@@ -1,0 +1,5 @@
+node_modules/
+.data/
+.git/
+package-lock.json
+src/**/__fixtures__/

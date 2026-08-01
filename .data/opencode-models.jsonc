@@ -1,0 +1,17 @@
+{
+  "model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+  "agent": {
+    "reviewer-engineer": {
+      "model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+      "variant": "high"
+    },
+    "software-engineer": {
+      "model": "xiaomi-token-plan-sgp/mimo-v2.5",
+      "variant": "high"
+    },
+    "test-engineer": {
+      "model": "xiaomi-token-plan-sgp/mimo-v2.5",
+      "variant": "high"
+    }
+  }
+}
