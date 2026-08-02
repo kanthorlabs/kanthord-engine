@@ -25,19 +25,66 @@ A remote branch can be force-pushed, so the force flag belongs on remote-trackin
 
 ## Seeding the bare home
 
-`git clone --bare` is forbidden here. A bare clone copies remote heads directly into `refs/heads/*`, and a bare repository has no checked-out branch to protect them, so a later fetch or a remote force-push can destroy local integrated work. Seeding is explicit:
+A bare clone of the remote is forbidden here. It copies remote heads directly into `refs/heads/*`, and a bare repository has no checked-out branch to protect them, so a later fetch or a remote force-push can destroy local integrated work. Seeding is explicit:
 
 ```
-git init --bare .data/repos/<name>.git
-git -C <home> remote add origin <url>
-git -C <home> config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
-git -C <home> fetch --prune origin
-git -C <home> update-ref refs/heads/<landing> refs/remotes/origin/<upstream>
+init({ dir: home, bare: true })
+addRemote({ dir: home, remote: 'origin', url })
+setConfig({ dir: home, path: 'remote.origin.fetch',
+            value: '+refs/heads/*:refs/remotes/origin/*' })
+fetch({ dir: home, remote: 'origin', prune: true, onAuth })
+writeRef({ dir: home, ref: 'refs/heads/<landing>',
+           value: await resolveRef({ ref: 'refs/remotes/origin/<upstream>' }) })
 ```
 
-`kanthord repository register --url <remote>` runs this. It detects the default branch from the remote `HEAD`, prints it, and asks the human to confirm. Detection never applies by itself, because a wrong default sends every later merge to the wrong branch and nothing can notice.
+`kanthord repository register --url <remote> --credential <name>` runs this. It detects the default branch from the `HEAD` symref that `getRemoteInfo` reports, prints it, and asks the human to confirm. Detection never applies by itself, because a wrong default sends every later merge to the wrong branch and nothing can notice.
 
-Git authentication to the remote is ambient on the daemon machine, through an SSH agent or a git credential helper. KanthorD stores no git credential. This is separate from the provider credentials of `../phase-2/providers-and-credentials.md`.
+## The git service is isomorphic-git, so a credential is stored
+
+`isomorphic-git` runs in process against the file system. It does not shell out, so no `git` binary, no `~/.gitconfig` and no credential helper takes part. Its only transport is HTTP, with Basic authentication supplied by an `onAuth` callback, and no transport reads a local path as a remote.
+
+Three decisions follow.
+
+- **A remote origin url is HTTP or HTTPS.** `ssh://` and `git@host:path` are refused at registration, because the library cannot open them. HTTPS is required, and plain HTTP is accepted only when the host is a loopback address, where there is no network to encrypt. That rule is a product rule with a public reason, not a test exception, and it is what lets a scenario serve a fixture remote on `127.0.0.1`.
+- **KanthorD stores the git credential.** A registration of `kind = 'git'` holds a forge, a username and a token, encrypted at rest, and `repository.credential_id` names it. This reverses the earlier decision that git authentication is ambient on the daemon machine. An ssh agent is a login-session artifact that an unattended daemon does not have, and `isomorphic-git` could not use one anyway. See `../database/provider.md` and `../database/repository.md`.
+- **An authentication failure fails once.** `onAuthFailure` returns `{ cancel: true }`, so the library throws `UserCanceledError` instead of retrying a credential that the forge already rejected. `git_operation.outcome` records `auth-failed`, so the human reads the cause rather than "push failed".
+- **Registration proves the credential against the write advertisement.** `listServerRefs({ forPush: true })` speaks to `git-receive-pack`, which requires push permission. A fetch cannot prove a credential, because a public repository serves reads to anyone and a garbage token reads it exactly like a good one. The write advertisement refuses a wrong token, returns 401 with no credential, and changes nothing on the remote.
+
+Only bare home operations authenticate. An objective clone has no configured remote, so no objective-side process ever holds this token.
+
+## The daemon home is a singleton, and that is what makes a local ref write safe
+
+`git update-ref <ref> <new> <old>` is an atomic compare-and-swap. `writeRef` takes no expected value, and it writes the loose ref file in place, so a crash during the write can leave a truncated ref. The design needs the guarantee back, and it comes from three rules that each answer one failure.
+
+**One daemon owns one home.** At startup the daemon takes an exclusive operating-system lock on the daemon home and holds it for the life of the process. A second daemon against the same home refuses to start and names the holder. The lock is an advisory lock held by an open handle, so the kernel releases it when the process dies, however it dies. There is therefore no stale lock to steal and no ownership protocol to get wrong.
+
+This is the rule that makes the rest correct. A lease that expires no longer implies a second writer, because a second writer cannot exist. An expired lease means a stalled task inside the one process that holds the home.
+
+**A ref write is atomic.** A `refUpdate` primitive in the git service replaces `writeRef` for `refs/heads/*`:
+
+```
+open    <home>/refs/<name>.lock with O_CREAT | O_EXCL
+write   the new oid and a trailing newline, then fsync the file
+re-read <home>/refs/<name> and compare it to the expected oid
+rename  <home>/refs/<name>.lock -> <home>/refs/<name>
+fsync   the directory
+```
+
+`O_EXCL` fails rather than truncating anything, so a human running `git` in that directory collides instead of racing. The re-read immediately before the rename is the compare of the compare-and-swap, and a mismatch aborts and returns the observed oid, which drives the recompute of `../phase-2/integration-and-publish.md`. A POSIX rename is atomic, so a reader sees the old oid or the new oid and never a partial file.
+
+**A crash leaves a lock file, and startup is the only place that removes one.** Startup holds the home lock before it touches anything, and it holds it before any operation runs, so a `*.lock` file it finds can only be its own predecessor's. It removes them once, in the same pass that reconciles the journal of `../phase-3/recovery.md`. No running operation ever removes a lock it did not create.
+
+**An outside writer is detected, not assumed away.** Nothing outside the daemon may write the bare home, and that stays a required invariant rather than a hope. Before a ref write, the daemon compares the current ref against the last completed `git_operation` for that ref, filtered by intent, because `merge` and `sync` name a local ref while `publish` names a remote one. Registration writes the baseline `sync` row, so a ref always has a recorded expectation. A mismatch refuses the operation, writes an event, and reports both object ids. It does not set `needs-reconcile`, which means a landing-to-upstream divergence and nothing else.
+
+## Publish is never a force, so it needs no lease on a remote ref
+
+`git push --force-with-lease` exists to make a force push safe, and KanthorD never forces. A non-force push is accepted only as a fast-forward, so the previous remote tip stays an ancestor of the new one and no commit is lost. The server performs its own old-value ref transaction, so a movement during negotiation cannot blindly overwrite.
+
+`expected_remote_oid` is therefore **advisory freshness, not a remote compare-and-swap.** The daemon reads it with `listServerRefs`, asserts with `isDescendent` that the reviewed `landingOid` descends from it, and reports a rejection it can predict without a round trip. If origin moves inside that window to a commit that is already an ancestor of `landingOid`, the push succeeds although the expectation was stale. That is the intended outcome, and it is the reason the column cannot be described as a precondition the transport enforces.
+
+A first publication has no destination ref, so `expected_remote_oid` is null, which means "the ref must not exist". A rejection then says the ref appeared under us.
+
+The one capability genuinely lost is repairing a remote by force. That is a human operation with the `git` CLI, and it is not a daemon capability.
 
 ## Three branch fields
 
@@ -62,7 +109,7 @@ Changing `landingBranch` is an explicit operation, not a configuration edit. It 
 
 All tasks of one objective share one clone. Tasks in one objective run in sequence, because they share a working tree. One lease covers the whole objective. Concurrency exists between objectives only, and it is deferred past the MVP.
 
-`git clone` configures an `origin` pointing at the source. The daemon therefore clones with `--no-hardlinks`, removes the remote, and asserts that `git remote` returns nothing. The removal is an explicit step, not a property of cloning.
+`clone` configures an `origin` pointing at the source. The daemon therefore clones from the bare home path, calls `deleteRemote`, and asserts that `listRemotes` returns an empty array. The removal is an explicit step, not a property of cloning.
 
 ## An objective binds exactly one repository
 

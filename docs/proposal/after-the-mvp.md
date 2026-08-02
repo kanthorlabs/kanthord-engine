@@ -10,7 +10,7 @@ Deferring an item does not delete its design. Where a file already specifies one
 - **Initiative end-to-end detection.** The project-level verifier binding, the repository-to-commit manifest, the run after the last objective integrates, and the `e2e-failed` block. An MVP initiative always records `not-applicable`. See `phase-2/gates-and-approval.md`.
 - **Concurrent objectives.** The lease protocol ships in the MVP for correctness. Running two objectives at once is advanced usage.
 - **Event stream over HTTP** for status watching.
-- **The ordered provider binding list**, failover across registrations, and wrap-around selection. See `phase-2/providers-and-credentials.md`.
+- **The ordered provider chain**, failover across registrations, and wrap-around selection. It also needs a `position` column and a model override on the binding rows, which the MVP shape does not carry. See `phase-2/providers-and-credentials.md`.
 - **Master key rotation.**
 - **`kanthord profile verify` gate C**, the hermetic canary through a real agent. Gates A and B ship in the MVP.
 - **Onboarding template detection**, and the template library beyond the first template.

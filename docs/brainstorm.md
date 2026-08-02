@@ -9,12 +9,12 @@
 - Configuration: convict@6
 - CLI: commander@15
 - HTTP server: koa@3
-- Git: simple-git@3.36.0
+- Git: isomorphic-git@1
 
 ## Architecture
 
 - We build services integrate with each others, and use command/query to perform business logic. Handle dependencies by using interface inject in service/command/query
-  - Git: we build git service with simple-git@3.36.0 to setup common git behaviour in our program
+  - Git: we build git service with isomorphic-git@1 to setup common git behaviour in our program
   - Storage: use sqlite as driver, we build our storage interface need
   - DAG: common DAG behaviour
   - And more services

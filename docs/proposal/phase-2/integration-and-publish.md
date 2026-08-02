@@ -10,12 +10,12 @@ The daemon holds the repository lock and runs:
 2. Classify `L`, the landing tip, against `U`, the upstream tracking tip, with `git merge-base --is-ancestor`.
 3. Record the fetched `U`, so the base of every objective is attributable.
 
-| Relation                  | Meaning                   | Action                                                |
-| ------------------------- | ------------------------- | ----------------------------------------------------- |
-| `L == U`                  | synchronized              | clone                                                 |
-| `L` is an ancestor of `U` | upstream advanced         | `git update-ref refs/heads/<landing> U L`, then clone |
-| `U` is an ancestor of `L` | local work is unpublished | clone                                                 |
-| neither                   | divergence                | refuse the clone                                      |
+| Relation                  | Meaning                   | Action                                                       |
+| ------------------------- | ------------------------- | ------------------------------------------------------------ |
+| `L == U`                  | synchronized              | clone                                                        |
+| `L` is an ancestor of `U` | upstream advanced         | `refUpdate refs/heads/<landing>` from `L` to `U`, then clone |
+| `U` is an ancestor of `L` | local work is unpublished | clone                                                        |
+| neither                   | divergence                | refuse the clone                                             |
 
 "Holds unpublished commits" is not a git predicate. The ancestry test is, and it stays correct after a remote force-push.
 
@@ -41,7 +41,7 @@ A completed objective integrates to the landing branch of the bare home after hu
 2. Take the repository lock. Read the landing tip `B`.
 3. When the parent of `C` is `B`, the update is a fast-forward, and the result recorded against `C` stands.
 4. Otherwise build merge commit `M` from `B` and `C` in a scratch workspace, and run the unit check against `M`. The tree of `M` is not the tree of `C`, and `M` is what lands.
-5. `git update-ref refs/heads/<landing> M B`.
+5. `refUpdate refs/heads/<landing>` from `B` to `M`. See `../phase-1/git-foundation.md` for why that call is a compare-and-swap without `git update-ref`.
 6. A failure means `B` moved. Discard `M`, because its first parent is stale, and recompute from step 2.
 
 An object id mismatch is the normal case for an objective that started from an older base, and it causes a recompute, not a block. The objective moves to `blocked` with reason `stale-base` only on a content conflict, or after the retry limit.
@@ -53,7 +53,7 @@ Publish is a distinct operation with its own API. It carries the object ids it e
 `POST /repositories/:id/publish` with `landingOid` and `expectedRemoteOid`:
 
 1. Take the repository lock. Assert that `refs/heads/<landing>` equals `landingOid`.
-2. `git push --porcelain origin <landingOid>:<publishRef>`. Never with force.
+2. Push `<landingOid>` to `<publishRef>`. Never with force, so the server accepts a fast-forward and rejects anything else. `expectedRemoteOid` is advisory freshness rather than a remote compare-and-swap, and a null value means the ref must not exist yet.
 
 An approval carries `publish: true` by default, and the default is configurable per repository. Chaining keeps the landing branch equal to upstream, which keeps divergence rare, and divergence refuses new objective clones.
 
@@ -63,7 +63,7 @@ Moving to a landing branch other than `main` does not by itself satisfy a branch
 
 ## The integration journal
 
-Git and SQLite cannot share a transaction. The daemon writes an `operation` row with intent, base and head object ids before it touches git, and marks the row complete after. Intents are `merge`, `sync`, `publish` and `revert`.
+Git and SQLite cannot share a transaction. The daemon writes a `git_operation` row with intent, base and head object ids before it touches git, and marks the row complete after. Intents are `merge`, `sync`, `publish` and `revert`.
 
 Startup reconciliation of incomplete rows is phase 3. See `../phase-3/recovery.md`.
 

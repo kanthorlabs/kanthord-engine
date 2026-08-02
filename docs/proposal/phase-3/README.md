@@ -12,32 +12,35 @@ The daemon survives every path that is not the happy path. Daily use becomes tru
 
 ## Files
 
-| File                       | Subject                                                        |
-| -------------------------- | -------------------------------------------------------------- |
-| [recovery.md](recovery.md) | attribution, lease expiry, the journal, import recovery, races |
-| [outcomes.md](outcomes.md) | `partial`, discard, abandon, waive                             |
+| File                       | Subject                                                           |
+| -------------------------- | ----------------------------------------------------------------- |
+| [recovery.md](recovery.md) | attribution, lease expiry, the journal, import idempotency, races |
+| [outcomes.md](outcomes.md) | `partial`, discard, abandon, waive                                |
 
 ## Deliverables
 
 - Named failpoints at every durable boundary, and the crash injection harness over the phase 2 fakes.
-- Integration journal reconciliation at startup, including the `ls-remote` check for an incomplete `publish`.
+- Startup order: the exclusive home lock, then the sweep of every `*.lock` file left in a bare home, then the journal, then lease recovery.
+- Integration journal reconciliation at startup, including the `listServerRefs` check for an incomplete `publish`.
 - Lease expiry recovery. A `running` node whose lease expired returns to `ready` when the tree is clean and its head equals the recorded base, and moves to `blocked` with reason `dirty-recovery` otherwise. This replaces the manual stale-lease clearing of phase 2.
 - `stale-base`: the recompute loop, the retry limit, and the invalidation of a recorded check result when the merge commit changes.
 - The `partial` projection and `acknowledge_partial`.
 - Discard with the subtree check, the dependent block with reason `dependency-discarded`, `abandon objective`, and `waive`.
-- Import crash recovery between the database commit and the rename.
+- Import idempotency: a retry of a committed `import_id` returns the original revision and document.
 
 ## Verification
 
 `npm run verify` holds the permutations:
 
 - Recovery: kill execution at each boundary — before and after the task commit, the state write, the event append, the ref update, and the approval — then restart and assert the state converges with no duplicate commit.
-- Journal: an incomplete `merge` row is completed or discarded by reading the real ref state; an incomplete `publish` row is reconciled from `ls-remote` and never by a retry.
+- Ref write: a kill between the `.lock` write and the rename leaves the ref at its old value, and startup removes the lock. A kill after the rename leaves the new value, and the journal completes the row. No boundary leaves a truncated ref.
+- Home lock: a second daemon against one home refuses to start. A `SIGKILL` releases the lock, so the next start takes it with no manual cleanup.
+- Journal: an incomplete `merge` row is completed or discarded by reading the real ref state; an incomplete `publish` row is reconciled from `listServerRefs` and never by a retry. A ref that matches neither `base_oid` nor `proposed_head_oid` reports an outside writer rather than retrying.
 - Lease: a `running` node with an expired lease and a clean tree returns to `ready`; with a dirty tree it moves to `blocked` with reason `dirty-recovery`. A discard that races a worker is serialized by the objective lease.
 - Integration: an objective integrates from an older base and merges cleanly. A second case touches the same lines and asserts `blocked` with reason `stale-base`. A third changes the landing branch between the freeze and the approval and asserts the compare-and-swap refuses. A fourth forces a recompute and asserts the recorded check result is invalidated and runs again.
 - Aggregation: an objective with one `done` task and one `discarded` task projects `partial`, lists the discarded task, refuses an approval without `acknowledge_partial`, then integrates and becomes `partial`, not `done`.
 - Discard: a discard of an integrated node fails and names the descendants. A discard of a blocked task fails until `abandon task` runs, then succeeds, and the earlier task commits survive. A discard of B blocks C, and `waive` releases it.
-- Import: a crash between the database commit and the rename recovers.
+- Import: a crash after the commit loses the response, and a retry of the same `import_id` returns the original revision and document rather than a second revision.
 
 ## End-to-end scenarios
 
@@ -50,7 +53,7 @@ The convention, the modes and the evidence format are in [../README.md](../READM
 - **Automation:** `scripts/e2e/run.mjs P3-E1 --failpoint <name>`, once per boundary, and `scripts/e2e/run.mjs P3-E1 --all`
 - **Human action:** none. A failpoint pauses at a named durable boundary and announces arrival. The harness sends `SIGKILL` from outside, so real startup reconciliation runs. A failpoint never simulates the recovery outcome.
 - **Oracle:** for each boundary — after restart with the same daemon home, `kanthord status` converges to the declared state; the landing branch holds no duplicate commit; the journal has no incomplete row; the event sequence has no gap.
-- **Boundaries:** before and after the task commit, the state write, the event append, the ref update, the publish, and the approval. Plus the import rename.
+- **Boundaries:** before and after the task commit, the state write, the event append, the ref update, the publish, and the approval. Plus between the `.lock` write and the rename of a ref update, and after the import commit and before the response.
 - **Evidence:** one bundle per boundary, each holding the pre-kill and post-restart status and ref state.
 
 ### P3-E2 — Recovery of an interrupted attempt

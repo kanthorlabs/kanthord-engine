@@ -4,31 +4,37 @@ Reviewer: platform and security. Phase 2. This file covers which model answers a
 
 ## Credentials are encrypted at rest
 
-The human registers a provider at runtime. The program encrypts the secret with a master key and stores the ciphertext in SQLite.
+The human registers an account at runtime. The program encrypts the whole payload of that account with a master key and stores the ciphertext in SQLite.
+
+The payload is encrypted whole, credential and connection fields together, so no field of any one kind becomes a column of the shared table. A factory keyed on `kind` holds the schema, the serializer and the public projection that a read returns. See [../database/provider.md](../database/provider.md).
 
 The master key comes from configuration: an environment variable, with a config file path as the fallback. Algorithm is AES-256-GCM with a random 96-bit initialization vector per record. The record stores the initialization vector, the authentication tag and a key version. A key file must have mode 0600, and the daemon refuses to start otherwise.
 
 Encryption at rest with a master key from configuration is the whole of the MVP scope. Key rotation is deferred.
 
-This is separate from git authentication to remote origin, which is ambient on the daemon machine. See `../phase-1/git-foundation.md`.
+A git credential is a registration of `kind = 'git'` in the same table, because `isomorphic-git` speaks HTTPS Basic authentication and inherits no ambient credential. It is bound by `repository.credential_id` rather than by a default. See `../phase-1/git-foundation.md`.
 
 ## A registration is a named account
 
-The human registers a provider at global scope through `pi-ai`. One registration holds a name, a provider type, a credential and a default model. The same provider type may be registered any number of times under different names, so three ChatGPT accounts are three registrations. The name is unique and is how every binding refers to it. At least one registration is mandatory to finish onboarding.
+The human registers an account at global scope. One registration holds a name, a kind, and one encrypted payload. `kind = 'llm'` is the account an attempt calls through `pi-ai`, and its payload holds the provider variant, the credential and the default model. `kind = 'git'` is the forge account the bare home fetches and pushes with, and its payload holds the forge, the username and the token. The same variant may be registered any number of times under different names, so three ChatGPT accounts are three registrations. The name is unique and is how a human refers to it. At least one registration is mandatory to finish onboarding, and onboarding stamps `set_default_at` on it.
 
-Registry operations are register, list, rename and remove. A removal is refused while a binding still names the registration, and the daemon lists the bindings that block it. Otherwise a removal would silently empty a chain and stop every node that resolves to it.
+Registry operations are register, list, rename, set default and remove. A removal is refused while anything still names the registration, and the daemon lists what blocks it: a non-null `set_default_at`, or a project binding. Otherwise a removal would silently empty a chain and stop every node that resolves to it.
 
-The MVP requires exactly one registration and one binding. The multi-registration rules below are the design the entity model already supports, and they are built after the MVP.
+The MVP requires exactly one registration, and it is the global default. The multi-registration rules below are the design the entity model already supports, and they are built after the MVP.
+
+There is no binding table. The global chain is the `set_default_at` column of the registration itself, because a scope table describing one global list carried a row whose scope was always the same literal. A narrower scope binds on the entity that owns it: a project through a `project_binding` row of `kind = 'provider'`, and an agent through `agent_binding` when agent-level binding is built. See [../database/provider.md](../database/provider.md).
 
 ## The task attempt is the unit of selection
 
-The daemon resolves the binding once, at the start of a task attempt, and pins one registration and one model for the whole attempt. A failure of that registration, of any kind, ends the attempt as a failure. The daemon never changes the registration or the model in the middle of an attempt, because a switch replays the context and repeats the work already paid for, which costs more than a clean retry. The attempt row records the pinned registration and model.
+The daemon resolves the binding once, at the start of a task attempt, and pins one registration and one provider_model for the whole attempt. A failure of that registration, of any kind, ends the attempt as a failure. The daemon never changes the registration or the provider_model in the middle of an attempt, because a switch replays the context and repeats the work already paid for, which costs more than a clean retry. The attempt row records the pinned registration and provider_model.
 
 This rule holds in the MVP, with a list of one.
 
-## Deferred: the ordered binding list
+## Deferred: the ordered chain
 
-A provider binding resolves agent, then project, then global. Global always holds a list, because onboarding forces one registration. A project without a binding inherits the global list. An agent without a binding inherits the project list. An agent must end with a non-empty list, and the daemon refuses to run a node whose agent resolves to an empty list. A binding may name a model to override the registration default; otherwise the default model applies.
+Resolution is agent, then project, then global. Global always holds a list, because onboarding forces one registration with `set_default_at` stamped. A project with no provider binding inherits the global chain. An agent with no binding inherits the project chain. An agent must end with a non-empty chain, and the daemon refuses to run a node whose agent resolves to an empty one.
+
+The global chain orders by `set_default_at`, and a project chain orders by the `created_at` of its binding rows. A reorder therefore rewrites those values, because no `position` column exists. An override of the registration default needs a column on the binding row, and neither binding table carries one yet; until then the `defaultModel` of the payload applies.
 
 ## Deferred: the chain advances across attempts
 

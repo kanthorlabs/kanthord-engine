@@ -8,6 +8,12 @@ The open question of `../brainstorm.md` is closed. A Python backend, a Vue front
 
 Bare-home seeding is closed. The bare home is created from the remote origin URL, not from a working checkout, so no original checkout has to be kept or detached. `phase-1/git-foundation.md` holds the procedure. A human checkout relates to remote origin through the standard git workflow, and never to the bare home.
 
+## Answered by measurement, 2026-08-02
+
+The fixture remote is settled, and the harness owns it: `node:http` in front of `git http-backend`, about ninety lines, with Basic authentication checked in front of the CGI. A spike drove `isomorphic-git` against it, and against the real `kanthord-verify` repository on GitHub with a personal access token. Both passed every row of the acceptance list in `README.md`: `HEAD` symref discovery, a seeded bare home whose only local head is the landing branch, a fetch that moves the tracking ref and leaves the landing branch untouched, a non-force push accepted, a non-fast-forward refused with the remote ref unmoved, and a branch deletion. The `git` binary is a test-time prerequisite of the suite, and the product ships no dependency on it.
+
+The same spike found a defect in the design it was testing. A read preflight cannot prove a git credential: the public `kanthord-verify` served the `git-upload-pack` advertisement to a garbage token, to a good token and to no credential at all, 28 refs every time. Only the `git-receive-pack` advertisement separated them, refusing the wrong token and answering 401 with none. `repository register` therefore proves the credential with `listServerRefs({ forPush: true })`, which changes nothing on the remote. See `phase-1/git-foundation.md` and `database/repository.md`.
+
 ## Still open
 
 - **`pr@1` and hosted review.** They need a hosting provider client, credential handling for it, remote push and a watch loop until the pull request is mergeable. That is a phase of its own. Plan it after the MVP.

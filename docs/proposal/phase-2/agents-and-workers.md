@@ -26,7 +26,7 @@ Capability is enforced in the agent implementation, never in profile data or pro
 
 ## Attempt accounting
 
-Each rejection increments the attempt counter. Each attempt records the pinned registration and model, the rendered messages, every source blob by content address, the adapter version and the tool definitions. See `instructions-and-profiles.md`.
+Each rejection increments the attempt counter. Each attempt records the pinned registration and provider_model, the rendered messages, every source blob by content address, the adapter version and the tool definitions. See `instructions-and-profiles.md`.
 
 ## Timeout and cancellation
 

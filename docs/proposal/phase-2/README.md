@@ -27,7 +27,7 @@ The human clears every stuck node by hand in this phase. The daemon recovers not
 ## Deliverables
 
 - Crypto service. The master key comes from configuration. Every credential is encrypted at rest. No rotation.
-- Provider registration on `pi-ai`, and one binding.
+- Provider registration on `pi-ai`, with `set_default_at` stamped on the first registration.
 - Instruction compiler: the typed channels, the append and override rules, the reduced reviewer render, the per-channel budget, and `kanthord instructions resolve`.
 - Profile: the schema, one template, markdown import and export, and the profile hash pinned per objective.
 - Ambient channel, with `noContextFiles: true` and the fail-closed assertion.
@@ -51,7 +51,7 @@ The human clears every stuck node by hand in this phase. The daemon recovers not
 - Crypto tests: round trip; tampered ciphertext fails the authentication tag; a missing master key refuses startup.
 - Compiler tests, free of model calls: prose appends across scopes and nothing is lost; a scalar overrides and a list appends; a lint reports two contradictory prose fragments; the `re@1` render omits implementation guidance and keeps the acceptance criteria; a channel over its budget refuses the attempt and names the channel; ambient content cannot set a structured field. Golden fixture prompts per role.
 - Ambient tests: a workspace nested under a repository that holds its own `AGENTS.md` inherits nothing; an agent that edits `AGENTS.md` inside its workspace does not change its own later attempts in that objective; a symlinked ambient file is refused.
-- Worker tests on the fakes: an accept reaches `done`; a rejection routes back and increments the counter; the third rejection moves the task to `blocked` with reason `attempt-limit`; every attempt row holds the registration and the model it used.
+- Worker tests on the fakes: an accept reaches `done`; a rejection routes back and increments the counter; the third rejection moves the task to `blocked` with reason `attempt-limit`; every attempt row holds the registration and the provider_model it used.
 - Check tests: the unit check runs against the frozen candidate and not before it; a per-task diagnostic failure is recorded and attributed to that task, and the task still reaches `done`; a check declared as a command that cannot fail is rejected.
 - Verify service tests: a command over its timeout is killed with its process tree, and a test server it started does not survive.
 - Freshness tests: upstream ahead fast-forwards the landing branch; the landing branch ahead clones unchanged; a divergence refuses the clone and moves the repository to `needs-reconcile`.

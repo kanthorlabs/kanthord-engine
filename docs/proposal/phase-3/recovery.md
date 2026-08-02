@@ -14,18 +14,27 @@ A `running` node found at startup whose lease has expired: the workspace is clea
 
 This replaces the manual stale-lease clearing of phase 2. See `../phase-2/agents-and-workers.md`.
 
+## Startup order
+
+Startup takes the exclusive lock on the daemon home before it reads anything. Everything below runs while holding it, and no operation starts until it finishes.
+
+1. Take the home lock. A second daemon refuses to start and names the holder.
+2. Remove every `*.lock` file left in a bare home. The home lock guarantees these belong to this home's dead predecessor, and no running operation ever removes a lock it did not create.
+3. Reconcile the journal below.
+4. Recover expired leases.
+
 ## The integration journal
 
-The daemon writes an `operation` row with intent, base and head object ids before it touches git, and marks the row complete after. Intents are `merge`, `sync`, `publish` and `revert`.
+The daemon writes a `git_operation` row with intent, base and head object ids before it touches git, and marks the row complete after. Intents are `merge`, `sync`, `publish` and `revert`.
 
 Startup reconciles every incomplete row by reading the real ref state:
 
 - `merge` and `sync`: compare the landing ref against the recorded base and head, and complete or discard the row.
-- `publish`: compare `git ls-remote origin <publishRef>` against the recorded `landingOid`. A blind retry is not a recovery procedure, because the push may have succeeded before the crash.
+- `publish`: compare `listServerRefs` for `<publishRef>` against the recorded `landingOid`. A blind retry is not a recovery procedure, because the push may have succeeded before the crash. A value that matches neither the base nor the proposed head means an outside actor moved the ref, and that is reported rather than retried.
 
 ## Import
 
-Import stages across the filesystem and the database. A crash before the database commit leaves the source files untouched. A crash between the database commit and the rename leaves the database ahead, and the next import detects it by the graph revision and finishes the rename. See `../phase-1/plan-format.md`.
+Import is one database transaction, because the daemon holds no plan files. A crash before the commit changes nothing, and the client sends the request again. A crash after the commit loses the response, and the client cannot tell whether the import committed. A retry of the same client-minted `import_id` returns the original revision and the original rewritten document, and it never writes a second revision. See `../phase-1/plan-format.md`.
 
 ## Divergence with upstream
 

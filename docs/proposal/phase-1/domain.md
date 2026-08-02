@@ -23,7 +23,11 @@ State tables hold state. Events are an audit trail. Every transition writes a ro
 
 `node:sqlite`. Tables:
 
-`credential`, `repository`, `project`, `provider`, `provider_binding`, `profile`, `blob`, `node`, `edge`, `graph_revision`, `workspace`, `lease`, `run`, `attempt`, `candidate`, `check_result`, `operation`, `event`.
+`repository`, `project`, `project_binding`, `provider`, `profile`, `blob`, `node`, `edge`, `plan_revision`, `workspace`, `lease`, `run`, `attempt`, `agent_invocation`, `candidate`, `check_result`, `git_operation`, `event`, plus the infrastructure table `migration`.
+
+A credential is not a table. It is the encrypted secret of a `provider` row. A provider binding is not a table either. The global chain is the `set_default_at` column of `provider`, and a narrower scope binds on the entity that owns it: `project_binding` for a project, and `agent_binding` when agent-level binding is built.
+
+[../database/README.md](../database/README.md) holds the columns, the constraints and the reason each table exists. One file per table.
 
 Migrations run from the CLI. `npm run verify` already calls `db status`, so that command is a phase 1 deliverable.
 
@@ -47,4 +51,4 @@ src/
 
 Already present: `pi-agent-core`, `pi-ai`, `pi-coding-agent`, `graphology`, `koa`, `commander`, `pino`, `ulid`, `yaml`, `supertest`.
 
-To add: `zod@4`, `convict@6`, `simple-git@3.36.0`.
+To add: `zod@4`, `convict@6`, `isomorphic-git@1`.

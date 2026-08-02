@@ -70,7 +70,7 @@ Repository ambient files are read once, from the objective's pinned commit, and 
 
 ## Reproduction
 
-Each attempt stores the rendered messages and every source blob by content address, with the adapter version, the tool definitions and the pinned registration and model. A hash alone cannot rebuild a prompt after its source is gone.
+Each attempt stores the rendered messages and every source blob by content address, with the adapter version, the tool definitions and the pinned registration and provider_model. A hash alone cannot rebuild a prompt after its source is gone.
 
 ## Profile verification
 
