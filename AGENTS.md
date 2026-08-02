@@ -2,7 +2,9 @@
 
 kanthord is one long-running daemon on **Node.js 24+ / TypeScript**, ES modules, `"type": "module"`. Node runs TypeScript directly by type stripping, so a relative import carries an explicit `.ts` extension. Tests run on the built-in **`node:test`** runner with `node:assert/strict`. There is no test framework dependency.
 
-`docs/proposal/` is the source of truth for behaviour. This file is the source of truth for structure, lanes and process. Where a story and this file disagree about structure, this file wins.
+`docs/proposal/` is the source of truth for behaviour. This file is the source of truth for structure. Where a story and this file disagree about structure, this file wins.
+
+Lanes, planning rules and the comment rule are not repeated here. They live in the pipeline definitions and in the operator's own instructions, and a second copy would drift.
 
 ## Architecture
 
@@ -135,34 +137,3 @@ A rule with no mechanism is a rule a reviewer applies inconsistently. Each of th
 | topological tie-break by ULID                    | an exact-order graph test                                         |
 | a constant-time token compare                    | `timingSafeEqual`, asserted by construction                       |
 | no domain branching in a handler                 | the handler signature admits only parse, invoke and format        |
-
-## Planning
-
-- **Epics are sequence order.** Epic N depends on epic N-1. A story for epic N may rely on N-1's capability existing, and it never re-specifies it.
-- **An epic carries a `## Verification Gate`** with a `Gates:` line and a program-level `Proof:` block. The Proof is binding: every `PASS` line is delivered by some story, and each story names which line it delivers. An epic with no Proof block is not expandable.
-- **A story is an execution script.** The exact edit with a file and a site, the exact tests to write, the exact pass and fail condition. No motivation, no history, no debate.
-
-## Lanes
-
-| Role                  | Writes                                   | Runs                                            |
-| --------------------- | ---------------------------------------- | ----------------------------------------------- |
-| `/author`             | `.agent/plan/**` only                    | read-only exploration                           |
-| **test-engineer**     | `src/**/*.test.ts`, `test/helpers/**`    | anything                                        |
-| **software-engineer** | `src/**/*.ts` except tests, `scripts/**` | anything except the test suite                  |
-| **reviewer-engineer** | nothing                                  | `typecheck`, `lint`, `verify`, the epic's Proof |
-
-The handoff gate is per role, because a red test is the point of a red handoff.
-
-- **test-engineer, RED handoff:** `typecheck` and `lint` pass, the named new tests fail for the stated reason, and the suite is otherwise green.
-- **software-engineer handoff:** `npm run verify` passes.
-- **reviewer-engineer:** `npm run verify` and the Proof pass, and the tree is untouched.
-
-A `scripts/` file may be **run** by every role. Only the software-engineer may **modify** one. A gate script writes only inside its own `mktemp` directory, never the repo tree, which is what lets the reviewer run it while writing nothing.
-
-Forbidden to every TDD role: `.agent/plan/**`, `.claude/**`, `scripts/lane-check.sh`, `scripts/verify-handoff.mjs`, `scripts/memory-append-only.sh`, `package.json`, `package-lock.json`, `tsconfig*.json`, `*.config.*`, this file, and the container and build files. Those change by human decision, in a commit of their own.
-
-## Code comments are forbidden
-
-Names, structure and types carry the meaning. A comment that narrates what the code does is removed on sight. Only a human adds a comment recording why a non-obvious decision was made, and an agent never adds one.
-
-A decision is cited by naming its `docs/proposal/` file in a story or a commit message. It does not go in the source.
