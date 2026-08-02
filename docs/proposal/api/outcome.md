@@ -6,12 +6,12 @@ The operations a human calls to clear a stuck graph. Every one of them writes an
 
 ## Routes
 
-| operationId    | Method and path              | introducedIn | status  | Source                                              |
-| -------------- | ---------------------------- | ------------ | ------- | --------------------------------------------------- |
-| `node.unblock` | `POST /v1/nodes/:id/unblock` | phase-2      | stubbed | agents-and-workers.md, "manual controls"            |
-| `node.abandon` | `POST /v1/nodes/:id/abandon` | phase-2      | stubbed | outcomes.md, `abandon task` and `abandon objective` |
-| `node.discard` | `POST /v1/nodes/:id/discard` | phase-3      | stubbed | outcomes.md, discard                                |
-| `node.waive`   | `POST /v1/nodes/:id/waive`   | phase-3      | stubbed | outcomes.md, waive                                  |
+| operationId    | Method and path             | introducedIn | status  | Source                                              |
+| -------------- | --------------------------- | ------------ | ------- | --------------------------------------------------- |
+| `node.unblock` | `POST /v1/node/:id/unblock` | phase-2      | stubbed | agents-and-workers.md, "manual controls"            |
+| `node.abandon` | `POST /v1/node/:id/abandon` | phase-2      | stubbed | outcomes.md, `abandon task` and `abandon objective` |
+| `node.discard` | `POST /v1/node/:id/discard` | phase-3      | stubbed | outcomes.md, discard                                |
+| `node.waive`   | `POST /v1/node/:id/waive`   | phase-3      | stubbed | outcomes.md, waive                                  |
 
 ## One path for abandon
 

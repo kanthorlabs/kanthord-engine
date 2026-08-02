@@ -10,15 +10,15 @@ Through this API, or through export, edit and re-import. No agent route exists h
 
 ## Routes
 
-| operationId      | Method and path                       | introducedIn | status | Source                                                 |
-| ---------------- | ------------------------------------- | ------------ | ------ | ------------------------------------------------------ |
-| `plan.validate`  | `POST /v1/projects/:id/plan/validate` | phase-1      | routed | new decision, see [new-decisions.md](new-decisions.md) |
-| `plan.import`    | `POST /v1/projects/:id/plan/import`   | phase-1      | routed | P1-E1, `plan import`                                   |
-| `plan.export`    | `GET /v1/projects/:id/plan/export`    | phase-1      | routed | P1-E1, `plan export`                                   |
-| `plan.revisions` | `GET /v1/projects/:id/plan/revisions` | phase-1      | routed | plan-format.md, re-import protocol                     |
-| `node.list`      | `GET /v1/nodes`                       | phase-1      | routed | P1-E1, `status` lists nodes                            |
-| `node.show`      | `GET /v1/nodes/:id`                   | phase-1      | routed | state-machine.md                                       |
-| `edge.list`      | `GET /v1/projects/:id/edges`          | phase-1      | routed | plan-format.md, `depends_on`                           |
+| operationId      | Method and path                      | introducedIn | status | Source                                                 |
+| ---------------- | ------------------------------------ | ------------ | ------ | ------------------------------------------------------ |
+| `plan.validate`  | `POST /v1/project/:id/plan/validate` | phase-1      | routed | new decision, see [new-decisions.md](new-decisions.md) |
+| `plan.import`    | `POST /v1/project/:id/plan/import`   | phase-1      | routed | P1-E1, `plan import`                                   |
+| `plan.export`    | `GET /v1/project/:id/plan/export`    | phase-1      | routed | P1-E1, `plan export`                                   |
+| `plan.revisions` | `GET /v1/project/:id/plan/revision`  | phase-1      | routed | plan-format.md, re-import protocol                     |
+| `node.list`      | `GET /v1/node`                       | phase-1      | routed | P1-E1, `status` lists nodes                            |
+| `node.show`      | `GET /v1/node/:id`                   | phase-1      | routed | state-machine.md                                       |
+| `edge.list`      | `GET /v1/project/:id/edge`           | phase-1      | routed | plan-format.md, `depends_on`                           |
 
 ## `plan.validate`
 

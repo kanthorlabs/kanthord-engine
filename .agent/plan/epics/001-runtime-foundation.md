@@ -18,7 +18,7 @@ The daemon starts from a packaged entry point, reads a discovered configuration 
 - **Config discovery and packaged entry points** — the daemon binary and the CLI binary, the file search order, and the version each reports.
 - **Layer boundaries** — `eslint-plugin-boundaries` rules for `services`, `domain`, `commands`, `queries`, `http` and `cli`, with the allowed dependency direction of `docs/proposal/phase-1/domain.md`.
 - **Startup refusal rules** — a non-loopback bind address with no token configured refuses to start; no master key refuses to start.
-- **Exclusive home lock** — an advisory lock held by an open handle, so the kernel releases it however the process dies. A second daemon refuses and names the holder.
+- **`services/home-lock`** — the interface, and an implementation that takes an advisory lock held by an open handle, so the kernel releases it however the process dies. A second daemon refuses and names the holder. `src/main.ts` acquires it before it opens any mutable service, and holds it until shutdown.
 - **Startup sequence and the lock sweep** — take the home lock first, then remove every `*.lock` file in the bare home once. No running operation ever removes one.
 
 ## Verification gate

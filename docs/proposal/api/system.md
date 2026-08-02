@@ -6,12 +6,12 @@ The daemon itself: liveness, schema state, and the one aggregate view a human re
 
 ## Routes
 
-| operationId     | Method and path       | introducedIn | status | Source                                     |
-| --------------- | --------------------- | ------------ | ------ | ------------------------------------------ |
-| `system.health` | `GET /v1/health`      | phase-1      | routed | new decision, public and unauthenticated   |
-| `system.db`     | `GET /v1/db/status`   | phase-1      | routed | `../phase-1/domain.md`, `npm run verify`   |
-| `system.status` | `GET /v1/status`      | phase-1      | routed | P1-E1, `kanthord status`                   |
-| `blob.show`     | `GET /v1/blobs/:hash` | phase-1      | routed | `../database/blob.md`, every large payload |
+| operationId     | Method and path      | introducedIn | status | Source                                     |
+| --------------- | -------------------- | ------------ | ------ | ------------------------------------------ |
+| `system.health` | `GET /v1/health`     | phase-1      | routed | new decision, public and unauthenticated   |
+| `system.db`     | `GET /v1/db/status`  | phase-1      | routed | `../phase-1/domain.md`, `npm run verify`   |
+| `system.status` | `GET /v1/status`     | phase-1      | routed | P1-E1, `kanthord status`                   |
+| `blob.show`     | `GET /v1/blob/:hash` | phase-1      | routed | `../database/blob.md`, every large payload |
 
 ## `system.health`
 
@@ -62,7 +62,7 @@ The route sits here because a blob belongs to no one domain. `../database/blob.m
 
 The contract:
 
-- The path parameter is the `blob.hash` value exactly as the citing field returned it: `GET /v1/blobs/sha256:9f2a…`. The API never reformats it, and a client never strips the algorithm prefix. A colon is legal in a path segment, so nothing is percent-encoded.
+- The path parameter is the `blob.hash` value exactly as the citing field returned it: `GET /v1/blob/sha256:9f2a…`. The API never reformats it, and a client never strips the algorithm prefix. A colon is legal in a path segment, so nothing is percent-encoded.
 - The response body is the payload bytes. The `Content-Type` is `application/octet-stream` unless the citing field declares a narrower one, and the daemon never sniffs content to choose a type.
 - `ETag` is the hash as a quoted entity tag, and `Cache-Control` is `private, immutable`, with a long lifetime. A blob is content addressed, so the payload behind one hash never changes. `private` keeps it out of a shared cache, because a prompt and a diff carry the work of one human.
 - A `Range` request is answered, because a check log runs to tens of kilobytes and a client may want its tail.

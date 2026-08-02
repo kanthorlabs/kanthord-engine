@@ -17,7 +17,7 @@ A request reaches a handler only after it passed the bearer check, the `Origin` 
 - **Authentication** — a constant-time bearer compare. `system.health` is the one exempt route.
 - **Browser defences** — any `Origin` header is `403 origin-forbidden`; a `Host` outside the allow list is `403 host-forbidden`. Both apply to `system.health` as well.
 - **Error envelope** — one shape, the code table of `docs/proposal/api/README.md`, and `details` carrying the current value on a precondition failure.
-- **Typed route registry** — one zod schema pair per `operationId`, `openapi.yaml` generation, and the parity assertion that the set of `operationId`, method and path equals the declaration in `docs/proposal/api/`.
+- **Typed route registry in `src/http/contract/`** — one authored module per domain, one zod schema pair per `operationId`, and a path declared as a typed segment tuple that one renderer turns into a string. The parity assertion compares the rendered set against `docs/proposal/api/`. `openapi.yaml` is generated into a temporary directory, validated, and deleted; it is never committed.
 - **CLI program skeleton** — commander, the base URL, the token, `X-Kanthord-Client`, and an exit code routed on the error `code` and never on `message`.
 - **`system.health` and `system.db`** — the two routes that prove the skeleton end to end, and `kanthord db status` calling the second one over HTTP.
 

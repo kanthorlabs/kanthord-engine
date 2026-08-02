@@ -6,17 +6,17 @@ What an agent is told, and where that text is stored.
 
 ## Routes
 
-| operationId              | Method and path                            | introducedIn | status   | Source                                               |
-| ------------------------ | ------------------------------------------ | ------------ | -------- | ---------------------------------------------------- |
-| `agent.list`             | `GET /v1/agents`                           | phase-2      | stubbed  | domain.md, agent roles                               |
-| `template.list`          | `GET /v1/templates`                        | phase-2      | stubbed  | instructions-and-profiles.md, templates              |
-| `template.show`          | `GET /v1/templates/:id`                    | phase-2      | stubbed  | instructions-and-profiles.md                         |
-| `profile.instantiate`    | `POST /v1/repositories/:id/profile`        | phase-2      | stubbed  | phase-2 onboarding, "instantiate a profile"          |
-| `profile.export`         | `GET /v1/repositories/:id/profile`         | phase-2      | stubbed  | instructions-and-profiles.md, export                 |
-| `profile.import`         | `PUT /v1/repositories/:id/profile`         | phase-2      | stubbed  | instructions-and-profiles.md, import                 |
-| `profile.verify`         | `POST /v1/repositories/:id/profile/verify` | phase-2      | stubbed  | instructions-and-profiles.md, gates A and B          |
-| `instructions.resolve`   | `GET /v1/instructions/resolve`             | phase-2      | stubbed  | instructions-and-profiles.md, `instructions resolve` |
-| `binding.provider.agent` | `PUT /v1/agents/:role/bindings/provider`   | post-mvp     | deferred | providers-and-credentials.md, deferred               |
+| operationId              | Method and path                          | introducedIn | status   | Source                                               |
+| ------------------------ | ---------------------------------------- | ------------ | -------- | ---------------------------------------------------- |
+| `agent.list`             | `GET /v1/agent`                          | phase-2      | stubbed  | domain.md, agent roles                               |
+| `template.list`          | `GET /v1/template`                       | phase-2      | stubbed  | instructions-and-profiles.md, templates              |
+| `template.show`          | `GET /v1/template/:id`                   | phase-2      | stubbed  | instructions-and-profiles.md                         |
+| `profile.instantiate`    | `POST /v1/repository/:id/profile`        | phase-2      | stubbed  | phase-2 onboarding, "instantiate a profile"          |
+| `profile.export`         | `GET /v1/repository/:id/profile`         | phase-2      | stubbed  | instructions-and-profiles.md, export                 |
+| `profile.import`         | `PUT /v1/repository/:id/profile`         | phase-2      | stubbed  | instructions-and-profiles.md, import                 |
+| `profile.verify`         | `POST /v1/repository/:id/profile/verify` | phase-2      | stubbed  | instructions-and-profiles.md, gates A and B          |
+| `instructions.resolve`   | `GET /v1/instruction/resolve`            | phase-2      | stubbed  | instructions-and-profiles.md, `instructions resolve` |
+| `binding.provider.agent` | `PUT /v1/agent/:role/binding/provider`   | post-mvp     | deferred | providers-and-credentials.md, deferred               |
 
 ## `agent.list`
 

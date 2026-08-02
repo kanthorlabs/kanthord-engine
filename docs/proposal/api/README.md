@@ -8,7 +8,15 @@ Reviewer: architect, and every domain owner listed below. Transport policy is `.
 
 These files are the contract at operation level. Each row declares an `operationId`, a method, a path, the precondition the operation carries, the error codes it returns, the phase it starts in, and the proposal file it comes from. A row with no source is a new decision, and it says so.
 
-These files never restate a request or response field schema. The typed route registry in `src/http/` holds every schema on zod, and it generates `openapi.yaml`. `npm run verify` asserts that the set of `operationId`, method and path in the registry equals the set declared here. The two artifacts do not overlap, so they cannot drift.
+These files never restate a request or response field schema. The typed route registry in `src/http/contract/` holds every schema on zod, one authored module per domain, and it generates `openapi.yaml`. `npm run verify` asserts that the set of `operationId`, method and path in the registry equals the set declared here. The two artifacts do not overlap, so they cannot drift.
+
+### `openapi.yaml` is generated, and it is not committed
+
+One self-contained OpenAPI 3.0.3 document, with internal `#/components/…` references only. An external `$ref` split is refused: a generator, a viewer and a publish step each resolve relative file references differently, copying the root alone yields a broken specification, and a consumer bundles it back into one document anyway.
+
+The file is **not committed**, because the reviewable contract change is already the zod module and the table in this directory. A generated diff of expanded schemas is redundant evidence that hides the authored change, and a committed artifact needs a regenerate-and-compare gate that mutates the working tree to check itself.
+
+`npm run verify` generates the document into a temporary directory, validates it with an independent OpenAPI validator, asserts operation parity against the registry, asserts that every reference resolves, and deletes it. Generation is canonical: fixed path, method and component order, LF endings, one trailing newline. A release publishes the generated document as a named artifact beside the daemon and the CLI, and a client generator consumes that artifact. Neither the validator nor a client generator ever starts the daemon.
 
 ## Domains
 
@@ -47,11 +55,35 @@ Phase 1 registers every route whose `introducedIn` is `phase-1`, `phase-2` or `p
 
 The distinction matters at review time. `501` says "this daemon will do it, not yet". `404` says "this daemon does not have this operation".
 
+## Path grammar
+
+**Every resource segment is singular.** `GET /v1/repository` lists repositories, `POST /v1/repository` creates one, and `GET /v1/repository/:id` reads one. Singular describes the spelling, not the cardinality.
+
+A path noun is public contract language. It is deliberately **not** tied to a table name or to an id prefix, and the two would be a bad coupling in both directions: a schema rename would become an API change, and an API naming improvement would become a migration. The counterexample is already in the contract — `repo_01J…` lives at `/v1/repository/:id` and persists in `repository`, and no two of those three words match.
+
+After `/v1`, every literal segment is exactly one of five kinds.
+
+| Kind        | Meaning                                    | Examples                                                     |
+| ----------- | ------------------------------------------ | ------------------------------------------------------------ |
+| resource    | an addressable resource or its collection  | `repository`, `project`, `node`, `event`, `blob`, `provider` |
+| subresource | one value belonging to the preceding scope | `plan`, `profile`, `approval`, `default`, `landing-branch`   |
+| action      | an operation on the preceding resource     | `inspect`, `rename`, `reconcile`, `import`, `publish`        |
+| system      | a non-resource daemon segment              | `health`, `db`, `status`                                     |
+| parameter   | a locator                                  | `:id`, `:hash`                                               |
+
+A parameter is a minted prefixed id. `blob/:hash` is the one content-addressed exception, and it is the only one.
+
+**The registry does not accept a free-form path string.** An operation declares a tuple of typed segments, and one renderer turns the tuple into the path. A plural cannot enter through an ordinary route edit, because a new resource noun is a change to the API-owned resource set rather than a string a developer types. `npm run verify` asserts that `/v1` is first and appears once, that each segment is valid in its declared kind, that every parameter declares its identity kind, that only `blob` uses a non-minted locator, that no two installed operations collide on method and rendered path, and that the rendered set equals the tables in this directory.
+
+A closed vocabulary alone would prove spelling and nothing else — it would accept `/v1/project/:id/project` and `/v1/status/status`. The grammar is what makes the rule mean something.
+
+`/v1` is unreleased, so these paths are still free to change. Once it is released, a path spelling is frozen: the CLI runs on a second machine and can be older than the daemon, so renaming a released path is a new API version.
+
 ## Command and query
 
 `domain.md` splits `commands/` from `queries/`. The routes follow it.
 
-A query is `GET`. A command that creates a resource is `POST` on the collection. A command that acts on a resource is `POST /<collection>/:id/<action>`. A command that replaces a whole binding is `PUT`.
+A query is `GET`. A command that creates a resource is `POST` on the resource. A command that acts on a resource is `POST /<resource>/:id/<action>`. A command that replaces a whole binding is `PUT`.
 
 `unblock`, `waive`, `abandon`, `discard`, `approve`, `publish`, `reconcile` and `rename` are actions, not resource states. None of them is spelled as a field update, because a state field that a client writes cannot express what the daemon must refuse.
 

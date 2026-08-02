@@ -6,12 +6,12 @@ The routes that move code. They carry the object ids they expect, because every 
 
 ## Routes
 
-| operationId             | Method and path                     | introducedIn | status  | Source                                   |
-| ----------------------- | ----------------------------------- | ------------ | ------- | ---------------------------------------- |
-| `node.approvalEvidence` | `GET /v1/nodes/:id/approval`        | phase-2      | stubbed | gates-and-approval.md, approval evidence |
-| `node.approve`          | `POST /v1/nodes/:id/approve`        | phase-2      | stubbed | gates-and-approval.md, approval endpoint |
-| `repository.publish`    | `POST /v1/repositories/:id/publish` | phase-2      | stubbed | integration-and-publish.md, spelled out  |
-| `gitOperation.list`     | `GET /v1/git-operations`            | phase-3      | stubbed | recovery.md, the integration journal     |
+| operationId             | Method and path                   | introducedIn | status  | Source                                   |
+| ----------------------- | --------------------------------- | ------------ | ------- | ---------------------------------------- |
+| `node.approvalEvidence` | `GET /v1/node/:id/approval`       | phase-2      | stubbed | gates-and-approval.md, approval evidence |
+| `node.approve`          | `POST /v1/node/:id/approve`       | phase-2      | stubbed | gates-and-approval.md, approval endpoint |
+| `repository.publish`    | `POST /v1/repository/:id/publish` | phase-2      | stubbed | integration-and-publish.md, spelled out  |
+| `gitOperation.list`     | `GET /v1/git-operation`           | phase-3      | stubbed | recovery.md, the integration journal     |
 
 ## `node.approvalEvidence`
 

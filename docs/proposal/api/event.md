@@ -6,10 +6,10 @@ Every transition emits one event. Events are an audit trail, and they never reco
 
 ## Routes
 
-| operationId    | Method and path         | introducedIn | status   | Source                           |
-| -------------- | ----------------------- | ------------ | -------- | -------------------------------- |
-| `event.list`   | `GET /v1/events`        | phase-1      | routed   | domain.md, "events feed history" |
-| `event.stream` | `GET /v1/events/stream` | post-mvp     | deferred | after-the-mvp.md, event stream   |
+| operationId    | Method and path        | introducedIn | status   | Source                           |
+| -------------- | ---------------------- | ------------ | -------- | -------------------------------- |
+| `event.list`   | `GET /v1/event`        | phase-1      | routed   | domain.md, "events feed history" |
+| `event.stream` | `GET /v1/event/stream` | post-mvp     | deferred | after-the-mvp.md, event stream   |
 
 ## `event.list`
 

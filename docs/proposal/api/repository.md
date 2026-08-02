@@ -6,14 +6,14 @@ Registration, the branch fields, and the repair of a divergence. Publish is deli
 
 ## Routes
 
-| operationId                | Method and path                            | introducedIn | status  | Source                                      |
-| -------------------------- | ------------------------------------------ | ------------ | ------- | ------------------------------------------- |
-| `repository.inspect`       | `POST /v1/repositories/inspect`            | phase-1      | routed  | git-foundation.md, default branch detection |
-| `repository.register`      | `POST /v1/repositories`                    | phase-1      | routed  | P1-E1, `repository register`                |
-| `repository.list`          | `GET /v1/repositories`                     | phase-1      | routed  | phase-2 onboarding CLI                      |
-| `repository.show`          | `GET /v1/repositories/:id`                 | phase-1      | routed  | P1-E1 and P1-E3, `repository show`          |
-| `repository.landingBranch` | `POST /v1/repositories/:id/landing-branch` | phase-2      | stubbed | git-foundation.md, "an explicit operation"  |
-| `repository.reconcile`     | `POST /v1/repositories/:id/reconcile`      | phase-2      | stubbed | P2-E3, `repository reconcile`               |
+| operationId                | Method and path                          | introducedIn | status  | Source                                      |
+| -------------------------- | ---------------------------------------- | ------------ | ------- | ------------------------------------------- |
+| `repository.inspect`       | `POST /v1/repository/inspect`            | phase-1      | routed  | git-foundation.md, default branch detection |
+| `repository.register`      | `POST /v1/repository`                    | phase-1      | routed  | P1-E1, `repository register`                |
+| `repository.list`          | `GET /v1/repository`                     | phase-1      | routed  | phase-2 onboarding CLI                      |
+| `repository.show`          | `GET /v1/repository/:id`                 | phase-1      | routed  | P1-E1 and P1-E3, `repository show`          |
+| `repository.landingBranch` | `POST /v1/repository/:id/landing-branch` | phase-2      | stubbed | git-foundation.md, "an explicit operation"  |
+| `repository.reconcile`     | `POST /v1/repository/:id/reconcile`      | phase-2      | stubbed | P2-E3, `repository reconcile`               |
 
 ## `repository.inspect`
 

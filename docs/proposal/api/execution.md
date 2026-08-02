@@ -6,16 +6,16 @@ Starting work, stopping it, and reading what an attempt did. These are the route
 
 ## Routes
 
-| operationId     | Method and path              | introducedIn | status  | Source                                    |
-| --------------- | ---------------------------- | ------------ | ------- | ----------------------------------------- |
-| `run.start`     | `POST /v1/projects/:id/run`  | phase-2      | stubbed | P1-E1, `kanthord run`                     |
-| `run.cancel`    | `POST /v1/runs/:id/cancel`   | phase-2      | stubbed | agents-and-workers.md, cancellation       |
-| `run.list`      | `GET /v1/runs`               | phase-2      | stubbed | domain.md, `run` table                    |
-| `run.show`      | `GET /v1/runs/:id`           | phase-2      | stubbed | domain.md, `run` table                    |
-| `node.attempts` | `GET /v1/nodes/:id/attempts` | phase-2      | stubbed | P2-E2, "the attempt record"               |
-| `attempt.show`  | `GET /v1/attempts/:id`       | phase-2      | stubbed | agents-and-workers.md, inspection         |
-| `node.checks`   | `GET /v1/nodes/:id/checks`   | phase-2      | stubbed | gates-and-approval.md, diagnostic results |
-| `worker.list`   | `GET /v1/workers`            | phase-2      | stubbed | domain.md, worker kinds                   |
+| operationId     | Method and path            | introducedIn | status  | Source                                    |
+| --------------- | -------------------------- | ------------ | ------- | ----------------------------------------- |
+| `run.start`     | `POST /v1/project/:id/run` | phase-2      | stubbed | P1-E1, `kanthord run`                     |
+| `run.cancel`    | `POST /v1/run/:id/cancel`  | phase-2      | stubbed | agents-and-workers.md, cancellation       |
+| `run.list`      | `GET /v1/run`              | phase-2      | stubbed | domain.md, `run` table                    |
+| `run.show`      | `GET /v1/run/:id`          | phase-2      | stubbed | domain.md, `run` table                    |
+| `node.attempts` | `GET /v1/node/:id/attempt` | phase-2      | stubbed | P2-E2, "the attempt record"               |
+| `attempt.show`  | `GET /v1/attempt/:id`      | phase-2      | stubbed | agents-and-workers.md, inspection         |
+| `node.checks`   | `GET /v1/node/:id/check`   | phase-2      | stubbed | gates-and-approval.md, diagnostic results |
+| `worker.list`   | `GET /v1/worker`           | phase-2      | stubbed | domain.md, worker kinds                   |
 
 ## `run.start`
 

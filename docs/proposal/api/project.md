@@ -6,15 +6,15 @@ A project binds repositories, and it is the scope a plan imports into.
 
 ## Routes
 
-| operationId                | Method and path                          | introducedIn | status   | Source                                     |
-| -------------------------- | ---------------------------------------- | ------------ | -------- | ------------------------------------------ |
-| `project.create`           | `POST /v1/projects`                      | phase-1      | routed   | phase-2 onboarding CLI, "create a project" |
-| `project.list`             | `GET /v1/projects`                       | phase-1      | routed   | domain.md                                  |
-| `project.show`             | `GET /v1/projects/:id`                   | phase-1      | routed   | domain.md                                  |
-| `project.repositories`     | `PUT /v1/projects/:id/repositories`      | phase-1      | routed   | domain.md, "binds repositories"            |
-| `binding.worker.project`   | `PUT /v1/projects/:id/bindings/worker`   | phase-2      | stubbed  | instructions-and-profiles.md, precedence   |
-| `binding.provider.project` | `PUT /v1/projects/:id/bindings/provider` | post-mvp     | deferred | providers-and-credentials.md, deferred     |
-| `binding.e2e.project`      | `PUT /v1/projects/:id/bindings/e2e`      | post-mvp     | deferred | gates-and-approval.md, deferred            |
+| operationId                | Method and path                        | introducedIn | status   | Source                                     |
+| -------------------------- | -------------------------------------- | ------------ | -------- | ------------------------------------------ |
+| `project.create`           | `POST /v1/project`                     | phase-1      | routed   | phase-2 onboarding CLI, "create a project" |
+| `project.list`             | `GET /v1/project`                      | phase-1      | routed   | domain.md                                  |
+| `project.show`             | `GET /v1/project/:id`                  | phase-1      | routed   | domain.md                                  |
+| `project.repositories`     | `PUT /v1/project/:id/repository`       | phase-1      | routed   | domain.md, "binds repositories"            |
+| `binding.worker.project`   | `PUT /v1/project/:id/binding/worker`   | phase-2      | stubbed  | instructions-and-profiles.md, precedence   |
+| `binding.provider.project` | `PUT /v1/project/:id/binding/provider` | post-mvp     | deferred | providers-and-credentials.md, deferred     |
+| `binding.e2e.project`      | `PUT /v1/project/:id/binding/e2e`      | post-mvp     | deferred | gates-and-approval.md, deferred            |
 
 ## `project.repositories`
 

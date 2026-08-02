@@ -12,14 +12,14 @@ A git credential is a registration too, of `kind = 'git'`, because the git servi
 
 ## Routes
 
-| operationId           | Method and path                 | introducedIn | status  | Source                                             |
-| --------------------- | ------------------------------- | ------------ | ------- | -------------------------------------------------- |
-| `provider.register`   | `POST /v1/providers`            | phase-1      | routed  | P1-E1, the git credential of `repository.register` |
-| `provider.list`       | `GET /v1/providers`             | phase-1      | routed  | P1-E1, the CLI resolves `--credential <name>`      |
-| `provider.show`       | `GET /v1/providers/:id`         | phase-1      | routed  | providers-and-credentials.md                       |
-| `provider.rename`     | `POST /v1/providers/:id/rename` | phase-2      | stubbed | providers-and-credentials.md, "rename"             |
-| `provider.remove`     | `DELETE /v1/providers/:id`      | phase-2      | stubbed | providers-and-credentials.md, "remove"             |
-| `provider.setDefault` | `PUT /v1/providers/:id/default` | phase-2      | stubbed | providers-and-credentials.md, "set default"        |
+| operationId           | Method and path                | introducedIn | status  | Source                                             |
+| --------------------- | ------------------------------ | ------------ | ------- | -------------------------------------------------- |
+| `provider.register`   | `POST /v1/provider`            | phase-1      | routed  | P1-E1, the git credential of `repository.register` |
+| `provider.list`       | `GET /v1/provider`             | phase-1      | routed  | P1-E1, the CLI resolves `--credential <name>`      |
+| `provider.show`       | `GET /v1/provider/:id`         | phase-1      | routed  | providers-and-credentials.md                       |
+| `provider.rename`     | `POST /v1/provider/:id/rename` | phase-2      | stubbed | providers-and-credentials.md, "rename"             |
+| `provider.remove`     | `DELETE /v1/provider/:id`      | phase-2      | stubbed | providers-and-credentials.md, "remove"             |
+| `provider.setDefault` | `PUT /v1/provider/:id/default` | phase-2      | stubbed | providers-and-credentials.md, "set default"        |
 
 ## Three routes ship in phase 1, and the rest in phase 2
 
