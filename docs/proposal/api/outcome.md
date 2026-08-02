@@ -17,8 +17,10 @@ The operations a human calls to clear a stuck graph. Every one of them writes an
 
 `abandon task` and `abandon objective` are one route. The node kind decides the behaviour, and the client cannot pick the wrong one for the node it names.
 
-- A task resets the workspace to the base object id recorded for that task, and returns the task to `pending`. The refusal is `409` when the task commits are not at the tip, and `details` names the tasks that sit above.
-- An objective resets the workspace to the clone base and returns every non-terminal task to `pending`.
+- A task resets the workspace to the base object id recorded for that task, and moves the task to `blocked` with reason `abandoned`. The refusal is `409` when the task commits are not at the tip, and `details` names the tasks that sit above.
+- An objective resets the workspace to the clone base, and it cascades to every task. The objective and every task that is not `discarded` move to `blocked` with reason `abandoned`.
+
+An abandon parks work and never resumes it. A human then revises the plan, discards the subtree, or calls `node.unblock`. See [../phase-1/state-machine.md](../phase-1/state-machine.md).
 
 Both are refused after integration. `abandon` on a live lease is `409 lease-held`. In phase 2 a human calls it on a stale lease by hand; in phase 3 startup reconciliation reaches the same node first.
 

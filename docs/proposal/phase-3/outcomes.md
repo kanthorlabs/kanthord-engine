@@ -24,9 +24,11 @@ A discarded node blocks its dependents. Task C depends on task B. A discard of B
 
 Unintegrated work is abandoned, not discarded. A blocked task holding only workspace commits could otherwise never reach a human decision.
 
-`abandon task` resets the workspace to the base object id recorded for that task, so its commits disappear and the commits of the earlier tasks survive. The task returns to `pending`. Tasks run in sequence, so the commits of the current blocked task always sit at the workspace tip, and the reset never touches another task. The daemon refuses the operation when the task commits are not at the tip, and it names the tasks that sit above.
+`abandon task` resets the workspace to the base object id recorded for that task, so its commits disappear and the commits of the earlier tasks survive. The task moves to `blocked` with reason `abandoned`. Tasks run in sequence, so the commits of the current blocked task always sit at the workspace tip, and the reset never touches another task. The daemon refuses the operation when the task commits are not at the tip, and it names the tasks that sit above. Those tasks are normally `done`, and the human abandons each one first.
 
-`abandon objective` is the coarse tool for that case. It resets the workspace to the clone base and returns every non-terminal task to `pending`.
+`abandon objective` is the coarse tool for that case. It resets the workspace to the clone base, and it cascades to every task, which is `abandon task` on each one. The objective and every task that is not `discarded` move to `blocked` with reason `abandoned`. A `done` task parks as well, because the reset destroyed the commits behind its verdict.
+
+An abandon parks work; it never resumes it. The human revises the plan, discards the subtree, or unblocks it deliberately. Nothing returns to `pending`, because only import writes that state. See `../phase-1/state-machine.md`.
 
 Both are refused after integration. Discard of an unintegrated task is legal after its abandon, because no commit remains.
 

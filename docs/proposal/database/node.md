@@ -25,7 +25,7 @@ CREATE TABLE node (
                    'awaiting_approval', 'done', 'partial', 'discarded')),
   CHECK ((state = 'blocked') = (block_reason IS NOT NULL)),
   CHECK (block_reason IS NULL OR block_reason IN ('attempt-limit', 'dependency-discarded',
-                   'stale-base', 'dirty-recovery', 'e2e-failed')),
+                   'stale-base', 'dirty-recovery', 'e2e-failed', 'abandoned')),
   CHECK (state <> 'awaiting_approval' OR kind = 'objective'),
   CHECK (state <> 'partial' OR kind <> 'task')
 ) STRICT;

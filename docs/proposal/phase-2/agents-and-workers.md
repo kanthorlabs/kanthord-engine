@@ -36,7 +36,7 @@ An agent run carries a timeout. Cancellation kills the process tree, so a subpro
 
 A blocked task is diagnosed from its attempt record, not from the workspace. The human may run the daemon on another machine and cannot open the clone, so one operation returns, for a node: the rendered prompt with per-block provenance, the tool trace, the diff, the verification output, the `re@1` reason per criterion, and the provider and model, for every attempt.
 
-`unblock` and `abandon task` are the manual controls. The daemon recovers nothing by itself in this phase. `status` reports a `running` node whose lease expired as stale, and `abandon task` accepts it, resets the workspace to the recorded base and returns the task to `pending`. `abandon task` on a live lease is refused. Phase 3 replaces this with startup reconciliation and the `dirty-recovery` block.
+`unblock` and `abandon task` are the manual controls. The daemon recovers nothing by itself in this phase. `status` reports a `running` node whose lease expired as stale, and `abandon task` accepts it, resets the workspace to the recorded base and moves the task to `blocked` with reason `abandoned`. `abandon task` on a live lease is refused. Phase 3 replaces this with startup reconciliation and the `dirty-recovery` block.
 
 ## Deferred: `tdd@1` and `git@1`
 

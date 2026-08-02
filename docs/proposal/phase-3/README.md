@@ -62,7 +62,7 @@ The convention, the modes and the evidence format are in [../README.md](../READM
 - **Why it exists:** phase 2 leaves a stuck node for the human, and the whole point of this phase is that the daemon sorts it out.
 - **Automation:** `scripts/e2e/run.mjs P3-E2`
 - **Human action:** none
-- **Oracle:** a `running` node killed with a clean tree at the recorded base returns to `ready` after restart and runs again. A `running` node killed with a dirty tree moves to `blocked` with reason `dirty-recovery`, names the dirty paths, and `abandon task` clears it.
+- **Oracle:** a `running` node killed with a clean tree at the recorded base returns to `ready` after restart and runs again. A `running` node killed with a dirty tree moves to `blocked` with reason `dirty-recovery`, names the dirty paths, and `abandon task` resets the workspace and rewrites the reason to `abandoned`.
 - **Evidence:** the workspace state and the lease record before and after.
 
 ### P3-E3 — Stale base and the recompute loop
@@ -84,7 +84,7 @@ The convention, the modes and the evidence format are in [../README.md](../READM
   - An objective with one `done` and one `discarded` task projects `partial`, lists the discarded task, and refuses approval without `acknowledge_partial`. With it, the objective integrates and reports `partial`, not `done`.
   - A discard of an integrated node is refused and names the descendants that hold commits.
   - A discard of task B moves dependent C to `blocked` with reason `dependency-discarded`, and `waive` releases it.
-  - `abandon objective` returns every non-terminal task to `pending` and resets the workspace to the clone base.
+  - `abandon objective` resets the workspace to the clone base, and it moves the objective and every task that is not `discarded` to `blocked` with reason `abandoned`.
 - **Evidence:** the graph state before and after each operation, and the event written for each human decision.
 
 ### P3-E5 — A crash during a remote-driven run

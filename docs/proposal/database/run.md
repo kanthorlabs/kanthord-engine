@@ -39,7 +39,7 @@ Every objective-level side effect therefore cites a run: `candidate.run_id`, `gi
 
 The row is inserted when the run starts, so the id is the start time. `ended_at` is a column, because a duration needs both ends.
 
-The partial index gives one active run per node, so `abandon task` has exactly one authoritative base. An abandon ends the run and returns the task to `pending`. A later execution opens a new run, and the old row stays as history, ordered after it by id.
+The partial index gives one active run per node, so `abandon task` has exactly one authoritative base. An abandon ends the run and moves the task to `blocked` with reason `abandoned`. A later execution opens a new run, and the old row stays as history, ordered after it by id.
 
 ## Example
 

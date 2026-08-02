@@ -6,17 +6,21 @@ Reviewer: runtime or backend engineer. Phase 1 defines the machine. Phase 2 driv
 
 Non-terminal:
 
-| State               | Meaning                                                  | Leaves by    |
-| ------------------- | -------------------------------------------------------- | ------------ |
-| `pending`           | dependencies are not satisfied                           | scheduler    |
-| `ready`             | a worker can claim it                                    | worker claim |
-| `running`           | a worker holds the lease                                 | agent result |
-| `blocked`           | attempt limit reached, dependency invalid, or base stale | human        |
-| `awaiting_approval` | work is complete, the human gate is open                 | human        |
+| State               | Meaning                                                                  | Leaves by    |
+| ------------------- | ------------------------------------------------------------------------ | ------------ |
+| `pending`           | dependencies are not satisfied                                           | scheduler    |
+| `ready`             | a worker can claim it                                                    | worker claim |
+| `running`           | a worker holds the lease                                                 | agent result |
+| `blocked`           | attempt limit reached, dependency invalid, base stale, or work abandoned | human        |
+| `awaiting_approval` | work is complete, the human gate is open                                 | human        |
 
-Terminal: `done`, `partial`, `discarded`.
+`Leaves by` names the normal actor. A human discard, the discard of a dependency, and an abandon leave any non-terminal state. The transition matrix below is normative.
 
-Block reasons: `attempt-limit`, `dependency-discarded`, `stale-base`, `dirty-recovery`, `e2e-failed`.
+Import and `unblock` are the only writers of `pending`. `unblock` clears the block reason and nothing else, and the scheduler then re-derives readiness. An abandon never returns a node to `pending`.
+
+Terminal: `done`, `partial`, `discarded`. A task is the one exception: a task holds workspace commits until its objective integrates, and an abandon reverses a `done` task. Integration is what makes an outcome irreversible, and only an objective integrates. `discarded` is terminal at every level, because it carries a human reason, and an abandon never resurrects it.
+
+Block reasons: `attempt-limit`, `dependency-discarded`, `stale-base`, `dirty-recovery`, `e2e-failed`, `abandoned`.
 
 ## There is no terminal error state
 
@@ -41,6 +45,66 @@ An objective that reaches `partial` still integrated. `partial` records that the
 An objective with no tasks, or an initiative with no objectives, is invalid. Import rejects it.
 
 The `partial` projection and `acknowledge_partial` are built in phase 3. See `../phase-3/outcomes.md`.
+
+## Transition matrix
+
+Three rules make the matrix decidable. All three are normative.
+
+- A parent is `running` while any child is non-terminal. Every aggregation edge therefore leaves `running`.
+- A discard needs the whole subtree to hold no commit. Integrated work is never discardable. An abandon removes unintegrated commits, and a discard after an abandon is legal. See `../phase-3/outcomes.md`.
+- An abandon parks the work. `abandon objective` resets the workspace to the clone base, and it cascades to every task, which is `abandon task` on each one. The objective and every task that is not `discarded` move to `blocked` with reason `abandoned`. A human then revises the plan, discards the subtree, or unblocks it deliberately. Nothing resumes by itself.
+
+The table holds every ordered pair of different states. `T` is a task, `O` is an objective, `I` is an initiative. `✅` is a valid transition at that level, and `❌` is an invalid one.
+
+| From                | To                  | T   | O   | I   | Note                                                                                                                                                                                                                     |
+| ------------------- | ------------------- | --- | --- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pending`           | `ready`             | ✅  | ✅  | ✅  | Every dependency is `done` or `partial`. The scheduler writes it.                                                                                                                                                        |
+| `pending`           | `running`           | ❌  | ❌  | ❌  | A claim reads `ready`. `ready` is the proof that every dependency is satisfied.                                                                                                                                          |
+| `pending`           | `blocked`           | ✅  | ✅  | ✅  | A dependency is discarded, reason `dependency-discarded`. T: also `abandon objective`, reason `abandoned`.                                                                                                               |
+| `pending`           | `awaiting_approval` | ❌  | ❌  | ❌  | The gate needs a frozen candidate, and no work ran.                                                                                                                                                                      |
+| `pending`           | `done`              | ❌  | ❌  | ❌  | No check result exists.                                                                                                                                                                                                  |
+| `pending`           | `partial`           | ❌  | ❌  | ❌  | Aggregation leaves `running`, and no child started.                                                                                                                                                                      |
+| `pending`           | `discarded`         | ✅  | ✅  | ✅  | Human discard. The subtree holds no commit.                                                                                                                                                                              |
+| `ready`             | `pending`           | ❌  | ❌  | ❌  | An abandon parks the node in `blocked`. Only import and `unblock` write `pending`.                                                                                                                                       |
+| `ready`             | `running`           | ✅  | ✅  | ✅  | T: the worker starts the attempt. O: a worker claims the objective lease. I: the first objective starts.                                                                                                                 |
+| `ready`             | `blocked`           | ✅  | ✅  | ✅  | A dependency is discarded, reason `dependency-discarded`. A discard blocks every dependent, whatever its state. T and O: also an abandon, reason `abandoned`.                                                            |
+| `ready`             | `awaiting_approval` | ❌  | ❌  | ❌  | The gate needs a frozen candidate, and no work ran.                                                                                                                                                                      |
+| `ready`             | `done`              | ❌  | ❌  | ❌  | No check result exists.                                                                                                                                                                                                  |
+| `ready`             | `partial`           | ❌  | ❌  | ❌  | Aggregation leaves `running`.                                                                                                                                                                                            |
+| `ready`             | `discarded`         | ✅  | ✅  | ✅  | Human discard. The subtree holds no commit.                                                                                                                                                                              |
+| `running`           | `pending`           | ❌  | ❌  | ❌  | An abandon parks the node in `blocked`. Only import and `unblock` write `pending`.                                                                                                                                       |
+| `running`           | `ready`             | ✅  | ❌  | ❌  | T: recovery finds an expired lease, a clean tree, and the head at the base. O and I: no operation rewinds a running parent to a claimable state.                                                                         |
+| `running`           | `blocked`           | ✅  | ✅  | ✅  | T: `attempt-limit`, `dirty-recovery` on an expired lease over a dirty tree, or `abandoned`. O: `abandoned`. I: `e2e-failed`. `stale-base` arises at integration, which runs from `awaiting_approval`.                    |
+| `running`           | `awaiting_approval` | ❌  | ✅  | ❌  | O: every task is terminal, and at least one task is `done`. T and I: the gate is objective only.                                                                                                                         |
+| `running`           | `done`              | ✅  | ❌  | ✅  | T: `re@1` accepts the diff. I: every objective is `done`, and the end-to-end check passed or recorded `not-applicable`. O: an objective always passes the human gate.                                                    |
+| `running`           | `partial`           | ❌  | ❌  | ✅  | I: every objective is terminal, at least one is `done`, at least one is `discarded`, and the end-to-end check passed or recorded `not-applicable`. T: a task has no child. O: an objective always passes the human gate. |
+| `running`           | `discarded`         | ❌  | ✅  | ✅  | O and I: every child is `discarded`, or a human discards a subtree that holds no commit. T: the task holds a live lease and may hold commits. Abandon it first.                                                          |
+| `blocked`           | `pending`           | ✅  | ✅  | ✅  | `unblock` clears `attempt-limit`, `dirty-recovery`, `stale-base` and `abandoned`. `dependency-discarded` needs `waive`, or a re-import that rewires the edge. `e2e-failed` clears when the repair objective imports.     |
+| `blocked`           | `ready`             | ❌  | ❌  | ❌  | `unblock` writes `pending`, and the scheduler re-derives readiness. A cleared node whose dependency is still discarded must not become claimable.                                                                        |
+| `blocked`           | `running`           | ❌  | ❌  | ❌  | `unblock` writes `pending`, and the scheduler re-derives eligibility before any claim.                                                                                                                                   |
+| `blocked`           | `awaiting_approval` | ❌  | ❌  | ❌  | No approved candidate exists.                                                                                                                                                                                            |
+| `blocked`           | `done`              | ❌  | ❌  | ❌  | The check that blocked it never passed.                                                                                                                                                                                  |
+| `blocked`           | `partial`           | ❌  | ❌  | ❌  | Aggregation leaves `running`.                                                                                                                                                                                            |
+| `blocked`           | `discarded`         | ✅  | ✅  | ✅  | Human discard, when the subtree holds no commit. The human abandons first in every other case.                                                                                                                           |
+| `awaiting_approval` | `pending`           | ❌  | ❌  | ❌  | An abandon parks the objective in `blocked`. Only import and `unblock` write `pending`.                                                                                                                                  |
+| `awaiting_approval` | `ready`             | ❌  | ❌  | ❌  | An abandon parks the objective in `blocked`, so a human decides before the objective runs again.                                                                                                                         |
+| `awaiting_approval` | `running`           | ❌  | ❌  | ❌  | Every task is already terminal, and a claim reads `ready`.                                                                                                                                                               |
+| `awaiting_approval` | `blocked`           | ❌  | ✅  | ❌  | O: integration hit a content conflict, or the merge retry limit, reason `stale-base`. Also `abandon objective`, reason `abandoned`.                                                                                      |
+| `awaiting_approval` | `done`              | ❌  | ✅  | ❌  | O: a human approved the frozen candidate, integration succeeded, and every task is `done`.                                                                                                                               |
+| `awaiting_approval` | `partial`           | ❌  | ✅  | ❌  | O: as `done`, and the approval carried `acknowledge_partial`.                                                                                                                                                            |
+| `awaiting_approval` | `discarded`         | ❌  | ❌  | ❌  | The candidate holds commits. The human abandons the objective first, then discards it from `blocked`.                                                                                                                    |
+| `done`              | `blocked`           | ✅  | ❌  | ❌  | T: an abandon resets the workspace, so the commits behind the `done` verdict disappear. Reason `abandoned`. O and I: a `done` parent is integrated.                                                                      |
+| `done`              | any other           | ❌  | ❌  | ❌  | Terminal, except for the task row above.                                                                                                                                                                                 |
+| `partial`           | any                 | ❌  | ❌  | ❌  | Terminal. `acknowledge_partial` records a human decision at approval time, and it writes no transition out of `partial`.                                                                                                 |
+| `discarded`         | any                 | ❌  | ❌  | ❌  | Terminal. An abandon skips a discarded task, because the discard carries a human reason.                                                                                                                                 |
+
+Only an objective occupies `awaiting_approval`, and a task never reaches `partial`. The `CHECK` clauses of `../database/node.md` hold both rules.
+
+An abandon over a node that is already `blocked` changes the block reason to `abandoned` and writes no state transition. The state pair is identical, so the matrix holds no row for it.
+
+### Why an abandon parks a `done` task
+
+`abandon objective` resets the workspace to the clone base. The reset destroys the commits of every task, including the commits of a task that is already `done`. A `done` state with no surviving commit is a lie, so the cascade moves that task to `blocked` as well. This is the reason a task's `done` is not terminal, and the reason `abandon task` refuses a task whose commits are not at the tip: the human abandons the tasks above first, and each one parks.
 
 ## Task order
 

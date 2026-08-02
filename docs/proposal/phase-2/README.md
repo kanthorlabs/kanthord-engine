@@ -81,7 +81,7 @@ The convention, the modes and the evidence format are in [../README.md](../READM
 - **Why it exists:** a real agent parks tasks on the first day, and a parked task the human cannot diagnose from another machine ends daily use.
 - **Automation:** `scripts/e2e/run.mjs P2-E2`
 - **Human action:** none
-- **Oracle:** the scripted reviewer rejects every attempt. The task reaches `blocked` with reason `attempt-limit` after exactly 3 attempts. The attempt record returns 3 entries, each holding the rendered prompt with per-block provenance, the tool trace, the verification output and the reviewer reason per criterion. `abandon task` then returns the task to `pending` and the earlier task commits survive.
+- **Oracle:** the scripted reviewer rejects every attempt. The task reaches `blocked` with reason `attempt-limit` after exactly 3 attempts. The attempt record returns 3 entries, each holding the rendered prompt with per-block provenance, the tool trace, the verification output and the reviewer reason per criterion. `abandon task` then moves the task to `blocked` with reason `abandoned`, and the earlier task commits survive.
 - **Evidence:** the attempt record, with credentials redacted.
 
 ### P2-E3 — Freshness, divergence and publish safety
