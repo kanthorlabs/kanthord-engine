@@ -60,8 +60,6 @@ Five rules carry that table.
 
 Production TypeScript exists only under the six directories or as `src/main.ts`. An unclassified file under `src/` is a lint error, so a seventh directory is a decision rather than an accident.
 
-Compiled code is not TypeScript and lives outside `src/`. `native/<capability>/` holds a Node-API addon and its `binding.gyp`, and only the matching `services/<capability>/` implementation loads it.
-
 ```
 domain/<subject>.ts
 services/<capability>/index.ts and its implementations

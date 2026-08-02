@@ -56,26 +56,48 @@ Only bare home operations authenticate. An objective clone has no configured rem
 
 `git update-ref <ref> <new> <old>` is an atomic compare-and-swap. `writeRef` takes no expected value, and it writes the loose ref file in place, so a crash during the write can leave a truncated ref. The design needs the guarantee back, and it comes from three rules that each answer one failure.
 
-**One daemon owns one home.** At startup the daemon takes an exclusive operating-system lock on the daemon home and holds it for the life of the process. A second daemon against the same home refuses to start and names the holder. The lock is an advisory lock held by an open handle, so the kernel releases it when the process dies, however it dies. There is therefore no stale lock to steal and no ownership protocol to get wrong.
+**One daemon owns one home.** At startup the daemon takes an exclusive operating-system lock on the daemon home and holds it for the life of the process. A second daemon against the same home refuses to start and names the holder. The kernel releases the lock when the process dies, however it dies, so there is no stale lock to steal and no ownership protocol to get wrong.
 
-The lock is a **POSIX `fcntl` record lock**, and that choice is forced rather than preferred. Node 24 exposes neither `flock` nor `fcntl`, so the daemon carries a small in-repository Node-API binding. Two alternatives were tested against a running process and rejected:
-
-- **A SQLite lock.** `PRAGMA locking_mode = EXCLUSIVE` with a held `BEGIN IMMEDIATE` does refuse a second daemon and does release on `SIGKILL`, but it also blocks the daemon's **own** writes: a second connection attempting `BEGIN IMMEDIATE` fails. A lock that deadlocks the application it protects is not a lock.
-- **A unix domain socket** at `<home>/daemon.sock`. It excludes a second daemon, and the holder can answer with its own identity, which names the holder better than the kernel does. But a `SIGKILL` leaves the socket file as a corpse, so reclaiming it means unlink then listen — and no portable primitive expresses "replace this path only if it still names the corpse I inspected". Two daemons starting together can both reclaim, and the second unlink can delete the first winner's fresh socket, leaving two owners that each believe they are alone. That is the ownership protocol this section exists to remove.
-
-The mechanism, exactly:
+The lock is **a held write transaction on a dedicated SQLite database**, `<home>/daemon.lock.db`, used for nothing else. SQLite takes a POSIX `fcntl` record lock underneath, which is exactly the primitive this rule needs, and it arrives inside Node rather than in an addon this project compiles, prebuilds, versions and maintains.
 
 ```
-open    <home>/daemon.lock, O_RDWR | O_CREAT | O_CLOEXEC, mode 0600, no truncate
-fcntl   F_SETLK, F_WRLCK over [0, 1) from SEEK_SET
-hold    the descriptor for the life of the process
+open    <home>/daemon.lock.db, read-write, create if absent, mode 0600
+pragma  busy_timeout = 0
+pragma  locking_mode = NORMAL
+pragma  journal_mode = DELETE
+begin   BEGIN IMMEDIATE
+hold    the connection, and run no further SQL on it
 ```
 
-On success the daemon writes its identity into the file — pid, hostname, version, `startedAt` — and only then runs startup recovery. On `EACCES` or `EAGAIN` it calls `F_GETLK` for the same byte range, retries `F_SETLK` once in case the holder died during the inspection, and then refuses. **The pid from `F_GETLK` is authoritative, and the file contents never decide ownership** — they are a convenience for the message. Any other errno is a startup failure, not contention.
+`BEGIN IMMEDIATE` takes a `RESERVED` lock, which excludes a second writer and still admits a reader. SQLite holds it until commit, rollback, connection close or process death. It does not expire, time out or downgrade on its own. `busy_timeout = 0` makes a second daemon fail at once instead of waiting. `locking_mode` stays `NORMAL` because `EXCLUSIVE` would also lock readers out, and `journal_mode` is pinned to `DELETE` because a WAL reader depends on `-wal` and `-shm` availability that this file has no reason to involve.
 
-A record lock is process-associated, so a second open of the same file inside one process does not exclude anything, and closing any descriptor for that inode can release the lock. The descriptor therefore never leaves the home-lock service, and exactly one instance is constructed.
+Only after the lock is held does the daemon publish its identity, to a **separate** file `<home>/daemon.lock.identity`, written to a temporary name and renamed into place:
 
-`fcntl` locking is unreliable on NFS, SMB and other network filesystems, so a daemon home on one is refused at startup rather than silently unsupported. Two machines sharing a network mount is outside the guarantee.
+```json
+{
+  "version": 1,
+  "pid": 16801,
+  "host": "devbox",
+  "startedAt": "…",
+  "instanceId": "…"
+}
+```
+
+**Identity is diagnostic, never authority.** It is never read to steal, delete or override the lock. Publishing it after acquisition is what makes it truthful: identity committed _before_ the lock can name the loser, because two daemons can both write identity and only then race for the transaction.
+
+A contender that is refused waits briefly for the identity file, reads it, and retries `BEGIN IMMEDIATE` once in case the holder died while it was looking. It then refuses. That retry is the only reason a contender ever touches the lock twice.
+
+Three alternatives were built and run against live processes, and rejected:
+
+- **A lock inside the application database.** `PRAGMA locking_mode = EXCLUSIVE` with a held `BEGIN IMMEDIATE` refuses a second daemon and releases on `SIGKILL`, but it also blocks the daemon's **own** writes — a second connection attempting `BEGIN IMMEDIATE` fails. A lock that deadlocks the application it protects is not a lock. A dedicated file removes this entirely, because the application database is a different file.
+- **A unix domain socket** at `<home>/daemon.sock`. It excludes a second daemon and the holder can name itself over the socket, but `SIGKILL` leaves the socket file as a corpse. Reclaiming means unlink then listen, and no portable primitive expresses "replace this path only if it still names the corpse I inspected", so two daemons starting together can both reclaim and both believe they are alone.
+- **A native `fcntl` binding.** It is the textbook answer and it was rejected as a product decision: a hand-maintained Node-API addon costs a build toolchain, per-platform prebuilds and a supply-chain surface, and it is a reliability risk of its own. SQLite provides the same kernel primitive with none of that.
+
+`fcntl` locking is unreliable on NFS, SMB and other network filesystems, and SQLite cannot strengthen a filesystem whose locking is unreliable, so a daemon home on one is refused at startup rather than silently unsupported. Two machines sharing a network mount is outside the guarantee.
+
+A corrupt or truncated `daemon.lock.db` fails startup closed. It is never deleted and never recreated automatically: unlinking the path while another process holds the old inode is how one home becomes two owners. A `daemon.lock.db-journal` left behind by a killed daemon is normal and is **not** cleaned up by hand — the next start rolls it back and acquires, which was measured rather than assumed.
+
+**One clause is weakened, and it is named here rather than discovered later.** A second daemon names the holder _when the holder has published its identity_. A holder that dies or stalls between acquiring the lock and publishing leaves a contender that correctly refuses but reports the identity as unavailable. Ownership itself is never ambiguous; only the message is.
 
 This is the rule that makes the rest correct. A lease that expires no longer implies a second writer, because a second writer cannot exist. An expired lease means a stalled task inside the one process that holds the home.
 
