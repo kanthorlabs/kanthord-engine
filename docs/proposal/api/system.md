@@ -1,0 +1,72 @@
+# System
+
+Reviewer: architect. Conventions are [README.md](README.md).
+
+The daemon itself: liveness, schema state, and the one aggregate view a human reads first.
+
+## Routes
+
+| operationId     | Method and path       | introducedIn | status | Source                                     |
+| --------------- | --------------------- | ------------ | ------ | ------------------------------------------ |
+| `system.health` | `GET /v1/health`      | phase-1      | routed | new decision, public and unauthenticated   |
+| `system.db`     | `GET /v1/db/status`   | phase-1      | routed | `../phase-1/domain.md`, `npm run verify`   |
+| `system.status` | `GET /v1/status`      | phase-1      | routed | P1-E1, `kanthord status`                   |
+| `blob.show`     | `GET /v1/blobs/:hash` | phase-1      | routed | `../database/blob.md`, every large payload |
+
+## `system.health`
+
+The one route that needs no bearer token. It answers whether the daemon is up, and nothing else.
+
+The response holds a literal status and nothing derived from configuration or state:
+
+```json
+{ "status": "ok" }
+```
+
+It names no version, no bind address, no host, no uptime, no repository, no node count and no configuration value. An unauthenticated route reveals whatever it returns, so it returns one constant. A daemon that answers is up, and a daemon that does not answer is not.
+
+The browser defences still apply. The `Origin` rejection and the `Host` allow list are not authentication, and a route exempt from them would reopen the DNS rebind path this daemon closes.
+
+The daemon version and the bind address moved to `system.status`, which carries the token.
+
+## `system.db`
+
+Returns every migration and whether it is applied. `npm run verify` calls `db status`, so the query ships in phase 1.
+
+**Migration apply is the one command that does not call HTTP.** The daemon owns the database file, and an unmigrated database stops the daemon from starting, so a route that applies migrations is unreachable exactly when it is needed. `kanthord db migrate` opens SQLite directly on the daemon machine. `kanthord db status` calls this route. The CLI refuses `db migrate` when it is configured with a non-loopback base URL, because the schema of another machine is not reachable from here.
+
+This is the single documented exception to the parity rule of `../phase-1/transport.md`, and it is named so that a reviewer sees it rather than finds it.
+
+## `system.status`
+
+The aggregate view. It returns:
+
+- the daemon version, the bind address and the process start time,
+- every node by kind and state, with `blockReason` where the state is `blocked`,
+- every repository whose state is `needs-reconcile`, with both object ids,
+- every expired lease, of either subject kind, with its owner and its fence.
+
+The lists come from one route because a human asks one question: what is stuck. `../phase-1/state-machine.md` requires the repository line, and `../phase-2/agents-and-workers.md` requires the stale lease line.
+
+The lease list covers a node and a repository, because `../database/lease.md` makes the objective lease and the repository lock one table. A repository lock that outlived its operation stops every fetch, merge and publish on that repository, and a status view that showed only node leases would report a healthy graph while nothing could move.
+
+The identity fields sit here rather than on `system.health`, because the deployment scenarios record the daemon version and the bind address, and a client that reads them already holds the token.
+
+A node list with filters is `graph.md`. This route is the summary, not a replacement for it.
+
+## `blob.show`
+
+Returns one immutable payload by its content hash. Every route that would otherwise carry a rendered prompt, a tool trace, a diff, a check log, a reviewer reason, an approval evidence document, a plan document, a profile document or an error detail returns the hash instead, and the client fetches what it needs.
+
+The route sits here because a blob belongs to no one domain. `../database/blob.md` is one store for every payload an audit must reproduce, and the client machine cannot open SQLite.
+
+The contract:
+
+- The path parameter is the `blob.hash` value exactly as the citing field returned it: `GET /v1/blobs/sha256:9f2a…`. The API never reformats it, and a client never strips the algorithm prefix. A colon is legal in a path segment, so nothing is percent-encoded.
+- The response body is the payload bytes. The `Content-Type` is `application/octet-stream` unless the citing field declares a narrower one, and the daemon never sniffs content to choose a type.
+- `ETag` is the hash as a quoted entity tag, and `Cache-Control` is `private, immutable`, with a long lifetime. A blob is content addressed, so the payload behind one hash never changes. `private` keeps it out of a shared cache, because a prompt and a diff carry the work of one human.
+- A `Range` request is answered, because a check log runs to tens of kilobytes and a client may want its tail.
+- The bearer token applies. A hash is not a capability, and an unauthenticated read of an unguessable name is still an unauthenticated read.
+- An unknown hash is `404 not-found`. A blob is never deleted while a row cites it, so a `404` means the hash was never stored, not that it expired.
+
+The daemon serves this route from phase 1, because `plan.import` and `plan.export` cite blobs before any agent runs.
