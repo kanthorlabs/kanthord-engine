@@ -14,7 +14,7 @@ Foundation layers first, then vertical use cases, then the contract sweep, then 
 
 | #   | Epic                     | Stories | Capability at close                                                                  |
 | --- | ------------------------ | ------- | ------------------------------------------------------------------------------------ |
-| 001 | Runtime foundation       | 6       | The daemon starts, reads its configuration, and owns its home exclusively.           |
+| 001 | Runtime foundation       | 7       | The daemon starts, reads its configuration, and owns its home exclusively.           |
 | 002 | Domain and state machine | 8       | The machine is defined and unit tested. Every service interface exists.              |
 | 003 | Storage                  | 8       | Every phase-1 table exists. Migrations are idempotent. Secrets and blobs persist.    |
 | 004 | Transport skeleton       | 7       | A request reaches a handler under the full transport policy, and the CLI carries it. |
@@ -25,7 +25,7 @@ Foundation layers first, then vertical use cases, then the contract sweep, then 
 | 009 | Contract completion      | 5       | Status, blobs, events, and every later-phase route answering `501`.                  |
 | 010 | End-to-end scenarios     | 5       | P1-E1, P1-E2 and P1-E3 produce evidence bundles.                                     |
 
-Total: 67 stories.
+Total: 68 stories.
 
 ## Dependencies
 

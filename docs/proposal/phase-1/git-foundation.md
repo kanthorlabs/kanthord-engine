@@ -58,6 +58,25 @@ Only bare home operations authenticate. An objective clone has no configured rem
 
 **One daemon owns one home.** At startup the daemon takes an exclusive operating-system lock on the daemon home and holds it for the life of the process. A second daemon against the same home refuses to start and names the holder. The lock is an advisory lock held by an open handle, so the kernel releases it when the process dies, however it dies. There is therefore no stale lock to steal and no ownership protocol to get wrong.
 
+The lock is a **POSIX `fcntl` record lock**, and that choice is forced rather than preferred. Node 24 exposes neither `flock` nor `fcntl`, so the daemon carries a small in-repository Node-API binding. Two alternatives were tested against a running process and rejected:
+
+- **A SQLite lock.** `PRAGMA locking_mode = EXCLUSIVE` with a held `BEGIN IMMEDIATE` does refuse a second daemon and does release on `SIGKILL`, but it also blocks the daemon's **own** writes: a second connection attempting `BEGIN IMMEDIATE` fails. A lock that deadlocks the application it protects is not a lock.
+- **A unix domain socket** at `<home>/daemon.sock`. It excludes a second daemon, and the holder can answer with its own identity, which names the holder better than the kernel does. But a `SIGKILL` leaves the socket file as a corpse, so reclaiming it means unlink then listen — and no portable primitive expresses "replace this path only if it still names the corpse I inspected". Two daemons starting together can both reclaim, and the second unlink can delete the first winner's fresh socket, leaving two owners that each believe they are alone. That is the ownership protocol this section exists to remove.
+
+The mechanism, exactly:
+
+```
+open    <home>/daemon.lock, O_RDWR | O_CREAT | O_CLOEXEC, mode 0600, no truncate
+fcntl   F_SETLK, F_WRLCK over [0, 1) from SEEK_SET
+hold    the descriptor for the life of the process
+```
+
+On success the daemon writes its identity into the file — pid, hostname, version, `startedAt` — and only then runs startup recovery. On `EACCES` or `EAGAIN` it calls `F_GETLK` for the same byte range, retries `F_SETLK` once in case the holder died during the inspection, and then refuses. **The pid from `F_GETLK` is authoritative, and the file contents never decide ownership** — they are a convenience for the message. Any other errno is a startup failure, not contention.
+
+A record lock is process-associated, so a second open of the same file inside one process does not exclude anything, and closing any descriptor for that inode can release the lock. The descriptor therefore never leaves the home-lock service, and exactly one instance is constructed.
+
+`fcntl` locking is unreliable on NFS, SMB and other network filesystems, so a daemon home on one is refused at startup rather than silently unsupported. Two machines sharing a network mount is outside the guarantee.
+
 This is the rule that makes the rest correct. A lease that expires no longer implies a second writer, because a second writer cannot exist. An expired lease means a stalled task inside the one process that holds the home.
 
 **A ref write is atomic.** A `refUpdate` primitive in the git service replaces `writeRef` for `refs/heads/*`:

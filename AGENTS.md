@@ -4,8 +4,6 @@ kanthord is one long-running daemon on **Node.js 24+ / TypeScript**, ES modules,
 
 `docs/proposal/` is the source of truth for behaviour. This file is the source of truth for structure. Where a story and this file disagree about structure, this file wins.
 
-Lanes, planning rules and the comment rule are not repeated here. They live in the pipeline definitions and in the operator's own instructions, and a second copy would drift.
-
 ## Architecture
 
 Six directories under `src/`, and the dependency direction between them is one way.
@@ -61,6 +59,8 @@ Five rules carry that table.
 ### Layout
 
 Production TypeScript exists only under the six directories or as `src/main.ts`. An unclassified file under `src/` is a lint error, so a seventh directory is a decision rather than an accident.
+
+Compiled code is not TypeScript and lives outside `src/`. `native/<capability>/` holds a Node-API addon and its `binding.gyp`, and only the matching `services/<capability>/` implementation loads it.
 
 ```
 domain/<subject>.ts
