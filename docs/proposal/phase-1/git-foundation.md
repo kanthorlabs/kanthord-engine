@@ -58,7 +58,7 @@ Only bare home operations authenticate. An objective clone has no configured rem
 
 **One daemon owns one home.** At startup the daemon takes an exclusive operating-system lock on the daemon home and holds it for the life of the process. A second daemon against the same home refuses to start and names the holder. The kernel releases the lock when the process dies, however it dies, so there is no stale lock to steal and no ownership protocol to get wrong.
 
-The lock is **a held write transaction on a dedicated SQLite database**, `<home>/daemon.lock.db`, used for nothing else. SQLite takes a POSIX `fcntl` record lock underneath, which is exactly the primitive this rule needs, and it arrives inside Node rather than in an addon this project compiles, prebuilds, versions and maintains.
+The lock is **a held write transaction on a dedicated SQLite database**, `<home>/daemon.lock.db`, used for nothing else. SQLite takes a POSIX `fcntl` record lock underneath, which is the primitive this rule needs, and Node carries it already. The file is dedicated because a lock held on the application database would block the daemon's own writes.
 
 ```
 open    <home>/daemon.lock.db, read-write, create if absent, mode 0600
@@ -87,17 +87,11 @@ Only after the lock is held does the daemon publish its identity, to a **separat
 
 A contender that is refused waits briefly for the identity file, reads it, and retries `BEGIN IMMEDIATE` once in case the holder died while it was looking. It then refuses. That retry is the only reason a contender ever touches the lock twice.
 
-Three alternatives were built and run against live processes, and rejected:
-
-- **A lock inside the application database.** `PRAGMA locking_mode = EXCLUSIVE` with a held `BEGIN IMMEDIATE` refuses a second daemon and releases on `SIGKILL`, but it also blocks the daemon's **own** writes — a second connection attempting `BEGIN IMMEDIATE` fails. A lock that deadlocks the application it protects is not a lock. A dedicated file removes this entirely, because the application database is a different file.
-- **A unix domain socket** at `<home>/daemon.sock`. It excludes a second daemon and the holder can name itself over the socket, but `SIGKILL` leaves the socket file as a corpse. Reclaiming means unlink then listen, and no portable primitive expresses "replace this path only if it still names the corpse I inspected", so two daemons starting together can both reclaim and both believe they are alone.
-- **A native `fcntl` binding.** It is the textbook answer and it was rejected as a product decision: a hand-maintained Node-API addon costs a build toolchain, per-platform prebuilds and a supply-chain surface, and it is a reliability risk of its own. SQLite provides the same kernel primitive with none of that.
-
 `fcntl` locking is unreliable on NFS, SMB and other network filesystems, and SQLite cannot strengthen a filesystem whose locking is unreliable, so a daemon home on one is refused at startup rather than silently unsupported. Two machines sharing a network mount is outside the guarantee.
 
-A corrupt or truncated `daemon.lock.db` fails startup closed. It is never deleted and never recreated automatically: unlinking the path while another process holds the old inode is how one home becomes two owners. A `daemon.lock.db-journal` left behind by a killed daemon is normal and is **not** cleaned up by hand — the next start rolls it back and acquires, which was measured rather than assumed.
+A corrupt or truncated `daemon.lock.db` fails startup closed. It is never deleted and never recreated automatically: unlinking the path while another process holds the old inode is how one home becomes two owners. A `daemon.lock.db-journal` left behind by a killed daemon is normal and is **not** cleaned up by hand — the next start rolls it back and acquires.
 
-**One clause is weakened, and it is named here rather than discovered later.** A second daemon names the holder _when the holder has published its identity_. A holder that dies or stalls between acquiring the lock and publishing leaves a contender that correctly refuses but reports the identity as unavailable. Ownership itself is never ambiguous; only the message is.
+**Naming the holder is best effort, and refusing is not.** A second daemon names the holder when the holder has published its identity. A holder that dies or stalls between acquiring the lock and publishing leaves a contender that still refuses, and reports the identity as unavailable. Ownership is never ambiguous; only the message is.
 
 This is the rule that makes the rest correct. A lease that expires no longer implies a second writer, because a second writer cannot exist. An expired lease means a stalled task inside the one process that holds the home.
 
