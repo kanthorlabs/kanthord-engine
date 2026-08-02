@@ -75,7 +75,7 @@ A mismatch returns `409` and the current value of the token. The client re-reads
 
 The idempotency lookup runs **before** the `fromRevision` comparison, because a genuine retry must not be rejected as stale.
 
-A reuse of one `importId` with a different document is a client defect, not a retry. The daemon compares the submitted document against the one recorded for that id and returns `409 idempotency-mismatch` when they differ. Returning the first result silently would hide the bug.
+A reuse of one `importId` with a different submission is a client defect, not a retry. The fingerprint covers the documents, the choice set, `fromRevision` and `validatedRevision`, with the documents normalized and sorted by path so that a reordered array stays a retry. A different fingerprint is `409 idempotency-mismatch`. Returning the first result silently would hide the bug.
 
 No other route is idempotent by key. Every other command is either a query, or a transition that a precondition already protects.
 
@@ -124,7 +124,11 @@ The CLI routes on `code` and never parses `message`. A block reason, a publish r
 | 409    | `acknowledgement-required` | the projection is `partial` and the request omitted the acknowledgement  |
 | 409    | `lease-held`               | a live lease refuses the operation                                       |
 | 409    | `idempotency-mismatch`     | an `importId` came back with a different document                        |
+| 409    | `choices-stale`            | topology moved since `plan.validate`, so the required choice set changed |
+| 409    | `choices-changed`          | a selected outcome is no longer legal against current runtime state      |
 | 422    | `plan-invalid`             | the plan failed validation, and `details` lists every finding            |
+| 422    | `choices-invalid`          | the choice set builds an invalid graph, and `details` names the nodes    |
+| 422    | `identity-kind-mismatch`   | one ULID payload appeared under two kind prefixes                        |
 | 422    | `credential-rejected`      | the forge refused the credential, and `details` holds its response       |
 | 501    | `not-implemented`          | the route ships in a later phase, and it wrote no state                  |
 

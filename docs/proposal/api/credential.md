@@ -12,14 +12,20 @@ A git credential is a registration too, of `kind = 'git'`, because the git servi
 
 ## Routes
 
-| operationId           | Method and path                 | introducedIn | status  | Source                                      |
-| --------------------- | ------------------------------- | ------------ | ------- | ------------------------------------------- |
-| `provider.register`   | `POST /v1/providers`            | phase-2      | stubbed | providers-and-credentials.md, "register"    |
-| `provider.list`       | `GET /v1/providers`             | phase-2      | stubbed | providers-and-credentials.md, "list"        |
-| `provider.show`       | `GET /v1/providers/:id`         | phase-2      | stubbed | providers-and-credentials.md                |
-| `provider.rename`     | `POST /v1/providers/:id/rename` | phase-2      | stubbed | providers-and-credentials.md, "rename"      |
-| `provider.remove`     | `DELETE /v1/providers/:id`      | phase-2      | stubbed | providers-and-credentials.md, "remove"      |
-| `provider.setDefault` | `PUT /v1/providers/:id/default` | phase-2      | stubbed | providers-and-credentials.md, "set default" |
+| operationId           | Method and path                 | introducedIn | status  | Source                                             |
+| --------------------- | ------------------------------- | ------------ | ------- | -------------------------------------------------- |
+| `provider.register`   | `POST /v1/providers`            | phase-1      | routed  | P1-E1, the git credential of `repository.register` |
+| `provider.list`       | `GET /v1/providers`             | phase-1      | routed  | P1-E1, the CLI resolves `--credential <name>`      |
+| `provider.show`       | `GET /v1/providers/:id`         | phase-1      | routed  | providers-and-credentials.md                       |
+| `provider.rename`     | `POST /v1/providers/:id/rename` | phase-2      | stubbed | providers-and-credentials.md, "rename"             |
+| `provider.remove`     | `DELETE /v1/providers/:id`      | phase-2      | stubbed | providers-and-credentials.md, "remove"             |
+| `provider.setDefault` | `PUT /v1/providers/:id/default` | phase-2      | stubbed | providers-and-credentials.md, "set default"        |
+
+## Three routes ship in phase 1, and the rest in phase 2
+
+`repository.register` carries a mandatory `credentialId` that names a `provider` row of `kind = 'git'`, and the phase-1 exit criterion registers a real remote. A phase in which every provider route answers `501` therefore has no public path to the credential its own journey needs. `provider.register`, `provider.list` and `provider.show` ship in phase 1 for that reason, and they need only the crypto service that phase 1 already delivers.
+
+`provider.rename`, `provider.remove` and `provider.setDefault` stay in phase 2. A rename and a removal are management of a registry that phase 1 only writes once, and `setDefault` serves the llm chain, which phase 1 has no use for.
 
 ## `provider.register`
 

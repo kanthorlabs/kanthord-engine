@@ -21,6 +21,8 @@ The body holds the remote URL and a `credentialId`. The response holds the defau
 
 Detection never applies by itself, so registration is two calls. The client shows the detected branch, the human confirms, and `repository.register` carries the confirmed value. The confirmation lives in the client, and the daemon holds no wizard state, because a half-finished registration on the server is a thing a second client can find.
 
+The confirmation is explicit in an automated run as well. `kanthord repository register --upstream <branch>` supplies it without a prompt, and the CLI refuses to register when neither a prompt nor the flag answered. P1-E1 passes the flag, which is what keeps its `Human action: none` true while the product rule holds.
+
 ### The credential check is a write advertisement
 
 The route runs `listServerRefs({ forPush: true })`, which speaks to `git-receive-pack`. It changes nothing on the remote.
