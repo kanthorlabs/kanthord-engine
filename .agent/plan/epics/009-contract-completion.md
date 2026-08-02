@@ -1,0 +1,34 @@
+# EPIC 009 — Contract completion
+
+Status: **draft**.
+
+## Goal
+
+Every route in `docs/proposal/api/` answers. A phase-1 route answers with data, a later-phase route answers `501 not-implemented` and writes no state, and a `post-mvp` path answers `404`.
+
+## Non-goals
+
+- No later-phase behaviour. A `501` route is a registered schema and nothing more.
+
+## Stories
+
+- **`system.status`** — the daemon version, the bind address, the start time, nodes by state, the repository reconciliation line, and the stale lease line. The shape exists even where phase 1 leaves a list empty.
+- **`blob.show`** — the `sha256:<hex>` path parameter, the content type, the caching and `ETag` behaviour, the `Range` behaviour, and the bearer requirement.
+- **`event.list`** — cursor paging over an append-only log, with the filters the domain declares. An offset cannot page it.
+- **The `501` sweep** — every stubbed `operationId` answers `501` and writes no state. The assertion enumerates the route registry, so a new stub is covered without a hand-written list.
+- **The `404` sweep** — every `post-mvp` path answers `404`, because `501` says "this daemon will do it" and `404` says "this daemon does not have this operation".
+
+## Verification gate
+
+Gates: `npm run verify`
+
+Proof:
+
+```bash
+node --test src/http/contract/**/*.test.ts && echo "PASS EPIC-009"
+```
+
+Hermetic coverage required beyond the Proof:
+
+- The `501` sweep calls every stubbed route and asserts, after each call, that no table gained a row.
+- Adding a stubbed route to the registry without a `501` handler fails the sweep.
