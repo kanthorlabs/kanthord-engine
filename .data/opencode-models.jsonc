@@ -6,11 +6,11 @@
       "variant": "high"
     },
     "software-engineer": {
-      "model": "xiaomi-token-plan-sgp/mimo-v2.5",
+      "model": "opencode-go/deepseek-v4-flash",
       "variant": "high"
     },
     "test-engineer": {
-      "model": "xiaomi-token-plan-sgp/mimo-v2.5",
+      "model": "opencode-go/deepseek-v4-flash",
       "variant": "high"
     }
   }
