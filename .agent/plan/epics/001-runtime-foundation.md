@@ -12,7 +12,7 @@ The daemon starts from a packaged entry point, reads a discovered configuration 
 - No database. EPIC 003 opens the file.
 - No journal reconciliation. The startup sweep removes `*.lock` files and nothing else; the journal is phase 3.
 - No graceful shutdown. The kernel releases the home lock on process death, and the `SIGKILL` case is asserted, so a second release path adds a code path without adding a guarantee.
-- No `src/cli/` program. EPIC 004 owns commander. `src/main.ts` parses `--version`, `--config`, `--home` and `serve` and nothing else.
+- No `src/cli/` program here. `src/main.ts` parses `--version`, `--config`, `--home` and `serve` and nothing else. `src/cli/` opens at EPIC 003, not EPIC 004: `AGENTS.md` puts the `kanthord db migrate` handler in the commander program with `main.ts` injecting it, so EPIC 003 creates `src/cli/base-url.ts` and `src/cli/db/migrate.ts`. EPIC 004 refactors both into its program skeleton. Command logic in `src/main.ts` would also be untestable except through a child process, because a test may not import the composition root.
 
 ## Stories
 
