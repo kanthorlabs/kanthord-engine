@@ -36,7 +36,7 @@ This table is normative. `eslint.config.js` encodes it, so a violation fails `np
 | From                     | May import                                                                              |
 | ------------------------ | --------------------------------------------------------------------------------------- |
 | `domain/`                | `domain/`                                                                               |
-| a service **interface**  | `domain/`                                                                               |
+| a service **interface**  | `domain/`, any service interface                                                        |
 | a service implementation | `domain/`, any service interface, an implementation in the **same** capability          |
 | `commands/`              | `domain/`, any service interface                                                        |
 | `queries/`               | `domain/`, any service interface                                                        |
@@ -51,7 +51,7 @@ Nothing imports `main.ts`. No production file imports a test or a test helper.
 Five rules carry that table.
 
 - **`domain/` is pure.** No file system, no network, no clock, no randomness. A ULID is minted by a service and passed in. Its only permitted runtime dependency is `zod`.
-- **A dependency injects through an interface, and only `main.ts` names an implementation.** A cross-capability dependency is legal through the interface — the event service reaching storage is normal. One capability's implementation importing another capability's implementation is not.
+- **A dependency injects through an interface, and only `main.ts` names an implementation.** A cross-capability dependency is legal through the interface — the event service reaching storage is normal. An interface reaching another interface is the same rule: `services/event` and `services/lease` name the storage transaction context in their own signatures, because the transaction rule below requires it. One capability's implementation importing another capability's implementation is not legal.
 - **`commands/` and `queries/` hold the business logic.** They import no vendor package at all. A handler parses a request, calls exactly one command or one query, and formats the response. A handler that branches on a domain rule is a defect.
 - **`http/contract/` is the transport contract, and the CLI is its second consumer.** It holds every operation id, method, path, lifecycle status and zod schema, and it imports no koa. That is what lets `cli/` be a typed client of a daemon on another machine without importing a handler.
 - **`cli/` reaches the daemon over HTTP.** It imports no command and no query. `kanthord db migrate` is the single exception in the product, and it is still not an exception here: `main.ts` constructs the storage implementation and passes the migration handler into the commander program.
