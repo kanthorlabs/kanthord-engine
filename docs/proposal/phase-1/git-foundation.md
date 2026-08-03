@@ -89,6 +89,10 @@ A contender that is refused waits briefly for the identity file, reads it, and r
 
 `fcntl` locking is unreliable on NFS, SMB and other network filesystems, and SQLite cannot strengthen a filesystem whose locking is unreliable, so a daemon home on one is refused at startup rather than silently unsupported. Two machines sharing a network mount is outside the guarantee.
 
+The refusal reads the filesystem type of the home. Linux reports a filesystem magic number, and the check refuses a home on NFS, SMB, SMB2, FUSE, 9P, CEPH, Lustre, AFS, GFS2 or OCFS2. Darwin reports a kernel table index rather than a magic number, and Node exposes no filesystem name and no mount table, so the type is unreadable there and startup continues. A network home on Darwin is therefore outside the guarantee rather than refused, and the daemon says nothing about it. Reading the type through the `git` binary or a native addon is refused for the same reasons the lock itself refuses them.
+
+The refusal is effective where the platform reports a type. A deployment that needs it enforced runs the daemon on Linux.
+
 A corrupt or truncated `daemon.lock.db` fails startup closed. It is never deleted and never recreated automatically: unlinking the path while another process holds the old inode is how one home becomes two owners. A `daemon.lock.db-journal` left behind by a killed daemon is normal and is **not** cleaned up by hand — the next start rolls it back and acquires.
 
 **Naming the holder is best effort, and refusing is not.** A second daemon names the holder when the holder has published its identity. A holder that dies or stalls between acquiring the lock and publishing leaves a contender that still refuses, and reports the identity as unavailable. Ownership is never ambiguous; only the message is.

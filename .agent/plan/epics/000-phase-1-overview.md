@@ -55,23 +55,24 @@ A phase can close with every unit test green and no working program. A command c
 
 Each of these came out of a debate round and now lives in the proposal files named.
 
-| Decision                                                                              | Landed in                                   |
-| ------------------------------------------------------------------------------------- | ------------------------------------------- |
-| `provider.register`, `provider.list` and `provider.show` move to phase 1              | `api/credential.md`, `api/new-decisions.md` |
-| Validation collects every finding                                                     | `phase-1/plan-format.md`, `api/graph.md`    |
-| `repository register --upstream <branch>` gives the confirmation non-interactively    | `api/repository.md`                         |
-| `plan.export` writes no status                                                        | `phase-1/plan-format.md`, `api/graph.md`    |
-| Byte identity is against the accepted document, with a canonical rendering            | `phase-1/plan-format.md`                    |
-| The import body is path-and-content pairs, with a decided path grammar                | `api/graph.md`, `api/new-decisions.md`      |
-| Re-import is a binary per-node choice, validated as a whole candidate graph           | `phase-1/plan-format.md`, `api/graph.md`    |
-| `fromRevision` stays a hard reject; the merge-base model is deferred                  | `api/new-decisions.md`, `after-the-mvp.md`  |
-| `choices_blob`, and `accepted_blob` holds the whole resulting graph                   | `database/plan_revision.md`                 |
-| "Every entity" is one row schema per table, plus the two kind sets and the interfaces | `phase-1/README.md`                         |
-| Worker, Agent and Template persist nothing; only `profile` holds a row                | `phase-1/domain.md`                         |
-| The project CLI ships in phase 1, and P1-E1 creates and binds a project               | `phase-1/README.md`                         |
-| P1-E4 is the two-namespace Podman run, `deterministic`, a laptop gate                 | `phase-1/README.md`, `README.md`            |
-| The runner has two axes, an execution driver and a scenario profile                   | `README.md`                                 |
-| Podman is a provisioned test prerequisite, with five hermeticity rules                | `README.md`                                 |
-| A container pair never substitutes for a `deployment` run                             | `README.md`                                 |
-| `npm run verify` is staged, and it starts a daemon for the `db status` step           | `phase-1/domain.md`, `api/system.md`        |
-| Both provider kinds, `git` and `llm`, ship in phase 1                                 | `phase-1/README.md`                         |
+| Decision                                                                              | Landed in                                        |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `provider.register`, `provider.list` and `provider.show` move to phase 1              | `api/credential.md`, `api/new-decisions.md`      |
+| Validation collects every finding                                                     | `phase-1/plan-format.md`, `api/graph.md`         |
+| `repository register --upstream <branch>` gives the confirmation non-interactively    | `api/repository.md`                              |
+| `plan.export` writes no status                                                        | `phase-1/plan-format.md`, `api/graph.md`         |
+| Byte identity is against the accepted document, with a canonical rendering            | `phase-1/plan-format.md`                         |
+| The import body is path-and-content pairs, with a decided path grammar                | `api/graph.md`, `api/new-decisions.md`           |
+| Re-import is a binary per-node choice, validated as a whole candidate graph           | `phase-1/plan-format.md`, `api/graph.md`         |
+| `fromRevision` stays a hard reject; the merge-base model is deferred                  | `api/new-decisions.md`, `after-the-mvp.md`       |
+| `choices_blob`, and `accepted_blob` holds the whole resulting graph                   | `database/plan_revision.md`                      |
+| "Every entity" is one row schema per table, plus the two kind sets and the interfaces | `phase-1/README.md`                              |
+| Worker, Agent and Template persist nothing; only `profile` holds a row                | `phase-1/domain.md`                              |
+| The project CLI ships in phase 1, and P1-E1 creates and binds a project               | `phase-1/README.md`                              |
+| P1-E4 is the two-namespace Podman run, `deterministic`, a laptop gate                 | `phase-1/README.md`, `README.md`                 |
+| The runner has two axes, an execution driver and a scenario profile                   | `README.md`                                      |
+| Podman is a provisioned test prerequisite, with five hermeticity rules                | `README.md`                                      |
+| A container pair never substitutes for a `deployment` run                             | `README.md`                                      |
+| `npm run verify` is staged, and it starts a daemon for the `db status` step           | `phase-1/domain.md`, `api/system.md`             |
+| Both provider kinds, `git` and `llm`, ship in phase 1                                 | `phase-1/README.md`                              |
+| The network-filesystem refusal is effective where the platform reports a type         | `phase-1/git-foundation.md`, `phase-1/README.md` |
