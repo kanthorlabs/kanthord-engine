@@ -8,7 +8,7 @@ Every route in `docs/proposal/api/` answers. A phase-1 route answers with data, 
 
 ## Non-goals
 
-- No later-phase behaviour. A `501` route is a registered schema and nothing more.
+- No later-phase behaviour. A `501` route is a **registry entry** and nothing more. EPIC 004 already declared its identity — `operationId`, method, path tuple, `introducedIn` and `status` — and it carries no request or response schema until the phase that implements it. "One zod schema pair per `operationId`" is a uniqueness rule, not a completeness rule: a schema belongs to exactly one operation and no second copy exists outside `src/http/contract/`, and an operation with no schema is correct rather than incomplete. So this epic authors three schema pairs — `system.status`, `blob.show` and `event.list` — and none for a stubbed route. A stub never reads a body, because dispatch answers `501` before the body parser runs.
 
 ## Stories
 

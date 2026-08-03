@@ -39,9 +39,14 @@ export class SqliteStorage implements Storage {
   transact<T>(work: (transaction: Transaction) => T): T;
   migrate(): MigrationStatus;
   status(): MigrationStatus;
+  ping(): void;
   close(): void;
 }
 ```
+
+`ping()` is `this.database.prepare("SELECT 1").get()` and nothing else. It opens no transaction, creates no table and returns nothing; a dead or closed connection makes it throw, which is the signal its caller wants. `src/services/storage/index.ts` declares it, and EPIC 004 Story 08 uses it as the `storage` health reporter.
+
+Add to the Verify list of this story: `ping()` returns `undefined` on a freshly opened database and throws after `close()`. Two assertions.
 
 The constructor validates the migration list, then calls `openDatabase(dependencies.path)` once and holds the `DatabaseSync` in a private field. The connection never leaves the capability.
 

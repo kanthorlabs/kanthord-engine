@@ -42,11 +42,14 @@ export interface Storage {
   transact<T>(work: (transaction: Transaction) => T): T;
   migrate(): MigrationStatus;
   status(): MigrationStatus;
+  ping(): void;
   close(): void;
 }
 ```
 
 `transact` opens one transaction, passes the context to `work`, commits on return and rolls back on a throw. `docs/proposal/database/README.md:45`: "One command is one transaction."
+
+`ping()` returns when the connection answers a trivial read, and throws otherwise. It is the health probe of `system.health`, and it exists because no other method is safe for one: `status()` bootstraps the `migration` table, so it writes, and `transact()` opens `BEGIN IMMEDIATE`, so it takes a write lock. A health check must do neither. EPIC 003 Story 02 implements it as one `SELECT 1` outside any transaction, and EPIC 004 Story 08 consumes it.
 
 ### 2. `src/services/crypto/index.ts` (new)
 

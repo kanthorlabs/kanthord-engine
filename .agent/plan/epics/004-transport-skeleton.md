@@ -29,7 +29,9 @@ Gates: `npm run verify`
 Proof:
 
 ```bash
-node --test src/http/**/*.test.ts src/cli/**/*.test.ts && echo "PASS EPIC-004"
+node --test src/http/**/*.test.ts src/cli/**/*.test.ts \
+  src/queries/**/*.test.ts src/domain/loopback.test.ts \
+  && echo "PASS EPIC-004"
 ```
 
 Hermetic coverage required beyond the Proof:
@@ -39,6 +41,6 @@ Hermetic coverage required beyond the Proof:
 - The daemon refuses to listen against a database with an unapplied migration, and it starts after `db migrate` on the same home.
 - No request schema in the registry accepts a server file-system path. The assertion reads the authored schemas, which admit only contract-approved fields, rather than searching for path-like names. `plan.import` carries a client-side relative path per document, and that is contract-approved rather than an exemption, because the path is data the client owns and never a location on the daemon.
 - The token compare is constant time, asserted by construction rather than by timing.
-- `system.health` answers with no token, and still answers `403` to an `Origin` header.
+- `system.health` reports the status of every dependency, and it requires the bearer token like every other route. No unauthenticated route remains on the daemon. It still answers `403` to an `Origin` header and to a `Host` outside the allow list, because the browser defences are a separate control from authentication.
 - The `db migrate` refactor preserves every rule EPIC 003 proved: it still refuses a non-loopback base URL with `db-remote-base-url` and writes nothing, it still holds the home lock, it still reads the configured home when no `--home` is given, and `src/cli/` still imports no service. The EPIC 003 tests are the regression suite, and they move to the program-level option rather than being deleted.
-- No second loopback classifier exists. One assertion greps `src/` for a `127.` literal and a `"localhost"` literal outside `src/cli/base-url.ts`, so the resolver cannot fork a copy of the policy.
+- No second loopback classifier exists. One assertion greps `src/` for a `127.` literal and a `"localhost"` literal, and the only files that may hold either are `src/domain/loopback.ts` and the `http.bind` default line of `src/services/config/convict.ts`. `domain/` is the one directory both `services/` and `cli/` may import, so it is where the single classifier lives; `services/config/refusals.ts` and `cli/base-url.ts` become re-export sites.

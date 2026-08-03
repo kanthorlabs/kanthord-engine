@@ -17,7 +17,7 @@ This is the largest epic in phase 1, because it carries the conflict resolution 
 
 ## Stories
 
-- **Project use case** — `project.create`, `project.list`, `project.show`, and `PUT /projects/:id/repositories` to replace the bound set.
+- **Project use case** — `project.create`, `project.list`, `project.show`, and `project.repositories` — `PUT /v1/project/:id/repository` — to replace the bound set. Every resource segment is singular, per `docs/proposal/api/README.md:60`, and the registry's closed segment sets refuse a plural spelling outright.
 - **Graph service on graphology** — the interface, the in-memory model, and the traversals the rest of the epic uses.
 - **Document parse** — YAML frontmatter, the body, and the `## Acceptance criteria` split. Body normalization: CRLF and lone CR become LF, and the body ends with exactly one LF. Trailing spaces survive.
 - **Submitted path grammar** — a relative POSIX path under `plan/`, ending in `.md`, with no empty, `.` or `..` segment, no backslash and no NUL. Case-sensitive. A duplicate path is `422 plan-invalid`. Array order carries no meaning.
