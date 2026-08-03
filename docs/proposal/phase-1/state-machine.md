@@ -30,13 +30,15 @@ A failed task parks in `blocked`. A human clears it. The scheduler never propaga
 
 A parent whose children are all terminal is not always `done`. `done` means every child is `done`. `partial` means at least one child is `done` and at least one is `discarded`. `discarded` means every child is `discarded`. A task has no children, so a task is never `partial`.
 
+A `partial` child counts as both. It carries one `done` and one `discarded` into its parent, because a `partial` objective integrated some work and discarded some. An initiative therefore reaches `partial` whenever one objective is `partial`, whatever the other objectives hold. Only an initiative meets this case, because a task is never `partial`.
+
 The levels do not share one rule. This table is normative.
 
-| Level      | Reaches `awaiting_approval`                            | Reaches `done`                                                                  | Reaches `partial`                                         | Reaches `discarded`                              |
-| ---------- | ------------------------------------------------------ | ------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------ |
-| Task       | never                                                  | verification passes and `re@1` accepts                                          | never                                                     | human discard                                    |
-| Objective  | every task is terminal and at least one task is `done` | integration succeeds and every task is `done`                                   | integration succeeds and at least one task is `discarded` | every task is `discarded`, or human discard      |
-| Initiative | never                                                  | every objective is `done`, and the end-to-end check passed or is not applicable | as `done`, but at least one objective is `discarded`      | every objective is `discarded`, or human discard |
+| Level      | Reaches `awaiting_approval`                            | Reaches `done`                                                                  | Reaches `partial`                                                 | Reaches `discarded`                              |
+| ---------- | ------------------------------------------------------ | ------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------ |
+| Task       | never                                                  | verification passes and `re@1` accepts                                          | never                                                             | human discard                                    |
+| Objective  | every task is terminal and at least one task is `done` | integration succeeds and every task is `done`                                   | integration succeeds and at least one task is `discarded`         | every task is `discarded`, or human discard      |
+| Initiative | never                                                  | every objective is `done`, and the end-to-end check passed or is not applicable | as `done`, but at least one objective is `discarded` or `partial` | every objective is `discarded`, or human discard |
 
 An initiative does not become terminal the moment its objectives do. When the last objective integrates, the end-to-end check runs, and the initiative stays non-terminal until it returns. A failure moves the initiative to `blocked` with reason `e2e-failed`. Initiative end-to-end detection is deferred past the MVP, so an MVP initiative always records `not-applicable`.
 

@@ -42,7 +42,7 @@ Exact behaviour, in this order:
 
 Step 5 is total. It covers `{done, discarded}` from `docs/proposal/phase-1/state-machine.md:31`, and it covers the three combinations that line leaves open at the initiative level — `{done, partial}`, `{partial}` and `{partial, discarded}` — because a `partial` objective already shipped some work and discarded some, so it carries both facts upward.
 
-Those three combinations are **wider** than the literal text of `docs/proposal/phase-1/state-machine.md:31,39`, which requires "at least one child is `done` and at least one is `discarded`". `{partial}` satisfies neither clause literally. This is a decided extension, not a reading of the source, and `docs/proposal/phase-1/state-machine.md` needs the same sentence before EPIC 003 restates the rule in DDL. See the open items of `index.md`.
+`docs/proposal/phase-1/state-machine.md:33` states the same rule: "A `partial` child counts as both. It carries one `done` and one `discarded` into its parent." The Initiative row at `:41` reaches `partial` when at least one objective is `discarded` **or** `partial`.
 
 `aggregate` takes no `"task"` parent. A task has no child, and the type rejects the call at compile time.
 

@@ -75,10 +75,9 @@ Source facts the stories depend on:
 - `mr@1` appears at `docs/proposal/phase-1/git-foundation.md:21,135` but is not a member of the closed worker-kind set of `docs/proposal/phase-1/domain.md:10`.
 - `repository.publish_on_approval`, `candidate.acknowledged_partial`, `candidate.publish_requested` and `check_result.authoritative` are plain `INTEGER` with no `0`/`1` `CHECK`. Their schemas are `z.int()`. A narrower schema would reject a row SQLite accepts.
 
-## Open items for the human
+## Decisions this epic settled
 
-One rule this epic depends on lives only here, not in the proposal. `/work` can run without it, and it should land in `docs/proposal/` before EPIC 003 restates it in DDL.
+No open item blocks `/work`. Two rules were decided during authoring, and both now live in the proposal and in `AGENTS.md` rather than only here.
 
-- Initiative aggregation over a `partial` objective is not covered by `docs/proposal/phase-1/state-machine.md:31,39`. Decided: a `partial` child contributes one `done` and one `discarded`, so `{done, partial}`, `{partial}` and `{partial, discarded}` all aggregate to `partial`. Story 07 encodes it. `docs/proposal/phase-1/state-machine.md` needs the same sentence.
-
-Resolved: `AGENTS.md:39` now reads "a service **interface** | `domain/`, any service interface", which matches `eslint.config.js:105-113`. Story 11's `Transaction` import is legal under the matrix, the prose and the lint.
+- Initiative aggregation over a `partial` objective. `docs/proposal/phase-1/state-machine.md:33` now states that a `partial` child carries one `done` and one `discarded` into its parent, and the Initiative row at `:41` reaches `partial` when at least one objective is `discarded` or `partial`. Story 07 encodes it. Aggregation is computed and never stored, so no `CHECK` clause and no later epic restates it.
+- A service interface may import another service interface. `AGENTS.md:39` now matches `eslint.config.js:105-113`, so Story 11's `Transaction` import is legal under the matrix, the prose and the lint.
