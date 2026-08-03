@@ -179,7 +179,7 @@ export default [
         {
           patterns: [
             {
-              group: ["node:*", ...vendorPackages],
+              group: ["node:*", "ulid", ...vendorPackages],
               message: "domain/ is pure: domain/ and zod only.",
             },
           ],
