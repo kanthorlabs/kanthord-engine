@@ -1,11 +1,11 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
 import { ConvictConfig } from "./convict.ts";
-import type { LoadInput, Settings, ConfigErrorCode } from "./index.ts";
+import type { LoadInput } from "./index.ts";
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "kanthord-config-"));

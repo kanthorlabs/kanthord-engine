@@ -93,7 +93,7 @@ describe("src/services/home-lock/startup.test", () => {
     const second = launchDaemon({ configPath, home: home.path });
     const exit = await second.exited();
     assert.equal(exit.code, 1);
-    assert.match(second.stderr(), /home-locked/);
+    assert.match(second.stderr(), /^kanthord: home-locked: [^\n]+\n$/);
     assert.match(second.stderr(), new RegExp(String(identity.pid)));
   });
 
@@ -118,7 +118,7 @@ describe("src/services/home-lock/startup.test", () => {
     db.close();
   });
 
-  it("first daemon SIGKILL: second daemon reaches readiness, no daemon.lock.db-journal remains", async () => {
+  it("first daemon SIGKILL: second daemon reaches readiness with no cleanup step", async () => {
     const home = createTemporaryHome();
     after(async () => {
       await killAll();
@@ -135,10 +135,8 @@ describe("src/services/home-lock/startup.test", () => {
     const second = launchDaemon({ configPath, home: home.path });
     await second.ready();
 
-    assert.ok(
-      !fs.existsSync(path.join(home.path, "daemon.lock.db-journal")),
-      "no daemon.lock.db-journal must remain after second daemon acquires lock",
-    );
+    assert.match(second.stdout(), /^kanthord: ready\n$/);
+    assert.equal(second.stderr(), "");
   });
 
   it("config with http.bind 0.0.0.0 and no token: daemon exits 1, stderr config-refused", async () => {
@@ -154,7 +152,7 @@ describe("src/services/home-lock/startup.test", () => {
     const proc = launchDaemon({ configPath, home: home.path });
     const exit = await proc.exited();
     assert.equal(exit.code, 1);
-    assert.match(proc.stderr(), /config-refused/);
+    assert.match(proc.stderr(), /^kanthord: config-refused: [^\n]+\n$/);
   });
 
   it("no config found: daemon exits 1, stderr config-not-found names every candidate path", async () => {
@@ -178,7 +176,7 @@ describe("src/services/home-lock/startup.test", () => {
     });
     const exit = await proc.exited();
     assert.equal(exit.code, 1);
-    assert.match(proc.stderr(), /config-not-found/);
+    assert.match(proc.stderr(), /^kanthord: config-not-found: [^\n]+\n$/);
     assert.match(proc.stderr(), /kanthord\.config\.json/);
     assert.match(
       proc.stderr(),

@@ -47,26 +47,9 @@ export class SqliteHomeLock implements HomeLock {
     const identityWaitMs = input.identityWaitMs ?? 200;
     const identityPollMs = input.identityPollMs ?? 20;
 
-    const openAndBegin = (): DatabaseSync => {
-      const lockPath = join(input.home, "daemon.lock.db");
-      const journalPath = join(input.home, "daemon.lock.db-journal");
-      const staleJournal = fs.existsSync(journalPath);
-      const fd = fs.openSync(lockPath, "a", 0o600);
-      fs.fchmodSync(fd, 0o600);
-      fs.closeSync(fd);
-      const db = new DatabaseSync(lockPath);
-      db.exec("PRAGMA busy_timeout = 0");
-      db.exec("PRAGMA locking_mode = NORMAL");
-      db.exec("PRAGMA journal_mode = DELETE");
-      db.exec("BEGIN IMMEDIATE");
-      if (staleJournal) fs.rmSync(journalPath, { force: true });
-      return db;
-    };
-
     let db: DatabaseSync | undefined;
     try {
-      db = openAndBegin();
-      if (input.beforeRetry !== undefined) input.beforeRetry();
+      db = this.openAndBegin(input.home);
       return this.makeHeld(db, input.home);
     } catch (error: unknown) {
       if (db !== undefined) db.close();
@@ -81,6 +64,24 @@ export class SqliteHomeLock implements HomeLock {
     }
   }
 
+  private openAndBegin(home: string): DatabaseSync {
+    const lockPath = join(home, "daemon.lock.db");
+    const fd = fs.openSync(lockPath, "a", 0o600);
+    fs.fchmodSync(fd, 0o600);
+    fs.closeSync(fd);
+    const db = new DatabaseSync(lockPath);
+    try {
+      db.exec("PRAGMA busy_timeout = 0");
+      db.exec("PRAGMA locking_mode = NORMAL");
+      db.exec("PRAGMA journal_mode = DELETE");
+      db.exec("BEGIN IMMEDIATE");
+    } catch (error: unknown) {
+      db.close();
+      throw error;
+    }
+    return db;
+  }
+
   private handleContended(
     input: AcquireInput,
     identityWaitMs: number,
@@ -88,13 +89,9 @@ export class SqliteHomeLock implements HomeLock {
   ): HeldHome {
     const identityPath = join(input.home, "daemon.lock.identity");
     let sleepBudget = identityWaitMs;
-    if (identityWaitMs === 0) {
-      // poll once, never sleep
-    } else {
-      while (!fs.existsSync(identityPath) && sleepBudget > 0) {
-        this.sleeper(identityPollMs);
-        sleepBudget -= identityPollMs;
-      }
+    while (!fs.existsSync(identityPath) && sleepBudget > 0) {
+      this.sleeper(identityPollMs);
+      sleepBudget -= identityPollMs;
     }
 
     let holder: HomeIdentity | null = null;
@@ -112,15 +109,7 @@ export class SqliteHomeLock implements HomeLock {
 
     let db: DatabaseSync | undefined;
     try {
-      const journalPath = join(input.home, "daemon.lock.db-journal");
-      const staleJournal = fs.existsSync(journalPath);
-      db = new DatabaseSync(join(input.home, "daemon.lock.db"));
-      db.exec("PRAGMA busy_timeout = 0");
-      db.exec("PRAGMA locking_mode = NORMAL");
-      db.exec("PRAGMA journal_mode = DELETE");
-      db.exec("BEGIN IMMEDIATE");
-      if (staleJournal) fs.rmSync(journalPath, { force: true });
-
+      db = this.openAndBegin(input.home);
       return this.makeHeld(db, input.home);
     } catch (retryError: unknown) {
       if (db !== undefined) db.close();

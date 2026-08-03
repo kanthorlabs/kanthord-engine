@@ -72,6 +72,13 @@ export function launchDaemon(input: LaunchInput): DaemonProcess {
       if (stdoutData.includes("kanthord: ready\n")) {
         return Promise.resolve();
       }
+      if (exitRecord !== null) {
+        return Promise.reject(
+          new Error(
+            `daemon exited before ready\ncode: ${exitRecord.code}\nsignal: ${exitRecord.signal}\nstderr: ${stderrData}`,
+          ),
+        );
+      }
       return new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(
@@ -81,8 +88,7 @@ export function launchDaemon(input: LaunchInput): DaemonProcess {
           );
         }, 5000);
 
-        const check = (chunk: Buffer) => {
-          stdoutData += chunk.toString("utf8");
+        const check = () => {
           if (stdoutData.includes("kanthord: ready\n")) {
             clearTimeout(timeout);
             child.stdout!.off("data", check);

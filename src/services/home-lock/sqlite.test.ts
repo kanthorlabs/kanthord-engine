@@ -100,10 +100,13 @@ describe("src/services/home-lock/sqlite.test", () => {
     const home = tmpHome();
     after(() => fs.rmSync(home, { recursive: true }));
     const lock1 = new SqliteHomeLock({ probe: fakeProbe("local") });
-    const lock2 = new SqliteHomeLock({ probe: fakeProbe("local") });
+    const lock2 = new SqliteHomeLock({
+      probe: fakeProbe("local"),
+      sleeper: () => {},
+    });
     const held1 = lock1.acquire({ home });
     assert.throws(
-      () => lock2.acquire({ home }),
+      () => lock2.acquire({ home, identityWaitMs: 0, identityPollMs: 20 }),
       (err: unknown) => {
         assert.ok(err instanceof HomeLockError);
         assert.equal(err.code, "home-locked");
@@ -327,7 +330,6 @@ describe("src/services/home-lock/sqlite.test", () => {
     after(() => fs.rmSync(home, { recursive: true }));
     const lock1 = new SqliteHomeLock({ probe: fakeProbe("local") });
     const held1 = lock1.acquire({ home });
-    held1.release();
     let retryCount = 0;
     const lock2 = new SqliteHomeLock({
       probe: fakeProbe("local"),
@@ -339,10 +341,11 @@ describe("src/services/home-lock/sqlite.test", () => {
       identityPollMs: 20,
       beforeRetry: () => {
         retryCount++;
+        held1.release();
       },
     });
     assert.equal(retryCount, 1);
-    assert.ok(held2.path === home);
+    assert.equal(held2.path, home);
     held2.release();
   });
 

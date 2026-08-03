@@ -2,7 +2,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { NETWORK_FILESYSTEM_MAGICS, StatfsProbe } from "./statfs-probe.ts";
-import type { FilesystemKind } from "./index.ts";
 
 describe("src/services/home-lock/statfs-probe.test", () => {
   it("NETWORK_FILESYSTEM_MAGICS deep-equals the ten expected values in order", () => {
