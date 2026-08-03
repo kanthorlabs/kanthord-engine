@@ -162,9 +162,12 @@ The CLI routes on `code` and never parses `message`. A block reason, a publish r
 | 422    | `choices-invalid`          | the choice set builds an invalid graph, and `details` names the nodes    |
 | 422    | `identity-kind-mismatch`   | one ULID payload appeared under two kind prefixes                        |
 | 422    | `credential-rejected`      | the forge refused the credential, and `details` holds its response       |
+| 500    | `internal-error`           | the daemon failed unexpectedly, and the message is a constant            |
 | 501    | `not-implemented`          | the route ships in a later phase, and it wrote no state                  |
 
 `stale-revision` covers both ways a frozen candidate stops being approvable. A revision mismatch and a `candidate.state` of `invalidated` mean the same thing to the human — read the evidence again — so they are one code, and `details` carries `candidateState` and `invalidatedReason`. A second code would split one condition into two the client must handle identically.
+
+`internal-error` is the one code this API adds for a fault of its own. An unexpected throw still answers the envelope shape, and its `message` is the constant `internal error` with no `details`, because a caught message is not contract and may name a path, a query or a secret. Every other `5xx` is absent by design: the daemon either answers a declared code or it fails.
 
 `credential-rejected` is `422` rather than `401`. A forge refusing a token is a fact about the request payload, and `401` on this API means the caller's own bearer token failed. An `ssh://` url, a `git@host:path` url and plain HTTP on a non-loopback host are all `400 invalid-request` with the reason in `details`, because they fail schema validation before any network call.
 
@@ -172,9 +175,13 @@ Block reasons appear in a node representation as `blockReason`, with the values 
 
 ## Security applies to every route
 
-One bearer scheme covers the whole surface. `../phase-1/transport.md` decides it, and P1-E2 fixes the codes: no token is `401`, a wrong token is `401`, an `Origin` header is `403`, and a `Host` outside the allow list is `403`.
+One bearer scheme covers the whole surface, with **no exception**. `../phase-1/transport.md` decides it, and P1-E2 fixes the codes: no token is `401`, a wrong token is `401`, an `Origin` header is `403`, and a `Host` outside the allow list is `403`.
 
-`system.health` is the one route with no bearer scheme. It returns a constant and reads nothing, so it reveals nothing. The browser defences still apply to it: authentication and the `Origin` and `Host` checks are separate controls, and a route exempt from the second would reopen the DNS rebind path. See [system.md](system.md).
+Every route needs the token, `system.health` included. An earlier draft exempted it, on the ground that it returned one constant and therefore revealed nothing. That ground is gone: `system.health` reports the status of every dependency, so it reads state, and an unauthenticated route reveals whatever it returns. A liveness probe that names which subsystem is down is a reconnaissance tool on a private network interface, and the deployment case — a non-loopback bind, where a token is mandatory for every other route — is exactly where it would be read. See [system.md](system.md).
+
+**The daemon therefore has no anonymous surface.** An unauthenticated request answers `401` whatever it asks for, and a registered path and an unregistered path answer identically, so the route table is not readable without the token. The cost is that an external monitor must hold the token to probe liveness; the daemon has one token and one human, so that is a configuration line rather than a new mechanism.
+
+The browser defences are a separate control and apply to every route, authenticated or not. The `Origin` rejection and the `Host` allow list stop a browser page and a DNS rebind, which a bearer token does not — a rebound page carries the victim's credentials by construction.
 
 ## No route names a server path
 

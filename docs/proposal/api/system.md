@@ -6,28 +6,38 @@ The daemon itself: liveness, schema state, and the one aggregate view a human re
 
 ## Routes
 
-| operationId     | Method and path      | introducedIn | status | Source                                     |
-| --------------- | -------------------- | ------------ | ------ | ------------------------------------------ |
-| `system.health` | `GET /v1/health`     | phase-1      | routed | new decision, public and unauthenticated   |
-| `system.db`     | `GET /v1/db/status`  | phase-1      | routed | `../phase-1/domain.md`, `npm run verify`   |
-| `system.status` | `GET /v1/status`     | phase-1      | routed | P1-E1, `kanthord status`                   |
-| `blob.show`     | `GET /v1/blob/:hash` | phase-1      | routed | `../database/blob.md`, every large payload |
+| operationId     | Method and path      | introducedIn | status | Source                                         |
+| --------------- | -------------------- | ------------ | ------ | ---------------------------------------------- |
+| `system.health` | `GET /v1/health`     | phase-1      | routed | new decision, dependency status, authenticated |
+| `system.db`     | `GET /v1/db/status`  | phase-1      | routed | `../phase-1/domain.md`, `npm run verify`       |
+| `system.status` | `GET /v1/status`     | phase-1      | routed | P1-E1, `kanthord status`                       |
+| `blob.show`     | `GET /v1/blob/:hash` | phase-1      | routed | `../database/blob.md`, every large payload     |
 
 ## `system.health`
 
-The one route that needs no bearer token. It answers whether the daemon is up, and nothing else.
-
-The response holds a literal status and nothing derived from configuration or state:
+Answers whether the daemon can do its work, by asking each dependency to report its own status. It carries the bearer token like every other route.
 
 ```json
-{ "status": "ok" }
+{
+  "status": "degraded",
+  "dependencies": [
+    { "name": "storage", "status": "ok" },
+    { "name": "git", "status": "failed" }
+  ]
+}
 ```
 
-It names no version, no bind address, no host, no uptime, no repository, no node count and no configuration value. An unauthenticated route reveals whatever it returns, so it returns one constant. A daemon that answers is up, and a daemon that does not answer is not.
+`status` is the roll-up: `ok` when no dependency reports `failed`, and `degraded` otherwise. A dependency reports `ok`, `failed`, or `not-implemented`, and `not-implemented` never degrades the daemon — `agent`, `verify` and `lease` are unimplemented through phase 1, and a phase-1 daemon without them is healthy by definition. `dependencies` is ordered by `name`, bytewise, so identical state produces identical bytes.
 
-The browser defences still apply. The `Origin` rejection and the `Host` allow list are not authentication, and a route exempt from them would reopen the DNS rebind path this daemon closes.
+The HTTP status is `200` even when the body says `degraded`. A reachable daemon reporting truthfully is not an HTTP error, a caller reads the body field, and a `5xx` would collapse "I am unwell" into "I failed to answer" — which is what the absence of a response already means.
 
-The daemon version and the bind address moved to `system.status`, which carries the token.
+A probe that reads state cannot also be anonymous. An earlier draft made this route a constant `{ "status": "ok" }` and exempted it from the bearer scheme, on the ground that a constant reveals nothing. Reporting per-dependency status is worth more than an anonymous probe is: it tells a human which subsystem to fix, and it is the one route a monitor calls on a schedule. So the route reads state and takes the token, and the daemon keeps no anonymous surface. See [README.md](README.md).
+
+The token requirement means an external monitor is configured with the token. The daemon has one token and one human, so that is a line of configuration rather than a user model.
+
+The browser defences apply here as they do everywhere. The `Origin` rejection and the `Host` allow list are not authentication, and a route exempt from them would reopen the DNS rebind path this daemon closes — a rebound browser page would carry the token by construction.
+
+The daemon version, the bind address and the process start time are on `system.status`, which reports what the daemon _is_ rather than whether it is well.
 
 ## `system.db`
 
@@ -50,7 +60,7 @@ The lists come from one route because a human asks one question: what is stuck. 
 
 The lease list covers a node and a repository, because `../database/lease.md` makes the objective lease and the repository lock one table. A repository lock that outlived its operation stops every fetch, merge and publish on that repository, and a status view that showed only node leases would report a healthy graph while nothing could move.
 
-The identity fields sit here rather than on `system.health`, because the deployment scenarios record the daemon version and the bind address, and a client that reads them already holds the token.
+The identity fields sit here rather than on `system.health` because the two routes answer different questions: `system.health` reports whether the daemon can work, and this route reports what it is and what is stuck. Both carry the token, so the split is about meaning rather than about disclosure. This route also carries the dependency list of `system.health`, from the same query, so the two can never disagree about the same daemon.
 
 A node list with filters is `graph.md`. This route is the summary, not a replacement for it.
 

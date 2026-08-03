@@ -18,7 +18,11 @@ Every request carries a bearer token from configuration, and the daemon compares
 
 There is no user model. One token serves one human.
 
-The health route is the one exception. It needs no token, it returns a constant, and it reads no configuration and no state, so an unauthenticated caller learns only that a daemon answers. The browser defences below still apply to it, because authentication and the `Origin` and `Host` checks are separate controls. See `../api/system.md`.
+**There is no exception.** Every route needs the token, and the daemon has no anonymous surface. An earlier draft exempted the health route because it returned a constant; the health route now reports the status of each dependency, so it reads state, and a route that reads state cannot be anonymous on an interface a second machine reaches. An unauthenticated request answers `401` whatever it asks for, and it cannot distinguish a registered path from an unregistered one, so the route table is not readable without the token. See `../api/system.md`.
+
+The consequence is operational and small: a process that probes liveness is configured with the token, the same one the CLI carries.
+
+The browser defences below are a separate control and apply to every route. A token does not stop a browser page — a rebound page sends the victim's credentials by construction — so the `Origin` and `Host` checks are what close that path.
 
 ## Transport encryption
 
