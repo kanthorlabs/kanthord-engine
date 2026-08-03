@@ -82,7 +82,11 @@ Eleven choices the EPIC and the proposal leave open. Each is pinned here so no s
 
 ## Open items
 
-None blocks `/work`. Four are worth a proposal amendment rather than a story change:
+None blocks `/work`. Four are worth a proposal amendment rather than a story change. Three more were raised by the human review of 2026-08-04 and are resolved; they are recorded here because they changed a pinned artifact:
+
+- R1 - resolved - candidate-check-accepted-null-acknowledgement - `CHECK (… OR acknowledged_partial = 1)` evaluated to `NULL` on a null column, and SQLite fails a `CHECK` only on false, so the schema accepted an approved `partial` candidate with no acknowledgement — the case `docs/proposal/database/candidate.md:34` and `:65` promise is impossible. The clause is now `acknowledged_partial IS 1` in the proposal, in `migration-0003-execution-and-journal.ts` and in Story 06. Story 06:102 stands as written.
+- R2 - resolved - repository-check-accepts-ready-with-one-oid - the clause is an equivalence, so `ready` with one `diverged_*` oid makes both sides false and the row is accepted. `docs/proposal/database/repository.md:30` claims only the `needs-reconcile` direction, so the DDL is right. Story 04:202 was amended to expect success.
+- R3 - resolved - reads-inside-the-caller-transaction - `BlobStore.get` and `EventLog.list` now take an optional `Transaction`. A caller inside its command's one transaction passes the context, because `Storage.transact` refuses a nested call. Story 08 was amended. This supersedes the transaction half of S3 below.
 
 - S1 - action:NO - busy-timeout-value - `docs/proposal/database/README.md:36` names three pragmas and no busy timeout. `5000` is pinned in Story 01 and asserted there. A later phase that measures contention may change the value; nothing in phase 1 depends on the number.
 - S2 - action:NO - event-order-is-id-order - `docs/proposal/database/event.md:19` calls `ORDER BY id` creation order, and EPIC 002 Story 01 records that `ulid()` is not the monotonic factory. Two events appended inside one millisecond can therefore list in either order. Story 08 asserts id order with pinned mock ids and claims nothing about append order. A monotonic `IdGenerator` contract would close the gap, and it belongs to the proposal and to `services/ids`, not to this epic.

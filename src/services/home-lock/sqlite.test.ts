@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import v8 from "node:v8";
+import vm from "node:vm";
 import { DatabaseSync } from "node:sqlite";
 
 import { SqliteHomeLock } from "./sqlite.ts";
@@ -115,6 +117,40 @@ describe("src/services/home-lock/sqlite.test", () => {
       },
     );
     held1.release();
+  });
+
+  it("the lock connection survives garbage collection while the home is held", () => {
+    const home = tmpHome();
+    after(() => fs.rmSync(home, { recursive: true }));
+    v8.setFlagsFromString("--expose_gc");
+    const collect = vm.runInNewContext("gc") as () => void;
+    v8.setFlagsFromString("--no-expose_gc");
+
+    const held = new SqliteHomeLock({ probe: fakeProbe("local") }).acquire({
+      home,
+    });
+    collect();
+    collect();
+
+    const contender = new SqliteHomeLock({
+      probe: fakeProbe("local"),
+      sleeper: () => {},
+    });
+    assert.throws(
+      () => contender.acquire({ home, identityWaitMs: 0, identityPollMs: 20 }),
+      (err: unknown) => {
+        assert.ok(err instanceof HomeLockError);
+        assert.equal(err.code, "home-locked");
+        return true;
+      },
+    );
+
+    held.release();
+    collect();
+    const after1 = new SqliteHomeLock({ probe: fakeProbe("local") }).acquire({
+      home,
+    });
+    after1.release();
   });
 
   it("after release(), third instance acquires", () => {

@@ -1,4 +1,4 @@
-# TypeScript / Node 24 type-stripping gotchas
+# Node 24 / TypeScript / SQLite gotchas
 
 Living checklist. **Read before any `src/` edit** — before the edit, not upfront.
 
@@ -75,3 +75,14 @@ does not exist on type 'void'`. To assert on a thrown error's fields, use
   `import.meta.dirname!` is redundant.
   _Verified 24.17: `const d: string = import.meta.dirname` typechecks clean —
   `npm run typecheck` on a probe under `src/`._
+
+- **A SQLite `CHECK` fails only on false, so `= 1` accepts a NULL column.**
+  `CHECK (flag = 1)` evaluates to `NULL` when `flag` is null, and a `NULL`
+  result does not violate the constraint — the row is accepted. The clause
+  fails open, and it refuses only an explicit `0`. Write `CHECK (flag IS 1)`,
+  which compares across null and returns false. The same trap hits any
+  `CHECK`, `WHERE` or `ON` predicate over a nullable column.
+  _Verified 24.17: a table with `CHECK (a = 1)` accepts `INSERT … VALUES
+(NULL)` and one with `CHECK (a IS 1)` refuses it — two `DatabaseSync`
+  tables and one insert each. Found by review of EPIC 003; see R1 in
+  `.agent/plan/stories/003-storage/index.md`._

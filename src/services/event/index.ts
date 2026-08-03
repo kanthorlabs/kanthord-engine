@@ -45,5 +45,8 @@ export class EventError extends Error {
 
 export interface EventLog {
   append(transaction: Transaction, input: AppendEventInput): RecordedEvent;
-  list(filter: EventFilter): readonly RecordedEvent[];
+  list(
+    filter: EventFilter,
+    transaction?: Transaction,
+  ): readonly RecordedEvent[];
 }

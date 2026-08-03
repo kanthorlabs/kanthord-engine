@@ -9,6 +9,7 @@ import {
   identity,
   anyIdentity,
   nodeIdentity,
+  identityTime,
   IdentityError,
 } from "./identity.ts";
 
@@ -148,5 +149,35 @@ describe("src/domain/identity.test", () => {
   it("anyIdentity rejects unknown prefix", () => {
     const result = anyIdentity.safeParse("widget_01HZY8QF3M4N5P6R7S8T9V0W1X");
     assert.equal(result.success, false);
+  });
+
+  it("identityTime decodes the first 10 ULID characters", () => {
+    assert.equal(
+      identityTime("event_01HZY8QF3M4N5P6R7S8T9V0W1X"),
+      1717928967284,
+    );
+  });
+
+  it("identityTime ignores the prefix", () => {
+    assert.equal(
+      identityTime("task_01HZY8QF3M4N5P6R7S8T9V0W1X"),
+      1717928967284,
+    );
+  });
+
+  it("identityTime returns null for an unparseable input", () => {
+    assert.equal(identityTime("0000000000000000000000000000"), null);
+    assert.equal(identityTime("widget_01HZY8QF3M4N5P6R7S8T9V0W1X"), null);
+  });
+
+  it("identityTime decodes a zero timestamp", () => {
+    assert.equal(identityTime("event_00000000000000000000000000"), 0);
+  });
+
+  it("identityTime decodes the largest 48-bit timestamp", () => {
+    assert.equal(
+      identityTime("event_7ZZZZZZZZZ0000000000000000"),
+      281474976710655,
+    );
   });
 });

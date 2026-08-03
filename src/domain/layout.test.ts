@@ -65,6 +65,7 @@ describe("src/domain/layout.test", () => {
       .sort();
     assert.deepEqual(directoryNames, [
       "agent",
+      "blob",
       "clock",
       "config",
       "crypto",

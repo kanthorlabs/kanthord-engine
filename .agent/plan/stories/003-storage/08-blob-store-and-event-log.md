@@ -48,7 +48,7 @@ export interface BlobStore {
 }
 ```
 
-`put` takes the transaction context, because a blob write is part of the one transaction of its command (`AGENTS.md`, `docs/proposal/database/README.md:45`). `get` is a read and takes none, the same shape as `EventLog.list`.
+`put` takes the transaction context, because a blob write is part of the one transaction of its command (`AGENTS.md`, `docs/proposal/database/README.md:45`). `get` takes an optional transaction context, the same shape as `EventLog.list`. A caller outside a transaction omits it, and `get` opens its own. A caller inside its command's one transaction passes the context, because `Storage.transact` refuses a nested call.
 
 ### 3. `src/services/blob/sqlite.ts` (new)
 
@@ -106,7 +106,7 @@ Exact behaviour:
   1. `const id = this.ids.mint("event");`
   2. `transaction.run("INSERT INTO event (id, subject_kind, subject_id, type, actor_kind, actor_id, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)", [id, input.subjectKind, input.subjectId, input.type, input.actorKind, input.actorId, JSON.stringify(input.payload)])`
   3. returns `{ id, ...the six input fields, occurredAt: identityTime(id) ?? 0 }`. `payload` is `input.payload` unchanged, not a re-parse.
-- `list(filter)` — one `SELECT id, subject_kind, subject_id, type, actor_kind, actor_id, payload_json FROM event`, with a `WHERE` built from the present filter fields joined by `AND`, in this fixed order:
+- `list(filter, transaction?)` — one `SELECT id, subject_kind, subject_id, type, actor_kind, actor_id, payload_json FROM event`, run on the caller's transaction context when one is passed and on its own when none is. The `WHERE` is built from the present filter fields joined by `AND`, in this fixed order:
 
   | field         | clause             |
   | ------------- | ------------------ |

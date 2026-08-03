@@ -2,6 +2,11 @@ import fs from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import type { Storage } from "../../src/services/storage/index.ts";
+import { migrations } from "../../src/services/storage/migrations.ts";
+import { SqliteStorage } from "../../src/services/storage/sqlite.ts";
+import { createMockClock } from "./clock.ts";
+
 export type TemporaryDatabase = Readonly<{ path: string; dispose(): void }>;
 
 export function createTemporaryDatabase(): TemporaryDatabase {
@@ -12,6 +17,30 @@ export function createTemporaryDatabase(): TemporaryDatabase {
     path: dbPath,
     dispose() {
       fs.rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+export type TemporaryStorage = Readonly<{
+  storage: Storage;
+  path: string;
+  dispose(): void;
+}>;
+
+export function createMigratedStorage(): TemporaryStorage {
+  const temporary = createTemporaryDatabase();
+  const storage = new SqliteStorage({
+    path: temporary.path,
+    clock: createMockClock({ start: 1700000000000, step: 1000 }),
+    migrations,
+  });
+  storage.migrate();
+  return {
+    storage,
+    path: temporary.path,
+    dispose() {
+      storage.close();
+      temporary.dispose();
     },
   };
 }

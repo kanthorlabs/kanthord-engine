@@ -199,7 +199,7 @@ Parity, the load-bearing case:
   - `ready` with both null succeeds; `needs-reconcile` with both set succeeds.
   - `needs-reconcile` with both null is refused; `ready` with both set is refused.
   - `needs-reconcile` with only `diverged_landing_oid` set is refused, and with only `diverged_upstream_oid` set is refused.
-  - `ready` with only `diverged_landing_oid` set is refused, and with only `diverged_upstream_oid` set is refused.
+  - `ready` with only `diverged_landing_oid` set succeeds, and with only `diverged_upstream_oid` set succeeds. The clause is an equivalence, and one oid alone makes both sides false. The `CHECK` constrains what `needs-reconcile` must carry; it does not forbid a stale oid on a `ready` row.
   - `state = "broken"` is refused.
   - `credential_id = "provider_missing"` is refused, with the message containing `"FOREIGN KEY constraint failed"`.
   - The `publish_on_approval` default: an insert that names every column except it reads back `1`.

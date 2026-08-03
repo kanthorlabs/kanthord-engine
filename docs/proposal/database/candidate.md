@@ -25,7 +25,7 @@ CREATE TABLE candidate (
   invalidated_reason   TEXT,                                                                -- what changed, so the human knows what to review again
   updated_at           INTEGER NOT NULL,                                                    -- last state change
   UNIQUE (node_id, revision),
-  CHECK (state <> 'approved' OR projected_outcome = 'done' OR acknowledged_partial = 1)
+  CHECK (state <> 'approved' OR projected_outcome = 'done' OR acknowledged_partial IS 1)
 ) STRICT;
 ```
 
@@ -33,7 +33,7 @@ The daemon writes a candidate when an objective enters `awaiting_approval`, so t
 
 `evidence_blob` is the frozen approval evidence: the projected outcome, every discarded task with its title and its discard reason, the diff, the commit list, and the base and head object ids. It is frozen at freeze time and not derived at approval time. A title changes on the next import, and the workspace is unreachable from the client machine, so a late derivation would answer a different question than the one the human agreed to. The check results and the attempt history are joined by id and stay in their own tables, because they are immutable already.
 
-The last `CHECK` clause is `acknowledge_partial`. The database refuses an approved `partial` candidate with no acknowledgement.
+The last `CHECK` clause is `acknowledged_partial`. The database refuses an approved `partial` candidate with no acknowledgement.
 
 `merge_oid` is the merge commit built from `landing_base_oid` and `candidate_oid`. When the compare-and-swap fails and the landing tip moved, the recompute discards the merge commit and writes a new `merge_oid`. That invalidates the check result recorded against the old merge commit only. The result recorded against `candidate_oid` stands, because the candidate is immutable.
 

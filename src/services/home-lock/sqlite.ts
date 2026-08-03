@@ -17,6 +17,8 @@ export type SqliteHomeLockDependencies = Readonly<{
   sleeper?: (milliseconds: number) => void;
 }>;
 
+const liveConnections = new Set<DatabaseSync>();
+
 export class SqliteHomeLock implements HomeLock {
   private readonly probe: FilesystemProbe;
   private readonly sleeper: (milliseconds: number) => void;
@@ -130,6 +132,7 @@ export class SqliteHomeLock implements HomeLock {
   }
 
   private makeHeld(db: DatabaseSync, home: string): HeldHome {
+    liveConnections.add(db);
     fs.rmSync(join(home, "daemon.lock.identity"), { force: true });
     this.held = true;
     let released = false;
@@ -175,6 +178,7 @@ export class SqliteHomeLock implements HomeLock {
       release() {
         if (released) return;
         released = true;
+        liveConnections.delete(db);
         db.close();
       },
     };

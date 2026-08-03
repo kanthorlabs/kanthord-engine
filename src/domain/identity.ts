@@ -100,11 +100,9 @@ const identitySchemaCache = new Map<IdentityKind, z.ZodType<string>>();
 export function identity(kind: IdentityKind): z.ZodType<string> {
   let schema = identitySchemaCache.get(kind);
   if (schema === undefined) {
-    schema = z
-      .string()
-      .refine((value) => parseIdentity(value)?.kind === kind, {
-        message: `expected a ${identityPrefixes[kind]}_ identity`,
-      });
+    schema = z.string().refine((value) => parseIdentity(value)?.kind === kind, {
+      message: `expected a ${identityPrefixes[kind]}_ identity`,
+    });
     identitySchemaCache.set(kind, schema);
   }
   return schema;
@@ -129,3 +127,19 @@ export const nodeIdentity: z.ZodType<string> = z.string().refine(
   },
   { message: "expected an initiative_, objective_ or task_ identity" },
 );
+
+const ulidTimeAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+export function identityTime(value: string): number | null {
+  const identity = parseIdentity(value);
+  if (identity === null) {
+    return null;
+  }
+  return identity.ulid
+    .slice(0, 10)
+    .split("")
+    .reduce(
+      (total, character) => total * 32 + ulidTimeAlphabet.indexOf(character),
+      0,
+    );
+}
