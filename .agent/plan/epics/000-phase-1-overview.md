@@ -24,19 +24,26 @@ Foundation layers first, then vertical use cases, then the contract sweep, then 
 | 008 | Project and plan            | 15      | A human imports, exports and re-imports a plan with per-node conflict choices.       |
 | 009 | CLI surface and composition | 6       | The program is assembled, and an unwired command fails a test.                       |
 | 010 | Contract completion         | 5       | Status, blobs, events, and every later-phase route answering `501`.                  |
-| 011 | End-to-end scenarios        | 10      | P1-E1, P1-E2, P1-E4 and P1-E3 produce evidence bundles.                              |
+| 011 | End-to-end scenarios        | 11      | P1-E1, P1-E2, P1-E4 and P1-E3 produce evidence bundles.                              |
+| 012 | Phase 1 acceptance run      | 6       | The scenarios ran once, in order, and one verdict points at the P1-E3 bundle.        |
 
-Total: 87 stories.
+Total: 94 stories.
 
 ## Dependencies
 
 ```
-001 ─> 002 ─> 003 ─> 004 ─┬─> 005 ─> 006 ─> 007 ─┬─> 009 ─> 010 ─> 011
+001 ─> 002 ─> 003 ─> 004 ─┬─> 005 ─> 006 ─> 007 ─┬─> 009 ─> 010 ─> 011 ─> 012
                           │                       │
                           └───────────────────────┴─> 008 ─┘
 ```
 
-008 needs 004 for its routes and 007 for the repository an objective binds. 009 assembles what 007 and 008 built, and every later epic depends on it. 010 sweeps the routes neither use case reached. 011 proves the whole thing through the packaged binary.
+008 needs 004 for its routes and 007 for the repository an objective binds. 009 assembles what 007 and 008 built, and every later epic depends on it. 010 sweeps the routes neither use case reached. 011 proves the whole thing through the packaged binary. 012 runs it and decides.
+
+## Why 012 exists
+
+011 makes each scenario runnable. It never makes the run happen. A phase can hold four green scenarios and no decision, so 012 owns the four things no other epic owns: the run frame, the execution of P1-E3 on the real profile, the product acceptance that `docs/proposal/README.md` keeps out of every scenario, and the verdict that opens a fix epic for each blocker.
+
+012 owns no oracle and invents no scenario. A run story names a scenario id and the 011 command, and asserts nothing of its own. A gap it finds becomes a proposal amendment, then an 011 story.
 
 ## Why 009 exists
 

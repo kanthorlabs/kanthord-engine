@@ -141,3 +141,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Acceptance run state and evidence
+.data/acceptance-*/
+.agent/acceptance/

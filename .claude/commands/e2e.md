@@ -1,186 +1,120 @@
 ---
-description: Drive the whole kanthord program end to end as the end user — a user-supplied OpenAI-compatible provider (URL + key + model) and the kanthord-verify GitHub repo, through register/probe/logout/reactivate, project + graph setup, a resilient daemon run that records issues instead of aborting, a harness-owned program proof, and a blockers/suggestions report. Everything runs through scripts/e2e/*, never ad-hoc one-liners. Use to validate that all components work together on a real feature, or to hunt integration bugs.
-argument-hint: [tag e.g. 009]  (names the isolated run dir .data/e2e-<tag>/)
+description: Drive one phase acceptance run — invoke every declared scenario id through scripts/e2e/run.mjs, record the product acceptance a machine cannot check, reference each evidence bundle, and write the verdict that closes the phase or opens a fix epic. Restates no oracle and invents no scenario. Use to close a phase, or to re-run acceptance after a fix epic lands.
+argument-hint: [phase e.g. 1]  (names the run dir .data/acceptance-<tag>/ and the report)
 allowed-tools: Bash, Read, Write, Edit
 ---
 
-# /e2e — end-to-end program test, as the end user
+# /e2e — the phase acceptance run
 
-Arguments: `$ARGUMENTS` — a run tag such as `009`. It names the isolated run dir
-`.data/e2e-<tag>/` and the fixture branch, and nothing else. Reuse of a tag is
-refused, so a rerun means a new tag.
+Arguments: `$ARGUMENTS` — the phase number, such as `1`. The run tag comes from
+`date -u +%Y%m%d%H%M%S%N`, never from you, because a one-second timestamp collides
+between two parallel invocations. The tag names the run directory
+`.data/acceptance-<tag>/` and the report `.agent/acceptance/<tag>/report.md`, and
+nothing else. A reused tag is refused, so a rerun is a new tag.
 
-Your job is to **drive** the phases and **judge** what goes wrong. The scripts do
-the setup and the asserting; you do the diagnosis, the retry decisions after the
-first round, and the final grouped assessment. Never re-derive state with ad-hoc
-`list … --json | node -e …` — every phase already prints and stores it.
+This command drives EPIC 012. It executes scenarios; it never defines one.
 
-## The workload
+## Two rules that decide every judgment call
 
-A mid-level engineering job, not a CRUD exercise: `kanthord-verify` is seeded
-with a **fixture** — conventions (`AGENTS.md`), stub modules, and **immutable
-contract tests that are red at the base commit**. The agent implements _to_ a
-contract it did not write and may not edit.
+- **You restate no oracle.** `docs/proposal/<phase>/README.md` declares each
+  scenario id, mode, driver, profile and oracle. `scripts/e2e/run.mjs` implements
+  them. You invoke an id and you read the result. When you want to assert
+  something the oracle does not, that is a finding about the oracle, not a check
+  you add here.
+- **You invent no scenario.** A gap you find becomes a proposal amendment, then a
+  story in the scenario epic. It never becomes a step in this run.
 
-- **objective A `todo-core`** — A1 store + server seam · A2 `POST/GET /tasks`
-  with validation, both filters and pagination · A3 `GET/PUT/DELETE /tasks/:id`
-  with 404/400/405 + an exact `Allow` header
-- **objective B `todo-persistence`** (`after: [todo-core]`) — B1 move the store
-  onto `node:sqlite` with the contract unchanged and persistence across a restart
+Never re-derive state with ad-hoc `list … --json | node -e …`. Every scenario
+already prints and bundles what it observed.
 
-`after:` means B's tasks stay pending until A is **integrated**, so a full run
-passes the human gate twice before the initiative reaches `landed`.
+## What you own
 
-## Inputs — one global `.data/e2e.env`, `chmod 600`
+The four things no scenario owns:
 
-Set it up once; every run reads it. It ships with placeholders — the four
-`REPLACE_ME` values are the whole setup:
+1. the run frame — one tag, one directory, one report;
+2. the execution of the `deployment` scenario on the real profile, which is the
+   phase exit;
+3. the product acceptance a machine cannot check;
+4. the verdict.
 
-```sh
-E2E_AI_BASE_URL=https://…/v1      # OpenAI-compatible endpoint, no credentials in the URL
-E2E_AI_API_KEY=…
-E2E_AI_MODEL=…                    # exact model id as the endpoint names it
-E2E_GH_TOKEN=…                    # fine-grained PAT: Contents=RW, Metadata=RO
-```
+## The run
 
-Everything else has a default, and the file lists them commented out:
-`E2E_AI_EFFORT=high` · `E2E_AI_API=openai-completions` ·
-`E2E_AI_CONTEXT_WINDOW=131072` and `E2E_AI_MAX_TOKENS=8192` (custom providers
-default to 32768/4096 and kanthord does **no** compaction) ·
-`E2E_AI_ALLOW_INSECURE=0` (set to 1 for a locally served model on `http://`) ·
-`E2E_GH_REPO=kanthorlabs/kanthord-verify` · `E2E_GH_BASE_BRANCH=main`
-(read-only, never written) · `E2E_MODE=local` · `E2E_MAX_ROUNDS=6` ·
-`E2E_ROUND_TIMEOUT=1800` · `E2E_MAX_ATTEMPTS=2` · `KANTHORD_MAX_TURNS=90`.
-
-Rules that the loader enforces:
-
-- `E2E_TAG` must **not** be in the file — it names one run, so export it in the
-  shell (`export E2E_TAG=009`). A file that pins it is refused.
-- A left-over `REPLACE_ME` counts as a missing input, not as a value.
-- Mode other than `600`/`400` gets a warning.
-- A per-run `.data/e2e-<tag>/e2e.env` is optional and **layers on top** of the
-  global file for a one-off experiment. `E2E_ENV_FILE=<path>` replaces both.
-
-Never pass a secret as a command argument — argv is visible in `ps`. The scripts
-write both secrets to `chmod 600` files and pass paths.
-
-A user-supplied URL + key + model is **not** `login provider` (that command is
-OAuth-only). The lifecycle is **register → probe → logout → reactivate**.
-
-## Phases
-
-Each script is idempotent-ish, refuses to run out of order, and stores its result
-in `.data/e2e-<tag>/state.json`. Run them in order; P0–P2 fail fast, P3 onward is
-resilient.
-
-The whole chain, always a fresh run — the tag is `date +%Y%m%d-%H%M%S`:
+Every invocation takes the same `--tag`, so one acceptance run writes one set of
+bundles. Read the phase README for the declared ids; phase 1 is `P1-E1`, `P1-E2`,
+`P1-E4` and `P1-E3`.
 
 ```sh
-make e2e
+export TAG=$(date -u +%Y%m%d%H%M%S%N)
+node scripts/e2e/run.mjs P1-E1 --tag "$TAG"   # fixture baseline, local driver
+node scripts/e2e/run.mjs P1-E2 --tag "$TAG"   # transport policy, local driver
+node scripts/e2e/run.mjs P1-E4 --tag "$TAG"   # two namespaces, podman driver
+node scripts/e2e/run.mjs P1-E3 --tag "$TAG" \
+  --daemon-host "$DAEMON_HOST" --client-host "$CLIENT_HOST"
 ```
 
-It always writes the report, and exits non-zero on the first phase failure so a
-blocked run never reads as a success. Run it from a terminal — P0 asks before it
-writes to the remote (`E2E_CONFIRM_PUSH=1` skips the prompt, and
-`E2E_CONFIRM_PUBLISH=1` in delivery mode).
+Order matters. The local baseline gates first, because Podman may be absent on an
+environment that must still gate. The `deployment` run is last, because it is the
+bundle the phase exits by pointing at.
 
-Phase by phase, when you want to stop and look between steps — or to continue a
-run that `make e2e` left `blocked` (export the tag it printed; `drive-run.sh`
-resumes):
+A prerequisite is proved, never assumed: the pinned `git` binary, the pinned
+Podman version with its rootless or rootful mode and architecture, both real hosts
+reachable, the real repository present and the real credential valid. A missing
+prerequisite makes the run report **unavailable**. It never skips and writes a
+passing bundle.
 
-```sh
-export E2E_TAG=<tag>
-scripts/e2e/preflight.sh        # P0  inputs, token, fixture push   (asks to confirm the push)
-scripts/e2e/provider-cycle.sh   # P1  register → probe → logout → reactivate
-scripts/e2e/setup-graph.sh      # P2  credential, repo, graph import + topology assertions
-scripts/e2e/drive-run.sh        # P3  daemon rounds, findings, approve gates   (resumable)
-scripts/e2e/contract-proof.sh   # P4  harness-owned program proof (+ publish in delivery mode)
-scripts/e2e/e2e-report.sh       # P5  the evidence report — always run this
-```
+Cleanup belongs to the runner. Confirm it happened; never hand-roll a teardown.
+A container, a pod, a network or a volume left carrying the run id label is a
+finding against the runner.
 
-- **P0** proves the inputs, then **pushes the fixture** to a new orphan branch
-  `kanthord-e2e/<tag>-base`. That push is the real proof the token can write
-  (GitHub's `permissions.push` is only metadata) and needs consent: answer the
-  prompt, or pass `E2E_CONFIRM_PUSH=1` when running non-interactively. `main` is
-  never touched. An existing fixture branch is refused unless
-  `E2E_FORCE_FIXTURE=1`.
-- **P1** asserts the whole credential lifecycle, including that a bare
-  `logout ai-provider` on the sole default is **refused**, and that
-  re-registering returns the **same id** with the default restored. The pass/fail
-  probe asks for a fixed literal; the "what date is it" answer is recorded as
-  evidence only — asserting on model prose is flaky, and a wrong date is a model
-  observation, not a kanthord defect.
-- **P2** asserts 2 objectives, 4 tasks, the A1←A2←A3 chain, the objective `after:`
-  edge, the repository's branch/auth, and that the chain still resolves the
-  provider.
-- **P3** runs the daemon in bounded rounds. It parses the **daemon's own stderr
-  summary** (`task failed: <id> — …`, `N objective(s) awaiting confirmation`,
-  `N initiative(s) landed`) — not `e2e-status.sh`, which is a human dashboard.
-  It approves an objective that is `awaiting_confirmation`, retries a failed task
-  **only in round 1** (bounded by `E2E_MAX_ATTEMPTS`), and otherwise stops as
-  `blocked` and hands you the diagnosis.
-- **P4** extracts the whole landed tree, **throws away its `test/` and drops the
-  harness's own contract copy in place**, runs that, then boots
-  `src/main.mjs` twice on one database file to prove persistence through the real
-  boot path. This is the only gate the agent cannot influence. A failure here is
-  `outcome=failed`, not a finding.
-- **P5** always runs, even after a fail-fast exit.
+## Product acceptance, recorded separately
 
-## Your part in P3
+`docs/proposal/README.md` keeps judgment out of every scenario: a thing only a
+human can judge is not a scenario. So you record it apart from the oracles, and
+it never gates the run.
 
-When `drive-run.sh` stops as `blocked`, it has already written the evidence. For
-each `needs-agent-decision` or `task-escalated` finding:
+For phase 1 that is the first-run message, the validation finding set a human
+reads while authoring a plan by hand, the re-import suggestion set, and the
+`plan export` rendering. Author a plan with three faults in one document, read the
+findings, fix them, then drive a re-import that needs a per-node choice. Write
+what a human would think. Label the section as judgment.
 
-1. read `logs/p3-round-<n>.log` and the task's evidence for the real reason;
-2. decide: retry with diagnosis, or stop and report a kanthord defect;
-3. `node src/main.ts retry task --id <id> --note "<what to do differently>"`;
-4. re-run `scripts/e2e/drive-run.sh` — it resumes with the same DB, graph and
-   attempt counters.
+## The report
 
-Each retry is a real model call against the user's own key. Do not retry a
-deterministic failure without changing something.
+Write `.agent/acceptance/<tag>/report.md`:
 
-## Verdicts
+- the commit under test, the proposal revision, and the tag;
+- each bundle by path and digest. **Reference a bundle; never merge one and never
+  edit one.** A bundle is primary evidence;
+- the product-acceptance section, labelled as judgment;
+- the findings, grouped by root cause, one bullet each as
+  `<B1/S1> - action:<YES/NO> - <name> - <description>`;
+- one outcome.
 
-`state.json` carries `outcome`:
+## The verdict
 
-- **passed** — the provider lifecycle, the graph execution, the local landing and
-  the harness-owned proof were all demonstrated (plus the remote publish in
-  delivery mode).
-- **blocked** — the run stopped without a usable verdict.
+- **passed** — every declared scenario produced a bundle, and the `deployment`
+  bundle exists.
+- **blocked** — the run stopped without a usable verdict. Exit non-zero. Never
+  report a blocked run as a pass.
 - **failed** — something was demonstrably wrong.
 
-Never call a run successful on a `blocked` outcome.
+A blocker opens a fix epic and the phase stays open. You never fix what you find:
+a fix inside an acceptance run destroys the evidence the run exists to produce.
+The phase closes on a `passed` outcome tied to a proposal revision, an
+implementation commit and the `deployment` bundle.
 
-## Gotchas (verified — check before filing a bug)
+The report is evidence, not a plan file. That is why it lives under
+`.agent/acceptance/` and not under `.agent/plan/epics/`.
 
-- **`node --test test/` does not work on Node 24** — it resolves `test` as a
-  module and dies with `MODULE_NOT_FOUND`. Pass explicit files, or a **quoted**
-  glob so Node expands it: `node --test "test/**/*.contract.test.mjs"`.
-- A task's `# Verification` lines each run in **their own `sh -c`** with a 300 s
-  timeout and no injected env, so state never carries between lines.
-- An ordinary task failure (verification failed, budget exceeded) is **never**
-  auto-retried by the daemon; only `transient` results are. It sits in `failed`
-  until someone runs `retry task`.
-- Turns default to 50 per task (`KANTHORD_MAX_TURNS`, the harness sets 90) and
-  there is **no compaction** — a long task dies on a provider context error that
-  surfaces as a plain `failed`.
-- The landed code is on the objective branch `kanthord/init/<initiative-id>`, not
-  on home `HEAD`/`main`; `main` moves only on publish.
-- Conflict messages print to **stderr** — capture `2>&1` when asserting on them.
-- `list event` needs `--after <cursor>` and pages **10** rows without `--limit`;
-  pass `--limit 1000` or follow the `nextCursor` sentinel.
-- `get repository --id` works, and so does `get resource --id`.
+## Secrets
 
-## Finishing
+Never pass a secret as a command argument — argv is visible in `ps`. A token
+reaches a container as a mounted file with restrictive permissions, never an
+environment variable and never an argument, because `podman inspect` and a printed
+command each disclose the other two. Assert redaction over the bearer header, the
+fixture Basic-auth header, the config file, the printed commands, the daemon logs,
+the inspect output and the failure diagnostics — on a deliberately failing run as
+well as a passing one.
 
-`scripts/e2e/e2e-report.sh` writes `.agent/e2e/<tag>/report.md` with the phase
-outcomes, the tally, the chronological evidence, the repro commands and the
-branch cleanup lines. Then **you** replace the marked section with the grouped
-assessment: group by root cause and write one bullet per item as
-`<B1/S1> - action:<YES/NO> - <name> - <description>`. `/debate` the fix approach,
-then author the fix EPIC with a program-level `Proof:` — the report is evidence,
-not an EPIC, which is why it does not live under `.agent/plan/epics/`.
-
-The fixture branch and the initiative branch stay on the remote until someone
-runs the cleanup lines. Never delete them without asking.
+Remote branches a run created are named in the report and deleted by a human.
+Never delete one without asking.
