@@ -32,7 +32,12 @@ export default [
       // src/* stays last so a new top-level directory is caught, not absorbed.
       "boundaries/elements": [
         { type: "domain", pattern: "src/domain", partialMatch: false },
-        { type: "service", pattern: "src/services", partialMatch: false },
+        {
+          type: "service",
+          pattern: "src/services/*",
+          capture: ["capability"],
+          partialMatch: false,
+        },
         { type: "command", pattern: "src/commands", partialMatch: false },
         { type: "query", pattern: "src/queries", partialMatch: false },
         {
@@ -51,7 +56,10 @@ export default [
       "boundaries/files": [
         { category: "service-interface", pattern: "src/services/*/index.ts" },
         { category: "composition-root", pattern: "src/main.ts" },
-        { category: "test", pattern: "src/**/*.test.ts" },
+        {
+          category: "test",
+          pattern: ["src/**/*.test.ts", "test/**/*.test.ts"],
+        },
       ],
     },
     rules: {
@@ -260,6 +268,10 @@ export default [
           policies: [
             {
               from: { file: { categories: "test" } },
+              disallow: { to: { file: { categories: "composition-root" } } },
+            },
+            {
+              from: { element: { types: "test-helper" } },
               disallow: { to: { file: { categories: "composition-root" } } },
             },
           ],

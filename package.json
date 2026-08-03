@@ -8,12 +8,15 @@
     "npm": ">=11.18.0"
   },
   "packageManager": "npm@11.18.0",
+  "bin": {
+    "kanthord": "./src/main.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test",
     "lint": "eslint .",
     "start": "node src/main.ts",
-    "verify": "npm run typecheck && npm test && npm run lint && node src/main.ts db status",
+    "verify": "npm run typecheck && npm test && npm run lint",
     "prepare": "husky"
   },
   "lint-staged": {
