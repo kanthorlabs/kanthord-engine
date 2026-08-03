@@ -29,7 +29,9 @@ This is the largest epic in phase 1, because it carries the conflict resolution 
 - **Choice completeness and containment legality** — the union of document and database identities; a missing, extra or duplicate choice is `400`. A task changes parent only while `pending` or `blocked` and while it holds no lease, workspace, attempt commit or retained commit; an objective needs that of every descendant.
 - **The import transaction** — the `importId` lookup first, then the `fromRevision` comparison inside the transaction, then the legality recompute against current leases, workspaces, commits, descendants and edges, then the commit. `409 choices-stale` when topology moved; `409 choices-changed` when a selected outcome is no longer legal. Both write nothing.
 - **Export and the revision lineage** — `plan.export` renders from the rows in the canonical layout with no status; `plan.revisions` returns the lineage with the three blob hashes. `accepted_blob` is the whole resulting graph.
-- **The graph queries and the CLI** — `node.list`, `node.show`, `edge.list`, and `kanthord plan import` and `plan export`. Import writes the returned documents and removes every `plan/**/*.md` the response does not name, because the response uses canonical paths and the human's own names would survive as orphans.
+- **The graph queries** — `node.list`, `node.show` and `edge.list`.
+- **The project CLI** — `kanthord project create`, `project list`, `project show`, and the repository binding that `project.repositories` replaces. Every plan route is `/v1/project/:id/plan/...`, and import rejects an objective whose repository is not bound to its project, so a human with no project command cannot reach import at all. P1-E1 depends on this story.
+- **The plan CLI and the import handshake** — `kanthord plan export`, and `kanthord plan import` as the protocol of `docs/proposal/api/graph.md` rather than one call: `plan.validate` first, pre-select the returned suggestion for every node, carry `validatedRevision` and `documentsHash` into `plan.import`, and submit one choice per node of the identity union. A non-interactive run takes every suggestion. `409 choices-stale` and `409 choices-changed` each exit non-zero and name the reason. Import writes the returned documents and removes every `plan/**/*.md` the response does not name, because the response uses canonical paths and the human's own names would survive as orphans.
 
 ## Verification gate
 
@@ -51,3 +53,6 @@ Hermetic coverage required beyond the Proof:
 - `submitted` on a prose edit is accepted at every state, `discarded` included, and it does not clear `discard_reason`.
 - The cycle case: database holds `B → A`, the document holds `A → B`, and taking `submitted` for `A` with `database` for `B` is refused as `choices-invalid`. The suggestion set for that same input is not that combination.
 - A missing choice, an extra choice and a duplicate choice are each `400`.
+- Document order is bytewise. A set with non-ASCII canonical paths sorts through `Buffer.compare`, and the assertion fails a locale-sensitive comparison that the ASCII cases would pass.
+- An objective naming a repository that is not bound to its project is refused, so the project binding of the CLI story is proved through import.
+- `kanthord plan import` calls `plan.validate` before `plan.import`, asserted by request order against a recording server, because an import that skips it cannot carry `validatedRevision`.

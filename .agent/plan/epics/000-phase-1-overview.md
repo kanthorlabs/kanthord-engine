@@ -12,43 +12,59 @@ Exit criterion: Ulrich onboards his real repository from a second machine over t
 
 Foundation layers first, then vertical use cases, then the contract sweep, then the scenarios. An epic must be verifiable when it closes, so a use case that cannot be driven through a route does not close.
 
-| #   | Epic                     | Stories | Capability at close                                                                  |
-| --- | ------------------------ | ------- | ------------------------------------------------------------------------------------ |
-| 001 | Runtime foundation       | 7       | The daemon starts, reads its configuration, and owns its home exclusively.           |
-| 002 | Domain and state machine | 8       | The machine is defined and unit tested. Every service interface exists.              |
-| 003 | Storage                  | 8       | Every phase-1 table exists. Migrations are idempotent. Secrets and blobs persist.    |
-| 004 | Transport skeleton       | 7       | A request reaches a handler under the full transport policy, and the CLI carries it. |
-| 005 | Test infrastructure      | 3       | A fixture remote answers real git HTTP and passes its own acceptance list.           |
-| 006 | Git primitives           | 5       | A ref write is a compare-and-swap. The three ref roles never blur.                   |
-| 007 | Repository registration  | 7       | A human registers a real remote and reads it back, end to end.                       |
-| 008 | Project and plan         | 13      | A human imports, exports and re-imports a plan with per-node conflict choices.       |
-| 009 | Contract completion      | 5       | Status, blobs, events, and every later-phase route answering `501`.                  |
-| 010 | End-to-end scenarios     | 5       | P1-E1, P1-E2 and P1-E3 produce evidence bundles.                                     |
+| #   | Epic                        | Stories | Capability at close                                                                  |
+| --- | --------------------------- | ------- | ------------------------------------------------------------------------------------ |
+| 001 | Runtime foundation          | 9       | The daemon starts, owns its home exclusively, and the test harness exists.           |
+| 002 | Domain and state machine    | 11      | The machine is defined and unit tested. Every service interface exists.              |
+| 003 | Storage                     | 8       | Every phase-1 table exists. Migrations are idempotent. Secrets and blobs persist.    |
+| 004 | Transport skeleton          | 8       | A request reaches a handler under the full transport policy, and the CLI carries it. |
+| 005 | Test infrastructure         | 2       | A fixture remote answers real git HTTP and passes its own acceptance list.           |
+| 006 | Git primitives              | 5       | A ref write is a compare-and-swap. The three ref roles never blur.                   |
+| 007 | Repository registration     | 8       | A human registers a real remote and reads it back, end to end.                       |
+| 008 | Project and plan            | 15      | A human imports, exports and re-imports a plan with per-node conflict choices.       |
+| 009 | CLI surface and composition | 6       | The program is assembled, and an unwired command fails a test.                       |
+| 010 | Contract completion         | 5       | Status, blobs, events, and every later-phase route answering `501`.                  |
+| 011 | End-to-end scenarios        | 10      | P1-E1, P1-E2, P1-E4 and P1-E3 produce evidence bundles.                              |
 
-Total: 68 stories.
+Total: 87 stories.
 
 ## Dependencies
 
 ```
-001 ─> 002 ─> 003 ─> 004 ─┬─> 005 ─> 006 ─> 007 ─┬─> 009 ─> 010
+001 ─> 002 ─> 003 ─> 004 ─┬─> 005 ─> 006 ─> 007 ─┬─> 009 ─> 010 ─> 011
                           │                       │
-                          └───────────────────────┴─> 008
+                          └───────────────────────┴─> 008 ─┘
 ```
 
-008 needs 004 for its routes and 007 for the repository an objective binds. 009 sweeps what 007 and 008 left. 010 proves the whole thing through the packaged binary.
+008 needs 004 for its routes and 007 for the repository an objective binds. 009 assembles what 007 and 008 built, and every later epic depends on it. 010 sweeps the routes neither use case reached. 011 proves the whole thing through the packaged binary.
+
+## Why 009 exists
+
+A phase can close with every unit test green and no working program. A command can be written, exported, unit tested and never referenced by `src/main.ts`, and nothing in 001 to 008 notices. 009 owns the seams that no vertical use case owns: the declared CLI inventory and its parity assertion, the two CLI commands that belong to no use case (`status` and `run`), the composition root asserted complete against every `routed` operation, and the daemon-backed `npm run verify`.
+
+`npm run verify` is staged for the same reason. It is every epic's gate, and `docs/proposal/api/system.md` makes `db status` an HTTP client command, so 001 defines `verify` without it and 009 restores it against a daemon the script starts itself.
 
 ## Decisions taken outside the proposal, then merged into it
 
 Each of these came out of a debate round and now lives in the proposal files named.
 
-| Decision                                                                           | Landed in                                   |
-| ---------------------------------------------------------------------------------- | ------------------------------------------- |
-| `provider.register`, `provider.list` and `provider.show` move to phase 1           | `api/credential.md`, `api/new-decisions.md` |
-| Validation collects every finding                                                  | `phase-1/plan-format.md`, `api/graph.md`    |
-| `repository register --upstream <branch>` gives the confirmation non-interactively | `api/repository.md`                         |
-| `plan.export` writes no status                                                     | `phase-1/plan-format.md`, `api/graph.md`    |
-| Byte identity is against the accepted document, with a canonical rendering         | `phase-1/plan-format.md`                    |
-| The import body is path-and-content pairs, with a decided path grammar             | `api/graph.md`, `api/new-decisions.md`      |
-| Re-import is a binary per-node choice, validated as a whole candidate graph        | `phase-1/plan-format.md`, `api/graph.md`    |
-| `fromRevision` stays a hard reject; the merge-base model is deferred               | `api/new-decisions.md`, `after-the-mvp.md`  |
-| `choices_blob`, and `accepted_blob` holds the whole resulting graph                | `database/plan_revision.md`                 |
+| Decision                                                                              | Landed in                                   |
+| ------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `provider.register`, `provider.list` and `provider.show` move to phase 1              | `api/credential.md`, `api/new-decisions.md` |
+| Validation collects every finding                                                     | `phase-1/plan-format.md`, `api/graph.md`    |
+| `repository register --upstream <branch>` gives the confirmation non-interactively    | `api/repository.md`                         |
+| `plan.export` writes no status                                                        | `phase-1/plan-format.md`, `api/graph.md`    |
+| Byte identity is against the accepted document, with a canonical rendering            | `phase-1/plan-format.md`                    |
+| The import body is path-and-content pairs, with a decided path grammar                | `api/graph.md`, `api/new-decisions.md`      |
+| Re-import is a binary per-node choice, validated as a whole candidate graph           | `phase-1/plan-format.md`, `api/graph.md`    |
+| `fromRevision` stays a hard reject; the merge-base model is deferred                  | `api/new-decisions.md`, `after-the-mvp.md`  |
+| `choices_blob`, and `accepted_blob` holds the whole resulting graph                   | `database/plan_revision.md`                 |
+| "Every entity" is one row schema per table, plus the two kind sets and the interfaces | `phase-1/README.md`                         |
+| Worker, Agent and Template persist nothing; only `profile` holds a row                | `phase-1/domain.md`                         |
+| The project CLI ships in phase 1, and P1-E1 creates and binds a project               | `phase-1/README.md`                         |
+| P1-E4 is the two-namespace Podman run, `deterministic`, a laptop gate                 | `phase-1/README.md`, `README.md`            |
+| The runner has two axes, an execution driver and a scenario profile                   | `README.md`                                 |
+| Podman is a provisioned test prerequisite, with five hermeticity rules                | `README.md`                                 |
+| A container pair never substitutes for a `deployment` run                             | `README.md`                                 |
+| `npm run verify` is staged, and it starts a daemon for the `db status` step           | `phase-1/domain.md`, `api/system.md`        |
+| Both provider kinds, `git` and `llm`, ship in phase 1                                 | `phase-1/README.md`                         |

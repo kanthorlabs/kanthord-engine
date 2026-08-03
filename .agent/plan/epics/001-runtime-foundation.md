@@ -11,6 +11,7 @@ The daemon starts from a packaged entry point, reads a discovered configuration 
 - No HTTP server. EPIC 004 opens the port.
 - No database. EPIC 003 opens the file.
 - No journal reconciliation. The startup sweep removes `*.lock` files and nothing else; the journal is phase 3.
+- No graceful shutdown. The kernel releases the home lock on process death, and the `SIGKILL` case is asserted, so a second release path adds a code path without adding a guarantee.
 
 ## Stories
 
@@ -21,6 +22,8 @@ The daemon starts from a packaged entry point, reads a discovered configuration 
 - **`services/home-lock`** — the interface, and the SQLite implementation: `<home>/daemon.lock.db` with `busy_timeout = 0`, `locking_mode = NORMAL`, `journal_mode = DELETE`, and a `BEGIN IMMEDIATE` held for the life of the process with no further SQL on that connection. The connection never leaves the capability, and exactly one instance is constructed. A network filesystem is refused at startup, and a corrupt lock database fails closed and is never deleted.
 - **Holder identity** — `<home>/daemon.lock.identity` written to a temporary name and renamed into place, published only **after** the lock is held. A contender waits briefly for it, retries `BEGIN IMMEDIATE` once, then refuses. Identity is diagnostic and never decides ownership.
 - **Startup sequence and the lock sweep** — `src/main.ts` acquires the home lock before it opens any mutable service, writes the identity into the lock file, then removes every `*.lock` file in the bare home once. No running operation ever removes one.
+- **Harness helpers** — `test/helpers/`: a temporary daemon home, the temporary-database convention every later test uses, a child-process launcher for the two-daemon cases, and the teardown that releases the home lock. It lives here because EPIC 003 already builds on the temporary-database convention and EPIC 004 needs an application factory beside it. The git smart-HTTP fixture stays in EPIC 005.
+- **Staged `npm run verify`** — `verify` runs `typecheck`, `test` and `lint` only. `node src/main.ts db status` leaves the script here, because `docs/proposal/api/system.md` makes `db status` an HTTP client command and no daemon exists yet. EPIC 009 restores it as a daemon-backed step. Every epic gate is `npm run verify`, so a gate that cannot pass at the epic it gates is a planning defect.
 
 ## Verification gate
 

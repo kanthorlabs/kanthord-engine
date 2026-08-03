@@ -9,15 +9,16 @@ A request reaches a handler only after it passed the bearer check, the `Origin` 
 ## Non-goals
 
 - No domain routes beyond the two that prove the skeleton. Each use case brings its own.
-- No `501` sweep. EPIC 009 enumerates the registry.
+- No `501` sweep. EPIC 010 enumerates the registry.
 
 ## Stories
 
-- **Server bootstrap** — koa, the configured bind address, and the start refusals of EPIC 001 enforced at listen time.
+- **Server bootstrap** — koa, the configured bind address, the supertest application factory in `test/helpers/`, and the start refusals of EPIC 001 enforced at listen time.
+- **The migration gate at startup** — the daemon reads the applied migration set before it listens, and it refuses to start when a migration is unapplied. It names `kanthord db migrate` in the refusal. `docs/proposal/api/system.md` states the rule: the daemon owns the database file, and an unmigrated database stops the daemon, which is why migration apply is not a route.
 - **Authentication** — a constant-time bearer compare. `system.health` is the one exempt route.
 - **Browser defences** — any `Origin` header is `403 origin-forbidden`; a `Host` outside the allow list is `403 host-forbidden`. Both apply to `system.health` as well.
 - **Error envelope** — one shape, the code table of `docs/proposal/api/README.md`, and `details` carrying the current value on a precondition failure.
-- **Typed route registry in `src/http/contract/`** — one authored module per domain, one zod schema pair per `operationId`, and a path declared as a typed segment tuple that one renderer turns into a string. The parity assertion compares the rendered set against `docs/proposal/api/`. `openapi.yaml` is generated into a temporary directory, validated, and deleted; it is never committed.
+- **Typed route registry in `src/http/contract/`** — one authored module per domain, one zod schema pair per `operationId`, and a path declared as a typed segment tuple that one renderer turns into a string. The parity assertion compares the rendered set against the `routed` and `stubbed` rows of `docs/proposal/api/`, and against those two only. A `post-mvp` row has no registry entry at all, so it is excluded here and EPIC 010 sweeps it from the proposal matrix instead. `openapi.yaml` is generated into a temporary directory, validated, and deleted; it is never committed.
 - **CLI program skeleton** — commander, the base URL, the token, `X-Kanthord-Client`, and an exit code routed on the error `code` and never on `message`.
 - **`system.health` and `system.db`** — the two routes that prove the skeleton end to end, and `kanthord db status` calling the second one over HTTP.
 
@@ -34,5 +35,8 @@ node --test src/http/**/*.test.ts src/cli/**/*.test.ts && echo "PASS EPIC-004"
 Hermetic coverage required beyond the Proof:
 
 - The parity assertion fails when a route is added to the registry and not to `docs/proposal/api/`, and when a route is declared and not registered.
+- Registering a `post-mvp` row fails the parity assertion, because that row must have no entry.
+- The daemon refuses to listen against a database with an unapplied migration, and it starts after `db migrate` on the same home.
+- No request schema in the registry accepts a server file-system path. The assertion reads the authored schemas, which admit only contract-approved fields, rather than searching for path-like names. `plan.import` carries a client-side relative path per document, and that is contract-approved rather than an exemption, because the path is data the client owns and never a location on the daemon.
 - The token compare is constant time, asserted by construction rather than by timing.
 - `system.health` answers with no token, and still answers `403` to an `Origin` header.

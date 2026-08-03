@@ -13,7 +13,8 @@ A human stores a git credential, inspects a remote, confirms the detected defaul
 
 ## Stories
 
-- **The git credential** — `provider.register`, `provider.list` and `provider.show` for `kind = 'git'`, on the crypto service of EPIC 003. The secret is write-only; no route reads it back. `provider.setDefault` refuses `kind = 'git'`.
+- **The provider kind factory** — `kind` dispatches to one zod schema, one serializer, one deserializer and one public projection, and the table carries no column of any single kind. `docs/proposal/database/provider.md` requires it.
+- **The credential routes, both kinds** — `provider.register`, `provider.list` and `provider.show`, on the crypto service of EPIC 003. `docs/proposal/database/provider.md` says the MVP registers `llm` and `git`, and `docs/proposal/api/credential.md` declares both payloads, so phase 1 ships both. The `git` projection is the forge and the username; the `llm` projection is the provider variant, the default model and the base URL. The secret is write-only; no route reads a credential field back under either kind. `provider.setDefault` refuses `kind = 'git'`.
 - **`repository.inspect`** — the default branch read from the `HEAD` symref, plus the credential verdict. It writes nothing, and it holds no wizard state.
 - **The registration preflight** — `listServerRefs({ forPush: true })`, which speaks to `git-receive-pack`. A wrong token, a missing token and a read-only credential on a public repository each fail and write no row. `onAuthFailure` returns `{ cancel: true }`, so the library throws instead of retrying. The journal records `auth-failed`; the API returns `422 credential-rejected`.
 - **Bare home seeding** — init bare, add the remote, set the fetch refspec, fetch with prune, and write `refs/heads/<landing>` through `refUpdate`. A bare clone of the remote is forbidden.
@@ -38,3 +39,4 @@ Hermetic coverage required beyond the Proof:
 - An `ssh://` url is refused at registration, and a plain HTTP url is accepted on a loopback host and refused elsewhere.
 - A wrong token and a missing token each fail with `auth-failed` in the journal, `422 credential-rejected` on the API, and no `repository` row.
 - `repository register` with no `--upstream` and no terminal exits non-zero and names the flag.
+- A `provider.show` of each kind returns that kind's public projection and no credential field, asserted field by field rather than by a substring search.
