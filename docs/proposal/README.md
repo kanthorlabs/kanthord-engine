@@ -60,6 +60,19 @@ scripts/e2e/run.mjs P3-E1 --failpoint after-ref-update
 
 Fixture data lives under `test/e2e/fixtures/`. The runner prints every underlying command, so a human reproduces any step by hand. One runner rather than one script per scenario, because two representations of the same procedure disagree eventually.
 
+### The runner has two axes
+
+A scenario that spans two hosts needs a place to run each step, and a set of inputs to run it against. These are separate choices, and the runner keeps them separate.
+
+| Axis                 | Meaning                                                                                                                                                          | Values                   |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| **Execution driver** | command execution per host, binary and configuration delivery, token delivery, daemon start and stop, log collection, and the merge of two hosts into one bundle | `local`, `podman`, `ssh` |
+| **Scenario profile** | the origin, the credential, the expected default branch, and the evidence the bundle must carry                                                                  | fixture, real            |
+
+The journey code and the public-surface assertions are shared across both axes. A driver swap alone never changes what a scenario claims: a fixture-profile run asserts fixture object ids and a fixture default branch, and a real-profile run asserts neither.
+
+A scenario declares one driver and one profile. Two scenarios that differ on either axis carry two ids and two evidence bundles, because one id with two meanings makes evidence ambiguous.
+
 ### The three modes
 
 - **`deterministic`** — scripted agent and scripted reviewer, a bare repository that the harness serves over git smart HTTP on a loopback port playing remote origin, a temporary daemon home. No outbound network, no provider account, no model. The git credential is a fixture token the loopback server accepts, because `isomorphic-git` has no transport that reads a local path as a remote. These are phase gates, and they must pass unattended.
@@ -80,8 +93,14 @@ Phase 1 therefore needs the read side and the authentication challenge. Phase 2 
 
 The fixture is `node:http` in front of `git http-backend`, which is about ninety lines and satisfies every row above. The `git` binary is therefore a test-time prerequisite. The suite is then hermetic only if that binary is provisioned and its version pinned by the same environment that runs the suite, and the evidence bundle records the version. The product itself still ships no dependency on a `git` binary.
 
+Podman is a test-time prerequisite on the same rule, for a scenario that takes the `podman` driver. The environment provisions it and pins its version, the runner records the version, the architecture and the rootless or rootful mode, and an absent or unreachable Podman fails the run loudly. The runner never starts a Podman machine: a phase gate does not reconfigure a global virtual machine. The product ships no dependency on Podman.
+
+A `podman` run is hermetic only under five rules. The network is internal with no outbound route. Images are provisioned before the run and consumed with `--pull=never`, so a deterministic gate never reaches a registry. Every resource carries a run id label, and cleanup works by label on the failure path as well as the success path, so two runs never collide and a killed run is reclaimed by the next one. Readiness is polled against the health route to a bounded deadline, never slept. A token reaches a container as a mounted file, never an environment variable and never an argument, because container inspection and a printed command each disclose the other two.
+
 - **`live`** — a real provider on a disposable repository. Opt-in through `KANTHORD_E2E_LIVE=1`, with a fixed maximum of attempts and calls, a per-call token cap, a wall-clock timeout, and no automatic rerun. A live failure is evidence about that run, not automatically a regression.
 - **`deployment`** — a real daemon host and a real client host across the VPN, with real credentials. It proves the environment, not the logic. A coding agent runs it when it has access to both hosts; that is a prerequisite, not a reason to call the scenario human-only.
+
+A container pair proves the two-host logic, so it is `deterministic` and it is a phase gate. It never proves the environment, so it never substitutes for a `deployment` run. `Human action: none` on a `deployment` scenario means none once the prerequisites exist: the runner never enrolls a host in the VPN, never mints or rotates a real credential, and never edits host security configuration. A missing prerequisite makes the run fail as unavailable. It never skips and writes a passing bundle.
 
 ### Scenarios use public surfaces only
 

@@ -31,7 +31,7 @@ The daemon version and the bind address moved to `system.status`, which carries 
 
 ## `system.db`
 
-Returns every migration and whether it is applied. `npm run verify` calls `db status`, so the query ships in phase 1.
+Returns every migration and whether it is applied. `npm run verify` calls `db status`, so the query ships in phase 1. That call needs a daemon, so `verify` starts one against a temporary home for the step and stops it after. See `../phase-1/domain.md`.
 
 **Migration apply is the one command that does not call HTTP.** The daemon owns the database file, and an unmigrated database stops the daemon from starting, so a route that applies migrations is unreachable exactly when it is needed. `kanthord db migrate` opens SQLite directly on the daemon machine. `kanthord db status` calls this route. The CLI refuses `db migrate` when it is configured with a non-loopback base URL, because the schema of another machine is not reachable from here.
 

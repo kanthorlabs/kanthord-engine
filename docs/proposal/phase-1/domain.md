@@ -5,7 +5,7 @@ Reviewer: architect or tech lead. Read this first. It names the entities every o
 ## Domain model
 
 - **Global**: credentials, git repositories, LLM provider registrations. Other entities inherit them.
-- **Project**: binds repositories, and optionally an ordered provider list that replaces the global one.
+- **Project**: binds repositories. An ordered provider list that replaces the global chain is post-MVP, and [../api/project.md](../api/project.md) holds its lifecycle.
 - **Graph**: initiative, objective, task. Containment is three levels. Dependency edges connect siblings.
 - **Worker**: executes one objective under a lease. Kinds are `general@1`, `tdd@1`, `git@1`.
 - **Agent**: `general@1`, `swe@1`, `te@1`, `re@1`. Each holds a role contract and a tool set defined in code.
@@ -14,6 +14,15 @@ Reviewer: architect or tech lead. Read this first. It names the entities every o
 - **Event**: every transition emits one.
 
 An agent is a dedicated unit. A worker kind composes agents. The MVP ships the `general@1` worker, which composes the `general@1` agent and `re@1`. `tdd@1`, `te@1`, `swe@1` and `git@1` are defined here because the entity model must hold them, and they are built after the MVP.
+
+## Three entries above persist nothing
+
+The list names the domain model, and a reader must not read it as a table list. Three entries hold no row.
+
+- **Worker** and **Agent** are closed sets of kinds, defined in code. A kind is vocabulary that a row cites: `project.worker`, `node.worker` and `run.worker` hold a worker kind, and `agent_invocation.agent` holds an agent kind. The set is a `CHECK` clause and a zod enum, never a table.
+- **Template** is content shipped with KanthorD. It has no table, no row and no id in the database. **Profile** is the instantiation of a template for one repository, and `profile` is the table that holds the pointer.
+
+The table list below is complete. A domain-model entry absent from it persists nothing, and a phase that names such an entry delivers code or content rather than a migration.
 
 ## State and events
 
@@ -29,7 +38,9 @@ A credential is not a table. It is the encrypted secret of a `provider` row. A p
 
 [../database/README.md](../database/README.md) holds the columns, the constraints and the reason each table exists. One file per table.
 
-Migrations run from the CLI. `npm run verify` already calls `db status`, so that command is a phase 1 deliverable.
+Migrations run from the CLI. `npm run verify` calls `db status`, so that command is a phase 1 deliverable.
+
+`db status` calls the daemon over HTTP, so `verify` is staged. Until the daemon listens, `verify` runs the type check, the tests and the lint and nothing else. It then gains a step that migrates a temporary home, starts the daemon on a loopback port with a token, calls `db status`, stops the daemon and removes the home. A verification script that calls a route with no daemon behind it is not a gate.
 
 ## Service layering
 

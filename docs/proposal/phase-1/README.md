@@ -4,6 +4,10 @@
 
 Every entity, service interface, command and query exists, and a human drives the daemon end to end. No agent is connected.
 
+**Every entity** means one zod row schema for every table of [domain.md](domain.md), the closed worker-kind and agent-kind sets, and every service interface. A table ships in phase 1, so its row schema ships with it. A phase-1 caller is not the test: `profile` carries no phase-1 command and still carries a row schema.
+
+Behaviour is not an entity. A later-phase document schema, a role contract, a tool set and a shipped template each belong to the phase that introduces them. `profile` is the clearest case: phase 1 owns the four columns of [../database/profile.md](../database/profile.md), and phase 2 owns the profile document those columns point at.
+
 **Blocker removed:** there is no skeleton to hang work on, and no bare home to work against.
 
 **Exit criteria:** Ulrich onboards his real repository from a second machine over the VPN, imports a two-objective plan, exports it identical, and reads status. Every execution route answers `not-implemented`.
@@ -24,13 +28,13 @@ Every entity, service interface, command and query exists, and a human drives th
 - Config service on convict. It holds the master key, the HTTP bind address, the HTTP token, the `Host` allow list, and the default attempt limit of 3.
 - Exclusive lock on the daemon home, taken at startup and held for the life of the process. A second daemon against one home refuses to start and names the holder. It is a held `BEGIN IMMEDIATE` on a dedicated `daemon.lock.db`, because Node 24 exposes neither `flock` nor `fcntl` and a native addon was refused. SQLite takes the `fcntl` record lock underneath. This is what makes a local ref write safe, per [git-foundation.md](git-foundation.md).
 - Storage service on `node:sqlite`, with migrations, `db status`, and every table of [domain.md](domain.md).
-- Domain schemas on zod. Entities, and the states, transitions and block reasons of [state-machine.md](state-machine.md). The state machine is defined and unit tested here. The scheduler that drives it arrives in phase 2.
+- Domain schemas on zod. One row schema per table, the closed worker-kind and agent-kind sets, and the states, transitions and block reasons of [state-machine.md](state-machine.md). The state machine is defined and unit tested here. The scheduler that drives it arrives in phase 2.
 - Graph service on graphology. Import, validate, export, the `import_id` idempotency key, and the re-import conflict resolution of [plan-format.md](plan-format.md): a binary choice per node, a suggestion per node from `plan.validate`, and a candidate graph validated as a whole before anything is applied.
-- Crypto service on the master key, and the three provider routes phase 1 needs for the git credential of `repository.register`. See [../api/credential.md](../api/credential.md).
+- Crypto service on the master key, and `provider.register`, `provider.list` and `provider.show`. The git credential of `repository.register` is what forces them into phase 1, and they carry both kinds the MVP registers, `git` and `llm`, because `kind` dispatches one payload schema and one public projection per kind. See [../api/credential.md](../api/credential.md) and [../database/provider.md](../database/provider.md).
 - Event log.
 - Git service on isomorphic-git: bare home creation from a remote origin URL, the three ref roles, and the three branch fields of [git-foundation.md](git-foundation.md). `git clone --bare` is forbidden, and the fetch refspec confines remote updates to `refs/remotes/origin/*`.
 - HTTP surface on koa, with the bind address, the bearer token, the `Origin` rejection and the `Host` allow list of [transport.md](transport.md). Every command and query is routed. An execution route returns `not-implemented`.
-- CLI on commander, calling the HTTP API. `db`, `plan import`, `plan export`, `status`, and the declared execution commands. The CLI carries a base URL and a token, so it runs on a different machine.
+- CLI on commander, calling the HTTP API. `db`, `credential register`, `repository register` and `show`, `project create`, `list` and `show`, `plan import`, `plan export`, `status`, and the declared execution commands. `project` ships here rather than with the phase-2 onboarding CLI, because every plan route names a project and import refuses an objective whose repository is not bound to one. The CLI carries a base URL and a token, so it runs on a different machine.
 
 ## Verification
 
@@ -62,6 +66,7 @@ The convention, the modes and the evidence format are in [../README.md](../READM
 - **Oracle:**
   - `kanthord credential register --kind git` exits zero and reports a credential id.
   - `kanthord repository register --url <fixture-remote> --credential <name> --upstream <branch>` exits zero, and `kanthord repository show` reports one landing branch at the fixture default and one tracking namespace.
+  - `kanthord project create` exits zero and reports a project id, and the repository binds to that project. Import refuses an objective whose repository is not bound, so the binding is a step of the journey rather than setup.
   - `kanthord plan import` of the two-objective fixture exits zero and reports a plan revision.
   - `kanthord plan export` returns documents byte-identical to the ones the import accepted.
   - A re-import of the exported documents at the same revision exits zero, and every choice is the suggested one. A re-import at the previous revision exits non-zero and names the revision.
@@ -78,11 +83,25 @@ The convention, the modes and the evidence format are in [../README.md](../READM
 - **Oracle:** direct HTTP against the running daemon. No token returns 401. A wrong token returns 401. A valid token with an `Origin` header returns 403. A valid token with a `Host` outside the allow list returns 403. A valid token with an allowed `Host` returns 200. The daemon refuses to start with a non-loopback bind address and no token configured.
 - **Evidence:** the request and response line of each case, with the token redacted.
 
+### P1-E4 — Two hosts on one laptop
+
+- **Mode:** `deterministic`
+- **Driver:** `podman`. **Profile:** fixture.
+- **Why it exists:** P1-E3 needs two hosts, and the two-host logic must gate every commit rather than wait for them. A client that shares a process, a file system and a loopback interface with the daemon proves none of that logic.
+- **Automation:** `scripts/e2e/run.mjs P1-E4`
+- **Human action:** none
+- **Topology:** three containers in two network namespaces. A pod holds the fixture-remote container and the daemon container on one namespace, so the fixture listens on `127.0.0.1` and the daemon reaches it over loopback. The url policy of [git-foundation.md](git-foundation.md) is therefore satisfied rather than relaxed, and the daemon image stays single-purpose. A client container holds the CLI alone, with no daemon volume. The daemon binds `0.0.0.0` behind the stable alias `kanthord-daemon`, never a discovered address, and the `Host` allow list names exactly that alias and port. The daemon home is a named volume; a bind mount from the host reports a FUSE filesystem, which the startup check of [git-foundation.md](git-foundation.md) is entitled to refuse.
+- **Oracle:** P1-E1 runs with the CLI and the daemon in separate network namespaces. The daemon binds a non-loopback address, so a token is mandatory and the startup refusal is exercised across a real network boundary. An allow list that omits the alias returns `403`. The client cannot read the daemon's file system, so ref layout is asserted through `kanthord repository show`. The transport cases of P1-E2 that a separate namespace makes representative run here, from the P1-E2 oracle rather than a second copy of it.
+- **Evidence:** the bundle records the driver, both namespace identities, the product artifact digest, the base image digest, the architecture, the Podman version, and the pinned `git` version.
+
 ### P1-E3 — Remote drive over the VPN
 
 - **Mode:** `deployment`
+- **Driver:** `ssh`. **Profile:** real.
 - **Why it exists:** the exit criterion is a human working from a second machine, and nothing local proves that routing, binding and token distribution work.
 - **Automation:** `scripts/e2e/run.mjs P1-E3 --daemon-host <a> --client-host <b>`
 - **Human action:** none once both hosts are reachable.
-- **Oracle:** P1-E1 runs with the CLI on the client host and the daemon on the daemon host. Every assertion is made through the public surface, because the client cannot read the daemon's file system. Ref layout is asserted through `kanthord repository show`, not through the bare home directory.
+- **Oracle:** P1-E1 runs with the CLI on the client host and the daemon on the daemon host, against a real repository and a real credential. Every assertion is made through the public surface, because the client cannot read the daemon's file system. Ref layout is asserted through `kanthord repository show`, not through the bare home directory.
 - **Evidence:** the bundle records both host identities and the bind address.
+
+P1-E4 shares the journey and the public-surface assertions with P1-E3, and it changes the driver and the profile. A P1-E4 pass is never evidence for P1-E3, because a container pair proves the logic and the mechanism rather than the environment. The phase exits by pointing at a P1-E3 bundle.
