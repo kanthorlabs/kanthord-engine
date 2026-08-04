@@ -13,7 +13,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test",
+    "test": "node --test --test-timeout=60000",
     "lint": "eslint .",
     "start": "node src/main.ts",
     "verify": "npm run typecheck && npm test && npm run lint",

@@ -177,12 +177,22 @@ none reaches build time.
   `ssh-keygen`. `KANTHORD_TEST_SSH_KEYGEN` defaults to `/usr/bin/ssh-keygen`, and
   Story 01 asserts `Object.keys(tools.paths)` is exactly the five names so a sixth
   binary cannot be spawned without being resolved first.
-- **Every external command carries a timeout.** `timeout: 10000`,
-  `killSignal: "SIGKILL"` and `maxBuffer: 8 MiB` on every `execFileSync` and
-  `spawn` in the epic. A `node:test` timeout cannot interrupt a synchronous
-  `execFileSync` blocked in a child, so without this a hung `ssh` or `sshd` hangs
-  the suite instead of failing it — and the EPIC's "names the mismatch rather than
-  timing out" coverage line would be unprovable.
+- **Every finite operation carries a deadline; every long-lived process carries
+  an owner.** A finite external command runs with `timeout: 10000`,
+  `killSignal: "SIGKILL"` and `maxBuffer: 8 MiB` — every `execFileSync`,
+  `spawnSync` and `execFile` in the epic, plus the per-request CGI `spawn`. A
+  `node:test` timeout cannot interrupt a synchronous `execFileSync` blocked in a
+  child, so without this a hung `ssh` hangs the suite instead of failing it, and
+  the EPIC's "names the mismatch rather than timing out" coverage line would be
+  unprovable. `maxBuffer` is not a `spawn` option and is never passed to one.
+
+  A long-lived process — the `sshd` fixture is the only one — carries no lifetime
+  timeout, because `spawn`'s `timeout` caps total life rather than idle time and
+  would SIGKILL a healthy server mid-test. It is bounded instead by four things:
+  a startup deadline, an owner that registers cleanup before the handle can
+  escape, a bounded shutdown that escalates SIGTERM to SIGKILL and always
+  settles, and an emergency kill when the runner exits.
+
 - **The seeded repository pins `--object-format=sha1`.** Every literal is a
   40-character SHA-1 id, and a `git` whose default is SHA-256 (built that way, or
   via `GIT_DEFAULT_HASH`) would invalidate all seven at once. `GIT_DEFAULT_HASH` is

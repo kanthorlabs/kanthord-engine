@@ -107,7 +107,20 @@ no` is required to run unprivileged.
    `tools.execPath` is the `git-core` directory, which holds `git-upload-pack`.
 
 6. Spawn `tools.paths.sshd` with `["-f", configPath, "-E", logPath, "-D"]`,
-   `env: {}`, `stdio: ["ignore", "pipe", "pipe"]`.
+   `env: {}`, `stdio: ["ignore", "ignore", "ignore"]`, then `child.unref()`.
+
+   **The daemon must not hold the event loop open.** A referenced child keeps
+   `node --test` alive after every test of a file has passed, so a fixture that a
+   test never disposed turns a green file into a run that never exits, and
+   `--test-timeout` cannot help because no test is running. `unref()` lets the
+   process exit, which is also what lets the emergency `process.on("exit")` kill
+   fire. An unref'd child still emits `"exit"`, so bounded disposal is unaffected.
+
+   **Diagnostics come from `logPath`, never from the pipes.** `sshd -E <log>`
+   writes even a bad-configuration error to that file and leaves stderr empty, so
+   ignored stdio loses nothing: every readiness and disposal failure names the tail
+   of `logPath`.
+
 7. Wait for readiness by connecting a `node:net` socket to the port, retrying
    every 50 ms until a connection is accepted, with a 5000 ms deadline matching
    `test/helpers/daemon.ts:72`. On the deadline, throw an `Error` whose message
@@ -242,9 +255,14 @@ then removes the server directory with `force: true`.
   and set that directory as `HOME`.
   - With `-F /dev/null`, an authenticated `ls-remote` still exits 0 and stderr does
     **not** contain `hostile-proxy-ran`.
-  - **The control**: the identical run with `-F /dev/null` removed from the command
-    exits non-zero and stderr **does** contain `hostile-proxy-ran`. This is what
-    proves `-F /dev/null` is load-bearing.
+  - **The control**: the identical run with ` -F /dev/null` replaced by
+    `-F '<the hostile config>'` exits non-zero and stderr **does** contain
+    `hostile-proxy-ran`. OpenSSH 10.2 resolves the default user config from the
+    passwd home, never from `$HOME`, so a control that only removes `-F /dev/null`
+    reads no trap and cannot fail.
+  - **The second control**: `ssh -G -F /dev/null <host>` resolves **no**
+    `proxycommand` line, while `ssh -G -F '<the hostile config>' <host>` resolves
+    the trap. Together the two controls prove `-F /dev/null` is load-bearing.
 
 - **The ssh-agent assertion**. A hostile `HOME` cannot reach an agent, so test the
   agent separately and by observation, as the EPIC coverage line requires. Create a
