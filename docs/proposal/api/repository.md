@@ -29,7 +29,7 @@ An ssh url adds a second thing the human confirms, and it takes the shape the br
 
 ```
 POST /v1/repository/inspect
-  -> { defaultBranch, hostKey: { algorithm, fingerprint }, credential }
+  -> { defaultBranch, hostKey: { algorithm, fingerprint }, credential: { reachable, refusal } }
 
 POST /v1/repository
   <- { ..., hostFingerprint }
@@ -45,19 +45,29 @@ An `http-basic` url has no host key, so `hostKey` is absent from the response an
 
 A host key that changes later is a failed operation, not a silent re-pin. Re-confirmation is an explicit human act, and it reuses this route.
 
-### The credential check is a write advertisement
+### The credential verdict here is a read verdict
 
-The route runs `git push --dry-run` against the publish ref, which contacts `git-receive-pack` and therefore requires push permission. `git ls-remote` cannot serve here: it speaks to `git-upload-pack`, which is the read side. The dry run changes nothing on the remote.
+`inspect` reports whether the credential reached the remote for a **read**, and nothing more. The member is `{ reachable, refusal }`: `reachable` is true when `git ls-remote` answered, and `refusal` carries the failure classification when it did not. A refused credential is a verdict in a `200` response, not an error — a human inspecting a remote with a dead token needs to be told which of the two is wrong.
 
-A fetch cannot prove a credential. A public repository serves `git-upload-pack` to anyone, so a garbage token reads the ref list exactly like a good one, and a read preflight would register a dead credential and surface it at the first publish, after a human approved work. The write advertisement requires push permission, refuses a wrong token, and answers `401` with no credential.
+**The write advertisement cannot run here.** It is `git push --dry-run`, and a push needs a local repository and a local object. `inspect` writes nothing and seeds nothing, so at this point there is neither. The preflight therefore belongs to `repository.register`, which runs it from the staging home after the fetch — see the section below. An earlier draft of this file placed it on this route, and it was not implementable.
 
-It proves **write-advertisement access, and nothing more.** Branch protection, a required check, a signature rule or a server hook can still reject a later push to the publish ref. The response says the credential authenticates and may push to the repository; it never says a publish will be accepted.
+`reachable: true` is therefore not a statement about push permission. A public repository serves `git-upload-pack` to anyone, so a garbage token reads the ref list exactly like a good one. Registration is where the credential is proved.
 
 ## `repository.register`
 
 The body holds the remote URL, a name, a `credentialId`, the three branch fields of `../phase-1/git-foundation.md` — `upstreamBranch`, `landingBranch` and `publishRef` — and, for an ssh url, the confirmed `hostFingerprint`. A missing branch field is `400`, and a missing `hostFingerprint` on an ssh url is the same `400`. The daemon never infers one here, because `repository.inspect` is where inference happens and the human already answered.
 
 **This route repeats the preflight.** `inspect` and `register` are two requests, and between them a credential can be removed or changed, the remote can move, and the client can submit a different `credentialId` than the one it inspected. A successful inspect authorizes nothing.
+
+### The credential check is a write advertisement
+
+The route runs `git push --dry-run` against the publish ref, which contacts `git-receive-pack` and therefore requires push permission. `git ls-remote` cannot serve here: it speaks to `git-upload-pack`, which is the read side. The dry run changes nothing on the remote.
+
+It runs from the staging home, **after** the fetch and **before** the rename, and it pushes the fetched upstream object id at the publish ref. That placement is forced: a push needs a local object, and the fetch is what produces one. It is the only point in the sequence where the credential can be proved against the write side and no visible home exists yet.
+
+A fetch cannot prove a credential. A public repository serves `git-upload-pack` to anyone, so a garbage token reads the ref list exactly like a good one, and a read preflight would register a dead credential and surface it at the first publish, after a human approved work. The write advertisement requires push permission, refuses a wrong token, and answers `401` with no credential.
+
+It proves **write-advertisement access, and nothing more.** Branch protection, a required check, a signature rule or a server hook can still reject a later push to the publish ref. The verdict says the credential authenticates and may push to the repository; it never says a publish will be accepted.
 
 The route then runs the explicit seeding sequence: init a bare repository, add the remote, set the fetch refspec, fetch with prune, and create the landing branch from the tracking ref. A bare clone of the remote is forbidden.
 

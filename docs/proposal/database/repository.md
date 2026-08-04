@@ -63,6 +63,8 @@ A fetch proves nothing about the credential. A public repository serves `git-upl
 
 `git_operation.outcome` carries `auth-failed` as its own value, so a human never reads "push failed" when the answer is a dead token.
 
+A preflight that fails **during registration** is recorded differently, because there is nothing to record it against. `git_operation.repository_id` is `NOT NULL REFERENCES repository(id)`, and a refused registration writes no `repository` row, so no journal row can exist. The refusal is an [event.md](event.md) row instead, with `subject_kind = 'provider'` and `subject_id` naming the credential registration that was refused. The journal covers operations on a repository that exists; the event covers the one operation that fails before it does.
+
 ## Example
 
 ```
