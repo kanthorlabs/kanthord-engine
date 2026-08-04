@@ -203,9 +203,14 @@ none reaches build time.
   `tools.ssh` and `tools.sshKeyscan` to the convict schema. So Story 01 reads
   `KANTHORD_TEST_GIT`, `KANTHORD_TEST_SSH`, `KANTHORD_TEST_SSHD` and
   `KANTHORD_TEST_SSH_KEYSCAN`, each with a documented absolute default, and touches
-  no file under `src/`. It satisfies the EPIC 006 injection contract at
-  `.agent/plan/epics/006-git-primitives.md:17`, because `Tools.paths` is exactly the
-  already-resolved absolute-path record the runner takes as a dependency. `sshd` and
+  no file under `src/`. It **supplies** what the EPIC 006 injection contract at
+  `.agent/plan/epics/006-git-primitives.md:17` needs. State it that way and not more:
+  `Tools.paths` is not the record the runner takes. EPIC 006's `GitPaths` names three
+  binaries — `git`, `ssh`, `sshKeyscan` — plus four daemon-owned directories, and
+  `.agent/plan/stories/006-git-primitives/01-pinned-invocation.md` maps the three by
+  name and forbids spreading `Tools.paths` into it, because `sshd` lives in
+  `/usr/sbin` and a spread would widen the pinned child `PATH`. The two records are a
+  superset and a selection, not one contract. `sshd` and
   `ssh-keygen` are fixture-only tools and correctly have no home in the production
   `Settings` type; `open-items.md:44-47` lists three tools, not five.
 
