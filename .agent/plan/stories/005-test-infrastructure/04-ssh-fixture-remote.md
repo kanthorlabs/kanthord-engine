@@ -170,8 +170,17 @@ against this fixture, and an unsorted handle would make that ordering an acciden
   `` `ssh://${username}@127.0.0.1:${port}${join(seed.path, repository)}` ``. The
   path is absolute, so the url carries a leading `/` after the port.
 
-`log()` reads `logPath` as `utf8`. `dispose()` sends `SIGTERM`, awaits `"exit"`,
-then removes the server directory with `force: true`.
+`log()` reads `logPath` as `utf8`.
+
+`dispose()` is a bounded state machine, and it settles on every branch. It sends
+`SIGTERM`, waits a short grace period, escalates to `SIGKILL`, then confirms the
+exit; if the daemon still has not exited it rejects with a message naming the pid
+and the tail of `logPath`. It removes the server directory on every branch, with
+`force: true` plus `maxRetries`, because a surviving `sshd-session` can recreate
+`sshd.log` mid-walk and make an unretried `fs.rmSync` throw `ENOTEMPTY`. A throw
+inside the `"exit"` listener strands the promise and hangs the run, so the removal
+is guarded and the promise is settled by every path. It stays registered in the
+emergency-kill registry until an exit is confirmed.
 
 ### The acceptance check list
 
