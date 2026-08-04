@@ -136,32 +136,6 @@ export class SqliteHomeLock implements HomeLock {
     fs.rmSync(join(home, "daemon.lock.identity"), { force: true });
     this.held = true;
     let released = false;
-    const sweep = (): readonly string[] => {
-      if (released) throw new Error("the home lock is released");
-      const reposDir = join(home, "repos");
-      if (!fs.existsSync(reposDir)) return [];
-      const collected: string[] = [];
-      const entries = fs.readdirSync(reposDir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (!entry.isDirectory() || !entry.name.endsWith(".git")) continue;
-        const walk = (dir: string) => {
-          for (const child of fs.readdirSync(dir, { withFileTypes: true })) {
-            const full = join(dir, child.name);
-            if (child.isDirectory()) {
-              walk(full);
-            } else if (child.isFile() && child.name.endsWith(".lock")) {
-              collected.push(full);
-            }
-          }
-        };
-        walk(join(reposDir, entry.name));
-      }
-      collected.sort((a, b) =>
-        Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8")),
-      );
-      for (const p of collected) fs.unlinkSync(p);
-      return collected;
-    };
     return {
       path: home,
       publishIdentity(identity: HomeIdentity) {
@@ -174,7 +148,6 @@ export class SqliteHomeLock implements HomeLock {
         fs.writeFileSync(tmpPath, renderIdentity(identity), { mode: 0o600 });
         fs.renameSync(tmpPath, finalPath);
       },
-      sweepRefLocks: sweep,
       release() {
         if (released) return;
         released = true;

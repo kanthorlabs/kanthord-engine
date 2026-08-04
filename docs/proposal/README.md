@@ -75,7 +75,7 @@ A scenario declares one driver and one profile. Two scenarios that differ on eit
 
 ### The three modes
 
-- **`deterministic`** — scripted agent and scripted reviewer, a bare repository that the harness serves over git smart HTTP on a loopback port playing remote origin, a temporary daemon home. No outbound network, no provider account, no model. The git credential is a fixture token the loopback server accepts, because `isomorphic-git` has no transport that reads a local path as a remote. These are phase gates, and they must pass unattended.
+- **`deterministic`** — scripted agent and scripted reviewer, a bare repository that the harness serves over git smart HTTP on a loopback port playing remote origin, and over `sshd` on a second loopback port for the ssh transport, a temporary daemon home. No outbound network, no provider account, no model. The git credential is a fixture token the loopback server accepts, and a fixture key pair the loopback `sshd` accepts, which is what makes both authentication paths real without an account. These are phase gates, and they must pass unattended.
 
 The fixture remote is part of the harness, so it needs its own acceptance list, and each item belongs to the phase whose scenarios use it. A fixture that fails an item makes the scenario prove less than it claims, so each phase proves its own subset before its scenarios run.
 
@@ -87,7 +87,7 @@ The fixture remote is part of the harness, so it needs its own acceptance list, 
 
 The second row is a write route in phase 1, although no phase 1 scenario pushes. The preflight has to be a write advertisement, because a read proves nothing about a credential on a public repository.
 
-Two things are not HTTP requirements at all, which is why they are not in the table. The harness moves the fixture remote by writing to that bare repository directly with `isomorphic-git`, so "upstream advances" in `P2-E3` needs no push route. The harness also owns the server process, so holding still between steps is a property of driving it, not a feature of it.
+Two things are not HTTP requirements at all, which is why they are not in the table. The harness moves the fixture remote by writing to that bare repository directly with the `git` binary, so "upstream advances" in `P2-E3` needs no push route. The harness also owns the server process, so holding still between steps is a property of driving it, not a feature of it.
 
 Phase 1 therefore needs the read side and the authentication challenge. Phase 2 adds the write side. Nothing here is a product deliverable: the daemon sees an ordinary HTTP remote in every case.
 

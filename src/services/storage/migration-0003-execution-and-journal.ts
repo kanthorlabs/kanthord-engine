@@ -140,6 +140,7 @@ export const executionAndJournal: Migration = {
   state               TEXT NOT NULL CHECK (state IN ('open', 'complete', 'discarded')),
   outcome             TEXT,
   detail_blob         TEXT REFERENCES blob(hash),
+  child_token         TEXT,
   completed_at        INTEGER
 ) STRICT`,
     `CREATE TABLE event (

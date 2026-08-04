@@ -12,7 +12,7 @@ The master key comes from configuration: an environment variable, with a config 
 
 Encryption at rest with a master key from configuration is the whole of the MVP scope. Key rotation is deferred.
 
-A git credential is a registration of `kind = 'git'` in the same table, because `isomorphic-git` speaks HTTPS Basic authentication and inherits no ambient credential. It is bound by `repository.credential_id` rather than by a default. See `../phase-1/git-foundation.md`.
+A git credential is a registration of `kind = 'git'` in the same table, because the git service authenticates from a stored credential and inherits no ambient one. It is bound by `repository.credential_id` rather than by a default. See `../phase-1/git-foundation.md`.
 
 ## A registration is a named account
 

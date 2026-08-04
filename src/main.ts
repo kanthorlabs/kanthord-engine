@@ -51,7 +51,6 @@ program
         startedAt: new Date().toISOString(),
         instanceId: ulid(),
       });
-      held.sweepRefLocks();
       process.stdout.write("kanthord: ready\n");
       setInterval(() => {}, 1 << 30);
     } catch (error) {

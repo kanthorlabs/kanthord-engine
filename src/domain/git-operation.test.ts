@@ -24,6 +24,7 @@ describe("src/domain/git-operation.test", () => {
     state: "open" as const,
     outcome: null,
     detailBlob: null,
+    childToken: null,
     completedAt: null,
   };
 

@@ -62,4 +62,4 @@ src/
 
 Already present: `pi-agent-core`, `pi-ai`, `pi-coding-agent`, `graphology`, `koa`, `commander`, `pino`, `ulid`, `yaml`, `supertest`.
 
-To add: `zod@4`, `convict@6`, `isomorphic-git@1`.
+To add: `zod@4`, `convict@6`. The git service runs the `git` binary and adds no package.

@@ -1,11 +1,22 @@
-export type GitAuth = Readonly<{ username: string; password: string }>;
+export type GitCredential =
+  | Readonly<{
+      transport: "http-basic";
+      forge: string;
+      username: string;
+      token: string;
+    }>
+  | Readonly<{ transport: "ssh"; privateKey: string }>;
+
+export type GitTransport = GitCredential["transport"];
+
+export type HostKey = Readonly<{ algorithm: string; fingerprint: string }>;
 
 export type SeedHomeInput = Readonly<{
   gitDir: string;
   remoteUrl: string;
   upstreamBranch: string;
   landingBranch: string;
-  auth: GitAuth;
+  credential: GitCredential;
 }>;
 
 export type RemoteInfo = Readonly<{
@@ -30,28 +41,80 @@ export type CloneInput = Readonly<{
   ref: string;
 }>;
 
-export type GitErrorCode =
-  "git-auth-failed" | "git-url-refused" | "git-lock-held" | "git-ref-missing";
+export type GitFailure =
+  | "auth-failed"
+  | "permission-denied"
+  | "transport-failed"
+  | "host-key-mismatch"
+  | "url-refused"
+  | "lock-held"
+  | "unknown";
 
 export class GitError extends Error {
-  readonly code: GitErrorCode;
-  constructor(code: GitErrorCode, message: string) {
+  readonly failure: GitFailure;
+  readonly detail: string;
+  constructor(failure: GitFailure, message: string, detail = "") {
     super(message);
     this.name = "GitError";
-    this.code = code;
+    this.failure = failure;
+    this.detail = detail;
   }
 }
 
+export type UrlRefusal =
+  | "scheme-not-allowed"
+  | "insecure-non-loopback"
+  | "password-in-url"
+  | "option-like"
+  | "control-character";
+
+export type RemoteUrlVerdict =
+  | Readonly<{ allowed: true; transport: GitTransport; host: string }>
+  | Readonly<{ allowed: false; refusal: UrlRefusal; reason: string }>;
+
+export type PushPreflight =
+  | Readonly<{ allowed: true }>
+  | Readonly<{ allowed: false; failure: GitFailure; detail: string }>;
+
+export type OutsideWriterInput = Readonly<{
+  gitDir: string;
+  repositoryId: string;
+  ref: string;
+  intent: "merge" | "sync" | "publish" | "revert";
+}>;
+
+export type OutsideWriterVerdict =
+  | Readonly<{ expected: true; oid: string | null }>
+  | Readonly<{
+      expected: false;
+      expectedOid: string | null;
+      observedOid: string | null;
+    }>;
+
 export interface Git {
+  remoteUrlVerdict(remoteUrl: string): RemoteUrlVerdict;
+  scanHostKeys(remoteUrl: string): Promise<readonly HostKey[]>;
+  trustHostKey(
+    input: Readonly<{ remoteUrl: string; hostKey: HostKey }>,
+  ): Promise<void>;
   seedHome(input: SeedHomeInput): Promise<void>;
   remoteInfo(
-    input: Readonly<{ remoteUrl: string; auth: GitAuth }>,
+    input: Readonly<{ remoteUrl: string; credential: GitCredential }>,
   ): Promise<RemoteInfo>;
   canPush(
-    input: Readonly<{ remoteUrl: string; auth: GitAuth }>,
-  ): Promise<boolean>;
-  fetch(input: Readonly<{ gitDir: string; auth: GitAuth }>): Promise<void>;
-  resolveRef(input: Readonly<{ gitDir: string; ref: string }>): Promise<string>;
+    input: Readonly<{
+      remoteUrl: string;
+      publishRef: string;
+      credential: GitCredential;
+    }>,
+  ): Promise<PushPreflight>;
+  fetch(
+    input: Readonly<{ gitDir: string; credential: GitCredential }>,
+  ): Promise<void>;
+  resolveRef(
+    input: Readonly<{ gitDir: string; ref: string }>,
+  ): Promise<string | null>;
   refUpdate(input: RefUpdateInput): Promise<RefUpdateResult>;
+  checkOutsideWriter(input: OutsideWriterInput): Promise<OutsideWriterVerdict>;
   clone(input: CloneInput): Promise<string>;
 }

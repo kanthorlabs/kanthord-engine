@@ -14,13 +14,15 @@ A human stores a git credential, inspects a remote, confirms the detected defaul
 ## Stories
 
 - **The provider kind factory** — `kind` dispatches to one zod schema, one serializer, one deserializer and one public projection, and the table carries no column of any single kind. `docs/proposal/database/provider.md` requires it.
-- **The credential routes, both kinds** — `provider.register`, `provider.list` and `provider.show`, on the crypto service of EPIC 003. `docs/proposal/database/provider.md` says the MVP registers `llm` and `git`, and `docs/proposal/api/credential.md` declares both payloads, so phase 1 ships both. The `git` projection is the forge and the username; the `llm` projection is the provider variant, the default model and the base URL. The secret is write-only; no route reads a credential field back under either kind. `provider.setDefault` refuses `kind = 'git'`.
-- **`repository.inspect`** — the default branch read from the `HEAD` symref, plus the credential verdict. It writes nothing, and it holds no wizard state.
-- **The registration preflight** — `listServerRefs({ forPush: true })`, which speaks to `git-receive-pack`. A wrong token, a missing token and a read-only credential on a public repository each fail and write no row. `onAuthFailure` returns `{ cancel: true }`, so the library throws instead of retrying. The journal records `auth-failed`; the API returns `422 credential-rejected`.
-- **Bare home seeding** — init bare, add the remote, set the fetch refspec, fetch with prune, and write `refs/heads/<landing>` through `refUpdate`. A bare clone of the remote is forbidden.
-- **`repository.register`** — the three branch fields and `publishOnApproval` from the body, the repeated preflight, the seeding, the baseline `sync` row in `git_operation`, and the event. A missing branch field is `400`; the daemon infers nothing here.
+- **The credential routes, both kinds** — `provider.register`, `provider.list` and `provider.show`, on the crypto service of EPIC 003. `docs/proposal/database/provider.md` says the MVP registers `llm` and `git`, and `docs/proposal/api/credential.md` declares both payloads, so phase 1 ships both. The `git` payload is a discriminated union on `transport`: `http-basic` carries a forge, a username and a token, and `ssh` carries an unencrypted private key and nothing else. An encrypted key is refused at registration, because `BatchMode=yes` means `ssh` never asks for a passphrase. The `git` projection is the transport, and the forge and username when it has them; the `llm` projection is the provider variant, the default model and the base URL. The secret is write-only; no route reads a credential field back under either kind. `provider.setDefault` refuses `kind = 'git'`.
+- **`repository.inspect`** — the default branch read from the `HEAD` symref that `git ls-remote --symref` reports, plus the credential verdict, plus the host key for an ssh url. It writes nothing, and it holds no wizard state.
+- **The registration preflight** — `git push --dry-run` against the publish ref, which speaks to `git-receive-pack` and therefore requires push permission. `git ls-remote` cannot serve, because it speaks to `git-upload-pack`. A push needs a local repository and a local object, and before seeding there is neither, so the preflight runs from the staging home after the fetch and before the rename, and pushes the fetched upstream object id at the publish ref. It asserts the remote ref did not move. A wrong token, a missing token and a read-only credential on a public repository each fail and write no row. `GIT_TERMINAL_PROMPT=0` makes a rejected credential fail instead of prompting. The journal records `auth-failed`; the API returns `422 credential-rejected`. The preflight proves write-advertisement access and no more.
+- **Host key discovery** — `ssh-keyscan` returns several keys in no guaranteed order, so this story fixes what is returned and stored: the accepted algorithm set, the ordering, the `SHA256:` fingerprint encoding, the `[host]:port` `known_hosts` spelling, and the classification of a scan timeout or refusal. Without those pinned, two runs disagree and the confirmation compares nothing.
+- **Host key confirmation** — for an ssh url, `inspect` returns the scanned host key and its fingerprint, `register` carries the confirmed `hostFingerprint`, and the route re-scans and compares before it writes anything. A mismatch is `409`. Only a match persists the key into the daemon's `known_hosts`, and every later connection verifies against it under `StrictHostKeyChecking=yes`. The re-scan is what stops a client echoing back any value it likes. `--host-fingerprint` supplies it without a prompt, and the CLI refuses an ssh url when neither a prompt nor the flag answered.
+- **Bare home seeding** — the confirmed host key is written into the daemon's `known_hosts` before any ssh connection that is not the scan itself, so the preflight and the fetch both run under `StrictHostKeyChecking=yes`. Then: init bare with an empty template into a staging directory, add the remote, set the fetch refspec, fetch with prune and `--no-tags`, read the upstream object id from the tracking ref, write `refs/heads/<landing>` through `refUpdate` against an empty expected value, then rename the staging directory into place. A bare clone of the remote is forbidden, and a partially seeded home is never visible.
+- **`repository.register`** — the three branch fields and `publishOnApproval` from the body, the confirmed `hostFingerprint` for an ssh url, the repeated preflight, the seeding, the baseline `sync` row in `git_operation`, and the event. A missing branch field is `400`, and so is a missing `hostFingerprint` on an ssh url; the daemon infers nothing here.
 - **`repository.list` and `repository.show`** — the projection carries the branch fields, the landing tip, the tracking tip, `fetchedUpstreamOid`, the bound credential, and the repository state. P1-E3 asserts the ref layout through this route alone.
-- **The CLI commands** — `kanthord credential register`, `kanthord repository register --url --credential --upstream`, and `kanthord repository show`. `--credential <name>` resolves to an id before the call. The register command refuses when neither a prompt nor `--upstream` answered the confirmation.
+- **The CLI commands** — `kanthord credential register`, `kanthord repository register --url --credential --upstream [--host-fingerprint]`, and `kanthord repository show`. `--credential <name>` resolves to an id before the call. The register command refuses when neither a prompt nor `--upstream` answered the confirmation, and refuses an ssh url when neither a prompt nor `--host-fingerprint` answered.
 
 ## Verification gate
 
@@ -29,14 +31,23 @@ Gates: `npm run verify`
 Proof:
 
 ```bash
-node --test src/commands/repository/**/*.test.ts src/queries/repository/**/*.test.ts \
+node --test src/commands/provider/**/*.test.ts src/queries/provider/**/*.test.ts \
+  src/commands/repository/**/*.test.ts src/queries/repository/**/*.test.ts \
+  src/cli/credential/**/*.test.ts src/cli/repository/**/*.test.ts \
   && echo "PASS EPIC-007"
 ```
+
+The Proof names `provider` and `cli` as well as `repository`. Three of the ten stories build neither a repository command nor a repository query, and a Proof that ran only the repository paths would print `PASS` while the credential routes and both CLI commands were absent.
 
 Hermetic coverage required beyond the Proof:
 
 - Registration against the fixture remote produces `refs/remotes/origin/*` and exactly one landing branch at the detected default.
-- An `ssh://` url is refused at registration, and a plain HTTP url is accepted on a loopback host and refused elsewhere.
+- An `ssh://` url registers against the ssh fixture with a confirmed fingerprint, and is refused when the fingerprint does not match, when the credential transport disagrees with the url, and when the key is encrypted.
+- `ssh-keyscan` against a host offering several algorithms yields the same ordered list and the same `SHA256:` fingerprints on every run, and the `known_hosts` entry uses the `[host]:port` spelling. A scan that times out is classified, not reported as a mismatch.
+- `register` **re-scans** the host and compares, rather than trusting the body: a request carrying a fingerprint the host does not present is `409`, proved by supplying a syntactically valid fingerprint that was never scanned.
+- Registration writes no `refs/tags/*` against a tagged fixture repository, and a failure injected after the fetch leaves no visible home, only a staging directory.
+- A read-only credential that fetches successfully is refused by the preflight, writes `auth-failed` to the journal, and creates no `repository` row. This is the case a read preflight cannot detect, and it is why the preflight is a write advertisement.
+- A plain HTTP url is accepted on a loopback host and refused elsewhere, and a url carrying a password in its userinfo is refused while one carrying only a username is not.
 - A wrong token and a missing token each fail with `auth-failed` in the journal, `422 credential-rejected` on the API, and no `repository` row.
-- `repository register` with no `--upstream` and no terminal exits non-zero and names the flag.
+- `repository register` with no `--upstream` and no terminal exits non-zero and names the flag, and an `ssh://` url with no `--host-fingerprint` and no terminal does the same.
 - A `provider.show` of each kind returns that kind's public projection and no credential field, asserted field by field rather than by a substring search.

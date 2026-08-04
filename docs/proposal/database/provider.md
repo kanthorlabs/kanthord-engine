@@ -38,15 +38,20 @@ An `llm` payload holds the provider variant and its fields, because ten LLM prov
 { "provider": "anthropic", "apiKey": "sk-ant-...", "defaultModel": "claude-opus-5", "baseUrl": null }
 ```
 
-A `git` payload holds what `isomorphic-git` needs for HTTPS Basic authentication:
+A `git` payload holds what one transport needs, and the two transports share no field:
 
 ```
-{ "forge": "github", "username": "kanthord-bot", "token": "ghp_..." }
+{ "transport": "http-basic", "forge": "github", "username": "kanthord-bot", "token": "ghp_..." }
+{ "transport": "ssh",   "privateKey": "-----BEGIN OPENSSH PRIVATE KEY-----\n..." }
 ```
 
-The two payloads share no field, which is the whole reason neither is a column. `forge` selects the Basic convention a token needs: GitHub accepts the token as the password, GitLab requires the username `oauth2`, and Bitbucket requires `x-token-auth`. The git service maps `forge` to that convention and returns `{ username, password }` from `onAuth`.
+`forge` selects the Basic convention a token needs: GitHub accepts the token as the password, GitLab requires the username `oauth2`, and Bitbucket requires `x-token-auth`. The git service maps `forge` to that convention and answers the credential helper with it.
 
-`kind` stays at the family level, `llm`, rather than `llm/anthropic`. The `llm` schema is a discriminated union on its own `provider` field, so the second level of dispatch is a zod concern rather than a column value. Selection then reads `WHERE kind = 'llm'` with no pattern match. A fine-grained `kind` is the alternative, and it moves that union into the enum.
+The ssh payload carries a key and nothing else. It has no forge, because an ssh url names a host rather than a forge convention, and no passphrase, because the daemon refuses an encrypted key: `ssh` runs under `BatchMode=yes` and never asks for one, and a stored passphrase would be a second envelope over a secret this table already encrypts. See [../phase-1/git-foundation.md](../phase-1/git-foundation.md).
+
+The discriminant is `http-basic` rather than `https`, because one credential serves HTTPS and the loopback HTTP exception alike, and a value named after the secure scheme would read as forbidding the exception the url policy allows.
+
+`kind` stays at the family level. `llm` is a discriminated union on its own `provider` field, and `git` is a discriminated union on its own `transport` field, so the second level of dispatch is a zod concern rather than a column value. Selection then reads `WHERE kind = 'git'` with no pattern match, and `repository.credential_id` binds one row whichever transport it carries. A fine-grained `kind` is the alternative, and it moves those unions into the enum and forces a migration for every transport this product ever speaks.
 
 ## What a read returns
 
@@ -82,9 +87,9 @@ A `provider remove` is refused while anything still names the registration, and 
 
 ## Why a git credential is stored
 
-`isomorphic-git` speaks HTTPS Basic authentication. It has no ssh transport, no ssh agent and no credential helper, so there is no ambient credential for the daemon to inherit. The credential has to be data the daemon holds, and this table is where a credential lives.
+An unattended daemon has no login session, so it has no ssh agent and no ambient credential helper. It could inherit an operator's, and it deliberately does not: [git-foundation.md](../phase-1/git-foundation.md) suppresses the global config, the system config and the inherited helper chain on every invocation, because a daemon whose authentication depends on whoever started it is not reproducible. The credential therefore has to be data the daemon holds, and this table is where a credential lives.
 
-That reverses the earlier decision in [git-foundation.md](../phase-1/git-foundation.md), which assumed a git CLI with an agent. The reversal is recorded there.
+That reverses the earlier decision, which assumed a git CLI with an agent. The reversal is recorded in that file. Note that the daemon does now run the `git` binary, and the conclusion is unchanged: the binary can reach an agent, and the daemon forbids it.
 
 A `git` registration is bound by `repository.credential_id`, not by `set_default_at`. One daemon serves repositories on different forges under different accounts, and a default would pick the wrong one silently. `set_default_at` therefore stays null on every `git` row, and the chain of that kind is empty.
 

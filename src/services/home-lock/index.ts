@@ -15,7 +15,6 @@ export type HomeIdentity = Readonly<{
 export interface HeldHome {
   readonly path: string;
   publishIdentity(identity: HomeIdentity): void;
-  sweepRefLocks(): readonly string[];
   release(): void;
 }
 

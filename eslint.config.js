@@ -4,12 +4,14 @@
 import tseslint from "typescript-eslint";
 import boundaries from "eslint-plugin-boundaries";
 
+const gitLibraries = ["isomorphic-git", "simple-git", "nodegit"];
+
 const vendorPackages = [
   "koa",
   "@koa/*",
   "commander",
   "convict",
-  "isomorphic-git",
+  ...gitLibraries,
   "graphology",
   "pino",
   "supertest",
@@ -170,6 +172,24 @@ export default [
     },
   },
   {
+    // The git service runs the git binary. No git wrapper library may return.
+    files: ["src/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        2,
+        {
+          patterns: [
+            {
+              group: gitLibraries,
+              message:
+                "the git service runs the git binary through execFile; see docs/proposal/phase-1/git-foundation.md",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // domain/ is pure: no node builtins, and zod is its one runtime dependency.
     files: ["src/domain/**/*.ts"],
     ignores: ["src/domain/**/*.test.ts"],
@@ -245,8 +265,8 @@ export default [
                 "koa",
                 "@koa/*",
                 "node:sqlite",
-                "isomorphic-git",
                 "graphology",
+                ...gitLibraries,
               ],
               message:
                 "cli/ calls the HTTP API. main.ts injects the db migrate handler.",

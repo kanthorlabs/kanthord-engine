@@ -21,7 +21,7 @@ The daemon survives every path that is not the happy path. Daily use becomes tru
 
 - Named failpoints at every durable boundary, and the crash injection harness over the phase 2 fakes.
 - Startup order: the exclusive home lock, then the sweep of every `*.lock` file left in a bare home, then the journal, then lease recovery.
-- Integration journal reconciliation at startup, including the `listServerRefs` check for an incomplete `publish`.
+- Integration journal reconciliation: local rows at startup, and the `git ls-remote` check for an incomplete `publish` after readiness, because it needs the network.
 - Lease expiry recovery. A `running` node whose lease expired returns to `ready` when the tree is clean and its head equals the recorded base, and moves to `blocked` with reason `dirty-recovery` otherwise. This replaces the manual stale-lease clearing of phase 2.
 - `stale-base`: the recompute loop, the retry limit, and the invalidation of a recorded check result when the merge commit changes.
 - The `partial` projection and `acknowledge_partial`.
@@ -35,7 +35,7 @@ The daemon survives every path that is not the happy path. Daily use becomes tru
 - Recovery: kill execution at each boundary — before and after the task commit, the state write, the event append, the ref update, and the approval — then restart and assert the state converges with no duplicate commit.
 - Ref write: a kill between the `.lock` write and the rename leaves the ref at its old value, and startup removes the lock. A kill after the rename leaves the new value, and the journal completes the row. No boundary leaves a truncated ref.
 - Home lock: a second daemon against one home refuses to start. A `SIGKILL` releases the lock, so the next start takes it with no manual cleanup.
-- Journal: an incomplete `merge` row is completed or discarded by reading the real ref state; an incomplete `publish` row is reconciled from `listServerRefs` and never by a retry. A ref that matches neither `base_oid` nor `proposed_head_oid` reports an outside writer rather than retrying.
+- Journal: an incomplete `merge` row is completed or discarded by reading the real ref state; an incomplete `publish` row is reconciled from `git ls-remote` and never by a retry. A ref that matches neither `base_oid` nor `proposed_head_oid` reports an outside writer rather than retrying.
 - Lease: a `running` node with an expired lease and a clean tree returns to `ready`; with a dirty tree it moves to `blocked` with reason `dirty-recovery`. A discard that races a worker is serialized by the objective lease.
 - Integration: an objective integrates from an older base and merges cleanly. A second case touches the same lines and asserts `blocked` with reason `stale-base`. A third changes the landing branch between the freeze and the approval and asserts the compare-and-swap refuses. A fourth forces a recompute and asserts the recorded check result is invalidated and runs again.
 - Aggregation: an objective with one `done` task and one `discarded` task projects `partial`, lists the discarded task, refuses an approval without `acknowledge_partial`, then integrates and becomes `partial`, not `done`.

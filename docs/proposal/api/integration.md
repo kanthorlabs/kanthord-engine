@@ -49,7 +49,7 @@ The body carries `landingOid` and `expectedRemoteOid`. Both are mandatory. A bar
 The two are not the same kind of check.
 
 - `landingOid` is a precondition. The daemon asserts the local landing ref equals it, and refuses with `409 stale-revision` otherwise.
-- `expectedRemoteOid` is **advisory freshness, not a remote compare-and-swap.** `isomorphic-git` has no `push --force-with-lease`, and publish never forces, so the server arbitrates its own ref transaction. The daemon reads the remote ref, asserts that `landingOid` descends from `expectedRemoteOid`, and predicts a rejection without a round trip. If origin moves inside that window to a commit already an ancestor of `landingOid`, the push succeeds although the expectation was stale, and that is the intended outcome. A null value means the ref must not exist, which is a first publication.
+- `expectedRemoteOid` is **advisory freshness, not a remote compare-and-swap.** Publish never forces, so the server arbitrates its own ref transaction. The daemon reads the remote ref, asserts that `landingOid` descends from `expectedRemoteOid`, and predicts a rejection without a round trip. If origin moves inside that window to a commit already an ancestor of `landingOid`, the push succeeds although the expectation was stale, and that is the intended outcome. A null value means the ref must not exist, which is a first publication.
 
 The push is never a force, so an accepted push is a fast-forward and no commit is lost.
 

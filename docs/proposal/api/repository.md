@@ -17,15 +17,37 @@ Registration, the branch fields, and the repair of a divergence. Publish is deli
 
 ## `repository.inspect`
 
-The body holds the remote URL and a `credentialId`. The response holds the default branch read from the `HEAD` symref, and the verdict of the credential check. It writes nothing.
+The body holds the remote URL and a `credentialId`. The response holds the default branch read from the `HEAD` symref, and the verdict of the credential check. For an ssh url it also holds the host key. It writes nothing.
 
 Detection never applies by itself, so registration is two calls. The client shows the detected branch, the human confirms, and `repository.register` carries the confirmed value. The confirmation lives in the client, and the daemon holds no wizard state, because a half-finished registration on the server is a thing a second client can find.
 
 The confirmation is explicit in an automated run as well. `kanthord repository register --upstream <branch>` supplies it without a prompt, and the CLI refuses to register when neither a prompt nor the flag answered. P1-E1 passes the flag, which is what keeps its `Human action: none` true while the product rule holds.
 
+### The host key is confirmed the same way
+
+An ssh url adds a second thing the human confirms, and it takes the shape the branch confirmation already has, because one pattern is enough for both.
+
+```
+POST /v1/repository/inspect
+  -> { defaultBranch, hostKey: { algorithm, fingerprint }, credential }
+
+POST /v1/repository
+  <- { ..., hostFingerprint }
+```
+
+`inspect` reads the host key with `ssh-keyscan` and returns its algorithm and `SHA256:` fingerprint. It stores nothing. `register` re-scans, compares against the `hostFingerprint` the body carries, and refuses with `409` when they differ. Only on a match does the daemon write the key into its own `known_hosts`, and from then on every connection verifies against it under `StrictHostKeyChecking=yes`.
+
+The re-scan is what makes the confirmation load-bearing rather than decorative. Without it, a client could echo any fingerprint back and the daemon would pin whatever the network offered at register time.
+
+`ssh-keyscan` reads the key over the same unauthenticated network as the connection it pins, so this is trust on first use with a human in the loop. The human comparing the fingerprint against the value their forge publishes is the security decision, and the daemon cannot make it for them. `--host-fingerprint <value>` supplies it without a prompt, and the CLI refuses to register an ssh url when neither a prompt nor the flag answered — the same rule as `--upstream`.
+
+An `http-basic` url has no host key, so `hostKey` is absent from the response and `hostFingerprint` is refused in the body.
+
+A host key that changes later is a failed operation, not a silent re-pin. Re-confirmation is an explicit human act, and it reuses this route.
+
 ### The credential check is a write advertisement
 
-The route runs `listServerRefs({ forPush: true })`, which speaks to `git-receive-pack`. It changes nothing on the remote.
+The route runs `git push --dry-run` against the publish ref, which contacts `git-receive-pack` and therefore requires push permission. `git ls-remote` cannot serve here: it speaks to `git-upload-pack`, which is the read side. The dry run changes nothing on the remote.
 
 A fetch cannot prove a credential. A public repository serves `git-upload-pack` to anyone, so a garbage token reads the ref list exactly like a good one, and a read preflight would register a dead credential and surface it at the first publish, after a human approved work. The write advertisement requires push permission, refuses a wrong token, and answers `401` with no credential.
 
@@ -33,7 +55,7 @@ It proves **write-advertisement access, and nothing more.** Branch protection, a
 
 ## `repository.register`
 
-The body holds the remote URL, a name, a `credentialId`, and the three branch fields of `../phase-1/git-foundation.md`: `upstreamBranch`, `landingBranch` and `publishRef`. A missing branch field is `400`. The daemon never infers one here, because `repository.inspect` is where inference happens and the human already answered.
+The body holds the remote URL, a name, a `credentialId`, the three branch fields of `../phase-1/git-foundation.md` — `upstreamBranch`, `landingBranch` and `publishRef` — and, for an ssh url, the confirmed `hostFingerprint`. A missing branch field is `400`, and a missing `hostFingerprint` on an ssh url is the same `400`. The daemon never infers one here, because `repository.inspect` is where inference happens and the human already answered.
 
 **This route repeats the preflight.** `inspect` and `register` are two requests, and between them a credential can be removed or changed, the remote can move, and the client can submit a different `credentialId` than the one it inspected. A successful inspect authorizes nothing.
 
@@ -47,13 +69,19 @@ The body also holds `publishOnApproval`, default true. `../phase-2/integration-a
 
 It is an id and never a name. A name is renameable, and the conventions make a name a filter rather than a reference. The CLI resolves `--credential <name>` to an id before it calls.
 
-`../phase-1/git-foundation.md` reversed the ambient-credential decision: `isomorphic-git` runs in process, has no ssh transport, no `~/.gitconfig` and no credential helper, so there is nothing ambient to inherit.
+`../phase-1/git-foundation.md` reversed the ambient-credential decision: the daemon suppresses the operator's `~/.gitconfig`, the system credential helper and the ssh agent on every invocation, so there is nothing ambient to inherit by design.
 
 ### Refused urls
 
-An `ssh://` or `git@host:path` url is `400 invalid-request`, and `details` says the git service has no ssh transport. Plain HTTP is accepted only when the host is a loopback address, where there is no network to encrypt; every other url must be HTTPS, and a plain HTTP url elsewhere is the same `400`.
+A url is HTTPS, ssh, or plain HTTP on a loopback host. Plain HTTP is accepted only when the host is a loopback address, where there is no network to encrypt, and a plain HTTP url elsewhere is `400 invalid-request`. Any other scheme is the same `400`.
 
-Both fail schema validation before any network call, which is why neither is an error code of its own.
+`ssh://` and `git@host:path` are accepted, and each requires a `git` credential whose transport is `ssh`. An HTTPS url, and the loopback HTTP exception, both require a credential whose transport is `http-basic`; the discriminant covers the exception deliberately. A url and a credential that disagree is `400 invalid-request`, because the daemon will not guess which one the human meant.
+
+Four url shapes are refused for a reason of their own, and each is the same `400` with the reason in `details`: a url carrying a **password** in its userinfo, because the secret belongs in the registration and would otherwise reach every log line; a url whose host or path begins with `-`, because it would be read as an option; a url carrying a control character; and a scheme the transport policy does not name.
+
+A userinfo **username** is not a secret and is not refused. `git@host:path` is the ordinary ssh spelling, and the login name has to live in the url because the ssh payload carries only a key. The rule is therefore narrower than "no credentials in urls": a username is data, and a password is a secret.
+
+All of these fail validation before any network call, which is why none is an error code of its own.
 
 A forge that refuses the credential is `422 credential-rejected`, with the forge response in `details`. It is not `401`: on this API `401` means the caller's own bearer token failed.
 

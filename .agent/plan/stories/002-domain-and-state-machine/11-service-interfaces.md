@@ -406,7 +406,7 @@ Story 01 creates this file. Add the service-inventory assertions listed under **
 
 - An interface file declares types and one interface. No implementation, and no re-export of one. `src/services/config/index.ts` is the model.
 - `src/services/event/index.ts` and `src/services/lease/index.ts` import `Transaction` from `../storage/index.ts`. `AGENTS.md:39` permits a service interface to import any service interface, `eslint.config.js:105-113` enforces that it reaches only the other capability's `index.ts`, and the AGENTS.md transaction rule requires it: "every service that persists inside that write accepts the context through its interface".
-- No file in this story imports `node:sqlite`, `isomorphic-git`, `graphology` or `pi-coding-agent`. The interface names the capability, not the vendor.
+- No file in this story imports `node:sqlite`, `node:child_process`, `graphology` or `pi-coding-agent`. The interface names the capability, not the vendor. A git wrapper library is banned outright by `eslint.config.js`; the git service runs the `git` binary.
 - `not-implemented.ts` is named after the behaviour, not a vendor, because there is no vendor. It is the one implementation file in each of those three capabilities.
 - Create no `src/commands/`, `src/queries/`, `src/http/` or `src/cli/` file. Those are EPICs 004 and later.
 - Do not modify `src/services/config/index.ts` or `src/main.ts`.

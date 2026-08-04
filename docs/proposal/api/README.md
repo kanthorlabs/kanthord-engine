@@ -99,7 +99,7 @@ A precondition is per operation. A registration has no prior revision, so it car
 
 A mismatch returns `409` and the current value of the token. The client re-reads and retries. The compare-and-swap of the landing branch is internal to integration, and it is not a route.
 
-`repository.publish` carries a fourth mandatory value, `expectedRemoteOid`, and it is **not** a precondition of this kind. `../phase-1/git-foundation.md` calls it advisory freshness: `isomorphic-git` has no `push --force-with-lease`, publish never forces, and the server arbitrates the ref transaction. The daemon asserts that `landingOid` descends from it and predicts a rejection without a round trip, and a stale value that is already an ancestor of `landingOid` still succeeds. A null value means the remote ref must not exist. It is mandatory and it is checked; it is not equality.
+`repository.publish` carries a fourth mandatory value, `expectedRemoteOid`, and it is **not** a precondition of this kind. `../phase-1/git-foundation.md` calls it advisory freshness: Publish never forces, and the server arbitrates the ref transaction. The daemon asserts that `landingOid` descends from it and predicts a rejection without a round trip, and a stale value that is already an ancestor of `landingOid` still succeeds. A null value means the remote ref must not exist. It is mandatory and it is checked; it is not equality.
 
 ## Idempotency
 

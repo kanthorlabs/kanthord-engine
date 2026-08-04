@@ -12,30 +12,35 @@ Exit criterion: Ulrich onboards his real repository from a second machine over t
 
 Foundation layers first, then vertical use cases, then the contract sweep, then the scenarios. An epic must be verifiable when it closes, so a use case that cannot be driven through a route does not close.
 
-| #   | Epic                        | Stories | Capability at close                                                                  |
-| --- | --------------------------- | ------- | ------------------------------------------------------------------------------------ |
-| 001 | Runtime foundation          | 9       | The daemon starts, owns its home exclusively, and the test harness exists.           |
-| 002 | Domain and state machine    | 11      | The machine is defined and unit tested. Every service interface exists.              |
-| 003 | Storage                     | 8       | Every phase-1 table exists. Migrations are idempotent. Secrets and blobs persist.    |
-| 004 | Transport skeleton          | 8       | A request reaches a handler under the full transport policy, and the CLI carries it. |
-| 005 | Test infrastructure         | 2       | A fixture remote answers real git HTTP and passes its own acceptance list.           |
-| 006 | Git primitives              | 5       | A ref write is a compare-and-swap. The three ref roles never blur.                   |
-| 007 | Repository registration     | 8       | A human registers a real remote and reads it back, end to end.                       |
-| 008 | Project and plan            | 15      | A human imports, exports and re-imports a plan with per-node conflict choices.       |
-| 009 | CLI surface and composition | 6       | The program is assembled, and an unwired command fails a test.                       |
-| 010 | Contract completion         | 5       | Status, blobs, events, and every later-phase route answering `501`.                  |
-| 011 | End-to-end scenarios        | 11      | P1-E1, P1-E2, P1-E4 and P1-E3 produce evidence bundles.                              |
-| 012 | Phase 1 acceptance run      | 6       | The scenarios ran once, in order, and one verdict points at the P1-E3 bundle.        |
+| #     | Epic                        | Stories | Capability at close                                                                  |
+| ----- | --------------------------- | ------- | ------------------------------------------------------------------------------------ |
+| 001   | Runtime foundation          | 9       | The daemon starts, owns its home exclusively, and the test harness exists.           |
+| 002   | Domain and state machine    | 11      | The machine is defined and unit tested. Every service interface exists.              |
+| 003   | Storage                     | 8       | Every phase-1 table exists. Migrations are idempotent. Secrets and blobs persist.    |
+| 004   | Transport skeleton          | 8       | A request reaches a handler under the full transport policy, and the CLI carries it. |
+| 005   | Test infrastructure         | 5       | Two fixture remotes answer real git HTTP and ssh, and each passes its own list.      |
+| 006   | Git primitives              | 8       | A ref write is a compare-and-swap. The three ref roles never blur.                   |
+| 007   | Repository registration     | 10      | A human registers a real remote and reads it back, end to end.                       |
+| 007.5 | Startup recovery            | 7       | Startup proves no predecessor child survives before it removes anything.             |
+| 008   | Project and plan            | 15      | A human imports, exports and re-imports a plan with per-node conflict choices.       |
+| 009   | CLI surface and composition | 6       | The program is assembled, and an unwired command fails a test.                       |
+| 010   | Contract completion         | 5       | Status, blobs, events, and every later-phase route answering `501`.                  |
+| 011   | End-to-end scenarios        | 11      | P1-E1, P1-E2, P1-E4 and P1-E3 produce evidence bundles.                              |
+| 012   | Phase 1 acceptance run      | 6       | The scenarios ran once, in order, and one verdict points at the P1-E3 bundle.        |
 
-Total: 94 stories.
+Total: 109 stories.
+
+`007.5` carries a decimal because it was inserted after `008` to `012` were numbered, and renumbering five epics would break every cross-reference for no gain.
 
 ## Dependencies
 
 ```
-001 ─> 002 ─> 003 ─> 004 ─┬─> 005 ─> 006 ─> 007 ─┬─> 009 ─> 010 ─> 011 ─> 012
-                          │                       │
-                          └───────────────────────┴─> 008 ─┘
+001 ─> 002 ─> 003 ─> 004 ─┬─> 005 ─> 006 ─> 007 ─> 007.5 ─┬─> 009 ─> 010 ─> 011 ─> 012
+                          │                                 │
+                          └─────────────────────────────────┴─> 008 ─┘
 ```
+
+007.5 needs 007, because a reap needs a journal row that only a real git operation writes, and 009 needs 007.5, because the composition root wires recovery in before readiness.
 
 008 needs 004 for its routes and 007 for the repository an objective binds. 009 assembles what 007 and 008 built, and every later epic depends on it. 010 sweeps the routes neither use case reached. 011 proves the whole thing through the packaged binary. 012 runs it and decides.
 

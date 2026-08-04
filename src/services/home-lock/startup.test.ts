@@ -8,7 +8,7 @@ import { launchDaemon, killAll } from "../../../test/helpers/daemon.ts";
 import { createTemporaryHome } from "../../../test/helpers/home.ts";
 
 describe("src/services/home-lock/startup.test", () => {
-  it("ordering proof: stale lock swept before readiness, second daemon home-locked", async () => {
+  it("ordering proof: a second daemon against a held home refuses to start", async () => {
     const home = createTemporaryHome();
     after(async () => {
       await killAll();
@@ -16,24 +16,8 @@ describe("src/services/home-lock/startup.test", () => {
     });
 
     const configPath = home.writeConfig();
-    const staleLock = path.join(
-      home.path,
-      "repos",
-      "a.git",
-      "refs",
-      "heads",
-      "main.lock",
-    );
-    fs.mkdirSync(path.dirname(staleLock), { recursive: true });
-    fs.writeFileSync(staleLock, "");
-
     const first = launchDaemon({ configPath, home: home.path });
     await first.ready();
-
-    assert.ok(
-      !fs.existsSync(staleLock),
-      "stale lock must be gone after readiness",
-    );
 
     const second = launchDaemon({ configPath, home: home.path });
     const exit = await second.exited();
