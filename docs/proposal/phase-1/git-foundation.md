@@ -53,7 +53,7 @@ The final `update-ref` names an empty expected value, which asserts that the lan
 
 ## The git service runs the git binary, so the environment is pinned
 
-The git service invokes the `git` binary directly through `node:child_process.execFile`. It uses no git wrapper library. The service has a small, fixed set of operations, and every one of them needs exact control of the argument vector, the environment, the working directory, the timeout and the cancellation. A wrapper that hides those controls, or that copies a credential into an error object, costs more than the parsing it saves.
+The git service invokes the `git` binary directly through `node:child_process.spawn`. `spawn` and not `execFile`: `execFile` does not forward `detached` to `spawn`, so a child started that way keeps the parent's process group and the group cancellation below would signal the daemon itself. It uses no git wrapper library. The service has a small, fixed set of operations, and every one of them needs exact control of the argument vector, the environment, the working directory, the timeout and the cancellation. A wrapper that hides those controls, or that copies a credential into an error object, costs more than the parsing it saves.
 
 `git` reads ambient state from many places, and a daemon that inherits any of it is not reproducible. The binary therefore runs under a pinned environment, never an inherited one.
 

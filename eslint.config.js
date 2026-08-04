@@ -182,7 +182,7 @@ export default [
             {
               group: gitLibraries,
               message:
-                "the git service runs the git binary through execFile; see docs/proposal/phase-1/git-foundation.md",
+                "the git service runs the git binary through spawn; see docs/proposal/phase-1/git-foundation.md",
             },
           ],
         },
