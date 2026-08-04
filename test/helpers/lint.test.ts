@@ -98,4 +98,20 @@ describe("test/helpers/lint.test", () => {
     });
     assert.deepEqual(ruleIds, []);
   });
+
+  it("cli importing http/contract is clean", async () => {
+    const ruleIds = await lintCase({
+      filePath: "src/cli/client.ts",
+      code: 'import { registry } from "../http/contract/registry.ts";\nconsole.log(registry);\n',
+    });
+    assert.equal(ruleIds.includes("boundaries/dependencies"), false);
+  });
+
+  it("cli importing a service implementation is blocked", async () => {
+    const ruleIds = await lintCase({
+      filePath: "src/cli/client.ts",
+      code: 'import { SqliteStorage } from "../services/storage/sqlite.ts";\nconsole.log(SqliteStorage);\n',
+    });
+    assert.equal(ruleIds.includes("boundaries/dependencies"), true);
+  });
 });

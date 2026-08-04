@@ -26,7 +26,7 @@ export type ProposalRoute = Readonly<{
 export function readRouteMatrix(): readonly ProposalRoute[];
 ```
 
-`readRouteMatrix` reads every `*.md` in `docs/proposal/api/` except `README.md` and `new-decisions.md`, in bytewise filename order. For each line, keep it only when it starts with `|`, splitting on `|` yields seven parts once the leading and trailing empties are dropped to six cells, and cell 3 trimmed is a member of `introducedInValues`. That single condition excludes the header row, the `---` separator row and every prose table in the same file.
+`readRouteMatrix` reads every `*.md` in `docs/proposal/api/` except `README.md` and `new-decisions.md`, in bytewise filename order. For each line, keep it only when it starts with `|`, splitting on `|` yields seven parts that drop to **five** cells once the leading and trailing empties are removed, and cell 3 trimmed is a member of `introducedInValues`. Both halves of that condition are load-bearing: the five-cell count excludes any prose table whose third column happens to hold a phase value, and the `introducedInValues` membership excludes the header row and the `---` separator row.
 
 Per kept line: trim each cell; strip a leading and trailing backtick from cells 1, 3 and 4; split cell 2 on its first space into `method` and `path`, and strip backticks from the whole cell first. Return the rows in file order, then row order.
 

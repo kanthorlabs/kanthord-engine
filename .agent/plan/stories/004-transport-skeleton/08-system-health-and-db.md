@@ -110,11 +110,11 @@ Call every `probe()` in reporter order. A `probe` that **throws** is recorded as
 
 The query takes reporters rather than services, so `queries/` names no capability it does not use, and each later epic appends one reporter in `src/main.ts` without editing this file.
 
-### 2c. `Storage.ping()` — assert it exists, do not add it
+### 2c. `Storage.ping()` — the declaration landed here as a scope exception
 
-`Storage` already declares `ping(): void`, and `SqliteStorage` already implements it as one `SELECT 1` outside any transaction. `.agent/plan/stories/002-domain-and-state-machine/11-service-interfaces.md` declares it and `.agent/plan/stories/003-storage/02-migration-runner.md` implements it, both for this consumer.
+`SqliteStorage` implements `ping(): void` as one `SELECT 1` outside any transaction, and `sqlite.test.ts` covers it. `.agent/plan/stories/002-domain-and-state-machine/11-service-interfaces.md` owns the declaration and `.agent/plan/stories/003-storage/02-migration-runner.md` owns the implementation, both for this consumer.
 
-**Create nothing here, and edit no file under `src/services/`.** If `ping()` is absent when this story runs, that is a defect in EPIC 002 or EPIC 003 and it is fixed there. Adding it in EPIC 004 would put a storage method outside the capability that owns it.
+**Create nothing here.** **Amended after EPIC 004 review (B4):** the `Storage` interface did _not_ declare `ping()` when this story ran, while the implementation and its test already shipped it. That was a defect in EPIC 002's `11-service-interfaces.md`, whose owner is the interface. The one-line declaration `ping(): void;` landed in `src/services/storage/index.ts` during EPIC 004 as a retained scope exception, because no route could typecheck without it. Add no other `src/services/` edit here, and add no storage _behaviour_ — the method body stays in the capability that owns it.
 
 It exists because no other method is a safe health probe: `status()` bootstraps the `migration` table, so it writes, and `transact()` opens `BEGIN IMMEDIATE`, so it takes a write lock. A health probe must do neither.
 

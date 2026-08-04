@@ -34,4 +34,5 @@ export interface Storage {
   migrate(): MigrationStatus;
   status(): MigrationStatus;
   close(): void;
+  ping(): void;
 }

@@ -1,6 +1,12 @@
 import type { Command } from "commander";
 
-import { isLoopbackUrl } from "../base-url.ts";
+import {
+  CliError,
+  printRefusal,
+  requireLoopbackBaseUrl,
+  resolveClientOptions,
+} from "../options.ts";
+import { dbCommand } from "./index.ts";
 
 export type AppliedMigrationLine = Readonly<{
   version: number;
@@ -21,29 +27,22 @@ export type RegisterDbMigrateInput = Readonly<{
 }>;
 
 export function registerDbMigrate(input: RegisterDbMigrateInput): void {
-  input.program
-    .command("db")
-    .description("database maintenance")
+  dbCommand(input.program)
     .command("migrate")
     .description("apply every pending migration to the daemon database")
     .option("--home <path>", "override the configured daemon home")
-    .option(
-      "--base-url <url>",
-      "daemon base url; a non-loopback url is refused",
-    )
     .action((options) => {
-      const baseUrl: string | undefined =
-        options.baseUrl ?? input.env.KANTHORD_BASE_URL;
-      if (
-        baseUrl !== undefined &&
-        baseUrl.length > 0 &&
-        !isLoopbackUrl(baseUrl)
-      ) {
-        input.stderr(
-          `kanthord: db-remote-base-url: ${baseUrl} is not a loopback daemon; db migrate opens the database file on the daemon machine\n`,
+      try {
+        requireLoopbackBaseUrl(
+          resolveClientOptions({ program: input.program, env: input.env }),
         );
-        input.fail();
-        return;
+      } catch (error) {
+        if (error instanceof CliError) {
+          printRefusal(error, input.stderr);
+          input.fail();
+          return;
+        }
+        throw error;
       }
 
       const applied = input.migrate({

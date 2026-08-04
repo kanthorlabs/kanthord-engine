@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { Command } from "commander";
 
+import { registerClientOptions } from "../options.ts";
 import {
   registerDbMigrate,
   type AppliedMigrationLine,
@@ -24,6 +25,7 @@ const harness = (
   failCalls(): number;
 } => {
   const program = new Command();
+  registerClientOptions(program);
   const migrateCalls: Readonly<{ home: string | undefined }>[] = [];
   const migrate: MigrateHandler = (call) => {
     migrateCalls.push(call);
@@ -95,10 +97,10 @@ describe("src/cli/db/migrate.test", () => {
   it("a non-loopback --base-url refuses without calling the handler", async () => {
     const h = harness();
     await run(h.program, [
-      "db",
-      "migrate",
       "--base-url",
       "https://daemon.example.com",
+      "db",
+      "migrate",
     ]);
 
     assert.deepEqual(h.migrateCalls, []);
@@ -118,7 +120,7 @@ describe("src/cli/db/migrate.test", () => {
 
   it("a loopback --base-url flag wins over a non-loopback KANTHORD_BASE_URL env", async () => {
     const h = harness({ KANTHORD_BASE_URL: "https://daemon.example.com" });
-    await run(h.program, ["db", "migrate", "--base-url", "http://127.0.0.1:1"]);
+    await run(h.program, ["--base-url", "http://127.0.0.1:1", "db", "migrate"]);
 
     assert.deepEqual(h.migrateCalls, [{ home: undefined }]);
     assert.equal(h.failCalls(), 0);
@@ -127,13 +129,33 @@ describe("src/cli/db/migrate.test", () => {
   it("a loopback --base-url calls the handler", async () => {
     const h = harness();
     await run(h.program, [
-      "db",
-      "migrate",
       "--base-url",
       "http://127.0.0.1:7421",
+      "db",
+      "migrate",
     ]);
 
     assert.deepEqual(h.migrateCalls, [{ home: undefined }]);
+    assert.equal(h.failCalls(), 0);
+  });
+
+  it("a non-loopback KANTHORD_BASE_URL env refuses through the shared resolver", async () => {
+    const h = harness({ KANTHORD_BASE_URL: "http://remote.test:7421" });
+    await run(h.program, ["db", "migrate", "--home", "/tmp/h"]);
+
+    assert.deepEqual(h.migrateCalls, []);
+    assert.equal(h.failCalls(), 1);
+    assert.equal(
+      h.stderrText(),
+      "kanthord: db-remote-base-url: http://remote.test:7421 is not a loopback daemon; db migrate opens the database file on the daemon machine\n",
+    );
+  });
+
+  it("with no base url and empty env the local case succeeds", async () => {
+    const h = harness({}, twoApplied);
+    await run(h.program, ["db", "migrate", "--home", "/tmp/h"]);
+
+    assert.deepEqual(h.migrateCalls, [{ home: "/tmp/h" }]);
     assert.equal(h.failCalls(), 0);
   });
 });

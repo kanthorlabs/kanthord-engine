@@ -1,4 +1,7 @@
 import { ConfigError } from "./index.ts";
+import { isLoopbackHost as isLoopback } from "../../domain/loopback.ts";
+
+export { isLoopbackHost as isLoopback } from "../../domain/loopback.ts";
 
 export type StartableInput = Readonly<{
   masterKey: string;
@@ -7,24 +10,6 @@ export type StartableInput = Readonly<{
   bind: string;
   token: string;
 }>;
-
-const IPV4_LOOPBACK = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-
-function isValidOctet(segment: string): boolean {
-  if (segment.length === 0) return false;
-  if (segment.length > 1 && segment[0] === "0") return false;
-  const n = Number(segment);
-  return n >= 0 && n <= 255;
-}
-
-export function isLoopback(bind: string): boolean {
-  if (bind === "localhost") return true;
-  if (bind === "::1") return true;
-
-  const m = IPV4_LOOPBACK.exec(bind);
-  if (m === null) return false;
-  return isValidOctet(m[1]!) && isValidOctet(m[2]!) && isValidOctet(m[3]!);
-}
 
 export function assertStartable(input: StartableInput): void {
   const bothEmpty =

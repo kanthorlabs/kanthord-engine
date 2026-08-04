@@ -26,6 +26,7 @@ describe("src/cli/base-url.test", () => {
       "file:///tmp",
       "not a url",
       "",
+      "http://127.999.0.1:7421",
     ];
     for (const url of nonLoopback) {
       assert.equal(isLoopbackUrl(url), false, url);

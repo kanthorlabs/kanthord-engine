@@ -2,6 +2,7 @@ import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { join } from "node:path";
+import net from "node:net";
 
 import { runCli } from "./cli.ts";
 import { launchDaemon, killAll } from "./daemon.ts";
@@ -12,6 +13,17 @@ import { migrations } from "../../src/services/storage/migrations.ts";
 const expected = migrations
   .map((entry) => `kanthord: applied ${entry.version} ${entry.name}\n`)
   .join("");
+
+function reservePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address() as net.AddressInfo;
+      probe.close(() => resolve(address.port));
+    });
+  });
+}
 
 describe("test/helpers/cli.test", () => {
   it("--version prints KANTHORD_VERSION and exits 0", async () => {
@@ -84,7 +96,12 @@ describe("test/helpers/cli.test", () => {
 
   it("a live daemon holds the home lock; db migrate is refused until it dies", async () => {
     const home = createTemporaryHome();
-    const configPath = home.writeConfig();
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
+    const migrated = await runCli({
+      args: ["db", "migrate", "--home", home.path],
+    });
+    assert.equal(migrated.code, 0, migrated.stderr);
     after(async () => {
       await killAll();
       home.dispose();

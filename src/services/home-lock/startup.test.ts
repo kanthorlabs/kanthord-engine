@@ -3,19 +3,75 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import net from "node:net";
 
-import { launchDaemon, killAll } from "../../../test/helpers/daemon.ts";
+import {
+  killAll,
+  launchDaemon,
+  type DaemonExit,
+  type DaemonProcess,
+} from "../../../test/helpers/daemon.ts";
 import { createTemporaryHome } from "../../../test/helpers/home.ts";
 
+const mainEntry = fileURLToPath(
+  new URL("../../../src/main.ts", import.meta.url),
+);
+
+function reservePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address() as net.AddressInfo;
+      probe.close(() => resolve(address.port));
+    });
+  });
+}
+
+function migrateHome(homePath: string): void {
+  const result = spawnSync(
+    process.execPath,
+    [mainEntry, "db", "migrate", "--home", homePath],
+    { env: {} },
+  );
+  assert.equal(result.status, 0, result.stderr?.toString() ?? "");
+}
+
+function exitWithin(proc: DaemonProcess, ms = 5000): Promise<DaemonExit> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new Error(
+          "the daemon did not exit in time; expected the migration gate to refuse it",
+        ),
+      );
+    }, ms);
+    proc.exited().then(
+      (exit) => {
+        clearTimeout(timer);
+        resolve(exit);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 describe("src/services/home-lock/startup.test", () => {
-  it("ordering proof: a second daemon against a held home refuses to start", async () => {
+  it("ordering proof: a second daemon against a held home refuses to start and never binds", async () => {
     const home = createTemporaryHome();
     after(async () => {
       await killAll();
       home.dispose();
     });
 
-    const configPath = home.writeConfig();
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
+    migrateHome(home.path);
     const first = launchDaemon({ configPath, home: home.path });
     await first.ready();
 
@@ -23,6 +79,67 @@ describe("src/services/home-lock/startup.test", () => {
     const exit = await second.exited();
     assert.equal(exit.code, 1);
     assert.match(second.stderr(), /home-locked/);
+
+    first.kill("SIGTERM");
+    await first.exited();
+    await assert.rejects(
+      fetch(`http://127.0.0.1:${port}/v1/health`),
+      (error: unknown) =>
+        (error as { cause?: { code?: string } }).cause?.code === "ECONNREFUSED",
+    );
+  });
+
+  it("a daemon on a configured loopback port answers over a real fetch with its host check live", async () => {
+    const home = createTemporaryHome();
+    after(async () => {
+      await killAll();
+      home.dispose();
+    });
+
+    const port = await reservePort();
+    const configPath = home.writeConfig({
+      http: { port, allowedHosts: [`127.0.0.1:${port}`] },
+    });
+    migrateHome(home.path);
+
+    const proc = launchDaemon({ configPath, home: home.path });
+    await proc.ready();
+
+    const response = await fetch(`http://127.0.0.1:${port}/v1/health`);
+    assert.equal(response.status, 401);
+    const body = (await response.json()) as { error: { code: string } };
+    assert.equal(body.error.code, "unauthenticated");
+
+    const authorized = await fetch(`http://127.0.0.1:${port}/v1/health`, {
+      headers: { Authorization: "Bearer test-token" },
+    });
+    assert.equal(authorized.status, 200);
+    assert.deepEqual(await authorized.json(), {
+      status: "ok",
+      dependencies: [{ name: "storage", status: "ok" }],
+    });
+  });
+
+  it("a daemon whose allow list does not match the bound address answers 403 host-forbidden", async () => {
+    const home = createTemporaryHome();
+    after(async () => {
+      await killAll();
+      home.dispose();
+    });
+
+    const port = await reservePort();
+    const configPath = home.writeConfig({
+      http: { port, allowedHosts: ["kanthord.test"] },
+    });
+    migrateHome(home.path);
+
+    const proc = launchDaemon({ configPath, home: home.path });
+    await proc.ready();
+
+    const response = await fetch(`http://127.0.0.1:${port}/v1/health`);
+    assert.equal(response.status, 403);
+    const body = (await response.json()) as { error: { code: string } };
+    assert.equal(body.error.code, "host-forbidden");
   });
 
   it("ref lock created after readiness survives SIGTERM", async () => {
@@ -32,7 +149,9 @@ describe("src/services/home-lock/startup.test", () => {
       home.dispose();
     });
 
-    const configPath = home.writeConfig();
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
+    migrateHome(home.path);
     const first = launchDaemon({ configPath, home: home.path });
     await first.ready();
 
@@ -63,7 +182,9 @@ describe("src/services/home-lock/startup.test", () => {
       home.dispose();
     });
 
-    const configPath = home.writeConfig();
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
+    migrateHome(home.path);
     const first = launchDaemon({ configPath, home: home.path });
     await first.ready();
 
@@ -88,7 +209,9 @@ describe("src/services/home-lock/startup.test", () => {
       home.dispose();
     });
 
-    const configPath = home.writeConfig();
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
+    migrateHome(home.path);
     const first = launchDaemon({ configPath, home: home.path });
     await first.ready();
 
@@ -109,7 +232,9 @@ describe("src/services/home-lock/startup.test", () => {
       home.dispose();
     });
 
-    const configPath = home.writeConfig();
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
+    migrateHome(home.path);
     const first = launchDaemon({ configPath, home: home.path });
     await first.ready();
 
@@ -123,20 +248,26 @@ describe("src/services/home-lock/startup.test", () => {
     assert.equal(second.stderr(), "");
   });
 
-  it("config with http.bind 0.0.0.0 and no token: daemon exits 1, stderr config-refused", async () => {
+  it("config with http.bind 0.0.0.0 and no token: daemon exits 1, stderr config-refused, port never bound", async () => {
     const home = createTemporaryHome();
     after(async () => {
       await killAll();
       home.dispose();
     });
 
+    const port = await reservePort();
     const configPath = home.writeConfig({
-      http: { bind: "0.0.0.0", token: "" },
+      http: { bind: "0.0.0.0", token: "", port },
     });
     const proc = launchDaemon({ configPath, home: home.path });
     const exit = await proc.exited();
     assert.equal(exit.code, 1);
     assert.match(proc.stderr(), /^kanthord: config-refused: [^\n]+\n$/);
+    await assert.rejects(
+      fetch(`http://127.0.0.1:${port}/v1/health`),
+      (error: unknown) =>
+        (error as { cause?: { code?: string } }).cause?.code === "ECONNREFUSED",
+    );
   });
 
   it("no config found: daemon exits 1, stderr config-not-found names every candidate path", async () => {
@@ -167,5 +298,40 @@ describe("src/services/home-lock/startup.test", () => {
       new RegExp(xdgHome.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
     );
     assert.match(proc.stderr(), /\/etc\/kanthord\/config\.json/);
+  });
+
+  it("the daemon refuses an unmigrated database", async () => {
+    const home = createTemporaryHome();
+    after(async () => {
+      await killAll();
+      home.dispose();
+    });
+
+    const configPath = home.writeConfig();
+    const proc = launchDaemon({ configPath, home: home.path });
+    const exit = await exitWithin(proc);
+    assert.equal(exit.code, 1);
+    assert.match(proc.stderr(), /^kanthord: db-migration-pending: [^\n]+\n$/);
+    assert.match(proc.stderr(), /kanthord db migrate/);
+    assert.ok(!proc.stdout().includes("kanthord: ready"));
+  });
+
+  it("the daemon starts after db migrate on the same home", async () => {
+    const home = createTemporaryHome();
+    after(async () => {
+      await killAll();
+      home.dispose();
+    });
+
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
+    migrateHome(home.path);
+    assert.ok(
+      fs.existsSync(path.join(home.path, "kanthord.db")),
+      "kanthord.db must exist after db migrate and before the launch",
+    );
+    const proc = launchDaemon({ configPath, home: home.path });
+    await proc.ready();
+    assert.equal(proc.stderr(), "");
   });
 });

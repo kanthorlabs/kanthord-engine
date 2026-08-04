@@ -190,6 +190,14 @@ export function toHttpError(error: unknown): HttpError;
 
 `name-taken` is `400 invalid-request` and not `409 binding-in-use`. `docs/proposal/api/README.md:154` gives `binding-in-use` to a refused **removal**, and `errors.ts:58` makes `details` mandatory for every `409`; a unique-name collision is a body that fails validation against existing state, which is what `invalid-request` names. `docs/proposal/api/credential.md:32` says only that the name is unique and declares no code for the collision.
 
+### A malformed JSON body answers `400 invalid-request`
+
+**Decision recorded by EPIC 004 review (S3).** `POST /v1/provider` is the first route in the product that carries a body, so it is the first route that can receive a syntactically broken one. `src/http/server/app.ts` runs `@koa/bodyparser` for a routed operation with a bound handler, and the parser throws before the handler runs. Today `envelopeMiddleware` catches that throw as an unexpected error and answers `500 internal-error`, which reports a client fault as a daemon fault.
+
+A malformed body answers `400 invalid-request`, and it reports nothing to `onInternalError`. `docs/proposal/api/README.md:148` gives `invalid-request` to "the body failed schema validation", and a body that does not parse fails validation ahead of the schema. The parser error message never reaches the envelope, because a caught message is not contract — the message is the constant `"the request body is not valid json"`.
+
+Wire it where the parser runs, not in a handler: a handler that branched on this would be the "no domain branching in a handler" defect. `envelopeMiddleware` keeps answering `500` for every other unexpected throw.
+
 `show-provider.ts`'s handler answers `httpError("not-found", `no provider ${id}`)` on a `null` query result.
 
 `list-provider.ts`'s handler reads no query parameter. `docs/proposal/api/credential.md:18` gives the CLI a `provider.list` it filters client-side, and the registry declares no query-parameter mechanism.
@@ -261,6 +269,7 @@ Each uses `createTestApp({ handlers: { … } })` from `test/helpers/app.ts` with
 
 - `POST /v1/provider` with a valid body answers `200` and the view.
 - `POST /v1/provider` with `{}` answers `400` with `error.code === "invalid-request"`.
+- `POST /v1/provider` with the body `{"oops` and `Content-Type: application/json` answers `400` with `error.code === "invalid-request"` and the message `"the request body is not valid json"`, `internalErrors()` is empty, and the command stub was never called.
 - A stub throwing `PayloadError("private-key-encrypted", …)` yields `400`, `error.code === "invalid-request"`, and `error.details.refusal === "private-key-encrypted"`.
 - A stub throwing `RegisterProviderError("name-taken", …)` yields `400` with `error.details.refusal === "name-taken"`.
 - `GET /v1/provider` answers `200` with `{ providers: [...] }`.

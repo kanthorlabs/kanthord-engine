@@ -3,13 +3,40 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import net from "node:net";
 import { launchDaemon, killAll } from "./daemon.ts";
 import { createTemporaryHome } from "./home.ts";
+
+const mainEntry = fileURLToPath(new URL("../../src/main.ts", import.meta.url));
+
+function reservePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address() as net.AddressInfo;
+      probe.close(() => resolve(address.port));
+    });
+  });
+}
+
+function migrateHome(homePath: string): void {
+  const result = spawnSync(
+    process.execPath,
+    [mainEntry, "db", "migrate", "--home", homePath],
+    { env: {} },
+  );
+  assert.equal(result.status, 0, result.stderr?.toString() ?? "");
+}
 
 describe("test/helpers/daemon.test", () => {
   it("daemon with config reaches ready(), stdout holds kanthord: ready", async () => {
     const home = createTemporaryHome();
-    const configPath = home.writeConfig();
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
+    migrateHome(home.path);
     after(async () => {
       await killAll();
       home.dispose();
@@ -23,7 +50,9 @@ describe("test/helpers/daemon.test", () => {
 
   it("kill(SIGTERM) makes exited() resolve, signal is SIGTERM", async () => {
     const home = createTemporaryHome();
-    const configPath = home.writeConfig();
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
+    migrateHome(home.path);
     after(async () => {
       await killAll();
       home.dispose();
@@ -67,7 +96,9 @@ describe("test/helpers/daemon.test", () => {
   it("--home reaches process: creates daemon.lock.db in second home", async () => {
     const home = createTemporaryHome();
     const secondHome = createTemporaryHome();
-    const configPath = home.writeConfig();
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
+    migrateHome(secondHome.path);
     after(async () => {
       await killAll();
       home.dispose();
@@ -84,8 +115,12 @@ describe("test/helpers/daemon.test", () => {
   it("killAll() with two live daemons resolves", async () => {
     const home1 = createTemporaryHome();
     const home2 = createTemporaryHome();
-    const configPath1 = home1.writeConfig();
-    const configPath2 = home2.writeConfig();
+    const port1 = await reservePort();
+    const port2 = await reservePort();
+    const configPath1 = home1.writeConfig({ http: { port: port1 } });
+    const configPath2 = home2.writeConfig({ http: { port: port2 } });
+    migrateHome(home1.path);
+    migrateHome(home2.path);
     after(async () => {
       await killAll();
       home1.dispose();
