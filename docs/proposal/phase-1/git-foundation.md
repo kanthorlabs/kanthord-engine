@@ -28,14 +28,17 @@ A remote branch can be force-pushed, so the force flag belongs on remote-trackin
 A bare clone of the remote is forbidden here. It copies remote heads directly into `refs/heads/*`, and a bare repository has no checked-out branch to protect them, so a later fetch or a remote force-push can destroy local integrated work. Seeding is explicit:
 
 ```
-init({ dir: home, bare: true })
-addRemote({ dir: home, remote: 'origin', url })
-setConfig({ dir: home, path: 'remote.origin.fetch',
+init({ gitdir: home, bare: true })
+addRemote({ gitdir: home, remote: 'origin', url })
+setConfig({ gitdir: home, path: 'remote.origin.fetch',
             value: '+refs/heads/*:refs/remotes/origin/*' })
-fetch({ dir: home, remote: 'origin', prune: true, onAuth })
-writeRef({ dir: home, ref: 'refs/heads/<landing>',
-           value: await resolveRef({ ref: 'refs/remotes/origin/<upstream>' }) })
+fetch({ gitdir: home, remote: 'origin', prune: true, onAuth })
+writeRef({ gitdir: home, ref: 'refs/heads/<landing>',
+           value: await resolveRef({ gitdir: home,
+                                     ref: 'refs/remotes/origin/<upstream>' }) })
 ```
+
+Every call names `gitdir`. The bare home has no work tree, and `dir` resolves to `<dir>/.git`, which does not exist here.
 
 `kanthord repository register --url <remote> --credential <name>` runs this. It detects the default branch from the `HEAD` symref that `getRemoteInfo` reports, prints it, and asks the human to confirm. Detection never applies by itself, because a wrong default sends every later merge to the wrong branch and nothing can notice.
 

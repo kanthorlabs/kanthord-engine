@@ -17,7 +17,9 @@ A fixture remote serves git smart HTTP on a loopback port, refuses a wrong and a
 ## Stories
 
 - 01 — `node:http` in front of `git http-backend`, the loopback port, the receive-pack Basic-auth check, and the deterministic seeder → `01-fixture-remote.md`
-- 02 — the five-row acceptance gate driven through `isomorphic-git` → `02-fixture-acceptance-gate.md`
+- 02 — the five-row acceptance gate, the `startVerifiedFixture` entry point, and the conformance test that confines `startFixtureRemote` → `02-fixture-acceptance-gate.md`
+
+`startVerifiedFixture` is the surface every later epic uses. It seeds, starts, gates every seeded repository, and closes the socket if the gate fails. `startFixtureRemote` stays exported for the transport tests inside `test/helpers/remote/`, and a conformance test fails when any file outside that directory names it.
 
 ## Facts (needed for implementation)
 
@@ -55,7 +57,7 @@ Source facts the stories depend on:
 
 ## Decisions this epic settled
 
-Nine choices the EPIC and the proposal leave open. Each is pinned in a story, so none reaches build time.
+Eleven choices the EPIC and the proposal leave open. Each is pinned in a story, so none reaches build time.
 
 - **The fixture authenticates `git-receive-pack` and nothing else.** The EPIC bullet at `:17` reads "a fixture token it accepts and any other token refused", which taken alone would put the check on every route. `docs/proposal/README.md:85` scopes the refusal to the receive-pack advertisement, and `docs/proposal/open-items.md:15` records the measured public-repository behaviour the preflight design was fixed against. A fixture that refused a bad token on `git-upload-pack` would make the phase-1 registration tests prove the opposite of what the design claims. Story 01 asserts the read side serves an unauthenticated request and a garbage-token request byte-identically.
 - **A read-only credential needs no third credential class.** `docs/proposal/phase-1/README.md:49` and `.agent/plan/epics/007-repository-registration.md:19` add "a read-only credential on a public repository" to the wrong-token and missing-token cases. On this fixture that is the same mechanism: any token other than the fixture token is served by upload-pack and refused by receive-pack. Measured — a `read-only` password reaches `getRemoteInfo` successfully and throws `UserCanceledError` on `listServerRefs({ forPush: true })`. EPIC 007 needs no fixture change.
@@ -63,6 +65,7 @@ Nine choices the EPIC and the proposal leave open. Each is pinned in a story, so
 - **A commit oid is an exact asserted value.** The author, committer, timestamp base `1577836800`, daily step and zero timezone offset are constants in `seed.ts`, so `AGENTS.md`'s "a test asserts a value, never some value" holds for git objects. Three oids are pinned in the stories, measured and reproduced across three fresh temporary roots.
 - **File order inside a tree is bytewise over the path.** `Buffer.compare` on the UTF-8 names, per the `AGENTS.md` determinism rule. Story 01 asserts that two different key orders in the `files` object produce one oid.
 - **The receive-pack POST is refused, and the advertisement is not.** The EPIC non-goal at `:11` says "No push route. Accepting a push is phase 2." Forwarding the POST to the CGI would have shipped a working push route, measured. Refusing it in the `node:http` layer keeps the advertisement — the only thing the phase-1 acceptance row needs — and makes phase 2 a one-branch deletion.
+- **The gate is enforced by construction, not by convention.** `startVerifiedFixture` is the entry point for every later epic, and it cannot return a fixture that has not passed. A conformance test confines `startFixtureRemote` to `test/helpers/remote/`, so the enforcement has a mechanism rather than a reviewer.
 - **The acceptance gate returns rows and never stops early.** Five named rows, always five, always in the fixed order, each carrying `passed` and a `detail`. A thrown check becomes a failed row. `assertFixtureAcceptance` is the throwing wrapper. This shape is a **decision made here**, not a proposal requirement: `docs/proposal/README.md:80` requires each phase to prove its subset before its scenarios run, and says nothing about a diagnostic contract. The reason to run all five is that a gate stopping at row 1 reports one failure where the fixture may have five, and a fixed-length row vector is a value a test compares with `deepStrictEqual`.
 - **The two refusals are asserted as two distinct error types.** `UserCanceledError` for a wrong token, `HttpError` with `data.statusCode === 401` for a missing one. An earlier reading would have asserted "it throws", which passes when the fixture refuses for the wrong reason.
 - **The request log records `authenticated`, never the header.** `.agent/plan/epics/011-end-to-end-scenarios.md:35` asserts redaction over the fixture Basic-auth header, so the fixture never holds it in readable form. Story 01 asserts `JSON.stringify(remote.requests())` contains neither the token nor `"Basic "`.
@@ -70,11 +73,10 @@ Nine choices the EPIC and the proposal leave open. Each is pinned in a story, so
 
 ## Open items
 
-Both stories are dispatchable as written. Three items need Ulrich's decision, and they change a document rather than a story.
+Both stories are dispatchable as written, and nothing here awaits a decision.
 
-- B1 - action:YES - pin-the-git-version - `.agent/plan/epics/005-test-infrastructure.md:17` requires the environment to provision `git`, pin its version, and record it. This epic delivers none of that: it accepts any binary named `git` and asserts only that `git --version` returned. Every measured fact in these stories was measured on `git version 2.50.1 (Apple Git-155)`. `/author` may not edit CI or configuration, and the EPIC puts provisioning on the environment, so the gap is escalated rather than absorbed. Decide where the pin lives — a CI tool version, a container base image, or an `engines`-style prerequisite check — and which epic ships it. Until then the suite is reproducible on a developer machine and not pinned across machines.
-- S1 - action:YES - amend-the-seeding-block-to-gitdir - `docs/proposal/phase-1/git-foundation.md:30-38` writes `init({ dir: home, bare: true })` and `fetch({ dir: home, ... })`. Against a bare repository those calls fail with `NotFoundError: Could not find HEAD.`; `gitdir` is the working form. The proposal is the source of truth for behaviour, so a call that cannot run should be corrected there rather than carried as a footnote for EPIC 006 to rediscover. The stories already use `gitdir`.
-- S2 - action:YES - force-the-gate-before-use - Nothing makes a consumer call `assertFixtureAcceptance`. A later epic can call `startFixtureRemote` directly, skip the gate, and still pass this epic's Proof — which is the failure `docs/proposal/README.md:80` and the EPIC goal say must be impossible. Enforcing it inside EPIC 005 would mean inventing the scenario-facing factory that EPIC 011 owns, so the obligation is recorded here instead: EPIC 006 and EPIC 011 must route fixture construction through a site that runs the gate. Decide whether that becomes an explicit story in EPIC 006 or an EPIC 011 requirement.
+- S1 - **done** - amend-the-seeding-block-to-gitdir - `docs/proposal/phase-1/git-foundation.md:30-38` wrote `init({ dir: home, bare: true })`, `fetch({ dir: home, ... })` and a `resolveRef` with no repository argument at all. Against a bare repository those calls fail with `NotFoundError: Could not find HEAD.` The block now names `gitdir` on every call, and states the rule. The amended block was run verbatim: it produces one landing branch at `cc9bdf8ea409b56b929085dcbe3d9f3469829565` and a populated tracking namespace, which is what `git-foundation.md:26-28` describes.
+- S2 - **done** - force-the-gate-before-use - Story 02 now exports `startVerifiedFixture`, which seeds, starts, gates every seeded repository and closes the socket when the gate fails. A conformance test asserts no file outside `test/helpers/remote/` names `startFixtureRemote`, so a later epic cannot reach an ungated fixture without the failure naming the file. The EPIC goal — "passes its own phase-1 acceptance list before any test uses it" — is now structural rather than a convention.
 
 Three more are limits that need no amendment.
 
