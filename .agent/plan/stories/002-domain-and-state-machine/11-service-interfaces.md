@@ -78,62 +78,57 @@ The four fields are the four `provider` columns of `docs/proposal/database/provi
 
 ### 3. `src/services/git/index.ts` (new)
 
+The interface is the one in the file. It is reproduced here in outline rather than verbatim, because the git service moved from a library to the `git` binary after this story was implemented, and a verbatim copy drifts. `src/services/git/index.ts` is the authority.
+
 ```ts
-export type GitAuth = Readonly<{ username: string; password: string }>;
+export type GitCredential =
+  | Readonly<{
+      transport: "http-basic";
+      forge: string;
+      username: string;
+      token: string;
+    }>
+  | Readonly<{ transport: "ssh"; privateKey: string }>;
 
-export type SeedHomeInput = Readonly<{
-  gitDir: string;
-  remoteUrl: string;
-  upstreamBranch: string;
-  landingBranch: string;
-  auth: GitAuth;
-}>;
-
-export type RemoteInfo = Readonly<{
-  defaultBranch: string | null;
-  branches: readonly string[];
-}>;
-
-export type RefUpdateInput = Readonly<{
-  gitDir: string;
-  ref: string;
-  expectedOid: string | null;
-  nextOid: string;
-}>;
-
-export type RefUpdateResult =
-  | Readonly<{ updated: true; oid: string }>
-  | Readonly<{ updated: false; observedOid: string | null }>;
-
-export type CloneInput = Readonly<{
-  sourceGitDir: string;
-  targetDir: string;
-  ref: string;
-}>;
-
-export type GitErrorCode =
-  "git-auth-failed" | "git-url-refused" | "git-lock-held" | "git-ref-missing";
-
-export class GitError extends Error {
-  /* code */
-}
+export type GitFailure =
+  | "auth-failed"
+  | "permission-denied"
+  | "transport-failed"
+  | "host-key-mismatch"
+  | "url-refused"
+  | "lock-held"
+  | "unknown";
 
 export interface Git {
+  remoteUrlVerdict(remoteUrl: string): RemoteUrlVerdict;
+  scanHostKeys(remoteUrl: string): Promise<readonly HostKey[]>;
+  trustHostKey(
+    input: Readonly<{ remoteUrl: string; hostKey: HostKey }>,
+  ): Promise<void>;
   seedHome(input: SeedHomeInput): Promise<void>;
   remoteInfo(
-    input: Readonly<{ remoteUrl: string; auth: GitAuth }>,
+    input: Readonly<{ remoteUrl: string; credential: GitCredential }>,
   ): Promise<RemoteInfo>;
   canPush(
-    input: Readonly<{ remoteUrl: string; auth: GitAuth }>,
-  ): Promise<boolean>;
-  fetch(input: Readonly<{ gitDir: string; auth: GitAuth }>): Promise<void>;
-  resolveRef(input: Readonly<{ gitDir: string; ref: string }>): Promise<string>;
+    input: Readonly<{
+      remoteUrl: string;
+      publishRef: string;
+      credential: GitCredential;
+    }>,
+  ): Promise<PushPreflight>;
+  fetch(
+    input: Readonly<{ gitDir: string; credential: GitCredential }>,
+  ): Promise<void>;
+  resolveRef(
+    input: Readonly<{ gitDir: string; ref: string }>,
+  ): Promise<string | null>;
   refUpdate(input: RefUpdateInput): Promise<RefUpdateResult>;
+  checkOutsideWriter(input: OutsideWriterInput): Promise<OutsideWriterVerdict>;
   clone(input: CloneInput): Promise<string>;
 }
 ```
 
-`expectedOid: null` means "the ref must not exist" (`docs/proposal/phase-1/git-foundation.md:124`). A mismatch returns `{ updated: false, observedOid }` rather than throwing (`docs/proposal/phase-1/git-foundation.md:112`); `observedOid` is `null` when the ref does not exist.
+`expectedOid: null` means "the ref must not exist". A mismatch returns `{ updated: false, observedOid }` rather than throwing, and `observedOid` is `null` when the ref does not exist or when the failure diagnostic could not be parsed. `resolveRef` returns `null` for an absent ref, because absence is data rather than an error. One `GitFailure` taxonomy classifies every failure; there is no second parallel set of error codes.
 
 `clone` returns the absolute path of the created working directory — the same value as `input.targetDir` after resolution. `resolveRef` returns the object id the ref points at, and throws `GitError("git-ref-missing", ...)` when the ref does not exist. `remoteInfo.defaultBranch` is the branch the remote `HEAD` symref names, and `null` when the remote reports none (`docs/proposal/phase-1/git-foundation.md:40`).
 
