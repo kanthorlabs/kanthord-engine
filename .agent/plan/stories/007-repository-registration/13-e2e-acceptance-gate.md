@@ -123,7 +123,7 @@ export function renderReport(
 
 ### 4. The epic Proof widens
 
-The epic's Proof block at `.agent/plan/epics/007-repository-registration.md:35-38` names six globs and misses seven test files this epic delivers. Replace it with:
+**Applied.** The epic's Proof block named six globs and missed nine test files this epic delivers. It now reads:
 
 ```bash
 node --test src/domain/provider-payload.test.ts \
@@ -137,7 +137,7 @@ node --test src/domain/provider-payload.test.ts \
   && echo "PASS EPIC-007"
 ```
 
-The original globs would print `PASS` while the provider kind factory, the tool probe, host key discovery, the preflight, the seeding, the interface assembly and every handler were absent. Editing the EPIC is outside this skill's remit, so the widened block is recorded here and in the index open items, and the human applies it.
+The original globs would print `PASS` while the provider kind factory, the tool probe, host key discovery, the preflight, the seeding, the interface assembly and every handler were absent. The EPIC also now names `npm run e2e:007` separately, as a gate outside the Proof.
 
 ## Constraints
 

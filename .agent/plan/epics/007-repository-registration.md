@@ -32,13 +32,26 @@ Gates: `npm run verify`
 Proof:
 
 ```bash
-node --test src/commands/provider/**/*.test.ts src/queries/provider/**/*.test.ts \
+node --test src/domain/provider-payload.test.ts \
+  src/services/git/probe.test.ts src/services/git/host-key.test.ts \
+  src/services/git/remote-info.test.ts src/services/git/preflight.test.ts \
+  src/services/git/seed.test.ts src/services/git/binary.test.ts \
+  src/commands/provider/**/*.test.ts src/queries/provider/**/*.test.ts \
   src/commands/repository/**/*.test.ts src/queries/repository/**/*.test.ts \
-  src/cli/credential/**/*.test.ts src/cli/repository/**/*.test.ts \
+  src/http/server/credential/**/*.test.ts src/http/server/repository/**/*.test.ts \
+  src/cli/confirm.test.ts src/cli/credential/**/*.test.ts src/cli/repository/**/*.test.ts \
   && echo "PASS EPIC-007"
 ```
 
-The Proof names `provider` and `cli` as well as `repository`. Three of the ten stories build neither a repository command nor a repository query, and a Proof that ran only the repository paths would print `PASS` while the credential routes and both CLI commands were absent.
+The Proof names every layer this epic builds, because most of it is neither a repository command nor a repository query. A Proof globbing only `commands/`, `queries/` and `cli/` would print `PASS` while the provider kind factory, the tool probe, host key discovery, the write-advertisement preflight, the seeding sequence, the `Git` assembly and every one of the seven handlers were absent.
+
+The end-to-end gate is separate and is **not** part of this Proof:
+
+```bash
+npm run e2e:007
+```
+
+It drives every declared scenario against the real remote of `.env.e2e`, and it is outside `npm run verify` because the hermetic suite makes no network call.
 
 Hermetic coverage required beyond the Proof:
 
