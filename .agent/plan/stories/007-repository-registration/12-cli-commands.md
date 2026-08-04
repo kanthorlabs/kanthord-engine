@@ -200,7 +200,7 @@ Every CLI test builds a fresh `new Command()`, registers into it, and drives it 
 - `--landing` defaults to the confirmed upstream, and `--publish-ref` defaults to `"refs/heads/" + it`. Assert both from one call with neither flag, then assert an explicit `--landing kanthord/main` overrides only the landing.
 - `--no-publish-on-approval` records `publishOnApproval: false`; its absence records `true`.
 - A url whose transport is unsupported calls `fail()` and records no call at all — not even `provider.list`. Assert the classification runs first.
-- A daemon `409` writes `kanthord: stale-revision: <message>\n` and calls `fail()`. A `422` writes `kanthord: credential-rejected: <message>\n`.
+- A daemon `409 host-key-mismatch` writes `kanthord: host-key-mismatch: <message>\n` and calls `fail()`. A `422` writes `kanthord: credential-rejected: <message>\n`.
 - **The CLI routes on `code`, never on `message`.** Feed two `400` responses with different messages and assert both produce a `fail()` and a line beginning with the same `kanthord: invalid-request:` prefix. `docs/proposal/api/README.md:143` states the rule.
 
 ### `src/cli/repository/show.test.ts`

@@ -109,7 +109,7 @@ payload: { failure, name: input.name, publishRef: input.publishRef, credentialId
 
 EPIC 006 Story 07's `checkOutsideWriter` returns a verdict and writes nothing. `.agent/plan/stories/006-git-primitives/index.md:122` assigns the refusal and the event to this epic: the call site, the event inside the same transaction as the state decision, exactly one event on a mismatch, none on a match, and no `needs-reconcile` write.
 
-This story delivers all five as one exported command, `assertNoOutsideWriter`, in `src/commands/repository/assert-no-outside-writer.ts`. It is **not** reached by `repository.register`: the check compares a ref against a recorded baseline, and registration writes the baseline and refuses an existing home, so at registration there is nothing to compare. The first production caller is the first repeat write path on a seeded home, which is a later epic. See the epic open items — the behaviour is implemented and tested here, and its route arrives later.
+This story delivers all five as one exported command, `assertNoOutsideWriter`, in `src/commands/repository/assert-no-outside-writer.ts`. It is **not** reached by `repository.register`: the check compares a ref against a recorded baseline, and registration writes the baseline and refuses an existing home, so at registration there is nothing to compare. The first production caller is the first repeat write path on a seeded home, which is a later epic. The EPIC bullet at `:24` records this: `repository.register` is the baseline writer, and the verdict's first caller is a later epic's repeat write path. See B5.
 
 ```ts
 export type AdoptRepositoryDependencies = RegisterRepositoryDependencies;
@@ -202,13 +202,13 @@ A missing `upstreamBranch`, `landingBranch` or `publishRef` is `400 invalid-requ
 | `…("credential-unreadable")`                      | `httpError("invalid-request", m, { refusal: "credential-unreadable" })`             |
 | `…("host-fingerprint-required")`                  | `httpError("invalid-request", m, { refusal: "host-fingerprint-required" })`         |
 | `…("host-fingerprint-forbidden")`                 | `httpError("invalid-request", m, { refusal: "host-fingerprint-forbidden" })`        |
-| `…("host-key-mismatch")`                          | `httpError("stale-revision", m, { presented, confirmed })`                          |
+| `…("host-key-mismatch")`                          | `httpError("host-key-mismatch", m, { presented, confirmed })`                       |
 | `…("host-key-unavailable")`                       | `httpError("invalid-request", m, { refusal: "host-key-unavailable", detail })`      |
 | `…("outside-writer")`                             | `httpError("stale-revision", m, { expectedOid, observedOid })`                      |
 | `GitError` with `failure === "url-refused"`       | `httpError("invalid-request", error.message, { refusal: "url-refused" })`           |
 | `GitError` with `failure === "auth-failed"`       | `httpError("credential-rejected", error.message, { failure: "auth-failed" })`       |
 | `GitError` with `failure === "permission-denied"` | `httpError("credential-rejected", error.message, { failure: "permission-denied" })` |
-| `GitError` with `failure === "host-key-mismatch"` | `httpError("stale-revision", error.message, { failure: "host-key-mismatch" })`      |
+| `GitError` with `failure === "host-key-mismatch"` | `httpError("host-key-mismatch", error.message, { failure: "host-key-mismatch" })`   |
 | `GitError` any other failure                      | rethrown, so `envelopeMiddleware` answers `500 internal-error`                      |
 
 `error.detail` never reaches a `message`. `GitError.detail` can carry an absolute path — EPIC 006 measured `Unable to create '<absolute path>.lock'` — and `docs/proposal/api/README.md:188` forbids a server path in a response. The `details` object carries the classification, not the raw stderr.
@@ -299,7 +299,7 @@ Every case asserts `SELECT COUNT(*)` on `repository`, `git_operation` and `event
 - `hostFingerprint: "nope"` answers `400` from the pattern.
 - An absent `publishOnApproval` reaches the stub as `true`; an absent `hostFingerprint` reaches it as `null`.
 - Each of the fourteen refusal rows answers its declared status and code, one case per row, asserting `error.code` and the named `details` members.
-- A `host-key-mismatch` answers `409` with `error.details.presented` an array and `error.details.confirmed` the body value.
+- A `host-key-mismatch` answers `409` with `error.code === "host-key-mismatch"`, `error.details.presented` an array and `error.details.confirmed` the body value. The `outside-writer` refusal keeps `stale-revision`: a journal baseline that no longer matches _is_ a precondition the caller re-reads.
 - A `GitError("auth-failed")` answers `422` with `error.code === "credential-rejected"`.
 - A `GitError("lock-held")` answers `500` with `error.message === "internal error"`, and `app.internalErrors()` has length one. An unclassified failure is not silently mapped.
 - **No response carries a daemon path.** For every refusal case, assert `JSON.stringify(body)` contains neither `homeRoot` nor the string `".git"` preceded by a `/`.

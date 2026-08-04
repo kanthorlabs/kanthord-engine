@@ -158,6 +158,7 @@ The CLI routes on `code` and never parses `message`. A block reason, a publish r
 | 409    | `idempotency-mismatch`     | an `importId` came back with a different document                        |
 | 409    | `choices-stale`            | topology moved since `plan.validate`, so the required choice set changed |
 | 409    | `choices-changed`          | a selected outcome is no longer legal against current runtime state      |
+| 409    | `host-key-mismatch`        | the host presented no key matching the confirmed fingerprint             |
 | 422    | `plan-invalid`             | the plan failed validation, and `details` lists every finding            |
 | 422    | `choices-invalid`          | the choice set builds an invalid graph, and `details` names the nodes    |
 | 422    | `identity-kind-mismatch`   | one ULID payload appeared under two kind prefixes                        |
@@ -168,6 +169,8 @@ The CLI routes on `code` and never parses `message`. A block reason, a publish r
 `stale-revision` covers both ways a frozen candidate stops being approvable. A revision mismatch and a `candidate.state` of `invalidated` mean the same thing to the human — read the evidence again — so they are one code, and `details` carries `candidateState` and `invalidatedReason`. A second code would split one condition into two the client must handle identically.
 
 `internal-error` is the one code this API adds for a fault of its own. An unexpected throw still answers the envelope shape, and its `message` is the constant `internal error` with no `details`, because a caught message is not contract and may name a path, a query or a secret. Every other `5xx` is absent by design: the daemon either answers a declared code or it fails.
+
+`host-key-mismatch` is the one code added after the original twenty, and the addition is deliberate. Every other candidate — a block reason, a publish rejection class, a repository state — travels in `details`, because a client needs the shape and not a branch. This one is different: `repository.register` re-scans the host and compares against the fingerprint a human confirmed, and a mismatch may mean the forge rotated its key or may mean something is answering in its place. A client must be able to branch on that without reading `details`, and it must not be told to retry. Reusing `stale-revision` would have said "re-read and try again", which is the wrong reflex for the only condition in phase 1 whose wrong answer has a security consequence. See [repository.md](repository.md).
 
 `credential-rejected` is `422` rather than `401`. A forge refusing a token is a fact about the request payload, and `401` on this API means the caller's own bearer token failed. An `ssh://` url, a `git@host:path` url and plain HTTP on a non-loopback host are all `400 invalid-request` with the reason in `details`, because they fail schema validation before any network call.
 

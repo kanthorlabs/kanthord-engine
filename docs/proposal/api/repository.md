@@ -35,7 +35,7 @@ POST /v1/repository
   <- { ..., hostFingerprint }
 ```
 
-`inspect` reads the host key with `ssh-keyscan` and returns its algorithm and `SHA256:` fingerprint. It stores nothing. `register` re-scans, compares against the `hostFingerprint` the body carries, and refuses with `409` when they differ. Only on a match does the daemon write the key into its own `known_hosts`, and from then on every connection verifies against it under `StrictHostKeyChecking=yes`.
+`inspect` reads the host key with `ssh-keyscan` and returns its algorithm and `SHA256:` fingerprint. It stores nothing. `register` re-scans, compares against the `hostFingerprint` the body carries, and refuses with `409 host-key-mismatch` when they differ, listing the fingerprints the host did present in `details`. Only on a match does the daemon write the key into its own `known_hosts`, and from then on every connection verifies against it under `StrictHostKeyChecking=yes`.
 
 The re-scan is what makes the confirmation load-bearing rather than decorative. Without it, a client could echo any fingerprint back and the daemon would pin whatever the network offered at register time.
 

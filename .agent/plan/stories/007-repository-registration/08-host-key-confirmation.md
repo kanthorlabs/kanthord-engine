@@ -73,12 +73,28 @@ The re-scan is what stops a client echoing back any value it likes. `docs/propos
 
 ### 3. `src/http/server/repository/refusals.ts` — two rows
 
-| thrown                                            | `httpError` call                                                                                         |
-| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `RegisterRepositoryError("host-key-mismatch")`    | `httpError("stale-revision", error.message, { presented: error.presented, confirmed: error.confirmed })` |
-| `RegisterRepositoryError("host-key-unavailable")` | `httpError("invalid-request", error.message, { refusal: "host-key-unavailable", detail: error.detail })` |
+| thrown                                            | `httpError` call                                                                                            |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `RegisterRepositoryError("host-key-mismatch")`    | `httpError("host-key-mismatch", error.message, { presented: error.presented, confirmed: error.confirmed })` |
+| `RegisterRepositoryError("host-key-unavailable")` | `httpError("invalid-request", error.message, { refusal: "host-key-unavailable", detail: error.detail })`    |
 
-`409` is spelled `stale-revision`. `docs/proposal/api/repository.md:38` says the route "refuses with `409`" and names no code; `src/http/contract/errors.ts:9-17` holds ten `409` codes and none of them is a host-key code, and `.agent/plan/stories/004-transport-skeleton/05-error-envelope.md:111` forbids a twenty-first code. `stale-revision` is the closest declared meaning — "a precondition token no longer matches" — and the confirmed fingerprint is exactly a precondition token the client supplied. `errors.ts:58` makes `details` mandatory for a `409`, and both object ids of the comparison travel there. See the epic open items: naming a `host-key-mismatch` code is a proposal decision, not a build-time one.
+`409` is spelled `host-key-mismatch`, and it is the **twenty-first** error code. `docs/proposal/api/README.md` now declares it after `choices-changed`, and `docs/proposal/api/repository.md:38` names it. Reusing `stale-revision` was rejected: its declared meaning is "a precondition token no longer matches", which tells a client to re-read and retry, and a host presenting an unexpected key is the one phase-1 condition where retrying is the wrong reflex. `errors.ts` makes `details` mandatory for every `409`, so both sides of the comparison travel there.
+
+### 4. `src/http/contract/errors.ts` — the twenty-first code
+
+Add one entry to `errorStatuses`, **after** `"choices-changed"` and before `"plan-invalid"`, so the record keeps the proposal's table order:
+
+```ts
+    "host-key-mismatch": 409,
+```
+
+`src/http/contract/errors.test.ts` pins that order, and it needs exactly three edits:
+
+- `:12-33` — insert `"host-key-mismatch"` after `"choices-changed"` in the `deepEqual` list, and rename the test to `"pins the twenty-one codes in table order"`.
+- `:44-53` — append `"host-key-mismatch"` to the `groups[409]` list.
+- `:69` — `assert.equal(sum, 21)`.
+
+Nothing else moves. `PreconditionCode` is derived from the status, so the new code joins it automatically and `httpError("host-key-mismatch", …)` will not compile without `details` — which is what forces both fingerprints into the response.
 
 `details.presented` is the array of scanned fingerprints and `details.confirmed` is the value the body carried. A human reading the error can compare the two without a second request.
 

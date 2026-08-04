@@ -108,7 +108,7 @@ It rethrows nothing. Koa's own error listener therefore never runs.
 
 - `src/http/contract/errors.ts` imports `zod` and nothing else. No koa, no `node:*`.
 - The message of an `internal-error` response is the literal `"internal error"` in every case.
-- Do not add a code beyond the twenty listed. `blockReason` values, publish rejection classes and repository states travel in `details`, not as a `code` — `docs/proposal/api/README.md:171`.
+- Do not add a code beyond the twenty listed. `blockReason` values, publish rejection classes and repository states travel in `details`, not as a `code` — `docs/proposal/api/README.md:171`. **One code was added after this story: `host-key-mismatch` at `409`, by EPIC 007's B4.** The rule stands and that is its one exception — a host identity mismatch is the only phase-1 condition a client must branch on and must not retry, so `details` could not carry it. Any further addition needs the same argument.
 
 ## Verify
 
