@@ -109,7 +109,25 @@ The idempotency lookup runs **before** the `fromRevision` comparison, because a 
 
 A reuse of one `importId` with a different submission is a client defect, not a retry. The fingerprint covers the documents, the choice set, `fromRevision` and `validatedRevision`, with the documents normalized and sorted by path so that a reordered array stays a retry. A different fingerprint is `409 idempotency-mismatch`. Returning the first result silently would hide the bug.
 
-No other route is idempotent by key. Every other command is either a query, or a transition that a precondition already protects.
+### Every other `POST` takes `Idempotency-Key`
+
+A precondition protects a transition from acting twice on stale state. It does not tell a client whether a command it lost the response to actually ran. So a `POST` may carry an `Idempotency-Key` header, and the daemon suppresses a duplicate under that key.
+
+**Idempotency is a policy per operation, declared in the registry**, and it takes one of three values.
+
+| Policy    | Storage                                      | Operations                   |
+| --------- | -------------------------------------------- | ---------------------------- |
+| `durable` | the database, inside the command transaction | `plan.import` only           |
+| `memory`  | a bounded in-process cache, TTL configurable | every other `POST`           |
+| `none`    | nothing                                      | every `GET`, `PUT`, `DELETE` |
+
+A single blanket rule was refused. The two mechanisms differ in the properties that matter: `importId` never expires and normalizes the documents before fingerprinting, and it must survive the restart that follows the crash it exists to cover. A memory cache does none of that, so it cannot carry `plan.import`. A supplied `Idempotency-Key` on `plan.import` must equal its `importId`, and a different value is `400 invalid-request`.
+
+Under `memory`: the key is reserved before the command runs, a duplicate arriving while the first is in flight joins it and receives the same answer, a duplicate after completion replays the stored status, body and response headers, and a different fingerprint under the same key is `409 idempotency-mismatch`. **A replayable outcome is declared per operation and never inferred from the status class.** A `409 lease-held` and a `404 not-found` are temporary domain state, and replaying either for the retention window would turn a lease that has since expired into an outage. A command that commits and then fails while writing its response is neither replayable nor safe to re-run, so its key is marked indeterminate and a duplicate receives the same indeterminate answer.
+
+**What this guarantees is bounded, same-process duplicate suppression. It is not exactly-once execution.** A restart empties the cache, a command that reaches a git forge can succeed remotely and fail locally, and a `POST` that outruns the retention window outlives its own record. No document and no message calls a keyed `POST` "safe to retry". EPIC 010.6 holds the design.
+
+The header is not mandatory. A `POST` without one executes as it always did, so the CLI and a human with `curl` are unaffected.
 
 ## Large payloads
 

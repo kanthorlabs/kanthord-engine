@@ -17,6 +17,8 @@ Filters are `subjectKind`, `subject`, `type`, `actorKind` and `actor`. `subject`
 
 Paging is a cursor: `after` takes the **id** of the last event read, and `limit` caps the page. An offset cannot page an append-only log that grows while a human reads it.
 
+`wait` is the fourth parameter, and it turns the same operation into a long poll. It is the decided progress channel for a GUI client, and `event.stream` below states why the stream is not.
+
 Every event carries its id, the type, the subject kind and identity, the actor kind and identity, and the payload. `../database/event.md` gives the table no sequence column and no timestamp column: the id is a ULID, `ORDER BY id` is creation order, and the timestamp is decoded from the id. The response returns that decoded timestamp, so a client never decodes a ULID to render a history line.
 
 **The order is total, and it carries no gap information.** A ULID is not dense, so no reader detects a missing row by comparing two ids. P3-E1 therefore asserts that state converges and that a transition wrote the events it must write. It never asserts a contiguous sequence, and no client should try to.
@@ -27,4 +29,12 @@ The route is read-only. No route writes an event, because an event is a conseque
 
 ## `event.stream`
 
-Deferred. Status watching over a stream is `../after-the-mvp.md`. The path returns `404` until it ships. A client polls `event.list` with a cursor in the meantime, which is why the cursor ships in phase 1, and a client resumes a future stream by passing the last id it saw.
+Deferred. Status watching over a stream is `../after-the-mvp.md`, and the path returns `404` until it ships.
+
+**A client watches progress by polling `event.list` with the cursor, and that is the decided mechanism rather than a stopgap.** The Flutter client withdrew its own SSE design in favour of it, because a browser cannot set an `Authorization` header on an `EventSource` and this API requires a bearer token on every route, so a stream would have cost a second transport on one platform for no gain. That is why the cursor ships in phase 1.
+
+`event.list` therefore gains one optional query parameter, `wait`, bounded in seconds. The daemon holds the request until an event matching the filters arrives or the wait elapses, then answers with the ordinary response shape. **An elapsed wait is a normal empty `200`.** It is never an error and never a timeout, because a client must be able to tell a quiet daemon from an unreachable one, and a client-side receive timeout means the second thing. One outstanding request replaces a poll loop, and it needs no new media type, no new transport and no resume semantics.
+
+Keep the bound conservative. A browser tab holds one connection for the duration of the wait, and any browser, proxy or NAT idle timeout on the path must be longer than it.
+
+A future stream carries lifecycle events only. Nothing in this product carries live agent output, and `../after-the-mvp.md` states that as a refusal rather than a gap.
