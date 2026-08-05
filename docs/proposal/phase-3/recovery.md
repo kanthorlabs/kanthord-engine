@@ -37,7 +37,11 @@ This is the cost of running git as a subprocess. An in-process library stopped w
 
 That ordering is what makes the record trustworthy. An absent pid file means `git` never started, because the launcher writes before it execs. There is no window in which a git process exists unrecorded.
 
-**Startup reaps before it sweeps.** For every in-flight row carrying a token, startup reads the pid file and decides liveness. A pid belongs to this row when it is alive **and** its operating-system start time precedes the creation time of the pid file: a process that reused the number necessarily started after that file existed.
+**Writing before the exec is not enough on its own, because a startup observation must also be final.** A launcher spawned a moment before the daemon died has not reached its write yet. A replacement daemon would find no pid file, conclude that `git` never started, and begin removing remnants while that launcher went on to write its pid file and exec `git`. The launcher therefore waits for one byte from the daemon between the write and the exec, and a launcher whose daemon is gone reads end-of-file and exits without touching anything. A dead daemon can start no new git process, so "no pid file" is a conclusion a later startup may act on.
+
+**A spawn before its repository row exists is recorded by the pid file alone.** Registration seeds a bare home before it commits the `repository` row, and the journal row cannot precede it: `repository_id` references that row, and `ref`, `base_oid` and `proposed_head_oid` are not null and are unknown until after the fetch. The pid file is the whole record for such a spawn. It sits in the daemon's own run directory, created at mode `0700` inside a home the daemon holds an exclusive lock on, so every name in that directory is the daemon's own and the reap takes each of them as a candidate. A name that encodes a repository or an operation id adds attribution to the report; it never decides whether a candidate is reaped. Seeding also spawns commands the caller supplies no path for, and those carry a generated name — so a reap that filtered by name would leave a live child holding a staging directory the sweep then removes.
+
+**Startup reaps before it sweeps.** For every in-flight row carrying a token, and for every pid file in the run directory, startup reads the pid file and decides liveness. A pid belongs to this row when it is alive **and** its operating-system start time precedes the creation time of the pid file: a process that reused the number necessarily started after that file existed.
 
 | Finding                      | Action                                                                        |
 | ---------------------------- | ----------------------------------------------------------------------------- |
@@ -45,6 +49,7 @@ That ordering is what makes the record trustworthy. An absent pid file means `gi
 | pid absent, or started later | the child is dead and the number was reused; its remnants are stale           |
 | a matching process is alive  | it is an orphan; signal its process group, wait for it to exit, then continue |
 | the orphan does not exit     | refuse to start, and name the process and the repository                      |
+| liveness cannot be read      | refuse to start; leave the token and the file, and name the process           |
 
 Only after this pass does any removal happen. A daemon that cannot establish the fact refuses to start rather than guessing, because the failure it is guessing about is silent data loss.
 

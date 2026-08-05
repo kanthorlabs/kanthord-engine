@@ -38,7 +38,9 @@ For a `publish`, `base_oid` is the reviewed `landingOid`, `expected_remote_oid` 
 
 The daemon spawns a launcher rather than `git` directly. The launcher writes its own process id into that path and then `exec`s `git`, and `exec` keeps the process id, so the recorded value is the git process itself. The write happens before `git` begins, so an absent pid file means `git` never started and every remnant of that row is stale.
 
-`child_token` is set only while `state = 'open'`, and completing or discarding a row clears it and removes the file.
+`child_token` is set only while `state = 'open'`, and completing or discarding a row clears it and removes the file. Clearing the token commits first and the file is removed after, because the two cannot be atomic: a removal that preceded a failed commit would leave an open row naming a file that is gone, which the next startup would read as "git never started".
+
+This paragraph governs a journaled operation only. Not every spawn has a row: registration seeds a bare home before its `repository` row exists, and `repository_id` cannot reference a row that is not there while `ref`, `base_oid` and `proposed_head_oid` cannot be filled before the fetch. Such a spawn is recorded by its pid file alone, and [../phase-3/recovery.md](../phase-3/recovery.md) holds that rule. The reap therefore takes both sources — every open row's token, and every pid file in the run directory — and a row is never a precondition of reaping a child.
 
 Startup decides liveness from the file rather than from a recorded timestamp. A pid is this row's child when it is alive **and** its operating-system start time precedes the creation time of the pid file. A process that reused the number necessarily started after the file existed, so the comparison separates them without storing a timestamp that the daemon could crash before writing.
 
