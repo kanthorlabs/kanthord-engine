@@ -85,6 +85,8 @@ A closed vocabulary alone would prove spelling and nothing else — it would acc
 
 A query is `GET`. A command that creates a resource is `POST` on the resource. A command that acts on a resource is `POST /<resource>/:id/<action>`. A command that replaces a whole binding is `PUT`.
 
+**Every route answers `200` on success, a creating `POST` included.** No route declares `201`. The daemon has one human and one client, the response carries the created resource in full, and no route answers with a bare `Location` header — so a second success status would give a client nothing to branch on. `plan.import` makes the rule load-bearing rather than cosmetic: a retry of a committed `importId` returns the original revision, and that answer cannot be `201` because it created nothing. One success status keeps a retry and a first import indistinguishable, which is what idempotency means here.
+
 `unblock`, `waive`, `abandon`, `discard`, `approve`, `publish`, `reconcile` and `rename` are actions, not resource states. None of them is spelled as a field update, because a state field that a client writes cannot express what the daemon must refuse.
 
 ## Preconditions
@@ -192,7 +194,7 @@ The CLI routes on `code` and never parses `message`. A block reason, a publish r
 
 `credential-rejected` is `422` rather than `401`. A forge refusing a token is a fact about the request payload, and `401` on this API means the caller's own bearer token failed. An `ssh://` url, a `git@host:path` url and plain HTTP on a non-loopback host are all `400 invalid-request` with the reason in `details`, because they fail schema validation before any network call.
 
-Block reasons appear in a node representation as `blockReason`, with the values of `../phase-1/state-machine.md`: `attempt-limit`, `dependency-discarded`, `stale-base`, `dirty-recovery`, `e2e-failed`.
+Block reasons appear in a node representation as `blockReason`, with the values of `../phase-1/state-machine.md`: `attempt-limit`, `dependency-discarded`, `stale-base`, `dirty-recovery`, `e2e-failed`, `abandoned`. All six, because the `node` table's `CHECK` accepts all six and a response schema that refused one would refuse a row the database holds.
 
 ## Security applies to every route
 

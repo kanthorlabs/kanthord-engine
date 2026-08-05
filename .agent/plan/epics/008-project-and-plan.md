@@ -40,9 +40,21 @@ Gates: `npm run verify`
 Proof:
 
 ```bash
-node --test src/services/graph/**/*.test.ts src/commands/plan/**/*.test.ts \
+node --test \
+  src/domain/*.test.ts \
+  src/services/graph/*.test.ts src/services/document/*.test.ts \
+  src/services/plan/*.test.ts src/services/blob/*.test.ts \
+  src/commands/project/*.test.ts src/commands/plan/*.test.ts \
+  src/queries/project/*.test.ts src/queries/plan/*.test.ts \
+  src/queries/node/*.test.ts src/queries/edge/*.test.ts \
+  src/http/contract/*.test.ts \
+  src/http/server/project/*.test.ts src/http/server/plan/*.test.ts \
+  src/http/server/node/*.test.ts src/http/server/edge/*.test.ts \
+  src/cli/project/*.test.ts src/cli/plan/*.test.ts \
   && echo "PASS EPIC-008"
 ```
+
+Every layer is named, because this epic writes in all six directories. The plan logic is pure and lands in `src/domain/`, so a Proof globbing `src/commands/plan/` alone reaches one file. `src/domain/*.test.ts` is taken whole rather than as `plan-*`: the domain suite is pure and fast, and a pattern that has to be widened for each new file is the defect this Proof already had once.
 
 Hermetic coverage required beyond the Proof:
 
@@ -53,6 +65,6 @@ Hermetic coverage required beyond the Proof:
 - `submitted` on a prose edit is accepted at every state, `discarded` included, and it does not clear `discard_reason`.
 - The cycle case: database holds `B → A`, the document holds `A → B`, and taking `submitted` for `A` with `database` for `B` is refused as `choices-invalid`. The suggestion set for that same input is not that combination.
 - A missing choice, an extra choice and a duplicate choice are each `400`.
-- Document order is bytewise. A set with non-ASCII canonical paths sorts through `Buffer.compare`, and the assertion fails a locale-sensitive comparison that the ASCII cases would pass.
+- Document order is bytewise. A set with non-ASCII **submitted** paths sorts through `Buffer.compare`, and the assertion fails a locale-sensitive comparison that the ASCII cases would pass. A canonical path is always ASCII — `slug(title)` keeps only `a-z` and `0-9`, and a ULID is uppercase ASCII — so the submitted path is where a non-ASCII byte reaches the ordering.
 - An objective naming a repository that is not bound to its project is refused, so the project binding of the CLI story is proved through import.
 - `kanthord plan import` calls `plan.validate` before `plan.import`, asserted by request order against a recording server, because an import that skips it cannot carry `validatedRevision`.

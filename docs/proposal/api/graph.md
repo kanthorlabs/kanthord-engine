@@ -97,7 +97,11 @@ The three are hashes, not content. `blob.show` serves them.
 
 ## `node.list`
 
-Filters are `project`, `kind`, `state`, `blockReason` and `repository`. The response holds identity, kind, title, state, block reason, discard reason, the parent, and the dependencies. It never holds the body prose; `node.show` does.
+The response holds identity, kind, title, state, block reason, discard reason, the parent, and the dependencies. It never holds the body prose; `node.show` does.
+
+**Phase 1 returns every node, ordered by identity, and takes no filter.** A filter is a query parameter, and this API has no query-parameter mechanism: an operation declares a tuple of typed path segments and a body schema, and nothing else. Adding one reaches the registry, the router, the generated document and the CLI client at once, so it is a transport decision rather than a property of this route. `repository.list` is unfiltered for the same reason. A human filters client-side until then.
+
+The filters this route will take are `project`, `kind`, `state`, `blockReason` and `repository`. They are recorded here so the shape is fixed when the mechanism arrives.
 
 ## `node.show`
 
