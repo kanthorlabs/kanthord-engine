@@ -202,13 +202,25 @@ test("documents the routed success status from successStatus", () => {
   );
 });
 
-test("keeps components.schemas bytewise sorted with Error registered", () => {
+test("registers exactly the thirteen schema components in bytewise order", () => {
   const document = buildOpenApiDocument();
   const components = document.components as Readonly<Record<string, unknown>>;
   const schemas = components.schemas as Readonly<Record<string, unknown>>;
-  const keys = Object.keys(schemas);
-  assert.deepEqual(keys, sortedBytewise(keys));
-  assert.ok(keys.includes("Error"), "Error is always a schema component");
+  assert.deepEqual(Object.keys(schemas), [
+    "Error",
+    "provider.list.response",
+    "provider.register.request",
+    "provider.register.response",
+    "provider.show.response",
+    "repository.inspect.request",
+    "repository.inspect.response",
+    "repository.list.response",
+    "repository.register.request",
+    "repository.register.response",
+    "repository.show.response",
+    "system.db.response",
+    "system.health.response",
+  ]);
 });
 
 test("refers to components only through internal refs", () => {

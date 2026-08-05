@@ -334,4 +334,24 @@ describe("src/services/home-lock/startup.test", () => {
     await proc.ready();
     assert.equal(proc.stderr(), "");
   });
+
+  it("a config naming a missing tool refuses startup before ready", async () => {
+    const home = createTemporaryHome();
+    after(async () => {
+      await killAll();
+      home.dispose();
+    });
+
+    const port = await reservePort();
+    const configPath = home.writeConfig({
+      tools: { git: "/nonexistent/git" },
+      http: { port },
+    });
+    migrateHome(home.path);
+    const proc = launchDaemon({ configPath, home: home.path });
+    const exit = await exitWithin(proc);
+    assert.equal(exit.code, 1);
+    assert.match(proc.stderr(), /^kanthord: tool-missing: [^\n]+\n$/);
+    assert.equal(proc.stdout(), "");
+  });
 });

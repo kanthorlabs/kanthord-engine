@@ -5,11 +5,18 @@ export type HttpSettings = Readonly<{
   allowedHosts: readonly string[];
 }>;
 
+export type ToolSettings = Readonly<{
+  git: string;
+  ssh: string;
+  sshKeyscan: string;
+}>;
+
 export type Settings = Readonly<{
   home: string;
   actor: string;
   masterKey: Buffer;
   http: HttpSettings;
+  tools: ToolSettings;
   attemptLimit: number;
 }>;
 

@@ -25,6 +25,14 @@ export type CallResult =
       details: unknown;
     }>;
 
+export type DaemonClient = Readonly<{
+  call(
+    operationId: string,
+    body: unknown,
+    parameters?: Readonly<Record<string, string>>,
+  ): Promise<CallResult>;
+}>;
+
 const PARAMETER_VALUE = /^[A-Za-z0-9_:.-]+$/;
 
 export function buildRequest(

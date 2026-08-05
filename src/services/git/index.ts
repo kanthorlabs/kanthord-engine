@@ -1,4 +1,7 @@
 import type { Transaction } from "../storage/index.ts";
+import type { ConfirmOutcome, ScanOutcome } from "./host-key.ts";
+import type { CanPushInput } from "./preflight.ts";
+import type { SeedHomeExtended, SeedHomeResult } from "./seed.ts";
 
 export type GitCredential =
   | Readonly<{
@@ -11,7 +14,11 @@ export type GitCredential =
 
 export type GitTransport = GitCredential["transport"];
 
-export type HostKey = Readonly<{ algorithm: string; fingerprint: string }>;
+export type HostKey = Readonly<{
+  algorithm: string;
+  fingerprint: string;
+  publicKey: string;
+}>;
 
 export type GitPaths = Readonly<{
   git: string;
@@ -59,6 +66,7 @@ export type GitFailure =
   | "permission-denied"
   | "transport-failed"
   | "host-key-mismatch"
+  | "host-key-unavailable"
   | "url-refused"
   | "lock-held"
   | "timed-out"
@@ -118,21 +126,18 @@ export type OutsideWriterVerdict =
 
 export interface Git {
   remoteUrlVerdict(remoteUrl: string): RemoteUrlVerdict;
-  scanHostKeys(remoteUrl: string): Promise<readonly HostKey[]>;
+  scanHostKeys(remoteUrl: string): Promise<ScanOutcome>;
+  confirmHostKey(
+    input: Readonly<{ remoteUrl: string; hostFingerprint: string }>,
+  ): Promise<ConfirmOutcome>;
   trustHostKey(
     input: Readonly<{ remoteUrl: string; hostKey: HostKey }>,
   ): Promise<void>;
-  seedHome(input: SeedHomeInput): Promise<void>;
+  seedHome(input: SeedHomeExtended): Promise<SeedHomeResult>;
   remoteInfo(
     input: Readonly<{ remoteUrl: string; credential: GitCredential }>,
   ): Promise<RemoteInfo>;
-  canPush(
-    input: Readonly<{
-      remoteUrl: string;
-      publishRef: string;
-      credential: GitCredential;
-    }>,
-  ): Promise<PushPreflight>;
+  canPush(input: CanPushInput): Promise<PushPreflight>;
   fetch(
     input: Readonly<{
       gitDir: string;

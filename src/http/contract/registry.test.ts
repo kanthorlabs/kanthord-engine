@@ -75,15 +75,27 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("attaches a response only to the two system routes and a request to none", () => {
+  it("attaches requests to provider.register, repository.inspect and repository.register and responses to the eight routes", () => {
+    const withRequest = registry.filter((entry) => entry.request !== undefined);
+    assert.deepEqual(withRequest.map((entry) => entry.operationId).sort(), [
+      "provider.register",
+      "repository.inspect",
+      "repository.register",
+    ]);
     const withResponse = registry.filter(
       (entry) => entry.response !== undefined,
     );
     assert.deepEqual(withResponse.map((entry) => entry.operationId).sort(), [
+      "provider.list",
+      "provider.register",
+      "provider.show",
+      "repository.inspect",
+      "repository.list",
+      "repository.register",
+      "repository.show",
       "system.db",
       "system.health",
     ]);
-    assert.ok(registry.every((entry) => entry.request === undefined));
   });
 
   it("reports no faults on the authored registry", () => {

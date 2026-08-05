@@ -334,4 +334,13 @@ export default [
       ],
     },
   },
+  {
+    // The end-to-end harness is an out-of-tree consumer, not production code.
+    files: ["scripts/**/*.ts"],
+    languageOptions: {
+      parser: tseslint.parser,
+      ecmaVersion: "latest",
+      sourceType: "module",
+    },
+  },
 ];

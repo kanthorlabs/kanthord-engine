@@ -26,6 +26,7 @@ const expected: Readonly<Record<string, number>> = {
   "idempotency-mismatch": 156,
   "choices-stale": 157,
   "choices-changed": 158,
+  "host-key-mismatch": 159,
   "plan-invalid": 160,
   "choices-invalid": 161,
   "identity-kind-mismatch": 162,
@@ -45,7 +46,7 @@ describe("src/cli/exit-code.test", () => {
     assert.deepEqual(codes, statuses);
   });
 
-  it("each of the twenty codes maps to its literal exit code", () => {
+  it("each of the twenty-one codes maps to its literal exit code", () => {
     let count = 0;
     for (const [code, status] of Object.entries(errorStatuses)) {
       assert.equal(
@@ -55,7 +56,7 @@ describe("src/cli/exit-code.test", () => {
       );
       count += 1;
     }
-    assert.equal(count, 20);
+    assert.equal(count, 21);
   });
 
   it("every value is an integer between 1 and 255 and 0 never appears", () => {
@@ -83,7 +84,7 @@ describe("src/cli/exit-code.test", () => {
   });
 
   it("no two codes share an exit code", () => {
-    assert.equal(new Set(Object.values(exitCodes)).size, 20);
+    assert.equal(new Set(Object.values(exitCodes)).size, 21);
   });
 
   it("unknown codes fall to the category floor", () => {

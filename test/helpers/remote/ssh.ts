@@ -132,6 +132,7 @@ function writeSshdConfig(
     "AllowAgentForwarding no",
     "AllowTcpForwarding no",
     "X11Forwarding no",
+    "PerSourcePenalties no",
     "LogLevel VERBOSE",
     "Subsystem sftp internal-sftp",
     `SetEnv PATH=${tools.execPath}`,

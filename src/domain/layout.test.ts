@@ -1,9 +1,51 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { lintCase } from "../../test/helpers/lint.ts";
+
+function relativeImportSpecifiers(source: string): readonly string[] {
+  const specifiers: string[] = [];
+  for (const match of source.matchAll(/from\s+["'](\.[^"']+)["']/g)) {
+    specifiers.push(match[1] ?? "");
+  }
+  return specifiers;
+}
+
+const defaultTestFilePatterns = [
+  /\.test\.[cm]?[jt]s$/,
+  /-test\.[cm]?[jt]s$/,
+  /_test\.[cm]?[jt]s$/,
+  /^test-/,
+  /^test\.[cm]?[jt]s$/,
+] as const;
+
+const harnessPathMention = ["scripts", "e2e"].join("/");
+const envFileMention = [".env", "e2e"].join(".");
+const harnessScenarioPaths = [
+  ["scripts", "e2e", "test", "x.ts"].join("/"),
+  ["scripts", "e2e", "x.test.ts"].join("/"),
+  ["scripts", "e2e", "test-x.ts"].join("/"),
+];
+
+function walkFiles(dir: string): readonly string[] {
+  const result: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) result.push(...walkFiles(path));
+    else result.push(path);
+  }
+  return result;
+}
+
+function wouldBeCollectedByDefaultRunner(relativePath: string): boolean {
+  const segments = relativePath.split("/");
+  if (segments.includes("test")) return true;
+  const basename = segments[segments.length - 1] ?? "";
+  return defaultTestFilePatterns.some((pattern) => pattern.test(basename));
+}
 
 const domainDir = new URL("./", import.meta.url);
 const productionFiles = fs
@@ -130,6 +172,38 @@ describe("src/domain/layout.test", () => {
     }
   });
 
+  it("no file under src/commands/ imports another command module", () => {
+    const commandsDir = fileURLToPath(new URL("../commands/", import.meta.url));
+    const offenders: string[] = [];
+    for (const file of walkFiles(commandsDir)) {
+      if (file.endsWith(".test.ts")) continue;
+      const content = fs.readFileSync(file, "utf8");
+      for (const specifier of relativeImportSpecifiers(content)) {
+        const target = resolve(dirname(file), specifier);
+        if (target.startsWith(commandsDir)) {
+          offenders.push(`${relative(commandsDir, file)} -> ${specifier}`);
+        }
+      }
+    }
+    assert.equal(offenders.length, 0, offenders.join(", "));
+  });
+
+  it("no file under src/queries/ imports another query module", () => {
+    const queriesDir = fileURLToPath(new URL("../queries/", import.meta.url));
+    const offenders: string[] = [];
+    for (const file of walkFiles(queriesDir)) {
+      if (file.endsWith(".test.ts")) continue;
+      const content = fs.readFileSync(file, "utf8");
+      for (const specifier of relativeImportSpecifiers(content)) {
+        const target = resolve(dirname(file), specifier);
+        if (target.startsWith(queriesDir)) {
+          offenders.push(`${relative(queriesDir, file)} -> ${specifier}`);
+        }
+      }
+    }
+    assert.equal(offenders.length, 0, offenders.join(", "));
+  });
+
   it("src/services/event/index.ts importing Transaction from ../storage/index.ts is not a boundary violation", async () => {
     const rules = await lintCase({
       filePath: "src/services/event/index.ts",
@@ -200,5 +274,47 @@ describe("src/domain/layout.test", () => {
       !rules.includes("no-restricted-imports"),
       `unexpected no-restricted-imports`,
     );
+  });
+
+  it("the collection predicate reports every default shape", () => {
+    for (const path of harnessScenarioPaths) {
+      assert.ok(
+        wouldBeCollectedByDefaultRunner(path),
+        `${path} was not reported`,
+      );
+    }
+  });
+
+  it("no file under scripts/ is collected by the default test runner", () => {
+    const scriptsDir = fileURLToPath(
+      new URL("../../scripts/", import.meta.url),
+    );
+    const offenders = walkFiles(scriptsDir)
+      .map((file) => relative(scriptsDir, file))
+      .filter((file) => wouldBeCollectedByDefaultRunner(file));
+    assert.equal(
+      offenders.length,
+      0,
+      `${offenders.join(", ")} match a default test pattern; npm test would run them`,
+    );
+  });
+
+  it("no file under src/ or test/ mentions the harness or its env file", () => {
+    const rootDir = fileURLToPath(new URL("../../", import.meta.url));
+    for (const area of ["src", "test"]) {
+      const areaDir = join(rootDir, area);
+      for (const file of walkFiles(areaDir)) {
+        if (!file.endsWith(".ts")) continue;
+        const content = fs.readFileSync(file, "utf8");
+        assert.ok(
+          !content.includes(harnessPathMention),
+          `${file} mentions ${harnessPathMention}`,
+        );
+        assert.ok(
+          !content.includes(envFileMention),
+          `${file} mentions ${envFileMention}`,
+        );
+      }
+    }
   });
 });

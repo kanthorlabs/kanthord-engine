@@ -99,7 +99,7 @@ describe("src/services/config/convict.test", () => {
       }
     });
 
-    it("Settings key order is home, actor, masterKey, http, attemptLimit", () => {
+    it("Settings key order is home, actor, masterKey, http, tools, attemptLimit", () => {
       const dir = tmpDir();
       try {
         const filePath = writeJson(dir, validFile());
@@ -109,8 +109,24 @@ describe("src/services/config/convict.test", () => {
           "actor",
           "masterKey",
           "http",
+          "tools",
           "attemptLimit",
         ]);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("defaults the three tool paths when the file names none", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile());
+        const result = config.load(loadInput(dir, filePath));
+        assert.deepEqual(result.settings.tools, {
+          git: "/usr/bin/git",
+          ssh: "/usr/bin/ssh",
+          sshKeyscan: "/usr/bin/ssh-keyscan",
+        });
       } finally {
         fs.rmSync(dir, { recursive: true });
       }
@@ -558,6 +574,103 @@ describe("src/services/config/convict.test", () => {
           (err: any) => {
             assert.equal(err.code, "config-invalid");
             assert.match(err.message, /31/);
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+  });
+
+  describe("config-invalid — tools validation", () => {
+    it("throws config-invalid for tools.git: relative path, message names absolute path", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile({ tools: { git: "git" } }));
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-invalid");
+            assert.match(err.message, /must be an absolute path/);
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("throws config-invalid for tools.git: empty string", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile({ tools: { git: "" } }));
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-invalid");
+            assert.match(err.message, /must be a non-empty string/);
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("throws config-invalid naming the nested unknown tool key", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({ tools: { unknownTool: "/bin/x" } }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-invalid");
+            assert.match(err.message, /unknownTool/);
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+  });
+
+  describe("env overrides — tools", () => {
+    it("KANTHORD_TOOLS_GIT overrides tools.git and the others keep their defaults", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile());
+        const result = config.load(
+          loadInput(dir, filePath, {
+            env: { KANTHORD_TOOLS_GIT: "/opt/git/bin/git" },
+          }),
+        );
+        assert.equal(result.settings.tools.git, "/opt/git/bin/git");
+        assert.equal(result.settings.tools.ssh, "/usr/bin/ssh");
+        assert.equal(result.settings.tools.sshKeyscan, "/usr/bin/ssh-keyscan");
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("a relative KANTHORD_TOOLS_SSH throws config-invalid", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile());
+        assert.throws(
+          () =>
+            config.load(
+              loadInput(dir, filePath, {
+                env: { KANTHORD_TOOLS_SSH: "relative/ssh" },
+              }),
+            ),
+          (err: any) => {
+            assert.equal(err.code, "config-invalid");
+            assert.match(err.message, /must be an absolute path/);
             return true;
           },
         );

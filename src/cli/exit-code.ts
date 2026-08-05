@@ -20,6 +20,7 @@ export const exitCodes: Readonly<Record<ErrorCode, number>> = {
   "idempotency-mismatch": 156,
   "choices-stale": 157,
   "choices-changed": 158,
+  "host-key-mismatch": 159,
   "plan-invalid": 160,
   "choices-invalid": 161,
   "identity-kind-mismatch": 162,

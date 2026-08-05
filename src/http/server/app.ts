@@ -4,6 +4,7 @@ import type { Context, Next } from "koa";
 
 import type { Operation } from "../contract/operation.ts";
 import { registry } from "../contract/registry.ts";
+import { httpError } from "../contract/errors.ts";
 import { authMiddleware } from "./auth.ts";
 import { dispatchMiddleware } from "./dispatch.ts";
 import { envelopeMiddleware } from "./envelope.ts";
@@ -69,7 +70,17 @@ function bodyParserForHandled(
       match.operation.status !== "stubbed" &&
       handlers[match.operation.operationId] !== undefined;
     if (hasHandler) {
-      await parse(context, next);
+      try {
+        await parse(context, next);
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          throw httpError(
+            "invalid-request",
+            "the request body is not valid json",
+          );
+        }
+        throw error;
+      }
       return;
     }
     await next();

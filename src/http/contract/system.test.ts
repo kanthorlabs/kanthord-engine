@@ -170,18 +170,28 @@ describe("src/http/contract/system.test", () => {
     assert.equal(findOperation("blob.show")?.response, undefined);
   });
 
-  it("exactly two registry entries carry a response and none carries a request", () => {
+  it("nine registry entries carry a response and three carry a request", () => {
     const withResponse = registry.filter(
       (entry) => entry.response !== undefined,
     );
-    assert.equal(withResponse.length, 2);
+    assert.equal(withResponse.length, 9);
     assert.deepEqual(withResponse.map((entry) => entry.operationId).sort(), [
+      "provider.list",
+      "provider.register",
+      "provider.show",
+      "repository.inspect",
+      "repository.list",
+      "repository.register",
+      "repository.show",
       "system.db",
       "system.health",
     ]);
-    assert.equal(
-      registry.filter((entry) => entry.request !== undefined).length,
-      0,
+    assert.deepEqual(
+      registry
+        .filter((entry) => entry.request !== undefined)
+        .map((entry) => entry.operationId)
+        .sort(),
+      ["provider.register", "repository.inspect", "repository.register"],
     );
   });
 

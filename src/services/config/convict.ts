@@ -31,6 +31,15 @@ function positiveInteger(value: unknown): void {
   }
 }
 
+function absolutePath(value: unknown): void {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error("must be a non-empty string");
+  }
+  if (!path.isAbsolute(value)) {
+    throw new Error("must be an absolute path");
+  }
+}
+
 function buildSchema(): Record<string, unknown> {
   return {
     home: { format: "nonEmptyString", default: null, env: "KANTHORD_HOME" },
@@ -53,6 +62,23 @@ function buildSchema(): Record<string, unknown> {
         format: "hostList",
         default: null,
         env: "KANTHORD_HTTP_ALLOWED_HOSTS",
+      },
+    },
+    tools: {
+      git: {
+        format: "absolutePath",
+        default: "/usr/bin/git",
+        env: "KANTHORD_TOOLS_GIT",
+      },
+      ssh: {
+        format: "absolutePath",
+        default: "/usr/bin/ssh",
+        env: "KANTHORD_TOOLS_SSH",
+      },
+      sshKeyscan: {
+        format: "absolutePath",
+        default: "/usr/bin/ssh-keyscan",
+        env: "KANTHORD_TOOLS_SSH_KEYSCAN",
       },
     },
     attemptLimit: {
@@ -144,6 +170,7 @@ export class ConvictConfig implements Config {
       nonEmptyString: { validate: nonEmptyString },
       hostList: { validate: hostList },
       positiveInteger: { validate: positiveInteger },
+      absolutePath: { validate: absolutePath },
     });
 
     const config = convict(buildSchema(), { env: input.env });
@@ -219,6 +246,11 @@ export class ConvictConfig implements Config {
           port: config.get("http.port") as number,
           token: config.get("http.token") as string,
           allowedHosts: config.get("http.allowedHosts") as string[],
+        },
+        tools: {
+          git: config.get("tools.git") as string,
+          ssh: config.get("tools.ssh") as string,
+          sshKeyscan: config.get("tools.sshKeyscan") as string,
         },
         attemptLimit: config.get("attemptLimit") as number,
       },

@@ -9,16 +9,12 @@ import {
 } from "./errors.ts";
 import { readErrorCodeMatrix } from "../../../test/helpers/proposal.ts";
 
-const DEFERRED_TO_EPIC_007 = ["host-key-mismatch"];
-
 describe("src/http/contract/errors.test", () => {
-  it("matches the proposal code table, less the codes a later epic owns", () => {
+  it("matches the proposal code table", () => {
     const proposal = readErrorCodeMatrix();
 
     assert.deepEqual(
-      Object.keys(proposal)
-        .filter((code) => !DEFERRED_TO_EPIC_007.includes(code))
-        .sort(),
+      Object.keys(proposal).sort(),
       Object.keys(errorStatuses).sort(),
     );
     for (const [code, status] of Object.entries(errorStatuses)) {
@@ -26,16 +22,7 @@ describe("src/http/contract/errors.test", () => {
     }
   });
 
-  it("declares every deferred code in the proposal and in no registry", () => {
-    const proposal = readErrorCodeMatrix();
-
-    for (const code of DEFERRED_TO_EPIC_007) {
-      assert.equal(Object.hasOwn(proposal, code), true);
-      assert.equal(Object.hasOwn(errorStatuses, code), false);
-    }
-  });
-
-  it("pins the twenty codes in table order", () => {
+  it("pins the twenty-one codes in table order", () => {
     assert.deepEqual(Object.keys(errorStatuses), [
       "invalid-request",
       "unauthenticated",
@@ -51,6 +38,7 @@ describe("src/http/contract/errors.test", () => {
       "idempotency-mismatch",
       "choices-stale",
       "choices-changed",
+      "host-key-mismatch",
       "plan-invalid",
       "choices-invalid",
       "identity-kind-mismatch",
@@ -79,6 +67,7 @@ describe("src/http/contract/errors.test", () => {
       "idempotency-mismatch",
       "choices-stale",
       "choices-changed",
+      "host-key-mismatch",
     ]);
     assert.deepEqual(groups[422], [
       "plan-invalid",
@@ -92,7 +81,7 @@ describe("src/http/contract/errors.test", () => {
       (total, codes) => total + codes.length,
       0,
     );
-    assert.equal(sum, 20);
+    assert.equal(sum, 21);
   });
 
   it("keeps every code kebab-case", () => {

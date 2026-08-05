@@ -1,5 +1,32 @@
+import { z } from "zod";
+
 import { action, parameter, resource, sub } from "./path.ts";
 import { operations } from "./operation.ts";
+import {
+  providerKinds,
+  providerProjection,
+} from "../../domain/provider-payload.ts";
+
+export const providerRegisterRequest = z.object({
+  name: z.string().min(1),
+  kind: z.enum(providerKinds),
+  payload: z.unknown(),
+});
+
+export const providerView = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: z.enum(providerKinds),
+  projection: providerProjection.nullable(),
+  setDefaultAt: z.number().nullable(),
+  updatedAt: z.number(),
+});
+
+export const providerRegisterResponse = providerView;
+export const providerListResponse = z.object({
+  providers: z.array(providerView),
+});
+export const providerShowResponse = providerView;
 
 export const credential = operations([
   {
@@ -8,6 +35,8 @@ export const credential = operations([
     path: [resource("provider")],
     introducedIn: "phase-1",
     status: "routed",
+    request: providerRegisterRequest,
+    response: providerRegisterResponse,
   },
   {
     operationId: "provider.list",
@@ -15,6 +44,7 @@ export const credential = operations([
     path: [resource("provider")],
     introducedIn: "phase-1",
     status: "routed",
+    response: providerListResponse,
   },
   {
     operationId: "provider.show",
@@ -22,6 +52,7 @@ export const credential = operations([
     path: [resource("provider"), parameter("provider")],
     introducedIn: "phase-1",
     status: "routed",
+    response: providerShowResponse,
   },
   {
     operationId: "provider.rename",

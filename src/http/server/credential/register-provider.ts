@@ -1,0 +1,38 @@
+import type { Handler } from "../app.ts";
+import { httpError } from "../../contract/errors.ts";
+import { providerRegisterRequest } from "../../contract/credential.ts";
+import type {
+  ProviderView,
+  RegisterProviderInput,
+} from "../../../commands/provider/register-provider.ts";
+import { toHttpError } from "./refusals.ts";
+
+export type RegisterProviderHandlerDependencies = Readonly<{
+  registerProvider: (input: RegisterProviderInput) => ProviderView;
+  actor: string;
+}>;
+
+export function registerProviderHandler(
+  dependencies: RegisterProviderHandlerDependencies,
+): Handler {
+  return (context) => {
+    const parsed = providerRegisterRequest.safeParse(context.body);
+    if (!parsed.success) {
+      throw httpError(
+        "invalid-request",
+        "the provider registration body is invalid",
+      );
+    }
+    try {
+      const view = dependencies.registerProvider({
+        name: parsed.data.name,
+        kind: parsed.data.kind,
+        payload: parsed.data.payload,
+        actor: dependencies.actor,
+      });
+      return { status: 200, body: view };
+    } catch (error) {
+      throw toHttpError(error);
+    }
+  };
+}

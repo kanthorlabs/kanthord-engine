@@ -15,6 +15,7 @@ export const errorStatuses = {
   "idempotency-mismatch": 409,
   "choices-stale": 409,
   "choices-changed": 409,
+  "host-key-mismatch": 409,
   "plan-invalid": 422,
   "choices-invalid": 422,
   "identity-kind-mismatch": 422,

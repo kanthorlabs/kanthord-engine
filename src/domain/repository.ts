@@ -30,3 +30,23 @@ export const repositoryRow = z
     },
   );
 export type RepositoryRow = z.infer<typeof repositoryRow>;
+
+export type RepositoryView = Readonly<{
+  id: string;
+  name: string;
+  remoteUrl: string;
+  credential: Readonly<{ id: string; name: string }>;
+  upstreamBranch: string;
+  landingBranch: string;
+  landingRef: string;
+  trackingRef: string;
+  publishRef: string;
+  publishOnApproval: boolean;
+  state: "ready" | "needs-reconcile";
+  landingOid: string | null;
+  trackingOid: string | null;
+  fetchedUpstreamOid: string | null;
+  divergedLandingOid: string | null;
+  divergedUpstreamOid: string | null;
+  updatedAt: number;
+}>;

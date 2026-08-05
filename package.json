@@ -14,6 +14,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test --test-timeout=60000",
+    "e2e:007": "node scripts/e2e/007/run.ts",
     "lint": "eslint .",
     "start": "node src/main.ts",
     "verify": "npm run typecheck && npm test && npm run lint",
