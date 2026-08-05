@@ -53,13 +53,13 @@ function makePaths(): GitPaths {
   };
 }
 
-function waitForFile(filePath: string): void {
-  const deadline = Date.now() + 5000;
+async function waitForFile(filePath: string, budgetMs: number): Promise<void> {
+  const deadline = Date.now() + budgetMs;
   while (Date.now() < deadline) {
     if (existsSync(filePath)) {
       return;
     }
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
   assert.fail(`timed out waiting for ${filePath}`);
 }
@@ -161,18 +161,20 @@ describe("src/services/git/run.test", () => {
       `#!/bin/sh\nprintf '%s' "$$" > '${sshPidPath}'\n/bin/sleep 30\n`,
       { mode: 0o700 },
     );
-    const rejection = await runGit({
+    const pending = runGit({
       args: ["ls-remote", "ssh://kanthord.invalid/r.git"],
       extraEnv: { GIT_SSH_COMMAND: `'${scriptPath}'` },
-      timeoutMs: 1500,
+      timeoutMs: 5000,
     }).then(
       () => null,
       (error: unknown) => error,
     );
+    await waitForFile(sshPidPath, 4000);
+    const sshPid = Number(readFileSync(sshPidPath, "utf8"));
+    assert.doesNotThrow(() => process.kill(sshPid, 0));
+    const rejection = await pending;
     assert.ok(rejection instanceof GitError, String(rejection));
     assert.equal(rejection.failure, "timed-out");
-    waitForFile(sshPidPath);
-    const sshPid = Number(readFileSync(sshPidPath, "utf8"));
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
       try {
