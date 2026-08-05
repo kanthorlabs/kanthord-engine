@@ -67,9 +67,10 @@ RED is the test-engineer's. **GREEN** (the smallest correct change satisfying th
 - **Helper scripts:** `scripts/**` is **yours to write** when the work needs a
   script (an EPIC `Proof:` script, an e2e/setup helper, a one-off check).
   Commit it here instead of pasting an ad-hoc inline shell blob. Keep it
-  executable, `set -euo pipefail`, and runnable from the repo root. Three
+  executable, `set -euo pipefail`, and runnable from the repo root. The
   pipeline guards stay locked to every role: `scripts/lane-check.sh`,
-  `scripts/verify-handoff.mjs`, `scripts/memory-append-only.sh`. Wiring a
+  `scripts/turn-snapshot.sh`, `scripts/verify-handoff.mjs`,
+  `scripts/memory-append-only.sh` and every `scripts/*.test.sh`. Wiring a
   script into `package.json` is not your lane → `OPEN:`.
 - New files go where the Task's `**Input:**` says.
 

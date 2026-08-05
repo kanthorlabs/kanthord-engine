@@ -166,13 +166,13 @@ TURN_ID=<epic-slug>-$TS-t<turn_count>                              # epic+timest
 DRAFT_FILE=<root>/.agent/tdd/.<next>-response-$TURN_ID.md          # <next> = test-engineer | software-engineer
 ```
 
-Also snapshot the set of changed files in `<root>` so Step 5g.1 can attribute this turn's edits and reject out-of-lane writes:
+Also snapshot the **content fingerprint** of every changed file in `<root>` so Step 5g.1 can attribute this turn's edits and reject out-of-lane writes:
 
 ```bash
-git -C '<root>' status --porcelain -uall | cut -c4- | sort > '/tmp/work-<epic-slug>-before-<turn>'
+scripts/turn-snapshot.sh '<root>' > '/tmp/work-<epic-slug>-before-<turn>'
 ```
 
-`-uall` is required so git lists each new file individually instead of collapsing it into a directory path; `sort` is required because Step 5g.1 feeds these snapshots to `comm`, which assumes sorted input.
+The guard emits one sorted `<blob-hash>\t<path>` line per dirty path (`ABSENT` in place of the hash for a deleted file). A **name-only** snapshot is not enough: a multi-turn TDD loop leaves files dirty by design, so a path already dirty before the turn appears in both snapshots and a name-set difference never reports the turn's second edit to it. The hash makes each turn's edit visible even on an already-dirty file. The guard uses `-uall` so git lists each new file individually instead of collapsing it into a directory path, `--no-renames` so a rename arrives as a plain delete plus a plain add rather than an `old -> new` record no predicate can split, and `LC_ALL=C sort` because Step 5g.1 feeds these snapshots to `comm`, which assumes sorted input.
 
 ### 5f. Dispatch the subagent
 
@@ -230,9 +230,11 @@ Re-read the tail (same pipeline as 5c) and also check for any new `^IMPLEMENTATI
 Lane boundaries are stated in the personas but nothing enforces them. Compute the files this turn changed (in `<root>`) and reject any write outside `next`'s lane — a cheap backstop.
 
 ```bash
-git -C '<root>' status --porcelain -uall | cut -c4- | sort > '/tmp/work-<epic-slug>-after-<turn>'
-TURN_FILES=$(comm -13 '/tmp/work-<epic-slug>-before-<turn>' '/tmp/work-<epic-slug>-after-<turn>')
+scripts/turn-snapshot.sh '<root>' > '/tmp/work-<epic-slug>-after-<turn>'
+TURN_FILES=$(comm -3 '/tmp/work-<epic-slug>-before-<turn>' '/tmp/work-<epic-slug>-after-<turn>' | sed 's/^\t//' | cut -f2- | LC_ALL=C sort -u)
 ```
+
+`comm -3` is required, not `comm -13`: a fingerprint line changes when the turn edits a file, deletes it, or reverts it to `HEAD`, and only the two-sided difference reports all three. `sed 's/^\t//'` strips the tab `comm` prefixes to its second column, and `cut -f2-` drops the hash to leave the path.
 
 Tests are **co-located** with source (`bar.ts` + `bar.test.ts` in one dir), so a
 prefix table cannot separate the lanes — this project uses a **predicate
@@ -243,18 +245,28 @@ script**: `scripts/lane-check.sh <role> <path>` (exit 0 = in-lane).
   `.agent/tdd/memory/test-engineer/`.
 - **software-engineer** lane: `src/**/*.ts` that is NOT a `*.test.ts` /
   `*.spec.ts`; plus `scripts/**` (helper/proof scripts its work needs — the
-  three pipeline guards below stay locked); plus its draft files and journal as
+  pipeline guards below stay locked); plus its draft files and journal as
   above.
 - **Always forbidden to BOTH** (the lane script denies these for every role):
   the locked plan tree `.agent/plan/**`; the pipeline files `.claude/**` and
   `.opencode/**`; the pipeline guards `scripts/lane-check.sh`,
-  `scripts/verify-handoff.mjs`, `scripts/memory-append-only.sh`;
+  `scripts/turn-snapshot.sh`, `scripts/verify-handoff.mjs`,
+  `scripts/memory-append-only.sh` and every `scripts/*.test.sh`;
   toolchain/config `package.json`, `package-lock.json`, `tsconfig*.json`,
   `*.config.*`; the architecture contract `AGENTS.md`; container/build files
   `Containerfile`, `compose.yaml`, `Makefile`. The reviewer-engineer edits
   nothing at all.
 
 Both roles may also write `.agent/tdd/` and their own `.agent/tdd/memory/<role>/` journal dir (under `<root>`).
+
+Pass each path to the predicate one at a time, and read a path with `read -r`, never by word splitting — a path that contains a space is legal, and splitting it produces two arguments the predicate denies for the wrong reason:
+
+```bash
+printf '%s\n' "$TURN_FILES" | while IFS= read -r changed; do
+  [ -n "$changed" ] || continue
+  scripts/lane-check.sh '<role>' "$changed" || exit 1
+done
+```
 
 If any path in `TURN_FILES` fails the active role predicate (or hits an always-forbidden path) → abort with `"lane violation: <role> changed <path>"` and leave the tree for human review. (`<DRAFT_FILE>` itself lives under `.agent/tdd/` and so is always in-lane.)
 
