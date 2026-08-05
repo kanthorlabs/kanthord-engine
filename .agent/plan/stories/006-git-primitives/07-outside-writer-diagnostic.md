@@ -98,7 +98,7 @@ The comparison is `===` on two strings. There is no normalisation, no abbreviati
 - This file writes nothing. It runs no `INSERT`, no `UPDATE`, and it calls no event log. The caller decides what a mismatch means.
 - It never sets `needs-reconcile`. `docs/proposal/phase-1/git-foundation.md:189` reserves that state for a landing-to-upstream divergence.
 - It never treats a passing verdict as proof the home was untouched. Nothing in this file records a "verified" fact, so nothing downstream can read one.
-- `transaction.get` returns `unknown`. Narrow it with a runtime check on the shape before reading the column; do not cast.
+- `transaction.get` returns `unknown`. Narrow it with a runtime check on the shape before reading the column; do not cast. Assert this through behaviour, not through the source text: feed a table of wrong-shaped rows — `null`, `undefined`, a number, a string, `[]`, `{}`, a wrong-typed column, a null column, an absent column — and require `null` from each. A source scan for `" as "` is not the assertion; it also fires on a legitimate `as const`.
 - Do not fall back to `base_oid`. A row with no `result_head_oid` is skipped by the `WHERE` clause, and the baseline is the previous row that did report one, or `null` when there is none.
 
 ## Verify

@@ -178,13 +178,17 @@ Block reasons appear in a node representation as `blockReason`, with the values 
 
 ## Security applies to every route
 
-One bearer scheme covers the whole surface, with **no exception**. `../phase-1/transport.md` decides it, and P1-E2 fixes the codes: no token is `401`, a wrong token is `401`, an `Origin` header is `403`, and a `Host` outside the allow list is `403`.
+One bearer scheme covers the whole surface, with **no exception**. `../phase-1/transport.md` decides it, and P1-E2 fixes the codes: no token is `401`, a wrong token is `401`, an `Origin` header outside the allow list is `403`, and a `Host` outside the allow list is `403`.
+
+The origin allow list is empty by default, so by default any `Origin` header is `403`. A deployment that names an origin gains a browser client and one anonymous surface: a `CORS` preflight, which a browser sends with no `Authorization` header. The preflight is answered after the `Host` check and before the bearer check, and its answer is a constant that names no route. `../phase-1/transport.md` holds the whole rule and states the disclosure it accepts.
 
 Every route needs the token, `system.health` included. An earlier draft exempted it, on the ground that it returned one constant and therefore revealed nothing. That ground is gone: `system.health` reports the status of every dependency, so it reads state, and an unauthenticated route reveals whatever it returns. A liveness probe that names which subsystem is down is a reconnaissance tool on a private network interface, and the deployment case — a non-loopback bind, where a token is mandatory for every other route — is exactly where it would be read. See [system.md](system.md).
 
-**The daemon therefore has no anonymous surface.** An unauthenticated request answers `401` whatever it asks for, and a registered path and an unregistered path answer identically, so the route table is not readable without the token. The cost is that an external monitor must hold the token to probe liveness; the daemon has one token and one human, so that is a configuration line rather than a new mechanism.
+**No route is readable without the token.** An unauthenticated request answers `401` whatever it asks for, and a registered path and an unregistered path answer identically, so the route table is not readable without the token. The cost is that an external monitor must hold the token to probe liveness; the daemon has one token and one human, so that is a configuration line rather than a new mechanism.
 
-The browser defences are a separate control and apply to every route, authenticated or not. The `Origin` rejection and the `Host` allow list stop a browser page and a DNS rebind, which a bearer token does not — a rebound page carries the victim's credentials by construction.
+A daemon with browser access configured answers one request without a token: the preflight. It names no route and reads no state, and `../phase-1/transport.md` states the disclosure it accepts. A daemon with no configured origin — the default — answers nothing without a token.
+
+The browser defences are a separate control and apply to every route, authenticated or not. The `Host` allow list stops a DNS rebind, which a bearer token does not, because a rebound page carries the victim's credentials by construction. The `Origin` allow list is browser access control, and it is not the rebind defence: a rebound page keeps its own `Host`, and a request with no `Origin` header passes the origin check by design.
 
 ## No route names a server path
 

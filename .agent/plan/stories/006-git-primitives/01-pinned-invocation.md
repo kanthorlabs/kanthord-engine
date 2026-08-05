@@ -69,19 +69,21 @@ export function gitArgv(args: readonly string[]): readonly string[];
 
 `gitEnvironment` returns a fresh object built **from nothing** — it never spreads `process.env`. The keys are exactly these, and the test asserts the key set:
 
-| Key                   | Value                |
-| --------------------- | -------------------- |
-| `PATH`                | `gitPath(paths)`     |
-| `HOME`                | `paths.home`         |
-| `LC_ALL`              | `C`                  |
-| `GIT_CONFIG_GLOBAL`   | `/dev/null`          |
-| `GIT_CONFIG_SYSTEM`   | `/dev/null`          |
-| `GIT_CONFIG_NOSYSTEM` | `1`                  |
-| `GIT_TERMINAL_PROMPT` | `0`                  |
-| `GIT_AUTHOR_NAME`     | `kanthord`           |
-| `GIT_AUTHOR_EMAIL`    | `kanthord@localhost` |
-| `GIT_COMMITTER_NAME`  | `kanthord`           |
-| `GIT_COMMITTER_EMAIL` | `kanthord@localhost` |
+| Key                   | Value                       |
+| --------------------- | --------------------------- |
+| `PATH`                | `gitPath(paths)`            |
+| `HOME`                | `paths.home`                |
+| `LC_ALL`              | `C`                         |
+| `GIT_CONFIG_GLOBAL`   | `/dev/null`                 |
+| `GIT_CONFIG_SYSTEM`   | `/dev/null`                 |
+| `GIT_CONFIG_NOSYSTEM` | `1`                         |
+| `GIT_TERMINAL_PROMPT` | `0`                         |
+| `GIT_AUTHOR_NAME`     | `kanthord`                  |
+| `GIT_AUTHOR_EMAIL`    | `kanthord@kanthord.invalid` |
+| `GIT_COMMITTER_NAME`  | `kanthord`                  |
+| `GIT_COMMITTER_EMAIL` | `kanthord@kanthord.invalid` |
+
+The identity domain is `kanthord.invalid`, not `localhost`. RFC 2606 reserves `.invalid`, so the name can never resolve. A `localhost` literal is also unavailable here: `src/domain/loopback.test.ts:85` admits exactly two files that may hold one, and `src/services/git/environment.ts` is not one of them.
 
 `GIT_DIR`, `GIT_WORK_TREE`, `GIT_CONFIG_COUNT` and every `GIT_TRACE*` name are absent rather than empty. A fresh object has no inherited key to unset, and an empty `GIT_DIR` is not the same as an absent one.
 
@@ -140,7 +142,7 @@ export function createGitRunner(paths: GitPaths): GitRunner;
 1. Resolves `pidFile` to `request.pidFile ?? join(paths.runDirectory, `git-${randomUUID()}.pid`)`. It records whether it minted the path.
 2. Calls `spawnSupervised({ command: paths.git, args: gitArgv(request.args), env: gitEnvironment({ paths, extra: request.extraEnv }), cwd: request.cwd ?? paths.home, pidFile })`.
 3. Collects `stdout` and `stderr` into two arrays of `Buffer`, tracking each total. When either total exceeds `request.outputLimitBytes ?? DEFAULT_OUTPUT_LIMIT_BYTES`, it cancels (step 4) and settles as `output-exceeded`.
-4. Starts one timer of `request.timeoutMs ?? DEFAULT_TIMEOUT_MS`. Cancellation is `signalGroup("SIGTERM")`, then a second timer of `TERMINATION_GRACE_MS`, then `signalGroup("SIGKILL")`. A `signalGroup` that throws with `code === "ESRCH"` is swallowed — the child exited between the decision and the signal — and any other error propagates. Both timers are cleared in a `finally`, so a resolved call leaves no pending handle and a `SIGTERM` cannot arrive after the child was reaped.
+4. Starts one timer of `request.timeoutMs ?? DEFAULT_TIMEOUT_MS`. Cancellation is `signalGroup("SIGTERM")`, then a second timer of `TERMINATION_GRACE_MS`, then `signalGroup("SIGKILL")`. A `signalGroup` that throws with `code === "ESRCH"` or `code === "EPERM"` is swallowed. Both mean the group is already gone: `ESRCH` when it is fully reaped, and `EPERM` when the leader is still a zombie, which is what `process.kill(-pid, …)` raises on darwin and Node 24.17.0. A fast-exiting child that breaches the output bound always hits that zombie window, so tolerating only `ESRCH` makes `run.test.ts` fail deterministically. Any other error is recorded and then rejects the runner promise after `exited` resolves. It is never thrown from inside a stream listener or a timer callback, because that raises an `uncaughtException` instead of failing the call. Both timers are cleared in a `finally`, so a resolved call leaves no pending handle and a `SIGTERM` cannot arrive after the child was reaped.
    After a cancellation, both streams stay attached and their data is discarded rather than accumulated. A descendant that inherited the pipe and writes into a full one would otherwise block, and the operation would not end when its `git` did.
 5. Awaits `exited`. When it minted the pid file, it removes it with `rmSync(pidFile, { force: true })` in a `finally`. When the caller supplied the path, it removes nothing: that file belongs to a `git_operation` row, and `.agent/plan/epics/007.5-startup-recovery.md:23` owns its lifecycle.
 6. **One precedence, and the first decision wins.** The runner records at most one verdict and never overwrites it, in this order: `output-exceeded`, then `timed-out`, then the launcher's `111`, then the exit code as data. The bound precedes the timeout because a breach is usually what causes the timeout that follows, and reporting the timeout would name the symptom rather than the cause.
@@ -160,6 +162,8 @@ Add a sixth `no-restricted-imports` block after the `src/cli/**` block at `eslin
 - `paths: [{ name: "node:child_process", message: "only src/services/git/launcher.ts creates a process; see .agent/plan/stories/006-git-primitives/04-supervised-spawn.md" }]`
 
 `test/helpers/daemon.ts:1` and `test/helpers/cli.ts:1` are under `test/`, so they are unaffected. This is the mechanism behind the epic's "no other file spawns a process"; a test alone would let a reviewer add a second spawn and then fix the test.
+
+The `ignores` list also needs `src/**/*.test.ts`, because `src/services/git/launcher.test.ts` and `src/services/home-lock/startup.test.ts` both create a process. That exemption is `node:child_process` only. Flat config applies the **last** matching `no-restricted-imports` entry per file and merges nothing, so a further block after the `src/**/*.test.ts` boundaries block must restate the `gitLibraries` group for `files: ["src/**/*.test.ts", "src/services/git/launcher.ts"]`. Without it the wrapper-library ban silently stops firing for every test file and for the launcher — the one file where a wrapper would be introduced. `src/domain/layout.test.ts` asserts both halves: `isomorphic-git` fires in a git-service file, in `launcher.ts` and in a test file, while `node:child_process` stays clean in `launcher.ts` and `launcher.test.ts`.
 
 ## Constraints
 

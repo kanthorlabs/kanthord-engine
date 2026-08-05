@@ -38,18 +38,24 @@ export function remoteUrlVerdict(remoteUrl: string): RemoteUrlVerdict;
 The function is pure and synchronous. It runs these steps in this exact order, and the order is asserted.
 
 1. **Control characters, on the raw string.** Scan every code unit of `remoteUrl`. When any code point is below `0x20`, or equals `0x7f`, refuse `control-character` with reason `"the url carries a control character"`. This runs **before** any parse, because `new URL("https://h/x\n.git")` silently strips the newline and yields path `/x.git` — a later check would never see it.
-2. **The scp-like spelling.** Match `/^([A-Za-z0-9._~+-]+)@([^:/@]+):(.+)$/` against `remoteUrl`. On a match, bind `host` to group 2 and `path` to group 3, set the transport to `ssh`, and continue at step 5 with those two values. `git@host:path` throws `ERR_INVALID_URL` in `new URL`, so it is recognised before parsing rather than after a failure.
-3. **Parse.** Call `new URL(remoteUrl)` inside a `try`. On a throw, refuse `malformed` with reason `"the url does not parse"`. Refuse `malformed` with reason `"the url names no host"` when `url.hostname` is the empty string, which is what `https:///r.git` parses to.
+2. **The scp-like spelling.** Match `/^([A-Za-z0-9._~+-]+)@([^:/@]+):(.+)$/` against `remoteUrl`. On a match, bind `host` to group 2 and `path` to group 3, set the transport to `ssh`, and continue at step 7 with those two values. `git@host:path` throws `ERR_INVALID_URL` in `new URL`, so it is recognised before parsing rather than after a failure.
+3. **Parse.** Call `new URL(remoteUrl)` inside a `try`. On a throw, refuse `malformed` with reason `"the url does not parse"`. This is the only refusal the parse itself produces.
 4. **Scheme.** Read `url.protocol`.
    - `"https:"` — transport `http-basic`.
-   - `"http:"` — transport `http-basic`, and step 6 applies.
+   - `"http:"` — transport `http-basic`, and step 8 applies.
    - `"ssh:"` — transport `ssh`.
    - anything else — refuse `scheme-not-allowed` with reason `` `the scheme ${url.protocol.slice(0, -1)} is not allowed` ``.
      Bind `host` to `url.hostname` and `path` to `url.pathname`.
-5. **Password.** For a parsed url, when `url.password !== ""`, refuse `password-in-url` with reason `"the url carries a password; store the secret in a credential"`. A username is not refused: `git@host:path` is the ordinary ssh spelling, and `url.username` is never inspected. The scp-like branch of step 2 has no password position, so it skips this step.
-6. **Option-like.** When `host` starts with `-`, refuse `option-like` with reason `"the host begins with a hyphen"`. When `path`, after one leading `/` is removed, starts with `-`, refuse `option-like` with reason `"the path begins with a hyphen"`.
-7. **Plain HTTP.** When the scheme is `http:`, call `isLoopbackHost(host.replace(/^\[/, "").replace(/\]$/, ""))`. On `false`, refuse `insecure-non-loopback` with reason `"plain HTTP is allowed only on a loopback host"`. The bracket strip is required: `new URL("http://[::1]:9/x.git").hostname` is `"[::1]"`, with the brackets.
-8. Return `{ allowed: true, transport, host }`, where `host` is the value bound above, brackets included for an IPv6 literal.
+5. **No host, on the raw string.** Find `"://"` in `remoteUrl`. When it is absent, this step passes. Otherwise take the remainder after it and refuse `malformed` with reason `"the url names no host"` when that remainder is empty or begins with `/`, `?` or `#`.
+6. **Password.** When `url.password !== ""`, refuse `password-in-url` with reason `"the url carries a password; store the secret in a credential"`. A username is not refused: `git@host:path` is the ordinary ssh spelling, and `url.username` is never inspected. The scp-like branch of step 2 has no password position, so it skips this step.
+7. **Option-like.** When `host` starts with `-`, refuse `option-like` with reason `"the host begins with a hyphen"`. When `path`, after one leading `/` is removed, starts with `-`, refuse `option-like` with reason `"the path begins with a hyphen"`.
+8. **Plain HTTP.** When the scheme is `http:`, call `isLoopbackHost(host.replace(/^\[/, "").replace(/\]$/, ""))`. On `false`, refuse `insecure-non-loopback` with reason `"plain HTTP is allowed only on a loopback host"`. The bracket strip is required: `new URL("http://[::1]:9/x.git").hostname` is `"[::1]"`, with the brackets.
+9. Return `{ allowed: true, transport, host }`, where `host` is the value bound above, brackets included for an IPv6 literal.
+
+Two measured facts fix the position and the mechanism of step 5, both on Node 24.17.0:
+
+- `url.hostname` cannot carry the check. `new URL("https:///r.git").hostname` is `"r.git"` and its pathname is `"/"`, not an empty hostname. `new URL("https://")` throws, so that row refuses at step 3 instead. The raw-string test is what sees the missing authority.
+- The no-host check must run **after** the scheme check, not before it. `file:///srv/r.git` and `ext::sh -c whoami` both parse with an empty `hostname`, so a no-host check placed earlier would refuse both as `malformed` while the refusal table below requires `scheme-not-allowed`. The table is the contract; this order is the only one that satisfies it.
 
 ## Constraints
 

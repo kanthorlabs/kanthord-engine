@@ -172,8 +172,13 @@ export default [
     },
   },
   {
-    // The git service runs the git binary. No git wrapper library may return.
+    // The git service runs the git binary: no wrapper library may return, and
+    // the launcher is the only place a process is created. Flat config applies
+    // the last no-restricted-imports entry per file, so the scoped blocks below
+    // (which come after this one) win for their directories and carry their own
+    // complete restriction sets; this one governs every other non-test src file.
     files: ["src/**/*.ts"],
+    ignores: ["src/services/git/launcher.ts", "src/**/*.test.ts"],
     rules: {
       "no-restricted-imports": [
         2,
@@ -183,6 +188,11 @@ export default [
               group: gitLibraries,
               message:
                 "the git service runs the git binary through spawn; see docs/proposal/phase-1/git-foundation.md",
+            },
+            {
+              group: ["node:child_process"],
+              message:
+                "only src/services/git/launcher.ts creates a process; see .agent/plan/stories/006-git-primitives/04-supervised-spawn.md",
             },
           ],
         },
@@ -223,6 +233,7 @@ export default [
                 "node:fs",
                 "node:fs/*",
                 "node:http",
+                "node:child_process",
               ],
               message:
                 "commands/ and queries/ reach a capability through its service interface.",
@@ -242,7 +253,13 @@ export default [
         {
           patterns: [
             {
-              group: ["koa", "@koa/*", "node:http", "node:sqlite"],
+              group: [
+                "koa",
+                "@koa/*",
+                "node:http",
+                "node:sqlite",
+                "node:child_process",
+              ],
               message:
                 "http/contract/ is the shared route contract: schemas only, no server.",
             },
@@ -266,10 +283,28 @@ export default [
                 "@koa/*",
                 "node:sqlite",
                 "graphology",
+                "node:child_process",
                 ...gitLibraries,
               ],
               message:
                 "cli/ calls the HTTP API. main.ts injects the db migrate handler.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/**/*.test.ts", "src/services/git/launcher.ts"],
+    rules: {
+      "no-restricted-imports": [
+        2,
+        {
+          patterns: [
+            {
+              group: gitLibraries,
+              message:
+                "the git service runs the git binary through spawn; see docs/proposal/phase-1/git-foundation.md",
             },
           ],
         },

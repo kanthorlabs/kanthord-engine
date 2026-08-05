@@ -49,7 +49,14 @@ export function launcherArgv(
 
 export function assertSignallable(pid: number | undefined): void;
 
-export function spawnSupervised(input: SupervisedSpawnInput): SupervisedChild;
+export type SupervisedSpawnFailure = Readonly<{
+  pid: undefined;
+  exited: Promise<SupervisedExit>;
+}>;
+
+export type SupervisedSpawn = SupervisedChild | SupervisedSpawnFailure;
+
+export function spawnSupervised(input: SupervisedSpawnInput): SupervisedSpawn;
 ```
 
 `launcherArgv` returns exactly:
@@ -73,7 +80,11 @@ const child = spawn(LAUNCHER_SHELL, launcherArgv(input), {
 
 It returns `child.pid` as `pid`, the two streams, an `exited` promise that resolves on the `close` event with `{ code, signal }`, and `signalGroup`.
 
-`assertSignallable(pid)` throws an `Error` with message `"a supervised pid must be greater than 1"` when `pid` is `undefined`, not an integer, or not greater than `1`. `spawnSupervised` calls it once on `child.pid` before it returns, and `signalGroup` calls it again before every signal.
+`assertSignallable(pid)` throws an `Error` with message `"a supervised pid must be greater than 1"` when `pid` is `undefined`, not an integer, or not greater than `1`. `spawnSupervised` calls it once on `child.pid` before it returns a `SupervisedChild`, and `signalGroup` calls it again before every signal.
+
+**A failed spawn returns the failure member, and never a `SupervisedChild` carrying a fake pid.** `spawn` returns a `ChildProcess` with `pid === undefined` when the spawn failed asynchronously — a missing `cwd`, for example — and reports the cause through the `error` event afterwards. Every value of `SupervisedChild.pid` is signallable, so that state cannot be expressed as a `SupervisedChild`; returning one with `pid: 0` would make the type claim a signallable process id for a process that does not exist. The failure member carries `exited` and nothing else, because `exited` is the only channel that can report a cause which has not arrived yet when `spawnSupervised` returns.
+
+A caller narrows on `pid === undefined` before it reads a stream or sends a signal. `run.ts` awaits `exited` in that branch, so the spawn error — `ENOENT` for a missing `cwd` — rejects the runner promise unchanged. It raises `GitError("unknown", `git ${args[0]} did not start`, "")` only if `exited` resolves instead.
 
 `signalGroup(signal)` calls `assertSignallable(pid)` and then `process.kill(-pid, signal)`. It never falls back to `process.kill(pid, signal)`. Signalling group `0` is the daemon's own group and signalling group `1` is every process on the machine, which is why the guard is a throw rather than a return.
 

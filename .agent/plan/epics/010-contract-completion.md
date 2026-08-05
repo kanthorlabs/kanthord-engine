@@ -6,6 +6,14 @@ Status: **draft**.
 
 Every route in `docs/proposal/api/` answers. A phase-1 route answers with data, a later-phase route answers `501 not-implemented` and writes no state, and a `post-mvp` path answers `404`.
 
+## What EPIC 004.5 already did
+
+`004.5` authored the request and response schemas for every phase-1 read operation, plus a validated
+example set, ahead of the handlers, because a second repository builds against them. So this epic no
+longer authors the `system.status` and `event.list` schema pairs — it implements their handlers and
+authors `blob.show`, whose media contract is not a body schema. The non-goal below is unchanged in
+substance: a `stubbed` operation still carries no schema.
+
 ## Non-goals
 
 - No later-phase behaviour. A `501` route is a **registry entry** and nothing more. EPIC 004 already declared its identity — `operationId`, method, path tuple, `introducedIn` and `status` — and it carries no request or response schema until the phase that implements it. "One zod schema pair per `operationId`" is a uniqueness rule, not a completeness rule: a schema belongs to exactly one operation and no second copy exists outside `src/http/contract/`, and an operation with no schema is correct rather than incomplete. So this epic authors three schema pairs — `system.status`, `blob.show` and `event.list` — and none for a stubbed route. A stub never reads a body, because dispatch answers `501` before the body parser runs.

@@ -1,3 +1,5 @@
+import type { Transaction } from "../storage/index.ts";
+
 export type GitCredential =
   | Readonly<{
       transport: "http-basic";
@@ -10,6 +12,16 @@ export type GitCredential =
 export type GitTransport = GitCredential["transport"];
 
 export type HostKey = Readonly<{ algorithm: string; fingerprint: string }>;
+
+export type GitPaths = Readonly<{
+  git: string;
+  ssh: string;
+  sshKeyscan: string;
+  home: string;
+  keyDirectory: string;
+  knownHosts: string;
+  runDirectory: string;
+}>;
 
 export type SeedHomeInput = Readonly<{
   gitDir: string;
@@ -29,6 +41,7 @@ export type RefUpdateInput = Readonly<{
   ref: string;
   expectedOid: string | null;
   nextOid: string;
+  pidFile: string;
 }>;
 
 export type RefUpdateResult =
@@ -48,7 +61,17 @@ export type GitFailure =
   | "host-key-mismatch"
   | "url-refused"
   | "lock-held"
+  | "timed-out"
+  | "output-exceeded"
   | "unknown";
+
+export type ForgeConvention = Readonly<{ username: string | null }>;
+
+export const forgeConventions: Readonly<Record<string, ForgeConvention>> = {
+  github: { username: null },
+  gitlab: { username: "oauth2" },
+  bitbucket: { username: "x-token-auth" },
+};
 
 export class GitError extends Error {
   readonly failure: GitFailure;
@@ -62,6 +85,7 @@ export class GitError extends Error {
 }
 
 export type UrlRefusal =
+  | "malformed"
   | "scheme-not-allowed"
   | "insecure-non-loopback"
   | "password-in-url"
@@ -77,6 +101,7 @@ export type PushPreflight =
   | Readonly<{ allowed: false; failure: GitFailure; detail: string }>;
 
 export type OutsideWriterInput = Readonly<{
+  transaction: Transaction;
   gitDir: string;
   repositoryId: string;
   ref: string;
@@ -109,7 +134,11 @@ export interface Git {
     }>,
   ): Promise<PushPreflight>;
   fetch(
-    input: Readonly<{ gitDir: string; credential: GitCredential }>,
+    input: Readonly<{
+      gitDir: string;
+      credential: GitCredential;
+      pidFile: string;
+    }>,
   ): Promise<void>;
   resolveRef(
     input: Readonly<{ gitDir: string; ref: string }>,
@@ -118,3 +147,5 @@ export interface Git {
   checkOutsideWriter(input: OutsideWriterInput): Promise<OutsideWriterVerdict>;
   clone(input: CloneInput): Promise<string>;
 }
+
+export const TRACKING_REFSPEC = "+refs/heads/*:refs/remotes/origin/*";

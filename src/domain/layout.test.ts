@@ -151,4 +151,54 @@ describe("src/domain/layout.test", () => {
       `expected boundaries/dependencies, got [${rules.join(", ")}]`,
     );
   });
+
+  it("spawn in src/services/git/probe.ts triggers no-restricted-imports", async () => {
+    const rules = await lintCase({
+      filePath: "src/services/git/probe.ts",
+      code: 'import { spawn } from "node:child_process";',
+    });
+    assert.ok(
+      rules.includes("no-restricted-imports"),
+      `expected no-restricted-imports, got [${rules.join(", ")}]`,
+    );
+  });
+
+  it("spawn in src/services/git/launcher.ts does not trigger no-restricted-imports", async () => {
+    const rules = await lintCase({
+      filePath: "src/services/git/launcher.ts",
+      code: 'import { spawn } from "node:child_process";',
+    });
+    assert.ok(
+      !rules.includes("no-restricted-imports"),
+      `unexpected no-restricted-imports`,
+    );
+  });
+
+  for (const filePath of [
+    "src/services/git/probe.ts",
+    "src/services/git/launcher.ts",
+    "src/services/git/probe.test.ts",
+  ]) {
+    it(`isomorphic-git in ${filePath} triggers no-restricted-imports`, async () => {
+      const rules = await lintCase({
+        filePath,
+        code: 'import git from "isomorphic-git";',
+      });
+      assert.ok(
+        rules.includes("no-restricted-imports"),
+        `expected no-restricted-imports, got [${rules.join(", ")}]`,
+      );
+    });
+  }
+
+  it("spawn in src/services/git/launcher.test.ts does not trigger no-restricted-imports", async () => {
+    const rules = await lintCase({
+      filePath: "src/services/git/launcher.test.ts",
+      code: 'import { spawn } from "node:child_process";',
+    });
+    assert.ok(
+      !rules.includes("no-restricted-imports"),
+      `unexpected no-restricted-imports`,
+    );
+  });
 });

@@ -18,6 +18,7 @@ Foundation layers first, then vertical use cases, then the contract sweep, then 
 | 002   | Domain and state machine    | 11      | The machine is defined and unit tested. Every service interface exists.              |
 | 003   | Storage                     | 8       | Every phase-1 table exists. Migrations are idempotent. Secrets and blobs persist.    |
 | 004   | Transport skeleton          | 8       | A request reaches a handler under the full transport policy, and the CLI carries it. |
+| 004.5 | Contract schemas            | 7       | Every phase-1 read shape is a zod schema plus an example. No handler is written.     |
 | 005   | Test infrastructure         | 5       | Two fixture remotes answer real git HTTP and ssh, and each passes its own list.      |
 | 006   | Git primitives              | 8       | A ref write is a compare-and-swap. The three ref roles never blur.                   |
 | 007   | Repository registration     | 10      | A human registers a real remote and reads it back, end to end.                       |
@@ -25,20 +26,28 @@ Foundation layers first, then vertical use cases, then the contract sweep, then 
 | 008   | Project and plan            | 15      | A human imports, exports and re-imports a plan with per-node conflict choices.       |
 | 009   | CLI surface and composition | 6       | The program is assembled, and an unwired command fails a test.                       |
 | 010   | Contract completion         | 5       | Status, blobs, events, and every later-phase route answering `501`.                  |
+| 010.5 | Browser access              | 6       | A named origin reaches the daemon. An empty list keeps the 004 behaviour.            |
+| 010.6 | Idempotent POST             | 8       | A keyed `POST` retried is suppressed, per an operation policy in the registry.       |
 | 011   | End-to-end scenarios        | 11      | P1-E1, P1-E2, P1-E4 and P1-E3 produce evidence bundles.                              |
 | 012   | Phase 1 acceptance run      | 6       | The scenarios ran once, in order, and one verdict points at the P1-E3 bundle.        |
 
-Total: 109 stories.
+Total: 130 stories.
 
-`007.5` carries a decimal because it was inserted after `008` to `012` were numbered, and renumbering five epics would break every cross-reference for no gain.
+`007.5` carries a decimal because it was inserted after `008` to `012` were numbered, and renumbering five epics would break every cross-reference for no gain. `004.5`, `010.5` and `010.6` carry one for the same reason.
 
 ## Dependencies
 
 ```
-001 ─> 002 ─> 003 ─> 004 ─┬─> 005 ─> 006 ─> 007 ─> 007.5 ─┬─> 009 ─> 010 ─> 011 ─> 012
+001 ─> 002 ─> 003 ─> 004 ─┬─> 005 ─> 006 ─> 007 ─> 007.5 ─┬─> 009 ─> 010 ─> 010.5 ─> 010.6 ─> 011 ─> 012
                           │                                 │
-                          └─────────────────────────────────┴─> 008 ─┘
+                          ├─────────────────────────────────┴─> 008 ─┘
+                          │
+                          └─> 004.5 (parallel, unblocks the Flutter client)
 ```
+
+004.5 needs 002 for the domain enums and 004 for the registry, and it needs nothing else: `src/http/contract/` imports no storage and no command, so a schema is authorable before its handler exists. It therefore runs **in parallel** with 005 to 008 rather than in the chain, and it is the one epic whose consumer is a second repository. `kanthord-apps/docs/api/parallel-development.md` states what that repository does with it.
+
+010.5 needs 010, because a browser client reads real routes and a preflight over a registry that still answers `501` everywhere proves nothing. 010.6 needs 010 for the same reason — a policy per operation is registry data — and 010.6 follows 010.5 because `Idempotency-Key` reaches a browser only through the preflight allow list 010.5 owns. 011 needs both, because a scenario drives the browser path and the retry path.
 
 007.5 needs 007, because a reap needs a journal row that only a real git operation writes, and 009 needs 007.5, because the composition root wires recovery in before readiness.
 
@@ -81,3 +90,7 @@ Each of these came out of a debate round and now lives in the proposal files nam
 | `npm run verify` is staged, and it starts a daemon for the `db status` step           | `phase-1/domain.md`, `api/system.md`             |
 | Both provider kinds, `git` and `llm`, ship in phase 1                                 | `phase-1/README.md`                              |
 | The network-filesystem refusal is effective where the platform reports a type         | `phase-1/git-foundation.md`, `phase-1/README.md` |
+| A browser client is supported through an allowed-origin list that is empty by default | `phase-1/transport.md`, `api/README.md`          |
+| A keyed `POST` is idempotent, by a policy per operation, memory-backed except import  | EPIC 010.6, pending a proposal amendment         |
+
+The last row is the one decision here that has **not** landed in `docs/proposal/` yet. EPIC 010.6 holds the design, and `docs/proposal/api/README.md` needs its idempotency section widened from `plan.import` alone before that epic is authored. The client contract already depends on it: `kanthord-apps/docs/api/errors.md`.
