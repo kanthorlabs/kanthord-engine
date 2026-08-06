@@ -85,7 +85,11 @@ src/*.ts)
   exit 0
   ;;
 scripts/*)
-  [ "$role" = software-engineer ] || deny "scripts are the software-engineer lane"
+  if [ "$is_test" = yes ]; then
+    [ "$role" = test-engineer ] || deny "a test file is not the software-engineer lane"
+  else
+    [ "$role" = software-engineer ] || deny "scripts are the software-engineer lane"
+  fi
   exit 0
   ;;
 test/helpers/*.ts)

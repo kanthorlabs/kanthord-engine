@@ -10,17 +10,23 @@ Every route in `docs/proposal/api/` answers. A phase-1 route answers with data, 
 
 `004.5` authored the request and response schemas for every phase-1 read operation, plus a validated
 example set, ahead of the handlers, because a second repository builds against them. So this epic no
-longer authors the `system.status` and `event.list` schema pairs — it implements their handlers and
-authors `blob.show`, whose media contract is not a body schema. The non-goal below is unchanged in
+longer authors the `event.list` schema pair — it implements that handler and authors `blob.show`,
+whose media contract is not a body schema. The non-goal below is unchanged in
 substance: a `stubbed` operation still carries no schema.
+
+`system.status` is no longer this epic's either. EPIC 009 needs `kanthord status` to answer with data,
+and 009 runs first, so 009 authors the `system.status` schema, query and handler. This epic inherits
+one consequence: `.agent/plan/stories/009-cli-and-composition-root/07-composition-root-asserted-complete.md`
+pins `["blob.show", "event.list"]` as the exact set of `routed` operations with no handler, and the
+stories below empty that constant.
 
 ## Non-goals
 
-- No later-phase behaviour. A `501` route is a **registry entry** and nothing more. EPIC 004 already declared its identity — `operationId`, method, path tuple, `introducedIn` and `status` — and it carries no request or response schema until the phase that implements it. "One zod schema pair per `operationId`" is a uniqueness rule, not a completeness rule: a schema belongs to exactly one operation and no second copy exists outside `src/http/contract/`, and an operation with no schema is correct rather than incomplete. So this epic authors three schema pairs — `system.status`, `blob.show` and `event.list` — and none for a stubbed route. A stub never reads a body, because dispatch answers `501` before the body parser runs.
+- No later-phase behaviour. A `501` route is a **registry entry** and nothing more. EPIC 004 already declared its identity — `operationId`, method, path tuple, `introducedIn` and `status` — and it carries no request or response schema until the phase that implements it. "One zod schema pair per `operationId`" is a uniqueness rule, not a completeness rule: a schema belongs to exactly one operation and no second copy exists outside `src/http/contract/`, and an operation with no schema is correct rather than incomplete. So this epic authors one schema pair — `blob.show` — and none for a stubbed route. A stub never reads a body, because dispatch answers `501` before the body parser runs.
+- No `system.status`. EPIC 009 owns it, schema and handler both.
 
 ## Stories
 
-- **`system.status`** — the daemon version, the bind address, the start time, nodes by state, the repository reconciliation line, and the stale lease line. The shape exists even where phase 1 leaves a list empty.
 - **`blob.show`** — the `sha256:<hex>` path parameter, the content type, the caching and `ETag` behaviour, the `Range` behaviour, and the bearer requirement.
 - **`event.list`** — cursor paging over an append-only log, with the filters the domain declares. An offset cannot page it.
 - **The `501` sweep** — every stubbed `operationId` answers `501` and writes no state. The assertion enumerates the route registry, so a new stub is covered without a hand-written list.

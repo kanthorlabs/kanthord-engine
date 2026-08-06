@@ -24,14 +24,14 @@ Foundation layers first, then vertical use cases, then the contract sweep, then 
 | 007   | Repository registration     | 10      | A human registers a real remote and reads it back, end to end.                       |
 | 007.5 | Startup recovery            | 7       | Startup proves no predecessor child survives before it removes anything.             |
 | 008   | Project and plan            | 15      | A human imports, exports and re-imports a plan with per-node conflict choices.       |
-| 009   | CLI surface and composition | 6       | The program is assembled, and an unwired command fails a test.                       |
-| 010   | Contract completion         | 5       | Status, blobs, events, and every later-phase route answering `501`.                  |
+| 009   | CLI surface and composition | 9       | The program is assembled, stops cleanly, and an unwired command fails a test.        |
+| 010   | Contract completion         | 4       | Blobs, events, and every later-phase route answering `501`.                          |
 | 010.5 | Browser access              | 6       | A named origin reaches the daemon. An empty list keeps the 004 behaviour.            |
 | 010.6 | Idempotent POST             | 8       | A keyed `POST` retried is suppressed, per an operation policy in the registry.       |
 | 011   | End-to-end scenarios        | 11      | P1-E1, P1-E2, P1-E4 and P1-E3 produce evidence bundles.                              |
 | 012   | Phase 1 acceptance run      | 6       | The scenarios ran once, in order, and one verdict points at the P1-E3 bundle.        |
 
-Total: 130 stories.
+Total: 132 stories.
 
 `007.5` carries a decimal because it was inserted after `008` to `012` were numbered, and renumbering five epics would break every cross-reference for no gain. `004.5`, `010.5` and `010.6` carry one for the same reason.
 
@@ -51,7 +51,7 @@ Total: 130 stories.
 
 007.5 needs 007, because a reap needs a journal row that only a real git operation writes, and 009 needs 007.5, because the composition root wires recovery in before readiness.
 
-008 needs 004 for its routes and 007 for the repository an objective binds. 009 assembles what 007 and 008 built, and every later epic depends on it. 010 sweeps the routes neither use case reached. 011 proves the whole thing through the packaged binary. 012 runs it and decides.
+008 needs 004 for its routes and 007 for the repository an objective binds. 009 assembles what 007 and 008 built, and every later epic depends on it. 010 sweeps the routes neither use case reached, less `system.status`, which 009 must build to answer `kanthord status`. 011 proves the whole thing through the packaged binary. 012 runs it and decides.
 
 ## Why 012 exists
 
@@ -61,7 +61,7 @@ Total: 130 stories.
 
 ## Why 009 exists
 
-A phase can close with every unit test green and no working program. A command can be written, exported, unit tested and never referenced by `src/main.ts`, and nothing in 001 to 008 notices. 009 owns the seams that no vertical use case owns: the declared CLI inventory and its parity assertion, the two CLI commands that belong to no use case (`status` and `run`), the composition root asserted complete against every `routed` operation, and the daemon-backed `npm run verify`.
+A phase can close with every unit test green and no working program. A command can be written, exported, unit tested and never referenced by `src/main.ts`, and nothing in 001 to 008 notices. 009 owns the seams that no vertical use case owns: the declared CLI inventory and its parity assertion, the two CLI commands that belong to no use case (`status` and `run`) together with the `system.status` route they need, the daemon's shutdown path, the composition root asserted complete against every `routed` operation this phase implements, and the daemon-backed `npm run verify`.
 
 `npm run verify` is staged for the same reason. It is every epic's gate, and `docs/proposal/api/system.md` makes `db status` an HTTP client command, so 001 defines `verify` without it and 009 restores it against a daemon the script starts itself.
 
