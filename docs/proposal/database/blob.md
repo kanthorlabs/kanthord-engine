@@ -17,6 +17,8 @@ The algorithm prefix is stored, not implied. It costs seven characters, and it b
 
 Every payload an audit must reproduce goes here: the rendered messages, the tool trace, the diff, the check output, the profile document, the plan document, the reviewer reasons, the approval evidence and the error detail. Rows in other tables hold the hash. One store gives deduplication and one retention rule. A `_json` column stays small and fixed in shape, so no other column grows without bound.
 
+**There is no size cap, and `blob.show` materializes the whole payload to serve it.** `node:sqlite` exposes no incremental blob API, so a `BLOB` column is read as one buffer whatever the reader intends; a streamed response would wrap a buffer that is already in memory and would bound nothing. The `size` column therefore serves `Content-Length` and a caller's own decision, not a refusal. That is correct while the payload kinds above run to tens of kilobytes. The epic that first writes a payload large enough to matter is the epic that moves `content` out of the row, and it is the same epic that would gain a cap; inventing a threshold before then would refuse a payload the product has never produced.
+
 A blob is never deleted while any row references it. [../phase-2/instructions-and-profiles.md](../phase-2/instructions-and-profiles.md) requires the source of a prompt after the source is gone, so retention is a decision for a later phase, not a background job.
 
 ## Example

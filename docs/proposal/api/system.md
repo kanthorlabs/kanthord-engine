@@ -74,8 +74,10 @@ The contract:
 
 - The path parameter is the `blob.hash` value exactly as the citing field returned it: `GET /v1/blob/sha256:9f2a…`. The API never reformats it, and a client never strips the algorithm prefix. A colon is legal in a path segment, so nothing is percent-encoded.
 - The response body is the payload bytes. The `Content-Type` is `application/octet-stream` unless the citing field declares a narrower one, and the daemon never sniffs content to choose a type.
-- `ETag` is the hash as a quoted entity tag, and `Cache-Control` is `private, immutable`, with a long lifetime. A blob is content addressed, so the payload behind one hash never changes. `private` keeps it out of a shared cache, because a prompt and a diff carry the work of one human.
-- A `Range` request is answered, because a check log runs to tens of kilobytes and a client may want its tail.
+- `ETag` is the hash as a quoted entity tag, and `Cache-Control` is `private, immutable, max-age=31536000`. A blob is content addressed, so the payload behind one hash never changes. `private` keeps it out of a shared cache, because a prompt and a diff carry the work of one human. One year is the lifetime because an immutable address has no expiry and the number only has to be longer than a session.
+- No conditional request is answered. `If-None-Match` is ignored and the route never returns `304`. The `ETag` exists so a cache can key on it, not so a client can revalidate an address that cannot change.
+- A single `Range` request is answered, because a check log runs to tens of kilobytes and a client may want its tail. `bytes=a-b`, `bytes=a-` and `bytes=-n` are the three accepted forms, and the answer is `206` with `Content-Range`. Every response carries `Accept-Ranges: bytes`.
+- **Anything else is ignored, and the whole payload is returned with `200`.** A multi-range request, a malformed value, a non-`bytes` unit and a range that starts past the end all take that path. The route never answers `416`: the error matrix of [README.md](README.md) declares no such code, a `Range` is a client optimisation rather than a precondition, and serving the whole payload always satisfies the request the client actually made.
 - The bearer token applies. A hash is not a capability, and an unauthenticated read of an unguessable name is still an unauthenticated read.
 - An unknown hash is `404 not-found`. A blob is never deleted while a row cites it, so a `404` means the hash was never stored, not that it expired.
 
