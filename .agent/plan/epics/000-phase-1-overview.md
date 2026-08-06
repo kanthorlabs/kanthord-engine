@@ -28,10 +28,10 @@ Foundation layers first, then vertical use cases, then the contract sweep, then 
 | 010   | Contract completion         | 4       | Blobs, events, and every later-phase route answering `501`.                          |
 | 010.5 | Browser access              | 6       | A named origin reaches the daemon. An empty list keeps the 004 behaviour.            |
 | 010.6 | Idempotent POST             | 8       | A keyed `POST` retried is suppressed, per an operation policy in the registry.       |
-| 011   | End-to-end scenarios        | 11      | P1-E1, P1-E2, P1-E4 and P1-E3 produce evidence bundles.                              |
+| 011   | End-to-end scenarios        | 12      | P1-E1, P1-E2, P1-E4 and P1-E3 produce evidence bundles.                              |
 | 012   | Phase 1 acceptance run      | 6       | The scenarios ran once, in order, and one verdict points at the P1-E3 bundle.        |
 
-Total: 131 stories.
+Total: 132 stories.
 
 `007.5` carries a decimal because it was inserted after `008` to `012` were numbered, and renumbering five epics would break every cross-reference for no gain. `009.5`, `010.5` and `010.6` carry one for the same reason.
 

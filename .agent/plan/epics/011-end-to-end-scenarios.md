@@ -14,6 +14,14 @@ The packaged binary, the configuration discovery, the daemon lifecycle and the C
 
 ## Stories
 
+- **The `http.tokenFile` key** — the daemon takes its bearer token from a file, exactly as it
+  already takes its master key from `masterKeyFile`. `http.token` is the only way to
+  configure a token today, so every deployment writes the secret into its configuration
+  file, and a container run has nowhere to put it that a config dump does not disclose. The
+  key mirrors `masterKeyFile` in every respect: the two are mutually exclusive, the file
+  must be mode `0600`, and the resolved token is what reaches `Settings`, so no consumer of
+  the configuration changes. This is what lets the secret-handling story assert the token is
+  absent from the config file rather than merely redacted in it.
 - **The runner** — `scripts/e2e/run.mjs <id>`, with setup, invocation, assertion, cleanup, and every underlying command printed so a human reproduces any step by hand. One runner, not one script per scenario. It takes `--tag <tag>`, which names the run directory and every bundle path, so several invocations of one acceptance run write into one place. A reused tag is refused. With no `--tag` the runner mints one.
 - **Cleanup is central** — the runner releases every resource it took, in a `finally` and on `SIGINT` and `SIGTERM`. A temporary home, a daemon process, a held home lock and a labelled container are each released by the runner, never by prose in a scenario. A scenario declares what it took; it never carries its own teardown path, because a teardown restated per scenario is a teardown that one scenario forgets.
 - **The evidence bundle** — the scenario id and schema version, the commit under test, the timestamp and host identity, the daemon and CLI versions, the fixture hashes, the pinned `git` version, the object ids involved, every assertion result, and sanitized logs.
