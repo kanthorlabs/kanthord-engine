@@ -27,6 +27,7 @@ export const exitCodes: Readonly<Record<ErrorCode, number>> = {
   "credential-rejected": 163,
   "internal-error": 210,
   "not-implemented": 220,
+  "service-unavailable": 230,
 };
 
 export function exitCodeForError(code: string, status: number): number {

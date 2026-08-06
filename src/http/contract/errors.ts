@@ -22,6 +22,7 @@ export const errorStatuses = {
   "credential-rejected": 422,
   "internal-error": 500,
   "not-implemented": 501,
+  "service-unavailable": 503,
 } as const;
 
 export type ErrorCode = keyof typeof errorStatuses;

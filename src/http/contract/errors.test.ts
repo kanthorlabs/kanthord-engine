@@ -22,7 +22,7 @@ describe("src/http/contract/errors.test", () => {
     }
   });
 
-  it("pins the twenty-one codes in table order", () => {
+  it("pins the twenty-two codes in table order", () => {
     assert.deepEqual(Object.keys(errorStatuses), [
       "invalid-request",
       "unauthenticated",
@@ -45,6 +45,7 @@ describe("src/http/contract/errors.test", () => {
       "credential-rejected",
       "internal-error",
       "not-implemented",
+      "service-unavailable",
     ]);
   });
 
@@ -77,11 +78,22 @@ describe("src/http/contract/errors.test", () => {
     ]);
     assert.deepEqual(groups[500], ["internal-error"]);
     assert.deepEqual(groups[501], ["not-implemented"]);
+    assert.deepEqual(groups[503], ["service-unavailable"]);
     const sum = Object.values(groups).reduce(
       (total, codes) => total + codes.length,
       0,
     );
-    assert.equal(sum, 21);
+    assert.equal(sum, 22);
+  });
+
+  it("service-unavailable is 503 and carries no details", () => {
+    assert.equal(errorStatuses["service-unavailable"], 503);
+    assert.equal(Object.keys(errorStatuses).length, 22);
+    const error = httpError("service-unavailable", "declined");
+    assert.equal(error.status, 503);
+    assert.deepEqual(errorEnvelope(error), {
+      error: { code: "service-unavailable", message: "declined" },
+    });
   });
 
   it("keeps every code kebab-case", () => {

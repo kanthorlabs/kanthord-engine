@@ -33,6 +33,7 @@ const expected: Readonly<Record<string, number>> = {
   "credential-rejected": 163,
   "internal-error": 210,
   "not-implemented": 220,
+  "service-unavailable": 230,
 };
 
 const bytewise = (a: string, b: string): number =>
@@ -46,7 +47,7 @@ describe("src/cli/exit-code.test", () => {
     assert.deepEqual(codes, statuses);
   });
 
-  it("each of the twenty-one codes maps to its literal exit code", () => {
+  it("each of the twenty-two codes maps to its literal exit code", () => {
     let count = 0;
     for (const [code, status] of Object.entries(errorStatuses)) {
       assert.equal(
@@ -56,7 +57,7 @@ describe("src/cli/exit-code.test", () => {
       );
       count += 1;
     }
-    assert.equal(count, 21);
+    assert.equal(count, 22);
   });
 
   it("every value is an integer between 1 and 255 and 0 never appears", () => {
@@ -84,7 +85,7 @@ describe("src/cli/exit-code.test", () => {
   });
 
   it("no two codes share an exit code", () => {
-    assert.equal(new Set(Object.values(exitCodes)).size, 21);
+    assert.equal(new Set(Object.values(exitCodes)).size, 22);
   });
 
   it("unknown codes fall to the category floor", () => {
@@ -103,5 +104,9 @@ describe("src/cli/exit-code.test", () => {
 
   it("not-implemented is 220", () => {
     assert.equal(exitCodes["not-implemented"], 220);
+  });
+
+  it("service-unavailable is 230", () => {
+    assert.equal(exitCodeForError("service-unavailable", 503), 230);
   });
 });
