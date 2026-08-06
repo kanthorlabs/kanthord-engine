@@ -6,13 +6,14 @@ Status: **draft**.
 
 Every route in `docs/proposal/api/` answers. A phase-1 route answers with data, a later-phase route answers `501 not-implemented` and writes no state, and a `post-mvp` path answers `404`.
 
-## What EPIC 004.5 already did
+## What EPIC 009.5 already did
 
-`004.5` authored the request and response schemas for every phase-1 read operation, plus a validated
-example set, ahead of the handlers, because a second repository builds against them. So this epic no
-longer authors the `event.list` schema pair — it implements that handler and authors `blob.show`,
-whose media contract is not a body schema. The non-goal below is unchanged in
-substance: a `stubbed` operation still carries no schema.
+`009.5` authored the `event.list` request and response pair, typed the error `details` per code,
+tightened every authored schema to reject an unknown key, and published the document with a validated
+example set, because a second repository builds against it. So this epic no longer authors the
+`event.list` schema pair — it implements that handler and authors `blob.show`, whose media contract is
+not a body schema. The non-goal below is unchanged in substance: a `stubbed` operation still carries no
+schema.
 
 `system.status` is no longer this epic's either. EPIC 009 needs `kanthord status` to answer with data,
 and 009 runs first, so 009 authors the `system.status` schema, query and handler. This epic inherits

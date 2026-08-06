@@ -2,7 +2,7 @@
 
 Epic: `.agent/plan/epics/010-contract-completion.md`
 Prereq: EPIC 009 (sequence order), expanded at `.agent/plan/stories/009-cli-and-composition-root/` and not built.
-**Hard prereq for Story 02: EPIC 004.5.** Its content is now settled — `.agent/plan/epics/004.5-contract-schemas.md` fixes the `limit` bound and the cursor shape — but the schemas do not yet exist. Story 02 cannot be dispatched until `eventListRequest` and `eventListResponse` are in `src/http/contract/event.ts`. See B3.
+**Hard prereq for Story 02: EPIC 009.5.** Its content is now settled — `.agent/plan/epics/009.5-contract-schemas.md` fixes the `limit` bound and the cursor shape — but the schemas do not yet exist. Story 02 cannot be dispatched until `eventListRequest` and `eventListResponse` are in `src/http/contract/event.ts`. See B3.
 
 Every route in `docs/proposal/api/` answers. `blob.show` and `event.list` answer with data, every `stubbed` route answers `501` and is proved to write no row, and every `post-mvp` path answers `404`.
 
@@ -18,7 +18,7 @@ Every route in `docs/proposal/api/` answers. `blob.show` and `event.list` answer
 - **`04`, `05` and `02` all unblock together** once `01` lands, and they run in parallel. `04` touches `dispatch.test.ts` and `test/helpers/database.ts`; `05` touches `route.test.ts`; `02` touches the event route, a migration and `src/main.ts`. No two share a file.
 - `04` needs `01` for two reasons: both edit `src/http/server/dispatch.test.ts` (`01` extends the handler-context block at `:196-249`, `04` replaces the sweep at `:288-310`), and `04` imports the `drive` helper `01` exports.
 - `05` needs `01` for `drive` only. It was independent until S3 moved that helper into `test/helpers/app.ts`; one shared helper is worth one edge.
-- `02` needs `01` for `HandlerContext.query` and `singleValued`. It also needs EPIC 004.5's two schemas — see B3, the one open blocker.
+- `02` needs `01` for `HandlerContext.query` and `singleValued`. It also needs EPIC 009.5's two schemas — see B3, the one open blocker.
 - `03` needs `01` for `HandlerResult.headers` and `HandlerContext.headers`.
 - **`02` and `03` both edit the `pending` constant of `src/main.test.ts`.** They must not run concurrently. Order is `02` then `03`; `03` writes the final `[]`.
 
@@ -93,7 +93,7 @@ State of the tree at the start of this epic. EPIC 008 and 009 are expanded and n
 - **Story 04's claim is "gains no row", not "writes nothing".** A row count cannot see an `UPDATE` or a `DELETE` offset by an `INSERT`. `writes === 0` is the stronger assertion; the count snapshot is kept because it is the EPIC's literal wording.
 - **Story 05 does not claim to prove the two sources are unswapped.** Registry parity already makes the two sets equal, so no assertion over them can distinguish which was read. Provenance is visible in the source: one sweep iterates `registry`, the other iterates `readRouteMatrix()`.
 - **An array-valued request header is joined with `", "`.** That is the one form `node:http` produces, and it keeps the boundary type a plain string in both directions.
-- **`responseMedia` is a new optional `Operation` field, not a `response` schema.** `blob.show` returns bytes. `.agent/plan/epics/004.5-contract-schemas.md:58-60` excluded it from the schema slice for exactly this reason, and `src/http/contract/system.test.ts:168-171` — `blob.show` carries no response schema — stays true unweakened.
+- **`responseMedia` is a new optional `Operation` field, not a `response` schema.** `blob.show` returns bytes. `.agent/plan/epics/009.5-contract-schemas.md:58-60` excluded it from the schema slice for exactly this reason, and `src/http/contract/system.test.ts:168-171` — `blob.show` carries no response schema — stays true unweakened.
 - **The OpenAPI binary body is inline, not a component.** `{ type: "string", format: "binary" }` under the declared media type. `components.schemas` gains no key, so `openapi.test.ts:205-230` is untouched by this epic.
 - **An unsatisfiable or unparseable `Range` is ignored and the whole payload is returned with `200`**, and `Cache-Control` is `private, immutable, max-age=31536000`. Both are now stated in `docs/proposal/api/system.md`, with the reason for the `200`: a `Range` is a client optimisation rather than a precondition, so the whole payload always satisfies the request the client made. The route never answers `416` and never answers `304`.
 - **No `If-None-Match` and no `304`.** `docs/proposal/api/system.md:73-80` declares neither, and this epic invents no clause.
@@ -106,7 +106,7 @@ State of the tree at the start of this epic. EPIC 008 and 009 are expanded and n
 
 ## Open items
 
-This section was rewritten twice: once after an adversarial review, once after Ulrich settled the nine items it raised. Fifteen review findings changed a story — the handler types broke the import matrix, both query tests broke the test import rule, `responseMedia` allowed contradictory registry data, the `Range` and cache decisions were planner inventions, the `501` sweep overclaimed and miscounted the tables, three assertions in the `404` sweep were redundant or unprovable, the response-header test claimed a wire order it cannot fix, the `event.list` fixtures used ids that fail their own schema, `parseRange` ignored unsafe integers, the dispatch order contradicted itself, EPIC 004.5 was a real prerequisite, and every `src/main.ts` line anchor was going to go stale.
+This section was rewritten twice: once after an adversarial review, once after Ulrich settled the nine items it raised. Fifteen review findings changed a story — the handler types broke the import matrix, both query tests broke the test import rule, `responseMedia` allowed contradictory registry data, the `Range` and cache decisions were planner inventions, the `501` sweep overclaimed and miscounted the tables, three assertions in the `404` sweep were redundant or unprovable, the response-header test claimed a wire order it cannot fix, the `event.list` fixtures used ids that fail their own schema, `parseRange` ignored unsafe integers, the dispatch order contradicted itself, EPIC 009.5 was a real prerequisite, and every `src/main.ts` line anchor was going to go stale.
 
 **One blocker is open, and it blocks Story 02 alone. Stories 01, 03, 04 and 05 are dispatch-ready.**
 
@@ -118,9 +118,9 @@ This section was rewritten twice: once after an adversarial review, once after U
 
   This was the only fix that had to reach `docs/proposal/`. An EPIC non-goal would not have done: `AGENTS.md` makes the proposal the source of truth, so a story answering `400` to a declared phase-1 parameter would have left EPIC 010 unable to claim contract completion whatever its own EPIC file said. Story 02's `?wait=5` test now asserts specified behaviour instead of recording a gap.
 
-- B3 - **open, and it is the one thing blocking Story 02** - event.list-schemas-do-not-exist-yet - `.agent/plan/epics/004.5-contract-schemas.md` now fixes the three values that were in no document — `limit` defaults to 100, caps at 500 with a `400` rather than a silent clamp, and no response carries a cursor field — and records that `event.list` declares no `wait`. So the _content_ is settled and Story 02 and EPIC 004.5 can no longer disagree.
+- B3 - **open, and it is the one thing blocking Story 02** - event.list-schemas-do-not-exist-yet - `.agent/plan/epics/009.5-contract-schemas.md` now fixes the three values that were in no document — `limit` defaults to 100, caps at 500 with a `400` rather than a silent clamp, and no response carries a cursor field — and records that `event.list` declares no `wait`. So the _content_ is settled and Story 02 and EPIC 009.5 can no longer disagree.
 
-  What is still open is _existence_. 004.5 is `Status: draft` with no story directory, and `src/http/contract/event.ts` is twelve lines with no zod. Sequence order lets a story rely on an earlier epic's capability; it does not conjure one. **Story 02 cannot be dispatched until `eventListRequest` and `eventListResponse` exist.** The fix is to expand and build 004.5, which is its own `/author` run.
+  What is still open is _existence_. 009.5 is `Status: draft` with no story directory, and `src/http/contract/event.ts` is twelve lines with no zod. Sequence order lets a story rely on an earlier epic's capability; it does not conjure one. **Story 02 cannot be dispatched until `eventListRequest` and `eventListResponse` exist.** The fix is to expand and build 009.5, which is its own `/author` run.
 
 - B4 - **done, proposal amended** - range-and-caching-are-now-specified - `docs/proposal/api/system.md` states the three accepted `Range` forms, the `206` with `Content-Range`, `Accept-Ranges: bytes` on every response, the `200` fallback for anything else, the explicit refusal of `416` with its reason, `max-age=31536000`, and the refusal of `If-None-Match` and `304`. Story 03 implements the proposal instead of inventing it, and the `["200", "default"]` OpenAPI question dissolves with it.
 

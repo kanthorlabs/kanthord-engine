@@ -51,14 +51,14 @@ export const systemStatusResponse = z.strictObject({
 });
 ```
 
-`nodeKind`, `nodeState` and `blockReason` are imported from `../../domain/state.ts:4,17,31`. No enum is restated — `.agent/plan/epics/004.5-contract-schemas.md` makes a second copy a defect.
+`nodeKind`, `nodeState` and `blockReason` are imported from `../../domain/state.ts:4,17,31`. No enum is restated — a second copy is a defect, and `.agent/plan/epics/009.5-contract-schemas.md` audits the whole contract for one later.
 
 Attach `response: systemStatusResponse` to the `system.status` entry at `src/http/contract/system.ts:46-52`.
 
 Four field decisions, each fixed here so no build-time choice remains:
 
 - `startedAt` is an ISO-8601 string, not epoch milliseconds. `docs/proposal/api/system.md:55` calls it "the process start time" and a human reads this route.
-- `blockReason` is present and `null` when the state is not `blocked`, never absent. `docs/proposal/api/system.md:55` requires it "where the state is `blocked`", and an explicitly-`null` field is what `004.5` fixes for every optional value.
+- `blockReason` is present and `null` when the state is not `blocked`, never absent. `docs/proposal/api/system.md:55` requires it "where the state is `blocked`", and an explicitly-`null` field is unambiguous where an absent one is not. `009.5` applies the same rule to every optional value in its audit.
 - `repositories` carries both diverged object ids, non-nullable. `src/domain/repository.ts:23-30` refines `state = 'needs-reconcile'` to be exactly the case where both are non-null, so the list cannot hold a null.
 - `leases` carries `expiresAt` non-nullable, because the list is the **expired** leases and an expired lease has an expiry.
 

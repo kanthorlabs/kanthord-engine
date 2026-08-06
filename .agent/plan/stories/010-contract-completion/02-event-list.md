@@ -1,13 +1,13 @@
 # Story 02 — `event.list`
 
 Epic: `.agent/plan/epics/010-contract-completion.md`
-Depends on: Story 01 (it reads `HandlerContext.query`). EPIC 004.5 authors `eventListRequest` and `eventListResponse`; this story authors neither.
+Depends on: Story 01 (it reads `HandlerContext.query`). EPIC 009.5 authors `eventListRequest` and `eventListResponse`; this story authors neither.
 
 `event.list` is `routed` at `src/http/contract/event.ts:5-11` and answers `501` today, because `src/main.ts:193-256` binds no handler. `SqliteEventLog.list` (`src/services/event/sqlite.ts:61-120`) already implements every filter and the cursor. This story adds the query, the handler and the binding.
 
 ## The contract this story consumes
 
-EPIC 004.5 owns `src/http/contract/event.ts`. This story requires exactly these two exports, and edits neither. See B3 in the index.
+EPIC 009.5 owns `src/http/contract/event.ts`. This story requires exactly these two exports, and edits neither. See B3 in the index.
 
 ```ts
 export const eventListRequest = z.strictObject({
@@ -38,7 +38,7 @@ export const eventListResponse = z.strictObject({
 
 Four decisions this fixes, each load-bearing for the tests below:
 
-- **`limit` defaults to 100 and caps at 500.** `docs/proposal/api/event.md:18` names `limit` and declares no bound. `.agent/plan/epics/004.5-contract-schemas.md:73-75` requires "a bounded positive integer" and names no number. These two numbers are the bound.
+- **`limit` defaults to 100 and caps at 500.** `docs/proposal/api/event.md:18` names `limit` and declares no bound. `.agent/plan/epics/009.5-contract-schemas.md:73-75` requires "a bounded positive integer" and names no number. These two numbers are the bound.
 - **`z.coerce` is on `limit` only.** Every other filter arrives as a string and stays one.
 - **The response carries no cursor field.** `docs/proposal/api/event.md:18` — "`after` takes the **id** of the last event read". A client pages with the last id in `events`, so a `nextAfter` field would be a second authority for the same value.
 - **`wait` is not declared, and the proposal now agrees.** `docs/proposal/api/event.md` defers the long poll to phase 2: a phase-1 client polls the cursor on its own timer. `eventListRequest` is a `z.strictObject`, so `?wait=5` answers `400 invalid-request`, and that is the specified answer rather than a gap.
@@ -181,7 +181,7 @@ Story 03 empties the constant. **Story 02 and Story 03 both edit this literal an
 - No new error code. The route answers `200`, or `400 invalid-request` from the schema, or a transport refusal.
 - No edit to `src/services/event/`. `list` at `src/services/event/sqlite.ts:61-120` already builds `WHERE id > ?` and `ORDER BY id ASC` and needs nothing, and `src/services/event/sqlite.test.ts` already covers it. This story proves the adapter and the wire, never the SQL.
 - **No file under `src/queries/` or `src/http/server/` imports `src/services/event/sqlite.ts`.** Only `src/main.ts` names an implementation.
-- No edit to `src/http/contract/`. EPIC 004.5 owns both schemas.
+- No edit to `src/http/contract/`. EPIC 009.5 owns both schemas.
 - The query re-sorts nothing in TypeScript. `ORDER BY id ASC` in the service is the only order.
 - `payload` reaches the wire as the parsed object. `src/services/event/sqlite.ts:113` already calls `JSON.parse`, so the handler never re-parses and never re-stringifies.
 
@@ -219,7 +219,7 @@ const first: EventView = {
 - **The result is returned by identity.** `assert.strictEqual(listEvents(...), theArrayTheMockReturned)`. The query maps nothing.
 - **An empty result returns `[]`**, not `null`.
 - **`mock.list` is called with no transaction.** The second argument is `undefined`, so the query never opens or joins one.
-- **`eventListResponse.parse({ events: [first, second] })` succeeds.** This is the obligation `.agent/plan/epics/004.5-contract-schemas.md:37-40` places on the epic that implements a handler: a schema authored ahead of its handler is a prediction until one test validates a real response against it. The fixtures are the shape `EventView` declares, so this assertion couples the query's result type to the 004.5 schema.
+- **`eventListResponse.parse({ events: [first, second] })` succeeds.** This is the obligation `.agent/plan/epics/009.5-contract-schemas.md:37-40` places on the epic that implements a handler: a schema authored ahead of its handler is a prediction until one test validates a real response against it. The fixtures are the shape `EventView` declares, so this assertion couples the query's result type to the 009.5 schema.
 
 ### `src/http/server/event/list-event.test.ts` (new)
 
