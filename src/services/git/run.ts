@@ -4,7 +4,11 @@ import { join } from "node:path";
 
 import { GitError, type GitPaths } from "./index.ts";
 import { gitArgv, gitEnvironment } from "./environment.ts";
-import { spawnSupervised, LAUNCHER_PID_FILE_FAILURE } from "./launcher.ts";
+import {
+  spawnSupervised,
+  LAUNCHER_ORPHANED_FAILURE,
+  LAUNCHER_PID_FILE_FAILURE,
+} from "./launcher.ts";
 import { stripUserinfo } from "./redact.ts";
 
 export const DEFAULT_TIMEOUT_MS = 120_000;
@@ -29,7 +33,23 @@ export type GitRunResult = Readonly<{
 
 export type GitRunner = (request: GitRunRequest) => Promise<GitRunResult>;
 
-export function createGitRunner(paths: GitPaths): GitRunner {
+export type ScheduledTimer = Readonly<{ cancel(): void }>;
+
+export type Schedule = (
+  callback: () => void,
+  delayMs: number,
+) => ScheduledTimer;
+
+export const systemSchedule: Schedule = (callback, delayMs) => {
+  const timer = setTimeout(callback, delayMs);
+  timer.unref();
+  return { cancel: () => clearTimeout(timer) };
+};
+
+export function createGitRunner(
+  paths: GitPaths,
+  schedule: Schedule = systemSchedule,
+): GitRunner {
   return async (request: GitRunRequest): Promise<GitRunResult> => {
     const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const outputLimitBytes =
@@ -58,7 +78,7 @@ export function createGitRunner(paths: GitPaths): GitRunner {
     let cancelled = false;
     let exceeded = false;
     let timedOut = false;
-    let graceTimer: NodeJS.Timeout | undefined;
+    let graceClear: (() => void) | undefined;
     let signalError: unknown;
 
     const signalGroup = (signal: NodeJS.Signals): void => {
@@ -78,10 +98,10 @@ export function createGitRunner(paths: GitPaths): GitRunner {
       }
       cancelled = true;
       signalGroup("SIGTERM");
-      graceTimer = setTimeout(() => {
+      const grace = schedule(() => {
         signalGroup("SIGKILL");
       }, TERMINATION_GRACE_MS);
-      graceTimer.unref();
+      graceClear = grace.cancel;
     };
 
     child.stdout.on("data", (chunk: Buffer) => {
@@ -110,11 +130,10 @@ export function createGitRunner(paths: GitPaths): GitRunner {
       stderrChunks.push(chunk);
     });
 
-    const timeoutTimer = setTimeout(() => {
+    const timeout = schedule(() => {
       timedOut = true;
       cancel();
     }, timeoutMs);
-    timeoutTimer.unref();
 
     try {
       const { code, signal } = await child.exited;
@@ -142,6 +161,13 @@ export function createGitRunner(paths: GitPaths): GitRunner {
           "",
         );
       }
+      if (code === LAUNCHER_ORPHANED_FAILURE) {
+        throw new GitError(
+          "unknown",
+          "the launcher was orphaned before it started git",
+          "",
+        );
+      }
       if (code === null) {
         throw new GitError(
           "unknown",
@@ -156,9 +182,9 @@ export function createGitRunner(paths: GitPaths): GitRunner {
         args: request.args,
       };
     } finally {
-      clearTimeout(timeoutTimer);
-      if (graceTimer !== undefined) {
-        clearTimeout(graceTimer);
+      timeout.cancel();
+      if (graceClear !== undefined) {
+        graceClear();
       }
       if (mintedPidFile) {
         rmSync(pidFile, { force: true });

@@ -76,27 +76,33 @@ function recordingRunner(): {
 }
 
 describe("src/services/git/binary.test", () => {
-  it("Object.keys of createBinaryGit bytewise sorted deep-equals the twelve member names", () => {
+  it("Object.keys of createBinaryGit bytewise sorted deep-equals the eighteen member names", () => {
     const paths = makePaths();
     const { runner } = recordingRunner();
     const git = createBinaryGit({ runner, paths });
     const keys = Object.keys(git).sort((left, right) =>
       Buffer.compare(Buffer.from(left), Buffer.from(right)),
     );
-    assert.equal(keys.length, 12);
+    assert.equal(keys.length, 18);
     assert.deepEqual(keys, [
       "canPush",
       "checkOutsideWriter",
       "clone",
       "confirmHostKey",
       "fetch",
+      "inspectChild",
+      "listPidFiles",
       "refUpdate",
       "remoteInfo",
       "remoteUrlVerdict",
+      "removePidFile",
       "resolveRef",
       "scanHostKeys",
       "seedHome",
+      "stopChild",
+      "sweepHome",
       "trustHostKey",
+      "worktreeClean",
     ]);
   });
 

@@ -1,6 +1,8 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import type { Readable } from "node:stream";
 import {
   existsSync,
   mkdtempSync,
@@ -18,9 +20,15 @@ import { pinnedGitEnvironment } from "../../../test/helpers/remote/seed.ts";
 import {
   assertSignallable,
   launcherArgv,
+  LAUNCHER_SHELL,
+  READY_FD,
   spawnSupervised,
 } from "./launcher.ts";
-import type { SupervisedChild, SupervisedSpawn } from "./launcher.ts";
+import type {
+  SupervisedChild,
+  SupervisedExit,
+  SupervisedSpawn,
+} from "./launcher.ts";
 
 const tools: Tools = resolveTools();
 
@@ -38,20 +46,20 @@ function makeDirectory(): string {
   return dir;
 }
 
-function waitForFile(filePath: string): void {
+async function waitForFile(filePath: string): Promise<void> {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     if (existsSync(filePath)) {
       return;
     }
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
   assert.fail(`timed out waiting for ${filePath}`);
 }
 
-function spawnSleepingSsh(
+async function spawnSleepingSsh(
   dir: string,
-): Readonly<{ child: SupervisedChild; sshPidPath: string }> {
+): Promise<Readonly<{ child: SupervisedChild; sshPidPath: string }>> {
   const scriptPath = join(dir, "ssh-sleeper.sh");
   const sshPidPath = join(dir, "ssh.pid");
   writeFileSync(
@@ -71,7 +79,7 @@ function spawnSleepingSsh(
     pidFile: join(dir, "git.pid"),
   });
   assert.ok(child.pid !== undefined, "the sleeping ssh child must have a pid");
-  waitForFile(sshPidPath);
+  await waitForFile(sshPidPath);
   return { child, sshPidPath };
 }
 
@@ -89,13 +97,73 @@ function processGroupId(pid: number): number {
   return Number(output.trim());
 }
 
+function spawnGatedLauncher(dir: string): Readonly<{
+  child: ChildProcess;
+  exited: Promise<SupervisedExit>;
+  ready: Readable;
+  marker: string;
+  pidFile: string;
+}> {
+  const marker = join(dir, "marker");
+  const pidFile = join(dir, "git.pid");
+  const child = spawn(
+    LAUNCHER_SHELL,
+    launcherArgv({
+      command: "/bin/sh",
+      args: ["-c", `printf x > '${marker}'`],
+    }),
+    {
+      env: {
+        ...pinnedGitEnvironment,
+        PATH: tools.execPath,
+        KANTHORD_PID_FILE: pidFile,
+      },
+      cwd: dir,
+      detached: true,
+      stdio: ["pipe", "pipe", "pipe", "pipe"],
+    },
+  );
+  const exited = new Promise<SupervisedExit>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      resolve({ code, signal });
+    });
+  });
+  const ready = child.stdio[READY_FD] as Readable;
+  return { child, exited, ready, marker, pidFile };
+}
+
+function spawnOrphanedLauncher(dir: string): Readonly<{
+  child: ChildProcess;
+  exited: Promise<SupervisedExit>;
+  marker: string;
+  pidFile: string;
+}> {
+  const launcher = spawnGatedLauncher(dir);
+  launcher.child.stdin?.destroy();
+  return launcher;
+}
+
+function waitForExit(pid: number): void {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+  }
+  assert.fail(`timed out waiting for ${pid} to exit`);
+}
+
 describe("src/services/git/launcher.test", () => {
   it("launcherArgv pins the exact argument vector", () => {
     assert.deepEqual(
       launcherArgv({ command: tools.paths.git, args: ["--version"] }),
       [
         "-c",
-        'set -C; printf "%s" "$$" > "$KANTHORD_PID_FILE" || exit 111; exec "$@"',
+        'set -C; printf "%s" "$$" > "$KANTHORD_PID_FILE" || exit 111; printf r >&3; exec 3>&-; read -r _ || exit 112; exec 0</dev/null; exec "$@"',
         "sh",
         tools.paths.git,
         "--version",
@@ -112,7 +180,7 @@ describe("src/services/git/launcher.test", () => {
 
   it("the pid file names git, not the launcher", async () => {
     const dir = makeDirectory();
-    const { child } = spawnSleepingSsh(dir);
+    const { child } = await spawnSleepingSsh(dir);
     const recorded = Number(readFileSync(join(dir, "git.pid"), "utf8"));
     assert.equal(recorded, child.pid);
     assert.equal(processName(recorded), "git");
@@ -122,7 +190,7 @@ describe("src/services/git/launcher.test", () => {
 
   it("the child leads its own process group", async () => {
     const dir = makeDirectory();
-    const { child } = spawnSleepingSsh(dir);
+    const { child } = await spawnSleepingSsh(dir);
     assert.equal(processGroupId(child.pid), child.pid);
     child.signalGroup("SIGTERM");
     await child.exited;
@@ -130,7 +198,7 @@ describe("src/services/git/launcher.test", () => {
 
   it("the group signal reaches the descendant", async () => {
     const dir = makeDirectory();
-    const { child, sshPidPath } = spawnSleepingSsh(dir);
+    const { child, sshPidPath } = await spawnSleepingSsh(dir);
     const sshPid = Number(readFileSync(sshPidPath, "utf8"));
     assert.doesNotThrow(() => process.kill(sshPid, 0));
     child.signalGroup("SIGTERM");
@@ -152,7 +220,7 @@ describe("src/services/git/launcher.test", () => {
 
   it("a process-only signal leaves the descendant alive", async () => {
     const dir = makeDirectory();
-    const { child, sshPidPath } = spawnSleepingSsh(dir);
+    const { child, sshPidPath } = await spawnSleepingSsh(dir);
     const sshPid = Number(readFileSync(sshPidPath, "utf8"));
     process.kill(child.pid, "SIGTERM");
     await child.exited;
@@ -222,6 +290,107 @@ describe("src/services/git/launcher.test", () => {
     });
     assert.deepEqual(await child.exited, { code: 0, signal: null });
     assert.equal(existsSync(pidFile), true);
+  });
+
+  it("a clean git --version completes through the handshake", async () => {
+    const dir = makeDirectory();
+    const pidFile = join(dir, "git.pid");
+    const child = spawnSupervised({
+      command: tools.paths.git,
+      args: ["--version"],
+      env: { ...pinnedGitEnvironment, PATH: tools.execPath },
+      cwd: dir,
+      pidFile,
+    });
+    assert.ok(child.pid !== undefined, "the child must have a pid");
+    const stdoutChunks: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+    assert.deepEqual(await child.exited, { code: 0, signal: null });
+    assert.ok(
+      Buffer.concat(stdoutChunks).toString("utf8").startsWith("git version "),
+      "stdout must hold the version banner",
+    );
+  });
+
+  it("git does not inherit the handshake pipe on stdin", async () => {
+    const dir = makeDirectory();
+    const pidFile = join(dir, "git.pid");
+    const child = spawnSupervised({
+      command: tools.paths.git,
+      args: ["hash-object", "--stdin"],
+      env: { ...pinnedGitEnvironment, PATH: tools.execPath },
+      cwd: dir,
+      pidFile,
+    });
+    assert.ok(child.pid !== undefined, "the child must have a pid");
+    const stdoutChunks: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+    assert.deepEqual(await child.exited, { code: 0, signal: null });
+    assert.equal(
+      Buffer.concat(stdoutChunks).toString("utf8").trim(),
+      "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    );
+  });
+
+  it("an orphaned launcher exits 112 and never runs the command", async () => {
+    const dir = makeDirectory();
+    const { exited, marker, pidFile } = spawnOrphanedLauncher(dir);
+    assert.deepEqual(await exited, { code: 112, signal: null });
+    assert.equal(existsSync(marker), false);
+    assert.equal(existsSync(pidFile), true);
+  });
+
+  it("the readiness byte reaches the parent only after the pid file exists", async () => {
+    const dir = makeDirectory();
+    const { child, exited, ready, marker, pidFile } = spawnGatedLauncher(dir);
+    const reported = await new Promise<Buffer>((resolve) => {
+      ready.once("data", (chunk: Buffer) => resolve(chunk));
+    });
+    assert.equal(reported.toString("utf8"), "r");
+    assert.equal(existsSync(pidFile), true);
+    assert.equal(readFileSync(pidFile, "utf8"), String(child.pid));
+    assert.equal(existsSync(marker), false);
+    child.stdin?.destroy();
+    assert.deepEqual(await exited, { code: 112, signal: null });
+    assert.equal(existsSync(marker), false);
+  });
+
+  it("a launcher held before its pid write runs no command once its daemon dies", () => {
+    const dir = makeDirectory();
+    const marker = join(dir, "marker");
+    const pidFile = join(dir, "git.pid");
+    execFileSync("/bin/sh", ["-c", `mkfifo '${pidFile}'`], {
+      env: { PATH: "/usr/bin:/bin" },
+    });
+    const launcherModule = new URL("./launcher.ts", import.meta.url).href;
+    const source = [
+      `import { spawnSupervised } from ${JSON.stringify(launcherModule)};`,
+      `spawnSupervised({`,
+      `  command: "/bin/sh",`,
+      `  args: ["-c", ${JSON.stringify(`printf x > '${marker}'`)}],`,
+      `  env: { PATH: ${JSON.stringify(tools.execPath)} },`,
+      `  cwd: ${JSON.stringify(dir)},`,
+      `  pidFile: ${JSON.stringify(pidFile)},`,
+      `});`,
+      `setTimeout(() => process.exit(0), 200);`,
+    ].join("\n");
+    const daemon = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--eval", source],
+      { encoding: "utf8" },
+    );
+    assert.equal(daemon.status, 0, daemon.stderr);
+    const launcherPid = Number(readFileSync(pidFile, "utf8"));
+    assert.ok(launcherPid > 1, "the held launcher must report its pid");
+    waitForExit(launcherPid);
+    assert.equal(existsSync(marker), false);
+  });
+
+  it("the pid write precedes the gate", async () => {
+    const dir = makeDirectory();
+    const { child, exited, pidFile } = spawnOrphanedLauncher(dir);
+    assert.deepEqual(await exited, { code: 112, signal: null });
+    assert.equal(readFileSync(pidFile, "utf8"), String(child.pid));
   });
 
   it("assertSignallable refuses a pid that cannot name a group", () => {

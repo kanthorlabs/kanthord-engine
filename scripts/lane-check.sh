@@ -88,6 +88,10 @@ scripts/*)
   [ "$role" = software-engineer ] || deny "scripts are the software-engineer lane"
   exit 0
   ;;
+test/helpers/*.ts)
+  [ "$role" = test-engineer ] || deny "test helpers are the test-engineer lane"
+  exit 0
+  ;;
 esac
 
 deny "outside every lane"

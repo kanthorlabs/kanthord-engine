@@ -1,14 +1,18 @@
 import type { Git, GitPaths } from "./index.ts";
 import type { GitRunner } from "./run.ts";
+import { inspectChild, stopChild } from "./child.ts";
 import { cloneObjective } from "./clone.ts";
 import { fetchTracking } from "./fetch.ts";
 import { confirmHostKey, scanHostKeys, trustHostKey } from "./host-key.ts";
 import { checkOutsideWriter } from "./outside-writer.ts";
+import { listPidFiles, removePidFile } from "./pid-file.ts";
 import { canPush } from "./preflight.ts";
 import { resolveRef } from "./ref-read.ts";
 import { refUpdate } from "./ref-update.ts";
 import { remoteInfo } from "./remote-info.ts";
 import { seedHome } from "./seed.ts";
+import { sweepHome } from "./sweep.ts";
+import { worktreeClean } from "./worktree.ts";
 import { remoteUrlVerdict } from "./url.ts";
 
 export type BinaryGitDependencies = Readonly<{
@@ -32,5 +36,11 @@ export function createBinaryGit(dependencies: BinaryGitDependencies): Git {
     remoteInfo: (input) => remoteInfo(runner, paths, input),
     canPush: (input) => canPush(runner, paths, input),
     seedHome: (input) => seedHome(runner, paths, input),
+    inspectChild: (input) => inspectChild(input),
+    stopChild: (input) => stopChild(input),
+    listPidFiles: (input) => listPidFiles(input),
+    removePidFile: (input) => removePidFile(input),
+    sweepHome: (input) => sweepHome(input),
+    worktreeClean: (input) => worktreeClean(runner, input),
   };
 }

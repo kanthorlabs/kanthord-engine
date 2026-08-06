@@ -26,24 +26,28 @@ A pre-committed journal row does not close this either: the row's token would na
   ```ts
   export const LAUNCHER_SCRIPT =
     'set -C; printf "%s" "$$" > "$KANTHORD_PID_FILE" || exit 111; ' +
+    "printf r >&3; exec 3>&-; " +
     'read -r _ || exit 112; exec 0</dev/null; exec "$@"';
 
   export const LAUNCHER_PID_FILE_FAILURE = 111;
   export const LAUNCHER_ORPHANED_FAILURE = 112;
+  export const READY_FD = 3;
   ```
 
-  The order is exact and load-bearing: **write, then wait, then exec.** The write is first so a process that reaches `exec` always has a pid file. The wait is second so a shell whose parent died before the handshake exits without ever touching the target. `exec 0</dev/null` is a redirection-only `exec` that runs before the command `exec`, so `git` inherits an empty stdin rather than the handshake pipe.
+  The order is exact and load-bearing: **write, then report, then wait, then exec.** The write is first so a process that reaches `exec` always has a pid file. The report is second, on descriptor 3, and it is what lets the daemon hold the release byte until the pid file exists. The wait is third so a shell whose parent died before the release exits without ever touching the target. `exec 3>&-` closes the report descriptor so `git` never inherits it, and `exec 0</dev/null` is a redirection-only `exec` that runs before the command `exec`, so `git` inherits an empty stdin rather than the handshake pipe.
 
-- **Edit `src/services/git/launcher.ts:66-67`.** `stdio` becomes `["pipe", "pipe", "pipe"]`. Immediately after `spawn` returns and only when `child.pid !== undefined`, write the go byte and close the stream:
+- **Edit `src/services/git/launcher.ts:66-67`.** `stdio` becomes `["pipe", "pipe", "pipe", "pipe"]`, so descriptor 3 is a pipe the parent reads. After `spawn` returns and only when `child.pid !== undefined`, subscribe to the report and write the go byte from inside that handler:
 
   ```ts
-  child.stdin.write("go\n");
-  child.stdin.end();
+  ready.on("data", () => {
+    child.stdin.write("go\n");
+    child.stdin.end();
+  });
   ```
 
-  An `EPIPE` on that write is swallowed: the shell may already have exited on `111`. Attach `child.stdin.on("error", () => {})` before the write.
+  An `EPIPE` on that write is swallowed: the shell may already have exited on `111`. Attach `child.stdin.on("error", () => {})` and an error listener on the report stream before the write.
 
-  The mechanism is the pipe's lifetime, not the byte. A daemon that dies before writing closes the write end, `read` sees end-of-file, and the shell exits `112`. No timer, no polling, no ambient state.
+  **The go byte must never precede the report.** A byte written at spawn time survives the daemon in the pipe buffer, so a launcher delayed before its pid write reads it after the daemon is gone and execs `git` anyway — measured, not argued. The write therefore happens in the `data` handler and nowhere else. The parent's event loop must be free between the spawn and the report, so a caller that blocks the loop while it waits for the child deadlocks; every production caller awaits.
 
 - **Edit `src/services/git/run.ts:121-151`.** In the failure-precedence chain, beside the existing `code === LAUNCHER_PID_FILE_FAILURE` branch, add `code === LAUNCHER_ORPHANED_FAILURE` throwing `new GitError("unknown", "the launcher was orphaned before it started git", "")`. Keep the existing precedence order otherwise.
 
@@ -65,6 +69,8 @@ A pre-committed journal row does not close this either: the row's token would na
   - **New: `git` does not inherit the handshake pipe.** Run `git hash-object --stdin` through `spawnSupervised` and assert `exited` resolves rather than hanging, with an empty-input hash on stdout — `e69de29bb2d1d6434b8b29ae775ad8c2e48c5391`, the exact sha1 of the empty blob. A `git` holding the pipe on stdin would block forever, and this is the only case that distinguishes the two.
   - **New: an orphaned launcher exits `112` and never runs the command.** The pipe alone builds the case, and no new production seam is added: `spawnSupervised` writes the go byte and ends the stream, so the test instead spawns a command whose target is a `sh` script that would `touch <marker>`, and drives the orphan state by calling `spawnSupervised` through a variant of the real call that the test constructs itself — one `spawn` of `LAUNCHER_SHELL` with `launcherArgv`, the same env and `stdio: ["pipe","pipe","pipe"]`, whose stdin is destroyed instead of written. Both exported constants and `launcherArgv` are reused, so the test exercises the real script. `exited` resolves `{ code: 112, signal: null }`, the marker does not exist, and the pid file **does** — the write precedes the gate.
   - **New: the pid write precedes the gate.** In the same case, `readFileSync(pidFile, "utf8")` equals `String(child.pid)` even though the command never ran.
+  - **New: the report reaches the parent only after the pid file exists.** Read one byte from descriptor 3, assert it is `r`, assert the pid file already holds the child's pid, then destroy stdin and assert exit `112` with no marker.
+  - **New: a launcher held before its pid write runs no command once its daemon dies.** This is the case the whole story exists for, and it is the only one that fails against a parent that writes the go byte at spawn time. Make the pid-file path a FIFO, so the launcher blocks in `open` before its write. Run the real `spawnSupervised` in a `node --input-type=module --eval` subprocess that exits 200 ms later. Read the FIFO to release the launcher, wait for that pid to exit, and assert the marker never appears. The target must be a shell builtin — `printf x > <marker>` — because the pinned `PATH` is git's exec path and holds no `touch`.
 - Edit `src/services/git/run.test.ts`: add one case asserting an exit of `LAUNCHER_ORPHANED_FAILURE` surfaces as `GitError` with `failure === "unknown"` and the message `the launcher was orphaned before it started git`. Reach it the way the file already reaches the `111` mapping — find that case and copy its arrangement, substituting `112`.
 - `node --test src/services/git/launcher.test.ts src/services/git/run.test.ts src/services/git/probe.test.ts src/services/git/host-key.test.ts src/services/git/seed.test.ts src/services/git/clone.test.ts src/services/git/fetch.test.ts src/services/git/ref-update.test.ts src/services/git/authenticated.test.ts src/services/git/binary.test.ts` exits 0 — every consumer of `spawnSupervised`.
 - `node --test src/commands/repository/register-repository.test.ts` exits 0.

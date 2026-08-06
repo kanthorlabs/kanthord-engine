@@ -2,6 +2,8 @@ import type { Transaction } from "../storage/index.ts";
 import type { ConfirmOutcome, ScanOutcome } from "./host-key.ts";
 import type { CanPushInput } from "./preflight.ts";
 import type { SeedHomeExtended, SeedHomeResult } from "./seed.ts";
+import type { SweepHomeInput, SweepHomeReport } from "./sweep.ts";
+import type { WorktreeCleanInput } from "./worktree.ts";
 
 export type GitCredential =
   | Readonly<{
@@ -59,6 +61,27 @@ export type CloneInput = Readonly<{
   sourceGitDir: string;
   targetDir: string;
   ref: string;
+}>;
+
+export type InspectChildInput = Readonly<{ pidFile: string }>;
+
+export type ChildInspection =
+  | Readonly<{ finding: "no-pid-file" }>
+  | Readonly<{ finding: "pid-file-unreadable"; detail: string }>
+  | Readonly<{ finding: "process-absent"; pid: number }>
+  | Readonly<{
+      finding: "started-later";
+      pid: number;
+      startedAt: number;
+      recordedAt: number;
+    }>
+  | Readonly<{ finding: "liveness-unknown"; pid: number; detail: string }>
+  | Readonly<{ finding: "alive"; pid: number; pidFile: string }>;
+
+export type StopChildInput = Readonly<{
+  pid: number;
+  graceMs: number;
+  pollMs?: number;
 }>;
 
 export type GitFailure =
@@ -151,6 +174,99 @@ export interface Git {
   refUpdate(input: RefUpdateInput): Promise<RefUpdateResult>;
   checkOutsideWriter(input: OutsideWriterInput): Promise<OutsideWriterVerdict>;
   clone(input: CloneInput): Promise<string>;
+  inspectChild(input: InspectChildInput): Promise<ChildInspection>;
+  stopChild(input: StopChildInput): Promise<boolean>;
+  listPidFiles(
+    input: Readonly<{ runDirectory: string }>,
+  ): Promise<readonly string[]>;
+  removePidFile(input: Readonly<{ pidFile: string }>): Promise<void>;
+  sweepHome(input: SweepHomeInput): Promise<SweepHomeReport>;
+  worktreeClean(input: WorktreeCleanInput): Promise<boolean>;
 }
 
 export const TRACKING_REFSPEC = "+refs/heads/*:refs/remotes/origin/*";
+
+export type GitIntent = "merge" | "sync" | "publish" | "revert";
+
+export type OpenJournalRowInput = Readonly<{
+  id: string;
+  repositoryId: string;
+  intent: GitIntent;
+  nodeId: string | null;
+  runId: string | null;
+  candidateId: string | null;
+  leaseFence: number;
+  ref: string;
+  baseOid: string;
+  proposedHeadOid: string;
+  expectedRemoteOid: string | null;
+  childToken: string;
+}>;
+
+export type CompleteJournalRowInput = Readonly<{
+  id: string;
+  resultHeadOid: string | null;
+  outcome: string | null;
+  completedAt: number;
+}>;
+
+export type DiscardJournalRowInput = Readonly<{
+  id: string;
+  outcome: string | null;
+  completedAt: number;
+}>;
+
+export type InFlightJournalRow = Readonly<{
+  id: string;
+  repositoryId: string;
+  repositoryHomePath: string;
+  intent: GitIntent;
+  ref: string;
+  baseOid: string;
+  proposedHeadOid: string;
+  childToken: string;
+}>;
+
+export type OpenJournalRow = Readonly<{
+  id: string;
+  repositoryId: string;
+  repositoryHomePath: string;
+  intent: GitIntent;
+  ref: string;
+  baseOid: string;
+  proposedHeadOid: string;
+  childToken: string | null;
+}>;
+
+export type JournalErrorCode = "journal-row-not-open";
+
+export class JournalError extends Error {
+  readonly code: JournalErrorCode;
+  constructor(code: JournalErrorCode, message: string) {
+    super(message);
+    this.name = "JournalError";
+    this.code = code;
+  }
+}
+
+export interface GitJournal {
+  open(transaction: Transaction, input: OpenJournalRowInput): void;
+  complete(
+    transaction: Transaction,
+    input: CompleteJournalRowInput,
+  ): string | null;
+  discard(
+    transaction: Transaction,
+    input: DiscardJournalRowInput,
+  ): string | null;
+  listInFlight(transaction: Transaction): readonly InFlightJournalRow[];
+  listOpen(transaction: Transaction): readonly OpenJournalRow[];
+  markPublishPending(
+    transaction: Transaction,
+    input: Readonly<{ id: string; outcome: string }>,
+  ): string | null;
+  clearChildToken(
+    transaction: Transaction,
+    input: Readonly<{ id: string }>,
+  ): string | null;
+}

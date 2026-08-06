@@ -17,7 +17,8 @@ import {
   probeTools,
   ToolProbeError,
 } from "./services/git/probe.ts";
-import { createGitRunner } from "./services/git/run.ts";
+import { createGitRunner, systemSchedule } from "./services/git/run.ts";
+import { createGitJournal } from "./services/git/journal.ts";
 import { createBinaryGit } from "./services/git/binary.ts";
 import { SystemClock } from "./services/clock/system.ts";
 import { SqliteStorage } from "./services/storage/sqlite.ts";
@@ -33,6 +34,12 @@ import { inspectRepository } from "./queries/repository/inspect-repository.ts";
 import { listRepositories } from "./queries/repository/list-repository.ts";
 import { showRepository } from "./queries/repository/show-repository.ts";
 import { registerRepository } from "./commands/repository/register-repository.ts";
+import { recoverHome } from "./commands/startup/recover-home.ts";
+import { reapOrphans } from "./commands/startup/reap-orphans.ts";
+import { sweepRemnants } from "./commands/startup/sweep-remnants.ts";
+import { reconcileJournal } from "./commands/startup/reconcile-journal.ts";
+import { recoverExpiredLeases } from "./commands/startup/recover-expired-leases.ts";
+import { RecoveryError, renderFinding } from "./domain/recovery.ts";
 import { registerProviderHandler } from "./http/server/credential/register-provider.ts";
 import { listProviderHandler } from "./http/server/credential/list-provider.ts";
 import { showProviderHandler } from "./http/server/credential/show-provider.ts";
@@ -107,7 +114,8 @@ program
         runDirectory: join(settings.home, "git", "run"),
       });
       const gitPaths = buildGitPaths({ probed, home: settings.home });
-      const gitRunner = createGitRunner(gitPaths);
+      const gitRunner = createGitRunner(gitPaths, systemSchedule);
+      const gitJournal = createGitJournal();
       const git = createBinaryGit({
         runner: gitRunner,
         paths: gitPaths,
@@ -124,6 +132,43 @@ program
           home: settings.home,
           pending: storage.status().pending,
         });
+        const ids = new UlidIdGenerator();
+        const events = new SqliteEventLog({ storage, ids });
+        const recovery = await recoverHome({
+          reap: () =>
+            reapOrphans(
+              {
+                storage,
+                journal: gitJournal,
+                git,
+                events,
+                clock,
+                runDirectory: gitPaths.runDirectory,
+                graceMs: 5000,
+              },
+              { actor: "daemon" },
+            ),
+          sweep: (reap) =>
+            sweepRemnants(
+              { storage, git, events, keyDirectory: gitPaths.keyDirectory },
+              { actor: "daemon", reap },
+            ),
+          reconcile: () =>
+            reconcileJournal(
+              { storage, journal: gitJournal, git, events, clock },
+              { actor: "daemon" },
+            ),
+          leases: () =>
+            recoverExpiredLeases(
+              { storage, git, events, clock },
+              { actor: "daemon" },
+            ),
+        });
+        for (const finding of recovery.findings) {
+          process.stderr.write(
+            `kanthord: recovery: ${renderFinding(finding)}\n`,
+          );
+        }
         const reporters = [
           {
             name: "storage",
@@ -133,12 +178,10 @@ program
             },
           },
         ];
-        const ids = new UlidIdGenerator();
         const crypto = new AesGcmCrypto({
           key: settings.masterKey,
           keyVersion: 1,
         });
-        const events = new SqliteEventLog({ storage, ids });
         const handlers = {
           "system.health": healthHandler({
             readHealth: () => readHealth({ reporters }),
@@ -219,6 +262,7 @@ program
         error instanceof ConfigError ||
         error instanceof HomeLockError ||
         error instanceof StartupError ||
+        error instanceof RecoveryError ||
         error instanceof CliError ||
         error instanceof ToolProbeError
       ) {

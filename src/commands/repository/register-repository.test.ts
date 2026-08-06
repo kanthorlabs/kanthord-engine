@@ -316,6 +316,24 @@ function gitMock(
     clone(): Promise<never> {
       throw new Error("unexpected clone call");
     },
+    inspectChild(): Promise<never> {
+      throw new Error("unexpected inspectChild call");
+    },
+    stopChild(): Promise<never> {
+      throw new Error("unexpected stopChild call");
+    },
+    listPidFiles(): Promise<never> {
+      throw new Error("unexpected listPidFiles call");
+    },
+    removePidFile(): Promise<never> {
+      throw new Error("unexpected removePidFile call");
+    },
+    sweepHome(): Promise<never> {
+      throw new Error("unexpected sweepHome call");
+    },
+    worktreeClean(): Promise<never> {
+      throw new Error("unexpected worktreeClean call");
+    },
   };
   return { git, seedInputs, confirmCalls, trustCalls, refCalls };
 }

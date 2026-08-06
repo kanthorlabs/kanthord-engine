@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
 
@@ -14,6 +14,10 @@ import {
   type DaemonProcess,
 } from "../../../test/helpers/daemon.ts";
 import { createTemporaryHome } from "../../../test/helpers/home.ts";
+import {
+  FIXTURE_REPOSITORY_ID,
+  seedFixtureRepository,
+} from "../../../test/helpers/recovery-home.ts";
 
 const mainEntry = fileURLToPath(
   new URL("../../../src/main.ts", import.meta.url),
@@ -59,6 +63,19 @@ function exitWithin(proc: DaemonProcess, ms = 5000): Promise<DaemonExit> {
       },
     );
   });
+}
+
+function waitForPidFile(filePath: string): number {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try {
+      return Number(fs.readFileSync(filePath, "utf8"));
+    } catch {
+      // the pid file has not been written yet
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+  }
+  assert.fail(`timed out waiting for ${filePath}`);
 }
 
 describe("src/services/home-lock/startup.test", () => {
@@ -173,6 +190,103 @@ describe("src/services/home-lock/startup.test", () => {
       fs.existsSync(lateLock),
       "lock created after readiness must survive exit",
     );
+  });
+
+  it("ordering proof: a stale ref lock is gone before the daemon reports ready", async () => {
+    const home = createTemporaryHome();
+    after(async () => {
+      await killAll();
+      home.dispose();
+    });
+
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
+    migrateHome(home.path);
+    const { lockPath } = seedFixtureRepository(home.path);
+    fs.writeFileSync(lockPath, "");
+
+    const first = launchDaemon({ configPath, home: home.path });
+    await first.ready();
+
+    assert.equal(
+      fs.existsSync(lockPath),
+      false,
+      "the stale lock must be gone before readiness",
+    );
+    assert.equal(first.stdout(), "kanthord: ready\n");
+    assert.equal(first.stderr(), "");
+  });
+
+  it("composed proof: a live recorded child is stopped before its lock is removed", async () => {
+    const home = createTemporaryHome();
+    let childPid: number | undefined;
+    after(async () => {
+      if (childPid !== undefined) {
+        try {
+          process.kill(childPid, "SIGKILL");
+        } catch {
+          // the child is already gone
+        }
+      }
+      await killAll();
+      home.dispose();
+    });
+
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
+    migrateHome(home.path);
+    const { lockPath } = seedFixtureRepository(home.path);
+    fs.writeFileSync(lockPath, "");
+
+    const runDirectory = path.join(home.path, "git", "run");
+    fs.mkdirSync(runDirectory, { recursive: true });
+    const pidPath = path.join(
+      runDirectory,
+      `seed-${FIXTURE_REPOSITORY_ID}.pid`,
+    );
+    spawn(
+      "/bin/sh",
+      ["-c", 'printf "%s" "$$" > "$1"; exec /bin/sleep 30', "sh", pidPath],
+      { detached: true },
+    );
+    childPid = waitForPidFile(pidPath);
+
+    const first = launchDaemon({ configPath, home: home.path });
+    await first.ready();
+
+    assert.equal(
+      fs.existsSync(lockPath),
+      false,
+      "the lock must be removed only after the reap stopped the child",
+    );
+    assert.throws(
+      () => process.kill(childPid as number, 0),
+      (error: unknown) => (error as NodeJS.ErrnoException).code === "ESRCH",
+    );
+    assert.equal(
+      fs.existsSync(pidPath),
+      false,
+      "the reaped child's pid file must be removed",
+    );
+
+    const { DatabaseSync } = await import("node:sqlite");
+    const database = new DatabaseSync(path.join(home.path, "kanthord.db"));
+    try {
+      const row = database
+        .prepare(
+          "SELECT subject_id, payload_json FROM event WHERE type = 'recovery.childReaped'",
+        )
+        .get() as { subject_id: string; payload_json: string } | undefined;
+      assert.ok(
+        row !== undefined,
+        "one recovery.childReaped event row must exist",
+      );
+      assert.equal(row!.subject_id, FIXTURE_REPOSITORY_ID);
+      const payload = JSON.parse(row!.payload_json) as { finding: string };
+      assert.equal(payload.finding, "stopped");
+    } finally {
+      database.close();
+    }
   });
 
   it("two daemons on one home: second exits 1, stderr has home-locked with first pid", async () => {

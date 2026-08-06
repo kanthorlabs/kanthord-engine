@@ -20,7 +20,14 @@ import {
 } from "../../../test/helpers/remote/seed.ts";
 
 import { GitError, type GitPaths } from "./index.ts";
-import { createGitRunner, type GitRunner } from "./run.ts";
+import {
+  createGitRunner,
+  systemSchedule,
+  TERMINATION_GRACE_MS,
+  type GitRunner,
+  type Schedule,
+  type ScheduledTimer,
+} from "./run.ts";
 
 const tools: Tools = resolveTools();
 
@@ -64,6 +71,39 @@ async function waitForFile(filePath: string, budgetMs: number): Promise<void> {
   assert.fail(`timed out waiting for ${filePath}`);
 }
 
+type FakeSchedule = Readonly<{
+  schedule: Schedule;
+  fire(delayMs: number): void;
+  pending(): number[];
+}>;
+
+function createFakeSchedule(): FakeSchedule {
+  let nextId = 0;
+  const timers = new Map<number, { delayMs: number; callback: () => void }>();
+  return {
+    schedule: (callback: () => void, delayMs: number): ScheduledTimer => {
+      const id = nextId++;
+      timers.set(id, { delayMs, callback });
+      return { cancel: () => timers.delete(id) };
+    },
+    fire(delayMs: number): void {
+      const matches = [...timers.entries()].filter(
+        ([, timer]) => timer.delayMs === delayMs,
+      );
+      assert.equal(matches.length, 1, `expected one timer at ${delayMs}ms`);
+      const match = matches[0];
+      assert.ok(match !== undefined);
+      timers.delete(match[0]);
+      match[1].callback();
+    },
+    pending(): number[] {
+      return [...timers.values()]
+        .map((timer) => timer.delayMs)
+        .sort((a, b) => a - b);
+    },
+  };
+}
+
 let seeded: SeedRoot;
 
 before(() => {
@@ -81,6 +121,26 @@ describe("src/services/git/run.test", () => {
     const result = await runGit({ args: ["--version"] });
     assert.equal(result.code, 0);
     assert.ok(result.stdout.startsWith("git version "), result.stdout);
+  });
+
+  it("systemSchedule is the default and both forms resolve git --version", async () => {
+    const paths = makePaths();
+    const implicit = createGitRunner(paths);
+    const explicit = createGitRunner(paths, systemSchedule);
+    const [fromDefault, fromExplicit] = await Promise.all([
+      implicit({ args: ["--version"] }),
+      explicit({ args: ["--version"] }),
+    ]);
+    assert.equal(fromDefault.code, 0);
+    assert.equal(fromExplicit.code, 0);
+    assert.ok(
+      fromDefault.stdout.startsWith("git version "),
+      fromDefault.stdout,
+    );
+    assert.ok(
+      fromExplicit.stdout.startsWith("git version "),
+      fromExplicit.stdout,
+    );
   });
 
   it("the child sees the pinned environment and the config pins", async () => {
@@ -153,7 +213,8 @@ describe("src/services/git/run.test", () => {
 
   it("the timeout signals the group and no descendant survives", async () => {
     const paths = makePaths();
-    const runGit: GitRunner = createGitRunner(paths);
+    const fake = createFakeSchedule();
+    const runGit: GitRunner = createGitRunner(paths, fake.schedule);
     const sshPidPath = join(paths.home, "ssh.pid");
     const scriptPath = join(paths.home, "ssh-sleeper.sh");
     writeFileSync(
@@ -164,7 +225,7 @@ describe("src/services/git/run.test", () => {
     const pending = runGit({
       args: ["ls-remote", "ssh://kanthord.invalid/r.git"],
       extraEnv: { GIT_SSH_COMMAND: `'${scriptPath}'` },
-      timeoutMs: 5000,
+      timeoutMs: 4242,
     }).then(
       () => null,
       (error: unknown) => error,
@@ -172,6 +233,50 @@ describe("src/services/git/run.test", () => {
     await waitForFile(sshPidPath, 4000);
     const sshPid = Number(readFileSync(sshPidPath, "utf8"));
     assert.doesNotThrow(() => process.kill(sshPid, 0));
+    fake.fire(4242);
+    const rejection = await pending;
+    assert.ok(rejection instanceof GitError, String(rejection));
+    assert.equal(rejection.failure, "timed-out");
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      try {
+        process.kill(sshPid, 0);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      } catch {
+        break;
+      }
+    }
+    assert.throws(
+      () => process.kill(sshPid, 0),
+      (error: unknown) => (error as NodeJS.ErrnoException).code === "ESRCH",
+    );
+  });
+
+  it("the grace timer is registered with TERMINATION_GRACE_MS", async () => {
+    const paths = makePaths();
+    const fake = createFakeSchedule();
+    const runGit: GitRunner = createGitRunner(paths, fake.schedule);
+    const sshPidPath = join(paths.home, "ssh.pid");
+    const scriptPath = join(paths.home, "ssh-sleeper.sh");
+    writeFileSync(
+      scriptPath,
+      `#!/bin/sh\nprintf '%s' "$$" > '${sshPidPath}'\ntrap '' TERM\n/bin/sleep 30\n`,
+      { mode: 0o700 },
+    );
+    const pending = runGit({
+      args: ["ls-remote", "ssh://kanthord.invalid/r.git"],
+      extraEnv: { GIT_SSH_COMMAND: `'${scriptPath}'` },
+      timeoutMs: 4242,
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await waitForFile(sshPidPath, 4000);
+    const sshPid = Number(readFileSync(sshPidPath, "utf8"));
+    assert.doesNotThrow(() => process.kill(sshPid, 0));
+    fake.fire(4242);
+    assert.deepEqual(fake.pending(), [TERMINATION_GRACE_MS]);
+    fake.fire(TERMINATION_GRACE_MS);
     const rejection = await pending;
     assert.ok(rejection instanceof GitError, String(rejection));
     assert.equal(rejection.failure, "timed-out");
@@ -192,17 +297,20 @@ describe("src/services/git/run.test", () => {
 
   it("the timeout error carries neither environment nor key directory", async () => {
     const paths = makePaths();
-    const runGit: GitRunner = createGitRunner(paths);
+    const fake = createFakeSchedule();
+    const runGit: GitRunner = createGitRunner(paths, fake.schedule);
     const scriptPath = join(paths.home, "ssh-sleeper.sh");
     writeFileSync(scriptPath, `#!/bin/sh\n/bin/sleep 30\n`, { mode: 0o700 });
-    const rejection = await runGit({
+    const pending = runGit({
       args: ["ls-remote", "ssh://kanthord.invalid/r.git"],
       extraEnv: { GIT_SSH_COMMAND: `'${scriptPath}'` },
-      timeoutMs: 1000,
+      timeoutMs: 4242,
     }).then(
       () => null,
       (error: unknown) => error,
     );
+    fake.fire(4242);
+    const rejection = await pending;
     assert.ok(rejection instanceof GitError, String(rejection));
     const serialized = JSON.stringify({
       message: rejection.message,
@@ -255,14 +363,13 @@ describe("src/services/git/run.test", () => {
         'import process from "node:process";',
         'if (process.argv.includes("--version")) process.exit(0);',
         "process.stdout.write(Buffer.alloc(4096, 0x78));",
-        'process.on("SIGTERM", () => {});',
         "setInterval(() => {}, 1000);",
       ].join("\n"),
       { mode: 0o700 },
     );
-    const runner = createGitRunner({ ...paths, git: fakeGit });
+    const fake = createFakeSchedule();
+    const runner = createGitRunner({ ...paths, git: fakeGit }, fake.schedule);
     await runner({ args: ["--version"] });
-    const startedAt = Date.now();
     const rejection = await runner({
       args: ["log"],
       outputLimitBytes: 64,
@@ -273,13 +380,13 @@ describe("src/services/git/run.test", () => {
     );
     assert.ok(rejection instanceof GitError, String(rejection));
     assert.equal(rejection.failure, "output-exceeded");
-    const elapsed = Date.now() - startedAt;
-    assert.ok(elapsed < 10000, `took ${elapsed}ms`);
+    assert.deepEqual(fake.pending(), []);
   });
 
   it("a cancelled operation ends even when a descendant holds the pipe", async () => {
     const paths = makePaths();
-    const runGit: GitRunner = createGitRunner(paths);
+    const fake = createFakeSchedule();
+    const runGit: GitRunner = createGitRunner(paths, fake.schedule);
     const scriptPath = join(paths.home, "ssh-spewer.sh");
     writeFileSync(
       scriptPath,
@@ -287,14 +394,16 @@ describe("src/services/git/run.test", () => {
       { mode: 0o700 },
     );
     const startedAt = Date.now();
-    const rejection = await runGit({
+    const pending = runGit({
       args: ["ls-remote", "ssh://kanthord.invalid/r.git"],
       extraEnv: { GIT_SSH_COMMAND: `'${scriptPath}'` },
-      timeoutMs: 1000,
+      timeoutMs: 4242,
     }).then(
       () => null,
       (error: unknown) => error,
     );
+    fake.fire(4242);
+    const rejection = await pending;
     assert.ok(rejection instanceof GitError, String(rejection));
     assert.equal(rejection.failure, "timed-out");
     const elapsed = Date.now() - startedAt;
@@ -318,6 +427,42 @@ describe("src/services/git/run.test", () => {
     assert.ok(Number.isInteger(recorded) && recorded > 1, String(recorded));
   });
 
+  it("the timeout is registered with the caller's timeoutMs", async () => {
+    const paths = makePaths();
+    const fake = createFakeSchedule();
+    const runGit: GitRunner = createGitRunner(paths, fake.schedule);
+    const pending = runGit({ args: ["--version"], timeoutMs: 4242 });
+    assert.deepEqual(fake.pending(), [4242]);
+    const result = await pending;
+    assert.equal(result.code, 0);
+    assert.deepEqual(fake.pending(), []);
+  });
+
+  it("a settled run cancels both timers", async () => {
+    const paths = makePaths();
+    const fake = createFakeSchedule();
+    const runGit: GitRunner = createGitRunner(paths, fake.schedule);
+    const clean = await runGit({ args: ["--version"], timeoutMs: 4242 });
+    assert.equal(clean.code, 0);
+    assert.deepEqual(fake.pending(), []);
+    const scriptPath = join(paths.home, "ssh-sleeper.sh");
+    writeFileSync(scriptPath, `#!/bin/sh\n/bin/sleep 30\n`, { mode: 0o700 });
+    const pending = runGit({
+      args: ["ls-remote", "ssh://kanthord.invalid/r.git"],
+      extraEnv: { GIT_SSH_COMMAND: `'${scriptPath}'` },
+      timeoutMs: 4242,
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    fake.fire(4242);
+    fake.fire(TERMINATION_GRACE_MS);
+    const rejection = await pending;
+    assert.ok(rejection instanceof GitError, String(rejection));
+    assert.equal(rejection.failure, "timed-out");
+    assert.deepEqual(fake.pending(), []);
+  });
+
   it("a launcher pid-file failure is classified as unknown", async () => {
     const paths = makePaths();
     const runGit: GitRunner = createGitRunner(paths);
@@ -335,6 +480,27 @@ describe("src/services/git/run.test", () => {
     assert.equal(
       rejection.message,
       "the launcher could not create the pid file",
+    );
+  });
+
+  it("an orphaned launcher exit is classified as unknown", async () => {
+    const paths = makePaths();
+    const fakeGit = join(paths.home, "orphaned-git.mjs");
+    writeFileSync(
+      fakeGit,
+      [`#!${process.execPath}`, "process.exit(112);"].join("\n"),
+      { mode: 0o700 },
+    );
+    const runner = createGitRunner({ ...paths, git: fakeGit });
+    const rejection = await runner({ args: ["--version"] }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    assert.ok(rejection instanceof GitError, String(rejection));
+    assert.equal(rejection.failure, "unknown");
+    assert.equal(
+      rejection.message,
+      "the launcher was orphaned before it started git",
     );
   });
 });

@@ -1,12 +1,16 @@
 import { spawn } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { Readable } from "node:stream";
 
 export const LAUNCHER_SHELL = "/bin/sh";
 
+export const READY_FD = 3;
+
 export const LAUNCHER_SCRIPT =
-  'set -C; printf "%s" "$$" > "$KANTHORD_PID_FILE" || exit 111; exec "$@"';
+  'set -C; printf "%s" "$$" > "$KANTHORD_PID_FILE" || exit 111; printf r >&3; exec 3>&-; read -r _ || exit 112; exec 0</dev/null; exec "$@"';
 
 export const LAUNCHER_PID_FILE_FAILURE = 111;
+export const LAUNCHER_ORPHANED_FAILURE = 112;
 
 export type SupervisedSpawnInput = Readonly<{
   command: string;
@@ -59,12 +63,29 @@ function requireSignallable(pid: number | undefined): number {
   return pid;
 }
 
+function releaseOnReady(child: ChildProcessWithoutNullStreams): void {
+  const ready = child.stdio[READY_FD];
+  if (ready === null || ready === undefined || !("on" in ready)) {
+    return;
+  }
+  let released = false;
+  ready.on("error", () => {});
+  ready.on("data", () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    child.stdin.write("go\n");
+    child.stdin.end();
+  });
+}
+
 export function spawnSupervised(input: SupervisedSpawnInput): SupervisedSpawn {
   const child = spawn(LAUNCHER_SHELL, launcherArgv(input), {
     env: { ...input.env, KANTHORD_PID_FILE: input.pidFile },
     cwd: input.cwd,
     detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe", "pipe"],
   });
   const exited = new Promise<SupervisedExit>((resolve, reject) => {
     child.once("error", reject);
@@ -75,6 +96,8 @@ export function spawnSupervised(input: SupervisedSpawnInput): SupervisedSpawn {
   if (child.pid === undefined) {
     return { pid: undefined, exited };
   }
+  child.stdin.on("error", () => {});
+  releaseOnReady(child);
   const pid = requireSignallable(child.pid);
   return {
     pid,
