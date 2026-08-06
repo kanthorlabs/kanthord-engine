@@ -202,12 +202,27 @@ test("documents the routed success status from successStatus", () => {
   );
 });
 
-test("registers exactly the thirteen schema components in bytewise order", () => {
+test("registers exactly the twenty-eight schema components in bytewise order", () => {
   const document = buildOpenApiDocument();
   const components = document.components as Readonly<Record<string, unknown>>;
   const schemas = components.schemas as Readonly<Record<string, unknown>>;
   assert.deepEqual(Object.keys(schemas), [
     "Error",
+    "edge.list.response",
+    "node.list.response",
+    "node.show.response",
+    "plan.export.response",
+    "plan.import.request",
+    "plan.import.response",
+    "plan.revisions.response",
+    "plan.validate.request",
+    "plan.validate.response",
+    "project.create.request",
+    "project.create.response",
+    "project.list.response",
+    "project.repositories.request",
+    "project.repositories.response",
+    "project.show.response",
     "provider.list.response",
     "provider.register.request",
     "provider.register.response",

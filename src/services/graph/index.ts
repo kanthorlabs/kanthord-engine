@@ -7,7 +7,8 @@ export type GraphInput = Readonly<{
   edges: readonly GraphEdgeInput[];
 }>;
 
-export type GraphErrorCode = "graph-cycle" | "graph-unknown-node";
+export type GraphErrorCode =
+  "graph-cycle" | "graph-unknown-node" | "graph-duplicate-node";
 
 export class GraphError extends Error {
   readonly code: GraphErrorCode;
@@ -22,4 +23,5 @@ export interface Graph {
   topologicalOrder(input: GraphInput): readonly string[];
   cycles(input: GraphInput): readonly (readonly string[])[];
   children(input: GraphInput, parentId: string | null): readonly string[];
+  components(input: GraphInput): readonly (readonly string[])[];
 }

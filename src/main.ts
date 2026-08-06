@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 import { homedir, hostname } from "node:os";
-import { readFileSync, statfsSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statfsSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { Command } from "commander";
@@ -26,10 +33,25 @@ import { StorageError } from "./services/storage/index.ts";
 import { migrations } from "./services/storage/migrations.ts";
 import { AesGcmCrypto } from "./services/crypto/aes-gcm.ts";
 import { SqliteEventLog } from "./services/event/sqlite.ts";
+import { SqliteBlobStore } from "./services/blob/sqlite.ts";
 import { UlidIdGenerator } from "./services/ids/ulid.ts";
+import { GraphologyGraph } from "./services/graph/graphology.ts";
+import { SqlitePlanStore } from "./services/plan/sqlite.ts";
+import { YamlDocumentReader } from "./services/document/yaml.ts";
 import { registerProvider } from "./commands/provider/register-provider.ts";
 import { listProviders } from "./queries/provider/list-provider.ts";
 import { showProvider } from "./queries/provider/show-provider.ts";
+import { createProject } from "./commands/project/create-project.ts";
+import { replaceProjectRepositories } from "./commands/project/replace-project-repositories.ts";
+import { listProjects } from "./queries/project/list-project.ts";
+import { showProject } from "./queries/project/show-project.ts";
+import { exportPlan } from "./queries/plan/export-plan.ts";
+import { listRevisions } from "./queries/plan/list-revision.ts";
+import { validatePlan } from "./queries/plan/validate-plan.ts";
+import { importPlan } from "./commands/plan/import-plan.ts";
+import { listNodes } from "./queries/node/list-node.ts";
+import { showNode } from "./queries/node/show-node.ts";
+import { listEdges } from "./queries/edge/list-edge.ts";
 import { inspectRepository } from "./queries/repository/inspect-repository.ts";
 import { listRepositories } from "./queries/repository/list-repository.ts";
 import { showRepository } from "./queries/repository/show-repository.ts";
@@ -47,6 +69,17 @@ import { inspectRepositoryHandler } from "./http/server/repository/inspect-repos
 import { listRepositoryHandler } from "./http/server/repository/list-repository.ts";
 import { showRepositoryHandler } from "./http/server/repository/show-repository.ts";
 import { registerRepositoryHandler } from "./http/server/repository/register-repository.ts";
+import { createProjectHandler } from "./http/server/project/create-project.ts";
+import { listProjectHandler } from "./http/server/project/list-project.ts";
+import { showProjectHandler } from "./http/server/project/show-project.ts";
+import { replaceProjectRepositoriesHandler } from "./http/server/project/replace-project-repositories.ts";
+import { exportPlanHandler } from "./http/server/plan/export-plan.ts";
+import { listRevisionHandler } from "./http/server/plan/list-revision.ts";
+import { validatePlanHandler } from "./http/server/plan/validate-plan.ts";
+import { importPlanHandler } from "./http/server/plan/import-plan.ts";
+import { listNodeHandler } from "./http/server/node/list-node.ts";
+import { showNodeHandler } from "./http/server/node/show-node.ts";
+import { listEdgeHandler } from "./http/server/edge/list-edge.ts";
 import {
   CliError,
   registerClientOptions,
@@ -58,6 +91,13 @@ import { registerDbStatus } from "./cli/db/status.ts";
 import { registerCredentialRegister } from "./cli/credential/register.ts";
 import { registerRepositoryRegister } from "./cli/repository/register.ts";
 import { registerRepositoryShow } from "./cli/repository/show.ts";
+import { registerProjectCreate } from "./cli/project/create.ts";
+import { registerProjectList } from "./cli/project/list.ts";
+import { registerProjectShow } from "./cli/project/show.ts";
+import { registerProjectRepository } from "./cli/project/repository.ts";
+import { registerPlanExport } from "./cli/plan/export.ts";
+import { registerPlanImport } from "./cli/plan/import.ts";
+import type { PlanDirectoryDependencies } from "./cli/plan/directory.ts";
 import {
   call,
   type ClientDependencies,
@@ -133,7 +173,11 @@ program
           pending: storage.status().pending,
         });
         const ids = new UlidIdGenerator();
+        const graph = new GraphologyGraph();
+        const plan = new SqlitePlanStore();
+        const reader = new YamlDocumentReader();
         const events = new SqliteEventLog({ storage, ids });
+        const blobs = new SqliteBlobStore({ storage, clock });
         const recovery = await recoverHome({
           reap: () =>
             reapOrphans(
@@ -228,6 +272,49 @@ program
           }),
           "repository.show": showRepositoryHandler({
             showRepository: (input) => showRepository({ storage, git }, input),
+          }),
+          "project.create": createProjectHandler({
+            createProject: (input) =>
+              createProject({ storage, ids, clock, events }, input),
+            actor: settings.actor,
+          }),
+          "project.list": listProjectHandler({
+            listProjects: (input) => listProjects({ storage }, input),
+          }),
+          "project.show": showProjectHandler({
+            showProject: (input) => showProject({ storage }, input),
+          }),
+          "project.repositories": replaceProjectRepositoriesHandler({
+            replaceProjectRepositories: (input) =>
+              replaceProjectRepositories({ storage, clock, events }, input),
+            actor: settings.actor,
+          }),
+          "node.list": listNodeHandler({
+            listNodes: (input) => listNodes({ storage, plan }, input),
+          }),
+          "node.show": showNodeHandler({
+            showNode: (input) => showNode({ storage, plan }, input),
+          }),
+          "edge.list": listEdgeHandler({
+            listEdges: (input) => listEdges({ storage, plan }, input),
+          }),
+          "plan.export": exportPlanHandler({
+            exportPlan: (input) => exportPlan({ storage, plan, blobs }, input),
+          }),
+          "plan.revisions": listRevisionHandler({
+            listRevisions: (input) => listRevisions({ storage, plan }, input),
+          }),
+          "plan.validate": validatePlanHandler({
+            validatePlan: (input) =>
+              validatePlan({ storage, plan, blobs, reader, graph, ids }, input),
+          }),
+          "plan.import": importPlanHandler({
+            importPlan: (input) =>
+              importPlan(
+                { storage, plan, blobs, reader, graph, ids, clock, events },
+                input,
+              ),
+            actor: settings.actor,
           }),
         };
         const unimplemented = registry
@@ -396,6 +483,63 @@ try {
     program,
     client,
     env: process.env,
+    stdout: writeOut,
+    stderr: writeErr,
+    fail,
+  });
+  registerProjectCreate({
+    program,
+    client,
+    stdout: writeOut,
+    stderr: writeErr,
+    fail,
+  });
+  registerProjectList({
+    program,
+    client,
+    stdout: writeOut,
+    stderr: writeErr,
+    fail,
+  });
+  registerProjectShow({
+    program,
+    client,
+    stdout: writeOut,
+    stderr: writeErr,
+    fail,
+  });
+  registerProjectRepository({
+    program,
+    client,
+    stdout: writeOut,
+    stderr: writeErr,
+    fail,
+  });
+  const planFs: PlanDirectoryDependencies = {
+    readDirectory: (path) =>
+      readdirSync(path, { withFileTypes: true }).map((entry) =>
+        entry.isDirectory() ? `${entry.name}/` : entry.name,
+      ),
+    readFile: (path) => readFileSync(path, "utf8"),
+    writeFile: (path, content) => writeFileSync(path, content, "utf8"),
+    makeDirectory: (path) => mkdirSync(path, { recursive: true }),
+    removeFile: (path) => rmSync(path, { force: true }),
+  };
+  registerPlanExport({
+    program,
+    client,
+    cwd: process.cwd(),
+    fs: planFs,
+    stdout: writeOut,
+    stderr: writeErr,
+    fail,
+  });
+  registerPlanImport({
+    program,
+    client,
+    confirm,
+    cwd: process.cwd(),
+    fs: planFs,
     stdout: writeOut,
     stderr: writeErr,
     fail,

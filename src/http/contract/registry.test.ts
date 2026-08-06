@@ -75,9 +75,13 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("attaches requests to provider.register, repository.inspect and repository.register and responses to the eight routes", () => {
+  it("attaches requests to the seven write routes and responses to the twenty routes", () => {
     const withRequest = registry.filter((entry) => entry.request !== undefined);
     assert.deepEqual(withRequest.map((entry) => entry.operationId).sort(), [
+      "plan.import",
+      "plan.validate",
+      "project.create",
+      "project.repositories",
       "provider.register",
       "repository.inspect",
       "repository.register",
@@ -86,6 +90,17 @@ describe("src/http/contract/registry.test", () => {
       (entry) => entry.response !== undefined,
     );
     assert.deepEqual(withResponse.map((entry) => entry.operationId).sort(), [
+      "edge.list",
+      "node.list",
+      "node.show",
+      "plan.export",
+      "plan.import",
+      "plan.revisions",
+      "plan.validate",
+      "project.create",
+      "project.list",
+      "project.repositories",
+      "project.show",
       "provider.list",
       "provider.register",
       "provider.show",

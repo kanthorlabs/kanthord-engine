@@ -98,7 +98,7 @@ describe("src/domain/layout.test", () => {
     );
   });
 
-  it("src/services/ holds exactly the eleven capabilities plus home-lock", () => {
+  it("src/services/ holds exactly the fourteen capabilities plus home-lock", () => {
     const servicesDir = new URL("../services/", import.meta.url);
     const entries = fs.readdirSync(servicesDir, { withFileTypes: true });
     const directoryNames = entries
@@ -111,12 +111,14 @@ describe("src/domain/layout.test", () => {
       "clock",
       "config",
       "crypto",
+      "document",
       "event",
       "git",
       "graph",
       "home-lock",
       "ids",
       "lease",
+      "plan",
       "storage",
       "verify",
     ]);
@@ -275,6 +277,34 @@ describe("src/domain/layout.test", () => {
       `unexpected no-restricted-imports`,
     );
   });
+
+  for (const [filePath, restricted] of [
+    ["src/commands/plan/import-plan.ts", true],
+    ["src/queries/plan/export-plan.ts", true],
+    ["src/domain/plan-document.ts", true],
+    ["src/http/contract/openapi.ts", false],
+    ["src/services/document/yaml.ts", false],
+  ] as const) {
+    it(`yaml import in ${filePath} ${
+      restricted ? "triggers" : "does not trigger"
+    } no-restricted-imports`, async () => {
+      const rules = await lintCase({
+        filePath,
+        code: 'import { parse } from "yaml";',
+      });
+      if (restricted) {
+        assert.ok(
+          rules.includes("no-restricted-imports"),
+          `expected no-restricted-imports, got [${rules.join(", ")}]`,
+        );
+      } else {
+        assert.ok(
+          !rules.includes("no-restricted-imports"),
+          `unexpected no-restricted-imports`,
+        );
+      }
+    });
+  }
 
   it("the collection predicate reports every default shape", () => {
     for (const path of harnessScenarioPaths) {

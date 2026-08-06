@@ -22,12 +22,16 @@ export class SqliteBlobStore implements BlobStore {
   }
 
   put(transaction: Transaction, content: Uint8Array): string {
-    const hash = `sha256:${createHash("sha256").update(content).digest("hex")}`;
+    const hash = this.hash(content);
     transaction.run(
       "INSERT INTO blob (hash, size, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(hash) DO NOTHING",
       [hash, content.byteLength, content, this.clock.now()],
     );
     return hash;
+  }
+
+  hash(content: Uint8Array): string {
+    return `sha256:${createHash("sha256").update(content).digest("hex")}`;
   }
 
   get(hash: string, transaction?: Transaction): BlobRecord | null {

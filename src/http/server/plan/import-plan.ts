@@ -1,0 +1,43 @@
+import type { Handler } from "../app.ts";
+import { httpError } from "../../contract/errors.ts";
+import { planImportRequest } from "../../contract/graph.ts";
+import type { ImportPlanInput } from "../../../commands/plan/import-plan.ts";
+import type { ImportPlanResult } from "../../../commands/plan/import-plan.ts";
+import { toHttpError } from "./refusals.ts";
+
+export type ImportPlanHandlerDependencies = Readonly<{
+  importPlan: (input: ImportPlanInput) => ImportPlanResult;
+  actor: string;
+}>;
+
+export function importPlanHandler(
+  dependencies: ImportPlanHandlerDependencies,
+): Handler {
+  return async (context) => {
+    const id = context.parameters["id"];
+    if (id === undefined) {
+      throw httpError("not-found", "no project id in the request path");
+    }
+    const parsed = planImportRequest.safeParse(context.body);
+    if (!parsed.success) {
+      throw httpError("invalid-request", "the plan import body is invalid");
+    }
+    try {
+      const result = dependencies.importPlan({
+        projectId: id,
+        fromRevision: parsed.data.fromRevision,
+        importId: parsed.data.importId,
+        documents: parsed.data.documents,
+        choices: parsed.data.choices,
+        validatedRevision: parsed.data.validatedRevision,
+        documentsHash: parsed.data.documentsHash,
+        actor: dependencies.actor,
+      });
+      const { retried, ...body } = result;
+      void retried;
+      return { status: 200, body };
+    } catch (error) {
+      throw toHttpError(error);
+    }
+  };
+}

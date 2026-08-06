@@ -107,6 +107,30 @@ describe("src/services/blob/sqlite.test", () => {
     assert.equal(count.c, 2);
   });
 
+  it("hash equals the put return value for the same content", () => {
+    const { storage, store, dispose } = build();
+    after(() => dispose());
+
+    const content = Buffer.from("kanthord", "utf8");
+    const putHash = storage.transact((t) => store.put(t, content));
+    assert.equal(store.hash(content), putHash);
+    assert.equal(store.hash(Buffer.from("kanthord", "utf8")), kanthordHash);
+  });
+
+  it("hash writes no row", () => {
+    const { storage, store, dispose } = build();
+    after(() => dispose());
+
+    const count = (): number =>
+      storage.transact(
+        (t) => t.get("SELECT COUNT(*) AS c FROM blob") as { c: number },
+      ).c;
+    const before = count();
+    store.hash(Buffer.from("kanthord", "utf8"));
+    store.hash(new Uint8Array());
+    assert.equal(count(), before);
+  });
+
   it("get of a valid hash with no row returns null", () => {
     const { store, dispose } = build();
     after(() => dispose());

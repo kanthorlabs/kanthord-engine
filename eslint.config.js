@@ -209,7 +209,7 @@ export default [
         {
           patterns: [
             {
-              group: ["node:*", "ulid", ...vendorPackages],
+              group: ["node:*", "ulid", "yaml", ...vendorPackages],
               message: "domain/ is pure: domain/ and zod only.",
             },
           ],
@@ -229,6 +229,7 @@ export default [
             {
               group: [
                 ...vendorPackages,
+                "yaml",
                 "node:sqlite",
                 "node:fs",
                 "node:fs/*",

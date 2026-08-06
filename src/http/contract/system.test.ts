@@ -22,7 +22,13 @@ const bannedPropertyNames = [
   "absolutePath",
 ];
 
-function collectPropertyNames(schema: unknown, into: Set<string>): void {
+const planRelativePathLocations = ["documents.path", "findings.path"];
+
+function collectPropertyNames(
+  schema: unknown,
+  parent: string,
+  into: Set<string>,
+): void {
   if (typeof schema !== "object" || schema === null) {
     return;
   }
@@ -32,12 +38,12 @@ function collectPropertyNames(schema: unknown, into: Set<string>): void {
     for (const [key, child] of Object.entries(
       properties as Readonly<Record<string, unknown>>,
     )) {
-      into.add(key);
-      collectPropertyNames(child, into);
+      into.add(`${parent}.${key}`);
+      collectPropertyNames(child, key, into);
     }
   }
   if (record.items !== undefined) {
-    collectPropertyNames(record.items, into);
+    collectPropertyNames(record.items, parent, into);
   }
 }
 
@@ -45,7 +51,7 @@ const propertyNamesOf = (
   entries: readonly Operation[],
   io: "input" | "output",
 ): Set<string> => {
-  const names = new Set<string>();
+  const located = new Set<string>();
   for (const entry of entries) {
     const schema = io === "input" ? entry.request : entry.response;
     if (schema === undefined) {
@@ -53,8 +59,16 @@ const propertyNamesOf = (
     }
     collectPropertyNames(
       z.toJSONSchema(schema, { target: "openapi-3.0", io }),
-      names,
+      "",
+      located,
     );
+  }
+  const names = new Set<string>();
+  for (const location of located) {
+    if (planRelativePathLocations.includes(location)) {
+      continue;
+    }
+    names.add(location.slice(location.lastIndexOf(".") + 1));
   }
   return names;
 };
@@ -170,12 +184,23 @@ describe("src/http/contract/system.test", () => {
     assert.equal(findOperation("blob.show")?.response, undefined);
   });
 
-  it("nine registry entries carry a response and three carry a request", () => {
+  it("twenty registry entries carry a response and seven carry a request", () => {
     const withResponse = registry.filter(
       (entry) => entry.response !== undefined,
     );
-    assert.equal(withResponse.length, 9);
+    assert.equal(withResponse.length, 20);
     assert.deepEqual(withResponse.map((entry) => entry.operationId).sort(), [
+      "edge.list",
+      "node.list",
+      "node.show",
+      "plan.export",
+      "plan.import",
+      "plan.revisions",
+      "plan.validate",
+      "project.create",
+      "project.list",
+      "project.repositories",
+      "project.show",
       "provider.list",
       "provider.register",
       "provider.show",
@@ -191,7 +216,15 @@ describe("src/http/contract/system.test", () => {
         .filter((entry) => entry.request !== undefined)
         .map((entry) => entry.operationId)
         .sort(),
-      ["provider.register", "repository.inspect", "repository.register"],
+      [
+        "plan.import",
+        "plan.validate",
+        "project.create",
+        "project.repositories",
+        "provider.register",
+        "repository.inspect",
+        "repository.register",
+      ],
     );
   });
 
@@ -207,9 +240,5 @@ describe("src/http/contract/system.test", () => {
     for (const banned of bannedPropertyNames) {
       assert.equal(responseNames.has(banned), false, `banned ${banned}`);
     }
-  });
-
-  it("plan.import carries no request schema today", () => {
-    assert.equal(findOperation("plan.import")?.request, undefined);
   });
 });

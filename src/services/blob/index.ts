@@ -21,4 +21,5 @@ export class BlobStoreError extends Error {
 export interface BlobStore {
   put(transaction: Transaction, content: Uint8Array): string;
   get(hash: string, transaction?: Transaction): BlobRecord | null;
+  hash(content: Uint8Array): string;
 }
