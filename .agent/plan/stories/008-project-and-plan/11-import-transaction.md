@@ -116,7 +116,11 @@ Every `PlanStore` member takes this transaction. `Transaction` is synchronous (`
 ```ts
 export const planImportRequest = z.object({
   fromRevision: z.string().nullable(),
-  importId: z.string().min(1).max(100),
+  importId: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(/^[\x21-\x7E](?:[\x20-\x7E]{0,98}[\x21-\x7E])?$/),
   documents: z.array(planDocument).min(1),
   choices: z.array(z.object({ id: z.string().min(1), take: z.enum(choices) })),
   validatedRevision: z.string().nullable(),
@@ -132,7 +136,11 @@ export const planImportResponse = z.object({
 
 `retried` is **not** a response member. `docs/proposal/api/graph.md:70` says a retry returns the original revision and the original documents with `200`, and a client that could see the difference would be tempted to branch on it. The command returns it for the handler's log line only.
 
-`importId` is a free-form string of one to a hundred characters. `plan_revision.import_id` is `TEXT NOT NULL` with `UNIQUE (project_id, import_id)` and no format constraint, and `src/domain/plan-revision.ts:10` declares `importId: z.string()`. The example in `docs/proposal/api/graph.md:44` is `import_01JQ8Z7G3H`, which is not a minted identity of this product, so no prefix is enforced.
+`importId` is a client-chosen string of one to a hundred **printable ASCII** characters, with no leading or trailing space. `plan_revision.import_id` is `TEXT NOT NULL` with `UNIQUE (project_id, import_id)` and no format constraint, and `src/domain/plan-revision.ts:10` declares `importId: z.string()` — the row schema stays unconstrained, because the database holds whatever was already written. The example in `docs/proposal/api/graph.md:44` is `import_01JQ8Z7G3H`, which is not a minted identity of this product, so no prefix is enforced.
+
+The character set is not decoration. EPIC 010.6 requires a supplied `Idempotency-Key` on `plan.import` to **equal** `importId` (`docs/proposal/api/README.md`, "Every other `POST` takes `Idempotency-Key`"), and an HTTP field value is ASCII — RFC 9110 deprecates `obs-text`. A free-form `importId` of `café` would therefore be legal in the body and unsendable in the header, so the keyed path would be closed to it for no reason a client could discover. The edge-space rule follows from the same place: HTTP strips the optional whitespace around a field value, so an `importId` of `" a"` could never survive as a header and would silently become a different key.
+
+The regex bound is `98` interior characters rather than `253`, because `.max(100)` already caps the whole value; the header grammar in `src/http/server/idempotency-key.ts` allows 255 and is therefore never the refusing side.
 
 ### 3. `src/http/server/plan/import-plan.ts` and `refusals.ts`
 
@@ -194,6 +202,19 @@ A helper in the test file, `snapshot(storage)`, returns the full row set of `nod
 - **Export is byte-identical.** `exportPlan` (Story 12) at that revision returns documents `deepEqual` to `result.documents`, and the `accepted_blob` content equals `canonicalDocumentsJson(result.documents)` byte for byte.
 - **A re-import at the same revision succeeds.** Submit the accepted documents with `fromRevision = revision`, every choice `database`, a new `importId`: it commits a second revision whose `parent_id` is the first, and `node.updated_at` moves to the second clock value.
 - **A re-import at the previous revision is refused by name.** The same submission with `fromRevision = null` throws `stale-revision` and `details.current` is the newest revision. The snapshot is unchanged.
+
+### `importId` grammar
+
+Assert against `planImportRequest.safeParse`, in the `src/http/contract/graph.test.ts` suite that
+covers the other schemas of this story.
+
+- Accepted: `import_01JQ8Z7G3H`, `a`, `release candidate`, `"a".repeat(100)`, `!~`.
+- Refused: `""`, `"a".repeat(101)`, `" ab"`, `"ab "`, `" "`, `"a\tb"`, `"café"`, `"a\nb"`.
+
+An interior space is legal and an edge space is not, because HTTP strips the whitespace around a
+field value. Non-ASCII is refused because EPIC 010.6 requires `Idempotency-Key` to equal this value
+and an HTTP field value is ASCII. Dropping either row reopens the case where a legal `importId`
+cannot be sent as a header.
 
 ### Idempotency
 
