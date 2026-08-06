@@ -40,6 +40,8 @@ export function resolveIdentities(
 
 The mint order is the documents sorted by `comparePaths` on the submitted path, ascending. That is the determinism rule: the same submission mints the same identity for the same document, whatever order the array arrived in.
 
+**A refusal after this point keeps the identities it minted.** `plan.validate` mints on a read path by design, and `plan.import` mints here at its step 6, before the `documentsHash` comparison of step 7 that consumes those identities (Story 11:228). So an import refused with `plan-invalid`, `choices-changed` or `choices-invalid` has already spent one ULID per id-less document. A ULID space is unbounded, so this costs nothing in production. It matters in one place only: a test whose mock id generator is constructed with exactly the ULIDs a successful run consumes will throw `ids-exhausted` on a refusal path. Size the mock for the refusal, not for the success.
+
 **Identity checks.** For a present `id`:
 
 - `parseIdentity(id)` returning `null` is `identity-invalid`.
