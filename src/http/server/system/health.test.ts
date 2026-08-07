@@ -119,6 +119,8 @@ describe("src/http/server/system/health.test", () => {
     const context: HandlerContext = {
       operation: findOperation("system.health")!,
       parameters: {},
+      query: {},
+      headers: {},
       body: undefined,
     };
 

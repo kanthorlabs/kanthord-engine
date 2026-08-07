@@ -189,6 +189,20 @@ describe("src/http/contract/system.test", () => {
     assert.equal(findOperation("blob.show")?.response, undefined);
   });
 
+  it("blob.show declares application/octet-stream as its response media", () => {
+    assert.equal(
+      findOperation("blob.show")?.responseMedia,
+      "application/octet-stream",
+    );
+  });
+
+  it("no operation but blob.show declares a response media", () => {
+    const withMedia = registry
+      .filter((entry) => entry.responseMedia !== undefined)
+      .map((entry) => entry.operationId);
+    assert.deepEqual(withMedia, ["blob.show"]);
+  });
+
   it("systemStatusResponse accepts a minimal and a full shape", () => {
     const minimal = {
       version: "27.8.1",

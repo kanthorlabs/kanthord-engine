@@ -9,11 +9,11 @@ import type { OperationExamples } from "./operation.ts";
 import { cursorRequest, cursorRequestExample } from "./cursor.ts";
 
 export const eventListRequest = cursorRequest.extend({
-  subjectKind: z.string().min(1).nullable().default(null),
-  subject: z.string().min(1).nullable().default(null),
-  type: z.string().min(1).nullable().default(null),
-  actorKind: z.enum(actorKinds).nullable().default(null),
-  actor: z.string().min(1).nullable().default(null),
+  subjectKind: z.string().min(1).optional(),
+  subject: z.string().min(1).optional(),
+  type: z.string().min(1).optional(),
+  actorKind: z.enum(actorKinds).optional(),
+  actor: z.string().min(1).optional(),
 });
 
 export const eventView = z.strictObject({
@@ -34,11 +34,11 @@ export const eventListResponse = z.strictObject({
 export const eventListExamples: OperationExamples = {
   query: {
     ...cursorRequestExample,
-    subjectKind: null,
-    subject: null,
-    type: null,
-    actorKind: null,
-    actor: null,
+    subjectKind: "node",
+    subject: `task_${U}`,
+    type: "node.state.changed",
+    actorKind: "daemon",
+    actor: "kanthord",
   },
   success: {
     events: [

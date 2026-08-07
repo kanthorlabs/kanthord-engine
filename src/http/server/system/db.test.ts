@@ -101,6 +101,8 @@ describe("src/http/server/system/db.test", () => {
     const context: HandlerContext = {
       operation: findOperation("system.db")!,
       parameters: {},
+      query: {},
+      headers: {},
       body: undefined,
     };
 

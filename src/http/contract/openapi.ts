@@ -119,6 +119,11 @@ function operationObject(
         },
       };
     }
+    if (entry.responseMedia !== undefined) {
+      success.content = {
+        [entry.responseMedia]: { schema: { type: "string", format: "binary" } },
+      };
+    }
     responses[successKey] = success;
   } else {
     responses["501"] = { description: "not implemented" };

@@ -146,6 +146,25 @@ describe("src/http/contract/registry.test", () => {
     );
   });
 
+  it("flags an entry declaring both response and responseMedia", () => {
+    const faults = registryFaults([
+      {
+        operationId: "x.both",
+        method: "GET",
+        path: [system("health")],
+        introducedIn: "phase-1",
+        status: "routed",
+        response: registry.find((entry) => entry.operationId === "node.list")
+          ?.response,
+        responseMedia: "application/octet-stream",
+      },
+    ]);
+    assert.deepEqual(
+      faults.map((fault) => fault.reason),
+      ["response and responseMedia both declared"],
+    );
+  });
+
   it("keeps the hash parameter exclusive to blob.show", () => {
     const hashed = registry.filter((entry) =>
       entry.path.some(

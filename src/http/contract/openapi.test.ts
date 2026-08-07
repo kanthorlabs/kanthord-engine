@@ -344,7 +344,7 @@ test("every phase-1 routed operation but blob.show refers to a response componen
   }
 });
 
-test("no routed operation but blob.show resolves to an empty response body", () => {
+test("every routed operation resolves to a non-empty response body", () => {
   const document = buildOpenApiDocument();
   for (const entry of operationObjects(document)) {
     const registered = registry.find(
@@ -357,15 +357,28 @@ test("no routed operation but blob.show resolves to an empty response body", () 
     const success = responses[
       String(registered.successStatus ?? 200)
     ] as Readonly<Record<string, unknown>>;
-    if (entry.operationId === "blob.show") {
-      assert.equal(Object.hasOwn(success, "content"), false);
-    } else {
-      assert.ok(
-        success.content !== undefined,
-        `${entry.operationId} has no content`,
-      );
-    }
+    assert.ok(
+      success.content !== undefined,
+      `${entry.operationId} has no content`,
+    );
   }
+});
+
+test("blob.show declares an inline binary media type and no response component", () => {
+  const document = buildOpenApiDocument();
+  const paths = document.paths as Readonly<Record<string, unknown>>;
+  const blobShow = (
+    paths["/v1/blob/{hash}"] as Readonly<Record<string, unknown>>
+  ).get as Readonly<Record<string, unknown>>;
+  const success = (blobShow.responses as Readonly<Record<string, unknown>>)[
+    "200"
+  ] as Readonly<Record<string, unknown>>;
+  const content = success.content as Readonly<Record<string, unknown>>;
+  assert.deepEqual(content["application/octet-stream"], {
+    schema: { type: "string", format: "binary" },
+  });
+  assert.deepEqual(Object.keys(content), ["application/octet-stream"]);
+  assert.deepEqual(Object.keys(success), ["description", "content"]);
 });
 
 test("every response component resolves", () => {

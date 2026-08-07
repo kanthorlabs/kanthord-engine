@@ -36,6 +36,7 @@ export type Operation = Readonly<{
   query?: ZodType;
   request?: ZodType;
   response?: ZodType;
+  responseMedia?: string;
   errors?: OperationErrors;
   examples?: OperationExamples;
 }>;

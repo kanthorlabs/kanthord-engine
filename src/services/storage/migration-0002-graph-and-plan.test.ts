@@ -18,6 +18,7 @@ import {
 import { coreEntities } from "./migration-0001-core-entities.ts";
 import { graphAndPlan } from "./migration-0002-graph-and-plan.ts";
 import { executionAndJournal } from "./migration-0003-execution-and-journal.ts";
+import { migration0004EventIndexes } from "./migration-0004-event-indexes.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -228,11 +229,12 @@ describe("src/services/storage/migration-0002-graph-and-plan.test", () => {
     assert.ok(migrationDoc.includes("0002-graph-and-plan"));
   });
 
-  it("migrations holds exactly coreEntities, graphAndPlan and executionAndJournal", () => {
+  it("migrations holds exactly coreEntities, graphAndPlan, executionAndJournal and migration0004EventIndexes", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
       executionAndJournal,
+      migration0004EventIndexes,
     ]);
   });
 

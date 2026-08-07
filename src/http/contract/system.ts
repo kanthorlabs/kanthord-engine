@@ -172,6 +172,7 @@ export const system = operations([
     path: [resource("blob"), hash()],
     introducedIn: "phase-1",
     status: "routed",
+    responseMedia: "application/octet-stream",
     errors: { ...baselineErrors },
   },
 ]);

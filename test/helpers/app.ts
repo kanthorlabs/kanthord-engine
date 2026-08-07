@@ -23,6 +23,44 @@ export type TestApp = Readonly<{
   internalErrors(): readonly unknown[];
 }>;
 
+export function drive(
+  app: TestApp,
+  method: string,
+  path: string,
+): supertest.Test {
+  switch (method) {
+    case "DELETE":
+      return app.del(path);
+    case "GET":
+      return app.get(path);
+    case "POST":
+      return app.post(path);
+    case "PUT":
+      return app.put(path);
+    default:
+      throw new Error(`unsupported method: ${method}`);
+  }
+}
+
+export function driveRaw(
+  app: TestApp,
+  method: string,
+  path: string,
+): supertest.Test {
+  switch (method) {
+    case "DELETE":
+      return app.raw.del(path);
+    case "GET":
+      return app.raw.get(path);
+    case "POST":
+      return app.raw.post(path);
+    case "PUT":
+      return app.raw.put(path);
+    default:
+      throw new Error(`unsupported method: ${method}`);
+  }
+}
+
 export async function createTestApp(
   overrides?: TestAppOverrides,
 ): Promise<TestApp> {

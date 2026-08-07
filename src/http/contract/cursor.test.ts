@@ -37,8 +37,12 @@ describe("src/http/contract/cursor.test", () => {
     assert.throws(() => cursorRequest.parse({ limit: "abc" }));
   });
 
-  it("defaults after to null when absent", () => {
-    assert.equal(cursorRequest.parse({}).after, null);
+  it("omits after when absent", () => {
+    assert.equal("after" in cursorRequest.parse({}), false);
+  });
+
+  it("keeps after when present", () => {
+    assert.equal(cursorRequest.parse({ after: "x" }).after, "x");
   });
 
   it("throws on an empty after", () => {

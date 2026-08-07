@@ -79,6 +79,10 @@ import { importPlanHandler } from "./http/server/plan/import-plan.ts";
 import { listNodeHandler } from "./http/server/node/list-node.ts";
 import { showNodeHandler } from "./http/server/node/show-node.ts";
 import { listEdgeHandler } from "./http/server/edge/list-edge.ts";
+import { listEventHandler } from "./http/server/event/list-event.ts";
+import { listEvents } from "./queries/event/list-event.ts";
+import { showBlobHandler } from "./http/server/blob/show-blob.ts";
+import { showBlob } from "./queries/blob/show-blob.ts";
 import { CliError } from "./cli/options.ts";
 import type { MigrateHandler } from "./cli/db/migrate.ts";
 import type { PlanDirectoryDependencies } from "./cli/plan/directory.ts";
@@ -278,6 +282,12 @@ async function serve(options: ServeOptions): Promise<void> {
         }),
         "edge.list": listEdgeHandler({
           listEdges: (input) => listEdges({ storage, plan }, input),
+        }),
+        "event.list": listEventHandler({
+          listEvents: (input) => listEvents({ events }, input),
+        }),
+        "blob.show": showBlobHandler({
+          showBlob: (input) => showBlob({ blobs }, input),
         }),
         "plan.export": exportPlanHandler({
           exportPlan: (input) => exportPlan({ storage, plan, blobs }, input),

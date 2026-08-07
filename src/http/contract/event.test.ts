@@ -4,10 +4,10 @@ import assert from "node:assert/strict";
 import { eventListRequest, eventListResponse, eventView } from "./event.ts";
 
 describe("src/http/contract/event.test", () => {
-  it("defaults limit to 100 and after to null on an empty request", () => {
+  it("defaults limit to 100 and omits after on an empty request", () => {
     const parsed = eventListRequest.parse({});
     assert.equal(parsed.limit, 100);
-    assert.equal(parsed.after, null);
+    assert.equal("after" in parsed, false);
   });
 
   it("rejects limit 501", () => {
@@ -37,8 +37,20 @@ describe("src/http/contract/event.test", () => {
     assert.throws(() => eventListRequest.parse({ after: "" }));
   });
 
-  it("has exactly the expected keys", () => {
-    const parsed = eventListRequest.parse({});
+  it("carries only limit on an empty request", () => {
+    assert.deepEqual(Object.keys(eventListRequest.parse({})), ["limit"]);
+  });
+
+  it("carries every filter when every filter is sent", () => {
+    const parsed = eventListRequest.parse({
+      subjectKind: "node",
+      subject: "task_x",
+      type: "t",
+      actorKind: "daemon",
+      actor: "a",
+      after: "event_x",
+      limit: "25",
+    });
     assert.deepEqual(Object.keys(parsed).sort(), [
       "actor",
       "actorKind",
@@ -48,6 +60,7 @@ describe("src/http/contract/event.test", () => {
       "subjectKind",
       "type",
     ]);
+    assert.equal(parsed.limit, 25);
   });
 
   it("eventListResponse parses an empty events list", () => {

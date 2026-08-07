@@ -19,6 +19,7 @@ import {
 import { coreEntities } from "./migration-0001-core-entities.ts";
 import { graphAndPlan } from "./migration-0002-graph-and-plan.ts";
 import { executionAndJournal } from "./migration-0003-execution-and-journal.ts";
+import { migration0004EventIndexes } from "./migration-0004-event-indexes.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -434,15 +435,16 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     assert.ok(migrationDoc.includes("0003-execution-and-journal"));
   });
 
-  it("migrations holds exactly the three migrations and versions map to 1, 2, 3", () => {
+  it("migrations holds exactly the four migrations and versions map to 1, 2, 3, 4", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
       executionAndJournal,
+      migration0004EventIndexes,
     ]);
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3],
+      [1, 2, 3, 4],
     );
   });
 
@@ -527,19 +529,19 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     }
   });
 
-  it("the index inventory is exactly run_one_active", () => {
+  it("the index inventory is exactly run_one_active plus the event indexes", () => {
     const { storage, temporary } = buildMigrated();
     after(() => storage.close());
     after(() => temporary.dispose());
 
     const rows = storage.transact((t) =>
       t.all(
-        "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'",
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name",
       ),
     ) as readonly Record<string, unknown>[];
     assert.deepEqual(
       rows.map((row) => row.name),
-      ["run_one_active"],
+      ["event_actor", "event_subject", "event_type", "run_one_active"],
     );
   });
 

@@ -14,8 +14,8 @@ import { reservePort } from "../test/helpers/port.ts";
 const byBytes = (a: string, b: string): number =>
   Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 
-// EPIC 010 owns these two; until then they are the exact remaining unbound set.
-const pending = ["blob.show", "event.list"] as const;
+// EPIC 010 has bound every routed operation; nothing is pending.
+const pending = [] as const;
 
 const MISSING_ID = "01JZZZZZZZZZZZZZZZZZZZZZZZ";
 const missing = (prefix: string): string => `${prefix}_${MISSING_ID}`;
@@ -114,6 +114,11 @@ const fixtures: Readonly<Record<string, Fixture>> = {
   "node.list": { expect: 200 },
   "node.show": { parameters: { id: missing("node") }, expect: 404 },
   "edge.list": { parameters: { id: missing("project") }, expect: 404 },
+  "event.list": { expect: 200 },
+  "blob.show": {
+    parameters: { hash: `sha256:${"0".repeat(64)}` },
+    expect: 404,
+  },
 };
 
 const clientDependencies = () => ({
@@ -198,34 +203,13 @@ describe("src/main.test", () => {
     }
   });
 
-  it("blob.show and event.list answer 501 as the exact remaining unbound set", async () => {
+  it("no routed operation is left unbound", () => {
     const residue = registry
       .filter((entry) => entry.status === "routed")
       .map((entry) => entry.operationId)
       .filter((id) => !(id in fixtures))
       .sort(byBytes);
     assert.deepEqual(residue, [...pending].sort(byBytes));
-
-    const blob = await call(clientDependencies(), {
-      operationId: "blob.show",
-      parameters: { hash: `sha256:${"0".repeat(64)}` },
-    });
-    assert.equal(blob.ok, false);
-    if (!blob.ok) {
-      assert.equal(blob.status, 501);
-      assert.equal(blob.code, "not-implemented");
-      assert.equal(blob.message.endsWith("is not implemented yet"), true);
-    }
-
-    const events = await call(clientDependencies(), {
-      operationId: "event.list",
-    });
-    assert.equal(events.ok, false);
-    if (!events.ok) {
-      assert.equal(events.status, 501);
-      assert.equal(events.code, "not-implemented");
-      assert.equal(events.message.endsWith("is not implemented yet"), true);
-    }
   });
 
   it("kanthord status answers against the started daemon", async () => {

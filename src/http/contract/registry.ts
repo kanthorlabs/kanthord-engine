@@ -236,6 +236,13 @@ export function registryFaults(
         reason: "query-on-stubbed",
       });
     }
+
+    if (entry.response !== undefined && entry.responseMedia !== undefined) {
+      faults.push({
+        operationId: entry.operationId,
+        reason: "response and responseMedia both declared",
+      });
+    }
   }
 
   return faults;

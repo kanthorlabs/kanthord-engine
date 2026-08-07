@@ -21,10 +21,16 @@ export type TransportSettings = Readonly<{
 export type HandlerContext = Readonly<{
   operation: Operation;
   parameters: Readonly<Record<string, string>>;
+  query: Readonly<Record<string, readonly string[]>>;
+  headers: Readonly<Record<string, string>>;
   body: unknown;
 }>;
 
-export type HandlerResult = Readonly<{ status: number; body: unknown }>;
+export type HandlerResult = Readonly<{
+  status: number;
+  body: unknown;
+  headers?: Readonly<Record<string, string>>;
+}>;
 
 export type Handler = (
   context: HandlerContext,

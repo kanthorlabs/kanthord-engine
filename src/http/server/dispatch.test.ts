@@ -11,8 +11,16 @@ import type { Handler, HandlerContext, TransportSettings } from "./app.ts";
 import { httpError } from "../contract/errors.ts";
 import { registry } from "../contract/registry.ts";
 import { renderPath } from "../contract/path.ts";
-import { createTestApp, unimplementedFor } from "../../../test/helpers/app.ts";
+import {
+  createTestApp,
+  unimplementedFor,
+  drive,
+} from "../../../test/helpers/app.ts";
 import { loopbackAgent } from "../../../test/helpers/agent.ts";
+import {
+  createMigratedStorage,
+  tableCounts,
+} from "../../../test/helpers/database.ts";
 
 const settings: TransportSettings = {
   token: "test-token",
@@ -237,6 +245,105 @@ describe("src/http/server/dispatch.test", () => {
     assert.deepEqual(recordedBody, { url: "https://example.test/r.git" });
   });
 
+  it("a handler receives the query string as a list per key", async () => {
+    let recorded: HandlerContext | undefined;
+    const app = await createTestApp({
+      handlers: {
+        "system.health": (context) => {
+          recorded = context;
+          return { status: 200, body: { ok: true } };
+        },
+      },
+    });
+    await app.get("/v1/health?limit=5");
+    assert.deepEqual(recorded?.query, { limit: ["5"] });
+
+    await app.get("/v1/health");
+    assert.deepEqual(recorded?.query, {});
+  });
+
+  it("a handler receives the request headers, lowercase-keyed", async () => {
+    let recorded: HandlerContext | undefined;
+    const app = await createTestApp({
+      handlers: {
+        "system.health": (context) => {
+          recorded = context;
+          return { status: 200, body: { ok: true } };
+        },
+      },
+    });
+    const response = await app.get("/v1/health");
+    assert.equal(response.status, 200);
+    assert.equal(recorded?.headers["host"], "kanthord.test");
+    assert.match(recorded?.headers["authorization"] ?? "", /^Bearer /);
+  });
+
+  it("a handler's response headers are applied to the response", async () => {
+    const app = await createTestApp({
+      handlers: {
+        "system.health": () => ({
+          status: 200,
+          body: "ok",
+          headers: { "X-B": "2", "X-A": "1" },
+        }),
+      },
+    });
+    const response = await app.get("/v1/health");
+    assert.equal(response.headers["x-a"], "1");
+    assert.equal(response.headers["x-b"], "2");
+  });
+
+  it("a handler's binary body and content type cross the boundary intact", async () => {
+    const app = await createTestApp({
+      handlers: {
+        "system.health": () => ({
+          status: 200,
+          body: Buffer.from([1, 2, 3]),
+          headers: { "Content-Type": "application/octet-stream" },
+        }),
+      },
+    });
+    const response = await app.get("/v1/health").buffer();
+    assert.match(
+      response.headers["content-type"] ?? "",
+      /application\/octet-stream/,
+    );
+    assert.equal((response.body as Buffer).length, 3);
+    assert.deepEqual(Array.from(response.body as Buffer), [1, 2, 3]);
+  });
+
+  it("a handler omitting headers sets no extra header", async () => {
+    const app = await createTestApp({
+      handlers: {
+        "system.health": () => ({ status: 200, body: { ok: true } }),
+      },
+    });
+    const response = await app.get("/v1/health");
+    assert.equal(response.status, 200);
+    assert.equal(response.headers["x-a"], undefined);
+  });
+
+  it("a repeated query key reaches the handler unrefused", async () => {
+    let recorded: HandlerContext | undefined;
+    const app = await createTestApp({
+      handlers: {
+        "system.health": (context) => {
+          recorded = context;
+          return { status: 200, body: { ok: true } };
+        },
+      },
+    });
+    const response = await app.get("/v1/health?a=1&a=2");
+    assert.equal(response.status, 200);
+    assert.deepEqual(recorded?.query, { a: ["1", "2"] });
+  });
+
+  it("a stubbed route answers 501 whatever the repeated query string says", async () => {
+    const app = await createTestApp();
+    const response = await app.get("/v1/run?a=1&a=2");
+    assert.equal(response.status, 501);
+  });
+
   it("an async handler is awaited", async () => {
     const app = await createTestApp({
       handlers: {
@@ -285,27 +392,83 @@ describe("src/http/server/dispatch.test", () => {
     assert.equal(app.internalErrors()[0], boom);
   });
 
-  it("every one of the thirty stubbed operations answers 501 from an empty handler map", async () => {
-    const app = await createTestApp();
+  async function buildWitnessApp(
+    temporary: ReturnType<typeof createMigratedStorage>,
+  ) {
+    let writes = 0;
+    const witness: Handler = () => {
+      writes += 1;
+      temporary.storage.transact((transaction) => {
+        transaction.run(
+          "INSERT INTO event (id, subject_kind, subject_id, type, actor_kind, actor_id, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [
+            `event_01HZY8QF3M4N5P6R7S8T9V0W${String(writes).padStart(2, "0")}`,
+            "node",
+            "node_01HZY8QF3M4N5P6R7S8T9V0W1A",
+            "witness",
+            "daemon",
+            "d1",
+            "{}",
+          ],
+        );
+      });
+      return { status: 200, body: {} };
+    };
+
+    const handlers = Object.fromEntries(
+      registry
+        .filter((entry) => entry.status === "routed")
+        .map((entry) => [entry.operationId, witness]),
+    );
+    const app = await createTestApp({ handlers });
+    return { app, writes: () => writes };
+  }
+
+  it("every stubbed route answers 501 and writes no row", async (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+
+    const { app, writes } = await buildWitnessApp(temporary);
+    const before = tableCounts(temporary.storage);
+
     let driven = 0;
     for (const entry of registry) {
-      if (entry.status !== "stubbed") {
-        continue;
-      }
+      if (entry.status !== "stubbed") continue;
       const path = renderPath(entry.path).replace(/:[^/]+/g, "x_01");
-      const method =
-        entry.method === "DELETE"
-          ? "del"
-          : (entry.method.toLowerCase() as "get" | "post" | "put");
-      const response = await app[method](path);
-      assert.equal(response.status, 501, entry.operationId);
+      const response = await drive(app, entry.method, path);
+      assert.equal(response.status, 501, `${entry.operationId} ${path}`);
       assert.equal(
         response.body.error.code,
         "not-implemented",
         entry.operationId,
       );
+      assert.deepEqual(
+        tableCounts(temporary.storage),
+        before,
+        entry.operationId,
+      );
       driven += 1;
     }
+
+    assert.equal(
+      driven,
+      registry.filter((entry) => entry.status === "stubbed").length,
+    );
     assert.equal(driven, 30);
+    assert.equal(writes(), 0);
+    assert.deepEqual(tableCounts(temporary.storage), before);
+  });
+
+  it("a routed route reaches the witness and writes a row", async (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+
+    const { app, writes } = await buildWitnessApp(temporary);
+    const before = tableCounts(temporary.storage);
+
+    const response = await app.get("/v1/health");
+    assert.equal(response.status, 200);
+    assert.equal(writes(), 1);
+    assert.equal(tableCounts(temporary.storage).event, before.event + 1);
   });
 });

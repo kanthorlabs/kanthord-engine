@@ -110,6 +110,8 @@ describe("src/http/server/system/status.test", () => {
     const context: HandlerContext = {
       operation: findOperation("system.status")!,
       parameters: { id: "unused" },
+      query: {},
+      headers: {},
       body: { unused: true },
     };
 

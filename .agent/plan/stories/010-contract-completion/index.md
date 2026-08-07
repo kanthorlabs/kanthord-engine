@@ -2,7 +2,7 @@
 
 Epic: `.agent/plan/epics/010-contract-completion.md`
 Prereq: EPIC 009 (sequence order), expanded at `.agent/plan/stories/009-cli-and-composition-root/` and not built.
-**Hard prereq for Story 02: EPIC 009.5.** Its content is now settled — `.agent/plan/epics/009.5-contract-schemas.md` fixes the `limit` bound and the cursor shape — but the schemas do not yet exist. Story 02 cannot be dispatched until `eventListRequest` and `eventListResponse` are in `src/http/contract/event.ts`. See B3.
+**Hard prereq for Story 02: EPIC 009.5 — now built.** `eventListRequest`, `eventView` and `eventListResponse` exist at `src/http/contract/event.ts:11-31`. Story 02 is dispatch-ready and amends the filter cardinality of that pair. See B3.
 
 Every route in `docs/proposal/api/` answers. `blob.show` and `event.list` answer with data, every `stubbed` route answers `501` and is proved to write no row, and every `post-mvp` path answers `404`.
 
@@ -118,9 +118,13 @@ This section was rewritten twice: once after an adversarial review, once after U
 
   This was the only fix that had to reach `docs/proposal/`. An EPIC non-goal would not have done: `AGENTS.md` makes the proposal the source of truth, so a story answering `400` to a declared phase-1 parameter would have left EPIC 010 unable to claim contract completion whatever its own EPIC file said. Story 02's `?wait=5` test now asserts specified behaviour instead of recording a gap.
 
-- B3 - **open, and it is the one thing blocking Story 02** - event.list-schemas-do-not-exist-yet - `.agent/plan/epics/009.5-contract-schemas.md` now fixes the three values that were in no document — `limit` defaults to 100, caps at 500 with a `400` rather than a silent clamp, and no response carries a cursor field — and records that `event.list` declares no `wait`. So the _content_ is settled and Story 02 and EPIC 009.5 can no longer disagree.
+- B3 - **done** - event.list-schemas-reconciled - EPIC 009.5 is built and `src/http/contract/event.ts` holds `eventListRequest`, `eventView` and `eventListResponse`. What it shipped differed from Story 02's quote on three points, and Ulrich settled all three:
 
-  What is still open is _existence_. 009.5 is `Status: draft` with no story directory, and `src/http/contract/event.ts` is twelve lines with no zod. Sequence order lets a story rely on an earlier epic's capability; it does not conjure one. **Story 02 cannot be dispatched until `eventListRequest` and `eventListResponse` exist.** The fix is to expand and build 009.5, which is its own `/author` run.
+  - **The wire timestamp stays `createdAt`**, the shipped and conventional name. `RecordedEvent` keeps `occurredAt`, and the **handler** renames it — a handler does parse, invoke and format, and a rename to the wire name is formatting. `src/queries/event/list-event.ts` stays a pure pass-through.
+  - **The six filter fields move from `.nullable().default(null)` to `.optional()`**, which Story 02 section 1 now performs. A query string cannot carry JSON `null`, so the nullable branch was reachable only through its own default. Under `.optional()`, `eventListRequest.parse({})` returns exactly `{ limit: 100 }` and is structurally `EventFilter`, so no `null`-to-`undefined` translation exists anywhere in the epic.
+  - **`after` and `subject` stay `z.string().min(1)`**, not `identity("event")` / `anyIdentity`. 009.5 settled that deliberately; Story 02 drops the identity-typed expectations, and `?after=repo_…` is now a `200` with an empty page rather than a `400`.
+
+  Consequence: Story 02 is the one story in this epic that edits `src/http/contract/`. The `Where the code lands` row above understates it by that much.
 
 - B4 - **done, proposal amended** - range-and-caching-are-now-specified - `docs/proposal/api/system.md` states the three accepted `Range` forms, the `206` with `Content-Range`, `Accept-Ranges: bytes` on every response, the `200` fallback for anything else, the explicit refusal of `416` with its reason, `max-age=31536000`, and the refusal of `If-None-Match` and `304`. Story 03 implements the proposal instead of inventing it, and the `["200", "default"]` OpenAPI question dissolves with it.
 

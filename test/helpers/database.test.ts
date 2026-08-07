@@ -2,7 +2,13 @@ import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { basename, dirname } from "node:path";
-import { createTemporaryDatabase } from "./database.ts";
+import {
+  createTemporaryDatabase,
+  createMigratedStorage,
+  tableCounts,
+} from "./database.ts";
+import { rows } from "../../src/domain/rows.ts";
+import { migrations } from "../../src/services/storage/migrations.ts";
 
 describe("test/helpers/database.test", () => {
   it("path ends with kanthord.db, parent exists, file does not", () => {
@@ -40,5 +46,58 @@ describe("test/helpers/database.test", () => {
     assert.equal(fs.existsSync(parent), false);
 
     assert.doesNotThrow(() => db.dispose());
+  });
+
+  it("reports every table name in bytewise order", () => {
+    const temporary = createMigratedStorage();
+    after(() => temporary.dispose());
+
+    const expected = (Object.keys(rows) as readonly string[])
+      .slice()
+      .sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
+    assert.deepEqual(Object.keys(tableCounts(temporary.storage)), expected);
+  });
+
+  it("reports 0 for every table except migration on a fresh database", () => {
+    const temporary = createMigratedStorage();
+    after(() => temporary.dispose());
+
+    const counts = tableCounts(temporary.storage);
+    for (const [table, count] of Object.entries(counts)) {
+      if (table === "migration") {
+        assert.equal(count, migrations.length, table);
+      } else {
+        assert.equal(count, 0, table);
+      }
+    }
+  });
+
+  it("one inserted event row moves event from 0 to 1 and no other entry", () => {
+    const temporary = createMigratedStorage();
+    after(() => temporary.dispose());
+
+    const before = tableCounts(temporary.storage);
+    temporary.storage.transact((transaction) => {
+      transaction.run(
+        "INSERT INTO event (id, subject_kind, subject_id, type, actor_kind, actor_id, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+          "event_01HZY8QF3M4N5P6R7S8T9V0W1B",
+          "node",
+          "node_01HZY8QF3M4N5P6R7S8T9V0W1A",
+          "witness",
+          "daemon",
+          "d1",
+          "{}",
+        ],
+      );
+    });
+    const after1 = tableCounts(temporary.storage);
+    for (const table of Object.keys(before)) {
+      const expected =
+        table === "event"
+          ? (before as Record<string, number>)[table]! + 1
+          : (before as Record<string, number>)[table]!;
+      assert.equal((after1 as Record<string, number>)[table], expected, table);
+    }
   });
 });

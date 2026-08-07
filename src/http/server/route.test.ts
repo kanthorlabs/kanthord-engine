@@ -6,6 +6,15 @@ import Koa from "koa";
 import { envelopeMiddleware } from "./envelope.ts";
 import { routeMiddleware, type RoutedState } from "./route.ts";
 import { loopbackAgent } from "../../../test/helpers/agent.ts";
+import { createTestApp, drive, driveRaw } from "../../../test/helpers/app.ts";
+import { readRouteMatrix } from "../../../test/helpers/proposal.ts";
+import { findOperation } from "../contract/registry.ts";
+
+const postMvp = readRouteMatrix()
+  .filter((row) => row.introducedIn === "post-mvp")
+  .sort((a, b) =>
+    Buffer.compare(Buffer.from(a.operationId), Buffer.from(b.operationId)),
+  );
 
 function buildApp(): Koa {
   const app = new Koa();
@@ -63,6 +72,83 @@ describe("src/http/server/route.test", () => {
         "match must name an operation",
       );
       assert.ok(response.body.parameters, "match must carry parameters");
+    }
+  });
+
+  it("the proposal declares four post-mvp rows", () => {
+    assert.deepEqual(
+      postMvp.map((row) => row.operationId),
+      [
+        "binding.e2e.project",
+        "binding.provider.agent",
+        "binding.provider.project",
+        "event.stream",
+      ],
+    );
+    assert.deepEqual(
+      postMvp.map((row) => `${row.method} ${row.path}`),
+      [
+        "PUT /v1/project/:id/binding/e2e",
+        "PUT /v1/agent/:role/binding/provider",
+        "PUT /v1/project/:id/binding/provider",
+        "GET /v1/event/stream",
+      ],
+    );
+    for (const row of postMvp) {
+      assert.equal(row.status, "deferred", row.operationId);
+    }
+    for (const row of readRouteMatrix()) {
+      if (row.status === "deferred") {
+        assert.equal(row.introducedIn, "post-mvp", row.operationId);
+      }
+    }
+  });
+
+  it("every post-mvp path answers 404 and never 501", async () => {
+    const app = await createTestApp();
+    let driven = 0;
+    for (const row of postMvp) {
+      const path = row.path.replace(/:[^/]+/g, "x_01");
+      const response = await drive(app, row.method, path);
+      assert.equal(response.status, 404, row.operationId);
+      assert.equal(response.body.error.code, "not-found", row.operationId);
+      assert.match(
+        response.body.error.message,
+        new RegExp(`${row.method} ${path.replace(/\//g, "\\/")}`),
+      );
+      driven += 1;
+    }
+    assert.equal(driven, postMvp.length);
+  });
+
+  it("a post-mvp row has no registry entry, and the matrix has no third kind of row", () => {
+    for (const row of postMvp) {
+      assert.equal(findOperation(row.operationId), undefined, row.operationId);
+    }
+    const matrix = readRouteMatrix();
+    const routedAndStubbed = matrix.filter(
+      (row) => row.status === "routed" || row.status === "stubbed",
+    ).length;
+    assert.equal(matrix.length, 57);
+    assert.equal(routedAndStubbed, 53);
+    assert.equal(postMvp.length, 4);
+    assert.equal(routedAndStubbed + postMvp.length, matrix.length);
+  });
+
+  it("a post-mvp path is unreadable without the token", async () => {
+    const app = await createTestApp();
+    for (const row of postMvp) {
+      const path = row.path.replace(/:[^/]+/g, "x_01");
+      const response = await driveRaw(app, row.method, path).set(
+        "Host",
+        "kanthord.test",
+      );
+      assert.equal(response.status, 401, row.operationId);
+      assert.equal(
+        response.body.error.code,
+        "unauthenticated",
+        row.operationId,
+      );
     }
   });
 });
