@@ -75,7 +75,7 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("attaches requests to the seven write routes and responses to the twenty-one routes", () => {
+  it("attaches requests to the seven write routes and responses to the twenty-two routes", () => {
     const withRequest = registry.filter((entry) => entry.request !== undefined);
     assert.deepEqual(withRequest.map((entry) => entry.operationId).sort(), [
       "plan.import",
@@ -91,6 +91,7 @@ describe("src/http/contract/registry.test", () => {
     );
     assert.deepEqual(withResponse.map((entry) => entry.operationId).sort(), [
       "edge.list",
+      "event.list",
       "node.list",
       "node.show",
       "plan.export",
@@ -116,6 +117,33 @@ describe("src/http/contract/registry.test", () => {
 
   it("reports no faults on the authored registry", () => {
     assert.deepEqual(registryFaults(registry), []);
+  });
+
+  it("event.list is the only operation with a query schema", () => {
+    assert.deepEqual(
+      registry
+        .filter((entry) => entry.query !== undefined)
+        .map((entry) => entry.operationId),
+      ["event.list"],
+    );
+  });
+
+  it("flags a query schema on a stubbed operation", () => {
+    const faults = registryFaults([
+      {
+        operationId: "x.stub",
+        method: "GET",
+        path: [system("health")],
+        introducedIn: "phase-1",
+        status: "stubbed",
+        query: registry.find((entry) => entry.operationId === "event.list")
+          ?.query,
+      },
+    ]);
+    assert.deepEqual(
+      faults.map((fault) => fault.reason),
+      ["query-on-stubbed"],
+    );
   });
 
   it("keeps the hash parameter exclusive to blob.show", () => {

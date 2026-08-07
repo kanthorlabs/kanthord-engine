@@ -315,7 +315,7 @@ describe("src/domain/layout.test", () => {
     }
   });
 
-  it("no file under scripts/ is collected by the default test runner, except the daemon-backed verify step", () => {
+  it("no file under scripts/ is collected by the default test runner, except the daemon-backed verify step and the contract-publish script", () => {
     const rootDir = fileURLToPath(new URL("../../", import.meta.url));
     const scriptsDir = join(rootDir, "scripts");
     const offenders = walkFiles(scriptsDir)
@@ -323,7 +323,7 @@ describe("src/domain/layout.test", () => {
       .filter((file) => wouldBeCollectedByDefaultRunner(file));
     assert.deepEqual(
       offenders,
-      ["verify-db-status.test.ts"],
+      ["publish-contract.test.ts", "verify-db-status.test.ts"],
       `${offenders.join(", ")} match a default test pattern; npm test would run them`,
     );
   });

@@ -1,22 +1,37 @@
 import { z } from "zod";
 
 import { action, parameter, resource, sub } from "./path.ts";
+import { baselineErrors } from "./error-baseline.ts";
+import {
+  credentialRejectedDetails,
+  hostKeyMismatchDetails,
+} from "./error-details.ts";
+import {
+  EXAMPLE_FINGERPRINT as F,
+  EXAMPLE_LANDING_OID as OID_L,
+  EXAMPLE_TRACKING_OID as OID_T,
+  EXAMPLE_UPSTREAM_OID as OID_U,
+  EXAMPLE_AT as A,
+  EXAMPLE_ULID as U,
+} from "./example-literal.ts";
 import { operations } from "./operation.ts";
+import type { OperationExamples } from "./operation.ts";
+import { repositoryStates } from "../../domain/repository.ts";
 
-export const repositoryInspectRequest = z.object({
+export const repositoryInspectRequest = z.strictObject({
   remoteUrl: z.string().min(1),
   credentialId: z.string().min(1),
 });
 
-export const hostKeyView = z.object({
+export const hostKeyView = z.strictObject({
   algorithm: z.string(),
   fingerprint: z.string(),
 });
 
-export const repositoryInspectResponse = z.object({
+export const repositoryInspectResponse = z.strictObject({
   defaultBranch: z.string().nullable(),
   branches: z.array(z.string()),
-  credential: z.object({
+  credential: z.strictObject({
     reachable: z.boolean(),
     refusal: z.string().nullable(),
   }),
@@ -42,7 +57,7 @@ export const repositoryName = z
   .max(100)
   .regex(/^[a-z0-9][a-z0-9._-]*$/);
 
-export const repositoryRegisterRequest = z.object({
+export const repositoryRegisterRequest = z.strictObject({
   name: repositoryName,
   remoteUrl: z.string().min(1),
   credentialId: z.string().min(1),
@@ -60,18 +75,18 @@ export const repositoryRegisterRequest = z.object({
     .default(null),
 });
 
-export const repositoryView = z.object({
+export const repositoryView = z.strictObject({
   id: z.string(),
   name: z.string(),
   remoteUrl: z.string(),
-  credential: z.object({ id: z.string(), name: z.string() }),
+  credential: z.strictObject({ id: z.string(), name: z.string() }),
   upstreamBranch: z.string(),
   landingBranch: z.string(),
   landingRef: z.string(),
   trackingRef: z.string(),
   publishRef: z.string(),
   publishOnApproval: z.boolean(),
-  state: z.enum(["ready", "needs-reconcile"]),
+  state: z.enum(repositoryStates),
   landingOid: z.string().nullable(),
   trackingOid: z.string().nullable(),
   fetchedUpstreamOid: z.string().nullable(),
@@ -82,10 +97,86 @@ export const repositoryView = z.object({
 
 export const repositoryRegisterResponse = repositoryView;
 
-export const repositoryListResponse = z.object({
+export const repositoryListResponse = z.strictObject({
   repositories: z.array(repositoryView),
 });
 export const repositoryShowResponse = repositoryView;
+
+export const repositoryInspectExamples: OperationExamples = {
+  request: {
+    remoteUrl: "https://example.test/atlas.git",
+    credentialId: `provider_${U}`,
+  },
+  success: {
+    defaultBranch: "main",
+    branches: ["main"],
+    credential: { reachable: true, refusal: null },
+    hostKey: null,
+  },
+  error: {
+    error: {
+      code: "credential-rejected",
+      message: "the forge refused the credential",
+      details: { failure: "auth-failed" },
+    },
+  },
+};
+
+export const repositoryView_example = {
+  id: `repo_${U}`,
+  name: "atlas",
+  remoteUrl: "https://example.test/atlas.git",
+  credential: { id: `provider_${U}`, name: "github" },
+  upstreamBranch: "main",
+  landingBranch: "kanthord/landing",
+  landingRef: "refs/heads/kanthord/landing",
+  trackingRef: "refs/kanthord/upstream/main",
+  publishRef: "refs/heads/main",
+  publishOnApproval: true,
+  state: "ready",
+  landingOid: OID_L,
+  trackingOid: OID_T,
+  fetchedUpstreamOid: OID_U,
+  divergedLandingOid: null,
+  divergedUpstreamOid: null,
+  updatedAt: A,
+};
+
+export const repositoryRegisterExamples: OperationExamples = {
+  request: {
+    name: "atlas",
+    remoteUrl: "https://example.test/atlas.git",
+    credentialId: `provider_${U}`,
+    upstreamBranch: "main",
+    landingBranch: "kanthord/landing",
+    publishRef: "refs/heads/main",
+    publishOnApproval: true,
+    hostFingerprint: null,
+  },
+  success: repositoryView_example,
+  error: {
+    error: {
+      code: "host-key-mismatch",
+      message: `the host presented no key matching ${F}`,
+      details: { presented: [F], confirmed: F },
+    },
+  },
+};
+
+export const repositoryListExamples: OperationExamples = {
+  success: { repositories: [repositoryView_example] },
+  error: {
+    error: {
+      code: "service-unavailable",
+      message: "the daemon is shutting down",
+    },
+  },
+};
+
+export const repositoryShowExamples: OperationExamples = {
+  success: repositoryView_example,
+  error: { error: { code: "not-found", message: `no repository repo_${U}` } },
+};
 
 export const repository = operations([
   {
@@ -96,6 +187,12 @@ export const repository = operations([
     status: "routed",
     request: repositoryInspectRequest,
     response: repositoryInspectResponse,
+    errors: {
+      ...baselineErrors,
+      "credential-rejected": credentialRejectedDetails,
+      "host-key-mismatch": hostKeyMismatchDetails,
+    },
+    examples: repositoryInspectExamples,
   },
   {
     operationId: "repository.register",
@@ -105,6 +202,12 @@ export const repository = operations([
     status: "routed",
     request: repositoryRegisterRequest,
     response: repositoryView,
+    errors: {
+      ...baselineErrors,
+      "credential-rejected": credentialRejectedDetails,
+      "host-key-mismatch": hostKeyMismatchDetails,
+    },
+    examples: repositoryRegisterExamples,
   },
   {
     operationId: "repository.list",
@@ -113,6 +216,8 @@ export const repository = operations([
     introducedIn: "phase-1",
     status: "routed",
     response: repositoryListResponse,
+    errors: { ...baselineErrors },
+    examples: repositoryListExamples,
   },
   {
     operationId: "repository.show",
@@ -121,6 +226,8 @@ export const repository = operations([
     introducedIn: "phase-1",
     status: "routed",
     response: repositoryShowResponse,
+    errors: { ...baselineErrors },
+    examples: repositoryShowExamples,
   },
   {
     operationId: "repository.landingBranch",

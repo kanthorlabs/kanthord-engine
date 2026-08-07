@@ -10,6 +10,8 @@ import { resolveTools } from "../../test/helpers/remote/tools.ts";
 import {
   PayloadError,
   deserializePayload,
+  gitProjection,
+  llmProjection,
   parsePayload,
   payloadSchemaFor,
   privateKeyCipher,
@@ -433,6 +435,19 @@ describe("src/domain/provider-payload.test", () => {
         assert.equal(Object.hasOwn(projection, "privateKey"), false);
         assert.ok(!JSON.stringify(projection).includes(subject.secret));
       }
+    });
+
+    it("llmProjection and gitProjection each reject an unknown key", () => {
+      const llmProjected = projectPayload("llm", parsedLlm);
+      assert.equal(
+        llmProjection.safeParse({ ...llmProjected, extra: true }).success,
+        false,
+      );
+      const gitProjected = projectPayload("git", parsedHttpBasic);
+      assert.equal(
+        gitProjection.safeParse({ ...gitProjected, extra: true }).success,
+        false,
+      );
     });
 
     it("every projection satisfies the public response schema", () => {

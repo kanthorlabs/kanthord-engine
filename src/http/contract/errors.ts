@@ -1,4 +1,8 @@
 import { z } from "zod";
+import type { ZodType } from "zod";
+
+import { baselineErrors } from "./error-baseline.ts";
+import type { OperationErrors } from "./operation.ts";
 
 export const errorStatuses = {
   "invalid-request": 400,
@@ -33,15 +37,45 @@ export type PreconditionCode = {
 
 export type ErrorDetails = Readonly<Record<string, unknown>>;
 
-export const errorEnvelopeSchema = z.object({
+export function buildErrorEnvelope(errors: OperationErrors): ZodType {
+  const members = (Object.keys(errorStatuses) as ErrorCode[])
+    .filter((code) => Object.hasOwn(errors, code))
+    .map((code) => {
+      const details = errors[code];
+      return details === null || details === undefined
+        ? z.strictObject({ code: z.literal(code), message: z.string() })
+        : z.strictObject({
+            code: z.literal(code),
+            message: z.string(),
+            details,
+          });
+    });
+
+  return z.strictObject({
+    error: z.discriminatedUnion(
+      "code",
+      members as [(typeof members)[number], ...(typeof members)[number][]],
+    ),
+  });
+}
+
+export type ErrorEnvelope = Readonly<{
+  error: Readonly<{
+    code: ErrorCode;
+    message: string;
+    details?: ErrorDetails;
+  }>;
+}>;
+
+export const errorEnvelopeSchema = buildErrorEnvelope(baselineErrors);
+
+export const daemonErrorEnvelopeSchema = z.strictObject({
   error: z.object({
     code: z.string(),
     message: z.string(),
-    details: z.record(z.string(), z.unknown()).optional(),
+    details: z.unknown().optional(),
   }),
 });
-
-export type ErrorEnvelope = z.infer<typeof errorEnvelopeSchema>;
 
 export class HttpError extends Error {
   readonly code: ErrorCode;

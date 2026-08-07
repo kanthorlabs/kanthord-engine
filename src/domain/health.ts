@@ -1,4 +1,7 @@
-export type DependencyStatus = "ok" | "failed" | "not-implemented";
+export const healthStatuses = ["ok", "degraded"] as const;
+export const dependencyStatuses = ["ok", "failed", "not-implemented"] as const;
+
+export type DependencyStatus = (typeof dependencyStatuses)[number];
 
 export type DependencyLine = Readonly<{
   name: string;
@@ -6,6 +9,6 @@ export type DependencyLine = Readonly<{
 }>;
 
 export type HealthResult = Readonly<{
-  status: "ok" | "degraded";
+  status: (typeof healthStatuses)[number];
   dependencies: readonly DependencyLine[];
 }>;

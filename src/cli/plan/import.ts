@@ -7,6 +7,7 @@ import {
   planRevisionsResponse,
   planValidateResponse,
 } from "../../http/contract/graph.ts";
+import { choicesChangedDetails } from "../../http/contract/error-details.ts";
 import type { ConfirmDependencies } from "../confirm.ts";
 import { comparePaths } from "../../domain/plan-path.ts";
 import type { PlanDirectoryDependencies } from "./directory.ts";
@@ -128,12 +129,8 @@ export function registerPlanImport(input: PlanImportCliInput): void {
             );
           }
           if (importResult.code === "choices-changed") {
-            const details = importResult.details as
-              | Readonly<{
-                  conflicts?: readonly Readonly<{ id: string }>[];
-                }>
-              | undefined;
-            const ids = (details?.conflicts ?? [])
+            const details = choicesChangedDetails.parse(importResult.details);
+            const ids = details.conflicts
               .map((conflict) => conflict.id)
               .join(",");
             input.stderr(`kanthord: choices-changed: ${ids}\n`);

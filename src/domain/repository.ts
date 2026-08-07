@@ -3,6 +3,10 @@ import { z } from "zod";
 import { identity } from "./identity.ts";
 import { epochMillis, objectId } from "./column.ts";
 
+export const repositoryStates = ["ready", "needs-reconcile"] as const;
+
+export const credentialFailures = ["auth-failed", "permission-denied"] as const;
+
 export const repositoryRow = z
   .object({
     id: identity("repository"),
@@ -14,7 +18,7 @@ export const repositoryRow = z
     landingBranch: z.string(),
     publishRef: z.string(),
     publishOnApproval: z.int(),
-    state: z.enum(["ready", "needs-reconcile"]),
+    state: z.enum(repositoryStates),
     divergedLandingOid: objectId.nullable(),
     divergedUpstreamOid: objectId.nullable(),
     fetchedUpstreamOid: objectId.nullable(),

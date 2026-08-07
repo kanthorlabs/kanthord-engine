@@ -1,5 +1,5 @@
 import { KANTHORD_VERSION } from "../domain/version.ts";
-import { errorEnvelopeSchema } from "../http/contract/errors.ts";
+import { daemonErrorEnvelopeSchema } from "../http/contract/errors.ts";
 import { parameterNames, renderPath } from "../http/contract/path.ts";
 import { findOperation } from "../http/contract/registry.ts";
 
@@ -113,16 +113,16 @@ export async function call(
     }
     const text = await response.text();
     const parsed: unknown = JSON.parse(text);
-    const envelope = errorEnvelopeSchema.safeParse(parsed);
-    if (!envelope.success) {
+    const result = daemonErrorEnvelopeSchema.safeParse(parsed);
+    if (!result.success) {
       return fallback;
     }
     return {
       ok: false as const,
       status,
-      code: envelope.data.error.code,
-      message: envelope.data.error.message,
-      details: envelope.data.error.details,
+      code: result.data.error.code,
+      message: result.data.error.message,
+      details: result.data.error.details,
     };
   } catch {
     return fallback;

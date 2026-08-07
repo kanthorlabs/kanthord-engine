@@ -38,13 +38,13 @@ export type GitPayload = z.infer<typeof gitPayload>;
 
 export type ProviderPayload = LlmPayload | GitPayload;
 
-export const llmProjection = z.object({
+export const llmProjection = z.strictObject({
   provider: z.string(),
   defaultModel: z.string(),
   baseUrl: z.string().nullable(),
 });
 
-export const gitProjection = z.object({
+export const gitProjection = z.strictObject({
   transport: z.enum(["http-basic", "ssh"]),
   forge: z.enum(gitForges).nullable(),
   username: z.string().nullable(),

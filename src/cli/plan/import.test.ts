@@ -516,6 +516,25 @@ describe("src/cli/plan/import.test", () => {
     );
   });
 
+  it("a malformed choices-changed details fails loudly instead of printing an empty id list", async () => {
+    const h = harness({
+      script: [
+        REVISIONS,
+        VALIDATE,
+        {
+          ok: false as const,
+          status: 409,
+          code: "choices-changed",
+          message: "a selected outcome is no longer legal",
+          details: { conflicts: [{ id: "task_a" }] },
+        },
+      ],
+      initialFs: AUTHORED,
+    });
+
+    await assert.rejects(run(h.program, ["plan", "import", "--project", ID]));
+  });
+
   it("the response replaces the directory: response documents written and the authored file removed", async () => {
     const h = harness({
       script: [REVISIONS, VALIDATE, IMPORT_RESPONSE],

@@ -141,7 +141,7 @@ export function importPlan(
       throw new ImportPlanError(
         "stale-revision",
         `the import names ${String(input.fromRevision)}, the newest revision is ${String(newest)}`,
-        { current: newest },
+        { expected: input.fromRevision, current: newest },
       );
     }
     if (input.validatedRevision !== newest) {

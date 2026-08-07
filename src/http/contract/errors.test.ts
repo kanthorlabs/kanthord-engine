@@ -2,11 +2,14 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildErrorEnvelope,
+  daemonErrorEnvelopeSchema,
   errorEnvelope,
   errorEnvelopeSchema,
   errorStatuses,
   httpError,
 } from "./errors.ts";
+import { baselineErrors } from "./error-baseline.ts";
 import { readErrorCodeMatrix } from "../../../test/helpers/proposal.ts";
 
 describe("src/http/contract/errors.test", () => {
@@ -123,14 +126,14 @@ describe("src/http/contract/errors.test", () => {
     const envelope = errorEnvelope(
       httpError("stale-revision", "moved", {
         expected: "revision_a",
-        actual: "revision_b",
+        current: "revision_b",
       }),
     );
     assert.deepEqual(envelope, {
       error: {
         code: "stale-revision",
         message: "moved",
-        details: { expected: "revision_a", actual: "revision_b" },
+        details: { expected: "revision_a", current: "revision_b" },
       },
     });
   });
@@ -145,18 +148,54 @@ describe("src/http/contract/errors.test", () => {
     assert.deepEqual(
       errorEnvelopeSchema.parse({
         error: {
-          code: "stale-revision",
-          message: "moved",
-          details: { expected: "revision_a", actual: "revision_b" },
+          code: "invalid-request",
+          message: "m",
+          details: { refusal: "name-taken" },
         },
       }),
       {
         error: {
-          code: "stale-revision",
-          message: "moved",
-          details: { expected: "revision_a", actual: "revision_b" },
+          code: "invalid-request",
+          message: "m",
+          details: { refusal: "name-taken" },
         },
       },
+    );
+  });
+
+  it("buildErrorEnvelope(baselineErrors) is the errorEnvelopeSchema baseline, and rejects a code outside it", () => {
+    const envelope = buildErrorEnvelope(baselineErrors);
+    assert.deepEqual(
+      envelope.parse({ error: { code: "not-found", message: "gone" } }),
+      { error: { code: "not-found", message: "gone" } },
+    );
+    assert.deepEqual(
+      envelope.parse({
+        error: {
+          code: "invalid-request",
+          message: "m",
+          details: { refusal: "name-taken" },
+        },
+      }),
+      {
+        error: {
+          code: "invalid-request",
+          message: "m",
+          details: { refusal: "name-taken" },
+        },
+      },
+    );
+    assert.doesNotThrow(() =>
+      envelope.parse({ error: { code: "not-implemented", message: "nope" } }),
+    );
+    assert.throws(() =>
+      envelope.parse({
+        error: {
+          code: "plan-invalid",
+          message: "m",
+          details: { findings: [] },
+        },
+      }),
     );
   });
 
@@ -173,5 +212,100 @@ describe("src/http/contract/errors.test", () => {
   it("accepts an empty details object", () => {
     const error = httpError("stale-revision", "moved", {});
     assert.deepEqual(error.details, {});
+  });
+
+  describe("daemonErrorEnvelopeSchema", () => {
+    it("parses an invented future code unchanged", () => {
+      const parsed = daemonErrorEnvelopeSchema.parse({
+        error: { code: "invented-future-code", message: "later" },
+      });
+      assert.equal(parsed.error.code, "invented-future-code");
+    });
+
+    it("parses a 409 stale-revision envelope with its real details intact", () => {
+      const parsed = daemonErrorEnvelopeSchema.parse({
+        error: {
+          code: "stale-revision",
+          message: "moved",
+          details: { expected: "rev-1", current: "rev-2" },
+        },
+      });
+      assert.deepEqual(parsed, {
+        error: {
+          code: "stale-revision",
+          message: "moved",
+          details: { expected: "rev-1", current: "rev-2" },
+        },
+      });
+    });
+
+    it("parses an unknown extra key inside error without dropping code, message or details", () => {
+      const parsed = daemonErrorEnvelopeSchema.parse({
+        error: {
+          code: "not-found",
+          message: "gone",
+          details: { id: "x" },
+          hint: "a future daemon field",
+        },
+      });
+      assert.equal(parsed.error.code, "not-found");
+      assert.equal(parsed.error.message, "gone");
+      assert.deepEqual(parsed.error.details, { id: "x" });
+    });
+
+    it("accepts an envelope with no details at all", () => {
+      const parsed = daemonErrorEnvelopeSchema.parse({
+        error: { code: "not-implemented", message: "nope" },
+      });
+      assert.equal(parsed.error.code, "not-implemented");
+      assert.equal(parsed.error.message, "nope");
+    });
+
+    it("rejects a non-object body", () => {
+      assert.throws(() => daemonErrorEnvelopeSchema.parse("not-an-object"));
+      assert.throws(() => daemonErrorEnvelopeSchema.parse(null));
+      assert.throws(() => daemonErrorEnvelopeSchema.parse(42));
+    });
+
+    it("rejects an object with no error key", () => {
+      assert.throws(() =>
+        daemonErrorEnvelopeSchema.parse({ code: "x", message: "y" }),
+      );
+    });
+
+    it("rejects an error field that is not an object", () => {
+      assert.throws(() =>
+        daemonErrorEnvelopeSchema.parse({ error: "not-an-object" }),
+      );
+    });
+
+    it("rejects a non-string code", () => {
+      assert.throws(() =>
+        daemonErrorEnvelopeSchema.parse({
+          error: { code: 42, message: "y" },
+        }),
+      );
+    });
+
+    it("rejects a non-string message", () => {
+      assert.throws(() =>
+        daemonErrorEnvelopeSchema.parse({
+          error: { code: "not-found", message: 42 },
+        }),
+      );
+    });
+  });
+
+  it("errorEnvelopeSchema stays distinct from daemonErrorEnvelopeSchema and rejects a non-baseline code", () => {
+    assert.throws(() =>
+      errorEnvelopeSchema.parse({
+        error: { code: "stale-revision", message: "moved" },
+      }),
+    );
+    assert.doesNotThrow(() =>
+      daemonErrorEnvelopeSchema.parse({
+        error: { code: "stale-revision", message: "moved" },
+      }),
+    );
   });
 });

@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 
 import {
-  dependencyStatuses,
   systemDbResponse,
   systemHealthResponse,
   systemStatusResponse,
 } from "./system.ts";
+import { dependencyStatuses } from "../../domain/health.ts";
 import { findOperation, registry } from "./registry.ts";
 import type { Operation } from "./operation.ts";
 
@@ -300,13 +300,14 @@ describe("src/http/contract/system.test", () => {
     }
   });
 
-  it("twenty-one registry entries carry a response and seven carry a request", () => {
+  it("twenty-two registry entries carry a response and seven carry a request", () => {
     const withResponse = registry.filter(
       (entry) => entry.response !== undefined,
     );
-    assert.equal(withResponse.length, 21);
+    assert.equal(withResponse.length, 22);
     assert.deepEqual(withResponse.map((entry) => entry.operationId).sort(), [
       "edge.list",
+      "event.list",
       "node.list",
       "node.show",
       "plan.export",

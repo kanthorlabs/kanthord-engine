@@ -1,5 +1,6 @@
 import type { ZodType } from "zod";
 
+import type { ErrorCode } from "./errors.ts";
 import type { Segment } from "./path.ts";
 
 export const methods = ["DELETE", "GET", "POST", "PUT"] as const;
@@ -16,6 +17,15 @@ export type IntroducedIn = (typeof introducedInValues)[number];
 export const statusValues = ["routed", "stubbed", "deferred"] as const;
 export type OperationStatus = (typeof statusValues)[number];
 
+export type OperationErrors = Partial<Record<ErrorCode, ZodType | null>>;
+
+export type OperationExamples = Readonly<{
+  query?: unknown;
+  request?: unknown;
+  success: unknown;
+  error: unknown;
+}>;
+
 export type Operation = Readonly<{
   operationId: string;
   method: Method;
@@ -23,8 +33,11 @@ export type Operation = Readonly<{
   introducedIn: IntroducedIn;
   status: "routed" | "stubbed";
   successStatus?: number;
+  query?: ZodType;
   request?: ZodType;
   response?: ZodType;
+  errors?: OperationErrors;
+  examples?: OperationExamples;
 }>;
 
 export function operations(

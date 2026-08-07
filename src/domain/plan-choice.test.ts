@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { choiceVerdict } from "./plan-choice.ts";
+import { choiceVerdict, differingFields, presences } from "./plan-choice.ts";
 import type { Choice, ChoiceFacts, ChoiceVerdict } from "./plan-choice.ts";
 import { nodeStates } from "./state.ts";
 import type { NodeState } from "./state.ts";
@@ -11,6 +11,21 @@ function verdict(facts: ChoiceFacts): ChoiceVerdict {
 }
 
 describe("src/domain/plan-choice.test", () => {
+  it("presences deep-equals the three presence values in order", () => {
+    assert.deepEqual(presences, ["both", "document-only", "database-only"]);
+  });
+
+  it("differingFields deep-equals the bytewise-sorted prose+structural union", () => {
+    assert.deepEqual(differingFields, [
+      "body",
+      "depends_on",
+      "parent",
+      "repo",
+      "title",
+      "worker",
+    ]);
+  });
+
   it("no difference suggests database as equivalent", () => {
     assert.deepEqual(
       verdict({

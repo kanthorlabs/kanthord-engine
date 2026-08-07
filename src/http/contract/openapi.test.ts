@@ -202,41 +202,182 @@ test("documents the routed success status from successStatus", () => {
   );
 });
 
-test("registers exactly the twenty-nine schema components in bytewise order", () => {
+test("registers exactly the fifty-three schema components in bytewise order", () => {
   const document = buildOpenApiDocument();
   const components = document.components as Readonly<Record<string, unknown>>;
   const schemas = components.schemas as Readonly<Record<string, unknown>>;
   assert.deepEqual(Object.keys(schemas), [
     "Error",
+    "blob.show.error",
+    "edge.list.error",
     "edge.list.response",
+    "event.list.error",
+    "event.list.response",
+    "node.list.error",
     "node.list.response",
+    "node.show.error",
     "node.show.response",
+    "plan.export.error",
     "plan.export.response",
+    "plan.import.error",
     "plan.import.request",
     "plan.import.response",
+    "plan.revisions.error",
     "plan.revisions.response",
+    "plan.validate.error",
     "plan.validate.request",
     "plan.validate.response",
+    "project.create.error",
     "project.create.request",
     "project.create.response",
+    "project.list.error",
     "project.list.response",
+    "project.repositories.error",
     "project.repositories.request",
     "project.repositories.response",
+    "project.show.error",
     "project.show.response",
+    "provider.list.error",
     "provider.list.response",
+    "provider.register.error",
     "provider.register.request",
     "provider.register.response",
+    "provider.show.error",
     "provider.show.response",
+    "repository.inspect.error",
     "repository.inspect.request",
     "repository.inspect.response",
+    "repository.list.error",
     "repository.list.response",
+    "repository.register.error",
     "repository.register.request",
     "repository.register.response",
+    "repository.show.error",
     "repository.show.response",
+    "system.db.error",
     "system.db.response",
+    "system.health.error",
     "system.health.response",
+    "system.status.error",
     "system.status.response",
   ]);
+});
+
+test("plan.import's default response refs its own error component, and a stubbed operation's still refs Error", () => {
+  const document = buildOpenApiDocument();
+  const paths = document.paths as Readonly<Record<string, unknown>>;
+  const planImport = (
+    paths["/v1/project/{id}/plan/import"] as Readonly<Record<string, unknown>>
+  ).post as Readonly<Record<string, unknown>>;
+  const planImportDefault = (
+    planImport.responses as Readonly<Record<string, unknown>>
+  ).default as Readonly<Record<string, unknown>>;
+  assert.deepEqual(
+    (planImportDefault.content as Readonly<Record<string, unknown>>)[
+      "application/json"
+    ],
+    { schema: { $ref: "#/components/schemas/plan.import.error" } },
+  );
+
+  const landingBranch = (
+    paths["/v1/repository/{id}/landing-branch"] as Readonly<
+      Record<string, unknown>
+    >
+  ).post as Readonly<Record<string, unknown>>;
+  const landingBranchDefault = (
+    landingBranch.responses as Readonly<Record<string, unknown>>
+  ).default as Readonly<Record<string, unknown>>;
+  assert.deepEqual(
+    (landingBranchDefault.content as Readonly<Record<string, unknown>>)[
+      "application/json"
+    ],
+    { schema: { $ref: "#/components/schemas/Error" } },
+  );
+});
+
+test("renders event.list query parameters in bytewise name order with no request body", () => {
+  const document = buildOpenApiDocument();
+  const paths = document.paths as Readonly<Record<string, unknown>>;
+  const eventGet = (paths["/v1/event"] as Readonly<Record<string, unknown>>)
+    .get as Readonly<Record<string, unknown>>;
+  const parameters = eventGet.parameters as ReadonlyArray<
+    Readonly<Record<string, unknown>>
+  >;
+  assert.deepEqual(
+    parameters.map((parameter) => parameter.name),
+    ["actor", "actorKind", "after", "limit", "subject", "subjectKind", "type"],
+  );
+  for (const parameter of parameters) {
+    assert.equal(parameter.in, "query");
+    assert.equal(parameter.required, false);
+  }
+  assert.equal(Object.hasOwn(eventGet, "requestBody"), false);
+});
+
+const scoped = registry.filter(
+  (entry) =>
+    entry.status === "routed" &&
+    entry.introducedIn === "phase-1" &&
+    entry.operationId !== "blob.show",
+);
+
+test("every phase-1 routed operation but blob.show refers to a response component", () => {
+  const document = buildOpenApiDocument();
+  const objects = operationObjects(document);
+  for (const entry of scoped) {
+    const found = objects.find(
+      (object) => object.operationId === entry.operationId,
+    );
+    assert.ok(found, `no operation object for ${entry.operationId}`);
+    const responses = found!.operation.responses as Readonly<
+      Record<string, unknown>
+    >;
+    const success = responses["200"] as Readonly<Record<string, unknown>>;
+    assert.deepEqual(
+      (success.content as Readonly<Record<string, unknown>>)[
+        "application/json"
+      ],
+      {
+        schema: { $ref: `#/components/schemas/${entry.operationId}.response` },
+      },
+    );
+  }
+});
+
+test("no routed operation but blob.show resolves to an empty response body", () => {
+  const document = buildOpenApiDocument();
+  for (const entry of operationObjects(document)) {
+    const registered = registry.find(
+      (row) => row.operationId === entry.operationId,
+    );
+    if (registered?.status !== "routed") continue;
+    const responses = entry.operation.responses as Readonly<
+      Record<string, unknown>
+    >;
+    const success = responses[
+      String(registered.successStatus ?? 200)
+    ] as Readonly<Record<string, unknown>>;
+    if (entry.operationId === "blob.show") {
+      assert.equal(Object.hasOwn(success, "content"), false);
+    } else {
+      assert.ok(
+        success.content !== undefined,
+        `${entry.operationId} has no content`,
+      );
+    }
+  }
+});
+
+test("every response component resolves", () => {
+  const document = buildOpenApiDocument();
+  const refs: string[] = [];
+  collectRefs(document, refs);
+  const components = document.components as Readonly<Record<string, unknown>>;
+  const schemas = components.schemas as Readonly<Record<string, unknown>>;
+  for (const ref of refs) {
+    const key = ref.slice("#/components/schemas/".length);
+    assert.equal(Object.hasOwn(schemas, key), true, `dangling $ref ${ref}`);
+  }
 });
 
 test("refers to components only through internal refs", () => {

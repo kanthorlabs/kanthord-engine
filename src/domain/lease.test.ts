@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { leaseRow } from "./lease.ts";
+import { leaseRow, leaseSubjectKinds } from "./lease.ts";
 
 const ULID_A = "01HZY8QF3M4N5P6R7S8T9V0W1X";
 
@@ -15,6 +15,10 @@ describe("src/domain/lease.test", () => {
     renewedAt: null,
     expiresAt: null,
   };
+
+  it("leaseSubjectKinds deep-equals the two kinds in order", () => {
+    assert.deepEqual(leaseSubjectKinds, ["node", "repository"]);
+  });
 
   it("accepts a valid row", () => {
     assert.equal(leaseRow.safeParse(validRow).success, true);

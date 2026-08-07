@@ -988,7 +988,56 @@ describe("src/commands/plan/import-plan.test", () => {
       );
 
       assert.equal(error.refusal, "stale-revision");
-      assert.deepEqual(error.details, { current: first.revision });
+      assert.deepEqual(error.details, {
+        expected: null,
+        current: first.revision,
+      });
+      assert.deepEqual(snapshot(fixture.storage), before);
+    });
+
+    it("a re-import at a stale non-null revision is refused by name", (t) => {
+      const fixture = build([
+        U_I,
+        U_T1,
+        U_O1,
+        U_T2,
+        U_T3,
+        U_O2,
+        U_REV,
+        U_EDGE,
+        U_REV2,
+      ]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      const first = runImport(fixture, roundTripInput(fixture));
+      const second = runImport(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: first.revision,
+        importId: "imp_rt2",
+        documents: first.documents,
+        choices: roundTripIdentities.map((id) => ({ id, take: "database" })),
+        validatedRevision: first.revision,
+        documentsHash: fixture.blobs.hash(
+          encoder.encode(canonicalDocumentsJson(first.documents)),
+        ),
+        actor: "human_1",
+      });
+      const before = snapshot(fixture.storage);
+      const error = importRefusal(
+        fixture,
+        roundTripInput(fixture, {
+          fromRevision: first.revision,
+          importId: "imp_stale2",
+          validatedRevision: first.revision,
+        }),
+      );
+
+      assert.equal(error.refusal, "stale-revision");
+      assert.deepEqual(error.details, {
+        expected: first.revision,
+        current: second.revision,
+      });
       assert.deepEqual(snapshot(fixture.storage), before);
     });
   });

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { repositoryRow } from "./repository.ts";
+import { repositoryRow, repositoryStates } from "./repository.ts";
 
 const ULID_A = "01HZY8QF3M4N5P6R7S8T9V0W1X";
 const OID = "a".repeat(40);
@@ -23,6 +23,10 @@ describe("src/domain/repository.test", () => {
     fetchedUpstreamOid: null,
     updatedAt: 0,
   };
+
+  it("repositoryStates deep-equals the two states in order", () => {
+    assert.deepEqual(repositoryStates, ["ready", "needs-reconcile"]);
+  });
 
   it("accepts a valid row", () => {
     assert.equal(repositoryRow.safeParse(validRow).success, true);

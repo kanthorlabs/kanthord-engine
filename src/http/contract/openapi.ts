@@ -2,7 +2,7 @@ import YAML from "yaml";
 import { z } from "zod";
 
 import { KANTHORD_VERSION } from "../../domain/version.ts";
-import { errorEnvelopeSchema } from "./errors.ts";
+import { buildErrorEnvelope, errorEnvelopeSchema } from "./errors.ts";
 import { parameterNames, renderOpenApiPath } from "./path.ts";
 import type { Operation } from "./operation.ts";
 import { registry } from "./registry.ts";
@@ -74,14 +74,33 @@ function operationObject(
     operationId: entry.operationId,
   };
 
-  const parameters = parameterNames(entry.path);
+  const pathParameters = parameterNames(entry.path).map((name) => ({
+    name,
+    in: "path",
+    required: true,
+    schema: { type: "string" },
+  }));
+
+  const queryParameters: Array<Record<string, unknown>> = [];
+  if (entry.query !== undefined) {
+    const querySchema = z.toJSONSchema(entry.query, {
+      target: "openapi-3.0",
+      io: "input",
+    }) as { properties?: Record<string, unknown> };
+    const properties = querySchema.properties ?? {};
+    for (const name of Object.keys(properties).sort(compareBytewise)) {
+      queryParameters.push({
+        name,
+        in: "query",
+        required: false,
+        schema: properties[name],
+      });
+    }
+  }
+
+  const parameters = [...pathParameters, ...queryParameters];
   if (parameters.length > 0) {
-    operation.parameters = parameters.map((name) => ({
-      name,
-      in: "path",
-      required: true,
-      schema: { type: "string" },
-    }));
+    operation.parameters = parameters;
   }
 
   const successKey = String(entry.successStatus ?? 200);
@@ -104,11 +123,23 @@ function operationObject(
   } else {
     responses["501"] = { description: "not implemented" };
   }
+  let errorRef = "#/components/schemas/Error";
+  if (entry.errors !== undefined) {
+    const schemaName = `${entry.operationId}.error`;
+    schemas.set(
+      schemaName,
+      z.toJSONSchema(buildErrorEnvelope(entry.errors), {
+        target: "openapi-3.0",
+        io: "output",
+      }),
+    );
+    errorRef = `#/components/schemas/${schemaName}`;
+  }
   responses.default = {
     description: "error",
     content: {
       "application/json": {
-        schema: { $ref: "#/components/schemas/Error" },
+        schema: { $ref: errorRef },
       },
     },
   };

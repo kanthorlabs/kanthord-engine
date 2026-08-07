@@ -3,9 +3,6 @@ import type { NodeState } from "./state.ts";
 export const choices = ["submitted", "database"] as const;
 export type Choice = (typeof choices)[number];
 
-export type DifferingField =
-  "title" | "body" | "depends_on" | "worker" | "repo" | "parent";
-
 export const proseFields = ["body", "title"] as const;
 export const structuralFields = [
   "depends_on",
@@ -14,7 +11,18 @@ export const structuralFields = [
   "worker",
 ] as const;
 
-export type Presence = "both" | "document-only" | "database-only";
+export const differingFields = [
+  "body",
+  "depends_on",
+  "parent",
+  "repo",
+  "title",
+  "worker",
+] as const;
+export type DifferingField = (typeof differingFields)[number];
+
+export const presences = ["both", "document-only", "database-only"] as const;
+export type Presence = (typeof presences)[number];
 
 export type ChoiceFacts = Readonly<{
   presence: Presence;

@@ -229,6 +229,13 @@ export function registryFaults(
         reason: "segment sequence is not a legal path",
       });
     }
+
+    if (entry.status === "stubbed" && entry.query !== undefined) {
+      faults.push({
+        operationId: entry.operationId,
+        reason: "query-on-stubbed",
+      });
+    }
   }
 
   return faults;

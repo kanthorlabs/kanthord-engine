@@ -108,6 +108,7 @@ describe("src/domain/loopback.test", () => {
     );
     assert.deepEqual(sorted, [
       "domain/loopback.ts",
+      "http/contract/system.ts",
       "services/config/convict.ts",
     ]);
 
@@ -115,10 +116,20 @@ describe("src/domain/loopback.test", () => {
       resolve(srcRoot, "services/config/convict.ts"),
       "utf-8",
     );
-    const holdingLines = convictSource
+    const convictHoldingLines = convictSource
       .split("\n")
       .filter((line) => line.includes("127.") || line.includes("localhost"));
-    assert.equal(holdingLines.length, 1);
-    assert.ok(holdingLines[0]!.includes('default: "127.0.0.1"'));
+    assert.equal(convictHoldingLines.length, 1);
+    assert.ok(convictHoldingLines[0]!.includes('default: "127.0.0.1"'));
+
+    const systemSource = readFileSync(
+      resolve(srcRoot, "http/contract/system.ts"),
+      "utf-8",
+    );
+    const systemHoldingLines = systemSource
+      .split("\n")
+      .filter((line) => line.includes("127.") || line.includes("localhost"));
+    assert.equal(systemHoldingLines.length, 1);
+    assert.ok(systemHoldingLines[0]!.includes('"127.0.0.1:7777"'));
   });
 });
