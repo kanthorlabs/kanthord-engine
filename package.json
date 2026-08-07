@@ -49,13 +49,13 @@
     "@koa/bodyparser": "6.1.0",
     "@koa/cors": "5.0.0",
     "commander": "15.0.0",
-    "convict": "^6.2.5",
+    "convict": "6.2.5",
     "graphology": "0.26.0",
     "koa": "3.2.1",
     "pino": "10.3.1",
     "ulid": "3.0.2",
     "yaml": "2.9.0",
-    "zod": "^4.4.3"
+    "zod": "4.4.3"
   },
   "allowScripts": {
     "@google/genai@1.52.0": true,
