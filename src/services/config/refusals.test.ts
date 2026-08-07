@@ -12,6 +12,7 @@ function validInput(overrides?: Partial<StartableInput>): StartableInput {
     masterKeyFileMode: undefined,
     bind: "127.0.0.1",
     token: "",
+    allowedOrigins: [],
     ...overrides,
   };
 }
@@ -163,6 +164,87 @@ describe("src/services/config/refusals.test", () => {
           assert.equal(
             err.message,
             "no master key configured; set masterKey or masterKeyFile",
+          );
+          return true;
+        },
+      );
+    });
+
+    it("rule 5: non-empty allowedOrigins with empty token throws config-refused naming http.token", () => {
+      assert.throws(
+        () =>
+          assertStartable(
+            validInput({
+              allowedOrigins: ["http://localhost:8080"],
+              token: "",
+            }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof ConfigError);
+          assert.equal(err.code, "config-refused");
+          assert.equal(
+            err.message,
+            "a non-empty http.allowedOrigins requires http.token",
+          );
+          return true;
+        },
+      );
+    });
+
+    it("returns undefined when allowedOrigins is non-empty and token is non-empty", () => {
+      const result = assertStartable(
+        validInput({
+          allowedOrigins: ["http://localhost:8080"],
+          token: "t",
+        }),
+      );
+      assert.equal(result, undefined);
+    });
+
+    it("returns undefined when allowedOrigins is empty and token is empty, on a loopback bind", () => {
+      const result = assertStartable(
+        validInput({ allowedOrigins: [], token: "" }),
+      );
+      assert.equal(result, undefined);
+    });
+
+    it("rule 5 fires on a loopback bind", () => {
+      assert.throws(
+        () =>
+          assertStartable(
+            validInput({
+              bind: "127.0.0.1",
+              allowedOrigins: ["http://localhost:8080"],
+              token: "",
+            }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof ConfigError);
+          assert.equal(err.code, "config-refused");
+          return true;
+        },
+      );
+    });
+
+    it("rule order: input failing rules 4 and 5 together reports rule 4", () => {
+      assert.throws(
+        () =>
+          assertStartable(
+            validInput({
+              masterKey: "",
+              masterKeyFile: "/some/path",
+              masterKeyFileMode: 0o600,
+              bind: "0.0.0.0",
+              token: "",
+              allowedOrigins: ["http://a.test"],
+            }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof ConfigError);
+          assert.equal(err.code, "config-refused");
+          assert.equal(
+            err.message,
+            "a non-loopback bind address requires http.token",
           );
           return true;
         },

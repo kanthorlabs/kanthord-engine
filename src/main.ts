@@ -313,6 +313,7 @@ async function serve(options: ServeOptions): Promise<void> {
         settings: {
           token: settings.http.token,
           allowedHosts: settings.http.allowedHosts,
+          allowedOrigins: settings.http.allowedOrigins,
         },
         handlers,
         unimplemented,

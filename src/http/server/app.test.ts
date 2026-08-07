@@ -143,10 +143,213 @@ describe("src/http/server/app.test", () => {
     assert.equal(calls, 0);
   });
 
+  it("with an allowed origin, an unauthenticated request still carries the header", async () => {
+    const app = await createTestApp({
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const response = await app.raw
+      .get("/v1/status")
+      .set("Host", "kanthord.test")
+      .set("Origin", "http://localhost:8080");
+    assert.equal(response.status, 401);
+    assert.equal(response.body.error.code, "unauthenticated");
+    assert.equal(
+      response.headers["access-control-allow-origin"],
+      "http://localhost:8080",
+    );
+  });
+
+  it("with an allowed origin, a valid token and host reaches the route and carries the header", async () => {
+    const app = await createTestApp({
+      handlers,
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const response = await app.raw
+      .get("/v1/status")
+      .set("Host", "kanthord.test")
+      .set("Authorization", "Bearer test-token")
+      .set("Origin", "http://localhost:8080");
+    assert.equal(response.status, 200);
+    assert.equal(
+      response.headers["access-control-allow-origin"],
+      "http://localhost:8080",
+    );
+  });
+
+  it("Host beats preflight: an OPTIONS with an allowed origin but a disallowed Host answers 403 host-forbidden", async () => {
+    const app = await createTestApp({
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const response = await app.raw
+      .options("/v1/status")
+      .set("Host", "evil.example")
+      .set("Origin", "http://localhost:8080");
+    assert.equal(response.status, 403);
+    assert.equal(response.body.error.code, "host-forbidden");
+  });
+
+  it("Origin beats host: an OPTIONS with a disallowed origin and a disallowed Host answers 403 origin-forbidden with no allow-origin header", async () => {
+    const app = await createTestApp({
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const response = await app.raw
+      .options("/v1/status")
+      .set("Host", "evil.example")
+      .set("Origin", "http://evil.test");
+    assert.equal(response.status, 403);
+    assert.equal(response.body.error.code, "origin-forbidden");
+    assert.equal(response.headers["access-control-allow-origin"], undefined);
+  });
+
+  it("preflight beats auth: an OPTIONS with an allowed origin and host, no Authorization, answers 204", async () => {
+    const app = await createTestApp({
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const response = await app.raw
+      .options("/v1/status")
+      .set("Host", "kanthord.test")
+      .set("Origin", "http://localhost:8080");
+    assert.equal(response.status, 204);
+  });
+
+  it("preflight beats route: an OPTIONS to a non-existent path answers the identical 204 headers as an OPTIONS to a real path", async () => {
+    const app = await createTestApp({
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const statusResponse = await app.raw
+      .options("/v1/status")
+      .set("Host", "kanthord.test")
+      .set("Origin", "http://localhost:8080");
+    assert.equal(statusResponse.status, 204);
+    const missingResponse = await app.raw
+      .options("/v1/does/not/exist")
+      .set("Host", "kanthord.test")
+      .set("Origin", "http://localhost:8080");
+    assert.equal(missingResponse.status, 204);
+    const headerNames = [
+      "access-control-allow-origin",
+      "access-control-allow-methods",
+      "access-control-allow-headers",
+      "access-control-max-age",
+    ];
+    for (const name of headerNames) {
+      assert.deepEqual(
+        missingResponse.headers[name],
+        statusResponse.headers[name],
+      );
+    }
+  });
+
+  it("auth still beats route for a non-preflight: a GET with an allowed origin and host, no token, answers 401 and carries the origin header", async () => {
+    const app = await createTestApp({
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const response = await app.raw
+      .get("/v1/status")
+      .set("Host", "kanthord.test")
+      .set("Origin", "http://localhost:8080");
+    assert.equal(response.status, 401);
+    assert.equal(response.body.error.code, "unauthenticated");
+    assert.equal(
+      response.headers["access-control-allow-origin"],
+      "http://localhost:8080",
+    );
+  });
+
+  it("an OPTIONS with no Origin is not a preflight: it falls through to a 404 not-found", async () => {
+    const app = await createTestApp({
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const response = await app.raw
+      .options("/v1/status")
+      .set("Host", "kanthord.test")
+      .set("Authorization", "Bearer test-token");
+    assert.equal(response.status, 404);
+    assert.equal(response.body.error.code, "not-found");
+  });
+
+  it("the empty-list table: a routed route, a stubbed route and system.health each answer origin-forbidden for a disallowed or null Origin, and their own explicit status with no Origin and no allow-origin header", async () => {
+    const app = await createTestApp({ handlers });
+    const routedEntry = registry.find(
+      (entry) =>
+        entry.status === "routed" && entry.operationId === "system.status",
+    );
+    const stubbedEntry = registry.find(
+      (entry) =>
+        entry.status === "stubbed" && entry.operationId === "agent.list",
+    );
+    const healthEntry = registry.find(
+      (entry) => entry.operationId === "system.health",
+    );
+    assert.ok(routedEntry, "system.status exists and is routed");
+    assert.ok(stubbedEntry, "agent.list exists and is stubbed");
+    assert.ok(healthEntry, "system.health exists");
+
+    const table = [
+      { entry: routedEntry, expectedStatus: 200 },
+      { entry: stubbedEntry, expectedStatus: 501 },
+      { entry: healthEntry, expectedStatus: 200 },
+    ];
+
+    for (const { entry, expectedStatus } of table) {
+      const path = renderPath(entry.path).replace(/:[^/]+/g, "x_01");
+      const method =
+        entry.method === "DELETE"
+          ? "del"
+          : (entry.method.toLowerCase() as "get" | "post" | "put");
+
+      const evil = await app.raw[method](path)
+        .set("Host", "kanthord.test")
+        .set("Authorization", "Bearer test-token")
+        .set("Origin", "http://evil.test");
+      assert.equal(evil.status, 403);
+      assert.equal(evil.body.error.code, "origin-forbidden");
+      assert.equal(evil.headers["access-control-allow-origin"], undefined);
+
+      const nullOrigin = await app.raw[method](path)
+        .set("Host", "kanthord.test")
+        .set("Authorization", "Bearer test-token")
+        .set("Origin", "null");
+      assert.equal(nullOrigin.status, 403);
+      assert.equal(nullOrigin.body.error.code, "origin-forbidden");
+
+      const noOrigin = await app.raw[method](path)
+        .set("Host", "kanthord.test")
+        .set("Authorization", "Bearer test-token");
+      assert.equal(noOrigin.status, expectedStatus);
+      assert.equal(noOrigin.headers["access-control-allow-origin"], undefined);
+    }
+  });
+
+  it("with an allowed origin, a valid token and host, a GET /v1/blob/:hash carries the exact expose-headers value", async () => {
+    const app = await createTestApp({
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const response = await app.raw
+      .get("/v1/blob/sha256:test")
+      .set("Host", "kanthord.test")
+      .set("Authorization", "Bearer test-token")
+      .set("Origin", "http://localhost:8080");
+    assert.equal(
+      response.headers["access-control-expose-headers"],
+      "etag, accept-ranges, content-range",
+    );
+  });
+
+  it("with the default empty allowedOrigins and no Origin header, a GET /v1/blob/:hash carries no expose-headers value", async () => {
+    const app = await createTestApp({});
+    const response = await app.raw
+      .get("/v1/blob/sha256:test")
+      .set("Host", "kanthord.test")
+      .set("Authorization", "Bearer test-token");
+    assert.equal(response.headers["access-control-expose-headers"], undefined);
+  });
+
   it("app.proxy stays false on the app createApp returns", () => {
     const settings: TransportSettings = {
       token: "test-token",
       allowedHosts: ["kanthord.test"],
+      allowedOrigins: [],
     };
     const app = createApp({
       settings,

@@ -3,6 +3,7 @@ export type HttpSettings = Readonly<{
   port: number;
   token: string;
   allowedHosts: readonly string[];
+  allowedOrigins: readonly string[];
 }>;
 
 export type ToolSettings = Readonly<{

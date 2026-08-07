@@ -13,7 +13,7 @@ import type { Context, Next } from "koa";
 const ALLOWED_METHODS = "DELETE, GET, POST, PUT";
 const ALLOWED_HEADERS =
   "authorization, content-type, idempotency-key, if-none-match, x-kanthord-client";
-const MAX_AGE = "600";
+const MAX_AGE = "86400";
 
 export function preflightMiddleware(): (
   context: Context,
@@ -105,7 +105,7 @@ Wiring this middleware into `createApp` is Story 5.
   - `access-control-allow-methods`: `DELETE, GET, POST, PUT`
   - `access-control-allow-headers`:
     `authorization, content-type, idempotency-key, if-none-match, x-kanthord-client`
-  - `access-control-max-age`: `600`
+  - `access-control-max-age`: `86400`
   - `vary`: `Origin`
   - `access-control-allow-credentials`: absent
 - The same request carries no `Authorization` header and still answers `204`.

@@ -729,6 +729,58 @@ describe("src/services/config/convict.test", () => {
       }
     });
 
+    it("non-empty http.allowedOrigins with empty http.token throws config-refused naming http.token", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "",
+              allowedHosts: ["localhost:8080"],
+              allowedOrigins: ["http://localhost:8080"],
+            },
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-refused");
+            assert.match(err.message, /http\.token/);
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("non-empty http.allowedOrigins with non-empty http.token loads", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "my-token",
+              allowedHosts: ["localhost:8080"],
+              allowedOrigins: ["http://localhost:8080"],
+            },
+          }),
+        );
+        const result = config.load(loadInput(dir, filePath));
+        assert.deepEqual(result.settings.http.allowedOrigins, [
+          "http://localhost:8080",
+        ]);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
     it("neither masterKey nor masterKeyFile throws config-refused", () => {
       const dir = tmpDir();
       try {
@@ -825,6 +877,299 @@ describe("src/services/config/convict.test", () => {
             return true;
           },
         );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+  });
+
+  describe("http.allowedOrigins", () => {
+    it("omitting http.allowedOrigins from the config file loads and yields []", () => {
+      const dir = tmpDir();
+      try {
+        const file = validFile();
+        delete (file as any).http.allowedOrigins;
+        const filePath = writeJson(dir, file);
+        const result = config.load(loadInput(dir, filePath));
+        assert.deepEqual(result.settings.http.allowedOrigins, []);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('KANTHORD_HTTP_ALLOWED_ORIGINS="" yields [] and loads', () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile());
+        const result = config.load(
+          loadInput(dir, filePath, {
+            env: { KANTHORD_HTTP_ALLOWED_ORIGINS: "" },
+          }),
+        );
+        assert.deepEqual(result.settings.http.allowedOrigins, []);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('KANTHORD_HTTP_ALLOWED_ORIGINS="http://a.test, http://b.test ,,http://c.test" yields exactly ["http://a.test", "http://b.test", "http://c.test"]', () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile());
+        const result = config.load(
+          loadInput(dir, filePath, {
+            env: {
+              KANTHORD_HTTP_ALLOWED_ORIGINS:
+                "http://a.test, http://b.test ,,http://c.test",
+            },
+          }),
+        );
+        assert.deepEqual(result.settings.http.allowedOrigins, [
+          "http://a.test",
+          "http://b.test",
+          "http://c.test",
+        ]);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('KANTHORD_HTTP_ALLOWED_ORIGINS="http://LOCALHOST:80" yields exactly ["http://localhost"]', () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile());
+        const result = config.load(
+          loadInput(dir, filePath, {
+            env: { KANTHORD_HTTP_ALLOWED_ORIGINS: "http://LOCALHOST:80" },
+          }),
+        );
+        assert.deepEqual(result.settings.http.allowedOrigins, [
+          "http://localhost",
+        ]);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    for (const badEntry of [
+      "*",
+      "http://*.test",
+      "http://a.test/",
+      "http://a.test/path",
+      "ftp://a.test",
+      "http://user:pw@a.test",
+      "null",
+      "http:a.test",
+      "http://a.test?",
+      "http://@a.test",
+    ]) {
+      it(`KANTHORD_HTTP_ALLOWED_ORIGINS naming ${JSON.stringify(badEntry)} throws config-invalid naming the entry`, () => {
+        const dir = tmpDir();
+        try {
+          const filePath = writeJson(dir, validFile());
+          assert.throws(
+            () =>
+              config.load(
+                loadInput(dir, filePath, {
+                  env: { KANTHORD_HTTP_ALLOWED_ORIGINS: badEntry },
+                }),
+              ),
+            (err: any) => {
+              assert.equal(err.code, "config-invalid");
+              assert.match(
+                err.message,
+                new RegExp(
+                  JSON.stringify(badEntry).replace(
+                    /[.*+?^${}()|[\]\\]/g,
+                    "\\$&",
+                  ),
+                ),
+              );
+              return true;
+            },
+          );
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
+    }
+
+    it("entry order is preserved, and a duplicate is kept", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile());
+        const result = config.load(
+          loadInput(dir, filePath, {
+            env: {
+              KANTHORD_HTTP_ALLOWED_ORIGINS:
+                "http://b.test,http://a.test,http://b.test",
+            },
+          }),
+        );
+        assert.deepEqual(result.settings.http.allowedOrigins, [
+          "http://b.test",
+          "http://a.test",
+          "http://b.test",
+        ]);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('a config file array ["http://LOCALHOST:80", "https://a.test:443"] loads and yields exactly ["http://localhost", "https://a.test"]', () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "test-token",
+              allowedHosts: ["localhost:8080"],
+              allowedOrigins: ["http://LOCALHOST:80", "https://a.test:443"],
+            },
+          }),
+        );
+        const result = config.load(loadInput(dir, filePath));
+        assert.deepEqual(result.settings.http.allowedOrigins, [
+          "http://localhost",
+          "https://a.test",
+        ]);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('a config file array ["http://a.test?q=1"] fails with config-invalid naming the entry', () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "test-token",
+              allowedHosts: ["localhost:8080"],
+              allowedOrigins: ["http://a.test?q=1"],
+            },
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-invalid");
+            assert.match(err.message, /http:\/\/a\.test\?q=1/);
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('a config file array ["http://a.test#f"] fails with config-invalid', () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "test-token",
+              allowedHosts: ["localhost:8080"],
+              allowedOrigins: ["http://a.test#f"],
+            },
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-invalid");
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("a config file array [123] fails with config-invalid", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "test-token",
+              allowedHosts: ["localhost:8080"],
+              allowedOrigins: [123],
+            },
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-invalid");
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('a config file array [""] fails with config-invalid', () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "test-token",
+              allowedHosts: ["localhost:8080"],
+              allowedOrigins: [""],
+            },
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-invalid");
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('a config file string "http://a.test,http://b.test" loads and yields ["http://a.test", "http://b.test"]', () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "test-token",
+              allowedHosts: ["localhost:8080"],
+              allowedOrigins: "http://a.test,http://b.test",
+            },
+          }),
+        );
+        const result = config.load(loadInput(dir, filePath));
+        assert.deepEqual(result.settings.http.allowedOrigins, [
+          "http://a.test",
+          "http://b.test",
+        ]);
       } finally {
         fs.rmSync(dir, { recursive: true });
       }

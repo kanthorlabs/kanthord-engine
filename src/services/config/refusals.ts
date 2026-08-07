@@ -9,6 +9,7 @@ export type StartableInput = Readonly<{
   masterKeyFileMode: number | undefined;
   bind: string;
   token: string;
+  allowedOrigins: readonly string[];
 }>;
 
 export function assertStartable(input: StartableInput): void {
@@ -48,6 +49,13 @@ export function assertStartable(input: StartableInput): void {
     throw new ConfigError(
       "config-refused",
       "a non-loopback bind address requires http.token",
+    );
+  }
+
+  if (input.allowedOrigins.length > 0 && input.token.length === 0) {
+    throw new ConfigError(
+      "config-refused",
+      "a non-empty http.allowedOrigins requires http.token",
     );
   }
 }

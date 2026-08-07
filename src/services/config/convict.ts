@@ -7,6 +7,7 @@ import type { Config, LoadInput, Loaded } from "./index.ts";
 import { ConfigError } from "./index.ts";
 import { searchOrder } from "./search-order.ts";
 import { assertStartable } from "./refusals.ts";
+import { canonicalizeOrigin } from "../../domain/origin.ts";
 
 function nonEmptyString(value: unknown): void {
   if (typeof value !== "string" || value.length === 0) {
@@ -17,6 +18,17 @@ function nonEmptyString(value: unknown): void {
 function hostList(value: unknown): void {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error("must be a non-empty array");
+  }
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry.length === 0) {
+      throw new Error("every entry must be a non-empty string");
+    }
+  }
+}
+
+function originList(value: unknown): void {
+  if (!Array.isArray(value)) {
+    throw new Error("must be an array");
   }
   for (const entry of value) {
     if (typeof entry !== "string" || entry.length === 0) {
@@ -63,6 +75,11 @@ function buildSchema(): Record<string, unknown> {
         default: null,
         env: "KANTHORD_HTTP_ALLOWED_HOSTS",
       },
+      allowedOrigins: {
+        format: "originList",
+        default: [],
+        env: "KANTHORD_HTTP_ALLOWED_ORIGINS",
+      },
     },
     tools: {
       git: {
@@ -102,6 +119,16 @@ function normalizeAllowedHosts(raw: unknown): string[] {
       .filter((s): s is string => typeof s === "string" && s.length > 0);
   }
   return [];
+}
+
+function normalizeAllowedOrigins(raw: unknown): unknown {
+  if (typeof raw === "string") {
+    return raw
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+  }
+  return raw;
 }
 
 export class ConvictConfig implements Config {
@@ -169,6 +196,7 @@ export class ConvictConfig implements Config {
     convict.addFormats({
       nonEmptyString: { validate: nonEmptyString },
       hostList: { validate: hostList },
+      originList: { validate: originList },
       positiveInteger: { validate: positiveInteger },
       absolutePath: { validate: absolutePath },
     });
@@ -179,6 +207,11 @@ export class ConvictConfig implements Config {
     const rawHosts = config.get("http.allowedHosts");
     config.set("http.allowedHosts", normalizeAllowedHosts(rawHosts));
 
+    config.set(
+      "http.allowedOrigins",
+      normalizeAllowedOrigins(config.get("http.allowedOrigins")),
+    );
+
     if (input.homeOverride !== undefined && input.homeOverride.length > 0) {
       config.set("home", input.homeOverride);
     }
@@ -188,6 +221,19 @@ export class ConvictConfig implements Config {
     } catch (err: unknown) {
       throw new ConfigError("config-invalid", (err as Error).message);
     }
+
+    const canonicalOrigins: string[] = [];
+    for (const entry of config.get("http.allowedOrigins") as string[]) {
+      const result = canonicalizeOrigin(entry);
+      if (!result.ok) {
+        throw new ConfigError(
+          "config-invalid",
+          `http.allowedOrigins entry ${JSON.stringify(entry)} is not a canonical origin (${result.reason})`,
+        );
+      }
+      canonicalOrigins.push(result.origin);
+    }
+    config.set("http.allowedOrigins", canonicalOrigins);
 
     const masterKeyStr = config.get("masterKey") as string;
     const masterKeyFileStr = config.get("masterKeyFile") as string;
@@ -219,6 +265,7 @@ export class ConvictConfig implements Config {
       masterKeyFileMode,
       bind: config.get("http.bind") as string,
       token: config.get("http.token") as string,
+      allowedOrigins: config.get("http.allowedOrigins") as string[],
     });
 
     let masterKey: Buffer;
@@ -246,6 +293,7 @@ export class ConvictConfig implements Config {
           port: config.get("http.port") as number,
           token: config.get("http.token") as string,
           allowedHosts: config.get("http.allowedHosts") as string[],
+          allowedOrigins: config.get("http.allowedOrigins") as string[],
         },
         tools: {
           git: config.get("tools.git") as string,

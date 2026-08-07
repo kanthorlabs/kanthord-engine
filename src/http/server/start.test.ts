@@ -20,7 +20,11 @@ import { exitCodeForError } from "../../cli/exit-code.ts";
 
 function buildApp() {
   return createApp({
-    settings: { token: "test-token", allowedHosts: ["kanthord.test"] },
+    settings: {
+      token: "test-token",
+      allowedHosts: ["kanthord.test"],
+      allowedOrigins: [],
+    },
     handlers: {},
     unimplemented: unimplementedFor({}),
     onInternalError: () => {},
@@ -88,7 +92,11 @@ describe("src/http/server/start.test", () => {
       }),
     };
     const app = createApp({
-      settings: { token: "test-token", allowedHosts: [`127.0.0.1:${port}`] },
+      settings: {
+        token: "test-token",
+        allowedHosts: [`127.0.0.1:${port}`],
+        allowedOrigins: [],
+      },
       handlers,
       unimplemented: unimplementedFor(handlers),
       onInternalError: () => {},

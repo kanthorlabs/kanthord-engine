@@ -182,7 +182,7 @@ so a reformatting is a failure.
 - `Access-Control-Allow-Methods`: `DELETE, GET, POST, PUT`
 - `Access-Control-Allow-Headers`:
   `authorization, content-type, idempotency-key, if-none-match, x-kanthord-client`
-- `Access-Control-Max-Age`: `600`
+- `Access-Control-Max-Age`: `86400`
 - `Access-Control-Expose-Headers`: `etag, accept-ranges, content-range`
 - `Access-Control-Allow-Credentials`: never set, anywhere.
 
@@ -205,17 +205,15 @@ Two of those files are new (`src/domain/origin.test.ts`,
 land. That is expected: the Proof is the completion marker, not a per-story check. Each story
 names its own `node --test` line in its `Verify` section.
 
-## Open questions for the human
+## Decisions the EPIC did not state
 
-Two items are not settled by the EPIC. Each is pinned in the stories so `/work` stays
-mechanical, but each is a decision the human may want to change before dispatch.
+Both are settled. Each is pinned in the stories, so `/work` stays mechanical.
 
-- **`Access-Control-Max-Age: 600`.** The EPIC says only "sets `Access-Control-Max-Age`" and
-  names no value. Story 4 pins `600`. Change the constant in Story 4 to change the policy.
-- **`OPTIONS` with no `Origin` answers `404 not-found`.** The EPIC does not state it. Story 4
-  pins fall-through to `routeMiddleware`, which finds no `OPTIONS` operation. The alternative
-  is a `405`, which would need a registry method-set lookup and would break the
-  "answer is a constant" property.
-  Settled: the EPIC Proof command was widened to cover all six suites. It previously ran only
+- **`Access-Control-Max-Age: 86400`.** The EPIC says only "sets `Access-Control-Max-Age`" and
+  names no value. Story 4 pins `86400`, the Chrome cap.
+- **`OPTIONS` with no `Origin` answers `404 not-found`.** Story 4 pins fall-through to
+  `routeMiddleware`, which finds no `OPTIONS` operation. This keeps the preflight answer a
+  constant and adds no error code to the registry.
+- The EPIC Proof command was widened to cover all six suites. It previously ran only
   `origin.test.ts`, `app.test.ts` and `refusals.test.ts`, so it omitted canonicalization,
   configuration loading and standalone preflight behaviour.

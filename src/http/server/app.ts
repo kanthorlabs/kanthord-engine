@@ -10,12 +10,14 @@ import { dispatchMiddleware } from "./dispatch.ts";
 import { envelopeMiddleware } from "./envelope.ts";
 import { hostMiddleware } from "./host.ts";
 import { originMiddleware } from "./origin.ts";
+import { preflightMiddleware } from "./preflight.ts";
 import { routeMiddleware } from "./route.ts";
 import type { RoutedState } from "./route.ts";
 
 export type TransportSettings = Readonly<{
   token: string;
   allowedHosts: readonly string[];
+  allowedOrigins: readonly string[];
 }>;
 
 export type HandlerContext = Readonly<{
@@ -57,8 +59,11 @@ export function createApp(dependencies: AppDependencies): Koa {
   app.use(
     envelopeMiddleware({ onInternalError: dependencies.onInternalError }),
   );
-  app.use(originMiddleware());
+  app.use(
+    originMiddleware({ allowedOrigins: dependencies.settings.allowedOrigins }),
+  );
   app.use(hostMiddleware({ allowedHosts: dependencies.settings.allowedHosts }));
+  app.use(preflightMiddleware());
   app.use(authMiddleware({ token: dependencies.settings.token }));
   app.use(routeMiddleware());
   app.use(bodyParserForHandled(dependencies.handlers));

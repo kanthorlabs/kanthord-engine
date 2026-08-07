@@ -2,17 +2,39 @@ import type { Context, Next } from "koa";
 
 import { httpError } from "../contract/errors.ts";
 
-export function originMiddleware(): (
-  context: Context,
-  next: Next,
-) => Promise<void> {
+const EXPOSED_HEADERS = "etag, accept-ranges, content-range";
+
+export type OriginDependencies = Readonly<{
+  allowedOrigins: readonly string[];
+}>;
+
+export type OriginState = Readonly<{ allowedOrigin: string | undefined }>;
+
+export function originMiddleware(
+  dependencies: OriginDependencies,
+): (context: Context, next: Next) => Promise<void> {
+  const allowed = new Set(dependencies.allowedOrigins);
   return async (context, next) => {
-    if (context.request.headers.origin !== undefined) {
+    const origin = context.request.headers.origin;
+    if (origin === undefined) {
+      await next();
+      return;
+    }
+    if (!allowed.has(origin)) {
       throw httpError(
         "origin-forbidden",
-        "the request carried an Origin header",
+        `the Origin header ${origin} is outside the allow list`,
       );
     }
-    await next();
+    context.set("Access-Control-Allow-Origin", origin);
+    if (context.method !== "OPTIONS") {
+      context.set("Access-Control-Expose-Headers", EXPOSED_HEADERS);
+    }
+    context.state.allowedOrigin = origin;
+    try {
+      await next();
+    } finally {
+      context.vary("Origin");
+    }
   };
 }

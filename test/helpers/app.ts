@@ -10,6 +10,7 @@ export { unimplementedFor };
 export type TestAppOverrides = Readonly<{
   token?: string;
   allowedHosts?: readonly string[];
+  allowedOrigins?: readonly string[];
   handlers?: Readonly<Record<string, Handler>>;
   onInternalError?: (error: unknown) => void;
 }>;
@@ -66,6 +67,7 @@ export async function createTestApp(
 ): Promise<TestApp> {
   const token = overrides?.token ?? "test-token";
   const allowedHosts = overrides?.allowedHosts ?? ["kanthord.test"];
+  const allowedOrigins = overrides?.allowedOrigins ?? [];
   const handlers = overrides?.handlers ?? {};
   const captured: unknown[] = [];
   const onInternalError =
@@ -74,7 +76,7 @@ export async function createTestApp(
       captured.push(error);
     });
   const app = createApp({
-    settings: { token, allowedHosts },
+    settings: { token, allowedHosts, allowedOrigins },
     handlers,
     unimplemented: unimplementedFor(handlers),
     onInternalError,

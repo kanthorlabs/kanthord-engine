@@ -25,6 +25,7 @@ import {
 const settings: TransportSettings = {
   token: "test-token",
   allowedHosts: ["kanthord.test"],
+  allowedOrigins: [],
 };
 
 const okHandler: Handler = () => ({ status: 200, body: { ok: true } });
