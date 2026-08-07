@@ -84,6 +84,8 @@ export const project = operations([
     path: [resource("project")],
     introducedIn: "phase-1",
     status: "routed",
+    idempotency: "memory",
+    replayable: [200],
     request: projectCreateRequest,
     response: projectCreateResponse,
     errors: { ...baselineErrors },

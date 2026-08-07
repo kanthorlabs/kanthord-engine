@@ -497,6 +497,21 @@ describe("src/services/config/convict.test", () => {
         fs.rmSync(dir, { recursive: true });
       }
     });
+
+    it("KANTHORD_ATTEMPT_LIMIT=7 wins over file attemptLimit", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile({ attemptLimit: 3 }));
+        const result = config.load(
+          loadInput(dir, filePath, {
+            env: { KANTHORD_ATTEMPT_LIMIT: "7" },
+          }),
+        );
+        assert.equal(result.settings.attemptLimit, 7);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
   });
 
   describe("homeOverride", () => {
@@ -1173,6 +1188,303 @@ describe("src/services/config/convict.test", () => {
       } finally {
         fs.rmSync(dir, { recursive: true });
       }
+    });
+  });
+
+  describe("http.idempotency", () => {
+    describe("defaults", () => {
+      it("a config file that omits http.idempotency yields the four defaults", () => {
+        const dir = tmpDir();
+        try {
+          const file = validFile();
+          const filePath = writeJson(dir, file);
+          const result = config.load(loadInput(dir, filePath));
+          assert.deepEqual(result.settings.http.idempotency, {
+            ttl: 300,
+            joinTimeout: 30,
+            maxEntries: 256,
+            maxBytes: 8388608,
+          });
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
+
+      it("http.idempotency: {} yields the same four defaults", () => {
+        const dir = tmpDir();
+        try {
+          const filePath = writeJson(
+            dir,
+            validFile({
+              http: { ...(validFile().http as object), idempotency: {} },
+            }),
+          );
+          const result = config.load(loadInput(dir, filePath));
+          assert.deepEqual(result.settings.http.idempotency, {
+            ttl: 300,
+            joinTimeout: 30,
+            maxEntries: 256,
+            maxBytes: 8388608,
+          });
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
+
+      it("a partial http.idempotency group keeps the other defaults", () => {
+        const dir = tmpDir();
+        try {
+          const filePath = writeJson(
+            dir,
+            validFile({
+              http: {
+                ...(validFile().http as object),
+                idempotency: { ttl: 60 },
+              },
+            }),
+          );
+          const result = config.load(loadInput(dir, filePath));
+          assert.deepEqual(result.settings.http.idempotency, {
+            ttl: 60,
+            joinTimeout: 30,
+            maxEntries: 256,
+            maxBytes: 8388608,
+          });
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
+    });
+
+    describe("accepted values", () => {
+      for (const [key, value] of [
+        ["ttl", 0],
+        ["joinTimeout", 0],
+        ["joinTimeout", 1],
+        ["maxEntries", 1],
+        ["maxBytes", 1],
+      ] as const) {
+        it(`${key}: ${value} loads and yields ${value}`, () => {
+          const dir = tmpDir();
+          try {
+            const filePath = writeJson(
+              dir,
+              validFile({
+                http: {
+                  ...(validFile().http as object),
+                  idempotency: { [key]: value },
+                },
+              }),
+            );
+            const result = config.load(loadInput(dir, filePath));
+            assert.equal(
+              (result.settings.http.idempotency as Record<string, number>)[key],
+              value,
+            );
+          } finally {
+            fs.rmSync(dir, { recursive: true });
+          }
+        });
+      }
+    });
+
+    describe("refusals", () => {
+      for (const [key, value] of [
+        ["ttl", -1],
+        ["ttl", 1.5],
+        ["ttl", "300"],
+        ["joinTimeout", -1],
+        ["joinTimeout", 1.5],
+        ["maxEntries", 0],
+        ["maxEntries", -1],
+        ["maxEntries", 1.5],
+        ["maxBytes", 0],
+        ["maxBytes", 1.5],
+      ] as const) {
+        it(`${key}: ${JSON.stringify(value)} throws config-invalid`, () => {
+          const dir = tmpDir();
+          try {
+            const filePath = writeJson(
+              dir,
+              validFile({
+                http: {
+                  ...(validFile().http as object),
+                  idempotency: { [key]: value },
+                },
+              }),
+            );
+            assert.throws(
+              () => config.load(loadInput(dir, filePath)),
+              (err: any) => {
+                assert.equal(err.code, "config-invalid");
+                return true;
+              },
+            );
+          } finally {
+            fs.rmSync(dir, { recursive: true });
+          }
+        });
+      }
+
+      it("an unknown key http.idempotency.sweepInterval throws config-invalid, proving strict mode", () => {
+        const dir = tmpDir();
+        try {
+          const filePath = writeJson(
+            dir,
+            validFile({
+              http: {
+                ...(validFile().http as object),
+                idempotency: { sweepInterval: 1 },
+              },
+            }),
+          );
+          assert.throws(
+            () => config.load(loadInput(dir, filePath)),
+            (err: any) => {
+              assert.equal(err.code, "config-invalid");
+              return true;
+            },
+          );
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
+    });
+
+    describe("env overrides", () => {
+      it("KANTHORD_HTTP_IDEMPOTENCY_TTL=60 yields ttl 60", () => {
+        const dir = tmpDir();
+        try {
+          const filePath = writeJson(dir, validFile());
+          const result = config.load(
+            loadInput(dir, filePath, {
+              env: { KANTHORD_HTTP_IDEMPOTENCY_TTL: "60" },
+            }),
+          );
+          assert.equal(result.settings.http.idempotency.ttl, 60);
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
+
+      it("KANTHORD_HTTP_IDEMPOTENCY_TTL=0 yields ttl 0", () => {
+        const dir = tmpDir();
+        try {
+          const filePath = writeJson(dir, validFile());
+          const result = config.load(
+            loadInput(dir, filePath, {
+              env: { KANTHORD_HTTP_IDEMPOTENCY_TTL: "0" },
+            }),
+          );
+          assert.equal(result.settings.http.idempotency.ttl, 0);
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
+
+      it("KANTHORD_HTTP_IDEMPOTENCY_JOIN_TIMEOUT=5 yields joinTimeout 5", () => {
+        const dir = tmpDir();
+        try {
+          const filePath = writeJson(dir, validFile());
+          const result = config.load(
+            loadInput(dir, filePath, {
+              env: { KANTHORD_HTTP_IDEMPOTENCY_JOIN_TIMEOUT: "5" },
+            }),
+          );
+          assert.equal(result.settings.http.idempotency.joinTimeout, 5);
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
+
+      it("KANTHORD_HTTP_IDEMPOTENCY_JOIN_TIMEOUT=0 yields joinTimeout 0", () => {
+        const dir = tmpDir();
+        try {
+          const filePath = writeJson(dir, validFile());
+          const result = config.load(
+            loadInput(dir, filePath, {
+              env: { KANTHORD_HTTP_IDEMPOTENCY_JOIN_TIMEOUT: "0" },
+            }),
+          );
+          assert.equal(result.settings.http.idempotency.joinTimeout, 0);
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
+
+      it("KANTHORD_HTTP_IDEMPOTENCY_MAX_ENTRIES=10 yields maxEntries 10", () => {
+        const dir = tmpDir();
+        try {
+          const filePath = writeJson(dir, validFile());
+          const result = config.load(
+            loadInput(dir, filePath, {
+              env: { KANTHORD_HTTP_IDEMPOTENCY_MAX_ENTRIES: "10" },
+            }),
+          );
+          assert.equal(result.settings.http.idempotency.maxEntries, 10);
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
+
+      it("KANTHORD_HTTP_IDEMPOTENCY_MAX_BYTES=1024 yields maxBytes 1024", () => {
+        const dir = tmpDir();
+        try {
+          const filePath = writeJson(dir, validFile());
+          const result = config.load(
+            loadInput(dir, filePath, {
+              env: { KANTHORD_HTTP_IDEMPOTENCY_MAX_BYTES: "1024" },
+            }),
+          );
+          assert.equal(result.settings.http.idempotency.maxBytes, 1024);
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
+
+      it("KANTHORD_HTTP_IDEMPOTENCY_TTL=abc throws config-invalid", () => {
+        const dir = tmpDir();
+        try {
+          const filePath = writeJson(dir, validFile());
+          assert.throws(
+            () =>
+              config.load(
+                loadInput(dir, filePath, {
+                  env: { KANTHORD_HTTP_IDEMPOTENCY_TTL: "abc" },
+                }),
+              ),
+            (err: any) => {
+              assert.equal(err.code, "config-invalid");
+              return true;
+            },
+          );
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
+
+      it("an env value overrides a config-file value: file ttl 30 plus env 90 yields 90", () => {
+        const dir = tmpDir();
+        try {
+          const filePath = writeJson(
+            dir,
+            validFile({
+              http: {
+                ...(validFile().http as object),
+                idempotency: { ttl: 30 },
+              },
+            }),
+          );
+          const result = config.load(
+            loadInput(dir, filePath, {
+              env: { KANTHORD_HTTP_IDEMPOTENCY_TTL: "90" },
+            }),
+          );
+          assert.equal(result.settings.http.idempotency.ttl, 90);
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
     });
   });
 

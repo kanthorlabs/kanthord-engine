@@ -4,6 +4,11 @@ import { loopbackAgent } from "./agent.ts";
 
 import { createApp, unimplementedFor } from "../../src/http/server/app.ts";
 import type { Handler } from "../../src/http/server/app.ts";
+import { defaultIdempotencySettings } from "../../src/http/server/idempotency-store.ts";
+import type {
+  IdempotencySettings,
+  Schedule,
+} from "../../src/http/server/idempotency-store.ts";
 
 export { unimplementedFor };
 
@@ -13,6 +18,9 @@ export type TestAppOverrides = Readonly<{
   allowedOrigins?: readonly string[];
   handlers?: Readonly<Record<string, Handler>>;
   onInternalError?: (error: unknown) => void;
+  idempotency?: IdempotencySettings;
+  now?: () => number;
+  schedule?: Schedule;
 }>;
 
 export type TestApp = Readonly<{
@@ -75,11 +83,17 @@ export async function createTestApp(
     ((error: unknown) => {
       captured.push(error);
     });
+  const idempotency = overrides?.idempotency ?? defaultIdempotencySettings;
+  const now = overrides?.now ?? (() => 0);
+  const schedule = overrides?.schedule ?? (() => () => {});
   const app = createApp({
     settings: { token, allowedHosts, allowedOrigins },
     handlers,
     unimplemented: unimplementedFor(handlers),
     onInternalError,
+    idempotency,
+    now,
+    schedule,
   });
   const raw = await loopbackAgent(app);
   const host = allowedHosts[0] ?? "";

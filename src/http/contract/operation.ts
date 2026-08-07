@@ -17,6 +17,9 @@ export type IntroducedIn = (typeof introducedInValues)[number];
 export const statusValues = ["routed", "stubbed", "deferred"] as const;
 export type OperationStatus = (typeof statusValues)[number];
 
+export const idempotencyPolicies = ["none", "memory", "durable"] as const;
+export type IdempotencyPolicy = (typeof idempotencyPolicies)[number];
+
 export type OperationErrors = Partial<Record<ErrorCode, ZodType | null>>;
 
 export type OperationExamples = Readonly<{
@@ -32,6 +35,8 @@ export type Operation = Readonly<{
   path: readonly Segment[];
   introducedIn: IntroducedIn;
   status: "routed" | "stubbed";
+  idempotency?: IdempotencyPolicy;
+  replayable?: readonly number[];
   successStatus?: number;
   query?: ZodType;
   request?: ZodType;
@@ -40,6 +45,10 @@ export type Operation = Readonly<{
   errors?: OperationErrors;
   examples?: OperationExamples;
 }>;
+
+export function idempotencyOf(entry: Operation): IdempotencyPolicy {
+  return entry.idempotency ?? "none";
+}
 
 export function operations(
   entries: readonly Operation[],

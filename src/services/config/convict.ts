@@ -43,6 +43,19 @@ function positiveInteger(value: unknown): void {
   }
 }
 
+function nonNegativeInteger(value: unknown): void {
+  if (!Number.isInteger(value) || (value as number) < 0) {
+    throw new Error("must be a non-negative integer >= 0");
+  }
+}
+
+function parseEnvInteger(value: string): number {
+  if (!/^-?\d+$/.test(value)) {
+    return NaN;
+  }
+  return Number(value);
+}
+
 function absolutePath(value: unknown): void {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error("must be a non-empty string");
@@ -79,6 +92,28 @@ function buildSchema(): Record<string, unknown> {
         format: "originList",
         default: [],
         env: "KANTHORD_HTTP_ALLOWED_ORIGINS",
+      },
+      idempotency: {
+        ttl: {
+          format: "nonNegativeInteger",
+          default: 300,
+          env: "KANTHORD_HTTP_IDEMPOTENCY_TTL",
+        },
+        joinTimeout: {
+          format: "nonNegativeInteger",
+          default: 30,
+          env: "KANTHORD_HTTP_IDEMPOTENCY_JOIN_TIMEOUT",
+        },
+        maxEntries: {
+          format: "positiveInteger",
+          default: 256,
+          env: "KANTHORD_HTTP_IDEMPOTENCY_MAX_ENTRIES",
+        },
+        maxBytes: {
+          format: "positiveInteger",
+          default: 8388608,
+          env: "KANTHORD_HTTP_IDEMPOTENCY_MAX_BYTES",
+        },
       },
     },
     tools: {
@@ -198,11 +233,29 @@ export class ConvictConfig implements Config {
       hostList: { validate: hostList },
       originList: { validate: originList },
       positiveInteger: { validate: positiveInteger },
+      nonNegativeInteger: { validate: nonNegativeInteger },
       absolutePath: { validate: absolutePath },
     });
 
     const config = convict(buildSchema(), { env: input.env });
     config.load(parsed);
+
+    const idempotencyEnvIntegers: ReadonlyArray<readonly [string, string]> = [
+      ["KANTHORD_HTTP_IDEMPOTENCY_TTL", "http.idempotency.ttl"],
+      [
+        "KANTHORD_HTTP_IDEMPOTENCY_JOIN_TIMEOUT",
+        "http.idempotency.joinTimeout",
+      ],
+      ["KANTHORD_HTTP_IDEMPOTENCY_MAX_ENTRIES", "http.idempotency.maxEntries"],
+      ["KANTHORD_HTTP_IDEMPOTENCY_MAX_BYTES", "http.idempotency.maxBytes"],
+      ["KANTHORD_ATTEMPT_LIMIT", "attemptLimit"],
+    ];
+    for (const [envVar, configPath] of idempotencyEnvIntegers) {
+      const rawValue = input.env[envVar];
+      if (rawValue !== undefined) {
+        config.set(configPath, parseEnvInteger(rawValue));
+      }
+    }
 
     const rawHosts = config.get("http.allowedHosts");
     config.set("http.allowedHosts", normalizeAllowedHosts(rawHosts));
@@ -294,6 +347,12 @@ export class ConvictConfig implements Config {
           token: config.get("http.token") as string,
           allowedHosts: config.get("http.allowedHosts") as string[],
           allowedOrigins: config.get("http.allowedOrigins") as string[],
+          idempotency: {
+            ttl: config.get("http.idempotency.ttl") as number,
+            joinTimeout: config.get("http.idempotency.joinTimeout") as number,
+            maxEntries: config.get("http.idempotency.maxEntries") as number,
+            maxBytes: config.get("http.idempotency.maxBytes") as number,
+          },
         },
         tools: {
           git: config.get("tools.git") as string,

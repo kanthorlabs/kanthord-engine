@@ -4,7 +4,7 @@ import { execution } from "./execution.ts";
 import { graph } from "./graph.ts";
 import { instruction } from "./instruction.ts";
 import { integration } from "./integration.ts";
-import { methods } from "./operation.ts";
+import { idempotencyOf, methods } from "./operation.ts";
 import type { Operation } from "./operation.ts";
 import { outcome } from "./outcome.ts";
 import { project } from "./project.ts";
@@ -242,6 +242,51 @@ export function registryFaults(
         operationId: entry.operationId,
         reason: "response and responseMedia both declared",
       });
+    }
+  }
+
+  for (const entry of entries) {
+    if (entry.method !== "POST" && idempotencyOf(entry) !== "none") {
+      faults.push({
+        operationId: entry.operationId,
+        reason: "idempotency policy outside POST",
+      });
+    }
+    if (
+      idempotencyOf(entry) === "durable" &&
+      entry.operationId !== "plan.import"
+    ) {
+      faults.push({
+        operationId: entry.operationId,
+        reason: "durable idempotency outside plan.import",
+      });
+    }
+    if (entry.replayable !== undefined && idempotencyOf(entry) !== "memory") {
+      faults.push({
+        operationId: entry.operationId,
+        reason: "replayable outcome without a memory policy",
+      });
+    }
+    if (
+      idempotencyOf(entry) === "memory" &&
+      (entry.replayable === undefined || entry.replayable.length === 0)
+    ) {
+      faults.push({
+        operationId: entry.operationId,
+        reason: "memory idempotency without a replayable outcome",
+      });
+    }
+    if (entry.replayable !== undefined) {
+      const distinct = new Set(entry.replayable);
+      const legal = entry.replayable.every(
+        (status) => Number.isInteger(status) && status >= 100 && status <= 599,
+      );
+      if (!legal || distinct.size !== entry.replayable.length) {
+        faults.push({
+          operationId: entry.operationId,
+          reason: "replayable outcome is not a distinct status list",
+        });
+      }
     }
   }
 

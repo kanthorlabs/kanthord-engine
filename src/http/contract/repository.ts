@@ -185,6 +185,8 @@ export const repository = operations([
     path: [resource("repository"), action("inspect")],
     introducedIn: "phase-1",
     status: "routed",
+    idempotency: "memory",
+    replayable: [200],
     request: repositoryInspectRequest,
     response: repositoryInspectResponse,
     errors: {
@@ -200,6 +202,8 @@ export const repository = operations([
     path: [resource("repository")],
     introducedIn: "phase-1",
     status: "routed",
+    idempotency: "memory",
+    replayable: [200],
     request: repositoryRegisterRequest,
     response: repositoryView,
     errors: {
@@ -239,6 +243,8 @@ export const repository = operations([
     ],
     introducedIn: "phase-2",
     status: "stubbed",
+    idempotency: "memory",
+    replayable: [200],
   },
   {
     operationId: "repository.reconcile",
@@ -250,5 +256,7 @@ export const repository = operations([
     ],
     introducedIn: "phase-2",
     status: "stubbed",
+    idempotency: "memory",
+    replayable: [200],
   },
 ]);

@@ -1,9 +1,17 @@
+export type HttpIdempotencySettings = Readonly<{
+  ttl: number;
+  joinTimeout: number;
+  maxEntries: number;
+  maxBytes: number;
+}>;
+
 export type HttpSettings = Readonly<{
   bind: string;
   port: number;
   token: string;
   allowedHosts: readonly string[];
   allowedOrigins: readonly string[];
+  idempotency: HttpIdempotencySettings;
 }>;
 
 export type ToolSettings = Readonly<{

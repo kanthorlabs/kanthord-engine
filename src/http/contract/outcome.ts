@@ -8,6 +8,8 @@ export const outcome = operations([
     path: [resource("node"), parameter("node"), action("unblock")],
     introducedIn: "phase-2",
     status: "stubbed",
+    idempotency: "memory",
+    replayable: [200],
   },
   {
     operationId: "node.abandon",
@@ -15,6 +17,8 @@ export const outcome = operations([
     path: [resource("node"), parameter("node"), action("abandon")],
     introducedIn: "phase-2",
     status: "stubbed",
+    idempotency: "memory",
+    replayable: [200],
   },
   {
     operationId: "node.discard",
@@ -22,6 +26,8 @@ export const outcome = operations([
     path: [resource("node"), parameter("node"), action("discard")],
     introducedIn: "phase-3",
     status: "stubbed",
+    idempotency: "memory",
+    replayable: [200],
   },
   {
     operationId: "node.waive",
@@ -29,5 +35,7 @@ export const outcome = operations([
     path: [resource("node"), parameter("node"), action("waive")],
     introducedIn: "phase-3",
     status: "stubbed",
+    idempotency: "memory",
+    replayable: [200],
   },
 ]);

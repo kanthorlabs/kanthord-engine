@@ -266,6 +266,8 @@ export const graph = operations([
     ],
     introducedIn: "phase-1",
     status: "routed",
+    idempotency: "memory",
+    replayable: [200],
     request: planValidateRequest,
     response: planValidateResponse,
     errors: { ...baselineErrors, "plan-invalid": planInvalidDetails },
@@ -282,6 +284,7 @@ export const graph = operations([
     ],
     introducedIn: "phase-1",
     status: "routed",
+    idempotency: "durable",
     request: planImportRequest,
     response: planImportResponse,
     errors: {

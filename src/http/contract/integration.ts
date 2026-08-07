@@ -15,6 +15,8 @@ export const integration = operations([
     path: [resource("node"), parameter("node"), action("approve")],
     introducedIn: "phase-2",
     status: "stubbed",
+    idempotency: "memory",
+    replayable: [200],
   },
   {
     operationId: "repository.publish",
@@ -22,6 +24,8 @@ export const integration = operations([
     path: [resource("repository"), parameter("repository"), action("publish")],
     introducedIn: "phase-2",
     status: "stubbed",
+    idempotency: "memory",
+    replayable: [200],
   },
   {
     operationId: "gitOperation.list",

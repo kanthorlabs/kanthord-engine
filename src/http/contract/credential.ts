@@ -81,6 +81,8 @@ export const credential = operations([
     path: [resource("provider")],
     introducedIn: "phase-1",
     status: "routed",
+    idempotency: "memory",
+    replayable: [200],
     request: providerRegisterRequest,
     response: providerRegisterResponse,
     errors: { ...baselineErrors },
@@ -112,6 +114,8 @@ export const credential = operations([
     path: [resource("provider"), parameter("provider"), action("rename")],
     introducedIn: "phase-2",
     status: "stubbed",
+    idempotency: "memory",
+    replayable: [200],
   },
   {
     operationId: "provider.remove",

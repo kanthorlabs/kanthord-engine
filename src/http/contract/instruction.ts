@@ -29,6 +29,8 @@ export const instruction = operations([
     path: [resource("repository"), parameter("repository"), sub("profile")],
     introducedIn: "phase-2",
     status: "stubbed",
+    idempotency: "memory",
+    replayable: [200],
   },
   {
     operationId: "profile.export",
@@ -55,6 +57,8 @@ export const instruction = operations([
     ],
     introducedIn: "phase-2",
     status: "stubbed",
+    idempotency: "memory",
+    replayable: [200],
   },
   {
     operationId: "instructions.resolve",

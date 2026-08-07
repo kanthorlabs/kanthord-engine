@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import Koa from "koa";
 
 import { httpError } from "../contract/errors.ts";
-import { envelopeMiddleware } from "./envelope.ts";
+import { envelopeMiddleware, materializeError } from "./envelope.ts";
 import { loopbackAgent } from "../../../test/helpers/agent.ts";
 
 describe("src/http/server/envelope.test", () => {
@@ -101,5 +101,67 @@ describe("src/http/server/envelope.test", () => {
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, { ok: true });
     assert.deepEqual(seen, []);
+  });
+
+  describe("materializeError", () => {
+    it("materializes a not-found HttpError with no details", () => {
+      assert.deepEqual(materializeError(httpError("not-found", "gone")), {
+        status: 404,
+        body: { error: { code: "not-found", message: "gone" } },
+        internal: false,
+      });
+    });
+
+    it("materializes a precondition HttpError carrying details", () => {
+      const materialized = materializeError(
+        httpError("stale-revision", "moved", { a: "b" }),
+      );
+      assert.equal(materialized.status, 409);
+      assert.equal(materialized.internal, false);
+      assert.deepEqual(materialized.body, {
+        error: {
+          code: "stale-revision",
+          message: "moved",
+          details: { a: "b" },
+        },
+      });
+    });
+
+    it("materializes an unexpected Error as an internal-error, hiding its message", () => {
+      const materialized = materializeError(new Error("boom"));
+      assert.deepEqual(materialized, {
+        status: 500,
+        body: { error: { code: "internal-error", message: "internal error" } },
+        internal: true,
+      });
+      assert.equal(JSON.stringify(materialized.body).includes("boom"), false);
+    });
+
+    it("materializes a thrown string the same as an Error", () => {
+      assert.deepEqual(materializeError("a string"), {
+        status: 500,
+        body: { error: { code: "internal-error", message: "internal error" } },
+        internal: true,
+      });
+    });
+
+    it("materializes a thrown undefined the same as an Error", () => {
+      assert.deepEqual(materializeError(undefined), {
+        status: 500,
+        body: { error: { code: "internal-error", message: "internal error" } },
+        internal: true,
+      });
+    });
+
+    it("a declared internal-error HttpError is not indeterminate", () => {
+      const materialized = materializeError(
+        httpError("internal-error", "internal error"),
+      );
+      assert.equal(materialized.status, 500);
+      assert.equal(materialized.internal, false);
+      assert.deepEqual(materialized.body, {
+        error: { code: "internal-error", message: "internal error" },
+      });
+    });
   });
 });

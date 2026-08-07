@@ -9,6 +9,9 @@ import { authMiddleware } from "./auth.ts";
 import { dispatchMiddleware } from "./dispatch.ts";
 import { envelopeMiddleware } from "./envelope.ts";
 import { hostMiddleware } from "./host.ts";
+import { createIdempotency } from "./idempotency.ts";
+import { defaultIdempotencySettings } from "./idempotency-store.ts";
+import type { IdempotencySettings, Schedule } from "./idempotency-store.ts";
 import { originMiddleware } from "./origin.ts";
 import { preflightMiddleware } from "./preflight.ts";
 import { routeMiddleware } from "./route.ts";
@@ -43,7 +46,16 @@ export type AppDependencies = Readonly<{
   handlers: Readonly<Record<string, Handler>>;
   unimplemented: readonly string[];
   onInternalError: (error: unknown) => void;
+  idempotency?: IdempotencySettings;
+  now?: () => number;
+  schedule?: Schedule;
 }>;
+
+const systemSchedule: Schedule = (milliseconds, callback) => {
+  const timer = setTimeout(callback, milliseconds);
+  timer.unref();
+  return () => clearTimeout(timer);
+};
 
 export class BindingError extends Error {}
 
@@ -67,6 +79,13 @@ export function createApp(dependencies: AppDependencies): Koa {
   app.use(authMiddleware({ token: dependencies.settings.token }));
   app.use(routeMiddleware());
   app.use(bodyParserForHandled(dependencies.handlers));
+  app.use(
+    createIdempotency({
+      settings: dependencies.idempotency ?? defaultIdempotencySettings,
+      now: dependencies.now ?? (() => Date.now()),
+      schedule: dependencies.schedule ?? systemSchedule,
+    }).middleware,
+  );
   app.use(dispatchMiddleware({ handlers: dependencies.handlers }));
   return app;
 }

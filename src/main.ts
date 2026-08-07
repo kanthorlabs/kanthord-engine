@@ -317,6 +317,13 @@ async function serve(options: ServeOptions): Promise<void> {
         },
         handlers,
         unimplemented,
+        idempotency: {
+          ttlSeconds: settings.http.idempotency.ttl,
+          joinTimeoutSeconds: settings.http.idempotency.joinTimeout,
+          maxEntries: settings.http.idempotency.maxEntries,
+          maxBytes: settings.http.idempotency.maxBytes,
+        },
+        now: () => clock.now(),
         onInternalError: (error) =>
           process.stderr.write(`kanthord: internal-error: ${String(error)}\n`),
       });

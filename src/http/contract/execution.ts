@@ -8,6 +8,8 @@ export const execution = operations([
     path: [resource("project"), parameter("project"), sub("run")],
     introducedIn: "phase-2",
     status: "stubbed",
+    idempotency: "memory",
+    replayable: [200],
   },
   {
     operationId: "run.cancel",
@@ -15,6 +17,8 @@ export const execution = operations([
     path: [resource("run"), parameter("run"), action("cancel")],
     introducedIn: "phase-2",
     status: "stubbed",
+    idempotency: "memory",
+    replayable: [200],
   },
   {
     operationId: "run.list",

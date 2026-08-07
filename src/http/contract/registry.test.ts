@@ -3,12 +3,17 @@ import assert from "node:assert/strict";
 
 import { action, hash, parameter, resource, sub, system } from "./path.ts";
 import type { Segment } from "./path.ts";
+import { idempotencyOf, idempotencyPolicies } from "./operation.ts";
+import type { Operation } from "./operation.ts";
 import {
   findOperation,
   matchRoute,
   registry,
   registryFaults,
 } from "./registry.ts";
+
+const bytewise = (a: string, b: string): number =>
+  Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 
 describe("src/http/contract/registry.test", () => {
   it("registers fifty-three operations", () => {
@@ -475,5 +480,299 @@ describe("src/http/contract/registry.test", () => {
     for (const entry of registry) {
       assert.deepEqual(registryFaults([entry]), []);
     }
+  });
+
+  it("pins the idempotency policy set", () => {
+    assert.deepEqual(idempotencyPolicies, ["none", "memory", "durable"]);
+  });
+
+  it("defaults idempotencyOf to none", () => {
+    const entry: Operation = {
+      operationId: "g.one",
+      method: "GET",
+      path: [system("health")],
+      introducedIn: "phase-1",
+      status: "routed",
+    };
+    assert.equal(idempotencyOf(entry), "none");
+  });
+
+  it("declares a policy on every POST and only a POST", () => {
+    for (const entry of registry) {
+      assert.equal(
+        idempotencyOf(entry) !== "none",
+        entry.method === "POST",
+        entry.operationId,
+      );
+    }
+  });
+
+  it("declares exactly the nineteen POST policies the story names", () => {
+    const keyed = registry
+      .filter((entry) => idempotencyOf(entry) !== "none")
+      .map((entry) => entry.operationId)
+      .sort(bytewise);
+    assert.deepEqual(
+      keyed,
+      [
+        "plan.import",
+        "plan.validate",
+        "project.create",
+        "provider.register",
+        "provider.rename",
+        "repository.inspect",
+        "repository.register",
+        "repository.landingBranch",
+        "repository.publish",
+        "repository.reconcile",
+        "run.start",
+        "run.cancel",
+        "node.approve",
+        "node.discard",
+        "node.waive",
+        "node.unblock",
+        "node.abandon",
+        "profile.instantiate",
+        "profile.verify",
+      ].sort(bytewise),
+    );
+  });
+
+  it("reserves durable for plan.import alone", () => {
+    assert.deepEqual(
+      registry
+        .filter((entry) => idempotencyOf(entry) === "durable")
+        .map((entry) => entry.operationId),
+      ["plan.import"],
+    );
+  });
+
+  it("counts eighteen memory-policy operations", () => {
+    assert.equal(
+      registry.filter((entry) => idempotencyOf(entry) === "memory").length,
+      18,
+    );
+  });
+
+  it("keeps the authored registry fault-free with the policy declared", () => {
+    assert.deepEqual(registryFaults(registry), []);
+  });
+
+  it("flags a GET declaring memory", () => {
+    const faults = registryFaults([
+      {
+        operationId: "g.one",
+        method: "GET",
+        path: [system("health")],
+        introducedIn: "phase-1",
+        status: "routed",
+        idempotency: "memory",
+        replayable: [200],
+      },
+    ]);
+    assert.deepEqual(
+      faults.map((fault) => fault.reason),
+      ["idempotency policy outside POST"],
+    );
+  });
+
+  it("does not flag a GET declaring none explicitly", () => {
+    const faults = registryFaults([
+      {
+        operationId: "g.one",
+        method: "GET",
+        path: [system("health")],
+        introducedIn: "phase-1",
+        status: "routed",
+        idempotency: "none",
+      },
+    ]);
+    assert.deepEqual(faults, []);
+  });
+
+  it("flags a PUT declaring durable in emission order", () => {
+    const faults = registryFaults([
+      {
+        operationId: "p.one",
+        method: "PUT",
+        path: [resource("project"), parameter("project")],
+        introducedIn: "phase-1",
+        status: "routed",
+        idempotency: "durable",
+      },
+    ]);
+    assert.deepEqual(
+      faults.map((fault) => fault.reason),
+      [
+        "idempotency policy outside POST",
+        "durable idempotency outside plan.import",
+      ],
+    );
+  });
+
+  it("flags durable declared on a POST other than plan.import", () => {
+    const faults = registryFaults([
+      {
+        operationId: "project.create",
+        method: "POST",
+        path: [resource("project")],
+        introducedIn: "phase-1",
+        status: "routed",
+        idempotency: "durable",
+      },
+    ]);
+    assert.deepEqual(
+      faults.map((fault) => fault.reason),
+      ["durable idempotency outside plan.import"],
+    );
+  });
+
+  it("keeps the authored registry fault-free with replayable declared", () => {
+    assert.deepEqual(registryFaults(registry), []);
+  });
+
+  it("declares [200] as the replayable outcome on every memory entry", () => {
+    for (const entry of registry) {
+      if (idempotencyOf(entry) === "memory") {
+        assert.deepEqual(entry.replayable, [200], entry.operationId);
+      }
+    }
+  });
+
+  it("declares no replayable outcome on plan.import", () => {
+    assert.equal(findOperation("plan.import")?.replayable, undefined);
+  });
+
+  it("declares replayable only on a memory entry", () => {
+    for (const entry of registry) {
+      assert.equal(
+        entry.replayable !== undefined,
+        idempotencyOf(entry) === "memory",
+        entry.operationId,
+      );
+    }
+  });
+
+  it("flags a replayable outcome declared without a memory policy", () => {
+    const faults = registryFaults([
+      {
+        operationId: "g.one",
+        method: "GET",
+        path: [system("health")],
+        introducedIn: "phase-1",
+        status: "routed",
+        replayable: [200],
+      },
+    ]);
+    assert.deepEqual(
+      faults.map((fault) => fault.reason),
+      ["replayable outcome without a memory policy"],
+    );
+  });
+
+  it("flags a memory policy with no replayable outcome", () => {
+    const faults = registryFaults([
+      {
+        operationId: "p.one",
+        method: "POST",
+        path: [resource("project")],
+        introducedIn: "phase-1",
+        status: "routed",
+        idempotency: "memory",
+      },
+    ]);
+    assert.deepEqual(
+      faults.map((fault) => fault.reason),
+      ["memory idempotency without a replayable outcome"],
+    );
+  });
+
+  it("flags a memory policy with an empty replayable list", () => {
+    const faults = registryFaults([
+      {
+        operationId: "p.one",
+        method: "POST",
+        path: [resource("project")],
+        introducedIn: "phase-1",
+        status: "routed",
+        idempotency: "memory",
+        replayable: [],
+      },
+    ]);
+    assert.deepEqual(
+      faults.map((fault) => fault.reason),
+      ["memory idempotency without a replayable outcome"],
+    );
+  });
+
+  it("flags a malformed replayable status list", () => {
+    const malformed: readonly (readonly number[])[] = [
+      [200.5],
+      [0],
+      [99],
+      [600],
+      [200, 200],
+    ];
+    for (const replayable of malformed) {
+      const faults = registryFaults([
+        {
+          operationId: "p.one",
+          method: "POST",
+          path: [resource("project")],
+          introducedIn: "phase-1",
+          status: "routed",
+          idempotency: "memory",
+          replayable,
+        },
+      ]);
+      assert.deepEqual(
+        faults.map((fault) => fault.reason),
+        ["replayable outcome is not a distinct status list"],
+        JSON.stringify(replayable),
+      );
+    }
+  });
+
+  it("flags both faults for a malformed list on a none entry", () => {
+    const faults = registryFaults([
+      {
+        operationId: "g.one",
+        method: "GET",
+        path: [system("health")],
+        introducedIn: "phase-1",
+        status: "routed",
+        replayable: [200, 200],
+      },
+    ]);
+    assert.deepEqual(
+      faults.map((fault) => fault.reason),
+      [
+        "replayable outcome without a memory policy",
+        "replayable outcome is not a distinct status list",
+      ],
+    );
+  });
+
+  it("flags a durable entry declaring a replayable outcome", () => {
+    const faults = registryFaults([
+      {
+        operationId: "plan.import",
+        method: "POST",
+        path: [
+          resource("project"),
+          parameter("project"),
+          sub("plan"),
+          action("import"),
+        ],
+        introducedIn: "phase-1",
+        status: "routed",
+        idempotency: "durable",
+        replayable: [200],
+      },
+    ]);
+    assert.deepEqual(
+      faults.map((fault) => fault.reason),
+      ["replayable outcome without a memory policy"],
+    );
   });
 });
