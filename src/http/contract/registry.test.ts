@@ -75,7 +75,7 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("attaches requests to the seven write routes and responses to the twenty routes", () => {
+  it("attaches requests to the seven write routes and responses to the twenty-one routes", () => {
     const withRequest = registry.filter((entry) => entry.request !== undefined);
     assert.deepEqual(withRequest.map((entry) => entry.operationId).sort(), [
       "plan.import",
@@ -110,6 +110,7 @@ describe("src/http/contract/registry.test", () => {
       "repository.show",
       "system.db",
       "system.health",
+      "system.status",
     ]);
   });
 

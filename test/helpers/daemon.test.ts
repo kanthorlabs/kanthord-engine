@@ -5,22 +5,11 @@ import { join } from "node:path";
 import os from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import net from "node:net";
 import { launchDaemon, killAll } from "./daemon.ts";
 import { createTemporaryHome } from "./home.ts";
+import { reservePort } from "./port.ts";
 
 const mainEntry = fileURLToPath(new URL("../../src/main.ts", import.meta.url));
-
-function reservePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address() as net.AddressInfo;
-      probe.close(() => resolve(address.port));
-    });
-  });
-}
 
 function migrateHome(homePath: string): void {
   const result = spawnSync(
@@ -48,7 +37,7 @@ describe("test/helpers/daemon.test", () => {
     assert.ok(proc.stdout().includes("kanthord: ready"));
   });
 
-  it("kill(SIGTERM) makes exited() resolve, signal is SIGTERM", async () => {
+  it("kill(SIGTERM) makes the daemon exit 0", async () => {
     const home = createTemporaryHome();
     const port = await reservePort();
     const configPath = home.writeConfig({ http: { port } });
@@ -64,7 +53,48 @@ describe("test/helpers/daemon.test", () => {
     proc.kill("SIGTERM");
     const exit = await proc.exited();
 
-    assert.equal(exit.signal, "SIGTERM");
+    assert.equal(exit.code, 0);
+    assert.equal(exit.signal, null);
+  });
+
+  it("two exited() calls on one daemon resolve with the same object", async () => {
+    const home = createTemporaryHome();
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
+    migrateHome(home.path);
+    after(async () => {
+      await killAll();
+      home.dispose();
+    });
+
+    const proc = launchDaemon({ configPath });
+    await proc.ready();
+
+    proc.kill("SIGTERM");
+    const first = await proc.exited();
+    const second = await proc.exited();
+
+    assert.equal(first, second);
+  });
+
+  it("exited() called after the process already exited resolves rather than hanging", async () => {
+    const home = createTemporaryHome();
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
+    migrateHome(home.path);
+    after(async () => {
+      await killAll();
+      home.dispose();
+    });
+
+    const proc = launchDaemon({ configPath });
+    await proc.ready();
+
+    proc.kill("SIGTERM");
+    await proc.exited();
+
+    const exit = await proc.exited();
+    assert.equal(exit.code, 0);
   });
 
   it("daemon with no config, empty env, empty cwd exits non-zero, ready rejects", async () => {

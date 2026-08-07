@@ -14,7 +14,7 @@ export type AppliedMigrationLine = Readonly<{
 }>;
 
 export type MigrateHandler = (
-  input: Readonly<{ home: string | undefined }>,
+  input: Readonly<{ home: string | undefined; config: string | undefined }>,
 ) => readonly AppliedMigrationLine[];
 
 export type RegisterDbMigrateInput = Readonly<{
@@ -47,6 +47,7 @@ export function registerDbMigrate(input: RegisterDbMigrateInput): void {
 
       const applied = input.migrate({
         home: options.home ?? input.program.opts().home,
+        config: input.program.opts().config,
       });
       if (applied.length === 0) {
         input.stdout("kanthord: no change\n");

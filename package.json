@@ -18,7 +18,7 @@
     "e2e:007": "node scripts/e2e/007/run.ts",
     "lint": "eslint .",
     "start": "node src/main.ts",
-    "verify": "npm run typecheck && npm test && npm run lint",
+    "verify": "npm run typecheck && npm test && npm run lint && node scripts/verify-db-status.ts",
     "verify:handoff": "node scripts/verify-handoff.mjs",
     "verify:guards": "scripts/lane-check.test.sh && scripts/turn-snapshot.test.sh && scripts/memory-append-only.test.sh",
     "prepare": "husky"

@@ -6,6 +6,7 @@ import {
   dependencyStatuses,
   systemDbResponse,
   systemHealthResponse,
+  systemStatusResponse,
 } from "./system.ts";
 import { findOperation, registry } from "./registry.ts";
 import type { Operation } from "./operation.ts";
@@ -166,29 +167,144 @@ describe("src/http/contract/system.test", () => {
     }
   });
 
-  it("binds systemHealthResponse to system.health and systemDbResponse to system.db", () => {
+  it("binds systemHealthResponse to system.health, systemDbResponse to system.db and systemStatusResponse to system.status", () => {
     assert.strictEqual(
       findOperation("system.health")?.response,
       systemHealthResponse,
     );
     assert.strictEqual(findOperation("system.db")?.response, systemDbResponse);
+    assert.strictEqual(
+      findOperation("system.status")?.response,
+      systemStatusResponse,
+    );
   });
 
-  it("system.health and system.db carry no request schema", () => {
+  it("system.health, system.db and system.status carry no request schema", () => {
     assert.equal(findOperation("system.health")?.request, undefined);
     assert.equal(findOperation("system.db")?.request, undefined);
+    assert.equal(findOperation("system.status")?.request, undefined);
   });
 
-  it("system.status and blob.show carry no response schema", () => {
-    assert.equal(findOperation("system.status")?.response, undefined);
+  it("blob.show carries no response schema", () => {
     assert.equal(findOperation("blob.show")?.response, undefined);
   });
 
-  it("twenty registry entries carry a response and seven carry a request", () => {
+  it("systemStatusResponse accepts a minimal and a full shape", () => {
+    const minimal = {
+      version: "27.8.1",
+      bind: "127.0.0.1:7421",
+      startedAt: "2026-08-06T00:00:00.000Z",
+      status: "ok",
+      dependencies: [],
+      nodes: [],
+      repositories: [],
+      leases: [],
+    };
+    assert.equal(systemStatusResponse.safeParse(minimal).success, true);
+    assert.equal(
+      systemStatusResponse.safeParse({
+        ...minimal,
+        status: "degraded",
+        dependencies: [{ name: "storage", status: "failed" }],
+        nodes: [
+          {
+            kind: "task",
+            state: "blocked",
+            blockReason: "stale-base",
+            count: 1,
+          },
+        ],
+        repositories: [
+          {
+            id: "repo_a",
+            name: "kanthord-verify",
+            divergedLandingOid: "a".repeat(40),
+            divergedUpstreamOid: "b".repeat(40),
+          },
+        ],
+        leases: [
+          {
+            subjectKind: "node",
+            subjectId: "task_a",
+            owner: null,
+            fence: 1,
+            expiresAt: 1700000000,
+          },
+        ],
+      }).success,
+      true,
+    );
+  });
+
+  it("systemStatusResponse rejects every non-contract shape", () => {
+    const base = {
+      version: "27.8.1",
+      bind: "127.0.0.1:7421",
+      startedAt: "2026-08-06T00:00:00.000Z",
+      status: "ok",
+      dependencies: [],
+      nodes: [],
+      repositories: [],
+      leases: [],
+    };
+    const rejected = [
+      { ...base, extra: 1 },
+      { ...base, status: "up" },
+      { ...base, startedAt: "" },
+      { ...base, dependencies: [{ name: "storage", status: "fine" }] },
+      {
+        ...base,
+        nodes: [{ kind: "task", state: "blocked", count: 1 }],
+      },
+      {
+        ...base,
+        nodes: [
+          {
+            kind: "widget",
+            state: "blocked",
+            blockReason: null,
+            count: 1,
+          },
+        ],
+      },
+      {
+        ...base,
+        nodes: [
+          {
+            kind: "task",
+            state: "blocked",
+            blockReason: null,
+            count: 0,
+          },
+        ],
+      },
+      {
+        ...base,
+        leases: [
+          {
+            subjectKind: "widget",
+            subjectId: "task_a",
+            owner: null,
+            fence: 1,
+            expiresAt: 1700000000,
+          },
+        ],
+      },
+    ];
+    for (const value of rejected) {
+      assert.equal(
+        systemStatusResponse.safeParse(value).success,
+        false,
+        `accepted ${JSON.stringify(value)}`,
+      );
+    }
+  });
+
+  it("twenty-one registry entries carry a response and seven carry a request", () => {
     const withResponse = registry.filter(
       (entry) => entry.response !== undefined,
     );
-    assert.equal(withResponse.length, 20);
+    assert.equal(withResponse.length, 21);
     assert.deepEqual(withResponse.map((entry) => entry.operationId).sort(), [
       "edge.list",
       "node.list",
@@ -210,6 +326,7 @@ describe("src/http/contract/system.test", () => {
       "repository.show",
       "system.db",
       "system.health",
+      "system.status",
     ]);
     assert.deepEqual(
       registry

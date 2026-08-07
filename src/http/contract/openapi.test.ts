@@ -202,7 +202,7 @@ test("documents the routed success status from successStatus", () => {
   );
 });
 
-test("registers exactly the twenty-eight schema components in bytewise order", () => {
+test("registers exactly the twenty-nine schema components in bytewise order", () => {
   const document = buildOpenApiDocument();
   const components = document.components as Readonly<Record<string, unknown>>;
   const schemas = components.schemas as Readonly<Record<string, unknown>>;
@@ -235,6 +235,7 @@ test("registers exactly the twenty-eight schema components in bytewise order", (
     "repository.show.response",
     "system.db.response",
     "system.health.response",
+    "system.status.response",
   ]);
 });
 

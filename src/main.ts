@@ -10,10 +10,8 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { Command } from "commander";
 import { ulid } from "ulid";
 
-import { KANTHORD_VERSION } from "./domain/version.ts";
 import { ConvictConfig } from "./services/config/convict.ts";
 import { ConfigError } from "./services/config/index.ts";
 import { StatfsProbe } from "./services/home-lock/statfs-probe.ts";
@@ -62,6 +60,7 @@ import { sweepRemnants } from "./commands/startup/sweep-remnants.ts";
 import { reconcileJournal } from "./commands/startup/reconcile-journal.ts";
 import { recoverExpiredLeases } from "./commands/startup/recover-expired-leases.ts";
 import { RecoveryError, renderFinding } from "./domain/recovery.ts";
+import { KANTHORD_VERSION } from "./domain/version.ts";
 import { registerProviderHandler } from "./http/server/credential/register-provider.ts";
 import { listProviderHandler } from "./http/server/credential/list-provider.ts";
 import { showProviderHandler } from "./http/server/credential/show-provider.ts";
@@ -80,469 +79,390 @@ import { importPlanHandler } from "./http/server/plan/import-plan.ts";
 import { listNodeHandler } from "./http/server/node/list-node.ts";
 import { showNodeHandler } from "./http/server/node/show-node.ts";
 import { listEdgeHandler } from "./http/server/edge/list-edge.ts";
-import {
-  CliError,
-  registerClientOptions,
-  requireBaseUrl,
-  resolveClientOptions,
-} from "./cli/options.ts";
-import { registerDbMigrate } from "./cli/db/migrate.ts";
-import { registerDbStatus } from "./cli/db/status.ts";
-import { registerCredentialRegister } from "./cli/credential/register.ts";
-import { registerRepositoryRegister } from "./cli/repository/register.ts";
-import { registerRepositoryShow } from "./cli/repository/show.ts";
-import { registerProjectCreate } from "./cli/project/create.ts";
-import { registerProjectList } from "./cli/project/list.ts";
-import { registerProjectShow } from "./cli/project/show.ts";
-import { registerProjectRepository } from "./cli/project/repository.ts";
-import { registerPlanExport } from "./cli/plan/export.ts";
-import { registerPlanImport } from "./cli/plan/import.ts";
+import { CliError } from "./cli/options.ts";
+import type { MigrateHandler } from "./cli/db/migrate.ts";
 import type { PlanDirectoryDependencies } from "./cli/plan/directory.ts";
-import {
-  call,
-  type ClientDependencies,
-  type DaemonClient,
-} from "./cli/client.ts";
-import { registry } from "./http/contract/registry.ts";
-import { createApp } from "./http/server/app.ts";
+import { buildProgram, type ServeOptions } from "./cli/program.ts";
+import { createApp, unimplementedFor } from "./http/server/app.ts";
 import { listen } from "./http/server/start.ts";
+import { createShutdown } from "./http/server/shutdown.ts";
 import { assertMigrated, StartupError } from "./http/server/migration-gate.ts";
 import { healthHandler } from "./http/server/system/health.ts";
 import { dbHandler } from "./http/server/system/db.ts";
+import { statusHandler } from "./http/server/system/status.ts";
 import { readHealth } from "./queries/system/read-health.ts";
 import type { DependencyStatus } from "./queries/system/read-health.ts";
 import { readMigrationStatus } from "./queries/system/read-migration-status.ts";
+import { readStatus } from "./queries/system/read-status.ts";
 
-const program = new Command()
-  .name("kanthord")
-  .version(KANTHORD_VERSION)
-  .option("--config <path>", "path to the configuration file")
-  .option("--home <path>", "override the configured daemon home");
+const startedAt = new Date().toISOString();
 
-registerClientOptions(program);
-
-program
-  .command("serve")
-  .description("run the daemon")
-  .action(async () => {
-    const options = program.opts();
+async function serve(options: ServeOptions): Promise<void> {
+  try {
+    const { settings } = new ConvictConfig().load({
+      explicitConfigPath: options.config,
+      homeOverride: options.home,
+      env: process.env,
+      cwd: process.cwd(),
+      homeDir: homedir(),
+      etcDir: "/etc",
+    });
+    const probe = new StatfsProbe({
+      platform: process.platform,
+      statfs: statfsSync,
+    });
+    const held = new SqliteHomeLock({ probe }).acquire({
+      home: settings.home,
+    });
+    held.publishIdentity({
+      version: 1,
+      pid: process.pid,
+      host: hostname(),
+      startedAt: new Date().toISOString(),
+      instanceId: ulid(),
+    });
+    const probed = await probeTools({
+      tools: settings.tools,
+      runDirectory: join(settings.home, "git", "run"),
+    });
+    const gitPaths = buildGitPaths({ probed, home: settings.home });
+    const gitRunner = createGitRunner(gitPaths, systemSchedule);
+    const gitJournal = createGitJournal();
+    const git = createBinaryGit({
+      runner: gitRunner,
+      paths: gitPaths,
+    });
+    const clock = new SystemClock();
+    const storage = new SqliteStorage({
+      path: join(settings.home, "kanthord.db"),
+      clock,
+      migrations,
+    });
+    let reachedListen = false;
     try {
-      const { settings } = new ConvictConfig().load({
-        explicitConfigPath: options.config,
-        homeOverride: options.home,
-        env: process.env,
-        cwd: process.cwd(),
-        homeDir: homedir(),
-        etcDir: "/etc",
-      });
-      const probe = new StatfsProbe({
-        platform: process.platform,
-        statfs: statfsSync,
-      });
-      const held = new SqliteHomeLock({ probe }).acquire({
+      assertMigrated({
         home: settings.home,
+        pending: storage.status().pending,
       });
-      held.publishIdentity({
-        version: 1,
-        pid: process.pid,
-        host: hostname(),
-        startedAt: new Date().toISOString(),
-        instanceId: ulid(),
+      const ids = new UlidIdGenerator();
+      const graph = new GraphologyGraph();
+      const plan = new SqlitePlanStore();
+      const reader = new YamlDocumentReader();
+      const events = new SqliteEventLog({ storage, ids });
+      const blobs = new SqliteBlobStore({ storage, clock });
+      const recovery = await recoverHome({
+        reap: () =>
+          reapOrphans(
+            {
+              storage,
+              journal: gitJournal,
+              git,
+              events,
+              clock,
+              runDirectory: gitPaths.runDirectory,
+              graceMs: 5000,
+            },
+            { actor: "daemon" },
+          ),
+        sweep: (reap) =>
+          sweepRemnants(
+            { storage, git, events, keyDirectory: gitPaths.keyDirectory },
+            { actor: "daemon", reap },
+          ),
+        reconcile: () =>
+          reconcileJournal(
+            { storage, journal: gitJournal, git, events, clock },
+            { actor: "daemon" },
+          ),
+        leases: () =>
+          recoverExpiredLeases(
+            { storage, git, events, clock },
+            { actor: "daemon" },
+          ),
       });
-      const probed = await probeTools({
-        tools: settings.tools,
-        runDirectory: join(settings.home, "git", "run"),
+      for (const finding of recovery.findings) {
+        process.stderr.write(`kanthord: recovery: ${renderFinding(finding)}\n`);
+      }
+      const reporters = [
+        {
+          name: "storage",
+          probe: (): DependencyStatus => {
+            storage.ping();
+            return "ok";
+          },
+        },
+      ];
+      const crypto = new AesGcmCrypto({
+        key: settings.masterKey,
+        keyVersion: 1,
       });
-      const gitPaths = buildGitPaths({ probed, home: settings.home });
-      const gitRunner = createGitRunner(gitPaths, systemSchedule);
-      const gitJournal = createGitJournal();
-      const git = createBinaryGit({
-        runner: gitRunner,
-        paths: gitPaths,
-      });
-      const clock = new SystemClock();
-      const storage = new SqliteStorage({
-        path: join(settings.home, "kanthord.db"),
-        clock,
-        migrations,
-      });
-      let reachedListen = false;
-      try {
-        assertMigrated({
-          home: settings.home,
-          pending: storage.status().pending,
-        });
-        const ids = new UlidIdGenerator();
-        const graph = new GraphologyGraph();
-        const plan = new SqlitePlanStore();
-        const reader = new YamlDocumentReader();
-        const events = new SqliteEventLog({ storage, ids });
-        const blobs = new SqliteBlobStore({ storage, clock });
-        const recovery = await recoverHome({
-          reap: () =>
-            reapOrphans(
+      const handlers = {
+        "system.health": healthHandler({
+          readHealth: () => readHealth({ reporters }),
+        }),
+        "system.db": dbHandler({
+          readMigrationStatus: () => readMigrationStatus({ storage }),
+        }),
+        "system.status": statusHandler({
+          readStatus: () =>
+            readStatus({
+              storage,
+              clock,
+              health: () => readHealth({ reporters }),
+              version: KANTHORD_VERSION,
+              bind: settings.http.bind,
+              startedAt,
+            }),
+        }),
+        "provider.register": registerProviderHandler({
+          registerProvider: (input) =>
+            registerProvider({ storage, crypto, ids, clock, events }, input),
+          actor: settings.actor,
+        }),
+        "provider.list": listProviderHandler({
+          listProviders: (input) => listProviders({ storage, crypto }, input),
+        }),
+        "provider.show": showProviderHandler({
+          showProvider: (input) => showProvider({ storage, crypto }, input),
+        }),
+        "repository.inspect": inspectRepositoryHandler({
+          inspectRepository: (input) =>
+            inspectRepository({ storage, crypto, git }, input),
+        }),
+        "repository.register": registerRepositoryHandler({
+          registerRepository: (input) =>
+            registerRepository(
               {
                 storage,
-                journal: gitJournal,
-                git,
-                events,
+                crypto,
+                ids,
                 clock,
-                runDirectory: gitPaths.runDirectory,
-                graceMs: 5000,
+                events,
+                git,
+                readRepositoryView: (id) =>
+                  showRepository({ storage, git }, { id }),
+                homeRoot: settings.home,
               },
-              { actor: "daemon" },
+              input,
             ),
-          sweep: (reap) =>
-            sweepRemnants(
-              { storage, git, events, keyDirectory: gitPaths.keyDirectory },
-              { actor: "daemon", reap },
+          actor: settings.actor,
+        }),
+        "repository.list": listRepositoryHandler({
+          listRepositories: (input) =>
+            listRepositories({ storage, git }, input),
+        }),
+        "repository.show": showRepositoryHandler({
+          showRepository: (input) => showRepository({ storage, git }, input),
+        }),
+        "project.create": createProjectHandler({
+          createProject: (input) =>
+            createProject({ storage, ids, clock, events }, input),
+          actor: settings.actor,
+        }),
+        "project.list": listProjectHandler({
+          listProjects: (input) => listProjects({ storage }, input),
+        }),
+        "project.show": showProjectHandler({
+          showProject: (input) => showProject({ storage }, input),
+        }),
+        "project.repositories": replaceProjectRepositoriesHandler({
+          replaceProjectRepositories: (input) =>
+            replaceProjectRepositories({ storage, clock, events }, input),
+          actor: settings.actor,
+        }),
+        "node.list": listNodeHandler({
+          listNodes: (input) => listNodes({ storage, plan }, input),
+        }),
+        "node.show": showNodeHandler({
+          showNode: (input) => showNode({ storage, plan }, input),
+        }),
+        "edge.list": listEdgeHandler({
+          listEdges: (input) => listEdges({ storage, plan }, input),
+        }),
+        "plan.export": exportPlanHandler({
+          exportPlan: (input) => exportPlan({ storage, plan, blobs }, input),
+        }),
+        "plan.revisions": listRevisionHandler({
+          listRevisions: (input) => listRevisions({ storage, plan }, input),
+        }),
+        "plan.validate": validatePlanHandler({
+          validatePlan: (input) =>
+            validatePlan({ storage, plan, blobs, reader, graph, ids }, input),
+        }),
+        "plan.import": importPlanHandler({
+          importPlan: (input) =>
+            importPlan(
+              { storage, plan, blobs, reader, graph, ids, clock, events },
+              input,
             ),
-          reconcile: () =>
-            reconcileJournal(
-              { storage, journal: gitJournal, git, events, clock },
-              { actor: "daemon" },
-            ),
-          leases: () =>
-            recoverExpiredLeases(
-              { storage, git, events, clock },
-              { actor: "daemon" },
-            ),
-        });
-        for (const finding of recovery.findings) {
-          process.stderr.write(
-            `kanthord: recovery: ${renderFinding(finding)}\n`,
-          );
-        }
-        const reporters = [
+          actor: settings.actor,
+        }),
+      };
+      const unimplemented = unimplementedFor(handlers);
+      const app = createApp({
+        settings: {
+          token: settings.http.token,
+          allowedHosts: settings.http.allowedHosts,
+        },
+        handlers,
+        unimplemented,
+        onInternalError: (error) =>
+          process.stderr.write(`kanthord: internal-error: ${String(error)}\n`),
+      });
+      const listening = await listen(app, {
+        bind: settings.http.bind,
+        port: settings.http.port,
+      });
+      reachedListen = true;
+      const shutdown = createShutdown({
+        steps: [
+          { name: "listener", run: () => listening.close() },
           {
             name: "storage",
-            probe: (): DependencyStatus => {
-              storage.ping();
-              return "ok";
+            run: () => {
+              storage.close();
             },
           },
-        ];
-        const crypto = new AesGcmCrypto({
-          key: settings.masterKey,
-          keyVersion: 1,
-        });
-        const handlers = {
-          "system.health": healthHandler({
-            readHealth: () => readHealth({ reporters }),
-          }),
-          "system.db": dbHandler({
-            readMigrationStatus: () => readMigrationStatus({ storage }),
-          }),
-          "provider.register": registerProviderHandler({
-            registerProvider: (input) =>
-              registerProvider({ storage, crypto, ids, clock, events }, input),
-            actor: settings.actor,
-          }),
-          "provider.list": listProviderHandler({
-            listProviders: (input) => listProviders({ storage, crypto }, input),
-          }),
-          "provider.show": showProviderHandler({
-            showProvider: (input) => showProvider({ storage, crypto }, input),
-          }),
-          "repository.inspect": inspectRepositoryHandler({
-            inspectRepository: (input) =>
-              inspectRepository({ storage, crypto, git }, input),
-          }),
-          "repository.register": registerRepositoryHandler({
-            registerRepository: (input) =>
-              registerRepository(
-                {
-                  storage,
-                  crypto,
-                  ids,
-                  clock,
-                  events,
-                  git,
-                  readRepositoryView: (id) =>
-                    showRepository({ storage, git }, { id }),
-                  homeRoot: settings.home,
-                },
-                input,
-              ),
-            actor: settings.actor,
-          }),
-          "repository.list": listRepositoryHandler({
-            listRepositories: (input) =>
-              listRepositories({ storage, git }, input),
-          }),
-          "repository.show": showRepositoryHandler({
-            showRepository: (input) => showRepository({ storage, git }, input),
-          }),
-          "project.create": createProjectHandler({
-            createProject: (input) =>
-              createProject({ storage, ids, clock, events }, input),
-            actor: settings.actor,
-          }),
-          "project.list": listProjectHandler({
-            listProjects: (input) => listProjects({ storage }, input),
-          }),
-          "project.show": showProjectHandler({
-            showProject: (input) => showProject({ storage }, input),
-          }),
-          "project.repositories": replaceProjectRepositoriesHandler({
-            replaceProjectRepositories: (input) =>
-              replaceProjectRepositories({ storage, clock, events }, input),
-            actor: settings.actor,
-          }),
-          "node.list": listNodeHandler({
-            listNodes: (input) => listNodes({ storage, plan }, input),
-          }),
-          "node.show": showNodeHandler({
-            showNode: (input) => showNode({ storage, plan }, input),
-          }),
-          "edge.list": listEdgeHandler({
-            listEdges: (input) => listEdges({ storage, plan }, input),
-          }),
-          "plan.export": exportPlanHandler({
-            exportPlan: (input) => exportPlan({ storage, plan, blobs }, input),
-          }),
-          "plan.revisions": listRevisionHandler({
-            listRevisions: (input) => listRevisions({ storage, plan }, input),
-          }),
-          "plan.validate": validatePlanHandler({
-            validatePlan: (input) =>
-              validatePlan({ storage, plan, blobs, reader, graph, ids }, input),
-          }),
-          "plan.import": importPlanHandler({
-            importPlan: (input) =>
-              importPlan(
-                { storage, plan, blobs, reader, graph, ids, clock, events },
-                input,
-              ),
-            actor: settings.actor,
-          }),
-        };
-        const unimplemented = registry
-          .filter((entry) => entry.status === "routed")
-          .map((entry) => entry.operationId)
-          .filter((operationId) => !(operationId in handlers));
-        const app = createApp({
-          settings: {
-            token: settings.http.token,
-            allowedHosts: settings.http.allowedHosts,
+          {
+            name: "home-lock",
+            run: () => {
+              held.release();
+            },
           },
-          handlers,
-          unimplemented,
-          onInternalError: (error) =>
-            process.stderr.write(
-              `kanthord: internal-error: ${String(error)}\n`,
-            ),
+        ],
+        write: (text) => process.stderr.write(text),
+        onSettled: (code) => {
+          process.exitCode = code;
+        },
+      });
+      for (const signal of ["SIGTERM", "SIGINT"] as const) {
+        process.once(signal, () => {
+          void shutdown();
         });
-        await listen(app, {
-          bind: settings.http.bind,
-          port: settings.http.port,
-        });
-        reachedListen = true;
-        process.stdout.write("kanthord: ready\n");
-      } finally {
-        if (!reachedListen) {
-          storage.close();
-        }
       }
-    } catch (error) {
-      if (
-        error instanceof ConfigError ||
-        error instanceof HomeLockError ||
-        error instanceof StartupError ||
-        error instanceof RecoveryError ||
-        error instanceof CliError ||
-        error instanceof ToolProbeError
-      ) {
-        process.stderr.write(`kanthord: ${error.code}: ${error.message}\n`);
-        process.exitCode = 1;
-        return;
+      process.stdout.write("kanthord: ready\n");
+    } finally {
+      if (!reachedListen) {
+        storage.close();
       }
-      throw error;
     }
-  });
+  } catch (error) {
+    if (
+      error instanceof ConfigError ||
+      error instanceof HomeLockError ||
+      error instanceof StartupError ||
+      error instanceof RecoveryError ||
+      error instanceof CliError ||
+      error instanceof ToolProbeError
+    ) {
+      process.stderr.write(`kanthord: ${error.code}: ${error.message}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
+}
+
+const migrate: MigrateHandler = (input) => {
+  const home =
+    input.home ??
+    new ConvictConfig().load({
+      explicitConfigPath: input.config,
+      env: process.env,
+      cwd: process.cwd(),
+      homeDir: homedir(),
+      etcDir: "/etc",
+    }).settings.home;
+  const held = new SqliteHomeLock({
+    probe: new StatfsProbe({
+      platform: process.platform,
+      statfs: statfsSync,
+    }),
+  }).acquire({ home });
+  try {
+    const storage = new SqliteStorage({
+      path: join(home, "kanthord.db"),
+      clock: new SystemClock(),
+      migrations,
+    });
+    let failed = false;
+    try {
+      const before = new Set(
+        storage.status().applied.map((entry) => entry.version),
+      );
+      const after = storage.migrate();
+      return after.applied
+        .filter((entry) => !before.has(entry.version))
+        .map(({ version, name }) => ({ version, name }));
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      try {
+        storage.close();
+      } catch (closeError) {
+        if (!failed) throw closeError;
+      }
+    }
+  } finally {
+    held.release();
+  }
+};
+
+const confirm = {
+  isTty: process.stdout.isTTY === true && process.stdin.isTTY === true,
+  prompt: async (question: string): Promise<string> => {
+    const readline = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    try {
+      return await readline.question(question);
+    } finally {
+      readline.close();
+    }
+  },
+};
+
+const writeOut = (text: string): void => {
+  process.stdout.write(text);
+};
+
+const writeErr = (text: string): void => {
+  process.stderr.write(text);
+};
+
+const fail = (): void => {
+  process.exitCode = 1;
+};
+
+const planFs: PlanDirectoryDependencies = {
+  readDirectory: (path) =>
+    readdirSync(path, { withFileTypes: true }).map((entry) =>
+      entry.isDirectory() ? `${entry.name}/` : entry.name,
+    ),
+  readFile: (path) => readFileSync(path, "utf8"),
+  writeFile: (path, content) => writeFileSync(path, content, "utf8"),
+  makeDirectory: (path) => mkdirSync(path, { recursive: true }),
+  removeFile: (path) => rmSync(path, { force: true }),
+};
 
 try {
-  registerDbMigrate({
-    program,
+  const program = buildProgram({
     env: process.env,
-    stdout: (text) => process.stdout.write(text),
-    stderr: (text) => process.stderr.write(text),
-    fail: () => {
-      process.exitCode = 1;
-    },
-    migrate: (input) => {
-      const home =
-        input.home ??
-        new ConvictConfig().load({
-          explicitConfigPath: program.opts().config,
-          env: process.env,
-          cwd: process.cwd(),
-          homeDir: homedir(),
-          etcDir: "/etc",
-        }).settings.home;
-      const held = new SqliteHomeLock({
-        probe: new StatfsProbe({
-          platform: process.platform,
-          statfs: statfsSync,
-        }),
-      }).acquire({ home });
-      try {
-        const storage = new SqliteStorage({
-          path: join(home, "kanthord.db"),
-          clock: new SystemClock(),
-          migrations,
-        });
-        let failed = false;
-        try {
-          const before = new Set(
-            storage.status().applied.map((entry) => entry.version),
-          );
-          const after = storage.migrate();
-          return after.applied
-            .filter((entry) => !before.has(entry.version))
-            .map(({ version, name }) => ({ version, name }));
-        } catch (error) {
-          failed = true;
-          throw error;
-        } finally {
-          try {
-            storage.close();
-          } catch (closeError) {
-            if (!failed) throw closeError;
-          }
-        }
-      } finally {
-        held.release();
-      }
-    },
-  });
-  const clientFactory = (): ClientDependencies => {
-    const options = resolveClientOptions({ program, env: process.env });
-    return {
-      baseUrl: requireBaseUrl(options),
-      token: options.token,
-      fetch: globalThis.fetch,
-    };
-  };
-  registerDbStatus({
-    program,
-    client: clientFactory,
-    stdout: (text) => process.stdout.write(text),
-    stderr: (text) => process.stderr.write(text),
+    fetch: globalThis.fetch,
+    cwd: process.cwd(),
+    fs: planFs,
+    stdout: writeOut,
+    stderr: writeErr,
+    fail,
     exit: (code) => {
       process.exitCode = code;
     },
-  });
-  const client: DaemonClient = {
-    call: (operationId, body, parameters) =>
-      call(clientFactory(), { operationId, body, parameters }),
-  };
-  const confirm = {
-    isTty: process.stdout.isTTY === true && process.stdin.isTTY === true,
-    prompt: async (question: string): Promise<string> => {
-      const readline = createInterface({
-        input: process.stdin,
-        output: process.stdout,
-      });
-      try {
-        return await readline.question(question);
-      } finally {
-        readline.close();
-      }
-    },
-  };
-  const writeOut = (text: string): void => {
-    process.stdout.write(text);
-  };
-  const writeErr = (text: string): void => {
-    process.stderr.write(text);
-  };
-  const fail = (): void => {
-    process.exitCode = 1;
-  };
-  registerCredentialRegister({
-    program,
-    client,
-    env: process.env,
     confirm,
     readFile: (path) => readFileSync(path, "utf8"),
-    stdout: writeOut,
-    stderr: writeErr,
-    fail,
-  });
-  registerRepositoryRegister({
-    program,
-    client,
-    env: process.env,
-    confirm,
-    stdout: writeOut,
-    stderr: writeErr,
-    fail,
-  });
-  registerRepositoryShow({
-    program,
-    client,
-    env: process.env,
-    stdout: writeOut,
-    stderr: writeErr,
-    fail,
-  });
-  registerProjectCreate({
-    program,
-    client,
-    stdout: writeOut,
-    stderr: writeErr,
-    fail,
-  });
-  registerProjectList({
-    program,
-    client,
-    stdout: writeOut,
-    stderr: writeErr,
-    fail,
-  });
-  registerProjectShow({
-    program,
-    client,
-    stdout: writeOut,
-    stderr: writeErr,
-    fail,
-  });
-  registerProjectRepository({
-    program,
-    client,
-    stdout: writeOut,
-    stderr: writeErr,
-    fail,
-  });
-  const planFs: PlanDirectoryDependencies = {
-    readDirectory: (path) =>
-      readdirSync(path, { withFileTypes: true }).map((entry) =>
-        entry.isDirectory() ? `${entry.name}/` : entry.name,
-      ),
-    readFile: (path) => readFileSync(path, "utf8"),
-    writeFile: (path, content) => writeFileSync(path, content, "utf8"),
-    makeDirectory: (path) => mkdirSync(path, { recursive: true }),
-    removeFile: (path) => rmSync(path, { force: true }),
-  };
-  registerPlanExport({
-    program,
-    client,
-    cwd: process.cwd(),
-    fs: planFs,
-    stdout: writeOut,
-    stderr: writeErr,
-    fail,
-  });
-  registerPlanImport({
-    program,
-    client,
-    confirm,
-    cwd: process.cwd(),
-    fs: planFs,
-    stdout: writeOut,
-    stderr: writeErr,
-    fail,
+    migrate,
+    serve,
   });
   await program.parseAsync(process.argv);
 } catch (error) {

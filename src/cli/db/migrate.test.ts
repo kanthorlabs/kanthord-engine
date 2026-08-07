@@ -19,14 +19,23 @@ const harness = (
   applied: readonly AppliedMigrationLine[] = [],
 ): {
   program: Command;
-  migrateCalls: readonly Readonly<{ home: string | undefined }>[];
+  migrateCalls: readonly Readonly<{
+    home: string | undefined;
+    config: string | undefined;
+  }>[];
   stdoutText(): string;
   stderrText(): string;
   failCalls(): number;
 } => {
-  const program = new Command();
+  const program = new Command().option(
+    "--config <path>",
+    "path to the configuration file",
+  );
   registerClientOptions(program);
-  const migrateCalls: Readonly<{ home: string | undefined }>[] = [];
+  const migrateCalls: Readonly<{
+    home: string | undefined;
+    config: string | undefined;
+  }>[] = [];
   const migrate: MigrateHandler = (call) => {
     migrateCalls.push(call);
     return applied;
@@ -69,7 +78,7 @@ describe("src/cli/db/migrate.test", () => {
     const h = harness({}, twoApplied);
     await run(h.program, ["db", "migrate", "--home", "/tmp/h"]);
 
-    assert.deepEqual(h.migrateCalls, [{ home: "/tmp/h" }]);
+    assert.deepEqual(h.migrateCalls, [{ home: "/tmp/h", config: undefined }]);
     assert.equal(
       h.stdoutText(),
       "kanthord: applied 1 0001-core-entities\nkanthord: applied 2 0002-graph-and-plan\n",
@@ -91,7 +100,7 @@ describe("src/cli/db/migrate.test", () => {
     const h = harness();
     await run(h.program, ["db", "migrate"]);
 
-    assert.deepEqual(h.migrateCalls, [{ home: undefined }]);
+    assert.deepEqual(h.migrateCalls, [{ home: undefined, config: undefined }]);
   });
 
   it("a non-loopback --base-url refuses without calling the handler", async () => {
@@ -122,7 +131,7 @@ describe("src/cli/db/migrate.test", () => {
     const h = harness({ KANTHORD_BASE_URL: "https://daemon.example.com" });
     await run(h.program, ["--base-url", "http://127.0.0.1:1", "db", "migrate"]);
 
-    assert.deepEqual(h.migrateCalls, [{ home: undefined }]);
+    assert.deepEqual(h.migrateCalls, [{ home: undefined, config: undefined }]);
     assert.equal(h.failCalls(), 0);
   });
 
@@ -135,7 +144,7 @@ describe("src/cli/db/migrate.test", () => {
       "migrate",
     ]);
 
-    assert.deepEqual(h.migrateCalls, [{ home: undefined }]);
+    assert.deepEqual(h.migrateCalls, [{ home: undefined, config: undefined }]);
     assert.equal(h.failCalls(), 0);
   });
 
@@ -155,7 +164,21 @@ describe("src/cli/db/migrate.test", () => {
     const h = harness({}, twoApplied);
     await run(h.program, ["db", "migrate", "--home", "/tmp/h"]);
 
-    assert.deepEqual(h.migrateCalls, [{ home: "/tmp/h" }]);
+    assert.deepEqual(h.migrateCalls, [{ home: "/tmp/h", config: undefined }]);
     assert.equal(h.failCalls(), 0);
+  });
+
+  it("a --config flag reaches the handler beside the parsed --home", async () => {
+    const h = harness();
+    await run(h.program, [
+      "--config",
+      "/c.json",
+      "db",
+      "migrate",
+      "--home",
+      "/h",
+    ]);
+
+    assert.deepEqual(h.migrateCalls, [{ home: "/h", config: "/c.json" }]);
   });
 });

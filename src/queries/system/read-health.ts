@@ -1,4 +1,10 @@
-export type DependencyStatus = "ok" | "failed" | "not-implemented";
+import type {
+  DependencyLine,
+  DependencyStatus,
+  HealthResult,
+} from "../../domain/health.ts";
+
+export type { DependencyStatus } from "../../domain/health.ts";
 
 export type DependencyReporter = Readonly<{
   name: string;
@@ -9,15 +15,7 @@ export type ReadHealthDependencies = Readonly<{
   reporters: readonly DependencyReporter[];
 }>;
 
-export type DependencyLine = Readonly<{
-  name: string;
-  status: DependencyStatus;
-}>;
-
-export type ReadHealthResult = Readonly<{
-  status: "ok" | "degraded";
-  dependencies: readonly DependencyLine[];
-}>;
+export type ReadHealthResult = HealthResult;
 
 export function readHealth(
   dependencies: ReadHealthDependencies,

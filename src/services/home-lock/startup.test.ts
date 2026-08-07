@@ -5,7 +5,6 @@ import path from "node:path";
 import os from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import net from "node:net";
 
 import {
   killAll,
@@ -14,6 +13,7 @@ import {
   type DaemonProcess,
 } from "../../../test/helpers/daemon.ts";
 import { createTemporaryHome } from "../../../test/helpers/home.ts";
+import { reservePort } from "../../../test/helpers/port.ts";
 import {
   FIXTURE_REPOSITORY_ID,
   seedFixtureRepository,
@@ -22,17 +22,6 @@ import {
 const mainEntry = fileURLToPath(
   new URL("../../../src/main.ts", import.meta.url),
 );
-
-function reservePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address() as net.AddressInfo;
-      probe.close(() => resolve(address.port));
-    });
-  });
-}
 
 function migrateHome(homePath: string): void {
   const result = spawnSync(

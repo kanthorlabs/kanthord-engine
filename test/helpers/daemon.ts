@@ -64,6 +64,11 @@ export function launchDaemon(input: LaunchInput): DaemonProcess {
     });
   });
 
+  const waitExit = (): Promise<DaemonExit> => {
+    if (exitRecord) return Promise.resolve(exitRecord);
+    return exitPromise;
+  };
+
   return {
     get pid() {
       return child.pid!;
@@ -110,8 +115,7 @@ export function launchDaemon(input: LaunchInput): DaemonProcess {
       });
     },
     exited() {
-      if (exitRecord) return Promise.resolve(exitRecord);
-      return exitPromise;
+      return waitExit();
     },
     stdout() {
       return stdoutData;

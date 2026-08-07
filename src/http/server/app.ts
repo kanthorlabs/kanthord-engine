@@ -87,6 +87,15 @@ function bodyParserForHandled(
   };
 }
 
+export function unimplementedFor(
+  handlers: Readonly<Record<string, Handler>>,
+): readonly string[] {
+  return registry
+    .filter((entry) => entry.status === "routed")
+    .map((entry) => entry.operationId)
+    .filter((operationId) => !(operationId in handlers));
+}
+
 function bindingOffenders(dependencies: AppDependencies): string[] {
   const offenders: string[] = [];
   for (const entry of registry) {

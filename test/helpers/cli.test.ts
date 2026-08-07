@@ -2,28 +2,17 @@ import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { join } from "node:path";
-import net from "node:net";
 
 import { runCli } from "./cli.ts";
 import { launchDaemon, killAll } from "./daemon.ts";
 import { createTemporaryHome } from "./home.ts";
+import { reservePort } from "./port.ts";
 import { KANTHORD_VERSION } from "../../src/domain/version.ts";
 import { migrations } from "../../src/services/storage/migrations.ts";
 
 const expected = migrations
   .map((entry) => `kanthord: applied ${entry.version} ${entry.name}\n`)
   .join("");
-
-function reservePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address() as net.AddressInfo;
-      probe.close(() => resolve(address.port));
-    });
-  });
-}
 
 describe("test/helpers/cli.test", () => {
   it("--version prints KANTHORD_VERSION and exits 0", async () => {

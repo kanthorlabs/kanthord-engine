@@ -2,9 +2,10 @@ import type supertest from "supertest";
 
 import { loopbackAgent } from "./agent.ts";
 
-import { registry } from "../../src/http/contract/registry.ts";
-import { createApp } from "../../src/http/server/app.ts";
+import { createApp, unimplementedFor } from "../../src/http/server/app.ts";
 import type { Handler } from "../../src/http/server/app.ts";
+
+export { unimplementedFor };
 
 export type TestAppOverrides = Readonly<{
   token?: string;
@@ -12,15 +13,6 @@ export type TestAppOverrides = Readonly<{
   handlers?: Readonly<Record<string, Handler>>;
   onInternalError?: (error: unknown) => void;
 }>;
-
-export function unimplementedFor(
-  handlers: Readonly<Record<string, Handler>>,
-): readonly string[] {
-  return registry
-    .filter((entry) => entry.status === "routed")
-    .map((entry) => entry.operationId)
-    .filter((operationId) => !(operationId in handlers));
-}
 
 export type TestApp = Readonly<{
   raw: ReturnType<typeof supertest>;

@@ -315,16 +315,15 @@ describe("src/domain/layout.test", () => {
     }
   });
 
-  it("no file under scripts/ is collected by the default test runner", () => {
-    const scriptsDir = fileURLToPath(
-      new URL("../../scripts/", import.meta.url),
-    );
+  it("no file under scripts/ is collected by the default test runner, except the daemon-backed verify step", () => {
+    const rootDir = fileURLToPath(new URL("../../", import.meta.url));
+    const scriptsDir = join(rootDir, "scripts");
     const offenders = walkFiles(scriptsDir)
       .map((file) => relative(scriptsDir, file))
       .filter((file) => wouldBeCollectedByDefaultRunner(file));
-    assert.equal(
-      offenders.length,
-      0,
+    assert.deepEqual(
+      offenders,
+      ["verify-db-status.test.ts"],
       `${offenders.join(", ")} match a default test pattern; npm test would run them`,
     );
   });

@@ -1,6 +1,5 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import net from "node:net";
 
 import { createApp } from "./app.ts";
 import type { Handler } from "./app.ts";
@@ -9,6 +8,7 @@ import { HttpError } from "../contract/errors.ts";
 import { systemDbResponse, systemHealthResponse } from "../contract/system.ts";
 import { unimplementedFor } from "../../../test/helpers/app.ts";
 import { createMigratedStorage } from "../../../test/helpers/database.ts";
+import { reservePort } from "../../../test/helpers/port.ts";
 import { healthHandler } from "./system/health.ts";
 import { dbHandler } from "./system/db.ts";
 import { readHealth } from "../../queries/system/read-health.ts";
@@ -17,17 +17,6 @@ import { readMigrationStatus } from "../../queries/system/read-migration-status.
 import { call } from "../../cli/client.ts";
 import type { ClientDependencies } from "../../cli/client.ts";
 import { exitCodeForError } from "../../cli/exit-code.ts";
-
-function reservePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address() as net.AddressInfo;
-      probe.close(() => resolve(address.port));
-    });
-  });
-}
 
 function buildApp() {
   return createApp({
