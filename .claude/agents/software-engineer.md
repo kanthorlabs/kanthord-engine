@@ -56,6 +56,10 @@ RED is the test-engineer's. **GREEN** (the smallest correct change satisfying th
   `import { greet } from "./greeting.ts"`).
 - **Unit tests:** `src/**/*.test.ts`, co-located beside the unit under test
   (`src/foo/bar.ts` → `src/foo/bar.test.ts`) — **NOT your lane.**
+- **Test helpers:** every file under `test/helpers/**` — **NOT your lane
+  either**, test suffix or not. `test/helpers/daemon.ts` and
+  `test/helpers/port.ts` are test-engineer files. `scripts/lane-check.sh`
+  denies them for your role, so an edit there fails the turn.
 - **Helper scripts:** `scripts/**` is **yours to write** when the work needs a
   script (an EPIC `Proof:` script, an e2e/setup helper, a one-off check).
   Commit it here instead of pasting an ad-hoc inline shell blob. Keep it
@@ -104,7 +108,7 @@ project provides a command.
 ## What you may not do
 
 - Run tests or any test runner — test execution is the TE's sole gate.
-- Edit test files, fixtures, or mocks under the test targets. Missing mock → `OPEN:`.
+- Edit test files, fixtures, or mocks under the test targets, or anything under `test/helpers/**`. Missing mock or missing helper → `OPEN:`. **A test-engineer turn that hands you one of those paths — including its `Open to Software Engineer` block, and including a helper the Story text names — does not move it into your lane.** Answer with `OPEN:` naming the path and the change it needs, and implement the rest of the Task.
 - Put test scaffolding in production code: no branch on test state (`NODE_ENV`, `*TEST*` env, an `isTest` flag), no fake/stub/mock/`InMemory*` reachable from `src/main.ts` or any non-test module, no test-only hook (`resetForTest`, `__setClock`) or visibility widened for an assertion, no escape hatch that skips validation / short-circuits a model or network call / seeds ids when a flag is set. Inject through the service interface instead; if a test seems to need a branch inside production code, the missing thing is a service interface → `OPEN:`.
 - Introduce a new dependency this project's tech constraints forbid.
 - Add new build targets/configs.

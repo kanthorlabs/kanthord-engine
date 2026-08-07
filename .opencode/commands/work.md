@@ -195,7 +195,7 @@ Follow your discussion-channel protocol exactly:
 1. Read the EPIC file and the discussion file for full context. The EPIC's `## Verification Gate` is binding. The `## Architecture` section of AGENTS.md (repo root) is binding for all production code. The discussion file's last turn (if any) tells you what was just done.
 2. Do the work your persona owns this turn:
    - If you are test-engineer: identify the next unimplemented Task, write its failing test under the exact verify path the Task names, then run the test using the project's test command and capture the failing assertion line. Tasks run in dependency order. When a Task has no `Action — RED:` block (GREEN-only), write a GREEN-ONLY pass-through turn listing the Task(s) for the software-engineer; do not write tests for them; after the SE's turn, run a build-only check. When every Task is green, run the Verification Gate and prepare an IMPLEMENTATION_READY_FOR_REVIEW turn if green.
-   - If you are software-engineer: read the most recent TEST-ENGINEER turn, identify the failing test and the seam it imports, and edit production sources to make that test green with the smallest correct change. If the last TEST-ENGINEER turn is a GREEN-ONLY pass-through, read the Story file path and Task IDs from the turn and implement all listed Tasks' GREEN+REFACTOR specs from the Story file. Never edit the test files. Do not run tests.
+   - If you are software-engineer: read the most recent TEST-ENGINEER turn, identify the failing test and the seam it imports, and edit production sources to make that test green with the smallest correct change. If the last TEST-ENGINEER turn is a GREEN-ONLY pass-through, read the Story file path and Task IDs from the turn and implement all listed Tasks' GREEN+REFACTOR specs from the Story file. Never edit the test files, and never edit `test/helpers/**` — both are the test-engineer's lane, even when the last TEST-ENGINEER turn asks you to. Do not run tests.
 3. Draft your turn into exactly this file: <DRAFT_FILE>
 4. Append your turn to the discussion file via shell:  cat '<DRAFT_FILE>' >> '<DISCUSSION_FILE>'
 5. Re-read the tail of the discussion file and verify the final non-blank line is exactly "END: <YOUR_ROLE>".
@@ -240,13 +240,16 @@ Tests are **co-located** with source (`bar.ts` + `bar.test.ts` in one dir), so a
 prefix table cannot separate the lanes — this project uses a **predicate
 script**: `scripts/lane-check.sh <role> <path>` (exit 0 = in-lane).
 
-- **test-engineer** lane: `src/**/*.test.ts`, `src/**/*.spec.ts`; plus its
-  draft files under `.agent/tdd/` and its journal under
+- **test-engineer** lane: `src/**/*.test.ts`, `src/**/*.spec.ts`; plus **every
+  file under `test/helpers/**`**, test suffix or not (`test/helpers/daemon.ts`
+  and `test/helpers/port.ts` are test-engineer files); plus its draft files
+  under `.agent/tdd/` and its journal under
   `.agent/tdd/memory/test-engineer/`.
 - **software-engineer** lane: `src/**/*.ts` that is NOT a `*.test.ts` /
   `*.spec.ts`; plus `scripts/**` (helper/proof scripts its work needs — the
   pipeline guards below stay locked); plus its draft files and journal as
-  above.
+  above. **`test/helpers/**` is not in this lane** — a helper the
+  software-engineer needs is an `OPEN:` to the test-engineer, never an edit.
 - **Always forbidden to BOTH** (the lane script denies these for every role):
   the locked plan tree `.agent/plan/**`; the pipeline files `.claude/**` and
   `.opencode/**`; the pipeline guards `scripts/lane-check.sh`,
@@ -262,13 +265,22 @@ Both roles may also write `.agent/tdd/` and their own `.agent/tdd/memory/<role>/
 Pass each path to the predicate one at a time, and read a path with `read -r`, never by word splitting — a path that contains a space is legal, and splitting it produces two arguments the predicate denies for the wrong reason:
 
 ```bash
-printf '%s\n' "$TURN_FILES" | while IFS= read -r changed; do
+lane_failed=0
+while IFS= read -r changed; do
   [ -n "$changed" ] || continue
-  scripts/lane-check.sh '<role>' "$changed" || exit 1
-done
+  scripts/lane-check.sh '<role>' "$changed" || lane_failed=1
+done <<EOF
+$TURN_FILES
+EOF
+[ "$lane_failed" -eq 0 ] && echo "LANE: PASS" || echo "LANE: FAIL"
 ```
 
-If any path in `TURN_FILES` fails the active role predicate (or hits an always-forbidden path) → abort with `"lane violation: <role> changed <path>"` and leave the tree for human review. (`<DRAFT_FILE>` itself lives under `.agent/tdd/` and so is always in-lane.)
+Two properties matter here. The flag replaces an in-loop `exit 1`, which stopped at the **first** violating path and left the rest unchecked — the human reviewing the abort needs every violation, not one. The here-doc replaces a `printf … | while` pipe, because a piped loop runs in a subshell where a flag set inside it is lost. Together they turn the verdict into an explicit stdout line instead of an exit status you must remember to read. Run the block on **every** turn, and read its last line before anything else:
+
+- `LANE: PASS` → continue to the draft cleanup below.
+- `LANE: FAIL` → **abort the cycle**. Print each denial `scripts/lane-check.sh` wrote to stderr as `"lane violation: <role> changed <path>"`, leave the tree and the draft file untouched for human review, and do not dispatch another turn. A lane violation is never a warning to note and move past — a turn that wrote outside its lane is not a turn that happened.
+
+(`<DRAFT_FILE>` itself lives under `.agent/tdd/` and so is always in-lane.)
 
 Otherwise the turn is clean. Delete this turn's draft temp by its **exact** path — the orchestrator owns this cleanup: `rm -f '<DRAFT_FILE>'`. Then remove the two `/tmp` snapshot files.
 
