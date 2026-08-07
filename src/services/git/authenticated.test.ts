@@ -396,19 +396,10 @@ describe("src/services/git/authenticated.test", () => {
 
   it("a thrown operation still removes the key file", async () => {
     const paths = makePaths();
-    const sshPidPath = join(paths.home, "ssh.pid");
-    const statPath = join(paths.home, "key-stat.txt");
     const fakeSsh = join(paths.home, "fake-ssh.sh");
-    writeFileSync(
-      fakeSsh,
-      [
-        "#!/bin/sh",
-        `printf '%s\\n' "$$" > '${sshPidPath}'`,
-        `/bin/ls -l "$KANTHORD_SSH_KEY" > '${statPath}'`,
-        "/bin/sleep 30",
-      ].join("\n"),
-      { mode: 0o700 },
-    );
+    writeFileSync(fakeSsh, ["#!/bin/sh", "/bin/sleep 30"].join("\n"), {
+      mode: 0o700,
+    });
     const pathsWithFakeSsh = { ...paths, ssh: fakeSsh };
     const runner = createGitRunner(pathsWithFakeSsh);
     const rejection = await runAuthenticated(runner, pathsWithFakeSsh, {
@@ -427,7 +418,35 @@ describe("src/services/git/authenticated.test", () => {
       false,
       entries.join(","),
     );
+  });
+
+  it("the key file ssh reads is readable only by its owner", async () => {
+    const paths = makePaths();
+    const statPath = join(paths.home, "key-stat.txt");
+    const fakeSsh = join(paths.home, "fake-ssh.sh");
+    writeFileSync(
+      fakeSsh,
+      [
+        "#!/bin/sh",
+        `/bin/ls -l "$KANTHORD_SSH_KEY" > '${statPath}'`,
+        "exit 1",
+      ].join("\n"),
+      { mode: 0o700 },
+    );
+    const pathsWithFakeSsh = { ...paths, ssh: fakeSsh };
+    const runner = createGitRunner(pathsWithFakeSsh);
+    const outcome = await runAuthenticated(runner, pathsWithFakeSsh, {
+      args: ["ls-remote", "ssh://127.0.0.1:1/r.git"],
+      credential: { transport: "ssh", privateKey: "probe-key\n" },
+    });
+    assert.equal(outcome.code, 128, outcome.stderr);
     const statOutput = readFileSync(statPath, "utf8");
     assert.ok(statOutput.includes("-rw-------"), statOutput);
+    const entries = readdirSync(paths.keyDirectory);
+    assert.equal(
+      entries.some((name) => name.startsWith("key-")),
+      false,
+      entries.join(","),
+    );
   });
 });
