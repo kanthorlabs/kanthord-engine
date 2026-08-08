@@ -102,8 +102,10 @@ Asserts, against a fake `PodmanExecutor` and a fake `HttpIssuer`:
   `["kanthord-daemon:7421"]` — read off the configs handed to the driver.
 - phase 9 issues exactly six requests, in `transportCases` order.
 - the assertion names recorded across the whole run deep-equal this exact array: the two
-  refusal names, the two alias names, the seventeen journey names of Story 04, then the
-  eleven transport names of Story 05 — **thirty-two** in total.
+  refusal names, the two alias names, the seventeen journey names of Story 04, the
+  eleven transport names of Story 05, then the eight `no-disclosure-*` names of Story 10 in
+  `disclosure.ts` declaration order — **forty** in total. Phase 11 runs in a `finally`, so
+  its eight names are part of every run, failing or passing.
 - a fake issuer answering `200` in phase 7 makes `run` reject with `assertion-failed`
   naming `alias-omitted-status`.
 - a preflight failure makes `run` reject with `RunnerError` code `unavailable`, and no

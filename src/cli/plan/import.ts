@@ -9,6 +9,7 @@ import {
 } from "../../http/contract/graph.ts";
 import { choicesChangedDetails } from "../../http/contract/error-details.ts";
 import type { ConfirmDependencies } from "../confirm.ts";
+import { exitCodeForError } from "../exit-code.ts";
 import { comparePaths } from "../../domain/plan-path.ts";
 import type { PlanDirectoryDependencies } from "./directory.ts";
 import { readPlanDirectory, writePlanDirectory } from "./directory.ts";
@@ -23,6 +24,7 @@ export type PlanImportCliInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 export function registerPlanImport(input: PlanImportCliInput): void {
@@ -66,7 +68,9 @@ export function registerPlanImport(input: PlanImportCliInput): void {
           input.stderr(
             `kanthord: ${revisionsResult.code}: ${revisionsResult.message}\n`,
           );
-          input.fail();
+          input.exit(
+            exitCodeForError(revisionsResult.code, revisionsResult.status),
+          );
           return;
         }
         const revisionsBody = planRevisionsResponse.parse(revisionsResult.body);
@@ -80,7 +84,9 @@ export function registerPlanImport(input: PlanImportCliInput): void {
           input.stderr(
             `kanthord: ${validateResult.code}: ${validateResult.message}\n`,
           );
-          input.fail();
+          input.exit(
+            exitCodeForError(validateResult.code, validateResult.status),
+          );
           return;
         }
         const validated = planValidateResponse.parse(validateResult.body);
@@ -96,10 +102,10 @@ export function registerPlanImport(input: PlanImportCliInput): void {
         const choices = [...validated.choices]
           .map((entry) => ({ id: entry.id, take: entry.suggested }))
           .sort((left, right) => comparePaths(left.id, right.id));
+        for (const choice of choices) {
+          input.stdout(`kanthord: ${choice.id} -> ${choice.take}\n`);
+        }
         if (options.yes !== true && input.confirm.isTty) {
-          for (const choice of choices) {
-            input.stdout(`kanthord: ${choice.id} -> ${choice.take}\n`);
-          }
           const answer = await input.confirm.prompt("import this plan? [y/N] ");
           if (!/^y/i.test(answer.trim())) {
             input.stderr("kanthord: cancelled\n");
@@ -135,7 +141,7 @@ export function registerPlanImport(input: PlanImportCliInput): void {
               .join(",");
             input.stderr(`kanthord: choices-changed: ${ids}\n`);
           }
-          input.fail();
+          input.exit(exitCodeForError(importResult.code, importResult.status));
           return;
         }
         const body = planImportResponse.parse(importResult.body);

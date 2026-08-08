@@ -1,4 +1,4 @@
-import type { Storage } from "../../services/storage/index.ts";
+import type { Storage, Transaction } from "../../services/storage/index.ts";
 import type { PlanStore } from "../../services/plan/index.ts";
 import type { BlobStore } from "../../services/blob/index.ts";
 import type { DocumentReader } from "../../services/document/index.ts";
@@ -59,7 +59,7 @@ export type ValidatePlanResult = Readonly<{
   choices: readonly ChoiceEntry[];
 }>;
 
-export type ValidatePlanRefusal = "project-not-found";
+export type ValidatePlanRefusal = "project-not-found" | "repository-unknown";
 
 export class ValidatePlanError extends Error {
   readonly refusal: ValidatePlanRefusal;
@@ -72,6 +72,15 @@ export class ValidatePlanError extends Error {
 }
 
 const encoder = new TextEncoder();
+
+function readRepositoryNamesById(
+  transaction: Transaction,
+): ReadonlyMap<string, string> {
+  const rows = transaction.all(
+    "SELECT id, name FROM repository",
+  ) as readonly Readonly<{ id: string; name: string }>[];
+  return new Map(rows.map((row) => [row.id, row.name]));
+}
 
 const storedPaths = (
   nodes: readonly StoredNode[],
@@ -112,7 +121,24 @@ export function validatePlan(
       transaction,
       input.projectId,
     );
-    const { nodes } = dependencies.plan.readGraph(transaction, input.projectId);
+    const { nodes: storedNodes } = dependencies.plan.readGraph(
+      transaction,
+      input.projectId,
+    );
+    const repositoryNamesById = readRepositoryNamesById(transaction);
+    const nodes = storedNodes.map((node) => {
+      if (node.repositoryId === null) {
+        return node;
+      }
+      const name = repositoryNamesById.get(node.repositoryId);
+      if (name === undefined) {
+        throw new ValidatePlanError(
+          "repository-unknown",
+          `repository ${node.repositoryId} is not registered`,
+        );
+      }
+      return { ...node, repositoryId: name };
+    });
     const databaseIdentities = nodes.map((node) => node.id);
 
     const validation = validateDocuments(

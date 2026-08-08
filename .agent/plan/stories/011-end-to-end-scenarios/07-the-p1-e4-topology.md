@@ -63,8 +63,45 @@ export async function main(argv: readonly string[]): Promise<number>;
 ```
 
 - reads `--port <port>` and `--bind <address>`, both required.
-- calls `resolveTools()` and `seedRepositories(tools)` from `test/helpers/remote/tools.ts`
-  and `test/helpers/remote/seed.ts`, then `startHttpRemote(tools, seed, { bind, port })`.
+- calls `resolveTools(process.env, ["git"])` and `seedRepositories(tools)` from
+  `test/helpers/remote/tools.ts` and `test/helpers/remote/seed.ts`, then
+  `startHttpRemote(tools, seed, { bind, port })`. The fixture image carries `git` and no
+  `ssh`, so it requests one tool.
+
+### Changed — `test/helpers/remote/tools.ts` — a narrowed result is typed narrowly
+
+`resolveTools` resolves only the tools it was asked for, so its result must describe only
+those. Today it builds `{} as Record<ToolName, string>` and returns
+`Readonly<Record<ToolName, string>>`, so the call above returns an object whose `paths.ssh`
+is typed `string` and valued `undefined`. This story is what introduces the first narrowed
+call site, so it is this story that fixes the type.
+
+```ts
+export type Tools<Name extends ToolName = ToolName> = Readonly<{
+  paths: Readonly<Record<Name, string>>;
+  gitVersion: Name extends "git" ? string : undefined;
+  sshVersion: Name extends "ssh" ? string : undefined;
+  execPath: string;
+  httpBackend: string;
+}>;
+
+export function resolveTools<Name extends ToolName = ToolName>(
+  env?: Readonly<Record<string, string | undefined>>,
+  names?: readonly Name[],
+): Tools<Name>;
+```
+
+- `gitVersion` and `sshVersion` follow the same rule as `paths`. An unrequested tool has no
+  version, and `""` is a sentinel that reads as "resolved to an empty version" — the same
+  class of lie as an `undefined` typed `string`, which is what this change exists to remove.
+- **`Partial<Record<ToolName, string>>` is not the fix.** Roughly thirty call sites request
+  every tool and would each gain a non-null assertion, which moves the lie into the callers.
+- The implementation still builds a partial map internally, then narrows once at the return.
+  TypeScript does not learn from `requested.has("git")` that `"git"` is in `Name`, so expect
+  one checked narrowing at the boundary, or an overload pair, rather than a body that
+  type-checks unchanged. The one cast belongs at that boundary and nowhere else.
+- Every zero-argument call site keeps `Tools<ToolName>` and needs no edit. That is what keeps
+  the change surgical.
 - writes one line `fixture-remote: ready <origin>\n` to stdout when listening.
 - releases the seed and the server on `SIGTERM`.
 
@@ -217,6 +254,16 @@ export async function createPodmanDriver(
   two Containerfiles copy disjoint trees.
 
 ## Verify
+
+`node --test test/helpers/remote/tools.test.ts` — extended:
+
+- `resolveTools(env, ["git"]).paths` deep-equals `{ git: <path> }` and holds exactly one key.
+  A key valued `undefined` fails this case.
+- `resolveTools(env, ["git"]).sshVersion` is `undefined`, not `""`.
+- `resolveTools()` still returns all five paths and both versions — the regression guard for
+  every existing call site.
+- a type-level case: `resolveTools(env, ["git"]).paths.ssh` does not compile. Asserted with a
+  `// @ts-expect-error` line, so `npm run verify`'s type check is the mechanism.
 
 `node --test scripts/e2e/lib/podman/topology.test.ts`
 

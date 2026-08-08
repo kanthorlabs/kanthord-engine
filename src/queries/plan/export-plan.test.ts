@@ -44,7 +44,7 @@ Do the task work.
 id: "${planFixtureIdentities.objective}"
 kind: "objective"
 title: "Harden the verify CLI"
-repo: "repo_a"
+repo: "kanthord-verify"
 ---
 Do the objective work.
 `,
@@ -135,7 +135,7 @@ describe("src/queries/plan/export-plan.test", () => {
 
     const byPath = new Map(result.documents.map((d) => [d.path, d.content]));
     assert.equal(
-      byPath.get(expectedPaths.objective)?.includes('repo: "repo_a"'),
+      byPath.get(expectedPaths.objective)?.includes('repo: "kanthord-verify"'),
       true,
     );
     assert.equal(byPath.get(expectedPaths.task)?.includes("repo:"), false);
@@ -345,6 +345,28 @@ describe("src/queries/plan/export-plan.test", () => {
         typeof error === "object" &&
         error !== null &&
         (error as { refusal?: string }).refusal === "project-not-found",
+    );
+  });
+
+  it("throws repository-unknown naming the id when a node's repository_id names no repository row", (t) => {
+    const { storage, plan, blobs, path, dispose } = build();
+    t.after(() => dispose());
+    seedPlanFixture(storage, plan, blobs);
+    const raw = new DatabaseSync(path);
+    raw.exec("PRAGMA foreign_keys = OFF");
+    raw
+      .prepare("UPDATE node SET repository_id = ? WHERE id = ?")
+      .run("repo_ghost", planFixtureIdentities.objective);
+    raw.close();
+
+    assert.throws(
+      () =>
+        exportPlan({ storage, plan, blobs }, { projectId: fixtureIds.project }),
+      (error: unknown) =>
+        typeof error === "object" &&
+        error !== null &&
+        (error as { refusal?: string }).refusal === "repository-unknown" &&
+        String(error).includes("repo_ghost"),
     );
   });
 });

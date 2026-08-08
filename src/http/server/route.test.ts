@@ -129,8 +129,8 @@ describe("src/http/server/route.test", () => {
     const routedAndStubbed = matrix.filter(
       (row) => row.status === "routed" || row.status === "stubbed",
     ).length;
-    assert.equal(matrix.length, 57);
-    assert.equal(routedAndStubbed, 53);
+    assert.equal(matrix.length, 58);
+    assert.equal(routedAndStubbed, 54);
     assert.equal(postMvp.length, 4);
     assert.equal(routedAndStubbed + postMvp.length, matrix.length);
   });

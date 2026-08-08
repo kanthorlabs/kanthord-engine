@@ -91,7 +91,7 @@ describe("test/helpers/remote/http.test", () => {
 
     assert.deepEqual(httpCredentials, {
       reader: { username: "reader", token: "r-tok", write: false },
-      writer: { username: "writer", token: "w-tok", write: true },
+      writer: { username: "writer", token: "w-tok-long", write: true },
     });
     assert.deepEqual(httpWrongCredential, {
       username: "writer",
@@ -540,5 +540,39 @@ describe("test/helpers/remote/http.test", () => {
     await assert.rejects(
       fetch(`${remote.url("fixture.git")}/info/refs?service=git-upload-pack`),
     );
+  });
+
+  it("startHttpRemote(tools, seed, { bind, port }) binds the exact requested port, and startHttpRemote(tools, seed) still binds 127.0.0.1:0", async () => {
+    const requestedPort = await new Promise<number>(
+      (resolvePort, rejectPort) => {
+        const probe = http.createServer();
+        probe.on("error", rejectPort);
+        probe.listen(0, "127.0.0.1", () => {
+          const address = probe.address();
+          const port =
+            address !== null && typeof address === "object" ? address.port : 0;
+          probe.close(() => resolvePort(port));
+        });
+      },
+    );
+
+    const seed = seedRepositories(tools);
+    after(() => seed.dispose());
+    const remote = await startHttpRemote(tools, seed, {
+      bind: "127.0.0.1",
+      port: requestedPort,
+    });
+    after(() => remote.dispose());
+
+    assert.equal(remote.port, requestedPort);
+    assert.equal(remote.origin, `http://127.0.0.1:${requestedPort}`);
+
+    const bareSeed = seedRepositories(tools);
+    after(() => bareSeed.dispose());
+    const bareRemote = await startHttpRemote(tools, bareSeed);
+    after(() => bareRemote.dispose());
+
+    assert.equal(bareRemote.origin, `http://127.0.0.1:${bareRemote.port}`);
+    assert.notEqual(bareRemote.port, requestedPort);
   });
 });

@@ -34,6 +34,8 @@ The same spike settled four behaviours that the design had assumed and never che
 
 - **`pr@1` and hosted review.** They need a hosting provider client, credential handling for it, remote push and a watch loop until the pull request is mergeable. That is a phase of its own. Plan it after the MVP.
 
+- **Where a shared read belongs when two layers need it.** Three plan operations — one command and two queries — each hold their own copy of the same repository name lookup, because the import matrix lets `commands/` and `queries/` import `domain/` and service interfaces and nothing else. `domain/` is pure, so raw SQL cannot go there, and a service **interface** holds no implementation, so it cannot go there either. **The matrix does not require the duplication.** It is tolerated debt, and the design question it defers is whether a read like this belongs behind an existing service capability, in the storage transaction context, or in a new read-side interface. Answer it against the second case that needs it, and settle it as a boundary decision rather than as a cleanup.
+
 - **A second, non-coding convention.** Today one convention exists and it is simply how KanthorD behaves: a task is judged by acceptance criteria, an objective by unit tests, an initiative by end-to-end detection. No selector, no named policy, no configuration language ships. When a non-coding purpose arrives, the seam gets designed against that real case, because a link checker needs network policy and a schema validator consumes artifacts rather than a working tree. Those are execution semantics, not command names, and guessing them now would produce the wrong abstraction.
 
 ## The external tool contract

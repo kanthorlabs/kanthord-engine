@@ -671,8 +671,8 @@ describe("src/services/plan/sqlite.test", () => {
 
     assert.deepEqual(context, {
       workerKinds: [...workerKinds],
-      boundRepositories: [fixtureIds.repository],
-      knownRepositories: [fixtureIds.repository, "repo_b"],
+      boundRepositories: ["kanthord-verify"],
+      knownRepositories: ["kanthord-verify", "second"],
     });
   });
 

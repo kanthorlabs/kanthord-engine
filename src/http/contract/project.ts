@@ -5,6 +5,7 @@ import { baselineErrors } from "./error-baseline.ts";
 import { EXAMPLE_AT as A, EXAMPLE_ULID as U } from "./example-literal.ts";
 import { operations } from "./operation.ts";
 import type { OperationExamples } from "./operation.ts";
+import { blockReason, nodeKind, nodeState } from "../../domain/state.ts";
 
 export const projectName = z
   .string()
@@ -30,6 +31,17 @@ export const projectRepositoriesRequest = z.strictObject({
   repositories: z.array(z.string().min(1)),
 });
 export const projectRepositoriesResponse = projectView;
+
+export const projectStatusResponse = z.strictObject({
+  nodes: z.array(
+    z.strictObject({
+      kind: nodeKind,
+      state: nodeState,
+      blockReason: blockReason.nullable(),
+      count: z.number().int().positive(),
+    }),
+  ),
+});
 
 export const projectView_example = {
   id: `project_${U}`,
@@ -77,6 +89,13 @@ export const projectRepositoriesExamples: OperationExamples = {
   },
 };
 
+export const projectStatusExamples: OperationExamples = {
+  success: {
+    nodes: [{ kind: "task", state: "pending", blockReason: null, count: 1 }],
+  },
+  error: { error: { code: "not-found", message: `no project project_${U}` } },
+};
+
 export const project = operations([
   {
     operationId: "project.create",
@@ -121,6 +140,16 @@ export const project = operations([
     response: projectRepositoriesResponse,
     errors: { ...baselineErrors },
     examples: projectRepositoriesExamples,
+  },
+  {
+    operationId: "project.status",
+    method: "GET",
+    path: [resource("project"), parameter("project"), sub("status")],
+    introducedIn: "phase-1",
+    status: "routed",
+    response: projectStatusResponse,
+    errors: { ...baselineErrors },
+    examples: projectStatusExamples,
   },
   {
     operationId: "binding.worker.project",

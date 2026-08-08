@@ -169,6 +169,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerPlanExport({
     program,

@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 
 import { validatePlan } from "./validate-plan.ts";
 import { exportPlan } from "./export-plan.ts";
@@ -56,7 +57,7 @@ const objectiveDocument = {
   content: `---
 kind: objective
 title: Harden the verify CLI
-repo: repo_a
+repo: kanthord-verify
 ---
 Make it verifiable.
 `,
@@ -87,7 +88,7 @@ const threeFaultsSubmission = [
     content: `---
 kind: task
 title: A task
-repo: repo_a
+repo: kanthord-verify
 depends_on:
   - 01-t.md
 ---
@@ -118,7 +119,7 @@ Build the renderer.
 id: "objective_${U_OBJECTIVE}"
 kind: "objective"
 title: "Harden the verify CLI"
-repo: "repo_a"
+repo: "kanthord-verify"
 ---
 Make it verifiable.
 `,
@@ -174,6 +175,7 @@ function build(): {
   blobs: BlobStore;
   reader: DocumentReader;
   graph: Graph;
+  path: string;
   dispose(): void;
 } {
   const temporary = createMigratedStorage();
@@ -188,6 +190,7 @@ function build(): {
     blobs,
     reader: createPlanReader(),
     graph: createPlanGraph(),
+    path: temporary.path,
     dispose: temporary.dispose,
   };
 }
@@ -502,7 +505,7 @@ describe("src/queries/plan/validate-plan.test", () => {
       content: `---
 kind: objective
 title: New objective
-repo: repo_a
+repo: kanthord-verify
 ---
 New objective work.
 `,
@@ -606,6 +609,38 @@ New objective work.
         typeof error === "object" &&
         error !== null &&
         (error as { refusal?: string }).refusal === "project-not-found",
+    );
+  });
+
+  it("throws repository-unknown naming the id when a node's repository_id names no repository row", (t) => {
+    const { storage, plan, blobs, reader, graph, path, dispose } = build();
+    t.after(() => dispose());
+    seedPlanFixture(storage, plan, blobs);
+    const raw = new DatabaseSync(path);
+    raw.exec("PRAGMA foreign_keys = OFF");
+    raw
+      .prepare("UPDATE node SET repository_id = ? WHERE id = ?")
+      .run("repo_ghost", planFixtureIdentities.objective);
+    raw.close();
+
+    assert.throws(
+      () =>
+        validatePlan(
+          {
+            storage,
+            plan,
+            blobs,
+            reader,
+            graph,
+            ids: createMockIdGenerator({ ulids: [] }),
+          },
+          { projectId: fixtureIds.project, fromRevision: null, documents: [] },
+        ),
+      (error: unknown) =>
+        typeof error === "object" &&
+        error !== null &&
+        (error as { refusal?: string }).refusal === "repository-unknown" &&
+        String(error).includes("repo_ghost"),
     );
   });
 
@@ -759,9 +794,26 @@ New objective work.
     const context = storage.transact((transaction) =>
       plan.readValidationContext(transaction, fixtureIds.project),
     );
-    const stored = storage.transact((transaction) =>
-      plan.readGraph(transaction, fixtureIds.project),
-    ).nodes;
+    const repositoryNamesById = new Map(
+      (
+        storage.transact((transaction) =>
+          transaction.all("SELECT id, name FROM repository"),
+        ) as readonly { id: string; name: string }[]
+      ).map((row) => [row.id, row.name]),
+    );
+    const stored = storage
+      .transact((transaction) =>
+        plan.readGraph(transaction, fixtureIds.project),
+      )
+      .nodes.map((node) =>
+        node.repositoryId === null
+          ? node
+          : {
+              ...node,
+              repositoryId:
+                repositoryNamesById.get(node.repositoryId) ?? node.repositoryId,
+            },
+      );
     const validation = validateDocuments(
       {
         readFrontmatter: (text) => reader.read(text),

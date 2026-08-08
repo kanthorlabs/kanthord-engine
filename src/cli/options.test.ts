@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Command } from "commander";
 
 import {
@@ -11,6 +14,15 @@ import {
   CliError,
 } from "./options.ts";
 import { registerDbMigrate } from "./db/migrate.ts";
+
+const withTempDir = (fn: (dir: string) => void): void => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kanthord-cli-options-"));
+  try {
+    fn(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+};
 
 const buildProgram = (): Command => {
   const program = new Command();
@@ -187,5 +199,123 @@ describe("src/cli/options.test", () => {
     });
 
     assert.equal(written, "kanthord: db-remote-base-url: m\n");
+  });
+
+  describe("--api-token-file", () => {
+    it("registers a --api-token-file option alongside --token", () => {
+      const program = buildProgram();
+      program.parse(["--api-token-file", "/some/path"], { from: "user" });
+
+      assert.equal(
+        (program.opts() as { apiTokenFile?: string }).apiTokenFile,
+        "/some/path",
+      );
+    });
+
+    it("resolves the token from the --api-token-file flag's file contents", () => {
+      withTempDir((dir) => {
+        const tokenFilePath = path.join(dir, "token.txt");
+        fs.writeFileSync(tokenFilePath, "s3cret", { mode: 0o600 });
+
+        const program = buildProgram();
+        program.parse(["--api-token-file", tokenFilePath], { from: "user" });
+
+        assert.deepEqual(resolveClientOptions({ program, env: {} }), {
+          baseUrl: undefined,
+          token: "s3cret",
+        });
+      });
+    });
+
+    it("trims a single trailing newline from the token file's contents", () => {
+      withTempDir((dir) => {
+        const tokenFilePath = path.join(dir, "token.txt");
+        fs.writeFileSync(tokenFilePath, "s3cret\n", { mode: 0o600 });
+
+        const program = buildProgram();
+        program.parse(["--api-token-file", tokenFilePath], { from: "user" });
+
+        assert.equal(
+          resolveClientOptions({ program, env: {} }).token,
+          "s3cret",
+        );
+      });
+    });
+
+    it("resolves the token from KANTHORD_API_TOKEN_FILE when no flag is set", () => {
+      withTempDir((dir) => {
+        const tokenFilePath = path.join(dir, "token.txt");
+        fs.writeFileSync(tokenFilePath, "from-env-file", { mode: 0o600 });
+
+        const program = buildProgram();
+        program.parse([], { from: "user" });
+
+        assert.equal(
+          resolveClientOptions({
+            program,
+            env: { KANTHORD_API_TOKEN_FILE: tokenFilePath },
+          }).token,
+          "from-env-file",
+        );
+      });
+    });
+
+    it("--token and --api-token-file both set throws cli-token-conflict", () => {
+      withTempDir((dir) => {
+        const tokenFilePath = path.join(dir, "token.txt");
+        fs.writeFileSync(tokenFilePath, "s3cret", { mode: 0o600 });
+
+        const program = buildProgram();
+        program.parse(["--token", "t", "--api-token-file", tokenFilePath], {
+          from: "user",
+        });
+
+        assert.throws(
+          () => resolveClientOptions({ program, env: {} }),
+          (err: unknown) =>
+            err instanceof CliError &&
+            err.code === "cli-token-conflict" &&
+            err.message ===
+              "--token and --api-token-file are both set; configure exactly one",
+        );
+      });
+    });
+
+    it("SECURITY: a missing --api-token-file path throws a typed CliError naming the path, not a raw ENOENT", () => {
+      const missingPath = path.join(
+        os.tmpdir(),
+        "kanthord-cli-options-test-missing-token",
+      );
+      fs.rmSync(missingPath, { force: true });
+
+      const program = buildProgram();
+      program.parse(["--api-token-file", missingPath], { from: "user" });
+
+      assert.throws(
+        () => resolveClientOptions({ program, env: {} }),
+        (err: unknown) =>
+          err instanceof CliError &&
+          err.code === "cli-token-file-missing" &&
+          err.message.includes(missingPath),
+      );
+    });
+
+    it("a --api-token-file with mode 0o644 throws cli-token-file-mode naming found 0644", () => {
+      withTempDir((dir) => {
+        const tokenFilePath = path.join(dir, "token.txt");
+        fs.writeFileSync(tokenFilePath, "s3cret", { mode: 0o644 });
+
+        const program = buildProgram();
+        program.parse(["--api-token-file", tokenFilePath], { from: "user" });
+
+        assert.throws(
+          () => resolveClientOptions({ program, env: {} }),
+          (err: unknown) =>
+            err instanceof CliError &&
+            err.code === "cli-token-file-mode" &&
+            err.message === "--api-token-file must have mode 0600; found 0644",
+        );
+      });
+    });
   });
 });

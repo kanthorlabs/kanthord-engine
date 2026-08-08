@@ -17,9 +17,37 @@ const vendorPackages = [
   "supertest",
 ];
 
+const removalPaths = [
+  {
+    name: "node:fs",
+    importNames: [
+      "default",
+      "rm",
+      "rmSync",
+      "rmdir",
+      "rmdirSync",
+      "unlink",
+      "unlinkSync",
+    ],
+    message:
+      "removal has one chokepoint: take the resource and let resources.ts release it.",
+  },
+  {
+    name: "node:fs/promises",
+    importNames: ["default", "rm", "rmdir", "unlink"],
+    message:
+      "removal has one chokepoint: take the resource and let resources.ts release it.",
+  },
+];
+
 export default [
   {
-    ignores: ["node_modules/**", ".data/**", "src/**/__fixtures__/**"],
+    ignores: [
+      "node_modules/**",
+      "dist/**",
+      ".data/**",
+      "src/**/__fixtures__/**",
+    ],
   },
   {
     files: ["src/**/*.ts", "test/**/*.ts"],
@@ -342,6 +370,52 @@ export default [
       parser: tseslint.parser,
       ecmaVersion: "latest",
       sourceType: "module",
+    },
+  },
+  {
+    // Removal has one chokepoint. Three modules may remove: resources.ts (every
+    // tree, through the ledger), driver/** (a driver owns the host it drives) and
+    // secret-file.ts (one unlink, in its own release closure). Everything else
+    // reaches removal through resources.ts. The ban is by imported NAME, not by
+    // module — the harness reads the file system legitimately — and importNames
+    // matches the imported binding, so `import { rm as removeTree }` is caught,
+    // which is the rename a text scan misses.
+    // `scenario/**` is excluded here and carries its own block below. Flat config
+    // resolves a rule by LAST WINS per rule name, never by union, so two blocks
+    // both naming `no-restricted-imports` over overlapping globs would leave only
+    // the later one in force. The two globs are therefore disjoint, and the
+    // scenario block repeats these entries rather than adding to them.
+    files: ["scripts/e2e/lib/**/*.ts"],
+    ignores: [
+      "scripts/e2e/lib/**/*.test.ts",
+      "scripts/e2e/lib/scenario/**/*.ts",
+      "scripts/e2e/lib/resources.ts",
+      "scripts/e2e/lib/secret-file.ts",
+      "scripts/e2e/lib/driver/**/*.ts",
+    ],
+    rules: {
+      "no-restricted-imports": [2, { paths: removalPaths }],
+    },
+  },
+  {
+    // A scenario removes nothing and spawns nothing. It repeats the removal
+    // entries because of the last-wins rule described above.
+    files: ["scripts/e2e/lib/scenario/**/*.ts"],
+    ignores: ["scripts/e2e/lib/scenario/**/*.test.ts"],
+    rules: {
+      "no-restricted-imports": [
+        2,
+        {
+          paths: [
+            ...removalPaths,
+            {
+              name: "node:child_process",
+              message:
+                "a scenario spawns nothing: command execution reaches it through the driver.",
+            },
+          ],
+        },
+      ],
     },
   },
 ];

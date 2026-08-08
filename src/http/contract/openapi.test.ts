@@ -71,11 +71,11 @@ test("documents openapi 3.0.3 and the product info", () => {
   });
 });
 
-test("renders forty-seven distinct paths in bytewise order", () => {
+test("renders forty-eight distinct paths in bytewise order", () => {
   const document = buildOpenApiDocument();
   const paths = document.paths as Readonly<Record<string, unknown>>;
   const keys = Object.keys(paths);
-  assert.equal(keys.length, 47);
+  assert.equal(keys.length, 48);
   assert.deepEqual(keys, sortedBytewise(keys));
 });
 
@@ -112,7 +112,7 @@ test("orders methods within a path by the fixed sequence", () => {
 test("names every operation and matches the registry set", () => {
   const document = buildOpenApiDocument();
   const ids = operationObjects(document).map((entry) => entry.operationId);
-  assert.equal(ids.length, 53);
+  assert.equal(ids.length, 54);
   assert.deepEqual(
     sortedBytewise(ids),
     sortedBytewise(registry.map((entry) => entry.operationId)),
@@ -237,6 +237,8 @@ test("registers exactly the fifty-three schema components in bytewise order", ()
     "project.repositories.response",
     "project.show.error",
     "project.show.response",
+    "project.status.error",
+    "project.status.response",
     "provider.list.error",
     "provider.list.response",
     "provider.register.error",

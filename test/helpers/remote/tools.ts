@@ -6,10 +6,10 @@ export type ToolName = "git" | "ssh" | "sshd" | "sshKeyscan" | "sshKeygen";
 
 export type ToolPaths = Readonly<Record<ToolName, string>>;
 
-export type Tools = Readonly<{
-  paths: ToolPaths;
-  gitVersion: string;
-  sshVersion: string;
+export type Tools<Name extends ToolName = ToolName> = Readonly<{
+  paths: Readonly<Record<Name, string>>;
+  gitVersion: "git" extends Name ? string : undefined;
+  sshVersion: "ssh" extends Name ? string : undefined;
   execPath: string;
   httpBackend: string;
 }>;
@@ -99,11 +99,14 @@ function probeStdout(name: ToolName, binary: string, args: string[]): string {
   return result.stdout;
 }
 
-export function resolveTools(
+export function resolveTools<Name extends ToolName = ToolName>(
   env: Readonly<Record<string, string | undefined>> = process.env,
-): Tools {
+  names: readonly Name[] = toolOrder as readonly Name[],
+): Tools<Name> {
+  const requested = new Set<ToolName>(names);
   const paths: Record<ToolName, string> = {} as Record<ToolName, string>;
   for (const name of toolOrder) {
+    if (!requested.has(name)) continue;
     const variable = toolEnvironmentNames[name];
     const configured = env[variable];
     const value =
@@ -124,66 +127,77 @@ export function resolveTools(
     paths[name] = value;
   }
 
-  const gitRaw = probeStdout("git", paths.git, ["--version"]);
-  const gitMatch = /^git version (\d+)\.(\d+)\.(\d+)/.exec(gitRaw);
-  if (gitMatch === null) {
-    throw new ToolError(
-      "git",
-      "git --version is unparseable: " + gitRaw.trim(),
-    );
-  }
-  const gitVersion = `${gitMatch[1] ?? ""}.${gitMatch[2] ?? ""}.${gitMatch[3] ?? ""}`;
-  if (belowMinimum(gitVersion)) {
-    throw new ToolError(
-      "git",
-      `git ${gitVersion} is below the tested minimum ${minimumGitVersion}`,
-    );
+  let gitVersion: string | undefined;
+  let execPath = "";
+  let httpBackend = "";
+  if (requested.has("git")) {
+    const gitRaw = probeStdout("git", paths.git, ["--version"]);
+    const gitMatch = /^git version (\d+)\.(\d+)\.(\d+)/.exec(gitRaw);
+    if (gitMatch === null) {
+      throw new ToolError(
+        "git",
+        "git --version is unparseable: " + gitRaw.trim(),
+      );
+    }
+    gitVersion = `${gitMatch[1] ?? ""}.${gitMatch[2] ?? ""}.${gitMatch[3] ?? ""}`;
+    if (belowMinimum(gitVersion)) {
+      throw new ToolError(
+        "git",
+        `git ${gitVersion} is below the tested minimum ${minimumGitVersion}`,
+      );
+    }
+
+    execPath = probeStdout("git", paths.git, ["--exec-path"]).trim();
+    httpBackend = join(execPath, "git-http-backend");
+    try {
+      accessSync(httpBackend, constants.X_OK);
+    } catch {
+      throw new ToolError(
+        "git",
+        `git-http-backend is missing or not executable at ${httpBackend}`,
+      );
+    }
   }
 
-  const sshResult = spawnSync(paths.ssh, ["-V"], {
-    ...spawnOptions,
-    stdio: sshStdio,
-  });
-  if (sshResult.error !== undefined) {
-    throw new ToolError("ssh", `ssh probe failed: ${sshResult.error.message}`);
-  }
-  if (sshResult.signal !== null) {
-    throw new ToolError(
-      "ssh",
-      `ssh probe was terminated by signal ${sshResult.signal}`,
-    );
-  }
-  if (sshResult.status !== 0) {
-    throw new ToolError(
-      "ssh",
-      `ssh probe exited with status ${String(sshResult.status)}`,
-    );
-  }
-  const sshMatch = /^OpenSSH_(\S+)/.exec(sshResult.stderr);
-  if (sshMatch === null) {
-    throw new ToolError(
-      "ssh",
-      "ssh -V is unparseable: " + sshResult.stderr.trim(),
-    );
-  }
-  const sshVersion = (sshMatch[1] ?? "").replace(/,$/, "");
-
-  const execPath = probeStdout("git", paths.git, ["--exec-path"]).trim();
-  const httpBackend = join(execPath, "git-http-backend");
-  try {
-    accessSync(httpBackend, constants.X_OK);
-  } catch {
-    throw new ToolError(
-      "git",
-      `git-http-backend is missing or not executable at ${httpBackend}`,
-    );
+  let sshVersion: string | undefined;
+  if (requested.has("ssh")) {
+    const sshResult = spawnSync(paths.ssh, ["-V"], {
+      ...spawnOptions,
+      stdio: sshStdio,
+    });
+    if (sshResult.error !== undefined) {
+      throw new ToolError(
+        "ssh",
+        `ssh probe failed: ${sshResult.error.message}`,
+      );
+    }
+    if (sshResult.signal !== null) {
+      throw new ToolError(
+        "ssh",
+        `ssh probe was terminated by signal ${sshResult.signal}`,
+      );
+    }
+    if (sshResult.status !== 0) {
+      throw new ToolError(
+        "ssh",
+        `ssh probe exited with status ${String(sshResult.status)}`,
+      );
+    }
+    const sshMatch = /^OpenSSH_(\S+)/.exec(sshResult.stderr);
+    if (sshMatch === null) {
+      throw new ToolError(
+        "ssh",
+        "ssh -V is unparseable: " + sshResult.stderr.trim(),
+      );
+    }
+    sshVersion = (sshMatch[1] ?? "").replace(/,$/, "");
   }
 
   return Object.freeze({
-    paths: Object.freeze(paths),
+    paths: Object.freeze(paths) as Readonly<Record<Name, string>>,
     gitVersion,
     sshVersion,
     execPath,
     httpBackend,
-  });
+  }) as Tools<Name>;
 }

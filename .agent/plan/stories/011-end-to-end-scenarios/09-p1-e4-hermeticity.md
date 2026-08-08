@@ -70,19 +70,29 @@ export type ProvisionResult = Readonly<{
 
 export async function provisionImages(
   execute: PodmanExecutor,
+  executeHost: PodmanExecutor,
   runId: string,
 ): Promise<ProvisionResult>;
 ```
+
+`execute` issues every `podman` command. `executeHost` issues every `npm` command on the
+runner host. The two are separate parameters of the same shape, because the `## Verify`
+block asserts which executor each command reached, and because a hermetic unit test fakes
+`npm` exactly as it fakes `podman`. `AGENTS.md`'s Tests contract forbids a unit test that
+reaches the network, so a real `npm ci` inside `node --test` is not available.
 
 The build is **fully offline**. Nothing inside a `podman build` reaches a registry, a
 package mirror or a DNS server.
 
 1. `npm pack --pack-destination <work>` in the repository root. `productDigest` is
    `sha256:` plus the sha256 of that tarball's bytes. This is the product artifact digest.
-2. Unpack the tarball into `<work>/product-context/product/`, then run
+2. Unpack the tarball into `<work>/product-context/product/`, copy the repository's
+   `package-lock.json` into that directory, then run
    `npm ci --omit=dev --prefix <work>/product-context/product` **locally, on the runner
-   host**, so the image build copies an already-installed tree. The image build therefore
-   runs no `npm install`, and Story 07's Containerfiles reach no network.
+   host**, so the image build copies an already-installed tree. The copy is required:
+   `npm pack` excludes `package-lock.json` from the tarball, and `npm ci` refuses to run
+   without one. The image build therefore runs no `npm install`, and Story 07's
+   Containerfiles reach no network.
 3. Copy `scripts/e2e/fixture-remote/` and its `test/helpers/remote/` dependencies into
    `<work>/fixture-context/fixture/`, and `npm ci --omit=dev` there the same way.
 4. `podman image inspect --format {{.Id}} <baseImageReference>`. A non-zero exit throws
@@ -107,11 +117,23 @@ evidence for another architecture.
 ```ts
 export const runLabel = "kanthord-e2e-run";
 
+export type ReclaimOutcome = Readonly<{ kind: ResourceKind; id: string }>;
+
+export type ReclaimReport = Readonly<{
+  reclaimed: readonly ReclaimOutcome[];
+  failed: readonly ReclaimOutcome[];
+}>;
+
 export async function reclaimByLabel(
   execute: PodmanExecutor,
   runId: string,
-): Promise<readonly string[]>;
+): Promise<ReclaimReport>;
 ```
+
+**An outcome carries its kind, never a bare id.** Podman ids are unique per kind and not
+across kinds, so a flat `string[]` cannot say which removal failed. A status encoded into a
+string — a `failed:<id>` prefix in the same array as the successes — is not a result type,
+and its one caller dropped it.
 
 Issues, in this exact order, each with `--filter label=${runLabel}=${runId}`:
 
@@ -123,14 +145,45 @@ Issues, in this exact order, each with `--filter label=${runLabel}=${runId}`:
 6. `podman image rm --force` over `podman image ls --quiet --filter label=...`
 
 Containers first, then the pod that held them, then the secrets, the volume, the network
-and the images the run built. It returns
-the list of reclaimed ids and never throws on an empty list. A removal that fails is
-collected and returned prefixed `failed:`; `reclaimByLabel` throws only when every retry
-failed after one repeat.
+and the images the run built. An empty list for a kind issues no remove command and is not a
+failure.
 
-`p1-e4.ts` calls it **before** creating anything, so a killed VM's leftovers are reclaimed
-by the next invocation. The ledger of Story 02 is the success and failure path; `reclaim` is
-the crash path.
+**Removal is verified, never assumed.** A remove command that exits zero is not proof that
+every listed id is gone, because the command is filtered rather than enumerated. After the
+removes for one kind, `reclaimByLabel` re-lists that kind's label and puts every id still
+present into `failed`. Everything absent goes into `reclaimed`.
+
+`reclaimByLabel` itself never throws on a failed removal. It reports. The caller decides,
+and the two callers decide differently:
+
+- **`p1-e4.ts`, before creating anything — fails closed.** A non-empty `failed` throws
+  ``RunnerError("assertion-failed", `a stale resource survived reclaim: <kind> <id>`)``
+  before the run starts. A surviving stale container or volume is ambient state inside a run
+  that claims to be hermetic, so the run does not start. This is the one place the EPIC's
+  "'Nothing remains after a crash' is not achievable" line does **not** license continuing:
+  that line concedes a crash may leave resources, not that a live run may build on them.
+- **`--reclaim <tag>`, the explicit operator path — reports and exits non-zero.** It prints
+  the report per kind and returns `1` when `failed` is non-empty, so the operator sees what
+  is left and what to remove by hand.
+
+The ledger of Story 02 is the success and failure path of a live run; `reclaim` is the crash
+path of a dead one.
+
+### Changed — `scripts/e2e/lib/main.ts` — the `--reclaim <tag>` mode
+
+`main` takes `--reclaim <tag>`, which is mutually exclusive with a scenario id and with
+`--tag`. It runs `assertPodman`, then `reclaimByLabel(execute, tag)`, prints the report, and
+returns `0` or `1`.
+
+It **claims no bundle directory and writes no bundle.** `claimBundleDirectory` refuses a
+reused tag, and a stale tag's directory is exactly what a crashed run left behind, so a
+reclaim that claimed a directory could never run for the tag it exists to clean. It also
+asserts nothing about the product, and a bundle is product evidence. The reclaim report is
+the invocation's own output, printed and returned as an exit code.
+
+`--reclaim` is why the EPIC promises manual recovery rather than automatic recovery. A
+scenario run reclaims its own tag and no other, because a label filter cannot distinguish a
+stale run from a live concurrent one.
 
 ### New — `scripts/e2e/lib/podman/readiness.ts`
 
@@ -218,11 +271,34 @@ Asserts, with a fake executor:
 - `reclaimByLabel(execute, "R1")` issues the six list commands and the six remove
   commands, in the exact order, each carrying `--filter label=kanthord-e2e-run=R1`.
 - an empty list for every kind issues the six list commands and no remove command, and
-  resolves `[]`.
-- a stale run: the list commands return ids, the removes succeed, and the returned array
-  holds those ids.
-- a remove that fails once and succeeds on the repeat resolves, and the id is not prefixed
-  `failed:`.
+  resolves `{ reclaimed: [], failed: [] }`.
+- a stale run: the list commands return ids, the re-list returns empty, and `reclaimed` holds
+  `{ kind, id }` for each — asserted as objects, so a bare id fails the case.
+- a remove that fails once and succeeds on the repeat resolves with the id in `reclaimed`.
+  **Both failure shapes are covered: a thrown executor error, and a non-zero exit code.** The
+  retry is load-bearing for a transient `resource busy`, and a version of this loop that
+  retried only a thrown error made the non-zero exit invisible — the defect that let a wrong
+  `--filter` argv pass a full cycle.
+- **a remove that exits zero while the re-list still returns the id puts it in `failed`.**
+  This is the verification case: a zero exit is not evidence of absence.
+- two kinds returning the same id string produce two distinct outcomes, one per kind. A
+  flat id list could not tell them apart.
+- `reclaimByLabel` itself throws for no removal failure. The decision belongs to the caller.
+
+`node --test scripts/e2e/lib/scenario/p1-e4.test.ts` — extended:
+
+- a fake in which one stale volume survives reclaim makes `runP1E4` throw
+  `assertion-failed` naming the kind and the id, and issues **no** `podman run` afterwards.
+  The run fails closed before it creates anything.
+
+`node --test scripts/e2e/lib/main.test.ts` — extended:
+
+- `--reclaim R1` runs `assertPodman` and `reclaimByLabel` for `R1`, and issues no
+  `podman run` and no scenario step.
+- `--reclaim R1` creates no directory under `.data/` — asserted over a temporary run root
+  before and after.
+- `--reclaim R1` with a non-empty `failed` returns `1`, and with an empty one returns `0`.
+- `--reclaim R1 P1-E4` and `--reclaim R1 --tag t1` each throw `invalid-argument`.
 
 `node --test scripts/e2e/lib/podman/readiness.test.ts`
 
@@ -237,7 +313,15 @@ Asserts, with a fake executor:
 
 `npm run verify` exits 0.
 
-Proof: precondition of `node scripts/e2e/run.mjs P1-E4`. It delivers three EPIC coverage
-lines: the leave-nothing-behind rule together with Story 02, the "second run with a stale
-run id present reclaims it and still passes" rule, and "Podman absent, stopped, or below the
-pinned version fails the gate loudly and names the remedy. It never skips."
+Proof: precondition of `node scripts/e2e/run.mjs P1-E4`, plus one line of its own:
+
+```bash
+node scripts/e2e/run.mjs --reclaim <tag-of-a-stale-run> \
+  && node scripts/e2e/run.mjs P1-E4 \
+  && echo "PASS STORY-09-RECLAIM"
+```
+
+It delivers four EPIC coverage lines: the leave-nothing-behind rule together with Story 02,
+the explicit `--reclaim <tag>` rule, the pre-run fail-closed rule, and "Podman absent,
+stopped, or below the pinned version fails the gate loudly and names the remedy. It never
+skips."

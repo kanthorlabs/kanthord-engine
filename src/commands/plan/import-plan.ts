@@ -72,7 +72,8 @@ export type ImportPlanRefusal =
   | "documents-hash-mismatch"
   | "choice-duplicate"
   | "choice-missing"
-  | "choice-extra";
+  | "choice-extra"
+  | "repository-unknown";
 
 export class ImportPlanError extends Error {
   readonly refusal: ImportPlanRefusal;
@@ -106,6 +107,24 @@ const storedPaths = (
 };
 
 const decoder = new TextDecoder();
+
+function readRepositoryNamesById(
+  transaction: Transaction,
+): ReadonlyMap<string, string> {
+  const rows = transaction.all(
+    "SELECT id, name FROM repository",
+  ) as readonly Readonly<{ id: string; name: string }>[];
+  return new Map(rows.map((row) => [row.id, row.name]));
+}
+
+function readRepositoryIdsByName(
+  transaction: Transaction,
+): ReadonlyMap<string, string> {
+  const rows = transaction.all(
+    "SELECT id, name FROM repository",
+  ) as readonly Readonly<{ id: string; name: string }>[];
+  return new Map(rows.map((row) => [row.name, row.id]));
+}
 
 export function importPlan(
   dependencies: ImportPlanDependencies,
@@ -159,10 +178,24 @@ export function importPlan(
       transaction,
       input.projectId,
     );
-    const { nodes, edges } = dependencies.plan.readGraph(
+    const { nodes: storedNodes, edges } = dependencies.plan.readGraph(
       transaction,
       input.projectId,
     );
+    const repositoryNamesById = readRepositoryNamesById(transaction);
+    const nodes = storedNodes.map((node) => {
+      if (node.repositoryId === null) {
+        return node;
+      }
+      const name = repositoryNamesById.get(node.repositoryId);
+      if (name === undefined) {
+        throw new ImportPlanError(
+          "repository-unknown",
+          `repository ${node.repositoryId} is not registered`,
+        );
+      }
+      return { ...node, repositoryId: name };
+    });
     const databaseIdentities = nodes.map((node) => node.id);
 
     const validation = validateDocuments(
@@ -369,7 +402,19 @@ export function importPlan(
       acceptedBlob,
     });
 
+    const repositoryIdsByName = readRepositoryIdsByName(transaction);
     for (const node of candidate.nodes) {
+      let repositoryId: string | null = null;
+      if (node.repositoryId !== null) {
+        const id = repositoryIdsByName.get(node.repositoryId);
+        if (id === undefined) {
+          throw new ImportPlanError(
+            "repository-unknown",
+            `repository ${node.repositoryId} is not registered`,
+          );
+        }
+        repositoryId = id;
+      }
       dependencies.plan.upsertNode(transaction, {
         id: node.id,
         projectId: input.projectId,
@@ -379,7 +424,7 @@ export function importPlan(
         instructionBlob: node.instructionBlob,
         acceptanceBlob: node.acceptanceBlob,
         worker: node.worker,
-        repositoryId: node.repositoryId,
+        repositoryId,
         revision,
         updatedAt,
       });

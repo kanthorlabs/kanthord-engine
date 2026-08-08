@@ -9,6 +9,9 @@ export type StartableInput = Readonly<{
   masterKeyFileMode: number | undefined;
   bind: string;
   token: string;
+  tokenFile: string;
+  tokenFileMode: number | undefined;
+  resolvedToken: string;
   allowedOrigins: readonly string[];
 }>;
 
@@ -45,14 +48,35 @@ export function assertStartable(input: StartableInput): void {
     );
   }
 
-  if (!isLoopback(input.bind) && input.token.length === 0) {
+  if (input.token.length > 0 && input.tokenFile.length > 0) {
+    throw new ConfigError(
+      "config-refused",
+      "http.token and http.tokenFile are both set; configure exactly one",
+    );
+  }
+
+  if (
+    input.tokenFile.length > 0 &&
+    input.tokenFileMode !== undefined &&
+    (input.tokenFileMode & 0o777) !== 0o600
+  ) {
+    const octal = (input.tokenFileMode & 0o777).toString(8).padStart(3, "0");
+    throw new ConfigError(
+      "config-refused",
+      `http.tokenFile must have mode 0600; found 0${octal}`,
+    );
+  }
+
+  const hasToken = input.resolvedToken.length > 0;
+
+  if (!isLoopback(input.bind) && !hasToken) {
     throw new ConfigError(
       "config-refused",
       "a non-loopback bind address requires http.token",
     );
   }
 
-  if (input.allowedOrigins.length > 0 && input.token.length === 0) {
+  if (input.allowedOrigins.length > 0 && !hasToken) {
     throw new ConfigError(
       "config-refused",
       "a non-empty http.allowedOrigins requires http.token",

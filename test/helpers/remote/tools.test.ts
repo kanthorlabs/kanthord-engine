@@ -140,6 +140,48 @@ describe("test/helpers/remote/tools.test", () => {
     );
   });
 
+  it("resolves only the requested tool names, skipping validation of the rest", () => {
+    const tools = resolveTools({ KANTHORD_TEST_SSHD: "/nonexistent/sshd" }, [
+      "git",
+    ]);
+    assert.deepEqual(Object.keys(tools.paths), ["git"]);
+    assert.equal(tools.paths.git, "/usr/bin/git");
+    assert.match(tools.gitVersion, /^\d+\.\d+\.\d+$/);
+    assert.equal(isAbsolute(tools.execPath), true);
+    assert.equal(fs.statSync(tools.httpBackend).isFile(), true);
+  });
+
+  it("narrows paths to exactly the requested tool names", () => {
+    const tools = resolveTools({}, ["git"]);
+    assert.deepEqual(tools.paths, { git: "/usr/bin/git" });
+    assert.deepEqual(Object.keys(tools.paths), ["git"]);
+  });
+
+  it("narrows sshVersion to undefined, not the empty-string sentinel, when ssh was not requested", () => {
+    const tools = resolveTools({}, ["git"]);
+    assert.equal(tools.sshVersion, undefined);
+  });
+
+  it("still resolves all five paths and both versions with no names argument", () => {
+    const tools = resolveTools({});
+    assert.deepEqual(Object.keys(tools.paths), [
+      "git",
+      "ssh",
+      "sshd",
+      "sshKeyscan",
+      "sshKeygen",
+    ]);
+    assert.match(tools.gitVersion, /^\d+\.\d+\.\d+$/);
+    assert.match(tools.sshVersion, /^\d+\.\d+/);
+  });
+
+  it("refuses at the type level to read an unrequested tool's path", () => {
+    const tools = resolveTools({}, ["git"]);
+    // @ts-expect-error paths.ssh does not exist on a result narrowed to ["git"]
+    const ssh: string = tools.paths.ssh;
+    assert.equal(ssh, undefined);
+  });
+
   it("refuses an ssh -V probe that exits non-zero even when it prints a valid version", () => {
     const dir = fs.mkdtempSync(join(os.tmpdir(), "kanthord-tool-probe-"));
     after(() => fs.rmSync(dir, { recursive: true, force: true }));

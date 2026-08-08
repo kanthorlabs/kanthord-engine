@@ -12,9 +12,16 @@ A project binds repositories, and it is the scope a plan imports into.
 | `project.list`             | `GET /v1/project`                      | phase-1      | routed   | domain.md                                  |
 | `project.show`             | `GET /v1/project/:id`                  | phase-1      | routed   | domain.md                                  |
 | `project.repositories`     | `PUT /v1/project/:id/repository`       | phase-1      | routed   | domain.md, "binds repositories"            |
+| `project.status`           | `GET /v1/project/:id/status`           | phase-1      | routed   | P1-E1, `kanthord status --project`         |
 | `binding.worker.project`   | `PUT /v1/project/:id/binding/worker`   | phase-2      | stubbed  | instructions-and-profiles.md, precedence   |
 | `binding.provider.project` | `PUT /v1/project/:id/binding/provider` | post-mvp     | deferred | providers-and-credentials.md, deferred     |
 | `binding.e2e.project`      | `PUT /v1/project/:id/binding/e2e`      | post-mvp     | deferred | gates-and-approval.md, deferred            |
+
+## `project.status`
+
+The route reports the graph one project holds: the objective count and the task count. It is the project-scoped counterpart of `system.md` `system.status`, which reports the daemon rather than one project, and it is what `kanthord status --project <id>` reads.
+
+A count is of nodes bound to the project, so a second project never changes the first one's answer.
 
 ## `project.repositories`
 

@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 
 import { importPlan } from "./import-plan.ts";
 import type {
@@ -140,7 +141,7 @@ Build the renderer.
     content: `---
 kind: objective
 title: Harden the verify CLI
-repo: repo_a
+repo: kanthord-verify
 ---
 Make it verifiable.
 `,
@@ -164,7 +165,7 @@ Build the renderer.
     content: `---
 kind: objective
 title: Harden the verify CLI
-repo: repo_a
+repo: kanthord-verify
 ---
 Make it verifiable.
 `,
@@ -193,7 +194,7 @@ Build the renderer.
 id: "objective_${U_O1}"
 kind: "objective"
 title: "Harden the verify CLI"
-repo: "repo_a"
+repo: "kanthord-verify"
 ---
 Make it verifiable.
 `,
@@ -236,7 +237,7 @@ Build the renderer.
 id: "objective_${U_O2}"
 kind: "objective"
 title: "Harden the verify CLI"
-repo: "repo_a"
+repo: "kanthord-verify"
 ---
 Make it verifiable.
 `,
@@ -329,6 +330,7 @@ type ImportFixture = Readonly<{
   clock: Clock;
   events: EventLog;
   recorded: readonly RecordedAppend[];
+  path: string;
   dispose(): void;
 }>;
 
@@ -351,6 +353,7 @@ function build(ulids: readonly string[]): ImportFixture {
     clock: createMockClock({ start: 1700000000000, step: 1000 }),
     events: log.events,
     recorded: log.recorded,
+    path: temporary.path,
     dispose: temporary.dispose,
   };
 }
@@ -652,7 +655,10 @@ function withObjectiveRepoB(
     document.content.includes("Do the objective work.")
       ? {
           ...document,
-          content: document.content.replace('repo: "repo_a"', 'repo: "repo_b"'),
+          content: document.content.replace(
+            'repo: "kanthord-verify"',
+            'repo: "kanthord-verify-b"',
+          ),
         }
       : document,
   );
@@ -1802,6 +1808,180 @@ describe("src/commands/plan/import-plan.test", () => {
       );
       assert.deepEqual(snapshot(fixture.storage), before);
     });
+
+    function namedRepoDocuments(
+      repo: string,
+    ): readonly Readonly<{ path: string; content: string }>[] {
+      return [
+        {
+          path: "plan/named-repo/initiative.md",
+          content: `---
+id: "initiative_01ARZ3NDEKTSV4RRFFQ69G5FAY"
+kind: "initiative"
+title: "Ship kanthord"
+---
+Bootstrap the daemon.
+`,
+        },
+        {
+          path: "plan/named-repo/harden/objective.md",
+          content: `---
+id: "objective_01ARZ3NDEKTSV4RRFFQ69G5FAZ"
+kind: "objective"
+title: "Harden the verify CLI"
+repo: "${repo}"
+---
+Make it verifiable.
+`,
+        },
+        {
+          path: "plan/named-repo/harden/01-a.md",
+          content: `---
+id: "task_01ARZ3NDEKTSV4RRFFQ69G5FB2"
+kind: "task"
+title: "Render the manifest"
+worker: "tdd@1"
+---
+Build the renderer.
+
+## Acceptance criteria
+
+- The bytes match.
+`,
+        },
+      ];
+    }
+
+    const namedRepoChoices: readonly Readonly<{ id: string; take: Choice }>[] =
+      [
+        { id: "initiative_01ARZ3NDEKTSV4RRFFQ69G5FAY", take: "submitted" },
+        { id: "objective_01ARZ3NDEKTSV4RRFFQ69G5FAZ", take: "submitted" },
+        { id: "task_01ARZ3NDEKTSV4RRFFQ69G5FB2", take: "submitted" },
+      ];
+
+    it("an objective naming a registered repository by its name persists the resolved repository id", (t) => {
+      const fixture = build(["01ARZ3NDEKTSV4RRFFQ69G5FB3"]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      const documents = namedRepoDocuments("kanthord-verify");
+      const documentsHash = planHash(fixture, documents, []);
+
+      const result = runImport(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: null,
+        importId: "imp_named_repo",
+        documents,
+        choices: namedRepoChoices,
+        validatedRevision: null,
+        documentsHash,
+        actor: "human_1",
+      });
+
+      assert.equal(result.revision, "revision_01ARZ3NDEKTSV4RRFFQ69G5FB3");
+      const row = fixture.storage.transact((transaction) =>
+        transaction.get("SELECT repository_id FROM node WHERE id = ?", [
+          "objective_01ARZ3NDEKTSV4RRFFQ69G5FAZ",
+        ]),
+      ) as Readonly<{ repository_id: string | null }>;
+      assert.equal(
+        row.repository_id,
+        fixtureIds.repository,
+        "the node stores the repository's id, not the registered name",
+      );
+    });
+
+    it("an objective naming an unregistered repository name is repository-unknown carrying the name", (t) => {
+      const fixture = build([]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      const documents = namedRepoDocuments("does-not-exist");
+      const before = snapshot(fixture.storage);
+      const error = importRefusal(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: null,
+        importId: "imp_unknown_repo",
+        documents,
+        choices: namedRepoChoices,
+        validatedRevision: null,
+        documentsHash: `sha256:${"0".repeat(64)}`,
+        actor: "human_1",
+      });
+
+      assert.equal(error.refusal, "plan-invalid");
+      const findings = (
+        error.details as {
+          findings: readonly Readonly<{ code: string; message: string }>[];
+        }
+      ).findings;
+      assert.deepEqual(
+        findings.map((finding) => finding.code),
+        ["repository-unknown"],
+      );
+      assert.match(findings[0]!.message, /does-not-exist/);
+      assert.deepEqual(snapshot(fixture.storage), before);
+    });
+
+    it("throws repository-unknown naming the id when a stored node's repository_id names no repository row", (t) => {
+      const fixture = build([]);
+      t.after(() => fixture.dispose());
+      seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+      const raw = new DatabaseSync(fixture.path);
+      raw.exec("PRAGMA foreign_keys = OFF");
+      raw
+        .prepare("UPDATE node SET repository_id = ? WHERE id = ?")
+        .run("repo_ghost", planFixtureIdentities.objective);
+      raw.close();
+
+      const error = importRefusal(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: fixtureIds.planRevision,
+        importId: "imp_ghost_repo",
+        documents: [],
+        choices: [],
+        validatedRevision: fixtureIds.planRevision,
+        documentsHash: `sha256:${"0".repeat(64)}`,
+        actor: "human_1",
+      });
+
+      assert.equal(error.refusal, "repository-unknown");
+      assert.match(error.message, /repo_ghost/);
+    });
+
+    it("the name → id lookup gets its own case: a registered repository row removed after the revision is accepted and before the write is refused naming the unresolved name", (t) => {
+      const fixture = build(["01ARZ3NDEKTSV4RRFFQ69G5FB6"]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      const documents = namedRepoDocuments("kanthord-verify");
+      const documentsHash = planHash(fixture, documents, []);
+
+      const raw = new DatabaseSync(fixture.path);
+      raw.exec("PRAGMA foreign_keys = OFF");
+      raw.exec(`
+        CREATE TRIGGER kanthord_test_drop_repo_after_accept
+        AFTER INSERT ON plan_revision
+        BEGIN
+          DELETE FROM repository WHERE name = 'kanthord-verify';
+        END
+      `);
+      raw.close();
+
+      const error = importRefusal(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: null,
+        importId: "imp_name_to_id_seam",
+        documents,
+        choices: namedRepoChoices,
+        validatedRevision: null,
+        documentsHash,
+        actor: "human_1",
+      });
+
+      assert.equal(error.refusal, "repository-unknown");
+      assert.match(error.message, /kanthord-verify/);
+    });
   });
 
   describe("the rest", () => {
@@ -2119,7 +2299,7 @@ Do the é work.
           content: `---
 kind: objective
 title: É objective
-repo: repo_a
+repo: kanthord-verify
 ---
 Make it verifiable.
 `,
@@ -2152,7 +2332,7 @@ Do the z work.
           content: `---
 kind: objective
 title: Z objective
-repo: repo_a
+repo: kanthord-verify
 ---
 Make it verifiable.
 `,
@@ -2226,6 +2406,22 @@ Build the renderer.
       assert.equal(/\b(?:INSERT|UPDATE|DELETE)\b/.test(source), false);
     });
 
+    it("none of the three repository-name translation files falls back with ?? node.repositoryId", () => {
+      const paths = [
+        new URL("./import-plan.ts", import.meta.url),
+        new URL("../../queries/plan/export-plan.ts", import.meta.url),
+        new URL("../../queries/plan/validate-plan.ts", import.meta.url),
+      ];
+      for (const path of paths) {
+        const source = readFileSync(path, "utf8");
+        assert.equal(
+          source.includes("?? node.repositoryId"),
+          false,
+          path.pathname,
+        );
+      }
+    });
+
     it("the right containment reader per kind is used", (t) => {
       const fixture = build([U_A, U_O2NEW, U_REV2]);
       t.after(() => fixture.dispose());
@@ -2254,8 +2450,8 @@ Build the renderer.
           ...objectiveDoc,
           path: "plan/i--01/o--01/objective.md",
           content: objectiveDoc.content.replace(
-            'repo: "repo_a"',
-            'repo: "repo_b"',
+            'repo: "kanthord-verify"',
+            'repo: "kanthord-verify-b"',
           ),
         },
         {
@@ -2281,7 +2477,7 @@ Do the other task work.
           content: `---
 kind: objective
 title: Harden the verify CLI
-repo: repo_a
+repo: kanthord-verify
 ---
 Make it verifiable.
 `,

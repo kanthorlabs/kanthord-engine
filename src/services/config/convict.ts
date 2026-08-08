@@ -56,6 +56,35 @@ function parseEnvInteger(value: string): number {
   return Number(value);
 }
 
+function trimSingleTrailingNewline(value: string): string {
+  return value.endsWith("\n") ? value.slice(0, -1) : value;
+}
+
+function readTokenFile(
+  filePath: string,
+): Readonly<{ token: string; mode: number }> {
+  let mode: number;
+  let content: string;
+  try {
+    mode = fs.statSync(filePath).mode;
+    content = fs.readFileSync(filePath, "utf-8");
+  } catch (err: unknown) {
+    if (
+      err !== null &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code: unknown }).code === "ENOENT"
+    ) {
+      throw new ConfigError(
+        "config-invalid",
+        `http.tokenFile not found: ${filePath}`,
+      );
+    }
+    throw err;
+  }
+  return { token: trimSingleTrailingNewline(content), mode };
+}
+
 function absolutePath(value: unknown): void {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error("must be a non-empty string");
@@ -83,6 +112,11 @@ function buildSchema(): Record<string, unknown> {
       },
       port: { format: "port", default: null, env: "KANTHORD_HTTP_PORT" },
       token: { format: "String", default: "", env: "KANTHORD_HTTP_TOKEN" },
+      tokenFile: {
+        format: "String",
+        default: "",
+        env: "KANTHORD_HTTP_TOKEN_FILE",
+      },
       allowedHosts: {
         format: "hostList",
         default: null,
@@ -312,14 +346,32 @@ export class ConvictConfig implements Config {
       }
     }
 
+    const tokenStr = config.get("http.token") as string;
+    const tokenFileStr = config.get("http.tokenFile") as string;
+    let tokenFileMode: number | undefined;
+    let resolvedTokenFile: string | undefined;
+
+    if (tokenFileStr.length > 0) {
+      const resolved = readTokenFile(tokenFileStr);
+      tokenFileMode = resolved.mode;
+      resolvedTokenFile = resolved.token;
+    }
+
     assertStartable({
       masterKey: masterKeyStr,
       masterKeyFile: masterKeyFileStr,
       masterKeyFileMode,
       bind: config.get("http.bind") as string,
-      token: config.get("http.token") as string,
+      token: tokenStr,
+      tokenFile: tokenFileStr,
+      tokenFileMode,
+      resolvedToken: resolvedTokenFile ?? tokenStr,
       allowedOrigins: config.get("http.allowedOrigins") as string[],
     });
+
+    if (resolvedTokenFile !== undefined) {
+      config.set("http.token", resolvedTokenFile);
+    }
 
     let masterKey: Buffer;
     if (masterKeyStr.length > 0) {

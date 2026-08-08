@@ -29,6 +29,7 @@ export const subresourceSegments = [
   "repository",
   "revision",
   "run",
+  "status",
   "worker",
 ] as const;
 

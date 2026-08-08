@@ -28,6 +28,7 @@ const everyImportPlanRefusal: Readonly<Record<ImportPlanRefusal, true>> = {
   "choice-duplicate": true,
   "choice-missing": true,
   "choice-extra": true,
+  "repository-unknown": true,
 };
 
 const finding = {

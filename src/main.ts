@@ -43,6 +43,7 @@ import { createProject } from "./commands/project/create-project.ts";
 import { replaceProjectRepositories } from "./commands/project/replace-project-repositories.ts";
 import { listProjects } from "./queries/project/list-project.ts";
 import { showProject } from "./queries/project/show-project.ts";
+import { readProjectStatus } from "./queries/project/read-project-status.ts";
 import { exportPlan } from "./queries/plan/export-plan.ts";
 import { listRevisions } from "./queries/plan/list-revision.ts";
 import { validatePlan } from "./queries/plan/validate-plan.ts";
@@ -71,6 +72,7 @@ import { registerRepositoryHandler } from "./http/server/repository/register-rep
 import { createProjectHandler } from "./http/server/project/create-project.ts";
 import { listProjectHandler } from "./http/server/project/list-project.ts";
 import { showProjectHandler } from "./http/server/project/show-project.ts";
+import { readProjectStatusHandler } from "./http/server/project/read-project-status.ts";
 import { replaceProjectRepositoriesHandler } from "./http/server/project/replace-project-repositories.ts";
 import { exportPlanHandler } from "./http/server/plan/export-plan.ts";
 import { listRevisionHandler } from "./http/server/plan/list-revision.ts";
@@ -268,6 +270,9 @@ async function serve(options: ServeOptions): Promise<void> {
         }),
         "project.show": showProjectHandler({
           showProject: (input) => showProject({ storage }, input),
+        }),
+        "project.status": readProjectStatusHandler({
+          readProjectStatus: (input) => readProjectStatus({ storage }, input),
         }),
         "project.repositories": replaceProjectRepositoriesHandler({
           replaceProjectRepositories: (input) =>

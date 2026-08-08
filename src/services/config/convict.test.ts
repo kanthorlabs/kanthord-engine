@@ -898,6 +898,238 @@ describe("src/services/config/convict.test", () => {
     });
   });
 
+  describe("http.tokenFile", () => {
+    it('a mode-0600 file holding "s3cret\\n" produces settings.http.token === "s3cret"', () => {
+      const dir = tmpDir();
+      try {
+        const tokenFilePath = path.join(dir, "token.txt");
+        fs.writeFileSync(tokenFilePath, "s3cret\n", { mode: 0o600 });
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "",
+              allowedHosts: ["localhost:8080"],
+              tokenFile: tokenFilePath,
+            },
+          }),
+        );
+        const result = config.load(loadInput(dir, filePath));
+        assert.equal(result.settings.http.token, "s3cret");
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('a file holding "s3cret\\n\\n" produces "s3cret\\n"', () => {
+      const dir = tmpDir();
+      try {
+        const tokenFilePath = path.join(dir, "token.txt");
+        fs.writeFileSync(tokenFilePath, "s3cret\n\n", { mode: 0o600 });
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "",
+              allowedHosts: ["localhost:8080"],
+              tokenFile: tokenFilePath,
+            },
+          }),
+        );
+        const result = config.load(loadInput(dir, filePath));
+        assert.equal(result.settings.http.token, "s3cret\n");
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('a file holding " pad " produces " pad " — no other trimming', () => {
+      const dir = tmpDir();
+      try {
+        const tokenFilePath = path.join(dir, "token.txt");
+        fs.writeFileSync(tokenFilePath, " pad ", { mode: 0o600 });
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "",
+              allowedHosts: ["localhost:8080"],
+              tokenFile: tokenFilePath,
+            },
+          }),
+        );
+        const result = config.load(loadInput(dir, filePath));
+        assert.equal(result.settings.http.token, " pad ");
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("a missing http.tokenFile throws config-invalid with http.tokenFile not found: <path>", () => {
+      const dir = tmpDir();
+      try {
+        const missingTokenPath = path.join(dir, "does-not-exist.token");
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "",
+              allowedHosts: ["localhost:8080"],
+              tokenFile: missingTokenPath,
+            },
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-invalid");
+            assert.equal(
+              err.message,
+              `http.tokenFile not found: ${missingTokenPath}`,
+            );
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("KANTHORD_HTTP_TOKEN_FILE sets the key from the environment", () => {
+      const dir = tmpDir();
+      try {
+        const tokenFilePath = path.join(dir, "token.txt");
+        fs.writeFileSync(tokenFilePath, "from-env-file\n", { mode: 0o600 });
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "",
+              allowedHosts: ["localhost:8080"],
+            },
+          }),
+        );
+        const result = config.load(
+          loadInput(dir, filePath, {
+            env: { KANTHORD_HTTP_TOKEN_FILE: tokenFilePath },
+          }),
+        );
+        assert.equal(result.settings.http.token, "from-env-file");
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('Object.hasOwn(settings.http, "tokenFile") is false', () => {
+      const dir = tmpDir();
+      try {
+        const tokenFilePath = path.join(dir, "token.txt");
+        fs.writeFileSync(tokenFilePath, "s3cret\n", { mode: 0o600 });
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "",
+              allowedHosts: ["localhost:8080"],
+              tokenFile: tokenFilePath,
+            },
+          }),
+        );
+        const result = config.load(loadInput(dir, filePath));
+        assert.equal(Object.hasOwn(result.settings.http, "tokenFile"), false);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("a config that sets http.token and no tokenFile produces the same Settings as before the change", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile());
+        const result = config.load(loadInput(dir, filePath));
+        assert.equal(result.settings.http.token, "test-token");
+        assert.equal(Object.hasOwn(result.settings.http, "tokenFile"), false);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("http.token and http.tokenFile both set throws config-refused", () => {
+      const dir = tmpDir();
+      try {
+        const tokenFilePath = path.join(dir, "token.txt");
+        fs.writeFileSync(tokenFilePath, "s3cret\n", { mode: 0o600 });
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "also-set",
+              allowedHosts: ["localhost:8080"],
+              tokenFile: tokenFilePath,
+            },
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-refused");
+            assert.equal(
+              err.message,
+              "http.token and http.tokenFile are both set; configure exactly one",
+            );
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("http.tokenFile mode 0o644 throws config-refused naming found 0644", () => {
+      const dir = tmpDir();
+      try {
+        const tokenFilePath = path.join(dir, "token.txt");
+        fs.writeFileSync(tokenFilePath, "s3cret\n", { mode: 0o644 });
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "",
+              allowedHosts: ["localhost:8080"],
+              tokenFile: tokenFilePath,
+            },
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-refused");
+            assert.match(err.message, /found 0644$/);
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+  });
+
   describe("http.allowedOrigins", () => {
     it("omitting http.allowedOrigins from the config file loads and yields []", () => {
       const dir = tmpDir();

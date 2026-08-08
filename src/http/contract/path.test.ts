@@ -36,14 +36,16 @@ describe("src/http/contract/path.test", () => {
 
   it("pins the closed-array sizes", () => {
     assert.equal(resourceSegments.length, 13);
-    assert.equal(subresourceSegments.length, 13);
+    assert.equal(subresourceSegments.length, 14);
     assert.equal(actionSegments.length, 15);
     assert.equal(systemSegments.length, 3);
   });
 
   it("keeps every resource and subresource segment singular", () => {
+    const singularDespiteTrailingS = new Set(["status"]);
     for (const segments of [resourceSegments, subresourceSegments]) {
       for (const segment of segments) {
+        if (singularDespiteTrailingS.has(segment)) continue;
         assert.equal(segment.endsWith("s"), false, `${segment} is plural`);
       }
     }

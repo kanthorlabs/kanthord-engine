@@ -213,16 +213,16 @@ export class SqlitePlanStore implements PlanStore {
     projectId: string,
   ): ValidationContext {
     const boundRows = transaction.all(
-      "SELECT target_id FROM project_binding WHERE project_id = ? AND kind = 'git' ORDER BY target_id ASC",
+      "SELECT r.name AS name FROM project_binding b JOIN repository r ON r.id = b.target_id WHERE b.project_id = ? AND b.kind = 'git' ORDER BY r.name ASC",
       [projectId],
-    ) as readonly Readonly<{ target_id: string }>[];
+    ) as readonly Readonly<{ name: string }>[];
     const knownRows = transaction.all(
-      "SELECT id FROM repository ORDER BY id ASC",
-    ) as readonly Readonly<{ id: string }>[];
+      "SELECT name FROM repository ORDER BY name ASC",
+    ) as readonly Readonly<{ name: string }>[];
     return {
       workerKinds: [...workerKinds],
-      boundRepositories: boundRows.map((row) => row.target_id),
-      knownRepositories: knownRows.map((row) => row.id),
+      boundRepositories: boundRows.map((row) => row.name),
+      knownRepositories: knownRows.map((row) => row.name),
     };
   }
 

@@ -85,6 +85,7 @@ const harness = (
   stdout(): string;
   stderr(): string;
   fails(): number;
+  exits(): readonly number[];
   promptCalls(): number;
 } => {
   const program = new Command();
@@ -155,9 +156,13 @@ const harness = (
   let stderrText = "";
   let failCalls = 0;
   let promptCalls = 0;
+  const exitCalls: number[] = [];
   registerPlanImport({
     program,
     client,
+    exit: (code: number) => {
+      exitCalls.push(code);
+    },
     confirm: {
       isTty: options.isTty ?? false,
       prompt: async (_question: string): Promise<string> => {
@@ -187,6 +192,7 @@ const harness = (
     stdout: () => stdoutText,
     stderr: () => stderrText,
     fails: () => failCalls,
+    exits: () => exitCalls,
     promptCalls: () => promptCalls,
   };
 };
@@ -375,6 +381,52 @@ describe("src/cli/plan/import.test", () => {
     );
   });
 
+  it("a non-interactive run still prints one choice line per suggestion, bytewise ascending by id", async () => {
+    const choice = (
+      id: string,
+      suggested: "submitted" | "database",
+    ): unknown => ({
+      id,
+      kind: "task",
+      presence: "both",
+      state: "pending",
+      suggested,
+      fields: [],
+      submitted: { legal: true, reason: null },
+      database: { legal: true, reason: null },
+    });
+    const h = harness({
+      script: [
+        REVISIONS,
+        {
+          ok: true as const,
+          status: 200,
+          body: {
+            ...(VALIDATE.body as Record<string, unknown>),
+            choices: [
+              choice("task_b", "submitted"),
+              choice("task_a", "database"),
+            ],
+          },
+        },
+        IMPORT_RESPONSE,
+      ],
+      initialFs: AUTHORED,
+    });
+    await run(h.program, ["plan", "import", "--project", ID]);
+
+    assert.equal(h.promptCalls(), 0);
+    assert.equal(h.fails(), 0);
+    assert.equal(
+      h
+        .stdout()
+        .startsWith(
+          "kanthord: task_a -> database\nkanthord: task_b -> submitted\n",
+        ),
+      true,
+    );
+  });
+
   it("with a TTY and no --yes the prompt is called once; answering n cancels with no import", async () => {
     const h = harness({
       script: [REVISIONS, VALIDATE],
@@ -424,7 +476,7 @@ describe("src/cli/plan/import.test", () => {
     });
     await run(h.program, ["plan", "import", "--project", ID]);
 
-    assert.equal(h.fails(), 1);
+    assert.deepEqual(h.exits(), [157]);
     assert.equal(
       h.stderr(),
       `kanthord: choices-stale: the choices were validated against ${REVISION_B}, the newest revision is ${REVISION_C}\n` +
@@ -464,7 +516,7 @@ describe("src/cli/plan/import.test", () => {
     });
     await run(h.program, ["plan", "import", "--project", ID]);
 
-    assert.equal(h.fails(), 1);
+    assert.deepEqual(h.exits(), [158]);
     assert.equal(
       h.stderr(),
       "kanthord: choices-changed: a selected outcome is no longer legal\n" +
@@ -472,7 +524,7 @@ describe("src/cli/plan/import.test", () => {
     );
   });
 
-  it("a 409 idempotency-mismatch and a 409 stale-revision each print their code and call fail", async () => {
+  it("a 409 idempotency-mismatch exits 156 and a 409 stale-revision exits 150, per exitCodeForError", async () => {
     const h1 = harness({
       script: [
         REVISIONS,
@@ -488,7 +540,7 @@ describe("src/cli/plan/import.test", () => {
       initialFs: AUTHORED,
     });
     await run(h1.program, ["plan", "import", "--project", ID]);
-    assert.equal(h1.fails(), 1);
+    assert.deepEqual(h1.exits(), [156]);
     assert.equal(
       h1.stderr(),
       "kanthord: idempotency-mismatch: the choices differ from the committed import\n",
@@ -509,10 +561,51 @@ describe("src/cli/plan/import.test", () => {
       initialFs: AUTHORED,
     });
     await run(h2.program, ["plan", "import", "--project", ID]);
-    assert.equal(h2.fails(), 1);
+    assert.deepEqual(h2.exits(), [150]);
     assert.equal(
       h2.stderr(),
       `kanthord: stale-revision: the import names ${REVISION_B}, the newest revision is ${REVISION_C}\n`,
+    );
+  });
+
+  it("a daemon-error response at plan.revisions or plan.validate also exits through exitCodeForError", async () => {
+    const revisionsFailed = harness({
+      script: [
+        {
+          ok: false as const,
+          status: 404,
+          code: "not-found",
+          message: "the project does not exist",
+          details: null,
+        },
+      ],
+      initialFs: AUTHORED,
+    });
+    await run(revisionsFailed.program, ["plan", "import", "--project", ID]);
+    assert.deepEqual(revisionsFailed.exits(), [140]);
+    assert.equal(
+      revisionsFailed.stderr(),
+      "kanthord: not-found: the project does not exist\n",
+    );
+
+    const validateFailed = harness({
+      script: [
+        REVISIONS,
+        {
+          ok: false as const,
+          status: 409,
+          code: "identity-kind-mismatch",
+          message: "the identity names a different kind",
+          details: null,
+        },
+      ],
+      initialFs: AUTHORED,
+    });
+    await run(validateFailed.program, ["plan", "import", "--project", ID]);
+    assert.deepEqual(validateFailed.exits(), [162]);
+    assert.equal(
+      validateFailed.stderr(),
+      "kanthord: identity-kind-mismatch: the identity names a different kind\n",
     );
   });
 

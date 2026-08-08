@@ -315,7 +315,7 @@ describe("src/domain/layout.test", () => {
     }
   });
 
-  it("no file under scripts/ is collected by the default test runner, except the daemon-backed verify step and the contract-publish script", () => {
+  it("no file under scripts/ is collected by the default test runner, except the daemon-backed verify step, the contract-publish script and the EPIC 011 e2e runner's own unit tests", () => {
     const rootDir = fileURLToPath(new URL("../../", import.meta.url));
     const scriptsDir = join(rootDir, "scripts");
     const offenders = walkFiles(scriptsDir)
@@ -323,7 +323,38 @@ describe("src/domain/layout.test", () => {
       .filter((file) => wouldBeCollectedByDefaultRunner(file));
     assert.deepEqual(
       offenders,
-      ["publish-contract.test.ts", "verify-db-status.test.ts"],
+      [
+        "e2e/lib/bundle.test.ts",
+        "e2e/lib/command.test.ts",
+        "e2e/lib/disclosure.test.ts",
+        "e2e/lib/driver/interface.test.ts",
+        "e2e/lib/driver/local.test.ts",
+        "e2e/lib/driver/podman-issuer.test.ts",
+        "e2e/lib/driver/ssh.test.ts",
+        "e2e/lib/fixtures.test.ts",
+        "e2e/lib/main.test.ts",
+        "e2e/lib/podman/image.test.ts",
+        "e2e/lib/podman/preflight.test.ts",
+        "e2e/lib/podman/provision.test.ts",
+        "e2e/lib/podman/readiness.test.ts",
+        "e2e/lib/podman/reclaim.test.ts",
+        "e2e/lib/podman/topology.test.ts",
+        "e2e/lib/profile/profile.test.ts",
+        "e2e/lib/redact.test.ts",
+        "e2e/lib/resources.test.ts",
+        "e2e/lib/scenario/discipline.test.ts",
+        "e2e/lib/scenario/index.test.ts",
+        "e2e/lib/scenario/journey.test.ts",
+        "e2e/lib/scenario/p1-e3.test.ts",
+        "e2e/lib/scenario/p1-e4.test.ts",
+        "e2e/lib/scenario/startup-refusal.test.ts",
+        "e2e/lib/scenario/transport.test.ts",
+        "e2e/lib/secret-file.test.ts",
+        "e2e/lib/shim.test.ts",
+        "e2e/lib/tag.test.ts",
+        "publish-contract.test.ts",
+        "verify-db-status.test.ts",
+      ],
       `${offenders.join(", ")} match a default test pattern; npm test would run them`,
     );
   });

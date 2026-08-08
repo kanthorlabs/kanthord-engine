@@ -52,7 +52,7 @@ sees exactly what it sees today. This is what keeps the change surgical.
 
 ### Changed — `src/services/config/refusals.ts`
 
-`StartableInput` gains two fields:
+`StartableInput` gains three fields:
 
 ```ts
 export type StartableInput = Readonly<{
@@ -63,8 +63,13 @@ export type StartableInput = Readonly<{
   token: string;
   tokenFile: string;
   tokenFileMode: number | undefined;
+  resolvedToken: string;
 }>;
 ```
+
+`resolvedToken` is the value the daemon authenticates with: the file content when
+`tokenFile` is set, and `token` otherwise. It is a **separate field**, because `token` and
+`tokenFile` each carry a different fact and the security guards need the third one.
 
 `assertStartable` gains two refusals, inserted **after** the `masterKeyFile` mode check at
 `refusals.ts:45` and **before** the loopback check at `refusals.ts:47`, so the message order
@@ -96,10 +101,20 @@ if (
 and that behaviour does not change. `masterKey` has such a refusal because a daemon cannot
 run without a master key; a token is optional on loopback.
 
-`input.token` at `refusals.ts:47` is the **resolved** token, so
-`a non-loopback bind address requires http.token` still fires when only `tokenFile` was
-configured and the file was empty. The message string does not change, because Story 05 and
-Story 08 assert it verbatim.
+**Every guard that asks "is a token configured" reads `input.resolvedToken`, never a path
+length.** The two guards are the non-loopback bind check at `refusals.ts:72` and the
+`allowedOrigins` check at `refusals.ts:79`. Both compute
+`input.resolvedToken.length > 0`. `a non-loopback bind address requires http.token`
+therefore still fires when only `tokenFile` was configured and the file was empty. The
+message string does not change, because Story 05 and Story 08 assert it verbatim.
+
+**This is a security rule, and it hid behind a passing Proof once.** A first
+implementation derived `hasToken` from `input.tokenFile.length > 0`, so a mode-`0600`
+**empty** token file satisfied both guards and started an unauthenticated daemon on
+`0.0.0.0`. Every scenario passed, because no scenario and no unit case wrote an empty token
+file. A path is evidence of intent; only the resolved value is evidence of a token. The
+Verify list below names the empty-file case for exactly this reason, and a future guard
+that tests `tokenFile` instead of `resolvedToken` is a defect of the same class.
 
 ## Constraints
 
@@ -128,6 +143,20 @@ Story 08 assert it verbatim.
 - the two `masterKey` refusals fire before the two token refusals — asserted by a config
   that violates one of each, whose message is the `masterKey` one.
 
+The resolved-token guard needs four cases of its own. Each sets `tokenFile: "/x"` with
+`tokenFileMode: 0o600`, so the path is present and well-permissioned, and varies only
+`resolvedToken`:
+
+- `resolvedToken: ""`, `bind: "0.0.0.0"` throws `config-refused` with
+  `a non-loopback bind address requires http.token`. A present path never satisfies the
+  guard.
+- `resolvedToken: ""`, `bind: "127.0.0.1"`, `allowedOrigins: ["http://x"]` throws
+  `config-refused` with `a non-empty http.allowedOrigins requires http.token`.
+- `resolvedToken: "s3cret"`, `bind: "0.0.0.0"` passes.
+- `token: "t"`, `tokenFile: "/x"`, `resolvedToken: ""` still throws the mutual-exclusion
+  message. The mutual-exclusion refusal reads the two configured keys, not the resolved
+  value, so an empty file never converts a misconfiguration into a start.
+
 `node --test src/services/config/convict.test.ts` — new cases, each on a `mkdtemp`
 directory:
 
@@ -141,6 +170,12 @@ directory:
 - `Object.hasOwn(settings.http, "tokenFile")` is `false` — the key never reaches `Settings`.
 - an existing config that sets `http.token` and no `tokenFile` produces the same `Settings`
   as before the change — the regression guard.
+- a mode-`0600` **empty** `http.tokenFile` with `http.bind: "0.0.0.0"` throws
+  `config-refused` with `a non-loopback bind address requires http.token`. This is the
+  security case, proved through `load` rather than through `assertStartable` alone, because
+  the defect lived in the wiring between the two.
+- a mode-`0600` `http.tokenFile` holding exactly `"\n"` behaves the same way: the one
+  trailing newline is removed, so the resolved token is empty.
 
 `npm run verify` exits 0.
 

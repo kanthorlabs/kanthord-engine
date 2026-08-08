@@ -3,7 +3,11 @@ import fs from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { toolTimeoutMilliseconds } from "./tools.ts";
-import type { Tools } from "./tools.ts";
+
+type GitTools = Readonly<{
+  execPath: string;
+  paths: Readonly<{ git: string }>;
+}>;
 
 export type SeededRepository = Readonly<{
   name: string;
@@ -68,12 +72,14 @@ export const pinnedGitConfigArguments: readonly string[] = [
   "tag.gpgSign=false",
 ];
 
-function invocationEnvironment(tools: Tools): Readonly<Record<string, string>> {
+function invocationEnvironment(
+  tools: GitTools,
+): Readonly<Record<string, string>> {
   return { ...pinnedGitEnvironment, PATH: tools.execPath };
 }
 
 function gitRun(
-  tools: Tools,
+  tools: GitTools,
   repositoryPath: string,
   args: readonly string[],
   input?: string,
@@ -92,7 +98,7 @@ function gitRun(
   ).trim();
 }
 
-function initBareRepository(tools: Tools, repositoryPath: string): void {
+function initBareRepository(tools: GitTools, repositoryPath: string): void {
   execFileSync(
     tools.paths.git,
     [
@@ -115,7 +121,7 @@ function initBareRepository(tools: Tools, repositoryPath: string): void {
   );
 }
 
-export function seedRepositories(tools: Tools): SeedRoot {
+export function seedRepositories(tools: GitTools): SeedRoot {
   const root = fs.mkdtempSync(join(tmpdir(), "kanthord-remote-"));
   try {
     return seedInto(tools, root);
@@ -125,7 +131,7 @@ export function seedRepositories(tools: Tools): SeedRoot {
   }
 }
 
-function seedInto(tools: Tools, root: string): SeedRoot {
+function seedInto(tools: GitTools, root: string): SeedRoot {
   const repositoryName = "fixture.git";
   const repositoryPath = join(root, repositoryName);
   initBareRepository(tools, repositoryPath);

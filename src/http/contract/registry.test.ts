@@ -16,13 +16,13 @@ const bytewise = (a: string, b: string): number =>
   Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 
 describe("src/http/contract/registry.test", () => {
-  it("registers fifty-three operations", () => {
-    assert.equal(registry.length, 53);
+  it("registers fifty-four operations", () => {
+    assert.equal(registry.length, 54);
   });
 
   it("sorts the registry bytewise by operationId with no duplicates", () => {
     const ids = registry.map((entry) => entry.operationId);
-    assert.equal(new Set(ids).size, 53);
+    assert.equal(new Set(ids).size, 54);
     for (let i = 0; i < ids.length - 1; i += 1) {
       assert.ok(
         Buffer.compare(Buffer.from(ids[i]!), Buffer.from(ids[i + 1]!)) < 0,
@@ -34,7 +34,7 @@ describe("src/http/contract/registry.test", () => {
   it("counts routed and stubbed entries", () => {
     assert.equal(
       registry.filter((entry) => entry.status === "routed").length,
-      23,
+      24,
     );
     assert.equal(
       registry.filter((entry) => entry.status === "stubbed").length,
@@ -45,7 +45,7 @@ describe("src/http/contract/registry.test", () => {
   it("counts introducedIn values with no post-mvp row", () => {
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-1").length,
-      23,
+      24,
     );
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-2").length,
@@ -80,7 +80,7 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("attaches requests to the seven write routes and responses to the twenty-two routes", () => {
+  it("attaches requests to the seven write routes and responses to the twenty-three routes", () => {
     const withRequest = registry.filter((entry) => entry.request !== undefined);
     assert.deepEqual(withRequest.map((entry) => entry.operationId).sort(), [
       "plan.import",
@@ -107,6 +107,7 @@ describe("src/http/contract/registry.test", () => {
       "project.list",
       "project.repositories",
       "project.show",
+      "project.status",
       "provider.list",
       "provider.register",
       "provider.show",

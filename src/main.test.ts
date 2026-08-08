@@ -84,6 +84,7 @@ const fixtures: Readonly<Record<string, Fixture>> = {
   "project.create": { body: { name: "kanthord-verify" }, expect: 200 },
   "project.list": { expect: 200 },
   "project.show": { parameters: { id: missing("project") }, expect: 404 },
+  "project.status": { parameters: { id: missing("project") }, expect: 404 },
   "project.repositories": {
     parameters: { id: missing("project") },
     body: { repositories: [] },

@@ -65,11 +65,25 @@ file into the ledger, and returns `path`.
 
 ### Changed — `scripts/e2e/lib/command.ts` and `bundle.ts`
 
-`redact` is called in exactly three places and nowhere else:
+**Redaction happens at an egress and nowhere else.** An egress is a place where text leaves
+the process: a terminal, or a file. Captured text stays raw in memory.
 
 1. the printed command line, before `sink.print`;
-2. `stdout` and `stderr` before they enter a `CommandRecord`;
-3. the serialized bundle string and every log body, in `serializeBundle` and `writeBundle`.
+2. the serialized bundle string and every log body, in `serializeBundle` and `writeBundle`;
+3. the reclaim failure line and the error line `main` writes to `stderr`.
+
+**A captured surface is never redacted at capture.** `runCommand` puts raw `stdout` and raw
+`stderr` into the `CommandRecord`, and `attachLog` attaches a raw body. This is what makes
+the disclosure assertions below mean anything: an absence asserted over already-redacted
+text proves the redactor ran, which is a different claim from the secret never having been
+there, and it is the claim that cannot fail.
+
+That ordering was inverted once, and it cost the EPIC a full cycle of false confidence.
+`runCommand` redacted into the record and both `attachLog` call sites redacted on the way in,
+so six of the seven surfaces compared a redacted string against a secret and passed by
+construction. The bundle of a passing run held `Authorization: Bearer [redacted]` in the very
+log the `bearer-header` surface reads: the secret _was_ emitted, the redactor removed it, and
+the assertion still passed. Redaction at capture destroys the evidence the assertion needs.
 
 ### New — `scripts/e2e/podman/kanthordc`
 
@@ -107,8 +121,15 @@ Steps 5 and 6 each gain:
 `masterKeyFile` whose mode is not exactly `0600`, and Story 00 gives `http.tokenFile` the
 same rule. A `0400` mount would make the daemon refuse to start.
 
-The **client** container carries the token secret because `kanthordc` reads it. It carries
-no volume and no daemon secret beyond that.
+The **client** container carries both secrets, exactly as the daemon container does: one
+`podman run` secret shape serves both, so no branch decides which secret reaches which host.
+`kanthordc` reads the token; the client never reads the master key. It carries no volume.
+
+A secret the client never reads is still mounted, and that is deliberate. The alternative is
+a per-role secret list, which is a branch that a future role would have to remember to
+update. The mount is safe because the same rules cover it either way: `mode=0600`, absent
+from `podman inspect`, absent from every printed command, and absent from every log — the
+disclosure assertions below hold over both containers, not just the daemon.
 
 The daemon's configuration is materialised inside the container, never on the runner host:
 `startDaemon` runs `podman exec <daemonContainer> node /opt/e2e/bin/write-config.mjs`, which
@@ -145,7 +166,7 @@ Seven surfaces, one obligation:
 | `bearer-header`    | every attached `*.http` log                                                |
 | `basic-header`     | `podman logs <fixtureContainer>`                                           |
 | `config`           | `podman exec <daemonContainer> cat /var/lib/kanthord/kanthord.config.json` |
-| `printed-commands` | every line the sink printed, and every recorded argv                       |
+| `printed-commands` | every printed line, and every recorded argv, `stdout` and `stderr`         |
 | `daemon-logs`      | `podman logs <daemonContainer>`                                            |
 | `podman-inspect`   | `podman inspect <pod> <fixture> <daemon> <client>`                         |
 | `diagnostics`      | every value of the bundle's `logs`                                         |
@@ -155,6 +176,26 @@ against the **raw** text, before bundle redaction, so it proves the value was ne
 rather than proving redaction ran. Assertion names are `no-disclosure-<name>`, seven in
 total.
 
+**An absence assertion over an empty set passes and proves nothing, so the registry is
+asserted non-empty first.** `assertNoDisclosure` refuses with
+`RunnerError("assertion-failed", "the secret registry is empty; a disclosure assertion would be vacuous")`
+when `secrets.forms()` is empty, **before** the seven surfaces. This is a refusal rather
+than an assertion, because a vacuous proof is a defect in the harness and not a finding
+about the product.
+
+This closed a real defect. In the first implementation a local stub `redact()` shadowed the
+real redactor in `command.ts`, `bundle.ts` never redacted on write, and no P1-E1 or P1-E2
+path called `secrets.hold`. All eight assertions passed for a full cycle against an empty
+registry. Three rules follow, and each is verified below:
+
+- **One redactor.** `redact` is imported from `scripts/e2e/lib/redact.ts`. No module
+  declares a function named `redact` of its own.
+- **Hold at creation, on every path.** Every secret is held where it is minted, so a
+  scenario that mints a token cannot forget. The holders are `writeSecretFile`, the podman
+  driver, the local driver, the ssh driver, `createFixtureProfile` and the transport
+  oracle — P1-E1 and P1-E2 included, not P1-E4 alone.
+- **A non-empty registry is a precondition of a disclosure claim**, per the refusal above.
+
 One extra assertion covers the two mount paths the configuration does name:
 `no-disclosure-config-mode` asserts `podman exec <daemonContainer> stat -c %a` is `600` for
 the configuration file and for both mounted secrets. Eight assertions in total.
@@ -163,12 +204,28 @@ the configuration file and for both mounted secrets. Eight assertions in total.
 
 Phase 11 calls `assertNoDisclosure`, from a `finally` around phases 5 to 10.
 
+**A disclosure failure never replaces the failure already in flight.** A `finally` that
+throws discards the exception the `try` was carrying, so a run that failed in phase 8 would
+report a disclosure error and lose its real cause — at exactly the moment a human needs it.
+Phase 11 therefore mirrors `withLedger`'s `cleanupFailures` contract:
+
+```ts
+export type WithDisclosureFailure = Error & { disclosureFailure?: Error };
+```
+
+- phases 5-10 succeeded, disclosure fails → throw the disclosure error.
+- phases 5-10 failed, disclosure succeeds → rethrow the original error.
+- both failed → attach the disclosure error to the original as a `disclosureFailure` own
+  property and rethrow **that same original object**. The cause is never replaced, and the
+  disclosure finding is never lost.
+
 ## Constraints
 
 - No `podman run`, `podman exec` or `podman build` in the whole EPIC carries `--env` or
   `-e`, and none carries a secret in argv. A test asserts this over the recorded argv of a
   full fake run.
-- `redact` is called in exactly the three places named above.
+- `redact` is called at the three egress points named above, and at no capture point.
+  A recorded `stdout`, a recorded `stderr` and an attached log body are raw.
 - `assertNoDisclosure` reads `secrets.forms()` and runs before serialization.
 - The disclosure phase runs on the failure path as well as the success path.
 
@@ -207,6 +264,36 @@ Phase 11 calls `assertNoDisclosure`, from a `finally` around phases 5 to 10.
 - a config dump naming `"tokenFile": "/run/secrets/kanthord-token"` and no token passes.
 - a config file at mode `644` rejects naming `no-disclosure-config-mode`, and so does a
   mounted secret at `0400`.
+- with an **empty** registry, `assertNoDisclosure` throws `assertion-failed` and records no
+  assertion at all.
+- an attached `*.http` log holding the raw bearer token rejects naming
+  `no-disclosure-bearer-header`, and an attached non-`http` log holding it rejects naming
+  `no-disclosure-diagnostics`. Both surfaces were unfalsifiable while capture redacted, so
+  each case is a guard against that inversion returning.
+- a recorded command whose raw `stdout` holds the token rejects naming
+  `no-disclosure-printed-commands`. A recorded `stdout` reaches `bundle.json`, so it is a
+  surface, not merely an input. This is the anti-vacuity guard, and it is what makes the seven passes
+  above mean something.
+- a source check over `scripts/e2e/lib/**` finds no second declaration of `redact` —
+  `function redact`, `const redact =` and `let redact =` appear in `redact.ts` only. A local
+  stub that shadows the real redactor is what made the first implementation vacuous.
+
+`node --test scripts/e2e/lib/command.test.ts` and `bundle.test.ts` — extended:
+
+- a `CommandRecord` built from a process that emits a held secret on `stdout` and on `stderr`
+  holds that secret **verbatim**, and holds no `redactedMarker`. Redaction at capture is the
+  defect this case names, and the case fails if it returns.
+- the printed command line for an argv carrying a held secret holds `redactedMarker` and no
+  form of the secret. The terminal is an egress.
+- `writeBundle` of a bundle whose recorded `stdout` and whose log body each carry a held
+  secret writes a `bundle.json` and a log file containing no form of the secret. A write path
+  that serializes but does not redact is the defect this case names.
+
+`node --test scripts/e2e/lib/scenario/transport.test.ts` — extended:
+
+- the attached `wrong-token.http` log holds the bearer header verbatim, and `redact` of that
+  same text holds no form of the token. The two assertions together pin the boundary: raw in
+  memory, redacted on the way out.
 
 `node --test scripts/e2e/lib/podman/topology.test.ts` — extended:
 
@@ -223,9 +310,23 @@ Phase 11 calls `assertNoDisclosure`, from a `finally` around phases 5 to 10.
 
 `node --test scripts/e2e/lib/scenario/p1-e4.test.ts` — extended:
 
-- over the full fake run, no recorded argv and no printed line contains any form in
-  `secrets.forms()`.
+- `secrets.forms()` is non-empty after the fake run, asserted **before** the sweep below.
+  The sweep iterates the forms, so an empty registry would pass it trivially.
+- over the full fake run, no recorded argv contains any form in `secrets.forms()`.
+
+**The printed-line half of that sweep is delivered by the Proof, not by this test.** The
+fakes answer `driver` calls directly and never reach `runCommand`, so `printedLines` is empty
+in a fake run and a loop over it would assert nothing — the same vacuity this story exists to
+remove, reintroduced one level down. A real `node scripts/e2e/run.mjs P1-E4` prints every
+command through `runCommand` and asserts `no-disclosure-printed-commands` over those lines.
+The gap is recorded here rather than covered by a test that cannot fail.
+
 - a fake run that fails in phase 8 still executes phase 11.
+- a fake run that fails in phase 8 **and** discloses a secret rejects with the phase-8 error
+  object itself — asserted with `assert.equal(caught, thrown)` — carrying
+  `disclosureFailure` whose message is the failing assertion name.
+- a fake run that succeeds through phase 10 and discloses a secret rejects with the
+  disclosure error, and that error carries no `disclosureFailure`.
 
 `npm run verify` exits 0.
 

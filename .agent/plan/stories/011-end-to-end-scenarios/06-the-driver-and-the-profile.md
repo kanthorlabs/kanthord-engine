@@ -57,20 +57,30 @@ export type ExecutionDriver = Readonly<{
     source: string,
     name: string,
   ): Promise<string>;
+  retrieveDirectory(
+    role: HostRole,
+    source: string,
+    destination: string,
+  ): Promise<void>;
   deliverConfig(config: DaemonConfig): Promise<string>;
   deliverToken(token: string): Promise<string>;
   assertBareMachine(): Promise<void>;
   cli(argv: readonly string[]): Promise<CommandRecord>;
   issue: HttpIssuer;
+  daemonNetwork?(): Promise<
+    Readonly<{ bind: string; port: number; allowedHosts: readonly string[] }>
+  >;
   startDaemon(config: DaemonConfig): Promise<DaemonHandle>;
-  startDaemonExpectingRefusal(config: DaemonConfig): Promise<CommandRecord>;
+  startDaemonExpectingRefusal(
+    config: DaemonConfig | null,
+  ): Promise<CommandRecord>;
   collectLogs(): Promise<Readonly<Record<string, string>>>;
 }>;
 
 export const driverMethodNames: readonly (keyof ExecutionDriver)[];
 ```
 
-`driverMethodNames` is the literal list of the thirteen keys above, in declaration order.
+`driverMethodNames` is the literal list of the fourteen keys above, in declaration order.
 It is the mechanism behind the EPIC coverage line "The `podman` and `ssh` drivers expose one
 interface, asserted by construction".
 
@@ -116,7 +126,15 @@ the npm prefix alone.`KANTHORD_TOKEN`is read by`src/cli/options.ts:39`, so no `-
   Story 09. It takes the process and the temporary home into the ledger through
   `context.take` at the moment each exists.
 - `startDaemonExpectingRefusal` spawns the same way and resolves the `CommandRecord` when
-  the process exits. It never waits for readiness.
+  the process exits. It never waits for readiness. A `config` of `null` means **deliver no
+  config**: the driver writes nothing and spawns onto a bare machine, so the daemon refuses
+  with `config-not-found` and names its search order. A `config` means deliver that config
+  and spawn, so the daemon refuses on the config's own content. P1-E1 takes the first form
+  and P1-E2 the second, and one method serves both because the spawn is identical.
+- The local driver writes its config at `<home>/kanthord.config.json` and spawns the daemon
+  with `cwd` equal to `<home>`, so the delivered config is the cwd candidate of
+  `src/services/config/search-order.ts`. That is what `docs/proposal` calls candidate 2, and
+  Story 04 expectation 3 requires the process to run with that same `cwd`.
 - `deliverDirectory(role, source, name)` copies `source` into `<tmp>/deliver/<name>` with
   `cp -R` semantics and returns that path. The local driver has one host, and the copy
   still happens, so the local run exercises the same code path as the other two.
@@ -255,7 +273,7 @@ Each row matches `docs/proposal/phase-1/README.md:63,82,92,102-103`.
 
 Asserts, by construction:
 
-- `driverMethodNames` has exactly thirteen entries, in the declaration order above.
+- `driverMethodNames` has exactly fourteen entries, in the declaration order above.
 - for each of the three factories — local, podman, ssh — the constructed driver's
   `Object.keys(driver).sort()` deep-equals `[...driverMethodNames].sort()`. The podman and
   ssh factories are constructed against a fake command executor, so the test spawns nothing.

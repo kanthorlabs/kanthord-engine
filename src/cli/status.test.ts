@@ -275,6 +275,78 @@ describe("src/cli/status.test", () => {
     assert.equal(h.failCalls(), 0);
   });
 
+  it("with --project <id> calls project.status with the id as a path parameter, never system.status", async () => {
+    const h = harness({
+      respond: () => ({ ok: true as const, status: 200, body: { nodes: [] } }),
+    });
+    await run(h.program, ["status", "--project", "project_a"]);
+
+    assert.deepEqual(h.calls, [
+      {
+        operationId: "project.status",
+        body: undefined,
+        parameters: { id: "project_a" },
+      },
+    ]);
+  });
+
+  it("with --project <id> renders one node line per entry, in response order", async () => {
+    const h = harness({
+      respond: () => ({
+        ok: true as const,
+        status: 200,
+        body: {
+          nodes: [
+            {
+              kind: "objective",
+              state: "pending",
+              blockReason: null,
+              count: 2,
+            },
+            { kind: "task", state: "pending", blockReason: null, count: 4 },
+          ],
+        },
+      }),
+    });
+    await run(h.program, ["status", "--project", "project_a"]);
+
+    assert.equal(
+      h.stdoutText(),
+      "kanthord: node objective pending - 2\n" +
+        "kanthord: node task pending - 4\n",
+    );
+    assert.equal(h.stderrText(), "");
+    assert.equal(h.failCalls(), 0);
+  });
+
+  it("with --project <id> and an empty nodes list writes the one no-node line", async () => {
+    const h = harness({
+      respond: () => ({ ok: true as const, status: 200, body: { nodes: [] } }),
+    });
+    await run(h.program, ["status", "--project", "project_a"]);
+
+    assert.equal(h.stdoutText(), "kanthord: no node\n");
+    assert.equal(h.stderrText(), "");
+    assert.equal(h.failCalls(), 0);
+  });
+
+  it("with --project <id> a 404 refusal writes the code line and fails once", async () => {
+    const h = harness({
+      respond: () => ({
+        ok: false as const,
+        status: 404,
+        code: "not-found",
+        message: "no project project_a",
+        details: undefined,
+      }),
+    });
+    await run(h.program, ["status", "--project", "project_a"]);
+
+    assert.equal(h.stderrText(), "kanthord: not-found: no project project_a\n");
+    assert.equal(h.failCalls(), 1);
+    assert.equal(h.stdoutText(), "");
+  });
+
   it("routes on the code, never on the message", async () => {
     const first = harness({
       respond: () => ({

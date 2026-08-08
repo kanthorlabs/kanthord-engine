@@ -225,8 +225,8 @@ Add after `"e2e:007"`, keeping the existing entry:
   `exitCode: 0`, `stdout: "x"`, and the sink received the printed line
   before the record — asserted by a sink that appends both to one ordered array.
 - `runCommand` against a command exiting `3` returns `exitCode: 3` and does not throw.
-- `runCommand` passes `env: {}` by default — asserted by a child printing
-  `Object.keys(process.env).length` and reading `0`.
+- `runCommand` passes `env: {}` by default — asserted by a
+  `/usr/bin/env` child, invoked with no arguments, whose output is the empty string.
 
 `npm run verify` exits 0.
 

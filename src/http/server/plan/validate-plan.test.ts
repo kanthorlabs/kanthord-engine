@@ -43,7 +43,7 @@ const objectiveDocument = {
   content: `---
 kind: objective
 title: Harden the verify CLI
-repo: repo_a
+repo: kanthord-verify
 ---
 Make it verifiable.
 `,
@@ -74,7 +74,7 @@ const threeFaultsTaskDocument = {
   content: `---
 kind: task
 title: A task
-repo: repo_a
+repo: kanthord-verify
 depends_on:
   - 01-t.md
 ---

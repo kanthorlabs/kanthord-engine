@@ -6,13 +6,22 @@ import type { StartableInput } from "./refusals.ts";
 import { ConfigError } from "./index.ts";
 
 function validInput(overrides?: Partial<StartableInput>): StartableInput {
+  const token = overrides?.token ?? "";
   return {
     masterKey: Buffer.alloc(32).toString("base64"),
     masterKeyFile: "",
     masterKeyFileMode: undefined,
     bind: "127.0.0.1",
-    token: "",
+    token,
+    tokenFile: "",
+    tokenFileMode: undefined,
     allowedOrigins: [],
+    // `resolvedToken` defaults to mirror `token` so every pre-existing case
+    // above keeps behaving exactly as it does today; a case that needs the
+    // resolved value to diverge from the configured `token`/`tokenFile`
+    // pair (an empty-content tokenFile, in particular) overrides it
+    // explicitly.
+    resolvedToken: token,
     ...overrides,
   };
 }
@@ -123,6 +132,109 @@ describe("src/services/config/refusals.test", () => {
       );
     });
 
+    it("http.token and http.tokenFile both set throws config-refused", () => {
+      assert.throws(
+        () =>
+          assertStartable(
+            validInput({
+              masterKey: "",
+              masterKeyFile: "/some/path",
+              masterKeyFileMode: 0o600,
+              token: "t",
+              tokenFile: "/x",
+            }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof ConfigError);
+          assert.equal(err.code, "config-refused");
+          assert.equal(
+            err.message,
+            "http.token and http.tokenFile are both set; configure exactly one",
+          );
+          return true;
+        },
+      );
+    });
+
+    it("http.tokenFile mode 0o644 throws config-refused, message ends with found 0644", () => {
+      assert.throws(
+        () =>
+          assertStartable(
+            validInput({
+              masterKey: "",
+              masterKeyFile: "/some/path",
+              masterKeyFileMode: 0o600,
+              tokenFile: "/x",
+              tokenFileMode: 0o644,
+            }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof ConfigError);
+          assert.equal(err.code, "config-refused");
+          assert.equal(
+            err.message,
+            "http.tokenFile must have mode 0600; found 0644",
+          );
+          return true;
+        },
+      );
+    });
+
+    it("http.tokenFile mode 0o600 returns undefined", () => {
+      const result = assertStartable(
+        validInput({ tokenFile: "/x", tokenFileMode: 0o600 }),
+      );
+      assert.equal(result, undefined);
+    });
+
+    it("empty token and empty tokenFile on a loopback bind returns undefined", () => {
+      const result = assertStartable(
+        validInput({ token: "", tokenFile: "", bind: "127.0.0.1" }),
+      );
+      assert.equal(result, undefined);
+    });
+
+    it("empty token and empty tokenFile on a non-loopback bind still throws the non-loopback message", () => {
+      assert.throws(
+        () =>
+          assertStartable(
+            validInput({ token: "", tokenFile: "", bind: "203.0.113.1" }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof ConfigError);
+          assert.equal(err.code, "config-refused");
+          assert.equal(
+            err.message,
+            "a non-loopback bind address requires http.token",
+          );
+          return true;
+        },
+      );
+    });
+
+    it("a masterKey refusal fires before a token refusal when both are violated", () => {
+      assert.throws(
+        () =>
+          assertStartable(
+            validInput({
+              masterKey: "",
+              masterKeyFile: "",
+              token: "t",
+              tokenFile: "/x",
+            }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof ConfigError);
+          assert.equal(err.code, "config-refused");
+          assert.equal(
+            err.message,
+            "no master key configured; set masterKey or masterKeyFile",
+          );
+          return true;
+        },
+      );
+    });
+
     it("rule 4: bind 0.0.0.0 with empty token throws config-refused", () => {
       assert.throws(
         () =>
@@ -221,6 +333,86 @@ describe("src/services/config/refusals.test", () => {
         (err: unknown) => {
           assert.ok(err instanceof ConfigError);
           assert.equal(err.code, "config-refused");
+          return true;
+        },
+      );
+    });
+
+    it("SECURITY: a tokenFile path set but resolving to an empty token still throws the non-loopback message", () => {
+      assert.throws(
+        () =>
+          assertStartable(
+            validInput({
+              tokenFile: "/run/secrets/kanthord-token",
+              tokenFileMode: 0o600,
+              resolvedToken: "",
+              bind: "0.0.0.0",
+            }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof ConfigError);
+          assert.equal(err.code, "config-refused");
+          assert.equal(
+            err.message,
+            "a non-loopback bind address requires http.token",
+          );
+          return true;
+        },
+      );
+    });
+
+    it("SECURITY: a tokenFile path set but resolving to an empty token still throws for a non-empty allowedOrigins", () => {
+      assert.throws(
+        () =>
+          assertStartable(
+            validInput({
+              tokenFile: "/run/secrets/kanthord-token",
+              tokenFileMode: 0o600,
+              resolvedToken: "",
+              allowedOrigins: ["http://a.test"],
+            }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof ConfigError);
+          assert.equal(err.code, "config-refused");
+          assert.equal(
+            err.message,
+            "a non-empty http.allowedOrigins requires http.token",
+          );
+          return true;
+        },
+      );
+    });
+
+    it("a tokenFile path set that resolves to a non-empty token satisfies the non-loopback guard", () => {
+      const result = assertStartable(
+        validInput({
+          tokenFile: "/run/secrets/kanthord-token",
+          tokenFileMode: 0o600,
+          resolvedToken: "s3cret",
+          bind: "0.0.0.0",
+        }),
+      );
+      assert.equal(result, undefined);
+    });
+
+    it("http.token and http.tokenFile both configured still throws mutual exclusion even when resolvedToken is empty", () => {
+      assert.throws(
+        () =>
+          assertStartable(
+            validInput({
+              token: "t",
+              tokenFile: "/x",
+              resolvedToken: "",
+            }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof ConfigError);
+          assert.equal(err.code, "config-refused");
+          assert.equal(
+            err.message,
+            "http.token and http.tokenFile are both set; configure exactly one",
+          );
           return true;
         },
       );

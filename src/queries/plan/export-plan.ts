@@ -1,4 +1,4 @@
-import type { Storage } from "../../services/storage/index.ts";
+import type { Storage, Transaction } from "../../services/storage/index.ts";
 import type { PlanStore } from "../../services/plan/index.ts";
 import type { BlobStore } from "../../services/blob/index.ts";
 import type { CanonicalNode } from "../../domain/plan-canonical-path.ts";
@@ -16,7 +16,7 @@ export type ExportPlanResult = Readonly<{
   documents: readonly RenderedDocument[];
 }>;
 
-export type ExportPlanRefusal = "project-not-found";
+export type ExportPlanRefusal = "project-not-found" | "repository-unknown";
 
 export class ExportPlanError extends Error {
   readonly refusal: ExportPlanRefusal;
@@ -29,6 +29,15 @@ export class ExportPlanError extends Error {
 }
 
 const decoder = new TextDecoder();
+
+function readRepositoryNamesById(
+  transaction: Transaction,
+): ReadonlyMap<string, string> {
+  const rows = transaction.all(
+    "SELECT id, name FROM repository",
+  ) as readonly Readonly<{ id: string; name: string }>[];
+  return new Map(rows.map((row) => [row.id, row.name]));
+}
 
 export function exportPlan(
   dependencies: ExportPlanDependencies,
@@ -52,6 +61,7 @@ export function exportPlan(
       return { revision: null, documents: [] };
     }
     const { nodes } = dependencies.plan.readGraph(transaction, input.projectId);
+    const repositoryNamesById = readRepositoryNamesById(transaction);
     const bodies = new Map<
       string,
       Readonly<{
@@ -84,11 +94,22 @@ export function exportPlan(
         }
         acceptance = decoder.decode(acceptanceBlob.content);
       }
+      let repo: string | null = null;
+      if (node.repositoryId !== null) {
+        const name = repositoryNamesById.get(node.repositoryId);
+        if (name === undefined) {
+          throw new ExportPlanError(
+            "repository-unknown",
+            `repository ${node.repositoryId} is not registered`,
+          );
+        }
+        repo = name;
+      }
       bodies.set(node.id, {
         instruction: decoder.decode(instruction.content),
         acceptance,
         worker: node.worker,
-        repo: node.repositoryId,
+        repo,
       });
     }
     const canonicalNodes: readonly CanonicalNode[] = nodes.map((node) => ({

@@ -13,14 +13,14 @@ describe("src/domain/version.test", () => {
     assert.equal(KANTHORD_VERSION, pkg.version);
   });
 
-  it("bin holds exactly one key kanthord with value ./src/main.ts", () => {
+  it("bin holds exactly one key kanthord with value ./dist/main.js", () => {
     const keys = Object.keys(pkg.bin);
     assert.equal(keys.length, 1);
     assert.equal(keys[0], "kanthord");
-    assert.equal(pkg.bin.kanthord, "./src/main.ts");
+    assert.equal(pkg.bin.kanthord, "./dist/main.js");
   });
 
-  it("bin target exists, has executable bit, first line is the shebang", () => {
+  it("src/main.ts, which tsconfig.build.json compiles to dist/main.js, exists, has executable bit, first line is the shebang", () => {
     const target = new URL("../../src/main.ts", import.meta.url);
     assert.ok(fs.existsSync(target), `target does not exist: ${target}`);
 

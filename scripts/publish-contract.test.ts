@@ -61,7 +61,7 @@ test("scripts/publish-contract", async (t) => {
       ]);
 
       const exampleFiles = readdirSync(join(directory, "examples"));
-      assert.equal(exampleFiles.length, 22);
+      assert.equal(exampleFiles.length, 23);
       const exampleIds = sortedBytewise(
         exampleFiles.map((name) => name.replace(/\.json$/, "")),
       );

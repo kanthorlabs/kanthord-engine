@@ -2,6 +2,8 @@
 
 kanthord is one long-running daemon on **Node.js 24+ / TypeScript**, ES modules, `"type": "module"`. Node runs TypeScript directly by type stripping, so a relative import carries an explicit `.ts` extension. Tests run on the built-in **`node:test`** runner with `node:assert/strict`. There is no test framework dependency.
 
+**The published artifact is compiled; the repository is not.** Node refuses to strip types under `node_modules`, so an installed `bin` pointing at a `.ts` file cannot run. `npm run build` emits `dist/` through `tsconfig.build.json`, `prepack` runs it, and `package.json` ships `dist` and points `bin` at `dist/main.js`. `rewriteRelativeImportExtensions` turns each `.ts` import specifier into `.js` on emit, so `src/` keeps its explicit `.ts` extensions unchanged. Development, tests and lint still run TypeScript directly. Never import from `dist/`, and never commit it.
+
 `docs/proposal/` is the source of truth for behaviour. This file is the source of truth for structure. Where a story and this file disagree about structure, this file wins.
 
 ## Architecture

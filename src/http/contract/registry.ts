@@ -185,7 +185,8 @@ export function registryFaults(
       }
       if (
         (segment.kind === "resource" || segment.kind === "subresource") &&
-        segment.value.endsWith("s")
+        segment.value.endsWith("s") &&
+        !segment.value.endsWith("us")
       ) {
         faults.push({
           operationId: entry.operationId,

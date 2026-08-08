@@ -10,13 +10,18 @@ import fs from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { resolveTools, toolTimeoutMilliseconds } from "./tools.ts";
-import type { Tools } from "./tools.ts";
 import {
   fixtureObjectIds,
   pinnedGitConfigArguments,
   pinnedGitEnvironment,
 } from "./seed.ts";
 import type { SeedRoot } from "./seed.ts";
+
+type GitTools = Readonly<{
+  execPath: string;
+  httpBackend: string;
+  paths: Readonly<{ git: string }>;
+}>;
 
 export type FixtureCredential = Readonly<{
   username: string;
@@ -51,7 +56,7 @@ export const httpCredentials: Readonly<
   Record<"reader" | "writer", FixtureCredential>
 > = {
   reader: { username: "reader", token: "r-tok", write: false },
-  writer: { username: "writer", token: "w-tok", write: true },
+  writer: { username: "writer", token: "w-tok-long", write: true },
 };
 
 export const httpWrongCredential: FixtureCredential = {
@@ -135,7 +140,7 @@ function headerValue(headers: IncomingHttpHeaders, name: string): string {
 }
 
 function cgiEnvironment(
-  tools: Tools,
+  tools: GitTools,
   seed: SeedRoot,
   req: IncomingMessage,
   parsed: URL,
@@ -163,7 +168,7 @@ function cgiEnvironment(
 }
 
 function handleRequest(
-  tools: Tools,
+  tools: GitTools,
   seed: SeedRoot,
   records: RequestRecord[],
   liveChildren: Set<ChildProcess>,
@@ -476,8 +481,9 @@ export const httpAcceptanceChecks: readonly {
 ];
 
 export function startHttpRemote(
-  tools: Tools,
+  tools: GitTools,
   seed: SeedRoot,
+  listen?: Readonly<{ bind?: string; port?: number }>,
 ): Promise<HttpRemote> {
   const records: RequestRecord[] = [];
   const liveChildren = new Set<ChildProcess>();
@@ -499,7 +505,7 @@ export function startHttpRemote(
 
   return new Promise<HttpRemote>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(listen?.port ?? 0, listen?.bind ?? "127.0.0.1", () => {
       server.off("error", reject);
       const address = server.address();
       if (address === null || typeof address === "string") {
@@ -507,7 +513,8 @@ export function startHttpRemote(
         return;
       }
       const port = address.port;
-      const origin = `http://127.0.0.1:${port}`;
+      const bind = listen?.bind ?? "127.0.0.1";
+      const origin = `http://${bind}:${port}`;
       const remote: HttpRemote = {
         transport: "http-basic",
         port,
