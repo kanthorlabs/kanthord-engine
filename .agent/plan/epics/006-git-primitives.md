@@ -1,6 +1,6 @@
 # EPIC 006 — Git primitives
 
-Status: **draft**.
+Status: **ready**.
 
 ## Goal
 

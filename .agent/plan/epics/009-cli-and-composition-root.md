@@ -1,6 +1,6 @@
 # EPIC 009 — CLI surface and composition root
 
-Status: **draft**.
+Status: **ready**.
 
 ## Goal
 

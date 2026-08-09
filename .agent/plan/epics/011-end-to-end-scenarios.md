@@ -1,6 +1,6 @@
 # EPIC 011 — End-to-end scenarios
 
-Status: **draft**.
+Status: **ready**.
 
 ## Goal
 

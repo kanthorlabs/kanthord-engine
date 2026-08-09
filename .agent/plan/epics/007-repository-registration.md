@@ -1,6 +1,6 @@
 # EPIC 007 — Repository registration
 
-Status: **draft**.
+Status: **ready**.
 
 ## Goal
 

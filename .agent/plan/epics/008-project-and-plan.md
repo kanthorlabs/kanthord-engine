@@ -1,6 +1,6 @@
 # EPIC 008 — Project and plan
 
-Status: **draft**.
+Status: **ready**.
 
 ## Goal
 

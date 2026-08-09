@@ -1,6 +1,6 @@
 # EPIC 005 — Test infrastructure
 
-Status: **draft**.
+Status: **ready**.
 
 ## Goal
 

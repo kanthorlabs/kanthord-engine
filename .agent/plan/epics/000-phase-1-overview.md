@@ -1,6 +1,6 @@
 # Phase 1 — epic overview
 
-Status: **draft**. The Stories lists are agreed. The Verification Gates are sketches, and each epic is finalised just before `/author` runs on it.
+Status: **ready**. The Stories lists are agreed. The Verification Gates are sketches, and each epic is finalised just before `/author` runs on it.
 
 Source: `docs/proposal/phase-1/`, `docs/proposal/api/`, `docs/proposal/database/`.
 

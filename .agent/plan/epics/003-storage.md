@@ -1,6 +1,6 @@
 # EPIC 003 — Storage
 
-Status: **draft**.
+Status: **ready**.
 
 ## Goal
 

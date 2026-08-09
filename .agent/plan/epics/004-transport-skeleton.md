@@ -1,6 +1,6 @@
 # EPIC 004 — Transport skeleton
 
-Status: **draft**.
+Status: **ready**.
 
 ## Goal
 

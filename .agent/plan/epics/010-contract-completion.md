@@ -1,6 +1,6 @@
 # EPIC 010 — Contract completion
 
-Status: **draft**.
+Status: **ready**.
 
 ## Goal
 

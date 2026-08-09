@@ -1,6 +1,6 @@
 # EPIC 002 — Domain and state machine
 
-Status: **draft**.
+Status: **ready**.
 
 ## Goal
 
