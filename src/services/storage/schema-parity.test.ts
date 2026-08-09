@@ -2,6 +2,7 @@ import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 
 import { agentKinds } from "../../domain/agent.ts";
+import { rows } from "../../domain/rows.ts";
 import { blockReasons, nodeKinds, nodeStates } from "../../domain/state.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import {
@@ -98,5 +99,22 @@ describe("src/services/storage/schema-parity.test", () => {
     after(() => temporary.dispose());
 
     assertClauseAgrees(storage, "agent_invocation", "agent", agentKinds);
+  });
+
+  it("the table set after migrate equals Object.keys(rows)", () => {
+    const { storage, temporary } = buildMigrated();
+    after(() => storage.close());
+    after(() => temporary.dispose());
+
+    const tables = storage.transact((t) =>
+      t.all(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+      ),
+    ) as readonly Record<string, unknown>[];
+
+    assert.deepEqual(
+      tables.map((row) => row.name),
+      Object.keys(rows),
+    );
   });
 });

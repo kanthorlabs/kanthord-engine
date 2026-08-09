@@ -6,7 +6,7 @@ import { deepStrictEqual } from "node:assert/strict";
 import { RunnerError } from "./errors.ts";
 import { redact } from "./redact.ts";
 import type { ScenarioId } from "./tag.ts";
-import type { CommandRecord, CommandSink } from "./command.ts";
+import type { CommandInput, CommandRecord, CommandSink } from "./command.ts";
 import { runCommand } from "./command.ts";
 import type { ResourceFailure } from "./resources.ts";
 import type { DriverName } from "./driver/index.ts";
@@ -309,10 +309,27 @@ export async function hashFixtures(
   return records.sort(byPathBytes);
 }
 
+export type CommandExecutor = (
+  sink: CommandSink,
+  input: CommandInput,
+) => Promise<CommandRecord>;
+
 export async function readCommit(
   sink: CommandSink,
   git: string,
+  execute: CommandExecutor = runCommand,
 ): Promise<string> {
-  const record = await runCommand(sink, { argv: [git, "rev-parse", "HEAD"] });
+  const record = await execute(sink, { argv: [git, "rev-parse", "HEAD"] });
+  return record.stdout.trim();
+}
+
+export async function readProposalRevision(
+  sink: CommandSink,
+  git: string,
+  execute: CommandExecutor = runCommand,
+): Promise<string> {
+  const record = await execute(sink, {
+    argv: [git, "log", "-1", "--format=%H", "--", "docs/proposal"],
+  });
   return record.stdout.trim();
 }

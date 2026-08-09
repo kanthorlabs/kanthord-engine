@@ -10,7 +10,7 @@ Behaviour is not an entity. A later-phase document schema, a role contract, a to
 
 **Blocker removed:** there is no skeleton to hang work on, and no bare home to work against.
 
-**Exit criteria:** Ulrich onboards his real repository from a second machine over the VPN, imports a two-objective plan, exports it identical, and reads status. Every execution route answers `not-implemented`.
+**Exit criteria:** Ulrich onboards his real repository from a second machine over the VPN, imports a two-objective plan, exports it identical, and reads status. Every execution route answers `not-implemented`. A coding agent rehearses every scenario and reports the run green. Ulrich then drives the same journey through the same CLI and the same API, and confirms it. The confirmation is recorded, and the phase does not exit without it.
 
 ## Files
 

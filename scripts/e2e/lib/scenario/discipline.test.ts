@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { glob, readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 
 import type { ScenarioContext } from "./context.ts";
 import type { CommandSink } from "../command.ts";
@@ -59,4 +59,39 @@ test("ScenarioContext carries no releaseAll key", () => {
   };
 
   assert.equal(Object.hasOwn(context, "releaseAll"), false);
+});
+
+test("no scenario file imports from src/", async () => {
+  const directory = resolve(import.meta.dirname);
+  const sourceRoot = resolve(import.meta.dirname, "../../../../src");
+  const files: string[] = [];
+
+  for await (const entry of glob("*.ts", { cwd: directory })) {
+    if (entry.endsWith(".test.ts")) {
+      continue;
+    }
+    files.push(entry);
+  }
+
+  assert.ok(files.length > 0, "expected at least one scenario file to check");
+
+  for (const file of files) {
+    const text = await readFile(resolve(directory, file), "utf8");
+    const specifiers = [
+      ...text.matchAll(/from\s+"([^"]+)"/g),
+      ...text.matchAll(/import\s*\(\s*"([^"]+)"/g),
+    ].map((match) => match[1] as string);
+
+    for (const specifier of specifiers) {
+      if (!specifier.startsWith(".")) {
+        continue;
+      }
+      const resolved = resolve(directory, specifier);
+      assert.equal(
+        resolved === sourceRoot || resolved.startsWith(`${sourceRoot}${sep}`),
+        false,
+        `${file} imports ${specifier}, which resolves into src/`,
+      );
+    }
+  }
 });

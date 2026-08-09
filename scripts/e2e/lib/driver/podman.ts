@@ -9,6 +9,8 @@ import {
 } from "../podman/topology.ts";
 import { pollHealth } from "../podman/readiness.ts";
 import { podmanIssuer } from "./podman-issuer.ts";
+import { runOriginProbe } from "./origin-probe.ts";
+import type { OriginProbeInput, ProbeRow } from "./origin-probe.ts";
 import type {
   DaemonConfig,
   DaemonHandle,
@@ -173,6 +175,20 @@ export async function createPodmanDriver(
         token,
       );
       return path;
+    },
+    async probeOrigin(input: OriginProbeInput): Promise<readonly ProbeRow[]> {
+      return runOriginProbe(
+        (script) =>
+          execute([
+            "podman",
+            "exec",
+            topology.daemonContainer,
+            "sh",
+            "-c",
+            script,
+          ]),
+        input,
+      );
     },
     async assertBareMachine() {
       return;

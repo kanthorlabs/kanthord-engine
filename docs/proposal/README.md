@@ -37,7 +37,7 @@ An end-to-end scenario is a complete journey across the deployed product. It exi
 
 ## How a scenario works
 
-Every scenario is executable by a coding agent and by a human, with no separate procedure for either. There is no actor field. A scenario that only a human can judge is not a scenario; it is product acceptance, and it is recorded separately.
+Every scenario is executable by a coding agent and by a human, with no separate procedure for either. There is no actor field. A scenario that only a human can judge is not a scenario; it is product acceptance, and it is recorded separately. Recorded separately means it is not an oracle and not a scenario. It carries its own verdict, and a phase exits on the scenario verdict and the acceptance verdict together.
 
 Each scenario declares:
 

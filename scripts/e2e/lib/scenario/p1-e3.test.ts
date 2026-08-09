@@ -13,9 +13,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkPrerequisites, runP1E3, p1e3 } from "./p1-e3.ts";
+import { checkPrerequisites, runP1E3, p1e3, type RealInputs } from "./p1-e3.ts";
 import { main } from "../main.ts";
 import { RunnerError } from "../errors.ts";
+import { E2eEnvError, type E2eEnv } from "../../env.ts";
 import { createLedger } from "../resources.ts";
 import type { ScenarioContext } from "./context.ts";
 import type { CommandRecord } from "../command.ts";
@@ -79,11 +80,18 @@ function fakeContext(
   };
 }
 
+function stubLoadEnv(overrides: Partial<E2eEnv> = {}): () => E2eEnv {
+  return () => ({
+    ghToken: "gh-secret",
+    ghRepo: "kanthorlabs/kanthord",
+    ghBaseBranch: "main",
+    runId: "r1",
+    ...overrides,
+  });
+}
+
 function baseEnv(workDir: string): Record<string, string | undefined> {
   return {
-    KANTHORD_E2E_REAL_ORIGIN: "https://example.invalid/real.git",
-    KANTHORD_E2E_REAL_BRANCH: "trunk",
-    KANTHORD_E2E_REAL_TOKEN_FILE: join(workDir, "token"),
     KANTHORD_E2E_REAL_PLAN: join(workDir, "plan"),
     KANTHORD_E2E_REAL_OBJECTIVES: "2",
     KANTHORD_E2E_REAL_TASKS: "4",
@@ -101,9 +109,8 @@ function reachableExecute(
   };
 }
 
-test("checkPrerequisites drives each of the ten rows one at a time, rejecting unavailable with the exact message", async (t) => {
+test("checkPrerequisites drives each of the seven rows one at a time, rejecting unavailable with the exact message", async (t) => {
   const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e3-"));
-  writeFileSync(join(workDir, "token"), "a-real-token-1234\n");
   mkdirSync(join(workDir, "plan"), { recursive: true });
   t.after(() => rmSync(workDir, { recursive: true, force: true }));
 
@@ -132,39 +139,6 @@ test("checkPrerequisites drives each of the ten rows one at a time, rejecting un
       () => baseEnv(workDir),
       () => reachableExecute(),
       "P1-E3 needs --client-host",
-    ],
-    [
-      "KANTHORD_E2E_REAL_ORIGIN is absent",
-      () =>
-        fakeContext({
-          daemonHost: "daemon.example",
-          clientHost: "client.example",
-        }),
-      () => ({ ...baseEnv(workDir), KANTHORD_E2E_REAL_ORIGIN: undefined }),
-      () => reachableExecute(),
-      "P1-E3 needs KANTHORD_E2E_REAL_ORIGIN",
-    ],
-    [
-      "KANTHORD_E2E_REAL_BRANCH is absent",
-      () =>
-        fakeContext({
-          daemonHost: "daemon.example",
-          clientHost: "client.example",
-        }),
-      () => ({ ...baseEnv(workDir), KANTHORD_E2E_REAL_BRANCH: undefined }),
-      () => reachableExecute(),
-      "P1-E3 needs KANTHORD_E2E_REAL_BRANCH",
-    ],
-    [
-      "KANTHORD_E2E_REAL_TOKEN_FILE is absent",
-      () =>
-        fakeContext({
-          daemonHost: "daemon.example",
-          clientHost: "client.example",
-        }),
-      () => ({ ...baseEnv(workDir), KANTHORD_E2E_REAL_TOKEN_FILE: undefined }),
-      () => reachableExecute(),
-      "P1-E3 needs KANTHORD_E2E_REAL_TOKEN_FILE",
     ],
     [
       "KANTHORD_E2E_REAL_PLAN is absent",
@@ -226,7 +200,12 @@ test("checkPrerequisites drives each of the ten rows one at a time, rejecting un
   for (const [name, buildContext, buildEnv, buildExecute, message] of rows) {
     await t.test(name, async () => {
       await assert.rejects(
-        checkPrerequisites(buildContext(), buildExecute(), buildEnv()),
+        checkPrerequisites(
+          buildContext(),
+          buildExecute(),
+          buildEnv(),
+          stubLoadEnv(),
+        ),
         (error: unknown) => {
           assert.ok(error instanceof RunnerError);
           assert.equal(error.code, "unavailable");
@@ -240,7 +219,6 @@ test("checkPrerequisites drives each of the ten rows one at a time, rejecting un
 
 test("KANTHORD_E2E_REAL_OBJECTIVES=0 and a non-numeric value each reject as unavailable", async (t) => {
   const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e3-"));
-  writeFileSync(join(workDir, "token"), "a-real-token-1234\n");
   mkdirSync(join(workDir, "plan"), { recursive: true });
   t.after(() => rmSync(workDir, { recursive: true, force: true }));
 
@@ -253,7 +231,7 @@ test("KANTHORD_E2E_REAL_OBJECTIVES=0 and a non-numeric value each reject as unav
       const env = { ...baseEnv(workDir), KANTHORD_E2E_REAL_OBJECTIVES: value };
 
       await assert.rejects(
-        checkPrerequisites(context, reachableExecute(), env),
+        checkPrerequisites(context, reachableExecute(), env, stubLoadEnv()),
         (error: unknown) => {
           assert.ok(error instanceof RunnerError);
           assert.equal(error.code, "unavailable");
@@ -264,12 +242,131 @@ test("KANTHORD_E2E_REAL_OBJECTIVES=0 and a non-numeric value each reject as unav
   }
 });
 
+test("checkPrerequisites resolves the RealInputs derived from .env.e2e and the three required env vars", async () => {
+  const context = fakeContext({
+    daemonHost: "daemon.example",
+    clientHost: "client.example",
+  });
+  const env = {
+    KANTHORD_E2E_REAL_PLAN: "/tmp/plan",
+    KANTHORD_E2E_REAL_OBJECTIVES: "2",
+    KANTHORD_E2E_REAL_TASKS: "4",
+  };
+
+  const result = await checkPrerequisites(
+    context,
+    reachableExecute(),
+    env,
+    stubLoadEnv(),
+  );
+
+  assert.deepEqual(result, {
+    origin: "https://github.com/kanthorlabs/kanthord.git",
+    defaultBranch: "main",
+    token: "gh-secret",
+    planPath: "/tmp/plan",
+    expectedObjectiveCount: 2,
+    expectedTaskCount: 4,
+  });
+});
+
+test("a loadEnv rejection is wrapped as unavailable naming each missing key", async () => {
+  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e3-"));
+  mkdirSync(join(workDir, "plan"), { recursive: true });
+  try {
+    const context = fakeContext({
+      daemonHost: "daemon.example",
+      clientHost: "client.example",
+    });
+    const env = baseEnv(workDir);
+    const loadEnv = (): E2eEnv => {
+      throw new E2eEnvError("boom", ["E2E_GH_TOKEN", "E2E_GH_REPO"]);
+    };
+
+    await assert.rejects(
+      checkPrerequisites(context, reachableExecute(), env, loadEnv),
+      (error: unknown) => {
+        assert.ok(error instanceof RunnerError);
+        assert.equal(error.code, "unavailable");
+        assert.equal(
+          error.message,
+          "P1-E3 needs E2E_GH_TOKEN, E2E_GH_REPO in .env.e2e",
+        );
+        return true;
+      },
+    );
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
+  }
+});
+
+test("a loadEnv rejection naming all three required keys preserves E2E_REQUIRED_KEYS order", async () => {
+  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e3-"));
+  mkdirSync(join(workDir, "plan"), { recursive: true });
+  try {
+    const context = fakeContext({
+      daemonHost: "daemon.example",
+      clientHost: "client.example",
+    });
+    const env = baseEnv(workDir);
+    const loadEnv = (): E2eEnv => {
+      throw new E2eEnvError("boom", [
+        "E2E_GH_TOKEN",
+        "E2E_GH_REPO",
+        "E2E_GH_BASE_BRANCH",
+      ]);
+    };
+
+    await assert.rejects(
+      checkPrerequisites(context, reachableExecute(), env, loadEnv),
+      (error: unknown) => {
+        assert.ok(error instanceof RunnerError);
+        assert.equal(error.code, "unavailable");
+        assert.equal(
+          error.message,
+          "P1-E3 needs E2E_GH_TOKEN, E2E_GH_REPO, E2E_GH_BASE_BRANCH in .env.e2e",
+        );
+        return true;
+      },
+    );
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
+  }
+});
+
+test("KANTHORD_E2E_REAL_ORIGIN, KANTHORD_E2E_REAL_BRANCH and KANTHORD_E2E_REAL_TOKEN_FILE absent from env does not reject", async () => {
+  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e3-"));
+  mkdirSync(join(workDir, "plan"), { recursive: true });
+  try {
+    const context = fakeContext({
+      daemonHost: "daemon.example",
+      clientHost: "client.example",
+    });
+    const env = baseEnv(workDir);
+    assert.equal("KANTHORD_E2E_REAL_ORIGIN" in env, false);
+    assert.equal("KANTHORD_E2E_REAL_BRANCH" in env, false);
+    assert.equal("KANTHORD_E2E_REAL_TOKEN_FILE" in env, false);
+
+    const result = await checkPrerequisites(
+      context,
+      reachableExecute(),
+      env,
+      stubLoadEnv(),
+    );
+
+    assert.equal(result.planPath, env.KANTHORD_E2E_REAL_PLAN);
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
+  }
+});
+
 function fakeDriver(
   planDirectory: string,
   cliDispatch: (
     argv: readonly string[],
   ) => CommandRecord | Promise<CommandRecord>,
   deliverDirectoryCalls: Array<readonly [HostRole, string, string]>,
+  deliverTokenCalls: string[] = [],
 ): ExecutionDriver {
   return {
     name: "ssh",
@@ -293,8 +390,12 @@ function fakeDriver(
     async deliverConfig() {
       return "~/.kanthord-e2e-p1e3-test/config.json";
     },
-    async deliverToken() {
+    async deliverToken(token: string) {
+      deliverTokenCalls.push(token);
       return "~/.kanthord-e2e-p1e3-test/token";
+    },
+    async probeOrigin() {
+      throw new Error("not used by this test");
     },
     async assertBareMachine() {
       return;
@@ -375,7 +476,6 @@ function buildJourneyDispatch(
   planDirectory: string,
 ): (argv: readonly string[]) => CommandRecord | Promise<CommandRecord> {
   let planImportCalls = 0;
-  let statusCalls = 0;
   const findFlag = (
     argv: readonly string[],
     flag: string,
@@ -392,8 +492,9 @@ function buildJourneyDispatch(
       return record(argv, { stdout: "kanthord: registered real cred_1\n" });
     }
     if (argv[0] === "repository" && argv[1] === "register") {
+      const upstream = findFlag(argv, "--upstream") ?? "trunk";
       return record(argv, {
-        stdout: "kanthord: registered real repo_1\nkanthord: upstream trunk\n",
+        stdout: `kanthord: registered real repo_1\nkanthord: upstream ${upstream}\n`,
       });
     }
     if (argv[0] === "repository" && argv[1] === "show") {
@@ -456,7 +557,6 @@ async function withRealPlan<T>(
   try {
     mkdirSync(join(workDir, "plan"), { recursive: true });
     writeFileSync(join(workDir, "plan", "objective.md"), "a real objective\n");
-    writeFileSync(join(workDir, "token"), "a-real-token-1234\n");
     return await body(workDir);
   } finally {
     rmSync(workDir, { recursive: true, force: true });
@@ -486,7 +586,7 @@ const seventeenJourneyNames = [
 test("with a driver and every prerequisite present, runP1E3 calls runJourney exactly once, in the seventeen named order, against a profile with fixtureRoot null and expectedObjectIds null", async (t) => {
   await withRealPlan(async (workDir) => {
     // "delivered" is its own namespace, nested one level below workDir, so its
-    // "plan" child never collides with workDir's own pre-seeded "plan"/"token"
+    // "plan" child never collides with workDir's own pre-seeded "plan"
     // (the real source withRealPlan seeds), once journey.ts's planRoot walks up
     // from profile.planDirectory to its parent.
     const planDeliveryDirectory = join(workDir, "delivered", "plan");
@@ -510,13 +610,140 @@ test("with a driver and every prerequisite present, runP1E3 calls runJourney exa
     });
     t.after(() => context.releaseAll());
     const env = baseEnv(workDir);
+    const inputs = await checkPrerequisites(
+      context,
+      reachableExecute(),
+      env,
+      stubLoadEnv(),
+    );
 
-    await runP1E3(context, driver, env);
+    await runP1E3(context, driver, inputs);
 
     assert.deepEqual(context.assertionNames(), seventeenJourneyNames);
     assert.deepEqual(deliverDirectoryCalls, [
-      ["client", env.KANTHORD_E2E_REAL_PLAN, "plan"],
+      ["client", inputs.planPath, "plan"],
     ]);
+  });
+});
+
+test("runP1E3 calls deliverToken exactly once with the token, and passes origin, defaultBranch, localPlanPath, expectedObjectiveCount and expectedTaskCount straight through to createRealProfile", async (t) => {
+  await withRealPlan(async (workDir) => {
+    const planDeliveryDirectory = join(workDir, "delivered", "plan");
+    mkdirSync(planDeliveryDirectory, { recursive: true });
+    writeFileSync(
+      join(planDeliveryDirectory, "objective.md"),
+      "a real objective\n",
+    );
+
+    const deliverDirectoryCalls: Array<readonly [HostRole, string, string]> =
+      [];
+    const deliverTokenCalls: string[] = [];
+    const repositoryRegisterCalls: string[][] = [];
+    const dispatch = buildJourneyDispatch(planDeliveryDirectory);
+    const driver = fakeDriver(
+      planDeliveryDirectory,
+      (argv) => {
+        if (argv[0] === "repository" && argv[1] === "register") {
+          repositoryRegisterCalls.push([...argv]);
+        }
+        return dispatch(argv);
+      },
+      deliverDirectoryCalls,
+      deliverTokenCalls,
+    );
+
+    const context = fakeContext({
+      daemonHost: "daemon.example",
+      clientHost: "client.example",
+    });
+    t.after(() => context.releaseAll());
+
+    const inputs: RealInputs = {
+      origin: "https://github.com/kanthorlabs/kanthord.git",
+      defaultBranch: "main",
+      token: "gh-secret",
+      planPath: join(workDir, "plan"),
+      expectedObjectiveCount: 2,
+      expectedTaskCount: 4,
+    };
+
+    await runP1E3(context, driver, inputs);
+
+    assert.deepEqual(deliverTokenCalls, ["gh-secret"]);
+    assert.equal(repositoryRegisterCalls.length, 1);
+    assert.ok(repositoryRegisterCalls[0]?.includes(inputs.origin));
+    assert.ok(repositoryRegisterCalls[0]?.includes(inputs.defaultBranch));
+    assert.deepEqual(deliverDirectoryCalls, [
+      ["client", inputs.planPath, "plan"],
+    ]);
+  });
+});
+
+test("SECURITY: the token loaded from .env.e2e appears in no recorded command argv, no bundle assertion and no attached log", async (t) => {
+  await withRealPlan(async (workDir) => {
+    const planDeliveryDirectory = join(workDir, "delivered", "plan");
+    mkdirSync(planDeliveryDirectory, { recursive: true });
+    writeFileSync(
+      join(planDeliveryDirectory, "objective.md"),
+      "a real objective\n",
+    );
+
+    const deliverDirectoryCalls: Array<readonly [HostRole, string, string]> =
+      [];
+    const deliverTokenCalls: string[] = [];
+    const commands: CommandRecord[] = [];
+    const attachedLogs: string[] = [];
+
+    const context = fakeContext({
+      daemonHost: "daemon.example",
+      clientHost: "client.example",
+      sink: {
+        print(): void {},
+        record(entry: CommandRecord): void {
+          commands.push(entry);
+        },
+      },
+      attachLog(_name: string, text: string): void {
+        attachedLogs.push(text);
+      },
+    });
+    t.after(() => context.releaseAll());
+
+    const dispatch = buildJourneyDispatch(planDeliveryDirectory);
+    const driver = fakeDriver(
+      planDeliveryDirectory,
+      (argv) => {
+        const result = dispatch(argv);
+        context.sink.record(result as CommandRecord);
+        return result;
+      },
+      deliverDirectoryCalls,
+      deliverTokenCalls,
+    );
+
+    const token = "gh-secret-value-should-never-leak";
+    const inputs: RealInputs = {
+      origin: "https://github.com/kanthorlabs/kanthord.git",
+      defaultBranch: "trunk",
+      token,
+      planPath: join(workDir, "plan"),
+      expectedObjectiveCount: 2,
+      expectedTaskCount: 4,
+    };
+
+    await runP1E3(context, driver, inputs);
+
+    const logs = await driver.collectLogs();
+    const commandsText = commands
+      .map((entry) => entry.argv.join(" "))
+      .join("\n");
+    const assertionsText = context.assertionNames().join("\n");
+    const logsText = [...attachedLogs, ...Object.values(logs)].join("\n");
+
+    assert.equal(commandsText.includes(token), false);
+    assert.equal(assertionsText.includes(token), false);
+    assert.equal(logsText.includes(token), false);
+    assert.deepEqual(deliverTokenCalls, [token]);
   });
 });
 

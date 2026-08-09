@@ -20,6 +20,14 @@ export function bundleDirectory(tag: string, scenarioId: ScenarioId): string {
   return join(runDirectory(tag), scenarioId);
 }
 
+export function verifyRecordPath(tag: string): string {
+  return join(runDirectory(tag), "verify.json");
+}
+
+export function acceptanceRecordPath(tag: string): string {
+  return join(runDirectory(tag), "acceptance.json");
+}
+
 export async function claimBundleDirectory(
   tag: string,
   scenarioId: ScenarioId,

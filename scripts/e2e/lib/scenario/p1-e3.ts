@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-
 import { RunnerError } from "../errors.ts";
 import { secrets } from "../redact.ts";
 import { runCommand } from "../command.ts";
@@ -9,11 +7,9 @@ import type { ExecutionDriver } from "../driver/index.ts";
 import type { ScenarioDeclaration } from "./index.ts";
 import type { ScenarioContext } from "./context.ts";
 import { runJourney } from "./journey.ts";
+import { loadE2eEnv, E2eEnvError, type E2eEnv } from "../../env.ts";
 
 const requiredEnvVars = [
-  "KANTHORD_E2E_REAL_ORIGIN",
-  "KANTHORD_E2E_REAL_BRANCH",
-  "KANTHORD_E2E_REAL_TOKEN_FILE",
   "KANTHORD_E2E_REAL_PLAN",
   "KANTHORD_E2E_REAL_OBJECTIVES",
   "KANTHORD_E2E_REAL_TASKS",
@@ -36,11 +32,21 @@ function sshArgv(host: string, argv: readonly string[]): string[] {
   ];
 }
 
+export type RealInputs = Readonly<{
+  origin: string;
+  defaultBranch: string;
+  token: string;
+  planPath: string;
+  expectedObjectiveCount: number;
+  expectedTaskCount: number;
+}>;
+
 export async function checkPrerequisites(
   context: ScenarioContext,
   execute: SshExecutor,
   env: Readonly<Record<string, string | undefined>>,
-): Promise<void> {
+  loadEnv: () => E2eEnv = loadE2eEnv,
+): Promise<RealInputs> {
   const { daemonHost, clientHost } = context;
 
   if (daemonHost === null) {
@@ -69,6 +75,19 @@ export async function checkPrerequisites(
     );
   }
 
+  let e2eEnv: E2eEnv;
+  try {
+    e2eEnv = loadEnv();
+  } catch (error) {
+    if (error instanceof E2eEnvError) {
+      throw new RunnerError(
+        "unavailable",
+        `P1-E3 needs ${error.missing.join(", ")} in .env.e2e`,
+      );
+    }
+    throw error;
+  }
+
   const daemonPing = await execute(
     { role: "daemon", host: daemonHost },
     sshArgv(daemonHost, ["true"]),
@@ -90,32 +109,33 @@ export async function checkPrerequisites(
       `P1-E3 cannot reach the client host ${clientHost}`,
     );
   }
+
+  return {
+    origin: `https://github.com/${e2eEnv.ghRepo}.git`,
+    defaultBranch: e2eEnv.ghBaseBranch,
+    token: e2eEnv.ghToken,
+    planPath: env.KANTHORD_E2E_REAL_PLAN as string,
+    expectedObjectiveCount: Number.parseInt(
+      env.KANTHORD_E2E_REAL_OBJECTIVES as string,
+      10,
+    ),
+    expectedTaskCount: Number.parseInt(
+      env.KANTHORD_E2E_REAL_TASKS as string,
+      10,
+    ),
+  };
 }
 
 export async function runP1E3(
   context: ScenarioContext,
   driver: ExecutionDriver,
-  env: Readonly<Record<string, string | undefined>>,
+  inputs: RealInputs,
 ): Promise<void> {
-  const origin = env.KANTHORD_E2E_REAL_ORIGIN as string;
-  const branch = env.KANTHORD_E2E_REAL_BRANCH as string;
-  const tokenFile = env.KANTHORD_E2E_REAL_TOKEN_FILE as string;
-  const localPlanPath = env.KANTHORD_E2E_REAL_PLAN as string;
-  const expectedObjectiveCount = Number.parseInt(
-    env.KANTHORD_E2E_REAL_OBJECTIVES as string,
-    10,
-  );
-  const expectedTaskCount = Number.parseInt(
-    env.KANTHORD_E2E_REAL_TASKS as string,
-    10,
-  );
-
-  const tokenValue = (await readFile(tokenFile, "utf8")).trim();
-  secrets.hold(tokenValue);
-  const deliveredTokenPath = await driver.deliverToken(tokenValue);
+  secrets.hold(inputs.token);
+  const deliveredTokenPath = await driver.deliverToken(inputs.token);
 
   const profile = await createRealProfile(context, driver, {
-    origin,
+    origin: inputs.origin,
     credentialArguments: [
       "--name",
       "real",
@@ -128,10 +148,10 @@ export async function runP1E3(
       "--token-file",
       deliveredTokenPath,
     ],
-    defaultBranch: branch,
-    localPlanPath,
-    expectedObjectiveCount,
-    expectedTaskCount,
+    defaultBranch: inputs.defaultBranch,
+    localPlanPath: inputs.planPath,
+    expectedObjectiveCount: inputs.expectedObjectiveCount,
+    expectedTaskCount: inputs.expectedTaskCount,
   });
 
   await runJourney(context, driver, profile);
@@ -149,7 +169,7 @@ async function run(context: ScenarioContext): Promise<void> {
     return runCommand(context.sink, { argv: [...argv], stdin });
   };
 
-  await checkPrerequisites(context, execute, process.env);
+  const inputs = await checkPrerequisites(context, execute, process.env);
 
   const driver = await createSshDriver(context, {
     daemonHost: context.daemonHost as string,
@@ -157,7 +177,7 @@ async function run(context: ScenarioContext): Promise<void> {
     execute,
   });
 
-  await runP1E3(context, driver, process.env);
+  await runP1E3(context, driver, inputs);
 
   const logs = await driver.collectLogs();
   const commandsText = captured

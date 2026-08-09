@@ -63,6 +63,9 @@ function buildRefusalDriver(
     async deliverToken() {
       throw new Error("not used by this test");
     },
+    async probeOrigin() {
+      throw new Error("not used by this test");
+    },
     async assertBareMachine() {},
     async cli() {
       throw new Error("not used by this test");

@@ -1,5 +1,6 @@
 import type { BundleIdentity } from "../bundle.ts";
 import type { CommandRecord } from "../command.ts";
+import type { OriginProbeInput, ProbeRow } from "./origin-probe.ts";
 
 export type DriverName = "local" | "podman" | "ssh";
 
@@ -53,6 +54,7 @@ export type ExecutionDriver = Readonly<{
   ): Promise<void>;
   deliverConfig(config: DaemonConfig): Promise<string>;
   deliverToken(token: string): Promise<string>;
+  probeOrigin(input: OriginProbeInput): Promise<readonly ProbeRow[]>;
   assertBareMachine(): Promise<void>;
   cli(argv: readonly string[]): Promise<CommandRecord>;
   issue: HttpIssuer;
@@ -74,6 +76,7 @@ export const driverMethodNames: readonly (keyof ExecutionDriver)[] = [
   "retrieveDirectory",
   "deliverConfig",
   "deliverToken",
+  "probeOrigin",
   "assertBareMachine",
   "cli",
   "issue",

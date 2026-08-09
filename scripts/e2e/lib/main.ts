@@ -11,6 +11,7 @@ import {
 import {
   createBundleWriter,
   readCommit,
+  readProposalRevision,
   writeBundle,
   type Bundle,
 } from "./bundle.ts";
@@ -25,6 +26,20 @@ import {
 import { runCommand, type CommandSink } from "./command.ts";
 import { redact } from "./redact.ts";
 import type { PodmanExecutor } from "./driver/podman.ts";
+import {
+  recordVerify,
+  type RecordVerifyDependencies,
+} from "./record/verify.ts";
+import {
+  driveValues,
+  judgmentValues,
+  recordAcceptance,
+  type Drive,
+  type Judgment,
+  type RecordAcceptanceDependencies,
+  type RecordAcceptanceInput,
+} from "./record/acceptance.ts";
+import { verdict } from "./record/verdict.ts";
 
 const knownScenarioIds: readonly ScenarioId[] = [
   "P1-E1",
@@ -48,7 +63,26 @@ export type RunInvocation = Readonly<{
 
 export type ReclaimInvocation = Readonly<{ reclaimTag: string }>;
 
-export type Invocation = RunInvocation | ReclaimInvocation;
+export type MintTagInvocation = Readonly<{ mintTag: string }>;
+
+export type RecordVerifyInvocation = Readonly<{ recordVerifyTag: string }>;
+
+export type RecordAcceptanceInvocation = Readonly<{
+  recordAcceptance: RecordAcceptanceInput;
+}>;
+
+export type VerdictInvocation = Readonly<{
+  verdictTag: string;
+  scenariosOnly: boolean;
+}>;
+
+export type Invocation =
+  | RunInvocation
+  | ReclaimInvocation
+  | MintTagInvocation
+  | RecordVerifyInvocation
+  | RecordAcceptanceInvocation
+  | VerdictInvocation;
 
 export function parseArguments(
   argv: readonly string[],
@@ -59,17 +93,55 @@ export function parseArguments(
   let daemonHost: string | null = null;
   let clientHost: string | null = null;
   let reclaimTag: string | undefined;
+  let mintTagRequested = false;
+  let recordVerifyRequested = false;
+  let recordAcceptanceRequested = false;
+  let by: string | undefined;
+  let drive: string | undefined;
+  let judgment: string | undefined;
+  let noteFile: string | undefined;
+  let verdictTag: string | undefined;
+  let scenariosOnly = false;
 
   let index = 0;
   while (index < argv.length) {
     const token = argv[index] as string;
 
     if (token.startsWith("--")) {
+      if (token === "--mint-tag") {
+        mintTagRequested = true;
+        index += 1;
+        continue;
+      }
+
+      if (token === "--record-verify") {
+        recordVerifyRequested = true;
+        index += 1;
+        continue;
+      }
+
+      if (token === "--record-acceptance") {
+        recordAcceptanceRequested = true;
+        index += 1;
+        continue;
+      }
+
+      if (token === "--scenarios-only") {
+        scenariosOnly = true;
+        index += 1;
+        continue;
+      }
+
       if (
         token !== "--tag" &&
         token !== "--daemon-host" &&
         token !== "--client-host" &&
-        token !== "--reclaim"
+        token !== "--reclaim" &&
+        token !== "--by" &&
+        token !== "--drive" &&
+        token !== "--judgment" &&
+        token !== "--note-file" &&
+        token !== "--verdict"
       ) {
         throw new RunnerError("invalid-argument", `unknown option ${token}`);
       }
@@ -91,8 +163,24 @@ export function parseArguments(
         daemonHost = value;
       } else if (token === "--client-host") {
         clientHost = value;
-      } else {
+      } else if (token === "--reclaim") {
         reclaimTag = value;
+      } else if (token === "--by") {
+        by = value;
+      } else if (token === "--drive") {
+        drive = value;
+      } else if (token === "--judgment") {
+        judgment = value;
+      } else if (token === "--note-file") {
+        noteFile = value;
+      } else {
+        if (!tagPattern.test(value)) {
+          throw new RunnerError(
+            "invalid-argument",
+            `tag ${value} is not a valid tag`,
+          );
+        }
+        verdictTag = value;
       }
 
       index += 2;
@@ -100,6 +188,202 @@ export function parseArguments(
       positionals.push(token);
       index += 1;
     }
+  }
+
+  if (mintTagRequested) {
+    if (positionals.length > 0) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--mint-tag is mutually exclusive with a scenario id",
+      );
+    }
+    if (recordVerifyRequested) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--mint-tag is mutually exclusive with --record-verify",
+      );
+    }
+    if (recordAcceptanceRequested) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--mint-tag is mutually exclusive with --record-acceptance",
+      );
+    }
+    if (verdictTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--mint-tag is mutually exclusive with --verdict",
+      );
+    }
+    if (tag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--mint-tag is mutually exclusive with --tag",
+      );
+    }
+    if (reclaimTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--mint-tag is mutually exclusive with --reclaim",
+      );
+    }
+
+    return { mintTag: mintedTag };
+  }
+
+  if (recordVerifyRequested) {
+    if (positionals.length > 0) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-verify is mutually exclusive with a scenario id",
+      );
+    }
+    if (reclaimTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-verify is mutually exclusive with --reclaim",
+      );
+    }
+    if (recordAcceptanceRequested) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-verify is mutually exclusive with --record-acceptance",
+      );
+    }
+    if (verdictTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-verify is mutually exclusive with --verdict",
+      );
+    }
+    if (tag === undefined) {
+      throw new RunnerError("invalid-argument", "--record-verify needs --tag");
+    }
+
+    return { recordVerifyTag: tag };
+  }
+
+  if (recordAcceptanceRequested) {
+    if (positionals.length > 0) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-acceptance is mutually exclusive with a scenario id",
+      );
+    }
+    if (reclaimTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-acceptance is mutually exclusive with --reclaim",
+      );
+    }
+    if (verdictTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-acceptance is mutually exclusive with --verdict",
+      );
+    }
+    if (tag === undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-acceptance needs --tag",
+      );
+    }
+    if (by === undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-acceptance needs --by",
+      );
+    }
+    if (drive === undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-acceptance needs --drive",
+      );
+    }
+    if (judgment === undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-acceptance needs --judgment",
+      );
+    }
+    if (!(driveValues as readonly string[]).includes(drive)) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--drive must be confirmed or not-confirmed",
+      );
+    }
+    if (!(judgmentValues as readonly string[]).includes(judgment)) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--judgment must be accepted or rejected",
+      );
+    }
+    if (drive === "not-confirmed" && noteFile === undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--note-file is required for --drive not-confirmed",
+      );
+    }
+    if (judgment === "rejected" && noteFile === undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--note-file is required for --judgment rejected",
+      );
+    }
+
+    return {
+      recordAcceptance: {
+        tag,
+        by,
+        drive: drive as Drive,
+        judgment: judgment as Judgment,
+        noteFile: noteFile ?? null,
+      },
+    };
+  }
+
+  for (const [name, value] of [
+    ["--by", by],
+    ["--drive", drive],
+    ["--judgment", judgment],
+    ["--note-file", noteFile],
+  ] as const) {
+    if (value !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        `${name} applies to --record-acceptance only`,
+      );
+    }
+  }
+
+  if (verdictTag !== undefined) {
+    if (positionals.length > 0) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--verdict is mutually exclusive with a scenario id",
+      );
+    }
+    if (tag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--verdict is mutually exclusive with --tag",
+      );
+    }
+    if (reclaimTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--verdict is mutually exclusive with --reclaim",
+      );
+    }
+
+    return { verdictTag, scenariosOnly };
+  }
+
+  if (scenariosOnly) {
+    throw new RunnerError(
+      "invalid-argument",
+      "--scenarios-only applies to --verdict only",
+    );
   }
 
   if (reclaimTag !== undefined) {
@@ -196,6 +480,41 @@ function createDefaultExecute(): PodmanExecutor {
     });
 }
 
+function createDefaultRecordDependencies(): RecordAcceptanceDependencies {
+  const silentSink: CommandSink = {
+    print: () => undefined,
+    record: () => undefined,
+  };
+  return {
+    readCommit(): Promise<string> {
+      return readCommit(silentSink, "git");
+    },
+    readProposalRevision(): Promise<string> {
+      return readProposalRevision(silentSink, "git");
+    },
+    now(): Date {
+      return new Date();
+    },
+  };
+}
+
+function createDefaultVerifyDependencies(): RecordVerifyDependencies {
+  const silentSink: CommandSink = {
+    print: () => undefined,
+    record: () => undefined,
+  };
+  return {
+    async run(argv: readonly string[]): Promise<number> {
+      const record = await runCommand(silentSink, {
+        argv: [...argv],
+        env: { PATH: process.env.PATH ?? "" },
+      });
+      return record.exitCode;
+    },
+    ...createDefaultRecordDependencies(),
+  };
+}
+
 function printReclaimReport(
   report: ReclaimReport,
   failureDetailsByKind: ReadonlyMap<string, ReclaimFailureDetail>,
@@ -217,10 +536,52 @@ function printReclaimReport(
 
 export async function main(
   argv: readonly string[],
-  dependencies?: Readonly<{ execute?: PodmanExecutor }>,
+  dependencies?: Readonly<{
+    execute?: PodmanExecutor;
+    verify?: RecordVerifyDependencies;
+    acceptance?: RecordAcceptanceDependencies;
+  }>,
 ): Promise<number> {
   try {
     const invocation = parseArguments(argv, mintTag(new Date(), ulid));
+
+    if ("mintTag" in invocation) {
+      process.stdout.write(`${invocation.mintTag}\n`);
+      return 0;
+    }
+
+    if ("recordVerifyTag" in invocation) {
+      const record = await recordVerify(
+        dependencies?.verify ?? createDefaultVerifyDependencies(),
+        invocation.recordVerifyTag,
+      );
+      return record.exitCode;
+    }
+
+    if ("recordAcceptance" in invocation) {
+      await recordAcceptance(
+        dependencies?.acceptance ?? createDefaultRecordDependencies(),
+        invocation.recordAcceptance,
+      );
+      return 0;
+    }
+
+    if ("verdictTag" in invocation) {
+      const failures = await verdict({
+        tag: invocation.verdictTag,
+        scenariosOnly: invocation.scenariosOnly,
+      });
+      for (const failure of failures) {
+        process.stderr.write(
+          `e2e: verdict: ${failure.axis} axis: ${failure.reason}\n`,
+        );
+      }
+      const [firstFailure] = failures;
+      if (firstFailure === undefined) {
+        return 0;
+      }
+      return exitCodeFor(firstFailure.code);
+    }
 
     if ("reclaimTag" in invocation) {
       const execute = dependencies?.execute ?? createDefaultExecute();

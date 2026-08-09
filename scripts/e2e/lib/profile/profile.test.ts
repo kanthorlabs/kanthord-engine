@@ -6,9 +6,12 @@ import { createFixtureProfile } from "./fixture.ts";
 import { createRealProfile } from "./real.ts";
 import { createLedger } from "../resources.ts";
 import { secrets } from "../redact.ts";
+import { RunnerError } from "../errors.ts";
 import { fixtureObjectIds } from "../../../../test/helpers/remote/seed.ts";
+import { httpWrongCredential } from "../../../../test/helpers/remote/http.ts";
 import type { ScenarioContext } from "../scenario/context.ts";
 import type { ExecutionDriver, HostRole } from "../driver/index.ts";
+import type { OriginProbeInput, ProbeRow } from "../driver/origin-probe.ts";
 import type { ResourceHandle } from "../resources.ts";
 
 const expectedFieldNames = [
@@ -49,6 +52,16 @@ async function fakeDeliverToken(_token: string): Promise<string> {
   return "/tmp/deliver/token";
 }
 
+async function passingProbe(
+  _input: OriginProbeInput,
+): Promise<readonly ProbeRow[]> {
+  return [
+    { name: "fixture-head-symref", passed: true },
+    { name: "fixture-fetch", passed: true },
+    { name: "fixture-receive-pack-refuses-wrong-token", passed: true },
+  ];
+}
+
 function fakeDriver(
   name: ExecutionDriver["name"],
   deliverDirectory: ExecutionDriver["deliverDirectory"],
@@ -62,6 +75,7 @@ function fakeDriver(
     retrieveDirectory: notImplemented,
     deliverConfig: notImplemented,
     deliverToken: notImplemented,
+    probeOrigin: passingProbe,
     assertBareMachine: notImplemented,
     cli: notImplemented,
     issue: notImplemented,
@@ -238,4 +252,155 @@ test("the fixture profile and the real profile carry the same key set", async ()
   );
 
   await ledger1.releaseAll();
+});
+
+test("createFixtureProfile on a podman driver probes the origin once with the delivered token path, the main branch and the wrong credential", async () => {
+  const ledger = createLedger();
+  const fixtureOrigin = "http://127.0.0.1:7422";
+  const probeCalls: OriginProbeInput[] = [];
+  const driver = fakeDriver(
+    "podman",
+    async (_role: HostRole, _source: string, name: string) =>
+      `/tmp/deliver/${name}`,
+    {
+      topology: { fixtureOrigin },
+      deliverToken: async (_token: string) => "/tmp/deliver/token-podman",
+      probeOrigin: async (input: OriginProbeInput) => {
+        probeCalls.push(input);
+        return passingProbe(input);
+      },
+    },
+  );
+
+  await createFixtureProfile(fakeContext(ledger), driver);
+
+  assert.equal(probeCalls.length, 1);
+  assert.equal(probeCalls[0]?.tokenPath, "/tmp/deliver/token-podman");
+  assert.equal(probeCalls[0]?.defaultBranch, "main");
+  assert.equal(probeCalls[0]?.wrongToken, httpWrongCredential.token);
+
+  await ledger.releaseAll();
+});
+
+test("createFixtureProfile records the three probe rows through context.assert with expected true", async () => {
+  const ledger = createLedger();
+  const assertions: Array<{
+    name: string;
+    expected: unknown;
+    actual: unknown;
+  }> = [];
+  const context: ScenarioContext = {
+    ...fakeContext(ledger),
+    assert(name: string, expected: unknown, actual: unknown): void {
+      assertions.push({ name, expected, actual });
+    },
+  };
+  const driver = fakeDriver(
+    "local",
+    async (_role: HostRole, _source: string, name: string) =>
+      `/tmp/deliver/${name}`,
+    { deliverToken: fakeDeliverToken },
+  );
+
+  await createFixtureProfile(context, driver);
+
+  assert.deepEqual(assertions, [
+    { name: "fixture-head-symref", expected: true, actual: true },
+    { name: "fixture-fetch", expected: true, actual: true },
+    {
+      name: "fixture-receive-pack-refuses-wrong-token",
+      expected: true,
+      actual: true,
+    },
+  ]);
+
+  await ledger.releaseAll();
+});
+
+test("createFixtureProfile rejects with unavailable when a probe row fails, and records it first", async () => {
+  const ledger = createLedger();
+  const assertions: Array<{
+    name: string;
+    expected: unknown;
+    actual: unknown;
+  }> = [];
+  const context: ScenarioContext = {
+    ...fakeContext(ledger),
+    assert(name: string, expected: unknown, actual: unknown): void {
+      assertions.push({ name, expected, actual });
+      if (actual !== expected) {
+        throw new RunnerError("assertion-failed", name);
+      }
+    },
+  };
+  const driver = fakeDriver(
+    "local",
+    async (_role: HostRole, _source: string, name: string) =>
+      `/tmp/deliver/${name}`,
+    {
+      deliverToken: fakeDeliverToken,
+      async probeOrigin(): Promise<readonly ProbeRow[]> {
+        return [
+          { name: "fixture-head-symref", passed: false },
+          { name: "fixture-fetch", passed: true },
+          { name: "fixture-receive-pack-refuses-wrong-token", passed: true },
+        ];
+      },
+    },
+  );
+
+  await assert.rejects(
+    createFixtureProfile(context, driver),
+    (error: unknown) =>
+      error instanceof RunnerError &&
+      error.code === "unavailable" &&
+      error.message === "fixture row fixture-head-symref failed",
+  );
+
+  assert.deepEqual(assertions[0], {
+    name: "fixture-head-symref",
+    expected: true,
+    actual: false,
+  });
+
+  await ledger.releaseAll();
+});
+
+test("createFixtureProfile issues probeOrigin before any journey command, and issues no cli call itself", async () => {
+  const ledger = createLedger();
+  const calls: string[] = [];
+  const driver = fakeDriver(
+    "local",
+    async (_role: HostRole, _source: string, name: string) => {
+      calls.push("deliverDirectory");
+      return `/tmp/deliver/${name}`;
+    },
+    {
+      deliverToken: async (_token: string) => {
+        calls.push("deliverToken");
+        return "/tmp/deliver/token";
+      },
+      async probeOrigin(input: OriginProbeInput): Promise<readonly ProbeRow[]> {
+        calls.push("probeOrigin");
+        return passingProbe(input);
+      },
+      async cli(argv: readonly string[]) {
+        calls.push("cli");
+        return {
+          argv,
+          cwd: process.cwd(),
+          exitCode: 0,
+          stdout: "",
+          stderr: "",
+        };
+      },
+    },
+  );
+
+  await createFixtureProfile(fakeContext(ledger), driver);
+
+  assert.equal(calls.includes("probeOrigin"), true);
+  assert.equal(calls.includes("cli"), false);
+
+  await ledger.releaseAll();
 });

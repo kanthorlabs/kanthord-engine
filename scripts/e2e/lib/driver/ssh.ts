@@ -8,6 +8,7 @@ import { pollHealth } from "../podman/readiness.ts";
 import type { CommandRecord } from "../command.ts";
 import type { BundleIdentity } from "../bundle.ts";
 import type { ScenarioContext } from "../scenario/context.ts";
+import type { OriginProbeInput, ProbeRow } from "./origin-probe.ts";
 import type {
   DaemonConfig,
   DaemonHandle,
@@ -203,6 +204,15 @@ export async function createSshDriver(
     return path;
   }
 
+  async function probeOrigin(
+    _input: OriginProbeInput,
+  ): Promise<readonly ProbeRow[]> {
+    throw new RunnerError(
+      "unavailable",
+      "the ssh driver runs the real profile and probes no fixture origin",
+    );
+  }
+
   async function deliverConfig(config: DaemonConfig): Promise<string> {
     const target = daemonTarget;
     const masterKeyPath = `${home}/master-key`;
@@ -388,6 +398,7 @@ export async function createSshDriver(
     retrieveDirectory,
     deliverConfig,
     deliverToken,
+    probeOrigin,
     assertBareMachine,
     async cli(argv: readonly string[]): Promise<CommandRecord> {
       return ssh.execute({ role: "client", host: ssh.clientHost }, argv);

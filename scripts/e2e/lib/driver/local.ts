@@ -24,6 +24,8 @@ import {
 } from "../podman/readiness.ts";
 import type { BundleIdentity } from "../bundle.ts";
 import type { ScenarioContext } from "../scenario/context.ts";
+import { runOriginProbe } from "./origin-probe.ts";
+import type { OriginProbeInput, ProbeRow } from "./origin-probe.ts";
 import type {
   DaemonConfig,
   DaemonHandle,
@@ -251,6 +253,16 @@ export async function createLocalDriver(
       const path = join(home, "token");
       await writeFile(path, `${value}\n`, { mode: 0o600 });
       return path;
+    },
+    async probeOrigin(input: OriginProbeInput): Promise<readonly ProbeRow[]> {
+      return runOriginProbe(
+        (script) =>
+          runCommand(context.sink, {
+            argv: ["/bin/sh", "-c", script],
+            env: { PATH: process.env.PATH ?? "" },
+          }),
+        input,
+      );
     },
     async assertBareMachine(): Promise<void> {
       try {

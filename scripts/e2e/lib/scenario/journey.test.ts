@@ -347,6 +347,9 @@ function buildFixture(overrides: FixtureOverrides): Readonly<{
     async deliverToken() {
       return join(overrides.workDir, "token");
     },
+    async probeOrigin() {
+      throw new Error("not used by this test");
+    },
     async assertBareMachine() {
       if (overrides.bareMachinePresent === true) {
         throw new RunnerError(

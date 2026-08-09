@@ -9,11 +9,12 @@ import {
   bundleSchemaVersion,
   createBundleWriter,
   hashFixtures,
+  readProposalRevision,
   serializeBundle,
   writeBundle,
 } from "./bundle.ts";
 import { RunnerError } from "./errors.ts";
-import type { CommandRecord } from "./command.ts";
+import type { CommandInput, CommandRecord, CommandSink } from "./command.ts";
 import { redactedMarker, secrets } from "./redact.ts";
 
 function baseInput() {
@@ -396,4 +397,32 @@ test("SECURITY: writeBundle writes a redacted bundle.json and a redacted log fil
   assert.equal(writtenJson.includes(heldSecret), false);
   assert.equal(stdoutLog.includes(heldSecret), false);
   assert.equal(stdoutLog.includes(redactedMarker), true);
+});
+
+test("readProposalRevision drives an injected executor and returns its exact pinned stdout", async () => {
+  const calls: CommandInput[] = [];
+  const pinnedStdout = "0123456789abcdef0123456789abcdef01234567\n";
+  const fakeExecute = async (
+    sink: CommandSink,
+    input: CommandInput,
+  ): Promise<CommandRecord> => {
+    calls.push(input);
+    const record: CommandRecord = {
+      argv: input.argv,
+      cwd: "/nonexistent",
+      exitCode: 0,
+      stdout: pinnedStdout,
+      stderr: "",
+    };
+    sink.record(record);
+    return record;
+  };
+  const sink: CommandSink = { print: () => {}, record: () => {} };
+
+  const revision = await readProposalRevision(sink, "git", fakeExecute);
+
+  assert.equal(revision, "0123456789abcdef0123456789abcdef01234567");
+  assert.deepEqual(calls, [
+    { argv: ["git", "log", "-1", "--format=%H", "--", "docs/proposal"] },
+  ]);
 });

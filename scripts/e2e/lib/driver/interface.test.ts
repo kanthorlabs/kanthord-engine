@@ -6,6 +6,7 @@ import { createLocalDriver } from "./local.ts";
 import { createPodmanDriver } from "./podman.ts";
 import { createSshDriver } from "./ssh.ts";
 import { createLedger } from "../resources.ts";
+import { RunnerError } from "../errors.ts";
 import type { ScenarioContext } from "../scenario/context.ts";
 import type { CommandRecord } from "../command.ts";
 
@@ -17,6 +18,7 @@ const expectedMethodNames = [
   "retrieveDirectory",
   "deliverConfig",
   "deliverToken",
+  "probeOrigin",
   "assertBareMachine",
   "cli",
   "issue",
@@ -125,4 +127,27 @@ test("createSshDriver's constructed driver exposes exactly the driverMethodNames
   assertDriverShape(driver);
   assert.equal(driver.name, "ssh");
   assert.equal(executed, false, "constructing the driver must not spawn ssh");
+});
+
+test("createSshDriver's probeOrigin rejects with unavailable, because the real profile has no fixture origin", async () => {
+  const driver = await createSshDriver(fakeContext(), {
+    daemonHost: "daemon.example",
+    clientHost: "client.example",
+    execute: async (
+      _target: Readonly<{ role: "daemon" | "client"; host: string }>,
+      argv: readonly string[],
+    ): Promise<CommandRecord> => fakeCommandRecord(argv),
+  });
+
+  await assert.rejects(
+    driver.probeOrigin({
+      origin: "http://example.invalid/fixture.git",
+      username: "writer",
+      tokenPath: "/tmp/token",
+      wrongToken: "bad-tok",
+      defaultBranch: "main",
+    }),
+    (error: unknown) =>
+      error instanceof RunnerError && error.code === "unavailable",
+  );
 });
