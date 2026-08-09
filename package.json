@@ -27,6 +27,7 @@
     "verify": "npm run typecheck && npm test && npm run lint && node scripts/verify-db-status.ts",
     "verify:handoff": "node scripts/verify-handoff.mjs",
     "verify:guards": "scripts/lane-check.test.sh && scripts/turn-snapshot.test.sh && scripts/memory-append-only.test.sh",
+    "contract:publish": "node scripts/publish-contract.ts",
     "prepare": "husky"
   },
   "lint-staged": {

@@ -10,13 +10,15 @@ These files are the contract at operation level. Each row declares an `operation
 
 These files never restate a request or response field schema. The typed route registry in `src/http/contract/` holds every schema on zod, one authored module per domain, and it generates `openapi.yaml`. `npm run verify` asserts that the set of `operationId`, method and path in the registry equals the set declared here. The two artifacts do not overlap, so they cannot drift.
 
-### `openapi.yaml` is generated, and it is not committed
+### OpenAPI documents are generated, and they are not committed
 
 One self-contained OpenAPI 3.0.3 document, with internal `#/components/…` references only. An external `$ref` split is refused: a generator, a viewer and a publish step each resolve relative file references differently, copying the root alone yields a broken specification, and a consumer bundles it back into one document anyway.
 
-The file is **not committed**, because the reviewable contract change is already the zod module and the table in this directory. A generated diff of expanded schemas is redundant evidence that hides the authored change, and a committed artifact needs a regenerate-and-compare gate that mutates the working tree to check itself.
+The publication also writes one self-contained document under `features/<namespace>.yaml` for each operation namespace. Each feature document carries its own schemas and references, so a UI client can generate one feature without bundling other files. The master document remains the complete API contract.
 
-`npm run verify` generates the document into a temporary directory, validates it with an independent OpenAPI validator, asserts operation parity against the registry, asserts that every reference resolves, and deletes it. Generation is canonical: fixed path, method and component order, LF endings, one trailing newline. A release publishes the generated document as a named artifact beside the daemon and the CLI, and a client generator consumes that artifact. Neither the validator nor a client generator ever starts the daemon.
+The generated files are **not committed**, because the reviewable contract change is already the zod module and the table in this directory. A generated diff of expanded schemas is redundant evidence that hides the authored change, and a committed artifact needs a regenerate-and-compare gate that mutates the working tree to check itself.
+
+`npm run verify` generates the master document into a temporary directory, validates it with an independent OpenAPI validator, asserts operation parity against the registry, asserts that every reference resolves, and deletes it. `npm run contract:publish -- <output-directory>` publishes the master document, feature documents and examples. Generation is canonical: fixed path, method and component order, LF endings, one trailing newline. A release publishes the generated documents as a named artifact beside the daemon and the CLI, and a client generator consumes them. Neither the validator nor a client generator ever starts the daemon.
 
 ## Domains
 

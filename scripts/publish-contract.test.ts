@@ -1,6 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import SwaggerParser from "@apidevtools/swagger-parser";
 import {
   existsSync,
   mkdtempSync,
@@ -12,11 +13,15 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import YAML from "yaml";
 
 import { publishContract } from "./publish-contract.ts";
 import { KANTHORD_VERSION } from "../src/domain/version.ts";
 import { buildErrorEnvelope } from "../src/http/contract/errors.ts";
-import { renderOpenApiYaml } from "../src/http/contract/openapi.ts";
+import {
+  openApiFeatures,
+  renderOpenApiYaml,
+} from "../src/http/contract/openapi.ts";
 import { registry } from "../src/http/contract/registry.ts";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -35,6 +40,8 @@ const publishedEntries = registry.filter(
 const publishedOperationIds = publishedEntries.map(
   (entry) => entry.operationId,
 );
+const features = openApiFeatures();
+const featureNames = features.map((feature) => feature.name);
 
 const directory = mkdtempSync(join(tmpdir(), "kanthord-contract-"));
 after(() => {
@@ -43,8 +50,8 @@ after(() => {
 
 test("scripts/publish-contract", async (t) => {
   await t.test(
-    "writes the document, the manifest and one example file per operation",
-    () => {
+    "writes the master document, feature documents and examples",
+    async () => {
       execFileSync(
         process.execPath,
         ["scripts/publish-contract.ts", directory],
@@ -56,9 +63,30 @@ test("scripts/publish-contract", async (t) => {
 
       assert.deepEqual(sortedBytewise(readdirSync(directory)), [
         "examples",
+        "features",
         "manifest.json",
         "openapi.yaml",
       ]);
+
+      const featureFiles = readdirSync(join(directory, "features"));
+      assert.deepEqual(
+        sortedBytewise(featureFiles),
+        sortedBytewise(featureNames.map((name) => `${name}.yaml`)),
+      );
+      for (const feature of features) {
+        const filePath = join(directory, "features", `${feature.name}.yaml`);
+        const document = YAML.parse(readFileSync(filePath, "utf8")) as {
+          paths: Record<string, Record<string, Record<string, unknown>>>;
+        };
+        const operationIds = Object.values(document.paths).flatMap((path) =>
+          Object.values(path).map((operation) => String(operation.operationId)),
+        );
+        assert.deepEqual(
+          sortedBytewise(operationIds),
+          sortedBytewise(feature.operations.map((entry) => entry.operationId)),
+        );
+        await SwaggerParser.validate(filePath);
+      }
 
       const exampleFiles = readdirSync(join(directory, "examples"));
       assert.equal(exampleFiles.length, 23);
@@ -79,7 +107,7 @@ test("scripts/publish-contract", async (t) => {
 
   let manifest: Record<string, unknown> = {};
   await t.test(
-    "the manifest carries the version, the commit, the dirty flag and the operation list",
+    "the manifest carries publication metadata and the operation list",
     () => {
       const raw = readFileSync(join(directory, "manifest.json"), "utf8");
       manifest = JSON.parse(raw) as Record<string, unknown>;
@@ -90,9 +118,11 @@ test("scripts/publish-contract", async (t) => {
         "version",
         "commit",
         "dirty",
+        "features",
         "operations",
       ]);
       assert.equal(typeof manifest.dirty, "boolean");
+      assert.deepEqual(manifest.features, featureNames);
       assert.match(String(manifest.commit), /^[0-9a-f]{40,64}$/);
     },
   );
@@ -240,6 +270,7 @@ test("scripts/publish-contract", async (t) => {
 
   await t.test("clears a stale file from a previous publication", () => {
     writeFileSync(join(directory, "examples", "gone.json"), "junk");
+    writeFileSync(join(directory, "features", "gone.yaml"), "junk");
     writeFileSync(join(directory, "openapi.yaml"), "junk");
 
     publishContract({
@@ -249,6 +280,7 @@ test("scripts/publish-contract", async (t) => {
     });
 
     assert.equal(existsSync(join(directory, "examples", "gone.json")), false);
+    assert.equal(existsSync(join(directory, "features", "gone.yaml")), false);
     assert.equal(
       readFileSync(join(directory, "openapi.yaml"), "utf8"),
       renderOpenApiYaml(),

@@ -102,7 +102,7 @@ A query takes the same shape. `main.ts` binds the dependencies once and passes c
 - **The transaction belongs to storage.** `services/storage` owns the transaction context. A write command opens one transaction, and every service that persists inside that write accepts the context through its interface. A state transition and its event append never sit in two transactions. `docs/proposal/phase-1/domain.md` requires them to be one.
 - **Route lifecycle is registry data, not a branch in a handler.** Every declared operation appears exactly once in `http/contract/`. A `routed` entry binds to exactly one command or query. A `stubbed` entry binds to the one shared `501` handler and names no command. A `post-mvp` row has no entry at all.
 - **A path is a typed segment tuple, never a string.** An operation declares resource, subresource, action, system and parameter segments from closed sets, and one renderer builds the path. Every resource segment is singular. `docs/proposal/api/README.md` holds the grammar. A route edit therefore cannot introduce a plural or a free-form segment.
-- **`openapi.yaml` is generated and not committed.** One self-contained document with internal references only. `npm run verify` emits it into a temporary directory, validates it, asserts parity with the registry, and deletes it. Never commit it, and never hand-edit it.
+- **OpenAPI documents are generated and not committed.** The master and each `features/*.yaml` slice are self-contained with internal references only. `npm run verify` emits and validates the master in a temporary directory. `npm run contract:publish -- <output-directory>` emits the master, feature slices and examples for a consumer. Never commit generated documents, and never hand-edit them.
 
 ## Tests
 

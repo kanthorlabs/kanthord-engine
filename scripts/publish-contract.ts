@@ -4,7 +4,10 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { KANTHORD_VERSION } from "../src/domain/version.ts";
-import { renderOpenApiYaml } from "../src/http/contract/openapi.ts";
+import {
+  openApiFeatures,
+  renderOpenApiYaml,
+} from "../src/http/contract/openapi.ts";
 import { registry } from "../src/http/contract/registry.ts";
 
 export type PublishInput = Readonly<{
@@ -41,18 +44,34 @@ export function publishContract(input: PublishInput): readonly string[] {
     recursive: true,
     force: true,
   });
+  rmSync(join(outputDirectory, "features"), {
+    recursive: true,
+    force: true,
+  });
   rmSync(join(outputDirectory, "openapi.yaml"), { force: true });
   rmSync(join(outputDirectory, "manifest.json"), { force: true });
 
   mkdirSync(outputDirectory, { recursive: true });
   mkdirSync(join(outputDirectory, "examples"), { recursive: true });
+  mkdirSync(join(outputDirectory, "features"), { recursive: true });
 
   const written: string[] = [];
+  const features = openApiFeatures();
 
   writeFileSync(join(outputDirectory, "openapi.yaml"), renderOpenApiYaml(), {
     encoding: "utf8",
   });
   written.push("openapi.yaml");
+
+  for (const feature of features) {
+    const relative = join("features", `${feature.name}.yaml`);
+    writeFileSync(
+      join(outputDirectory, relative),
+      renderOpenApiYaml(feature.operations),
+      { encoding: "utf8" },
+    );
+    written.push(relative);
+  }
 
   const publishedEntries = registry.filter(
     (entry) => entry.examples !== undefined,
@@ -80,6 +99,7 @@ export function publishContract(input: PublishInput): readonly string[] {
     version: KANTHORD_VERSION,
     commit: input.commit,
     dirty: input.dirty,
+    features: features.map((feature) => feature.name),
     operations: publishedEntries.map((entry) => entry.operationId),
   };
   writeFileSync(

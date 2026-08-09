@@ -9,7 +9,42 @@ import { registry } from "./registry.ts";
 
 const fixedMethodOrder = ["delete", "get", "post", "put"] as const;
 
-export function buildOpenApiDocument(): Readonly<Record<string, unknown>> {
+export type OpenApiFeature = Readonly<{
+  name: string;
+  operations: readonly Operation[];
+}>;
+
+export function openApiFeatures(
+  entries: readonly Operation[] = registry,
+): readonly OpenApiFeature[] {
+  const grouped = new Map<string, Operation[]>();
+  for (const entry of entries) {
+    const separator = entry.operationId.indexOf(".");
+    const name =
+      separator === -1
+        ? entry.operationId
+        : entry.operationId.slice(0, separator);
+    const operations = grouped.get(name);
+    if (operations === undefined) {
+      grouped.set(name, [entry]);
+    } else {
+      operations.push(entry);
+    }
+  }
+
+  return [...grouped.entries()]
+    .sort(([a], [b]) => compareBytewise(a, b))
+    .map(([name, operations]) => ({
+      name,
+      operations: operations.sort((a, b) =>
+        compareBytewise(a.operationId, b.operationId),
+      ),
+    }));
+}
+
+export function buildOpenApiDocument(
+  entries: readonly Operation[] = registry,
+): Readonly<Record<string, unknown>> {
   const schemas = new Map<string, unknown>();
   schemas.set(
     "Error",
@@ -20,7 +55,7 @@ export function buildOpenApiDocument(): Readonly<Record<string, unknown>> {
   );
 
   const byPath = new Map<string, Map<string, Operation>>();
-  for (const entry of registry) {
+  for (const entry of entries) {
     const path = renderOpenApiPath(entry.path);
     const byMethod = byPath.get(path);
     if (byMethod === undefined) {
@@ -62,8 +97,10 @@ export function buildOpenApiDocument(): Readonly<Record<string, unknown>> {
   };
 }
 
-export function renderOpenApiYaml(): string {
-  return YAML.stringify(buildOpenApiDocument(), { lineWidth: 0 });
+export function renderOpenApiYaml(
+  entries: readonly Operation[] = registry,
+): string {
+  return YAML.stringify(buildOpenApiDocument(entries), { lineWidth: 0 });
 }
 
 function operationObject(
