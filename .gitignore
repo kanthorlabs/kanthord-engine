@@ -144,5 +144,6 @@ vite.config.ts.timestamp-*
 
 # Acceptance run state and evidence
 .data/acceptance-*/
+.data/opencode-*
 .agent/acceptance/
 .agent/e2e/
