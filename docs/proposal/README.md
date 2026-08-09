@@ -43,7 +43,7 @@ Each scenario declares:
 
 | Field           | Meaning                                                               |
 | --------------- | --------------------------------------------------------------------- |
-| `Mode`          | `deterministic`, `live` or `deployment`                               |
+| `Mode`          | `deterministic`, `integration`, `live` or `deployment`                |
 | `Why it exists` | the one sentence naming what breaks if this fails                     |
 | `Automation`    | the exact command                                                     |
 | `Human action`  | `none`, or the confirmation the procedure asks for                    |
@@ -73,7 +73,7 @@ The journey code and the public-surface assertions are shared across both axes. 
 
 A scenario declares one driver and one profile. Two scenarios that differ on either axis carry two ids and two evidence bundles, because one id with two meanings makes evidence ambiguous.
 
-### The three modes
+### The four modes
 
 - **`deterministic`** — scripted agent and scripted reviewer, a bare repository that the harness serves over git smart HTTP on a loopback port playing remote origin, and over `sshd` on a second loopback port for the ssh transport, a temporary daemon home. No outbound network, no provider account, no model. The git credential is a fixture token the loopback server accepts, and a fixture key pair the loopback `sshd` accepts, which is what makes both authentication paths real without an account. These are phase gates, and they must pass unattended.
 
@@ -97,8 +97,11 @@ Podman is a test-time prerequisite on the same rule, for a scenario that takes t
 
 A `podman` run is hermetic only under five rules. The network is internal with no outbound route. Images are provisioned before the run and consumed with `--pull=never`, so a deterministic gate never reaches a registry. Every resource carries a run id label, and cleanup works by label on the failure path as well as the success path, so two runs never collide and a killed run is reclaimed by the next one. Readiness is polled against the health route to a bounded deadline, never slept. A token reaches a container as a mounted file, never an environment variable and never an argument, because container inspection and a printed command each disclose the other two.
 
+- **`integration`** — a real remote and a real credential on one machine. No second host, no provider account and no model. The credentials come from `.env.e2e` and they name a throwaway repository. It proves that the product works against a real git forge, which a fixture cannot prove, and it proves nothing about a network between two machines. A missing credential file makes the run fail as unavailable.
 - **`live`** — a real provider on a disposable repository. Opt-in through `KANTHORD_E2E_LIVE=1`, with a fixed maximum of attempts and calls, a per-call token cap, a wall-clock timeout, and no automatic rerun. A live failure is evidence about that run, not automatically a regression.
 - **`deployment`** — a real daemon host and a real client host across the VPN, with real credentials. It proves the environment, not the logic. A coding agent runs it when it has access to both hosts; that is a prerequisite, not a reason to call the scenario human-only.
+
+Every `deployment` scenario belongs to phase 3. Routing, binding across two machines and token distribution are one subject, they are proved once, and they are proved at the end. Phase 1 and phase 2 prove the logic and the real-forge behaviour on one machine, and neither phase exits on a network. A phase that needed the VPN earlier would block on an environment rather than on the product.
 
 A container pair proves the two-host logic, so it is `deterministic` and it is a phase gate. It never proves the environment, so it never substitutes for a `deployment` run. `Human action: none` on a `deployment` scenario means none once the prerequisites exist: the runner never enrolls a host in the VPN, never mints or rotates a real credential, and never edits host security configuration. A missing prerequisite makes the run fail as unavailable. It never skips and writes a passing bundle.
 

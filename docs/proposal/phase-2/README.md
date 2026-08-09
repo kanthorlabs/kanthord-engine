@@ -6,7 +6,7 @@
 
 **Blocker removed:** no real agent is connected, so the capacity of KanthorD is unproven.
 
-**Exit criteria:** Ulrich registers a provider, authors one objective with two tasks, runs it from a second machine over the VPN, reads the attempt record of every task, approves, and sees the work reach remote origin.
+**Exit criteria:** Ulrich registers a provider, authors one objective with two tasks, runs it, reads the attempt record of every task, approves, and sees the work reach remote origin.
 
 ## Failure on this path is normal
 
@@ -108,11 +108,4 @@ The convention, the modes and the evidence format are in [../README.md](../READM
 - **Bounds:** a fixed maximum of attempts and provider calls, a per-call token cap, a wall-clock timeout, and no automatic rerun. A failure is evidence about that run, not automatically a regression.
 - **Evidence:** the provider, the model, the usage, the prompt hashes, the run and attempt ids, and the hidden test output.
 
-### P2-E5 — A real run driven over the VPN
-
-- **Mode:** `deployment`
-- **Why it exists:** the exit criterion is a human approving real work from a second machine, and neither the local nor the live scenario proves that path.
-- **Automation:** `KANTHORD_E2E_LIVE=1 scripts/e2e/run.mjs P2-E5 --daemon-host <a> --client-host <b>`
-- **Human action:** the procedure asks for one confirmation before the approval, because this run reaches a real remote.
-- **Oracle:** P2-E4 runs with the CLI on the client host. The attempt record is retrieved from the client host and is complete. The approval and the publish are issued from the client host.
-- **Evidence:** as P2-E4, plus both host identities and the confirming human.
+No phase-2 scenario crosses the VPN. A real run driven from a second machine is [P3-E7](../phase-3/README.md), because routing, binding across two machines and token distribution are one subject and phase 3 proves it once. Phase 2 exits on the agent and the work it lands, never on a network.

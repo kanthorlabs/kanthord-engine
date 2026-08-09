@@ -10,7 +10,7 @@ Behaviour is not an entity. A later-phase document schema, a role contract, a to
 
 **Blocker removed:** there is no skeleton to hang work on, and no bare home to work against.
 
-**Exit criteria:** Ulrich onboards his real repository from a second machine over the VPN, imports a two-objective plan, exports it identical, and reads status. Every execution route answers `not-implemented`. A coding agent rehearses every scenario and reports the run green. Ulrich then drives the same journey through the same CLI and the same API, and confirms it. The confirmation is recorded, and the phase does not exit without it.
+**Exit criteria:** Ulrich onboards his real repository, imports a two-objective plan, exports it identical, and reads status. Every execution route answers `not-implemented`. A coding agent rehearses every scenario and reports the run green. Ulrich then drives the same journey through the same CLI and the same API, and confirms it. The confirmation is recorded, and the phase does not exit without it.
 
 ## Files
 
@@ -90,21 +90,24 @@ The convention, the modes and the evidence format are in [../README.md](../READM
 
 - **Mode:** `deterministic`
 - **Driver:** `podman`. **Profile:** fixture.
-- **Why it exists:** P1-E3 needs two hosts, and the two-host logic must gate every commit rather than wait for them. A client that shares a process, a file system and a loopback interface with the daemon proves none of that logic.
+- **Why it exists:** the CLI reaches the daemon over HTTP, and the two-host logic must gate every commit. A client that shares a process, a file system and a loopback interface with the daemon proves none of that logic.
 - **Automation:** `scripts/e2e/run.mjs P1-E4`
 - **Human action:** none
 - **Topology:** three containers in two network namespaces. A pod holds the fixture-remote container and the daemon container on one namespace, so the fixture listens on `127.0.0.1` and the daemon reaches it over loopback. The url policy of [git-foundation.md](git-foundation.md) is therefore satisfied rather than relaxed, and the daemon image stays single-purpose. A client container holds the CLI alone, with no daemon volume. The daemon binds `0.0.0.0` behind the stable alias `kanthord-daemon`, never a discovered address, and the `Host` allow list names exactly that alias and port. The daemon home is a named volume; a bind mount from the host reports a FUSE filesystem, which the startup check of [git-foundation.md](git-foundation.md) is entitled to refuse. The containers run Linux, so that check reads a filesystem magic number and the refusal is effective here.
 - **Oracle:** P1-E1 runs with the CLI and the daemon in separate network namespaces. The daemon binds a non-loopback address, so a token is mandatory and the startup refusal is exercised across a real network boundary. An allow list that omits the alias returns `403`. The client cannot read the daemon's file system, so ref layout is asserted through `kanthord repository show`. The transport cases of P1-E2 that a separate namespace makes representative run here, from the P1-E2 oracle rather than a second copy of it.
 - **Evidence:** the bundle records the driver, both namespace identities, the product artifact digest, the base image digest, the architecture, the Podman version, and the pinned `git` version.
 
-### P1-E3 — Remote drive over the VPN
+### P1-E5 — Onboarding a real repository
 
-- **Mode:** `deployment`
-- **Driver:** `ssh`. **Profile:** real.
-- **Why it exists:** the exit criterion is a human working from a second machine, and nothing local proves that routing, binding and token distribution work.
-- **Automation:** `scripts/e2e/run.mjs P1-E3 --daemon-host <a> --client-host <b>`
-- **Human action:** none once both hosts are reachable.
-- **Oracle:** P1-E1 runs with the CLI on the client host and the daemon on the daemon host, against a real repository and a real credential. Every assertion is made through the public surface, because the client cannot read the daemon's file system. Ref layout is asserted through `kanthord repository show`, not through the bare home directory.
-- **Evidence:** the bundle records both host identities and the bind address.
+- **Mode:** `integration`
+- **Driver:** `local`. **Profile:** real.
+- **Why it exists:** a fixture remote answers exactly what the harness taught it to answer. A real git forge negotiates its own capabilities, names its own default branch, and refuses its own way. Nothing proves that the product onboards a repository Ulrich cares about until it onboards one.
+- **Automation:** `scripts/e2e/run.mjs P1-E5`
+- **Human action:** none
+- **Inputs:** the throwaway repository, the branch and the credential of `.env.e2e`, and a hand-authored two-objective plan against that repository. Fixture object ids and the fixture default branch do not transfer, so the fixture plan is not reused.
+- **Oracle:** P1-E1 runs against the real repository and the real credential. Registration proves the credential with a `git-receive-pack` advertisement, the landing branch lands at the branch the forge reports, and the tracking namespace holds `refs/remotes/origin/*` and no tag. Every assertion is made through the public surface, and ref layout is asserted through `kanthord repository show`. No phase-1 operation writes a ref on the remote, so the run leaves the forge unchanged.
+- **Evidence:** the bundle records the repository, the detected default branch, the object ids involved, and the credential name with the secret redacted.
 
-P1-E4 shares the journey and the public-surface assertions with P1-E3, and it changes the driver and the profile. A P1-E4 pass is never evidence for P1-E3, because a container pair proves the logic and the mechanism rather than the environment. The phase exits by pointing at a P1-E3 bundle.
+P1-E4 and P1-E5 divide the matrix and neither substitutes for the other. P1-E4 proves the two-host logic against a fixture the harness controls. P1-E5 proves real-forge behaviour on one machine. The phase exits by pointing at a P1-E5 bundle.
+
+No phase-1 scenario crosses the VPN. Routing, binding across two machines and token distribution are proved once, in phase 3, by [../phase-3/README.md](../phase-3/README.md). Phase 1 exits on the product, never on a network.

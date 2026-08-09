@@ -11,7 +11,7 @@ Registration, the branch fields, and the repair of a divergence. Publish is deli
 | `repository.inspect`       | `POST /v1/repository/inspect`            | phase-1      | routed  | git-foundation.md, default branch detection |
 | `repository.register`      | `POST /v1/repository`                    | phase-1      | routed  | P1-E1, `repository register`                |
 | `repository.list`          | `GET /v1/repository`                     | phase-1      | routed  | phase-2 onboarding CLI                      |
-| `repository.show`          | `GET /v1/repository/:id`                 | phase-1      | routed  | P1-E1 and P1-E3, `repository show`          |
+| `repository.show`          | `GET /v1/repository/:id`                 | phase-1      | routed  | P1-E1 and P1-E5, `repository show`          |
 | `repository.landingBranch` | `POST /v1/repository/:id/landing-branch` | phase-2      | stubbed | git-foundation.md, "an explicit operation"  |
 | `repository.reconcile`     | `POST /v1/repository/:id/reconcile`      | phase-2      | stubbed | P2-E3, `repository reconcile`               |
 
@@ -101,7 +101,7 @@ Returns the branch fields, the landing tip, the upstream tracking tip, the last 
 
 `fetchedUpstreamOid` is the `U` of the last freshness pass, which is what makes the base of an objective attributable.
 
-P1-E3 asserts the ref layout through this route alone, because the client host cannot read the daemon file system. The response therefore names the landing branch and the tracking namespace explicitly, not as a directory listing.
+P1-E4 and P3-E6 assert the ref layout through this route alone, because the client cannot read the daemon file system. The response therefore names the landing branch and the tracking namespace explicitly, not as a directory listing.
 
 The state is `ready` or `needs-reconcile`. A `needs-reconcile` response carries both object ids, because `../phase-1/state-machine.md` requires `status` to name them.
 

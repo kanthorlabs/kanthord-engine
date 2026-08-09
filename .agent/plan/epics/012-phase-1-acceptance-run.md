@@ -4,7 +4,7 @@ Status: **draft**.
 
 ## Goal
 
-Phase 1 closes on evidence. A coding agent runs every declared phase-1 scenario against the assembled product and reports the run green, a human then drives the same journey and signs it, and one verdict points at the P1-E3 bundle.
+Phase 1 closes on evidence. A coding agent runs every declared phase-1 scenario against the assembled product and reports the run green, a human then drives the same journey and signs it, and one verdict points at the P1-E5 bundle.
 
 The verdict has two axes. The scenario axis is machine-checked: every declared scenario, the regression suite, and one commit across them. The acceptance axis is the human confirmation: the drive, and the judgment no oracle can assert. Phase 1 exits on both.
 
@@ -65,13 +65,13 @@ prerequisite.
 
 - **Run the container gate — P1-E4** — the `podman` driver and the fixture profile. Setup proves Podman reachable at the pinned version, records rootless or rootful mode and the architecture, and provisions the images with no pull. It never starts a Podman machine. Seed is the same fixture, delivered into the client container. Run invokes `scripts/e2e/run.mjs P1-E4 --tag <tag>`. Cleanup confirms no container, pod, network or volume carries the run id label. Record appends the bundle, the product artifact digest, the base image digest and the architecture, because an `arm64` pass is not evidence for another architecture.
 
-- **Run the exit — P1-E3** — the `ssh` driver and the real profile, on two real hosts across the VPN. Setup proves both hosts reachable, the real repository present and the real credential valid; a missing prerequisite fails the run as unavailable and never skips. Seed is a hand-authored two-objective plan against the real repository, not the fixture, because fixture object ids and the fixture default branch do not transfer. Run invokes `scripts/e2e/run.mjs P1-E3 --tag <tag> --daemon-host <a> --client-host <b>`. Cleanup removes the artifact and the configuration from both hosts. No phase-1 operation writes a ref on the remote, so cleanup names no remote branch. Record appends the bundle, both host identities and the bind address. This is the bundle the phase exits by pointing at.
+- **Run the exit — P1-E5** — the `local` driver and the real profile, on one machine. Setup proves `.env.e2e` complete and the real credential valid; a missing prerequisite fails the run as unavailable and never skips. Seed is a hand-authored two-objective plan against the real repository, not the fixture, because fixture object ids and the fixture default branch do not transfer. Run invokes `scripts/e2e/run.mjs P1-E5 --tag <tag>`. Cleanup removes the temporary home, the token file and the daemon process. No phase-1 operation writes a ref on the remote, so the forge is unchanged and the run names no remote branch. Record appends the bundle, the repository and the detected default branch. This is the bundle the phase exits by pointing at. No phase-1 scenario crosses the VPN: `docs/proposal/README.md` puts every `deployment` scenario in phase 3.
 
 - **The rehearsal** — a coding agent runs the four scenarios and the verify record under one tag, and reports the scenario axis green with `node scripts/e2e/run.mjs --verdict <tag> --scenarios-only`. The rehearsal is repeatable and unattended, because no scenario pauses for a human. It never closes the phase: `--scenarios-only` checks one axis and says nothing about the other. The rehearsal exists so the human gate meets a run that already works, and so the human drives the same CLI and the same API the rehearsal drove.
 
-- **The human gate** — Ulrich drives the P1-E3 journey himself, through the CLI and the API, on the commit under test. He then judges the four subjects `docs/proposal/README.md` keeps out of every scenario: the first-run message, the validation finding set a human reads while authoring a plan by hand, the re-import suggestion set, and the `plan export` rendering. He authors a plan with three faults in one document, reads the findings, fixes them, and drives a re-import that needs a per-node choice. One invocation of `node scripts/e2e/run.mjs --record-acceptance --tag <tag>` signs the drive and the judgment. This is not an oracle and not a scenario, and it is not advisory either: it is the acceptance axis, and the phase does not exit without it.
+- **The human gate** — Ulrich drives the P1-E5 journey himself, through the CLI and the API, on the commit under test. He then judges the four subjects `docs/proposal/README.md` keeps out of every scenario: the first-run message, the validation finding set a human reads while authoring a plan by hand, the re-import suggestion set, and the `plan export` rendering. He authors a plan with three faults in one document, reads the findings, fixes them, and drives a re-import that needs a per-node choice. One invocation of `node scripts/e2e/run.mjs --record-acceptance --tag <tag>` signs the drive and the judgment. This is not an oracle and not a scenario, and it is not advisory either: it is the acceptance axis, and the phase does not exit without it.
 
-- **The report and the verdict** — findings grouped by root cause, each as `<B1/S1> - action:<YES/NO> - <name> - <description>`. Each blocker opens a fix epic and phase 1 stays open. The outcome is not asserted in prose: `node scripts/e2e/run.mjs --verdict <tag>` checks both axes and returns the exit status, and the report records that command and its exit status. The scenario axis needs a bundle per declared scenario, all `passed`, a verify record with exit status zero, and one commit across every record. The acceptance axis needs a signed record on that same commit. Phase 1 closes on a zero exit status from `--verdict`, a P1-E3 bundle, a proposal revision and an implementation commit.
+- **The report and the verdict** — findings grouped by root cause, each as `<B1/S1> - action:<YES/NO> - <name> - <description>`. Each blocker opens a fix epic and phase 1 stays open. The outcome is not asserted in prose: `node scripts/e2e/run.mjs --verdict <tag>` checks both axes and returns the exit status, and the report records that command and its exit status. The scenario axis needs a bundle per declared scenario, all `passed`, a verify record with exit status zero, and one commit across every record. The acceptance axis needs a signed record on that same commit. Phase 1 closes on a zero exit status from `--verdict`, a P1-E5 bundle, a proposal revision and an implementation commit.
 
 ## Verification gate
 
@@ -87,9 +87,7 @@ TAG=$(node scripts/e2e/run.mjs --mint-tag)
 node scripts/e2e/run.mjs P1-E1 --tag "$TAG"
 node scripts/e2e/run.mjs P1-E2 --tag "$TAG"
 node scripts/e2e/run.mjs P1-E4 --tag "$TAG"
-node scripts/e2e/run.mjs P1-E3 --tag "$TAG" \
-  --daemon-host "$KANTHORD_ACCEPT_DAEMON_HOST" \
-  --client-host "$KANTHORD_ACCEPT_CLIENT_HOST"
+node scripts/e2e/run.mjs P1-E5 --tag "$TAG"
 node scripts/e2e/run.mjs --record-verify --tag "$TAG"
 node scripts/e2e/run.mjs --verdict "$TAG" --scenarios-only
 # the human gate, after the rehearsal is green
@@ -106,7 +104,7 @@ Coverage required beyond the Proof:
 - The report records the `--verdict` command and its exit status, and the outcome it states agrees
   with that exit status.
 - A `blocked` outcome exits non-zero, so a stopped run never reads as a pass.
-- A missing P1-E3 prerequisite reports unavailable and writes no passing bundle.
+- A missing P1-E5 prerequisite reports unavailable and writes no passing bundle.
 - A failing scenario does not stop the scenarios after it, and each one still writes a bundle.
 - Every bundle, the verify record and the acceptance record name one commit under test.
 - The rehearsal passes `--scenarios-only` and the full verdict still fails until the gate is signed.

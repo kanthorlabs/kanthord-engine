@@ -33,8 +33,7 @@ already prints and bundles what it observed.
 The four things no scenario owns:
 
 1. the run frame — one tag, one directory, one report;
-2. the execution of the `deployment` scenario on the real profile, which is the
-   phase exit;
+2. the execution of the real-profile scenario, which is the phase exit;
 3. the product acceptance a machine cannot check;
 4. the verdict.
 
@@ -42,21 +41,20 @@ The four things no scenario owns:
 
 Every invocation takes the same `--tag`, so one acceptance run writes one set of
 bundles. Read the phase README for the declared ids; phase 1 is `P1-E1`, `P1-E2`,
-`P1-E4` and `P1-E3`.
+`P1-E4` and `P1-E5`.
 
 ```sh
 export TAG=$(node scripts/e2e/run.mjs --mint-tag)
 node scripts/e2e/run.mjs P1-E1 --tag "$TAG"   # fixture baseline, local driver
 node scripts/e2e/run.mjs P1-E2 --tag "$TAG"   # transport policy, local driver
 node scripts/e2e/run.mjs P1-E4 --tag "$TAG"   # two namespaces, podman driver
-node scripts/e2e/run.mjs P1-E3 --tag "$TAG" \
-  --daemon-host "$DAEMON_HOST" --client-host "$CLIENT_HOST"
+node scripts/e2e/run.mjs P1-E5 --tag "$TAG"   # real repository, local driver
 node scripts/e2e/run.mjs --record-verify --tag "$TAG"   # the regression suite
 node scripts/e2e/run.mjs --verdict "$TAG" --scenarios-only   # the rehearsal is green
 ```
 
 Order matters. The local baseline gates first, because Podman may be absent on an
-environment that must still gate. The `deployment` run is last, because it is the
+environment that must still gate. The real-profile run is last, because it is the
 bundle the phase exits by pointing at.
 
 `--record-verify` runs `npm run verify` and records the command, its exit status,
@@ -65,8 +63,8 @@ the commit under test and the proposal revision beside the bundles.
 report a rehearsal green, and it can never close the phase.
 
 A prerequisite is proved, never assumed: the pinned `git` binary, the pinned
-Podman version with its rootless or rootful mode and architecture, both real hosts
-reachable, the real repository present and the real credential valid. A missing
+Podman version with its rootless or rootful mode and architecture, a complete
+`.env.e2e`, and the real repository and the real credential valid. A missing
 prerequisite makes the run report **unavailable**. It never skips and writes a
 passing bundle.
 
@@ -85,7 +83,7 @@ For phase 1 that is the first-run message, the validation finding set a human
 reads while authoring a plan by hand, the re-import suggestion set, and the
 `plan export` rendering. Ulrich authors a plan with three faults in one document,
 reads the findings, fixes them, then drives a re-import that needs a per-node
-choice. He drives the P1-E3 journey through the same CLI and the same API, on the
+choice. He drives the P1-E5 journey through the same CLI and the same API, on the
 commit under test. One invocation signs the drive and the judgment:
 
 ```sh
@@ -130,7 +128,7 @@ checks both axes and returns the exit status.
 A blocker opens a fix epic and the phase stays open. You never fix what you find:
 a fix inside an acceptance run destroys the evidence the run exists to produce.
 The phase closes on a `passed` outcome tied to a proposal revision, an
-implementation commit and the `deployment` bundle.
+implementation commit and the real-profile bundle.
 
 The report is evidence, not a plan file. That is why it lives under
 `.agent/acceptance/` and not under `.agent/plan/epics/`.

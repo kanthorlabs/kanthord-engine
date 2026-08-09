@@ -95,3 +95,24 @@ The convention, the modes and the evidence format are in [../README.md](../READM
 - **Human action:** none
 - **Oracle:** the client drives a run, the harness kills the daemon at one boundary, the daemon restarts, and the client observes the converged state and the block reason through the CLI alone. Every block reason is cleared from the client host.
 - **Evidence:** the client-side transcript and both host identities.
+
+### P3-E6 — Onboarding driven over the VPN
+
+- **Mode:** `deployment`
+- **Driver:** `ssh`. **Profile:** real.
+- **Why it exists:** phase 1 proves onboarding on one machine, and phase 1 proves the two-host logic against a fixture. Neither proves that routing, binding and token distribution work between two real machines. This scenario carries the assertion phase 1 declines to make.
+- **Automation:** `scripts/e2e/run.mjs P3-E6 --daemon-host <a> --client-host <b>`
+- **Human action:** none once both hosts are reachable.
+- **Oracle:** the P1-E1 journey runs with the CLI on the client host and the daemon on the daemon host, against a real repository and a real credential. Every assertion is made through the public surface, because the client cannot read the daemon's file system. Ref layout is asserted through `kanthord repository show`, not through the bare home directory.
+- **Evidence:** the bundle records both host identities and the bind address.
+
+### P3-E7 — A real run driven over the VPN
+
+- **Mode:** `deployment`
+- **Why it exists:** phase 2 proves that a real agent lands approved work on one machine. It does not prove that a human approves that work from a second machine, and an approval is the one action that must reach the daemon from wherever the human is.
+- **Automation:** `KANTHORD_E2E_LIVE=1 scripts/e2e/run.mjs P3-E7 --daemon-host <a> --client-host <b>`
+- **Human action:** the procedure asks for one confirmation before the approval, because this run reaches a real remote.
+- **Oracle:** the P2-E4 journey runs with the CLI on the client host. The attempt record is retrieved from the client host and is complete. The approval and the publish are issued from the client host.
+- **Evidence:** as P2-E4, plus both host identities and the confirming human.
+
+P3-E5, P3-E6 and P3-E7 are the only `deployment` scenarios in the MVP. They share two hosts and one prerequisite set, so they run together, and the phase exits by pointing at all three.
