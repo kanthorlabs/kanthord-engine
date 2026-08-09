@@ -26,8 +26,8 @@ import {
 const allScenarioIds: readonly ScenarioId[] = [
   "P1-E1",
   "P1-E2",
-  "P1-E3",
   "P1-E4",
+  "P1-E5",
 ];
 
 async function withTempCwd(run: () => Promise<void>): Promise<void> {
@@ -159,6 +159,25 @@ test("verdict returns [] and main exits 0 on a complete run", async () => {
   });
 });
 
+test("the verdict requires a P1-E5 bundle", async () => {
+  await withTempCwd(async () => {
+    await setupCompleteRun("t1");
+    await rm(bundleDirectory("t1", "P1-E5"), { recursive: true, force: true });
+
+    const failures = await verdict({ tag: "t1", scenariosOnly: true });
+    assert.deepEqual(failures, [
+      {
+        axis: "scenario",
+        code: "unavailable",
+        reason: "P1-E5 has no bundle under tag t1",
+      },
+    ]);
+
+    const exit = await main(["--verdict", "t1", "--scenarios-only"]);
+    assert.equal(exit, 3);
+  });
+});
+
 const failureCases: ReadonlyArray<
   readonly [
     name: string,
@@ -227,13 +246,13 @@ const failureCases: ReadonlyArray<
     1,
   ],
   [
-    "P1-E3 bundle on commit c2",
+    "P1-E5 bundle on commit c2",
     async (tag) => {
-      await writeBundleStub(tag, "P1-E3", { commit: "c2", outcome: "passed" });
+      await writeBundleStub(tag, "P1-E5", { commit: "c2", outcome: "passed" });
     },
     "scenario",
     "assertion-failed",
-    "P1-E3 is on commit c2; the verify record is on c1",
+    "P1-E5 is on commit c2; the verify record is on c1",
     1,
   ],
   [

@@ -11,17 +11,17 @@ const expectedTable: Readonly<
 > = {
   "P1-E1": { mode: "deterministic", driver: "local", profile: "fixture" },
   "P1-E2": { mode: "deterministic", driver: "local", profile: "fixture" },
-  "P1-E3": { mode: "deployment", driver: "ssh", profile: "real" },
   "P1-E4": { mode: "deterministic", driver: "podman", profile: "fixture" },
+  "P1-E5": { mode: "integration", driver: "local", profile: "real" },
 };
 
 test("scenarios has exactly four entries", () => {
   assert.equal(scenarios.length, 4);
 });
 
-test("the ids are P1-E1..P1-E4, bytewise ascending", () => {
+test("the ids are P1-E1, P1-E2, P1-E4, P1-E5, bytewise ascending", () => {
   const ids = scenarios.map((scenario) => scenario.id);
-  assert.deepEqual(ids, ["P1-E1", "P1-E2", "P1-E3", "P1-E4"]);
+  assert.deepEqual(ids, ["P1-E1", "P1-E2", "P1-E4", "P1-E5"]);
 
   const sorted = [...ids].sort((a, b) =>
     Buffer.compare(Buffer.from(a), Buffer.from(b)),
@@ -42,12 +42,19 @@ test("each row's mode, driver and profile match the declared table", () => {
   }
 });
 
-test("exactly one row is mode deployment, and it is P1-E3", () => {
+test("exactly one row is mode integration, and it is P1-E5", () => {
+  const integrationRows = scenarios.filter(
+    (scenario) => scenario.mode === "integration",
+  );
+  assert.equal(integrationRows.length, 1);
+  assert.equal(integrationRows[0]?.id, "P1-E5");
+});
+
+test("no row is mode deployment", () => {
   const deploymentRows = scenarios.filter(
     (scenario) => scenario.mode === "deployment",
   );
-  assert.equal(deploymentRows.length, 1);
-  assert.equal(deploymentRows[0]?.id, "P1-E3");
+  assert.equal(deploymentRows.length, 0);
 });
 
 test("no scenario or profile module file text contains a driver.name equality check", () => {

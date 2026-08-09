@@ -44,8 +44,8 @@ import { verdict } from "./record/verdict.ts";
 const knownScenarioIds: readonly ScenarioId[] = [
   "P1-E1",
   "P1-E2",
-  "P1-E3",
   "P1-E4",
+  "P1-E5",
 ];
 
 function isKnownScenarioId(value: string): value is ScenarioId {
@@ -414,7 +414,7 @@ export function parseArguments(
   if (!isKnownScenarioId(scenarioIdCandidate)) {
     throw new RunnerError(
       "invalid-argument",
-      `unknown scenario ${scenarioIdCandidate}`,
+      `unknown scenario ${scenarioIdCandidate}; known ids are ${knownScenarioIds.join(", ")}`,
     );
   }
 
@@ -457,7 +457,7 @@ export async function resolveCommit(
   }
 }
 
-function exitCodeFor(code: RunnerErrorCode): number {
+export function exitCodeFor(code: RunnerErrorCode): number {
   switch (code) {
     case "assertion-failed":
       return 1;
@@ -608,16 +608,16 @@ export async function main(
       );
     }
 
-    if (invocation.daemonHost !== null && scenario.id !== "P1-E3") {
+    if (invocation.daemonHost !== null) {
       throw new RunnerError(
         "invalid-argument",
-        "--daemon-host applies to P1-E3 only",
+        "--daemon-host belongs to a phase-3 deployment scenario",
       );
     }
-    if (invocation.clientHost !== null && scenario.id !== "P1-E3") {
+    if (invocation.clientHost !== null) {
       throw new RunnerError(
         "invalid-argument",
-        "--client-host applies to P1-E3 only",
+        "--client-host belongs to a phase-3 deployment scenario",
       );
     }
 

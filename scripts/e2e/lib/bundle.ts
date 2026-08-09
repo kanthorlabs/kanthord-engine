@@ -39,7 +39,7 @@ export type BundleIdentity = Readonly<{
 export type Bundle = Readonly<{
   schemaVersion: number;
   scenarioId: ScenarioId;
-  mode: "deterministic" | "deployment";
+  mode: "deterministic" | "integration" | "deployment";
   driver: DriverName;
   profile: ProfileName;
   tag: string;

@@ -16,7 +16,7 @@ test("scripts/e2e/run.mjs refuses an unknown scenario id, exits 2, and writes th
   assert.equal(result.status, 2);
   assert.equal(
     result.stderr,
-    "e2e: invalid-argument: unknown scenario P1-E9\n",
+    "e2e: invalid-argument: unknown scenario P1-E9; known ids are P1-E1, P1-E2, P1-E4, P1-E5\n",
   );
 });
 

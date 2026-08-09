@@ -269,7 +269,7 @@ export async function createSshDriver(
     if (record.exitCode === 0) {
       throw new RunnerError(
         "unavailable",
-        `/etc/kanthord/config.json exists on ${target.host}; P1-E3 needs a bare machine`,
+        `/etc/kanthord/config.json exists on ${target.host}; P3-E6 needs a bare machine`,
       );
     }
   }

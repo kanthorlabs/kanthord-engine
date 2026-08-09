@@ -10,9 +10,10 @@ import {
   parseArguments,
   deriveOutcome,
   resolveCommit,
+  exitCodeFor,
   type RunInvocation,
 } from "./main.ts";
-import { RunnerError } from "./errors.ts";
+import { RunnerError, type RunnerErrorCode } from "./errors.ts";
 import type { ResourceFailure } from "./resources.ts";
 import { runDirectory } from "./tag.ts";
 import type { CommandRecord } from "./command.ts";
@@ -29,17 +30,14 @@ test("parseArguments resolves the scenario id and defaults every optional flag t
   });
 });
 
-test("parseArguments resolves every optional flag when all three are given", () => {
-  const invocation = parseArguments(
-    ["P1-E3", "--tag", "t1", "--daemon-host", "a", "--client-host", "b"],
-    "m",
-  );
+test("parseArguments resolves a P1-E5 invocation without host flags", () => {
+  const invocation = parseArguments(["P1-E5", "--tag", "t1"], "m");
 
   assert.deepEqual(invocation, {
-    scenarioId: "P1-E3",
+    scenarioId: "P1-E5",
     tag: "t1",
-    daemonHost: "a",
-    clientHost: "b",
+    daemonHost: null,
+    clientHost: null,
   });
 });
 
@@ -62,7 +60,7 @@ const refusals: ReadonlyArray<
     "a positional not in scenarios",
     ["P1-E9"],
     "invalid-argument",
-    "unknown scenario P1-E9",
+    "unknown scenario P1-E9; known ids are P1-E1, P1-E2, P1-E4, P1-E5",
   ],
   [
     "an option token that is not one of the three",
@@ -97,6 +95,32 @@ for (const [name, argv, code, message] of refusals) {
   });
 }
 
+test("exitCodeFor maps every RunnerErrorCode to its exact status, and the union has exactly four members", () => {
+  const table: Readonly<Record<RunnerErrorCode, number>> = {
+    "assertion-failed": 1,
+    "invalid-argument": 2,
+    "tag-reused": 2,
+    unavailable: 3,
+  };
+
+  assert.deepEqual(Object.keys(table).sort(), [
+    "assertion-failed",
+    "invalid-argument",
+    "tag-reused",
+    "unavailable",
+  ]);
+
+  for (const [code, expected] of Object.entries(table)) {
+    assert.equal(exitCodeFor(code as RunnerErrorCode), expected, code);
+  }
+});
+
+test("a present artifact reporting a failure exits 1, and an absent artifact exits 3", () => {
+  assert.equal(exitCodeFor("assertion-failed"), 1);
+  assert.equal(exitCodeFor("unavailable"), 3);
+  assert.notEqual(exitCodeFor("assertion-failed"), exitCodeFor("unavailable"));
+});
+
 test("main writes the invalid-argument refusal to stderr and resolves exit code 2", async (t) => {
   let captured = "";
   t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
@@ -113,6 +137,101 @@ test("main writes the invalid-argument refusal to stderr and resolves exit code 
 test("main resolves exit code 2 for an unknown scenario id", async () => {
   const code = await main(["P1-E9"]);
   assert.equal(code, 2);
+});
+
+test("main(['P1-E3']) returns 2 and names every known id", async (t) => {
+  let captured = "";
+  t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+    captured += chunk.toString();
+    return true;
+  });
+
+  const code = await main(["P1-E3"]);
+
+  assert.equal(code, 2);
+  assert.equal(
+    captured,
+    "e2e: invalid-argument: unknown scenario P1-E3; known ids are P1-E1, P1-E2, P1-E4, P1-E5\n",
+  );
+});
+
+test("main(['P1-E1', '--daemon-host', 'a']) refuses a daemon host", async (t) => {
+  let captured = "";
+  t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+    captured += chunk.toString();
+    return true;
+  });
+
+  const code = await main(["P1-E1", "--daemon-host", "a"]);
+
+  assert.equal(code, 2);
+  assert.equal(
+    captured,
+    "e2e: invalid-argument: --daemon-host belongs to a phase-3 deployment scenario\n",
+  );
+});
+
+test("main(['P1-E5', '--daemon-host', 'a']) refuses a daemon host", async (t) => {
+  let captured = "";
+  t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+    captured += chunk.toString();
+    return true;
+  });
+
+  const code = await main(["P1-E5", "--daemon-host", "a"]);
+
+  assert.equal(code, 2);
+  assert.equal(
+    captured,
+    "e2e: invalid-argument: --daemon-host belongs to a phase-3 deployment scenario\n",
+  );
+});
+
+test("main(['P1-E1', '--client-host', 'a']) refuses a client host", async (t) => {
+  let captured = "";
+  t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+    captured += chunk.toString();
+    return true;
+  });
+
+  const code = await main(["P1-E1", "--client-host", "a"]);
+
+  assert.equal(code, 2);
+  assert.equal(
+    captured,
+    "e2e: invalid-argument: --client-host belongs to a phase-3 deployment scenario\n",
+  );
+});
+
+test("main(['P1-E5', '--client-host', 'a']) refuses a client host", async (t) => {
+  let captured = "";
+  t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+    captured += chunk.toString();
+    return true;
+  });
+
+  const code = await main(["P1-E5", "--client-host", "a"]);
+
+  assert.equal(code, 2);
+  assert.equal(
+    captured,
+    "e2e: invalid-argument: --client-host belongs to a phase-3 deployment scenario\n",
+  );
+});
+
+test("a refused host option claims no bundle directory", async (t) => {
+  const cwd = process.cwd();
+  const directory = await mkdtemp(join(tmpdir(), "kanthord-e2e-host-refusal-"));
+  process.chdir(directory);
+  t.after(async () => {
+    process.chdir(cwd);
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  const code = await main(["P1-E5", "--tag", "t1", "--daemon-host", "a"]);
+
+  assert.equal(code, 2);
+  assert.equal(existsSync(join(directory, ".data/acceptance-t1/P1-E5")), false);
 });
 
 const oneCleanupFailure: readonly ResourceFailure[] = [

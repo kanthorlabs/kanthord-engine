@@ -47,6 +47,16 @@ export function parseDotEnv(text: string): Readonly<Record<string, string>> {
   return result;
 }
 
+export function loadE2eFileValues(
+  overrides?: Readonly<{ file?: string }>,
+): Readonly<Record<string, string>> {
+  const file = overrides?.file ?? resolve(process.cwd(), E2E_ENV_FILE);
+  if (!existsSync(file)) {
+    return {};
+  }
+  return parseDotEnv(readFileSync(file, "utf8"));
+}
+
 export function loadE2eEnv(
   overrides?: Readonly<{ file?: string; runId?: string }>,
 ): E2eEnv {

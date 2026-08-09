@@ -63,8 +63,8 @@ export function serializeAcceptanceRecord(record: AcceptanceRecord): string {
 const knownScenarioIds: readonly ScenarioId[] = [
   "P1-E1",
   "P1-E2",
-  "P1-E3",
   "P1-E4",
+  "P1-E5",
 ];
 
 async function exists(path: string): Promise<boolean> {

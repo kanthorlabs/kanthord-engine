@@ -53,6 +53,19 @@ test("bundleSchemaVersion is 1", () => {
   assert.equal(bundleSchemaVersion, 1);
 });
 
+test("a bundle declaring mode integration round-trips through the writer", () => {
+  const input = { ...baseInput(), mode: "integration" as const };
+  const writer = createBundleWriter(input);
+
+  const bundle = writer.finish({
+    outcome: "passed",
+    cleanupFailures: [],
+    finishedAt: "2026-01-01T00:00:00.000Z",
+  });
+
+  assert.equal(bundle.mode, "integration");
+});
+
 test("serializeBundle emits the exact bytes for a fully populated bundle, keys in Bundle declaration order", () => {
   const input = baseInput();
   const writer = createBundleWriter(input);

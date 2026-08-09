@@ -103,7 +103,7 @@ export const scenarios: readonly ScenarioDeclaration[] = [
     id: "E7-11",
     story: "11",
     file: "11-repository-projection.e2e.ts",
-    goal: "P1-E3: the ref layout through the route alone",
+    goal: "P1-E5: the ref layout through the route alone",
     writesRemoteRef: false,
   },
   {

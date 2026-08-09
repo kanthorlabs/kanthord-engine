@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  existsSync,
   readFileSync,
   readdirSync,
   mkdtempSync,
   mkdirSync,
+  statSync,
   writeFileSync,
   rmSync,
 } from "node:fs";
@@ -13,20 +15,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkPrerequisites, runP1E3, p1e3, type RealInputs } from "./p1-e3.ts";
+import { checkPrerequisites, runP1E5, p1e5, type RealInputs } from "./p1-e5.ts";
+
+import { createBundleWriter, serializeBundle } from "../bundle.ts";
 import { main } from "../main.ts";
 import { RunnerError } from "../errors.ts";
 import { E2eEnvError, type E2eEnv } from "../../env.ts";
 import { createLedger } from "../resources.ts";
 import type { ScenarioContext } from "./context.ts";
 import type { CommandRecord } from "../command.ts";
+import type { ReadRemoteRefs, RemoteRefsInput } from "../remote-refs.ts";
 import type {
   DaemonConfig,
   DaemonHandle,
   ExecutionDriver,
   HostRole,
 } from "../driver/index.ts";
-import type { SshTarget } from "../driver/ssh.ts";
 import { searchOrder } from "../../../../src/services/config/search-order.ts";
 
 function record(
@@ -46,17 +50,30 @@ function fakeContext(
   overrides: Partial<ScenarioContext> = {},
 ): ScenarioContext & {
   assertionNames(): readonly string[];
+  assertionRecords(): readonly Readonly<{
+    name: string;
+    expected: unknown;
+    actual: unknown;
+  }>[];
   releaseAll(): ReturnType<ReturnType<typeof createLedger>["releaseAll"]>;
 } {
   const ledger = createLedger();
   const assertionNames: string[] = [];
+  const assertionRecords: Array<
+    Readonly<{
+      name: string;
+      expected: unknown;
+      actual: unknown;
+    }>
+  > = [];
   return {
-    tag: "p1e3-test",
-    scenarioId: "P1-E3",
-    bundleDirectory: "/tmp/p1e3-test-bundle",
+    tag: "p1e5-test",
+    scenarioId: "P1-E5",
+    bundleDirectory: "/tmp/p1e5-test-bundle",
     take: ledger.take,
     sink: { print(): void {}, record(): void {} },
     assert(name: string, expected: unknown, actual: unknown): void {
+      assertionRecords.push({ name, expected, actual });
       let passed = true;
       try {
         assert.deepStrictEqual(actual, expected);
@@ -72,6 +89,13 @@ function fakeContext(
     clientHost: null,
     assertionNames(): readonly string[] {
       return assertionNames;
+    },
+    assertionRecords(): readonly Readonly<{
+      name: string;
+      expected: unknown;
+      actual: unknown;
+    }>[] {
+      return [...assertionRecords];
     },
     releaseAll(): ReturnType<ReturnType<typeof createLedger>["releaseAll"]> {
       return ledger.releaseAll();
@@ -98,19 +122,12 @@ function baseEnv(workDir: string): Record<string, string | undefined> {
   };
 }
 
-function reachableExecute(
-  unreachableHost?: string,
-): (target: SshTarget, argv: readonly string[]) => Promise<CommandRecord> {
-  return async (target, argv) => {
-    if (unreachableHost !== undefined && target.host === unreachableHost) {
-      return record(argv, { exitCode: 255, stderr: "ssh: connect refused" });
-    }
-    return record(argv, {});
-  };
-}
+const stableRemoteRefs: ReadRemoteRefs = async () => ({
+  "refs/heads/main": "a".repeat(40),
+});
 
-test("checkPrerequisites drives each of the seven rows one at a time, rejecting unavailable with the exact message", async (t) => {
-  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e3-"));
+test("checkPrerequisites drives each of the three required rows one at a time, rejecting unavailable with the exact message", async (t) => {
+  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e5-"));
   mkdirSync(join(workDir, "plan"), { recursive: true });
   t.after(() => rmSync(workDir, { recursive: true, force: true }));
 
@@ -119,93 +136,33 @@ test("checkPrerequisites drives each of the seven rows one at a time, rejecting 
       name: string,
       buildContext: () => ScenarioContext,
       buildEnv: () => Record<string, string | undefined>,
-      buildExecute: () => (
-        target: SshTarget,
-        argv: readonly string[],
-      ) => Promise<CommandRecord>,
       message: string,
     ]
   > = [
     [
-      "context.daemonHost is null",
-      () => fakeContext({ daemonHost: null, clientHost: "client.example" }),
-      () => baseEnv(workDir),
-      () => reachableExecute(),
-      "P1-E3 needs --daemon-host",
-    ],
-    [
-      "context.clientHost is null",
-      () => fakeContext({ daemonHost: "daemon.example", clientHost: null }),
-      () => baseEnv(workDir),
-      () => reachableExecute(),
-      "P1-E3 needs --client-host",
-    ],
-    [
       "KANTHORD_E2E_REAL_PLAN is absent",
-      () =>
-        fakeContext({
-          daemonHost: "daemon.example",
-          clientHost: "client.example",
-        }),
-      () => ({ ...baseEnv(workDir), KANTHORD_E2E_REAL_PLAN: undefined }),
-      () => reachableExecute(),
-      "P1-E3 needs KANTHORD_E2E_REAL_PLAN",
+      () => fakeContext(),
+      () => ({ ...baseEnv(workDir), KANTHORD_E2E_REAL_PLAN: "" }),
+      "P1-E5 needs KANTHORD_E2E_REAL_PLAN, in the environment or in .env.e2e",
     ],
     [
       "KANTHORD_E2E_REAL_OBJECTIVES is absent",
-      () =>
-        fakeContext({
-          daemonHost: "daemon.example",
-          clientHost: "client.example",
-        }),
-      () => ({ ...baseEnv(workDir), KANTHORD_E2E_REAL_OBJECTIVES: undefined }),
-      () => reachableExecute(),
-      "P1-E3 needs KANTHORD_E2E_REAL_OBJECTIVES",
+      () => fakeContext(),
+      () => ({ ...baseEnv(workDir), KANTHORD_E2E_REAL_OBJECTIVES: "" }),
+      "P1-E5 needs KANTHORD_E2E_REAL_OBJECTIVES, in the environment or in .env.e2e",
     ],
     [
       "KANTHORD_E2E_REAL_TASKS is absent",
-      () =>
-        fakeContext({
-          daemonHost: "daemon.example",
-          clientHost: "client.example",
-        }),
-      () => ({ ...baseEnv(workDir), KANTHORD_E2E_REAL_TASKS: undefined }),
-      () => reachableExecute(),
-      "P1-E3 needs KANTHORD_E2E_REAL_TASKS",
-    ],
-    [
-      "the daemon host is unreachable",
-      () =>
-        fakeContext({
-          daemonHost: "daemon.example",
-          clientHost: "client.example",
-        }),
-      () => baseEnv(workDir),
-      () => reachableExecute("daemon.example"),
-      "P1-E3 cannot reach the daemon host daemon.example",
-    ],
-    [
-      "the client host is unreachable",
-      () =>
-        fakeContext({
-          daemonHost: "daemon.example",
-          clientHost: "client.example",
-        }),
-      () => baseEnv(workDir),
-      () => reachableExecute("client.example"),
-      "P1-E3 cannot reach the client host client.example",
+      () => fakeContext(),
+      () => ({ ...baseEnv(workDir), KANTHORD_E2E_REAL_TASKS: "" }),
+      "P1-E5 needs KANTHORD_E2E_REAL_TASKS, in the environment or in .env.e2e",
     ],
   ];
 
-  for (const [name, buildContext, buildEnv, buildExecute, message] of rows) {
+  for (const [name, buildContext, buildEnv, message] of rows) {
     await t.test(name, async () => {
       await assert.rejects(
-        checkPrerequisites(
-          buildContext(),
-          buildExecute(),
-          buildEnv(),
-          stubLoadEnv(),
-        ),
+        checkPrerequisites(buildContext(), buildEnv(), stubLoadEnv()),
         (error: unknown) => {
           assert.ok(error instanceof RunnerError);
           assert.equal(error.code, "unavailable");
@@ -217,21 +174,99 @@ test("checkPrerequisites drives each of the seven rows one at a time, rejecting 
   }
 });
 
+test("checkPrerequisites keeps plan and count inputs explicit instead of reading them from .env.e2e", async () => {
+  await assert.rejects(
+    Reflect.apply(checkPrerequisites, undefined, [
+      fakeContext(),
+      {},
+      stubLoadEnv(),
+      () => ({
+        KANTHORD_E2E_REAL_PLAN: "/from/file",
+        KANTHORD_E2E_REAL_OBJECTIVES: "2",
+        KANTHORD_E2E_REAL_TASKS: "4",
+      }),
+    ]) as Promise<unknown>,
+    (error: unknown) => {
+      assert.ok(error instanceof RunnerError);
+      assert.equal(error.code, "unavailable");
+      assert.equal(
+        error.message,
+        "P1-E5 needs KANTHORD_E2E_REAL_PLAN, in the environment or in .env.e2e",
+      );
+      return true;
+    },
+  );
+});
+
+test("checkPrerequisites passes the run tag to loadE2eEnv as the run id, so no E2E_RUN_ID export is needed", async () => {
+  const seen: (string | undefined)[] = [];
+  const loadEnv = (
+    overrides?: Readonly<{ file?: string; runId?: string }>,
+  ): E2eEnv => {
+    seen.push(overrides?.runId);
+    return {
+      ghToken: "gh-secret",
+      ghRepo: "kanthorlabs/kanthord",
+      ghBaseBranch: "main",
+      runId: overrides?.runId ?? "",
+    };
+  };
+
+  await checkPrerequisites(fakeContext(), baseEnv("/tmp/p1e5-plan"), loadEnv);
+
+  assert.deepEqual(seen, ["p1e5-test"]);
+});
+
+test("checkPrerequisites refuses a context carrying a daemon host", async () => {
+  await assert.rejects(
+    checkPrerequisites(
+      fakeContext({ daemonHost: "daemon.example" }),
+      baseEnv("/tmp/p1e5-plan"),
+      stubLoadEnv(),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof RunnerError);
+      assert.equal(error.code, "invalid-argument");
+      assert.equal(
+        error.message,
+        "P1-E5 runs on one machine and takes no host option",
+      );
+      return true;
+    },
+  );
+});
+
+test("checkPrerequisites refuses a context carrying a client host", async () => {
+  await assert.rejects(
+    checkPrerequisites(
+      fakeContext({ clientHost: "client.example" }),
+      baseEnv("/tmp/p1e5-plan"),
+      stubLoadEnv(),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof RunnerError);
+      assert.equal(error.code, "invalid-argument");
+      assert.equal(
+        error.message,
+        "P1-E5 runs on one machine and takes no host option",
+      );
+      return true;
+    },
+  );
+});
+
 test("KANTHORD_E2E_REAL_OBJECTIVES=0 and a non-numeric value each reject as unavailable", async (t) => {
-  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e3-"));
+  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e5-"));
   mkdirSync(join(workDir, "plan"), { recursive: true });
   t.after(() => rmSync(workDir, { recursive: true, force: true }));
 
   for (const value of ["0", "not-a-number"]) {
     await t.test(`KANTHORD_E2E_REAL_OBJECTIVES=${value}`, async () => {
-      const context = fakeContext({
-        daemonHost: "daemon.example",
-        clientHost: "client.example",
-      });
+      const context = fakeContext();
       const env = { ...baseEnv(workDir), KANTHORD_E2E_REAL_OBJECTIVES: value };
 
       await assert.rejects(
-        checkPrerequisites(context, reachableExecute(), env, stubLoadEnv()),
+        checkPrerequisites(context, env, stubLoadEnv()),
         (error: unknown) => {
           assert.ok(error instanceof RunnerError);
           assert.equal(error.code, "unavailable");
@@ -242,23 +277,15 @@ test("KANTHORD_E2E_REAL_OBJECTIVES=0 and a non-numeric value each reject as unav
   }
 });
 
-test("checkPrerequisites resolves the RealInputs derived from .env.e2e and the three required env vars", async () => {
-  const context = fakeContext({
-    daemonHost: "daemon.example",
-    clientHost: "client.example",
-  });
+test("checkPrerequisites resolves the RealInputs from the explicit plan and count inputs", async () => {
+  const context = fakeContext();
   const env = {
     KANTHORD_E2E_REAL_PLAN: "/tmp/plan",
     KANTHORD_E2E_REAL_OBJECTIVES: "2",
     KANTHORD_E2E_REAL_TASKS: "4",
   };
 
-  const result = await checkPrerequisites(
-    context,
-    reachableExecute(),
-    env,
-    stubLoadEnv(),
-  );
+  const result = await checkPrerequisites(context, env, stubLoadEnv());
 
   assert.deepEqual(result, {
     origin: "https://github.com/kanthorlabs/kanthord.git",
@@ -271,26 +298,23 @@ test("checkPrerequisites resolves the RealInputs derived from .env.e2e and the t
 });
 
 test("a loadEnv rejection is wrapped as unavailable naming each missing key", async () => {
-  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e3-"));
+  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e5-"));
   mkdirSync(join(workDir, "plan"), { recursive: true });
   try {
-    const context = fakeContext({
-      daemonHost: "daemon.example",
-      clientHost: "client.example",
-    });
+    const context = fakeContext();
     const env = baseEnv(workDir);
     const loadEnv = (): E2eEnv => {
       throw new E2eEnvError("boom", ["E2E_GH_TOKEN", "E2E_GH_REPO"]);
     };
 
     await assert.rejects(
-      checkPrerequisites(context, reachableExecute(), env, loadEnv),
+      checkPrerequisites(context, env, loadEnv),
       (error: unknown) => {
         assert.ok(error instanceof RunnerError);
         assert.equal(error.code, "unavailable");
         assert.equal(
           error.message,
-          "P1-E3 needs E2E_GH_TOKEN, E2E_GH_REPO in .env.e2e",
+          "P1-E5 needs E2E_GH_TOKEN, E2E_GH_REPO in .env.e2e",
         );
         return true;
       },
@@ -301,13 +325,10 @@ test("a loadEnv rejection is wrapped as unavailable naming each missing key", as
 });
 
 test("a loadEnv rejection naming all three required keys preserves E2E_REQUIRED_KEYS order", async () => {
-  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e3-"));
+  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e5-"));
   mkdirSync(join(workDir, "plan"), { recursive: true });
   try {
-    const context = fakeContext({
-      daemonHost: "daemon.example",
-      clientHost: "client.example",
-    });
+    const context = fakeContext();
     const env = baseEnv(workDir);
     const loadEnv = (): E2eEnv => {
       throw new E2eEnvError("boom", [
@@ -318,13 +339,13 @@ test("a loadEnv rejection naming all three required keys preserves E2E_REQUIRED_
     };
 
     await assert.rejects(
-      checkPrerequisites(context, reachableExecute(), env, loadEnv),
+      checkPrerequisites(context, env, loadEnv),
       (error: unknown) => {
         assert.ok(error instanceof RunnerError);
         assert.equal(error.code, "unavailable");
         assert.equal(
           error.message,
-          "P1-E3 needs E2E_GH_TOKEN, E2E_GH_REPO, E2E_GH_BASE_BRANCH in .env.e2e",
+          "P1-E5 needs E2E_GH_TOKEN, E2E_GH_REPO, E2E_GH_BASE_BRANCH in .env.e2e",
         );
         return true;
       },
@@ -335,24 +356,16 @@ test("a loadEnv rejection naming all three required keys preserves E2E_REQUIRED_
 });
 
 test("KANTHORD_E2E_REAL_ORIGIN, KANTHORD_E2E_REAL_BRANCH and KANTHORD_E2E_REAL_TOKEN_FILE absent from env does not reject", async () => {
-  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e3-"));
+  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e5-"));
   mkdirSync(join(workDir, "plan"), { recursive: true });
   try {
-    const context = fakeContext({
-      daemonHost: "daemon.example",
-      clientHost: "client.example",
-    });
+    const context = fakeContext();
     const env = baseEnv(workDir);
     assert.equal("KANTHORD_E2E_REAL_ORIGIN" in env, false);
     assert.equal("KANTHORD_E2E_REAL_BRANCH" in env, false);
     assert.equal("KANTHORD_E2E_REAL_TOKEN_FILE" in env, false);
 
-    const result = await checkPrerequisites(
-      context,
-      reachableExecute(),
-      env,
-      stubLoadEnv(),
-    );
+    const result = await checkPrerequisites(context, env, stubLoadEnv());
 
     assert.equal(result.planPath, env.KANTHORD_E2E_REAL_PLAN);
   } finally {
@@ -367,14 +380,15 @@ function fakeDriver(
   ) => CommandRecord | Promise<CommandRecord>,
   deliverDirectoryCalls: Array<readonly [HostRole, string, string]>,
   deliverTokenCalls: string[] = [],
+  tokenFilePath?: string,
 ): ExecutionDriver {
   return {
-    name: "ssh",
+    name: "local",
     async identity() {
-      return { hostname: "p1e3-test", platform: "linux", architecture: "x64" };
+      return { hostname: "p1e5-test", platform: "linux", architecture: "x64" };
     },
     async deliverBinary() {
-      return "~/.kanthord-e2e-p1e3-test/bin/kanthord";
+      return "~/.kanthord-e2e-p1e5-test/bin/kanthord";
     },
     async deliverDirectory(role: HostRole, source: string, name: string) {
       deliverDirectoryCalls.push([role, source, name]);
@@ -388,11 +402,15 @@ function fakeDriver(
       await cp(source, destination, { recursive: true });
     },
     async deliverConfig() {
-      return "~/.kanthord-e2e-p1e3-test/config.json";
+      return "~/.kanthord-e2e-p1e5-test/config.json";
     },
     async deliverToken(token: string) {
       deliverTokenCalls.push(token);
-      return "~/.kanthord-e2e-p1e3-test/token";
+      if (tokenFilePath !== undefined) {
+        writeFileSync(tokenFilePath, `${token}\n`, { mode: 0o600 });
+        return tokenFilePath;
+      }
+      return "~/.kanthord-e2e-p1e5-test/token";
     },
     async probeOrigin() {
       throw new Error("not used by this test");
@@ -453,7 +471,7 @@ function fakeDriver(
     async startDaemonExpectingRefusal(
       config: DaemonConfig | null,
     ): Promise<CommandRecord> {
-      const home = config?.home ?? "~/.kanthord-e2e-p1e3-test";
+      const home = config?.home ?? "~/.kanthord-e2e-p1e5-test";
       const candidates = searchOrder({
         env: {},
         cwd: home,
@@ -545,7 +563,7 @@ function buildJourneyDispatch(
       });
     }
     throw new Error(
-      `unexpected cli invocation in the p1-e3 fake: ${argv.join(" ")}`,
+      `unexpected cli invocation in the p1-e5 fake: ${argv.join(" ")}`,
     );
   };
 }
@@ -553,7 +571,7 @@ function buildJourneyDispatch(
 async function withRealPlan<T>(
   body: (workDir: string) => Promise<T>,
 ): Promise<T> {
-  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e3-run-"));
+  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e5-run-"));
   try {
     mkdirSync(join(workDir, "plan"), { recursive: true });
     writeFileSync(join(workDir, "plan", "objective.md"), "a real objective\n");
@@ -563,7 +581,7 @@ async function withRealPlan<T>(
   }
 }
 
-const seventeenJourneyNames = [
+const journeyAndForgeAssertionNames = [
   "no-config-exit",
   "no-config-names-search-order",
   "first-location-starts",
@@ -581,9 +599,10 @@ const seventeenJourneyNames = [
   "status-counts",
   "run-not-implemented",
   "status-unchanged",
+  "forge-unchanged",
 ];
 
-test("with a driver and every prerequisite present, runP1E3 calls runJourney exactly once, in the seventeen named order, against a profile with fixtureRoot null and expectedObjectIds null", async (t) => {
+test("with a driver and every prerequisite present, runP1E5 calls runJourney exactly once, in the seventeen named order, then asserts forge unchanged, against a profile with fixtureRoot null and expectedObjectIds null", async (t) => {
   await withRealPlan(async (workDir) => {
     // "delivered" is its own namespace, nested one level below workDir, so its
     // "plan" child never collides with workDir's own pre-seeded "plan"
@@ -604,29 +623,21 @@ test("with a driver and every prerequisite present, runP1E3 calls runJourney exa
       "a real objective\n",
     );
 
-    const context = fakeContext({
-      daemonHost: "daemon.example",
-      clientHost: "client.example",
-    });
+    const context = fakeContext();
     t.after(() => context.releaseAll());
     const env = baseEnv(workDir);
-    const inputs = await checkPrerequisites(
-      context,
-      reachableExecute(),
-      env,
-      stubLoadEnv(),
-    );
+    const inputs = await checkPrerequisites(context, env, stubLoadEnv());
 
-    await runP1E3(context, driver, inputs);
+    await runP1E5(context, driver, inputs, stableRemoteRefs);
 
-    assert.deepEqual(context.assertionNames(), seventeenJourneyNames);
+    assert.deepEqual(context.assertionNames(), journeyAndForgeAssertionNames);
     assert.deepEqual(deliverDirectoryCalls, [
       ["client", inputs.planPath, "plan"],
     ]);
   });
 });
 
-test("runP1E3 calls deliverToken exactly once with the token, and passes origin, defaultBranch, localPlanPath, expectedObjectiveCount and expectedTaskCount straight through to createRealProfile", async (t) => {
+test("runP1E5 calls deliverToken exactly once with the token, and passes origin, defaultBranch, localPlanPath, expectedObjectiveCount and expectedTaskCount straight through to createRealProfile", async (t) => {
   await withRealPlan(async (workDir) => {
     const planDeliveryDirectory = join(workDir, "delivered", "plan");
     mkdirSync(planDeliveryDirectory, { recursive: true });
@@ -652,10 +663,7 @@ test("runP1E3 calls deliverToken exactly once with the token, and passes origin,
       deliverTokenCalls,
     );
 
-    const context = fakeContext({
-      daemonHost: "daemon.example",
-      clientHost: "client.example",
-    });
+    const context = fakeContext();
     t.after(() => context.releaseAll());
 
     const inputs: RealInputs = {
@@ -667,7 +675,7 @@ test("runP1E3 calls deliverToken exactly once with the token, and passes origin,
       expectedTaskCount: 4,
     };
 
-    await runP1E3(context, driver, inputs);
+    await runP1E5(context, driver, inputs, stableRemoteRefs);
 
     assert.deepEqual(deliverTokenCalls, ["gh-secret"]);
     assert.equal(repositoryRegisterCalls.length, 1);
@@ -676,6 +684,199 @@ test("runP1E3 calls deliverToken exactly once with the token, and passes origin,
     assert.deepEqual(deliverDirectoryCalls, [
       ["client", inputs.planPath, "plan"],
     ]);
+  });
+});
+
+test("runP1E5 reads the remote refs twice, with the same input both times", async (t) => {
+  await withRealPlan(async (workDir) => {
+    const planDeliveryDirectory = join(workDir, "delivered", "plan");
+    mkdirSync(planDeliveryDirectory, { recursive: true });
+    writeFileSync(
+      join(planDeliveryDirectory, "objective.md"),
+      "a real objective\n",
+    );
+
+    const driver = fakeDriver(
+      planDeliveryDirectory,
+      buildJourneyDispatch(planDeliveryDirectory),
+      [],
+    );
+    const context = fakeContext();
+    t.after(() => context.releaseAll());
+    const inputs: RealInputs = {
+      origin: "https://github.com/kanthorlabs/kanthord.git",
+      defaultBranch: "main",
+      token: "gh-secret",
+      planPath: join(workDir, "plan"),
+      expectedObjectiveCount: 2,
+      expectedTaskCount: 4,
+    };
+    const readInputs: RemoteRefsInput[] = [];
+    const readRemoteRefs: ReadRemoteRefs = async (remoteInput) => {
+      readInputs.push(remoteInput);
+      return { "refs/heads/main": "a".repeat(40) };
+    };
+
+    await runP1E5(context, driver, inputs, readRemoteRefs);
+
+    assert.equal(readInputs.length, 2);
+    assert.deepEqual(readInputs, [
+      {
+        origin: inputs.origin,
+        username: "x-access-token",
+        tokenPath: "~/.kanthord-e2e-p1e5-test/token",
+      },
+      {
+        origin: inputs.origin,
+        username: "x-access-token",
+        tokenPath: "~/.kanthord-e2e-p1e5-test/token",
+      },
+    ]);
+  });
+});
+
+test("runP1E5 reads the refs before the first journey command and after the last", async (t) => {
+  await withRealPlan(async (workDir) => {
+    const planDeliveryDirectory = join(workDir, "delivered", "plan");
+    mkdirSync(planDeliveryDirectory, { recursive: true });
+    writeFileSync(
+      join(planDeliveryDirectory, "objective.md"),
+      "a real objective\n",
+    );
+
+    const commands: CommandRecord[] = [];
+    const dispatch = buildJourneyDispatch(planDeliveryDirectory);
+    const driver = fakeDriver(
+      planDeliveryDirectory,
+      async (argv) => {
+        const result = await dispatch(argv);
+        commands.push(result);
+        return result;
+      },
+      [],
+    );
+    const context = fakeContext();
+    t.after(() => context.releaseAll());
+    const inputs: RealInputs = {
+      origin: "https://github.com/kanthorlabs/kanthord.git",
+      defaultBranch: "main",
+      token: "gh-secret",
+      planPath: join(workDir, "plan"),
+      expectedObjectiveCount: 2,
+      expectedTaskCount: 4,
+    };
+    let readCount = 0;
+    let commandCountAtSecondRead = -1;
+    const readRemoteRefs: ReadRemoteRefs = async (): Promise<
+      Readonly<Record<string, string>>
+    > => {
+      readCount += 1;
+      if (readCount === 1) {
+        assert.equal(commands.length, 0);
+      } else {
+        commandCountAtSecondRead = commands.length;
+      }
+      return { "refs/heads/main": "a".repeat(40) };
+    };
+
+    await runP1E5(context, driver, inputs, readRemoteRefs);
+
+    assert.equal(readCount, 2);
+    assert.ok(commands.length > 0);
+    assert.equal(commandCountAtSecondRead, commands.length);
+  });
+});
+
+test("runP1E5 asserts forge-unchanged with the two maps", async (t) => {
+  await withRealPlan(async (workDir) => {
+    const planDeliveryDirectory = join(workDir, "delivered", "plan");
+    mkdirSync(planDeliveryDirectory, { recursive: true });
+    writeFileSync(
+      join(planDeliveryDirectory, "objective.md"),
+      "a real objective\n",
+    );
+
+    const driver = fakeDriver(
+      planDeliveryDirectory,
+      buildJourneyDispatch(planDeliveryDirectory),
+      [],
+    );
+    const context = fakeContext();
+    t.after(() => context.releaseAll());
+    const inputs: RealInputs = {
+      origin: "https://github.com/kanthorlabs/kanthord.git",
+      defaultBranch: "main",
+      token: "gh-secret",
+      planPath: join(workDir, "plan"),
+      expectedObjectiveCount: 2,
+      expectedTaskCount: 4,
+    };
+    const refs = { "refs/heads/main": "a".repeat(40) };
+
+    await runP1E5(context, driver, inputs, async () => refs);
+
+    const assertion = context
+      .assertionRecords()
+      .find((entry) => entry.name === "forge-unchanged");
+    assert.ok(assertion);
+    assert.deepEqual(assertion.expected, refs);
+    assert.deepEqual(assertion.actual, refs);
+  });
+});
+
+test("runP1E5 records forge-unchanged as failed when a ref appears during the journey", async (t) => {
+  await withRealPlan(async (workDir) => {
+    const planDeliveryDirectory = join(workDir, "delivered", "plan");
+    mkdirSync(planDeliveryDirectory, { recursive: true });
+    writeFileSync(
+      join(planDeliveryDirectory, "objective.md"),
+      "a real objective\n",
+    );
+
+    const driver = fakeDriver(
+      planDeliveryDirectory,
+      buildJourneyDispatch(planDeliveryDirectory),
+      [],
+    );
+    const context = fakeContext();
+    t.after(() => context.releaseAll());
+    const inputs: RealInputs = {
+      origin: "https://github.com/kanthorlabs/kanthord.git",
+      defaultBranch: "main",
+      token: "gh-secret",
+      planPath: join(workDir, "plan"),
+      expectedObjectiveCount: 2,
+      expectedTaskCount: 4,
+    };
+    let readCount = 0;
+    const readRemoteRefs: ReadRemoteRefs = async (): Promise<
+      Readonly<Record<string, string>>
+    > => {
+      readCount += 1;
+      if (readCount === 1) {
+        return { "refs/heads/main": "a".repeat(40) };
+      }
+      return {
+        "refs/heads/main": "a".repeat(40),
+        "refs/heads/created-during-run": "b".repeat(40),
+      };
+    };
+
+    await assert.rejects(
+      runP1E5(context, driver, inputs, readRemoteRefs),
+      (error: unknown) => {
+        assert.ok(error instanceof RunnerError);
+        assert.equal(error.code, "assertion-failed");
+        assert.equal(error.message, "forge-unchanged");
+        return true;
+      },
+    );
+
+    const assertion = context
+      .assertionRecords()
+      .find((entry) => entry.name === "forge-unchanged");
+    assert.ok(assertion);
+    assert.notDeepEqual(assertion.expected, assertion.actual);
   });
 });
 
@@ -695,8 +896,6 @@ test("SECURITY: the token loaded from .env.e2e appears in no recorded command ar
     const attachedLogs: string[] = [];
 
     const context = fakeContext({
-      daemonHost: "daemon.example",
-      clientHost: "client.example",
       sink: {
         print(): void {},
         record(entry: CommandRecord): void {
@@ -731,7 +930,7 @@ test("SECURITY: the token loaded from .env.e2e appears in no recorded command ar
       expectedTaskCount: 4,
     };
 
-    await runP1E3(context, driver, inputs);
+    await runP1E5(context, driver, inputs, stableRemoteRefs);
 
     const logs = await driver.collectLogs();
     const commandsText = commands
@@ -744,6 +943,92 @@ test("SECURITY: the token loaded from .env.e2e appears in no recorded command ar
     assert.equal(assertionsText.includes(token), false);
     assert.equal(logsText.includes(token), false);
     assert.deepEqual(deliverTokenCalls, [token]);
+  });
+});
+
+test("SECURITY: P1-E5 serializes no token and removes its 0600 token file after ledger cleanup", async (t) => {
+  await withRealPlan(async (workDir) => {
+    const planDeliveryDirectory = join(workDir, "delivered", "plan");
+    mkdirSync(planDeliveryDirectory, { recursive: true });
+    writeFileSync(
+      join(planDeliveryDirectory, "objective.md"),
+      "a real objective\n",
+    );
+
+    const token = "p1e5-bundle-token-file-secret";
+    const tokenFilePath = join(workDir, "token");
+    const writer = createBundleWriter({
+      scenarioId: "P1-E5",
+      mode: "integration",
+      driver: "local",
+      profile: "real",
+      tag: "p1e5-security-bundle",
+      commit: "commit-p1e5-security",
+      startedAt: "2026-08-09T00:00:00.000Z",
+      identity: {
+        hostname: "p1e5-test",
+        platform: "darwin",
+        architecture: "arm64",
+      },
+      fixtureHashes: [],
+    });
+    const context = fakeContext({
+      sink: writer.sink,
+      assert: writer.assert,
+      noteObject: writer.noteObject,
+      attachLog: writer.attachLog,
+      logs: writer.logs,
+      printedLines: writer.printedLines,
+      commandsRecorded: writer.commandsRecorded,
+    });
+    t.after(() => context.releaseAll());
+
+    const dispatch = buildJourneyDispatch(planDeliveryDirectory);
+    const driver = fakeDriver(
+      planDeliveryDirectory,
+      async (argv) => {
+        const dispatched = await dispatch(argv);
+        const result =
+          argv[0] === "credential"
+            ? { ...dispatched, stderr: `${dispatched.stderr}${token}\n` }
+            : dispatched;
+        context.sink.record(result);
+        return result;
+      },
+      [],
+      [],
+      tokenFilePath,
+    );
+
+    await runP1E5(
+      context,
+      driver,
+      {
+        origin: "https://github.com/kanthorlabs/kanthord.git",
+        defaultBranch: "main",
+        token,
+        planPath: join(workDir, "plan"),
+        expectedObjectiveCount: 2,
+        expectedTaskCount: 4,
+      },
+      stableRemoteRefs,
+    );
+
+    const bundle = writer.finish({
+      outcome: "passed",
+      cleanupFailures: [],
+      finishedAt: "2026-08-09T00:05:00.000Z",
+    });
+    const serialized = serializeBundle(bundle);
+
+    assert.equal(serialized.includes(token), false);
+    assert.equal(serialized.includes("[redacted]"), true);
+    assert.equal(existsSync(tokenFilePath), true);
+    assert.equal(statSync(tokenFilePath).mode & 0o777, 0o600);
+
+    await context.releaseAll();
+
+    assert.equal(existsSync(tokenFilePath), false);
   });
 });
 
@@ -774,40 +1059,20 @@ test("scripts/e2e/lib contains no NEEDS-HUMAN marker anywhere", () => {
   }
 });
 
-test("main(['P1-E1', '--daemon-host', 'a']) returns 2 with the message --daemon-host applies to P1-E3 only", async () => {
-  const code = await main(["P1-E1", "--daemon-host", "a"]);
-  assert.equal(code, 2);
-});
-
-test("main writes exactly that refusal message for a non-P1-E3 --daemon-host use", async (t) => {
-  let captured = "";
-  t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
-    captured += chunk.toString();
-    return true;
-  });
-
-  await main(["P1-E1", "--daemon-host", "a"]);
-
-  assert.equal(
-    captured,
-    "e2e: invalid-argument: --daemon-host applies to P1-E3 only\n",
-  );
-});
-
 test("on a prerequisite failure, main resolves exit code 3 and writes a bundle with outcome unavailable, an empty assertions array and no passed key", async (t) => {
   const cwd = process.cwd();
-  const dir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e3-main-"));
+  const dir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e5-main-"));
   process.chdir(dir);
   t.after(() => {
     process.chdir(cwd);
     rmSync(dir, { recursive: true, force: true });
   });
 
-  const code = await main(["P1-E3", "--tag", "t1"]);
+  const code = await main(["P1-E5", "--tag", "t1"]);
   assert.equal(code, 3);
 
   const bundleText = await readFile(
-    ".data/acceptance-t1/P1-E3/bundle.json",
+    ".data/acceptance-t1/P1-E5/bundle.json",
     "utf8",
   );
   const bundle = JSON.parse(bundleText) as Readonly<{
@@ -820,9 +1085,9 @@ test("on a prerequisite failure, main resolves exit code 3 and writes a bundle w
   assert.equal(Object.hasOwn(bundle, "passed"), false);
 });
 
-test("p1e3 declares P1-E3, mode deployment, driver ssh, profile real", () => {
-  assert.equal(p1e3.id, "P1-E3");
-  assert.equal(p1e3.mode, "deployment");
-  assert.equal(p1e3.driver, "ssh");
-  assert.equal(p1e3.profile, "real");
+test("p1e5 declares P1-E5, mode integration, driver local, profile real", () => {
+  assert.equal(p1e5.id, "P1-E5");
+  assert.equal(p1e5.mode, "integration");
+  assert.equal(p1e5.driver, "local");
+  assert.equal(p1e5.profile, "real");
 });

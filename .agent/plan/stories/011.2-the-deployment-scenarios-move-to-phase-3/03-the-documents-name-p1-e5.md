@@ -3,37 +3,14 @@
 Epic: `.agent/plan/epics/011.2-the-deployment-scenarios-move-to-phase-3.md`
 Depends on: Story 01.
 
-This story ships no production code and no new test. It resolves the written references a code
-rename cannot reach.
+This story ships no production code, no new test and no edit. It confirms the written references a
+code rename cannot reach. Stories 01 and 02 cover every code and message site. The two live
+documents the EPIC names were amended ahead of this epic.
 
-## Change — the enumerated list
+## Change — nothing
 
-Edit exactly these files, and no others.
-
-| File                                                                        | Edit                                                                                        |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `.agent/plan/stories/007-repository-registration/13-e2e-acceptance-gate.md` | every `P1-E3` becomes `P1-E5`; the gate it describes is the one-machine real-repository run |
-
-Nothing else needs an edit. Stories 01 and 02 cover every code and message site, and the proposal
-and the two acceptance documents were amended ahead of this epic.
-
-## Change — nothing, in these files
-
-Confirm each still contains `P1-E3` after the story, and leave every one untouched. A closed
-record states what it did at the time, and rewriting it destroys the history.
-
-- `.agent/plan/epics/011-end-to-end-scenarios.md`
-- `.agent/plan/epics/011.1-acceptance-run-preconditions.md`
-- `.agent/plan/stories/011-end-to-end-scenarios/**` — `01-the-runner.md`,
-  `04-p1-e1-the-onboarding-journey.md`, `06-the-driver-and-the-profile.md`,
-  `11-p1-e3-the-vpn-run.md`, `index.md`
-- `.agent/plan/stories/011.2-the-deployment-scenarios-move-to-phase-3/**` — this story set names
-  the old id because it performs the rename
-- `.agent/tdd/history/**` — `2026-08-07-011-end-to-end-scenarios.md`,
-  `2026-08-08-011-end-to-end-scenarios.md`,
-  `2026-08-09-011.1-acceptance-run-preconditions.md`
-- `.agent/tdd/memory/software-engineer/2026-08-08.md`
-- `.agent/tdd/memory/test-engineer/2026-08-08.md`
+Edit no file. A story that edits nothing still has a job: it proves the rename is complete, and it
+names every place the old id stays on purpose.
 
 ## Change — confirm, do not re-edit
 
@@ -48,6 +25,33 @@ These carry the new names already. Read each and confirm; change nothing.
 - `.agent/plan/epics/012-phase-1-acceptance-run.md`
 - `.claude/commands/e2e.md`
 
+## Change — nothing, in these records
+
+A closed record states what it did at the time, and rewriting it destroys the history. Confirm each
+still contains `P1-E3` after the story, and leave every one untouched.
+
+- `.agent/plan/epics/000-phase-1-overview.md`
+- `.agent/plan/epics/007-repository-registration.md`
+- `.agent/plan/stories/007-repository-registration/**` — `10-repository-register.md`,
+  `11-repository-projection.md`, `13-e2e-acceptance-gate.md`, `index.md`
+- `.agent/plan/epics/011-end-to-end-scenarios.md`
+- `.agent/plan/stories/011-end-to-end-scenarios/**` — `01-the-runner.md`,
+  `04-p1-e1-the-onboarding-journey.md`, `06-the-driver-and-the-profile.md`,
+  `11-p1-e3-the-vpn-run.md`, `index.md`
+- `.agent/plan/epics/011.1-acceptance-run-preconditions.md`
+- `.agent/plan/stories/011.1-acceptance-run-preconditions/**` — `03-the-acceptance-record.md`,
+  `04-the-verdict-command.md`, `07-the-real-profile-reads-env-e2e.md`,
+  `09-the-driver-matches-the-mechanism.md`, `index.md`
+- `.agent/plan/stories/011.2-the-deployment-scenarios-move-to-phase-3/**` — this story set names
+  the old id because it performs the rename
+- `.agent/tdd/**`
+
+## Change — nothing, in this code site
+
+- `scripts/e2e/lib/main.test.ts` — `P1-E3` is the id the runner refuses. The EPIC coverage item
+  `P1-E3 is not a known scenario id, and the runner names P1-E5 in its refusal` requires the
+  refusal to name it. Deleting the string deletes the assertion.
+
 ## Constraints
 
 - Change no oracle text. A scenario's mode, driver, profile and assertions belong to the
@@ -59,19 +63,17 @@ These carry the new names already. Read each and confirm; change nothing.
 - This command prints nothing:
 
   ```bash
-  grep -rl "P1-E3\|P2-E5" . \
+  grep -rl "P1-E3" . \
     --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=.data \
-    | grep -v '^\./\.agent/plan/epics/011-end-to-end-scenarios\.md$' \
-    | grep -v '^\./\.agent/plan/epics/011\.1-acceptance-run-preconditions\.md$' \
-    | grep -v '^\./\.agent/plan/stories/011-end-to-end-scenarios/' \
-    | grep -v '^\./\.agent/plan/stories/011\.2-the-deployment-scenarios-move-to-phase-3/' \
-    | grep -v '^\./\.agent/tdd/'
+    --exclude-dir=.agent \
+    | grep -v 'scripts/e2e/lib/main\.test\.ts$'
   ```
 
-  Run it from the repository root. A non-empty result names a file this story missed.
+  Run it from the repository root. A non-empty result names a live document that still carries the
+  old id. The `.agent` tree is excluded whole, because every record in it is closed. Match the
+  retained path by suffix, never with a `^\./` anchor: `--exclude-dir` drops the `./` prefix from
+  the output, so an anchored filter matches nothing and the check passes for the wrong reason.
 
-- `npx prettier --check .agent/plan/stories/007-repository-registration/13-e2e-acceptance-gate.md`
-  passes.
 - `npm run verify` exits 0.
 - Proof: delivers the EPIC coverage item
   `P1-E3 is not a known scenario id, and the runner names P1-E5 in its refusal`, jointly with
