@@ -68,6 +68,33 @@ Podman version with its rootless or rootful mode and architecture, a complete
 prerequisite makes the run report **unavailable**. It never skips and writes a
 passing bundle.
 
+### The real-profile run needs a dedicated forge
+
+`E2E_GH_REPO` in `.env.e2e` names a **throwaway repository**, and three
+constraints hold for the whole run:
+
+- **Throwaway.** It holds no work anyone depends on. The run registers a
+  credential against it and fetches from it.
+- **No automation.** No bot, no Dependabot, no merge queue, no release workflow
+  and no scheduled job writes to it.
+- **No second writer.** No other person and no other run pushes to it while this
+  run is in flight.
+
+P1-E5 reads the remote ref advertisement before the journey and again after it,
+and asserts the two are identical. Any write between the two reads fails
+`forge-unchanged`. Confirm the three constraints before the run, and record the
+repository name in the report.
+
+A failed `forge-unchanged` is read before it is filed. Open the P1-E5 bundle,
+compare the two maps, and name the ref that differs. A ref the product created is
+a blocker against the product. A ref another writer created is a finding against
+the environment, and the run repeats on a quiet repository. State which one the
+report means.
+
+The assertion has one stated limit: it compares the two endpoints, so a ref the
+run creates and then deletes passes. Record that limit beside the result rather
+than claiming the run proved the forge untouched throughout.
+
 Cleanup belongs to the runner. Confirm it happened; never hand-roll a teardown.
 A container, a pod, a network or a volume left carrying the run id label is a
 finding against the runner.
@@ -117,13 +144,32 @@ Write `.agent/acceptance/<tag>/report.md`:
 The outcome is not asserted in prose. `node scripts/e2e/run.mjs --verdict <tag>`
 checks both axes and returns the exit status.
 
-- **passed** — `--verdict <tag>` exits zero. The scenario axis needs one bundle per
-  declared scenario, all `passed`, a verify record with exit status zero, and one
-  commit across every record. The acceptance axis needs a signed record on that
-  same commit, reporting `drive: confirmed` and `judgment: accepted`.
-- **blocked** — the run stopped without a usable verdict. Exit non-zero. Never
-  report a blocked run as a pass.
-- **failed** — something was demonstrably wrong.
+This is the exit-code table, and it is the only place that states it. Every other
+document points here rather than restating a number. `exitCodeFor` in
+`scripts/e2e/lib/main.ts` is the mechanism, and one test pins it exhaustively.
+
+| Exit | Runner code                      | Outcome | Meaning                                 |
+| ---- | -------------------------------- | ------- | --------------------------------------- |
+| 0    | —                                | passed  | both axes green                         |
+| 1    | `assertion-failed`               | failed  | a present artifact reports a failure    |
+| 2    | `invalid-argument`, `tag-reused` | blocked | the operator's invocation is wrong      |
+| 3    | `unavailable`                    | blocked | an artifact or a prerequisite is absent |
+
+The first failing condition sets the status.
+
+- **passed** — exit `0`. The scenario axis needs one bundle per declared scenario,
+  all `passed`, a verify record with exit status zero, and one commit across every
+  record. The acceptance axis needs a signed record on that same commit, reporting
+  `drive: confirmed` and `judgment: accepted`.
+- **failed** — exit `1`. Something is demonstrably wrong: a bundle reports
+  `failed`, a record is present but corrupt, a commit disagrees, or the judgment is
+  `rejected`.
+- **blocked** — exit `2` or `3`. The run stopped without a usable verdict, because
+  the invocation was wrong or an artifact never arrived. Never report a blocked run
+  as a pass.
+
+An incomplete run is exit `3`, never exit `1`. A bundle that is absent and a bundle
+that reports a failure are different findings, and the status tells them apart.
 
 A blocker opens a fix epic and the phase stays open. You never fix what you find:
 a fix inside an acceptance run destroys the evidence the run exists to produce.

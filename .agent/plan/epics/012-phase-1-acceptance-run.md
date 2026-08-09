@@ -103,7 +103,9 @@ Coverage required beyond the Proof:
 - The report names every bundle by path and digest, and it modifies no bundle.
 - The report records the `--verdict` command and its exit status, and the outcome it states agrees
   with that exit status.
-- A `blocked` outcome exits non-zero, so a stopped run never reads as a pass.
+- A `blocked` outcome exits `2` or `3`, and a `failed` outcome exits `1`, so a stopped run never
+  reads as a pass and never reads as a defect. `.claude/commands/e2e.md` holds the one exit-code
+  table; this list restates no number that the table does not carry.
 - A missing P1-E5 prerequisite reports unavailable and writes no passing bundle.
 - A failing scenario does not stop the scenarios after it, and each one still writes a bundle.
 - Every bundle, the verify record and the acceptance record name one commit under test.
