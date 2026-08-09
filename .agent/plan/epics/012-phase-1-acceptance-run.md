@@ -1,6 +1,6 @@
 # EPIC 012 — Phase 1 acceptance run
 
-Status: **draft**.
+Status: **PASS**.
 
 ## Goal
 
