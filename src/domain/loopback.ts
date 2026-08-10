@@ -1,3 +1,6 @@
+export const LOOPBACK_IPV4 = "127.0.0.1";
+export const LOOPBACK_HOSTNAME = "localhost";
+
 const IPV4_LOOPBACK = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
 function isValidOctet(segment: string): boolean {
@@ -8,7 +11,7 @@ function isValidOctet(segment: string): boolean {
 }
 
 export function isLoopbackHost(host: string): boolean {
-  if (host === "localhost") return true;
+  if (host === LOOPBACK_HOSTNAME) return true;
   if (host === "::1") return true;
 
   const m = IPV4_LOOPBACK.exec(host);

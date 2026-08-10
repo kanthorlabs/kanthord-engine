@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 
 import { findOperation } from "../http/contract/registry.ts";
 import { commandPaths, declaredCommands } from "./inventory.ts";
@@ -12,6 +13,11 @@ const fakeDependencies = (): ProgramDependencies => ({
     throw new Error("the fake fetch must never be called");
   },
   cwd: "/tmp",
+  username: "test-user",
+  randomBytes,
+  writeFile: () => {
+    throw new Error("the fake writeFile must never be called");
+  },
   stdout: () => {
     throw new Error("the fake stdout must never be called");
   },
@@ -66,10 +72,10 @@ describe("src/cli/parity.test", () => {
     );
   });
 
-  it("programCommandPaths returns the fourteen inventory paths", () => {
+  it("programCommandPaths returns the fifteen inventory paths", () => {
     const paths = programCommandPaths(buildProgram(fakeDependencies()));
 
-    assert.equal(paths.length, 14);
+    assert.equal(paths.length, 15);
     assert.deepEqual(paths, commandPaths());
   });
 

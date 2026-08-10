@@ -29,14 +29,14 @@ const readP1E1Block = (): string => {
 };
 
 describe("src/cli/inventory.test", () => {
-  it("declares exactly fourteen commands", () => {
-    assert.equal(declaredCommands.length, 14);
+  it("declares exactly fifteen commands", () => {
+    assert.equal(declaredCommands.length, 15);
   });
 
-  it("commandPaths holds fourteen distinct strings", () => {
+  it("commandPaths holds fifteen distinct strings", () => {
     const paths = commandPaths();
-    assert.equal(paths.length, 14);
-    assert.equal(new Set(paths).size, 14);
+    assert.equal(paths.length, 15);
+    assert.equal(new Set(paths).size, 15);
   });
 
   it("commandPaths is bytewise sorted", () => {
@@ -53,13 +53,13 @@ describe("src/cli/inventory.test", () => {
     }
   });
 
-  it("marks db migrate and serve as the two commands that call no route", () => {
+  it("marks local commands that call no route", () => {
     const empty = declaredCommands.filter(
       (entry) => entry.operationIds.length === 0,
     );
     assert.deepEqual(
       empty.map((entry) => entry.path.join(" ")),
-      ["db migrate", "serve"],
+      ["config generate", "db migrate", "serve"],
     );
   });
 
@@ -113,7 +113,7 @@ describe("src/cli/inventory.test", () => {
     }
   });
 
-  it("pins the six paths the P1-E1 scan never names", () => {
+  it("pins the seven paths the P1-E1 scan never names", () => {
     const oracle = new Set<string>();
     const pattern = /`kanthord ((?:[a-z][a-z-]*)(?: [a-z][a-z-]*){0,2})/g;
     for (const match of readP1E1Block().matchAll(pattern)) {
@@ -130,6 +130,7 @@ describe("src/cli/inventory.test", () => {
     assert.deepEqual(
       commandPaths().filter((path) => !oracle.has(path)),
       [
+        "config generate",
         "db migrate",
         "db status",
         "project list",

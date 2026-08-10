@@ -5,6 +5,10 @@ export type DeclaredCommand = Readonly<{
 
 export const declaredCommands: readonly DeclaredCommand[] = [
   {
+    path: ["config", "generate"],
+    operationIds: [],
+  },
+  {
     path: ["credential", "register"],
     operationIds: ["provider.register"],
   },

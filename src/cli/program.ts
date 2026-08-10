@@ -2,6 +2,7 @@ import { Command } from "commander";
 
 import { call, type ClientDependencies, type DaemonClient } from "./client.ts";
 import type { ConfirmDependencies } from "./confirm.ts";
+import { registerConfigGenerate } from "./config/generate.ts";
 import { registerCredentialRegister } from "./credential/register.ts";
 import type { AppliedMigrationLine } from "./db/migrate.ts";
 import { registerDbMigrate } from "./db/migrate.ts";
@@ -33,6 +34,9 @@ export type ProgramDependencies = Readonly<{
   env: Readonly<Record<string, string | undefined>>;
   fetch: typeof globalThis.fetch;
   cwd: string;
+  username: string;
+  randomBytes: (size: number) => Buffer;
+  writeFile: (path: string, content: string) => void;
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
@@ -54,6 +58,15 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     .option("--home <path>", "override the configured daemon home");
 
   registerClientOptions(program);
+
+  registerConfigGenerate({
+    program,
+    cwd: dependencies.cwd,
+    username: dependencies.username,
+    randomBytes: dependencies.randomBytes,
+    writeFile: dependencies.writeFile,
+    stdout: dependencies.stdout,
+  });
 
   program
     .command("serve")

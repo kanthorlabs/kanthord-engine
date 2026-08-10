@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-import { homedir, hostname } from "node:os";
+import { homedir, hostname, userInfo } from "node:os";
+import { randomBytes } from "node:crypto";
 import {
+  chmodSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -475,6 +477,12 @@ try {
     env: process.env,
     fetch: globalThis.fetch,
     cwd: process.cwd(),
+    username: userInfo().username,
+    randomBytes,
+    writeFile: (path, content) => {
+      writeFileSync(path, content, { encoding: "utf8", mode: 0o600 });
+      chmodSync(path, 0o600);
+    },
     fs: planFs,
     stdout: writeOut,
     stderr: writeErr,

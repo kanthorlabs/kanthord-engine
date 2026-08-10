@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 
 import { KANTHORD_VERSION } from "../domain/version.ts";
 import type { AppliedMigrationLine } from "./db/migrate.ts";
@@ -39,6 +40,11 @@ const fakeDependencies = (): {
       throw new Error("the fake fetch must never be called");
     },
     cwd: "/tmp",
+    username: "test-user",
+    randomBytes,
+    writeFile: () => {
+      throw new Error("the fake writeFile must never be called");
+    },
     stdout: (text) => {
       stdoutText += text;
     },
@@ -113,7 +119,7 @@ describe("src/cli/program.test", () => {
     assert.equal(program.version(), KANTHORD_VERSION);
   });
 
-  it("registers the eight declared top-level commands, sorted bytewise", () => {
+  it("registers the nine declared top-level commands, sorted bytewise", () => {
     const { dependencies } = fakeDependencies();
     const program = buildProgram(dependencies);
 
@@ -125,6 +131,7 @@ describe("src/cli/program.test", () => {
         return Buffer.compare(left, right);
       }),
       [
+        "config",
         "credential",
         "db",
         "plan",
