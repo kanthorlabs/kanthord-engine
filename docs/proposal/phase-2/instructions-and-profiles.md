@@ -52,7 +52,13 @@ The profile is pinned per objective. An objective records the profile hash when 
 
 ## Templates
 
-Templates carry the reusable knowledge, and onboarding instantiates one. KanthorD ships templates for `nodejs`, `python`, `go`, `dotnet`, `flutter`, `docs` and `research`. Onboarding detects candidates by inspecting the repository, proposes a template and the fields it can infer, and the human commits the result. Detection never applies by itself, because a `package.json` does not name the workspace root or the real verification script. The instantiated profile records the template id, version and digest, so a later template change is a diff the human reads.
+Templates carry the reusable knowledge, and onboarding instantiates one. The MVP ships one template, `nodejs`. The human names it, because a library of one has nothing to choose between. The instantiated profile records the template id, version and digest, so a later template change is a diff the human reads.
+
+Nothing in the template shape is specific to a programming language, so the library grows without a schema change. `../open-items.md` states what a grown library buys: a Python backend, a Vue frontend and a Flutter mobile repository are three profiles in one project, each instantiated from its own template.
+
+### Deferred: the template library and detection
+
+Templates for `python`, `go`, `dotnet`, `flutter`, `docs` and `research`, and onboarding detection. Detection inspects the repository, proposes a template and the fields it can infer, and the human commits the result. Detection never applies by itself, because a `package.json` does not name the workspace root or the real verification script. See `../after-the-mvp.md`.
 
 ## Capability
 
@@ -74,13 +80,18 @@ Each attempt stores the rendered messages and every source blob by content addre
 
 ## Profile verification
 
-Profile verification is a manual command, and it does not block. `kanthord profile verify` runs three gates.
+Profile verification is a manual command, and it does not block. `kanthord profile verify` runs two gates in the MVP.
 
 - **Gate A** validates the schema and the role headings, resolves the template digest, compiles the channels, and asserts by inspection that the verification command reached the right channel. It is deterministic and needs no model.
 - **Gate B** runs the verification command at an exact commit and separates a wrong declaration from a repository baseline that is currently red. Where the template supports it, a negative control applies a known violation and asserts the command fails, which catches a command that exits zero and checks nothing.
-- **Gate C** runs one hermetic canary through the real agent with a mechanically checkable goal, and asserts the diff, the tool trace, the file scope, the verification result and the `re@1` verdict. It is a smoke test of the loop.
+
+Gate A and Gate B need no provider account, so the command stays runnable on a machine that holds no credential. The report names the gate that failed and the reason.
 
 No gate proves that prose guidance will be followed later, and the daemon never claims it does. A wrong profile therefore surfaces as tasks that fail verification and park in `blocked`, and the human edits the profile.
+
+### Deferred: Gate C
+
+Gate C runs one hermetic canary through the real agent with a mechanically checkable goal, and asserts the diff, the tool trace, the file scope, the verification result and the `re@1` verdict. It is a smoke test of the loop. It needs a provider account and it costs a model call, and `README.md` proves the same loop once through P2-E4. See `../after-the-mvp.md`.
 
 ## Inspection
 

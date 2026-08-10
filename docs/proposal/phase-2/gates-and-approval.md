@@ -14,7 +14,7 @@ Each level is verified differently. This convention serves coding work. Non-codi
 
 A task reaches `done` when `re@1` accepts its diff against the `## Acceptance criteria` section of its body. `re@1` returns a reason per criterion. A rejection returns the task to the worker until the attempt limit, then `blocked`.
 
-`re@1` cannot see a missing import or an uncompilable tree, and ten tasks share one working tree, so a defect can compound before any suite runs. KanthorD therefore runs the objective's unit check after each task as a **diagnostic**. The result is recorded and attributed to that task, and a failure is visible immediately. It is not authoritative: it does not gate the task, and it never marks a task `done` or `blocked` by itself.
+`re@1` cannot see a missing import or an uncompilable tree, and ten tasks share one working tree, so a defect can compound before any suite runs. KanthorD therefore runs the objective's unit check on each attempt as a **diagnostic**. It runs after the attempt produces its diff and before `re@1` reviews it, because `instructions-and-profiles.md` gives the reviewer the verification output. The result is recorded and attributed to that task, and a failure is visible immediately. It is not authoritative: it does not gate the task, and it never marks a task `done` or `blocked` by itself. A rejected attempt therefore carries its own verification output, which is what makes the attempt record of a blocked task diagnosable.
 
 ## Objective
 

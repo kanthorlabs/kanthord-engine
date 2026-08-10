@@ -33,7 +33,7 @@ The inspection operation of `../phase-2/agents-and-workers.md`. A blocked task i
 
 ### Scope
 
-The route returns the attempts of the **active task run** by default. `?run=<runId>` selects an earlier one, and `run.list` enumerates them.
+The route returns the attempts of the **active task run** by default, and of the newest ended task run when no run is active. A blocked task holds no active run, and P2-E2 reads exactly that record. A task that never ran answers with an empty attempt list and a null run. `?run=<runId>` selects an earlier one, and `run.list` enumerates them.
 
 A node can hold several task runs: `abandon task` ends a run and a later execution opens a new one, and `../database/run.md` keeps the old row as history. Without a default scope, P2-E2's "exactly three entries" would stop being true the first time a human abandoned and reran, and the oracle would drift from the route.
 
@@ -59,7 +59,7 @@ Each invocation under it carries what one call did:
 
 The large payloads are hashes. `blob.show` serves them, so a client that wants a verdict does not download three rendered prompts to find it.
 
-Credentials are redacted. P2-E2 asserts the redaction and asserts exactly three attempts after an attempt-limit block.
+Credentials are redacted before the evidence is stored, so a payload served inline and a payload served through `blob.show` are both clean. A hash of secret-bearing bytes is indirection, not redaction. P2-E2 asserts the redaction and asserts exactly three attempts after an attempt-limit block.
 
 `attempt.show` returns one attempt with its invocations. There is no separate invocations route: the calls of one attempt are two rows of hashes, and a subresource would be a round trip that buys nothing.
 

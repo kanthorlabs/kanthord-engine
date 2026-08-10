@@ -24,6 +24,17 @@ It composes the `general@1` agent and `re@1`:
 
 Capability is enforced in the agent implementation, never in profile data or prose. Each role receives a tool set defined in code: `re@1` gets read-only tools, `te@1` writes tests, `swe@1` writes code, `git@1` uses no model at all. A profile cannot widen a tool set, because it holds no field that names one. An instruction such as "do not access the network" is guidance to a model, not a control, and the daemon never depends on one.
 
+The tool set is an allow list in code, per role. The `pi-coding-agent` built-ins are `read`, `ls`, `find`, `grep`, `edit`, `write` and `bash`.
+
+| Role        | Tool set                                              | Reason                                                        |
+| ----------- | ----------------------------------------------------- | ------------------------------------------------------------- |
+| `general@1` | `read`, `ls`, `find`, `grep`, `edit`, `write`, `bash` | It does the task, so it reads, writes and runs commands.      |
+| `re@1`      | `read`, `ls`, `find`, `grep`                          | A reviewer reads. `bash` is excluded, because a shell writes. |
+
+`te@1`, `swe@1` and `git@1` are deferred, and their tool sets are decided when they ship.
+
+The SDK selects tools by exclusion, through `excludeTools`. An exclusion list is not fail-closed: a built-in added by a later SDK version joins every role that did not name it. The adapter therefore computes the exclusion from the allow list, then asserts the constructed session exposes exactly the allow list, and it fails closed on a mismatch. A new built-in stops the daemon rather than reaching `re@1`.
+
 ## Attempt accounting
 
 Each rejection increments the attempt counter. Each attempt records the pinned registration and provider_model, the rendered messages, every source blob by content address, the adapter version and the tool definitions. See `instructions-and-profiles.md`.

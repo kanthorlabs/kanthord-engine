@@ -40,7 +40,7 @@ The body names the template id and the fields the human confirmed. Template dete
 
 The body names the gate: `A` or `B`. Gate C is deferred and returns `400` with the reason.
 
-Verification is manual and it never blocks. The response reports each gate result as a `check_result` of subject kind `profile-gate`. Those results belong to no node, so `node.checks` never returns them and this route is the only way to read them.
+Verification is manual and it never blocks. The response reports each gate result. Gate B records a `check_result` of subject kind `profile-gate`. Gate A returns its report and records no row, because it runs no command and a row needs a commit. Those results belong to no node, so `node.checks` never returns them and this route is the only way to read them.
 
 A wrong profile still surfaces later as tasks that park in `blocked`, and the daemon never claims otherwise.
 

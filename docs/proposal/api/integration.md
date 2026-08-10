@@ -57,7 +57,7 @@ A rejection is classified and reported, and nothing is retried:
 
 - a non-fast-forward rejection returns the ancestry classification and both object ids,
 - an authentication failure returns `auth-failed`, so a human reads a dead token rather than "push failed",
-- a policy rejection — a protected branch, a required check, a signature rule, a server hook — returns the server message verbatim.
+- a policy rejection — a protected branch, a required check, a signature rule, a server hook — returns the server message as the daemon received it, less the url userinfo, and bounded. `../phase-2/integration-and-publish.md` states both exceptions and why they exist.
 
 The daemon takes no further action on any of them. Fetching, merging and retrying would turn a publish into an unapproved source integration.
 
