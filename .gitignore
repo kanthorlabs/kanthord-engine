@@ -147,3 +147,5 @@ vite.config.ts.timestamp-*
 .data/opencode-*
 .agent/acceptance/
 .agent/e2e/
+/.kanthord/
+/kanthord.config.json

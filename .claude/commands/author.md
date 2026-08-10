@@ -94,9 +94,9 @@ Epic: `.agent/plan/epics/<epic-slug>.md`
 [Depends on: Story <Y> / EPIC <N-1>]   ← only if a real ordering constraint exists
 
 ## Change
-- <exact edit, with file:line and the current code it replaces>
-- <new file / new type with its exact signature>
-- ... (concrete enough that two implementers would produce the same edit)
+- <required behavior change from the Goal, with exact file:line or symbol>
+- <required new file or type, with its responsibility and public contract>
+- ... (prose instructions concrete enough to produce one deterministic result)
 
 ## Constraints
 - <correctness-critical only: surgical scope, invariants, "do not break X">
