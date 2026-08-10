@@ -223,19 +223,14 @@ describe("src/services/config/convict.test", () => {
       }
     });
 
-    it("throws config-invalid when http.port is omitted", () => {
+    it("uses default port 31415 when http.port is omitted", () => {
       const dir = tmpDir();
       try {
         const file = validFile();
         delete (file as any).http.port;
         const filePath = writeJson(dir, file);
-        assert.throws(
-          () => config.load(loadInput(dir, filePath)),
-          (err: any) => {
-            assert.equal(err.code, "config-invalid");
-            return true;
-          },
-        );
+        const result = config.load(loadInput(dir, filePath));
+        assert.equal(result.settings.http.port, 31415);
       } finally {
         fs.rmSync(dir, { recursive: true });
       }

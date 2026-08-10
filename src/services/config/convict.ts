@@ -110,7 +110,7 @@ function buildSchema(): Record<string, unknown> {
         default: "127.0.0.1",
         env: "KANTHORD_HTTP_BIND",
       },
-      port: { format: "port", default: null, env: "KANTHORD_HTTP_PORT" },
+      port: { format: "port", default: 31415, env: "KANTHORD_HTTP_PORT" },
       token: { format: "String", default: "", env: "KANTHORD_HTTP_TOKEN" },
       tokenFile: {
         format: "String",
