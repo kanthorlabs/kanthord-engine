@@ -2,8 +2,8 @@
 name: test-engineer
 description: "TDD test-engineer for kanthord — writes the failing test on node:test (RED), confirms GREEN, signals ready. Never touches production code."
 mode: subagent
-model: openai/gpt-5.6-terra
-variant: high
+model: openai/gpt-5.6-luna
+variant: max
 permission:
   "*": deny
   read:

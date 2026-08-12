@@ -3,7 +3,7 @@ name: reviewer-engineer
 description: "TDD reviewer-engineer for kanthord — review against cited sources plus the EPIC's full Verification Gate (npm run verify + hermetic Proof); blocker/suggestion verdict. Never edits files or mutates the repo tree."
 mode: subagent
 model: openai/gpt-5.6-sol
-variant: medium
+variant: high
 permission:
   "*": deny
   read:
