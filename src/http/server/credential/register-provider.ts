@@ -1,10 +1,8 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
 import { providerRegisterRequest } from "../../contract/credential.ts";
-import type {
-  ProviderView,
-  RegisterProviderInput,
-} from "../../../commands/provider/register-provider.ts";
+import type { ProviderView } from "../../../domain/provider-view.ts";
+import type { RegisterProviderInput } from "../../../commands/provider/register-provider.ts";
 import { toHttpError } from "./refusals.ts";
 
 export type RegisterProviderHandlerDependencies = Readonly<{

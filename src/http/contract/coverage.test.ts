@@ -358,7 +358,7 @@ describe("src/http/contract/coverage.test", () => {
 
   it("a stubbed operation declares no schema, no example and no errors", () => {
     const stubbed = registry.filter((entry) => entry.status === "stubbed");
-    assert.equal(stubbed.length, 30);
+    assert.equal(stubbed.length, 27);
     for (const entry of stubbed) {
       assert.equal(
         entry.query,

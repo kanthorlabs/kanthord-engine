@@ -5,6 +5,7 @@ import path from "node:path";
 import os from "node:os";
 
 import { ConvictConfig } from "./convict.ts";
+import { ConfigError } from "./index.ts";
 import type { LoadInput } from "./index.ts";
 
 function tmpDir(): string {
@@ -891,6 +892,110 @@ describe("src/services/config/convict.test", () => {
         fs.rmSync(dir, { recursive: true });
       }
     });
+
+    it("masterKeyFile naming a directory at mode 0600 throws config-refused naming the path and EISDIR, not a raw system error", () => {
+      const dir = tmpDir();
+      try {
+        const keyDir = path.join(dir, "master.keydir");
+        fs.mkdirSync(keyDir);
+        fs.chmodSync(keyDir, 0o600);
+        const filePath = writeJson(
+          dir,
+          validFile({
+            masterKey: "",
+            masterKeyFile: keyDir,
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: unknown) => {
+            assert.ok(
+              err instanceof ConfigError,
+              "the read failure must convert to ConfigError, not escape raw",
+            );
+            assert.equal(err.code, "config-refused");
+            assert.equal(
+              err.message,
+              `masterKeyFile refused at ${keyDir}: EISDIR`,
+            );
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("masterKeyFile naming a self-referential symlink throws config-refused naming the path and ELOOP", () => {
+      const dir = tmpDir();
+      try {
+        const loopPath = path.join(dir, "loop.key");
+        fs.symlinkSync(loopPath, loopPath);
+        const filePath = writeJson(
+          dir,
+          validFile({
+            masterKey: "",
+            masterKeyFile: loopPath,
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: unknown) => {
+            assert.ok(
+              err instanceof ConfigError,
+              "the stat failure must convert to ConfigError, not escape raw",
+            );
+            assert.equal(err.code, "config-refused");
+            assert.equal(
+              err.message,
+              `masterKeyFile refused at ${loopPath}: ELOOP`,
+            );
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("self-referential masterKeyFile and tokenFile refuse with the exact master-key ELOOP message and no token-file path", () => {
+      const dir = tmpDir();
+      try {
+        const loopKey = path.join(dir, "loop.key");
+        fs.symlinkSync(loopKey, loopKey);
+        const loopToken = path.join(dir, "loop.token");
+        fs.symlinkSync(loopToken, loopToken);
+        const filePath = writeJson(
+          dir,
+          validFile({
+            masterKey: "",
+            masterKeyFile: loopKey,
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "",
+              allowedHosts: ["localhost:8080"],
+              tokenFile: loopToken,
+            },
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: unknown) => {
+            assert.ok(err instanceof ConfigError);
+            assert.equal(err.code, "config-refused");
+            assert.equal(
+              err.message,
+              `masterKeyFile refused at ${loopKey}: ELOOP`,
+            );
+            assert.doesNotMatch(err.message, /http\.tokenFile/);
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
   });
 
   describe("http.tokenFile", () => {
@@ -907,6 +1012,31 @@ describe("src/services/config/convict.test", () => {
               port: 8080,
               token: "",
               allowedHosts: ["localhost:8080"],
+              tokenFile: tokenFilePath,
+            },
+          }),
+        );
+        const result = config.load(loadInput(dir, filePath));
+        assert.equal(result.settings.http.token, "s3cret");
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("a valid 0600 token file satisfies the non-loopback bind and non-empty allowedOrigins guards with its transformed content", () => {
+      const dir = tmpDir();
+      try {
+        const tokenFilePath = path.join(dir, "token.txt");
+        fs.writeFileSync(tokenFilePath, "s3cret\n", { mode: 0o600 });
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "0.0.0.0",
+              port: 8080,
+              token: "",
+              allowedHosts: ["localhost:8080"],
+              allowedOrigins: ["http://a.test"],
               tokenFile: tokenFilePath,
             },
           }),

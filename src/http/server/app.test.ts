@@ -360,11 +360,11 @@ describe("src/http/server/app.test", () => {
     assert.equal(app.proxy, false);
   });
 
-  it("binding system.health and system.db leaves twenty-two unimplemented ids", () => {
+  it("binding system.health and system.db leaves twenty-five unimplemented ids", () => {
     const bound = {
       "system.health": healthHandler,
       "system.db": statusHandler,
     };
-    assert.equal(unimplementedFor(bound).length, 22);
+    assert.equal(unimplementedFor(bound).length, 25);
   });
 });

@@ -82,11 +82,12 @@ describe("src/http/contract/error-details.test", () => {
   });
 
   describe("bindingInUseDetails", () => {
-    it("parses one blocker of each of the three kinds", () => {
+    it("parses one blocker of each of the four kinds", () => {
       for (const blocker of [
         { kind: "default-chain" },
         { kind: "project-binding", projectId: "project_a" },
         { kind: "repository", repositoryId: "repository_a" },
+        { kind: "attempt", attemptId: "attempt_a" },
       ]) {
         const parsed = bindingInUseDetails.parse({ blockers: [blocker] });
         assert.deepEqual(parsed, { blockers: [blocker] });
@@ -101,6 +102,14 @@ describe("src/http/contract/error-details.test", () => {
       assert.throws(() =>
         bindingInUseDetails.parse({
           blockers: [{ kind: "project-binding" }],
+        }),
+      );
+    });
+
+    it("rejects an attempt blocker missing attemptId", () => {
+      assert.throws(() =>
+        bindingInUseDetails.parse({
+          blockers: [{ kind: "attempt" }],
         }),
       );
     });

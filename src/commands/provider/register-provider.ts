@@ -8,8 +8,8 @@ import {
   serializePayload,
   projectPayload,
   type ProviderKind,
-  type ProviderProjection,
 } from "../../domain/provider-payload.ts";
+import type { ProviderView } from "../../domain/provider-view.ts";
 
 export type RegisterProviderDependencies = Readonly<{
   storage: Storage;
@@ -24,15 +24,6 @@ export type RegisterProviderInput = Readonly<{
   kind: ProviderKind;
   payload: unknown;
   actor: string;
-}>;
-
-export type ProviderView = Readonly<{
-  id: string;
-  name: string;
-  kind: ProviderKind;
-  projection: ProviderProjection;
-  setDefaultAt: number | null;
-  updatedAt: number;
 }>;
 
 export type RegisterProviderRefusal = "name-taken";
@@ -56,6 +47,7 @@ export function registerProvider(
   const sealed = dependencies.crypto.seal(text);
   const id = dependencies.ids.mint("provider");
   const updatedAt = dependencies.clock.now();
+  let setDefaultAt: number | null = null;
   dependencies.storage.transact((transaction) => {
     const existing = transaction.get("SELECT id FROM provider WHERE name = ?", [
       input.name,
@@ -66,13 +58,20 @@ export function registerProvider(
         `a provider named ${input.name} is already registered`,
       );
     }
+    const firstLlm =
+      input.kind === "llm" &&
+      transaction.get("SELECT id FROM provider WHERE kind = 'llm' LIMIT 1") ===
+        undefined;
+    if (firstLlm) {
+      setDefaultAt = updatedAt;
+    }
     transaction.run(
       "INSERT INTO provider (id, name, kind, set_default_at, payload_ciphertext, payload_iv, payload_tag, key_version, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         id,
         input.name,
         input.kind,
-        null,
+        setDefaultAt,
         sealed.ciphertext,
         sealed.iv,
         sealed.tag,
@@ -88,13 +87,23 @@ export function registerProvider(
       actorId: input.actor,
       payload: { name: input.name, kind: input.kind },
     });
+    if (setDefaultAt !== null) {
+      dependencies.events.append(transaction, {
+        subjectKind: "provider",
+        subjectId: id,
+        type: "provider.defaultSet",
+        actorKind: "human",
+        actorId: input.actor,
+        payload: { name: input.name, kind: input.kind, setDefaultAt },
+      });
+    }
   });
   return {
     id,
     name: input.name,
     kind: input.kind,
     projection: projectPayload(input.kind, parsed),
-    setDefaultAt: null,
+    setDefaultAt,
     updatedAt,
   };
 }

@@ -29,6 +29,10 @@ export const bindingInUseDetails = z.strictObject({
           kind: z.literal("repository"),
           repositoryId: z.string().min(1),
         }),
+        z.strictObject({
+          kind: z.literal("attempt"),
+          attemptId: z.string().min(1),
+        }),
       ]),
     )
     .min(1),

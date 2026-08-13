@@ -125,7 +125,7 @@ describe("src/queries/provider/show-provider.test", () => {
     );
   });
 
-  it("returns projection null for a broken payload", (t) => {
+  it("regression: returns projection null for a broken payload", (t) => {
     const temporary = createMigratedStorage();
     t.after(() => temporary.dispose());
     const id = register(
@@ -158,6 +158,20 @@ describe("src/queries/provider/show-provider.test", () => {
     assert.equal(item.kind, "git");
   });
 
+  it("regression: the statement names its columns and rejects a star select", () => {
+    const source = readFileSync(
+      new URL("./show-provider.ts", import.meta.url),
+      "utf8",
+    );
+    assert.equal(
+      source.includes(
+        "id, name, kind, set_default_at, payload_ciphertext, payload_iv, payload_tag, key_version, updated_at",
+      ),
+      true,
+    );
+    assert.equal(/select\s*\*/i.test(source), false);
+  });
+
   it("each kind returns that kind's projection, asserted field by field", (t) => {
     const temporary = createMigratedStorage();
     t.after(() => temporary.dispose());
@@ -169,6 +183,7 @@ describe("src/queries/provider/show-provider.test", () => {
         "01HZY8QF3M4N5P6R7S8T9V0W20",
         "01HZY8QF3M4N5P6R7S8T9V0W21",
         "01HZY8QF3M4N5P6R7S8T9V0W22",
+        "01HZY8QF3M4N5P6R7S8T9V0W23",
       ],
     });
     const clock = createMockClock({ start: 1700000000000, step: 1000 });

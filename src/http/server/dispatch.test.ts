@@ -188,10 +188,10 @@ describe("src/http/server/dispatch.test", () => {
     );
   });
 
-  it("the complete binding does not throw and derives twenty-two unimplemented ids", () => {
+  it("the complete binding does not throw and derives twenty-five unimplemented ids", () => {
     const complete = { "system.health": okHandler, "system.db": okHandler };
     const unimplemented = unimplementedFor(complete);
-    assert.equal(unimplemented.length, 22);
+    assert.equal(unimplemented.length, 25);
     assert.doesNotThrow(() =>
       createApp({
         settings,
@@ -455,7 +455,7 @@ describe("src/http/server/dispatch.test", () => {
       driven,
       registry.filter((entry) => entry.status === "stubbed").length,
     );
-    assert.equal(driven, 30);
+    assert.equal(driven, 27);
     assert.equal(writes(), 0);
     assert.deepEqual(tableCounts(temporary.storage), before);
   });

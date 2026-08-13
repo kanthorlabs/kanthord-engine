@@ -12,14 +12,14 @@ A git credential is a registration too, of `kind = 'git'`, because the git servi
 
 ## Routes
 
-| operationId           | Method and path                | introducedIn | status  | Source                                             |
-| --------------------- | ------------------------------ | ------------ | ------- | -------------------------------------------------- |
-| `provider.register`   | `POST /v1/provider`            | phase-1      | routed  | P1-E1, the git credential of `repository.register` |
-| `provider.list`       | `GET /v1/provider`             | phase-1      | routed  | P1-E1, the CLI resolves `--credential <name>`      |
-| `provider.show`       | `GET /v1/provider/:id`         | phase-1      | routed  | providers-and-credentials.md                       |
-| `provider.rename`     | `POST /v1/provider/:id/rename` | phase-2      | stubbed | providers-and-credentials.md, "rename"             |
-| `provider.remove`     | `DELETE /v1/provider/:id`      | phase-2      | stubbed | providers-and-credentials.md, "remove"             |
-| `provider.setDefault` | `PUT /v1/provider/:id/default` | phase-2      | stubbed | providers-and-credentials.md, "set default"        |
+| operationId           | Method and path                | introducedIn | status | Source                                             |
+| --------------------- | ------------------------------ | ------------ | ------ | -------------------------------------------------- |
+| `provider.register`   | `POST /v1/provider`            | phase-1      | routed | P1-E1, the git credential of `repository.register` |
+| `provider.list`       | `GET /v1/provider`             | phase-1      | routed | P1-E1, the CLI resolves `--credential <name>`      |
+| `provider.show`       | `GET /v1/provider/:id`         | phase-1      | routed | providers-and-credentials.md                       |
+| `provider.rename`     | `POST /v1/provider/:id/rename` | phase-2      | routed | providers-and-credentials.md, "rename"             |
+| `provider.remove`     | `DELETE /v1/provider/:id`      | phase-2      | routed | providers-and-credentials.md, "remove"             |
+| `provider.setDefault` | `PUT /v1/provider/:id/default` | phase-2      | routed | providers-and-credentials.md, "set default"        |
 
 ## Three routes ship in phase 1, and the rest in phase 2
 
@@ -41,9 +41,10 @@ A removal is refused while anything names the registration. The refusal is `409 
 
 - a non-null `set_default_at`, which puts the registration in the global chain of its kind,
 - a `project_binding` row of `kind = 'provider'`,
-- a `repository.credential_id` that names it, listed by repository.
+- a `repository.credential_id` that names it, listed by repository,
+- an `attempt.provider_id` that names it, listed by attempt.
 
-The third is not optional. `repository.credential_id` is `NOT NULL REFERENCES provider(id)`, so removing a `git` registration that a repository still uses would break every fetch and every publish of that repository. A silent removal would empty a chain and stop every node that resolves to it.
+The third and the fourth are not optional. `repository.credential_id` is `NOT NULL REFERENCES provider(id)`, so removing a `git` registration that a repository still uses would break every fetch and every publish of that repository. `attempt.provider_id` is `NOT NULL REFERENCES provider(id)` too, so removing a registration an attempt pinned would orphan the attempt's selection. A silent removal would empty a chain and stop every node that resolves to it.
 
 ## `provider.setDefault`
 

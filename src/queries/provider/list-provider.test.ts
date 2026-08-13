@@ -130,6 +130,7 @@ describe("src/queries/provider/list-provider.test", () => {
         "01HZY8QF3M4N5P6R7S8T9V0W1Y",
         "01HZY8QF3M4N5P6R7S8T9V0W1Z",
         "01HZY8QF3M4N5P6R7S8T9V0W20",
+        "01HZY8QF3M4N5P6R7S8T9V0W21",
       ],
     });
     const clock = createMockClock({ start: 1700000000000, step: 1000 });
@@ -163,6 +164,7 @@ describe("src/queries/provider/list-provider.test", () => {
         "01HZY8QF3M4N5P6R7S8T9V0W1Y",
         "01HZY8QF3M4N5P6R7S8T9V0W1Z",
         "01HZY8QF3M4N5P6R7S8T9V0W20",
+        "01HZY8QF3M4N5P6R7S8T9V0W21",
       ],
     });
     const clock = createMockClock({ start: 1700000000000, step: 1000 });
@@ -188,7 +190,7 @@ describe("src/queries/provider/list-provider.test", () => {
     assert.equal(result[0]?.kind, "git");
   });
 
-  it("a broken payload is reported as projection null, not dropped", (t) => {
+  it("regression: a broken payload is reported as projection null, not dropped", (t) => {
     const temporary = createMigratedStorage();
     t.after(() => temporary.dispose());
     const ids = createMockIdGenerator({
@@ -230,12 +232,17 @@ describe("src/queries/provider/list-provider.test", () => {
     assert.deepEqual(items(temporary.storage), []);
   });
 
-  it("the statement names its columns", () => {
+  it("regression: the statement names its columns", () => {
     const source = readFileSync(
       new URL("./list-provider.ts", import.meta.url),
       "utf8",
     );
-    assert.equal(source.includes("SELECT *"), false);
-    assert.equal(source.includes("select *"), false);
+    assert.equal(
+      source.includes(
+        "id, name, kind, set_default_at, payload_ciphertext, payload_iv, payload_tag, key_version, updated_at",
+      ),
+      true,
+    );
+    assert.equal(/select\s*\*/i.test(source), false);
   });
 });

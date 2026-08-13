@@ -60,6 +60,19 @@ const fixtures: Readonly<Record<string, Fixture>> = {
     expect: 200,
   },
   "provider.show": { parameters: { id: missing("provider") }, expect: 404 },
+  "provider.rename": {
+    parameters: { id: missing("provider") },
+    body: { name: "renamed" },
+    expect: 404,
+  },
+  "provider.setDefault": {
+    parameters: { id: missing("provider") },
+    expect: 404,
+  },
+  "provider.remove": {
+    parameters: { id: missing("provider") },
+    expect: 404,
+  },
   "repository.list": { expect: 200 },
   "repository.show": {
     parameters: { id: missing("repository") },

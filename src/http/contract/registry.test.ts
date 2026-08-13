@@ -34,11 +34,11 @@ describe("src/http/contract/registry.test", () => {
   it("counts routed and stubbed entries", () => {
     assert.equal(
       registry.filter((entry) => entry.status === "routed").length,
-      24,
+      27,
     );
     assert.equal(
       registry.filter((entry) => entry.status === "stubbed").length,
-      30,
+      27,
     );
   });
 
@@ -80,7 +80,7 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("attaches requests to the seven write routes and responses to the twenty-three routes", () => {
+  it("attaches requests to the eight write routes and responses to the twenty-six routes", () => {
     const withRequest = registry.filter((entry) => entry.request !== undefined);
     assert.deepEqual(withRequest.map((entry) => entry.operationId).sort(), [
       "plan.import",
@@ -88,6 +88,7 @@ describe("src/http/contract/registry.test", () => {
       "project.create",
       "project.repositories",
       "provider.register",
+      "provider.rename",
       "repository.inspect",
       "repository.register",
     ]);
@@ -110,6 +111,9 @@ describe("src/http/contract/registry.test", () => {
       "project.status",
       "provider.list",
       "provider.register",
+      "provider.remove",
+      "provider.rename",
+      "provider.setDefault",
       "provider.show",
       "repository.inspect",
       "repository.list",

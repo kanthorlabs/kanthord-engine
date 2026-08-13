@@ -39,6 +39,9 @@ import { GraphologyGraph } from "./services/graph/graphology.ts";
 import { SqlitePlanStore } from "./services/plan/sqlite.ts";
 import { YamlDocumentReader } from "./services/document/yaml.ts";
 import { registerProvider } from "./commands/provider/register-provider.ts";
+import { renameProvider } from "./commands/provider/rename-provider.ts";
+import { setDefaultProvider } from "./commands/provider/set-default-provider.ts";
+import { removeProvider } from "./commands/provider/remove-provider.ts";
 import { listProviders } from "./queries/provider/list-provider.ts";
 import { showProvider } from "./queries/provider/show-provider.ts";
 import { createProject } from "./commands/project/create-project.ts";
@@ -65,6 +68,9 @@ import { recoverExpiredLeases } from "./commands/startup/recover-expired-leases.
 import { RecoveryError, renderFinding } from "./domain/recovery.ts";
 import { KANTHORD_VERSION } from "./domain/version.ts";
 import { registerProviderHandler } from "./http/server/credential/register-provider.ts";
+import { renameProviderHandler } from "./http/server/credential/rename-provider.ts";
+import { setDefaultProviderHandler } from "./http/server/credential/set-default-provider.ts";
+import { removeProviderHandler } from "./http/server/credential/remove-provider.ts";
 import { listProviderHandler } from "./http/server/credential/list-provider.ts";
 import { showProviderHandler } from "./http/server/credential/show-provider.ts";
 import { inspectRepositoryHandler } from "./http/server/repository/inspect-repository.ts";
@@ -225,6 +231,20 @@ async function serve(options: ServeOptions): Promise<void> {
         "provider.register": registerProviderHandler({
           registerProvider: (input) =>
             registerProvider({ storage, crypto, ids, clock, events }, input),
+          actor: settings.actor,
+        }),
+        "provider.rename": renameProviderHandler({
+          renameProvider: (input) =>
+            renameProvider({ storage, crypto, clock, events }, input),
+          actor: settings.actor,
+        }),
+        "provider.setDefault": setDefaultProviderHandler({
+          setDefaultProvider: (input) =>
+            setDefaultProvider({ storage, crypto, clock, events }, input),
+          actor: settings.actor,
+        }),
+        "provider.remove": removeProviderHandler({
+          removeProvider: (input) => removeProvider({ storage, events }, input),
           actor: settings.actor,
         }),
         "provider.list": listProviderHandler({

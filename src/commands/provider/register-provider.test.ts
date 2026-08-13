@@ -22,10 +22,10 @@ import {
   registerProvider,
 } from "./register-provider.ts";
 import type {
-  ProviderView,
   RegisterProviderDependencies,
   RegisterProviderInput,
 } from "./register-provider.ts";
+import type { ProviderView } from "../../domain/provider-view.ts";
 import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
@@ -214,10 +214,12 @@ describe("src/commands/provider/register-provider.test", () => {
     assert.equal(JSON.stringify(view).includes("ghp_x"), false);
   });
 
-  it("an llm registration writes kind llm, the llm projection and a null set_default_at", (t) => {
+  it("a first llm registration stamps set_default_at with its own updated_at", (t) => {
     const temporary = createMigratedStorage();
     t.after(() => temporary.dispose());
-    const ids = createMockIdGenerator({ ulids: [PROVIDER_ULID, EVENT_ULID] });
+    const ids = createMockIdGenerator({
+      ulids: [PROVIDER_ULID, EVENT_ULID, "01HZY8QF3M4N5P6R7S8T9V0W1Z"],
+    });
     const deps = dependencies(
       temporary.storage,
       ids,
@@ -236,9 +238,242 @@ describe("src/commands/provider/register-provider.test", () => {
       defaultModel: "claude-opus-5",
       baseUrl: null,
     });
+    assert.equal(view.setDefaultAt, 1700000000000);
     const row = readProvider(temporary.storage, providerId);
     assert.equal(row.kind, "llm");
-    assert.equal(row.set_default_at, null);
+    assert.equal(row.set_default_at, 1700000000000);
+    assert.equal(row.updated_at, 1700000000000);
+  });
+
+  it("a first llm registration appends provider.registered then provider.defaultSet in id order", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const ids = createMockIdGenerator({
+      ulids: [
+        PROVIDER_ULID,
+        "01HZY8QF3M4N5P6R7S8T9V0W1Y",
+        "01HZY8QF3M4N5P6R7S8T9V0W1Z",
+      ],
+    });
+    const deps = dependencies(
+      temporary.storage,
+      ids,
+      createMockClock({ start: 1700000000000, step: 1000 }),
+    );
+
+    registerProvider(deps, {
+      name: "anthropic-bot",
+      kind: "llm",
+      payload: llmInput,
+      actor: "ulrich",
+    });
+
+    const events = [...readEvents(temporary.storage)].sort((a, b) =>
+      Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)),
+    );
+    assert.equal(events.length, 2);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["provider.registered", "provider.defaultSet"],
+    );
+    for (const event of events) {
+      assert.equal(event.subject_kind, "provider");
+      assert.equal(event.subject_id, providerId);
+      assert.equal(event.actor_kind, "human");
+      assert.equal(event.actor_id, "ulrich");
+    }
+    assert.equal(
+      events[0]!.payload_json,
+      '{"name":"anthropic-bot","kind":"llm"}',
+    );
+    assert.equal(
+      events[1]!.payload_json,
+      '{"name":"anthropic-bot","kind":"llm","setDefaultAt":1700000000000}',
+    );
+  });
+
+  it("a second llm registration stores a null set_default_at and appends only provider.registered", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const ids = createMockIdGenerator({
+      ulids: [
+        PROVIDER_ULID,
+        "01HZY8QF3M4N5P6R7S8T9V0W1Y",
+        "01HZY8QF3M4N5P6R7S8T9V0W1Z",
+        "01HZY8QF3M4N5P6R7S8T9V0W20",
+        "01HZY8QF3M4N5P6R7S8T9V0W21",
+      ],
+    });
+    const deps = dependencies(
+      temporary.storage,
+      ids,
+      createMockClock({ start: 1700000000000, step: 1000 }),
+    );
+
+    registerProvider(deps, {
+      name: "anthropic-bot",
+      kind: "llm",
+      payload: llmInput,
+      actor: "ulrich",
+    });
+    assert.equal(
+      readProvider(temporary.storage, providerId).set_default_at,
+      1700000000000,
+    );
+
+    const secondProviderId = "provider_01HZY8QF3M4N5P6R7S8T9V0W20";
+    const view = registerProvider(deps, {
+      name: "second-bot",
+      kind: "llm",
+      payload: llmInput,
+      actor: "ulrich",
+    });
+    assert.equal(view.setDefaultAt, null);
+    assert.equal(
+      readProvider(temporary.storage, secondProviderId).set_default_at,
+      null,
+    );
+    const secondEvents = readEvents(temporary.storage).filter(
+      (event) => event.subject_id === secondProviderId,
+    );
+    assert.deepEqual(
+      secondEvents.map((event) => event.type),
+      ["provider.registered"],
+    );
+  });
+
+  it("an llm registration while an unstamped llm row exists stores a null set_default_at and appends only provider.registered", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const ids = createMockIdGenerator({ ulids: [PROVIDER_ULID, EVENT_ULID] });
+    const deps = dependencies(
+      temporary.storage,
+      ids,
+      createMockClock({ start: 1700000000000, step: 1000 }),
+    );
+
+    temporary.storage.transact((transaction) => {
+      transaction.run(
+        "INSERT INTO provider (id, name, kind, set_default_at, payload_ciphertext, payload_iv, payload_tag, key_version, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+          "provider_unstamped",
+          "legacy-bot",
+          "llm",
+          null,
+          Buffer.alloc(16, 1),
+          Buffer.alloc(12, 2),
+          Buffer.alloc(16, 3),
+          1,
+          1700000000000,
+        ],
+      );
+    });
+
+    const view = registerProvider(deps, {
+      name: "anthropic-bot",
+      kind: "llm",
+      payload: llmInput,
+      actor: "ulrich",
+    });
+    assert.equal(view.setDefaultAt, null);
+    assert.equal(
+      readProvider(temporary.storage, providerId).set_default_at,
+      null,
+    );
+    const events = readEvents(temporary.storage);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["provider.registered"],
+    );
+  });
+
+  it("a git registration stores a null set_default_at and appends only provider.registered even when a git row exists", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const ids = createMockIdGenerator({
+      ulids: [
+        PROVIDER_ULID,
+        EVENT_ULID,
+        "01HZY8QF3M4N5P6R7S8T9V0W1Z",
+        "01HZY8QF3M4N5P6R7S8T9V0W20",
+      ],
+    });
+    const deps = dependencies(
+      temporary.storage,
+      ids,
+      createMockClock({ start: 1700000000000, step: 1000 }),
+    );
+
+    registerProvider(deps, {
+      name: "github-bot",
+      kind: "git",
+      payload: gitHttpBasicInput,
+      actor: "ulrich",
+    });
+    assert.equal(
+      readProvider(temporary.storage, providerId).set_default_at,
+      null,
+    );
+
+    const secondProviderId = "provider_01HZY8QF3M4N5P6R7S8T9V0W1Z";
+    const view = registerProvider(deps, {
+      name: "gitlab-bot",
+      kind: "git",
+      payload: gitHttpBasicInput,
+      actor: "ulrich",
+    });
+    assert.equal(view.setDefaultAt, null);
+    assert.equal(
+      readProvider(temporary.storage, secondProviderId).set_default_at,
+      null,
+    );
+    const secondEvents = readEvents(temporary.storage).filter(
+      (event) => event.subject_id === secondProviderId,
+    );
+    assert.deepEqual(
+      secondEvents.map((event) => event.type),
+      ["provider.registered"],
+    );
+  });
+
+  it("an event append that throws inside the transaction leaves provider and event counts at zero", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const ids = createMockIdGenerator({
+      ulids: [PROVIDER_ULID, EVENT_ULID, "01HZY8QF3M4N5P6R7S8T9V0W1Z"],
+    });
+    const clock = createMockClock({ start: 1700000000000, step: 1000 });
+    const inner = new SqliteEventLog({ storage: temporary.storage, ids });
+    let appends = 0;
+    const events: EventLog = {
+      append(transaction, input) {
+        appends++;
+        if (appends === 2) {
+          throw new Error("second event append fails");
+        }
+        return inner.append(transaction, input);
+      },
+      list(filter, transaction) {
+        return inner.list(filter, transaction);
+      },
+    };
+
+    assert.throws(
+      () =>
+        registerProvider(
+          { storage: temporary.storage, crypto, ids, clock, events },
+          {
+            name: "anthropic-bot",
+            kind: "llm",
+            payload: llmInput,
+            actor: "ulrich",
+          },
+        ),
+      (error: unknown) =>
+        error instanceof Error && error.message === "second event append fails",
+    );
+    assert.equal(countRows(temporary.storage, "provider"), 0);
+    assert.equal(countRows(temporary.storage, "event"), 0);
   });
 
   it("writes exactly one provider.registered event naming name and kind and nothing else", (t) => {

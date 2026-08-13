@@ -88,7 +88,11 @@ function register(
   payload: unknown,
 ): string {
   const ids = createMockIdGenerator({
-    ulids: ["01HZY8QF3M4N5P6R7S8T9V0W1X", "01HZY8QF3M4N5P6R7S8T9V0W1Y"],
+    ulids: [
+      "01HZY8QF3M4N5P6R7S8T9V0W1X",
+      "01HZY8QF3M4N5P6R7S8T9V0W1Y",
+      "01HZY8QF3M4N5P6R7S8T9V0W1Z",
+    ],
   });
   const clock = createMockClock({ start: 1700000000000, step: 1000 });
   return registerProvider(deps(storage, ids, clock), {

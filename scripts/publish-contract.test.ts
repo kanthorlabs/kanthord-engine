@@ -89,13 +89,13 @@ test("scripts/publish-contract", async (t) => {
       }
 
       const exampleFiles = readdirSync(join(directory, "examples"));
-      assert.equal(exampleFiles.length, 23);
+      assert.equal(exampleFiles.length, 26);
       const exampleIds = sortedBytewise(
         exampleFiles.map((name) => name.replace(/\.json$/, "")),
       );
       assert.deepEqual(exampleIds, sortedBytewise(publishedOperationIds));
       for (const name of exampleFiles) {
-        assert.match(name, /^[a-z][a-z.]*\.json$/);
+        assert.match(name, /^[a-zA-Z][a-zA-Z.]*\.json$/);
       }
     },
   );

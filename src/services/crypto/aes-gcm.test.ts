@@ -153,7 +153,7 @@ describe("src/services/crypto/aes-gcm.test", () => {
     );
   });
 
-  it("a flipped ciphertext byte fails authentication", () => {
+  it("regression: a flipped ciphertext byte fails authentication", () => {
     const sealed = pinned.seal(plaintext);
     assertAuthenticationFailed(pinned, {
       ...sealed,
@@ -161,7 +161,7 @@ describe("src/services/crypto/aes-gcm.test", () => {
     });
   });
 
-  it("a flipped tag byte fails authentication", () => {
+  it("regression: a flipped tag byte fails authentication", () => {
     const sealed = pinned.seal(plaintext);
     assertAuthenticationFailed(pinned, {
       ...sealed,
@@ -169,7 +169,7 @@ describe("src/services/crypto/aes-gcm.test", () => {
     });
   });
 
-  it("a flipped iv byte fails authentication", () => {
+  it("regression: a flipped iv byte fails authentication", () => {
     const sealed = pinned.seal(plaintext);
     assertAuthenticationFailed(pinned, {
       ...sealed,
@@ -187,7 +187,7 @@ describe("src/services/crypto/aes-gcm.test", () => {
     assertAuthenticationFailed(cryptoV2, { ...sealed, keyVersion: 2 });
   });
 
-  it("a wrong master key fails authentication", () => {
+  it("regression: a wrong master key fails authentication", () => {
     const wrongKey = new AesGcmCrypto({
       key: new Uint8Array(32).fill(8),
       keyVersion: 1,
@@ -196,7 +196,7 @@ describe("src/services/crypto/aes-gcm.test", () => {
     assertAuthenticationFailed(wrongKey, pinned.seal(plaintext));
   });
 
-  it("a foreign keyVersion throws crypto-key-missing with the version message", () => {
+  it("regression: a foreign keyVersion throws crypto-key-missing with the version message", () => {
     const sealed = pinned.seal(plaintext);
     assert.throws(
       () => pinned.open({ ...sealed, keyVersion: 2 }),

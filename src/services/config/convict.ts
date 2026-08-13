@@ -60,29 +60,76 @@ function trimSingleTrailingNewline(value: string): string {
   return value.endsWith("\n") ? value.slice(0, -1) : value;
 }
 
-function readTokenFile(
-  filePath: string,
-): Readonly<{ token: string; mode: number }> {
-  let mode: number;
-  let content: string;
-  try {
-    mode = fs.statSync(filePath).mode;
-    content = fs.readFileSync(filePath, "utf-8");
-  } catch (err: unknown) {
-    if (
-      err !== null &&
-      typeof err === "object" &&
-      "code" in err &&
-      (err as { code: unknown }).code === "ENOENT"
-    ) {
-      throw new ConfigError(
-        "config-invalid",
-        `http.tokenFile not found: ${filePath}`,
-      );
+type RestrictedSecretHandle = Readonly<{
+  mode: number;
+  read(): string;
+  close(): void;
+}>;
+
+function osErrorCode(err: unknown): string {
+  if (err !== null && typeof err === "object" && "code" in err) {
+    const code = (err as { code: unknown }).code;
+    if (typeof code === "string" && code.length > 0) {
+      return code;
     }
-    throw err;
   }
-  return { token: trimSingleTrailingNewline(content), mode };
+  return "UNKNOWN";
+}
+
+function restrictedSecretError(
+  err: unknown,
+  settingName: string,
+  filePath: string,
+): ConfigError {
+  const code = osErrorCode(err);
+  if (code === "ENOENT") {
+    return new ConfigError(
+      "config-invalid",
+      `${settingName} not found: ${filePath}`,
+    );
+  }
+  return new ConfigError(
+    "config-refused",
+    `${settingName} refused at ${filePath}: ${code}`,
+  );
+}
+
+function openRestrictedSecretFile(
+  filePath: string,
+  settingName: string,
+): RestrictedSecretHandle {
+  let descriptor: number;
+  try {
+    descriptor = fs.openSync(filePath, "r");
+  } catch (err: unknown) {
+    throw restrictedSecretError(err, settingName, filePath);
+  }
+
+  let mode: number;
+  try {
+    mode = fs.fstatSync(descriptor).mode;
+  } catch (err: unknown) {
+    fs.closeSync(descriptor);
+    throw restrictedSecretError(err, settingName, filePath);
+  }
+
+  let closed = false;
+  return {
+    mode,
+    read(): string {
+      try {
+        return fs.readFileSync(descriptor, "utf-8");
+      } catch (err: unknown) {
+        throw restrictedSecretError(err, settingName, filePath);
+      }
+    },
+    close(): void {
+      if (!closed) {
+        closed = true;
+        fs.closeSync(descriptor);
+      }
+    },
+  };
 }
 
 function absolutePath(value: unknown): void {
@@ -324,61 +371,76 @@ export class ConvictConfig implements Config {
 
     const masterKeyStr = config.get("masterKey") as string;
     const masterKeyFileStr = config.get("masterKeyFile") as string;
-    let masterKeyFileMode: number | undefined;
-
-    if (masterKeyFileStr.length > 0) {
-      try {
-        const stat = fs.statSync(masterKeyFileStr);
-        masterKeyFileMode = stat.mode;
-      } catch (err: unknown) {
-        if (
-          err !== null &&
-          typeof err === "object" &&
-          "code" in err &&
-          (err as { code: unknown }).code === "ENOENT"
-        ) {
-          throw new ConfigError(
-            "config-invalid",
-            `masterKeyFile not found: ${masterKeyFileStr}`,
-          );
-        }
-        throw err;
-      }
-    }
-
     const tokenStr = config.get("http.token") as string;
     const tokenFileStr = config.get("http.tokenFile") as string;
-    let tokenFileMode: number | undefined;
-    let resolvedTokenFile: string | undefined;
-
-    if (tokenFileStr.length > 0) {
-      const resolved = readTokenFile(tokenFileStr);
-      tokenFileMode = resolved.mode;
-      resolvedTokenFile = resolved.token;
-    }
-
-    assertStartable({
-      masterKey: masterKeyStr,
-      masterKeyFile: masterKeyFileStr,
-      masterKeyFileMode,
-      bind: config.get("http.bind") as string,
-      token: tokenStr,
-      tokenFile: tokenFileStr,
-      tokenFileMode,
-      resolvedToken: resolvedTokenFile ?? tokenStr,
-      allowedOrigins: config.get("http.allowedOrigins") as string[],
-    });
-
-    if (resolvedTokenFile !== undefined) {
-      config.set("http.token", resolvedTokenFile);
-    }
 
     let masterKey: Buffer;
-    if (masterKeyStr.length > 0) {
-      masterKey = Buffer.from(masterKeyStr, "base64");
-    } else {
-      const keyFileContent = fs.readFileSync(masterKeyFileStr, "utf-8");
-      masterKey = Buffer.from(keyFileContent.trim(), "base64");
+    let masterKeyFileMode: number | undefined;
+    let tokenFileMode: number | undefined;
+    let masterKeyHandle: RestrictedSecretHandle | undefined;
+    let tokenHandle: RestrictedSecretHandle | undefined;
+    let bodyError: unknown = undefined;
+
+    try {
+      if (masterKeyFileStr.length > 0) {
+        masterKeyHandle = openRestrictedSecretFile(
+          masterKeyFileStr,
+          "masterKeyFile",
+        );
+        masterKeyFileMode = masterKeyHandle.mode;
+      }
+      if (tokenFileStr.length > 0) {
+        tokenHandle = openRestrictedSecretFile(tokenFileStr, "http.tokenFile");
+        tokenFileMode = tokenHandle.mode;
+      }
+
+      const resolvedToken =
+        tokenHandle !== undefined && (tokenHandle.mode & 0o777) === 0o600
+          ? trimSingleTrailingNewline(tokenHandle.read())
+          : tokenStr;
+
+      assertStartable({
+        masterKey: masterKeyStr,
+        masterKeyFile: masterKeyFileStr,
+        masterKeyFileMode,
+        bind: config.get("http.bind") as string,
+        token: tokenStr,
+        tokenFile: tokenFileStr,
+        tokenFileMode,
+        resolvedToken,
+        allowedOrigins: config.get("http.allowedOrigins") as string[],
+      });
+
+      if (tokenHandle !== undefined) {
+        config.set("http.token", resolvedToken);
+      }
+
+      if (masterKeyStr.length > 0) {
+        masterKey = Buffer.from(masterKeyStr, "base64");
+      } else {
+        const keyFileContent = masterKeyHandle!.read();
+        masterKey = Buffer.from(keyFileContent.trim(), "base64");
+      }
+    } catch (err: unknown) {
+      bodyError = err;
+      throw err;
+    } finally {
+      let closeError: unknown;
+      try {
+        masterKeyHandle?.close();
+      } catch (err: unknown) {
+        closeError = err;
+      }
+      try {
+        tokenHandle?.close();
+      } catch (err: unknown) {
+        if (closeError === undefined) {
+          closeError = err;
+        }
+      }
+      if (closeError !== undefined && bodyError === undefined) {
+        throw closeError;
+      }
     }
 
     if (masterKey.length !== 32) {

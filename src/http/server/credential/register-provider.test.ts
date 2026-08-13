@@ -4,12 +4,10 @@ import assert from "node:assert/strict";
 import { createTestApp } from "../../../../test/helpers/app.ts";
 import { PayloadError } from "../../../domain/provider-payload.ts";
 import { RegisterProviderError } from "../../../commands/provider/register-provider.ts";
-import type {
-  ProviderView,
-  RegisterProviderInput,
-} from "../../../commands/provider/register-provider.ts";
+import type { RegisterProviderInput } from "../../../commands/provider/register-provider.ts";
+import type { ProviderView } from "../../../domain/provider-view.ts";
 import { registerProviderHandler } from "./register-provider.ts";
-import { createMigratedStorage } from "../../../../test/helpers/database.ts";
+import { providerRegisterResponse } from "../../contract/credential.ts";
 
 const view: ProviderView = {
   id: "provider_01HZY8QF3M4N5P6R7S8T9V0W1X",
@@ -50,6 +48,21 @@ describe("src/http/server/credential/register-provider.test", () => {
     });
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, view);
+    const parsed = providerRegisterResponse.parse(response.body);
+    assert.deepEqual(Object.keys(parsed).sort(), [
+      "id",
+      "kind",
+      "name",
+      "projection",
+      "setDefaultAt",
+      "updatedAt",
+    ]);
+    assert.throws(() =>
+      providerRegisterResponse.parse({
+        ...response.body,
+        credential: "secret",
+      }),
+    );
     assert.deepEqual(called, {
       name: "github-bot",
       kind: "git",
@@ -165,39 +178,5 @@ describe("src/http/server/credential/register-provider.test", () => {
     assert.equal(response.status, 400);
     assert.equal(response.body.error.code, "invalid-request");
     assert.equal(response.body.error.details.refusal, "name-taken");
-  });
-
-  it("PUT /v1/provider/<id>/default answers 501 ships in phase-2 and writes nothing", async () => {
-    const temporary = createMigratedStorage();
-    try {
-      const count = (): number =>
-        temporary.storage.transact(
-          (transaction) =>
-            (
-              transaction.get("SELECT COUNT(*) AS c FROM provider") as {
-                c: number;
-              }
-            ).c,
-        );
-      const before = count();
-      const app = await createTestApp({
-        handlers: {
-          "provider.register": registerProviderHandler({
-            registerProvider: () => view,
-            actor: "ulrich",
-          }),
-        },
-      });
-      const response = await app.put(
-        "/v1/provider/provider_01HZY8QF3M4N5P6R7S8T9V0W1X/default",
-      );
-      assert.equal(response.status, 501);
-      assert.ok(
-        String(response.body.error.message).endsWith("ships in phase-2"),
-      );
-      assert.equal(count(), before);
-    } finally {
-      temporary.dispose();
-    }
   });
 });
