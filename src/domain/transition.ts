@@ -70,10 +70,10 @@ export const transitions: readonly TransitionRow[] = [
   {
     from: "ready",
     to: "pending",
-    task: false,
-    objective: false,
-    initiative: false,
-    note: "An abandon parks the node in `blocked`. Only import and `unblock` write `pending`.",
+    task: true,
+    objective: true,
+    initiative: true,
+    note: "A topology write and an import write it, when the accepted graph adds an unsatisfied dependency to a node that was already `ready`.",
   },
   {
     from: "ready",
@@ -129,7 +129,7 @@ export const transitions: readonly TransitionRow[] = [
     task: false,
     objective: false,
     initiative: false,
-    note: "An abandon parks the node in `blocked`. Only import and `unblock` write `pending`.",
+    note: "An abandon parks the node in `blocked`. No writer of `pending` accepts a `running` node.",
   },
   {
     from: "running",
@@ -137,7 +137,7 @@ export const transitions: readonly TransitionRow[] = [
     task: true,
     objective: false,
     initiative: false,
-    note: "T: recovery finds an expired lease, a clean tree, and the head at the base. O and I: no operation rewinds a running parent to a claimable state.",
+    note: "T: recovery finds an expired lease, a clean tree, and the head at the base, or an external harness reports a rejected attempt under the attempt limit, which ends the attempt and returns the task to the pool. O and I: no operation rewinds a running parent to a claimable state.",
   },
   {
     from: "running",
@@ -153,7 +153,7 @@ export const transitions: readonly TransitionRow[] = [
     task: false,
     objective: true,
     initiative: false,
-    note: "O: every task is terminal, and at least one task is `done`. T and I: the gate is objective only.",
+    note: "O: every task is terminal, and at least one task is `done`. An externally driven objective reaches the state on an explicit attestation by its lease holder, which carries the combined object id in place of a frozen candidate. T and I: the gate is objective only.",
   },
   {
     from: "running",
@@ -161,7 +161,7 @@ export const transitions: readonly TransitionRow[] = [
     task: true,
     objective: false,
     initiative: true,
-    note: "T: `re@1` accepts the diff. I: every objective is `done`, and the end-to-end check passed or recorded `not-applicable`. O: an objective always passes the human gate.",
+    note: "T: `re@1` accepts the diff. An externally driven task reaches `done` when the harness reports an accepted outcome, because the external drive holds no `re@1` and no verify. I: every objective is `done`, and the end-to-end check passed or recorded `not-applicable`. O: an objective always passes the human gate.",
   },
   {
     from: "running",
@@ -241,7 +241,7 @@ export const transitions: readonly TransitionRow[] = [
     task: false,
     objective: false,
     initiative: false,
-    note: "An abandon parks the objective in `blocked`. Only import and `unblock` write `pending`.",
+    note: "An abandon parks the objective in `blocked`. No writer of `pending` accepts an `awaiting_approval` node.",
   },
   {
     from: "awaiting_approval",
@@ -273,7 +273,7 @@ export const transitions: readonly TransitionRow[] = [
     task: false,
     objective: true,
     initiative: false,
-    note: "O: a human approved the frozen candidate, integration succeeded, and every task is `done`.",
+    note: "O: a human approved the frozen candidate, integration succeeded, and every task is `done`. An externally driven objective closes on a `human` actor decision with no integration.",
   },
   {
     from: "awaiting_approval",
@@ -281,7 +281,7 @@ export const transitions: readonly TransitionRow[] = [
     task: false,
     objective: true,
     initiative: false,
-    note: "O: as `done`, and the approval carried `acknowledge_partial`.",
+    note: "O: as `done`, and the approval carried `acknowledge_partial`. An externally driven objective closes on a `human` actor decision with no integration.",
   },
   {
     from: "awaiting_approval",

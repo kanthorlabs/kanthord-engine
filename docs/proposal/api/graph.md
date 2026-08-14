@@ -4,7 +4,7 @@ Reviewer: developer experience. Conventions are [README.md](README.md). The deci
 
 The DAG: how a plan enters, how it leaves, and how a human reads the topology. Human controls that change a node outcome are [outcome.md](outcome.md).
 
-## Only a human mutates the graph
+## Only an actor mutates the graph
 
 Through this API, or through export, edit and re-import. No agent route exists here, and no route accepts a state field. The daemon owns state, so a client never writes one.
 
@@ -99,7 +99,7 @@ The three are hashes, not content. `blob.show` serves them.
 
 The response holds identity, kind, title, state, block reason, discard reason, the parent, and the dependencies. It never holds the body prose; `node.show` does.
 
-**Phase 1 returns every node, ordered by identity, and takes no filter.** A filter is a query parameter, and this API has no query-parameter mechanism: an operation declares a tuple of typed path segments and a body schema, and nothing else. Adding one reaches the registry, the router, the generated document and the CLI client at once, so it is a transport decision rather than a property of this route. `repository.list` is unfiltered for the same reason. A human filters client-side until then.
+**Phase 1 returns every node, ordered by identity, and takes no filter.** The claim that this API has no query-parameter mechanism was false, and it is corrected here. The mechanism exists: `src/http/contract/operation.ts:41` declares an optional `query` schema on every operation, and `event.list` binds `query: eventListRequest` at `src/http/contract/event.ts:69` over the schema declared at `src/http/contract/event.ts:11-17`. `node.list` takes no filter in phase 1 because no epic had declared one, not because the transport cannot carry one. EPIC 018 declares them. `repository.list` is unfiltered by choice rather than by mechanism, and a human filters it client-side.
 
 The filters this route will take are `project`, `kind`, `state`, `blockReason` and `repository`. They are recorded here so the shape is fixed when the mechanism arrives.
 

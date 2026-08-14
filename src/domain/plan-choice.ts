@@ -88,7 +88,11 @@ export function choiceVerdict(facts: ChoiceFacts): ChoiceVerdict {
       ? true
       : facts.containmentMovable;
 
-  if (facts.state === "pending" || facts.state === "blocked") {
+  if (
+    facts.state === "pending" ||
+    facts.state === "blocked" ||
+    facts.state === "ready"
+  ) {
     return {
       suggested: structuralLegal ? "submitted" : "database",
       submitted: structuralLegal
@@ -106,7 +110,7 @@ export function choiceVerdict(facts: ChoiceFacts): ChoiceVerdict {
     suggested: "database",
     submitted: {
       legal: false,
-      reason: "a structural edit needs pending or blocked",
+      reason: "a structural edit needs pending, blocked or ready",
     },
     database,
   };

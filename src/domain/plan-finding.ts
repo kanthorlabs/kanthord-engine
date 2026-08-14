@@ -1,5 +1,8 @@
 import { comparePaths } from "./plan-path.ts";
 
+export const validationScopes = ["structural", "completeness"] as const;
+export type ValidationScope = (typeof validationScopes)[number];
+
 export const findingCodes = [
   "acceptance-heading-duplicated",
   "acceptance-heading-not-at-line-start",
@@ -35,6 +38,33 @@ export type Finding = Readonly<{
   id: string | null;
   message: string;
 }>;
+
+export const findingScope: Readonly<Record<FindingCode, ValidationScope>> = {
+  "acceptance-heading-duplicated": "structural",
+  "acceptance-heading-not-at-line-start": "structural",
+  "acceptance-missing": "structural",
+  "acceptance-unexpected": "structural",
+  "dependency-cross-parent": "structural",
+  "dependency-cycle": "structural",
+  "dependency-self": "structural",
+  "document-unparsable": "structural",
+  "frontmatter-invalid": "structural",
+  "identity-duplicate": "structural",
+  "identity-invalid": "structural",
+  "identity-kind-mismatch": "structural",
+  "initiative-without-objective": "completeness",
+  "objective-without-task": "completeness",
+  "parent-missing": "structural",
+  "path-duplicate": "structural",
+  "path-invalid": "structural",
+  "reference-ambiguous": "structural",
+  "reference-unresolved": "structural",
+  "repo-missing": "structural",
+  "repo-on-task": "structural",
+  "repository-unbound": "structural",
+  "repository-unknown": "structural",
+  "worker-unknown": "structural",
+};
 
 export function sortFindings(findings: readonly Finding[]): readonly Finding[] {
   return [...findings].sort((left, right) => {

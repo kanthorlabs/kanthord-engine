@@ -96,6 +96,10 @@ test/helpers/*.ts)
   [ "$role" = test-engineer ] || deny "test helpers are the test-engineer lane"
   exit 0
   ;;
+docs/proposal/*)
+  [ "$role" = software-engineer ] || deny "the proposal is the software-engineer lane"
+  exit 0
+  ;;
 esac
 
 deny "outside every lane"

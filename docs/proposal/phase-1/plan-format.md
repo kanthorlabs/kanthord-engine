@@ -106,7 +106,7 @@ This table is normative. It holds every case, and a case absent from it is a def
 | Node only in the database                                                                          | `database`  | illegal; a deletion is `node.discard`  |
 | `pending` or `blocked`, any change                                                                 | `submitted` | legal                                  |
 | `ready`, prose only                                                                                | `submitted` | legal                                  |
-| `ready`, structural                                                                                | `database`  | illegal                                |
+| `ready`, structural                                                                                | `submitted` | legal                                  |
 | `running` or `awaiting_approval`, prose only                                                       | `database`  | legal                                  |
 | `running` or `awaiting_approval`, structural                                                       | `database`  | illegal                                |
 | `done`, `partial` or `discarded`, prose only                                                       | `database`  | legal                                  |
@@ -121,7 +121,7 @@ The last row is the cost of a per-node choice. The node is one unit, so the whol
 
 A `blocked` node can still hold a lease, a workspace or a commit, so state alone does not decide a move.
 
-- A task changes parent only while it is `pending` or `blocked`, and only when it holds no lease, no workspace, no attempt commit and no retained commit.
+- A task changes parent only while it is `pending`, `ready` or `blocked`, and only when it holds no lease, no workspace, no attempt commit and no retained commit.
 - An objective changes parent, or changes `repo`, only when that holds for the objective and for every descendant.
 - Otherwise the suggestion is `database` and `submitted` is illegal.
 - A path that moves without changing the derived parent is cosmetic, and it is not a difference at all.

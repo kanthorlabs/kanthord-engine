@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { runRow } from "./run.ts";
+import { runDrivers, runRow } from "./run.ts";
 
 const ULID_A = "01HZY8QF3M4N5P6R7S8T9V0W1X";
 const OID = "a".repeat(40);
@@ -10,6 +10,7 @@ describe("src/domain/run.test", () => {
   const validObjectiveRun = {
     id: "run_" + ULID_A,
     kind: "objective" as const,
+    driver: "internal" as const,
     nodeId: "objective_" + ULID_A,
     parentRunId: null,
     workspaceId: "workspace_" + ULID_A,
@@ -26,6 +27,7 @@ describe("src/domain/run.test", () => {
   const validTaskRun = {
     id: "run_" + ULID_A,
     kind: "task" as const,
+    driver: "internal" as const,
     nodeId: "task_" + ULID_A,
     parentRunId: "run_" + ULID_A,
     workspaceId: "workspace_" + ULID_A,
@@ -37,6 +39,14 @@ describe("src/domain/run.test", () => {
     state: "active" as const,
     outcome: null,
     endedAt: null,
+  };
+
+  const validExternalRun = {
+    ...validObjectiveRun,
+    driver: "external" as const,
+    workspaceId: null,
+    worker: null,
+    baseOid: null,
   };
 
   it("accepts a valid objective run", () => {
@@ -154,6 +164,67 @@ describe("src/domain/run.test", () => {
         parentRunId: "run_" + ULID_A,
       }).success,
       true,
+    );
+  });
+
+  it("runDrivers pins the two drivers in order", () => {
+    assert.deepEqual([...runDrivers], ["internal", "external"]);
+    assert.equal(runDrivers.length, 2);
+  });
+
+  it("accepts an external run that holds no workspace, worker or base", () => {
+    assert.equal(runRow.safeParse(validExternalRun).success, true);
+  });
+
+  it("refuses an external run that carries a daemon-worker fact", () => {
+    assert.equal(
+      runRow.safeParse({
+        ...validExternalRun,
+        workspaceId: "workspace_" + ULID_A,
+      }).success,
+      false,
+    );
+    assert.equal(
+      runRow.safeParse({ ...validExternalRun, worker: "general@1" }).success,
+      false,
+    );
+    assert.equal(
+      runRow.safeParse({ ...validExternalRun, baseOid: OID }).success,
+      false,
+    );
+  });
+
+  it("refuses an internal run that omits a daemon-worker fact", () => {
+    assert.equal(
+      runRow.safeParse({ ...validObjectiveRun, workspaceId: null }).success,
+      false,
+    );
+    assert.equal(
+      runRow.safeParse({ ...validObjectiveRun, worker: null }).success,
+      false,
+    );
+    assert.equal(
+      runRow.safeParse({ ...validObjectiveRun, baseOid: null }).success,
+      false,
+    );
+  });
+
+  it("driver refine: message equals the DDL CHECK expression", () => {
+    const result = runRow.safeParse({
+      ...validObjectiveRun,
+      workspaceId: null,
+    });
+    assert.equal(result.success, false);
+    assert.equal(
+      result.error!.issues[0]!.message,
+      "(driver = 'internal') = (workspace_id IS NOT NULL AND worker IS NOT NULL AND base_oid IS NOT NULL)",
+    );
+  });
+
+  it("refuses an unknown driver", () => {
+    assert.equal(
+      runRow.safeParse({ ...validObjectiveRun, driver: "hybrid" }).success,
+      false,
     );
   });
 });

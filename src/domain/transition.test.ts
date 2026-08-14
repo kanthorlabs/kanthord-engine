@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { transitions, canTransition } from "./transition.ts";
 import { nodeStates } from "./state.ts";
 import type { NodeKind, NodeState } from "./state.ts";
@@ -10,6 +12,7 @@ describe("src/domain/transition.test", () => {
       "pending→ready",
       "pending→blocked",
       "pending→discarded",
+      "ready→pending",
       "ready→running",
       "ready→blocked",
       "ready→discarded",
@@ -24,6 +27,7 @@ describe("src/domain/transition.test", () => {
       "pending→ready",
       "pending→blocked",
       "pending→discarded",
+      "ready→pending",
       "ready→running",
       "ready→blocked",
       "ready→discarded",
@@ -40,6 +44,7 @@ describe("src/domain/transition.test", () => {
       "pending→ready",
       "pending→blocked",
       "pending→discarded",
+      "ready→pending",
       "ready→running",
       "ready→blocked",
       "ready→discarded",
@@ -233,9 +238,9 @@ describe("src/domain/transition.test", () => {
     }
   });
 
-  it("only blocked→pending writes pending", () => {
+  it("only blocked→pending and ready→pending write pending", () => {
     for (const from of nodeStates) {
-      if (from === "blocked") continue;
+      if (from === "blocked" || from === "ready") continue;
       for (const level of ["task", "objective", "initiative"] as const) {
         assert.equal(
           canTransition(level, from, "pending"),
@@ -244,5 +249,114 @@ describe("src/domain/transition.test", () => {
         );
       }
     }
+    for (const level of ["task", "objective", "initiative"] as const) {
+      assert.equal(
+        canTransition(level, "blocked", "pending"),
+        true,
+        `canTransition("${level}", "blocked", "pending") should be true`,
+      );
+      assert.equal(
+        canTransition(level, "ready", "pending"),
+        true,
+        `canTransition("${level}", "ready", "pending") should be true`,
+      );
+    }
+  });
+
+  it("every matrix row of state-machine.md equals its transitions row", () => {
+    const lines = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../docs/proposal/phase-1/state-machine.md",
+      ),
+      "utf-8",
+    ).split("\n");
+    const rows: string[][] = [];
+    for (const line of lines) {
+      if (!line.startsWith("|")) continue;
+      const cells = line
+        .split("|")
+        .slice(1, -1)
+        .map((cell) => cell.trim());
+      if (cells.length !== 6) continue;
+      if (!/^`([a-z_]+)`$/.test(cells[0]!)) continue;
+      if (!/^`([a-z_]+)`$/.test(cells[1]!)) continue;
+      rows.push(cells);
+    }
+    assert.equal(
+      rows.length,
+      36,
+      "expected 36 matrix rows in state-machine.md",
+    );
+    for (const cells of rows) {
+      const from = cells[0]!.replace(/^`|`$/g, "");
+      const to = cells[1]!.replace(/^`|`$/g, "");
+      const row = transitions.find((r) => r.from === from && r.to === to);
+      assert.ok(row, `no transitions row for ${from}→${to}`);
+      assert.equal(row.note, cells[5]!, `note mismatch at ${from}→${to}`);
+      assert.equal(
+        cells[2]!,
+        row.task ? "✅" : "❌",
+        `task mark mismatch at ${from}→${to}`,
+      );
+      assert.equal(
+        cells[3]!,
+        row.objective ? "✅" : "❌",
+        `objective mark mismatch at ${from}→${to}`,
+      );
+      assert.equal(
+        cells[4]!,
+        row.initiative ? "✅" : "❌",
+        `initiative mark mismatch at ${from}→${to}`,
+      );
+    }
+  });
+
+  it("five notes name the external trigger", () => {
+    const pairs = [
+      ["running", "ready"],
+      ["running", "awaiting_approval"],
+      ["running", "done"],
+      ["awaiting_approval", "done"],
+      ["awaiting_approval", "partial"],
+    ] as const;
+    for (const [from, to] of pairs) {
+      const row = transitions.find((r) => r.from === from && r.to === to);
+      assert.ok(row, `no transitions row for ${from}→${to}`);
+      assert.ok(
+        row.note.includes("external"),
+        `note for ${from}→${to} does not name the external trigger`,
+      );
+    }
+  });
+
+  it("the pending-writer paragraph names the blocked→pending and ready→pending writers", () => {
+    const lines = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../docs/proposal/phase-1/state-machine.md",
+      ),
+      "utf-8",
+    ).split("\n");
+    const paragraph = lines.find((line) =>
+      line.includes("An abandon never returns a node to `pending`"),
+    );
+    assert.ok(paragraph, "no pending-writer paragraph in state-machine.md");
+    assert.ok(
+      paragraph!.includes("topology write"),
+      "the paragraph does not name the ready→pending topology writer",
+    );
+    assert.ok(
+      paragraph!.includes("import"),
+      "the paragraph does not name the import writer",
+    );
+    assert.ok(
+      paragraph!.includes("unblock"),
+      "the paragraph does not name the blocked→pending unblock writer",
+    );
+    assert.ok(
+      !paragraph!.includes("the only writers of"),
+      "the paragraph still claims import and unblock are the only pending writers",
+    );
   });
 });

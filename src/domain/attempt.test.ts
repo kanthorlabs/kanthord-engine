@@ -11,6 +11,7 @@ describe("src/domain/attempt.test", () => {
     id: "attempt_" + ULID_A,
     runId: "run_" + ULID_A,
     attemptNo: 1,
+    driver: "internal" as const,
     providerId: "provider_" + ULID_A,
     providerModel: "gpt-4",
     timeoutMs: 30000,
@@ -18,6 +19,15 @@ describe("src/domain/attempt.test", () => {
     headOid: null,
     outcome: null,
     endedAt: null,
+  };
+
+  const validExternalRow = {
+    ...validRow,
+    driver: "external" as const,
+    providerId: null,
+    providerModel: null,
+    timeoutMs: null,
+    baseOid: null,
   };
 
   it("accepts a valid row", () => {
@@ -83,6 +93,68 @@ describe("src/domain/attempt.test", () => {
   it("rejects invalid outcome", () => {
     assert.equal(
       attemptRow.safeParse({ ...validRow, outcome: "invalid" }).success,
+      false,
+    );
+  });
+
+  it("accepts an external attempt that holds no provider fact", () => {
+    assert.equal(attemptRow.safeParse(validExternalRow).success, true);
+  });
+
+  it("refuses an external attempt that carries a provider fact", () => {
+    assert.equal(
+      attemptRow.safeParse({
+        ...validExternalRow,
+        providerId: "provider_" + ULID_A,
+      }).success,
+      false,
+    );
+    assert.equal(
+      attemptRow.safeParse({ ...validExternalRow, providerModel: "gpt-4" })
+        .success,
+      false,
+    );
+    assert.equal(
+      attemptRow.safeParse({ ...validExternalRow, timeoutMs: 30000 }).success,
+      false,
+    );
+    assert.equal(
+      attemptRow.safeParse({ ...validExternalRow, baseOid: OID }).success,
+      false,
+    );
+  });
+
+  it("refuses an internal attempt that omits a provider fact", () => {
+    assert.equal(
+      attemptRow.safeParse({ ...validRow, providerId: null }).success,
+      false,
+    );
+    assert.equal(
+      attemptRow.safeParse({ ...validRow, providerModel: null }).success,
+      false,
+    );
+    assert.equal(
+      attemptRow.safeParse({ ...validRow, timeoutMs: null }).success,
+      false,
+    );
+    assert.equal(
+      attemptRow.safeParse({ ...validRow, baseOid: null }).success,
+      false,
+    );
+  });
+
+  it("driver refine: message equals the DDL CHECK expression", () => {
+    const result = attemptRow.safeParse({ ...validRow, providerId: null });
+    assert.equal(result.success, false);
+    assert.equal(
+      result.error!.issues[0]!.message,
+      "(driver = 'internal') = (provider_id IS NOT NULL AND provider_model IS NOT NULL AND timeout_ms IS NOT NULL AND base_oid IS NOT NULL)",
+    );
+  });
+
+  it("refuses an unknown driver", () => {
+    assert.equal(
+      attemptRow.safeParse({ ...validRow, driver: "hybrid" }).success,
       false,
     );
   });

@@ -143,9 +143,9 @@ A route returns the small fields inline and the hash of each large one. The clie
 
 ## The actor
 
-`event.actor_id` and `candidate.approved_actor` record who decided. The daemon reads that name from configuration, and no request carries it.
+`event.actor_id` and `candidate.approved_actor` record who decided. The token identifies the actor, and `event.actor_id` records the resolved actor rather than a configured name.
 
-There is no user model, and one token serves one human, so an actor field on a request would be a claim rather than a fact. Every human decision — approve, discard, waive, abandon, unblock — stamps the configured name.
+A user model exists. A registered actor is a `human` or a `harness`, and `harness` is the second registered actor kind. `daemon` stays the third actor kind of the event log, and it registers nothing. No request carries an actor field, because a request that names its own actor states a claim rather than a fact: the daemon resolves the actor from the bearer token it authenticated. Every human decision — approve, discard, waive, abandon, unblock — stamps the resolved actor. EPIC 015 lands the enum, the service-interface type and the `CHECK`.
 
 ## Errors
 

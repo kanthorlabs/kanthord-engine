@@ -16,7 +16,7 @@ The bind address comes from configuration, and the default is `127.0.0.1`. A hum
 
 Every request carries a bearer token from configuration, and the daemon compares it in constant time. A private network is a network boundary, not an authorization boundary: any host that reaches the interface can otherwise merge to the source of truth. The daemon refuses to start on a non-loopback bind address with no token configured.
 
-There is no user model. One token serves one human.
+A user model exists. The configured bearer token resolves to a bootstrap `human` actor, and a registered actor holds its own token. A registered actor is a `human` or a `harness`, and `harness` is the second registered actor kind. `daemon` stays the third actor kind of the event log, and it registers nothing. EPIC 015 lands the enum, the service-interface type and the `CHECK`.
 
 **There is no exception.** Every route needs the token, and the daemon has no anonymous surface. An earlier draft exempted the health route because it returned a constant; the health route now reports the status of each dependency, so it reads state, and a route that reads state cannot be anonymous on an interface a second machine reaches. An unauthenticated request answers `401` whatever it asks for, and it cannot distinguish a registered path from an unregistered one, so the route table is not readable without the token. See `../api/system.md`.
 

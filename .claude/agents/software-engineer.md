@@ -68,6 +68,10 @@ RED is the test-engineer's. **GREEN** (the smallest correct change satisfying th
   `scripts/turn-snapshot.sh`, `scripts/verify-handoff.mjs`,
   `scripts/memory-append-only.sh` and every `scripts/*.test.sh`. Wiring a
   script into `package.json` is not your lane → `OPEN:`.
+- **Proposal documents:** `docs/proposal/**` is **yours to amend** when a Story
+  names a document edit as its work. A parity test binds a document note to a
+  code note, so amend the document and the code in the same turn. The rest of
+  `docs/**` stays locked, and so does `AGENTS.md`.
 - New files go where the Task's `**Input:**` says.
 
 ## Idiom checklist (every edit)

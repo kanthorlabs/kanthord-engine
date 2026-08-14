@@ -15,6 +15,8 @@ Reviewer: architect or tech lead. Read this first. It names the entities every o
 
 An agent is a dedicated unit. A worker kind composes agents. The MVP ships the `general@1` worker, which composes the `general@1` agent and `re@1`. `tdd@1`, `te@1`, `swe@1` and `git@1` are defined here because the entity model must hold them, and they are built after the MVP.
 
+**Plan validity holds two scopes, and each one runs at a different place.** A **structural** finding is a defect in the submitted document set: an unparsable document, a bad path, a duplicate identity, a missing parent, a dependency cycle, a cross-parent dependency, an unknown worker or an unbound repository. A structural finding refuses the write. A **completeness** finding records that a container holds no child: an initiative with no objective, or an objective with no task. Completeness is enforced at the claim only. `plan.import` and a per-node write both report a completeness finding and commit, and a claim under an incomplete node is refused. `src/domain/plan-finding.ts` holds the scope of every finding code, and `src/domain/plan-completeness.ts` holds the completeness function.
+
 ## Three entries above persist nothing
 
 The list names the domain model, and a reader must not read it as a table list. Three entries hold no row.
@@ -27,6 +29,8 @@ The table list below is complete. A domain-model entry absent from it persists n
 ## State and events
 
 State tables hold state. Events are an audit trail. Every transition writes a row and appends an immutable event. Events feed history and the status stream. Events do not reconstruct state.
+
+**An event names its actor kind, and there are three.** A `human` decides. A `daemon` writes what it derived on its own. A `harness` is an external agent that claims work and reports an outcome. A `human` and a `harness` each register and hold their own token; a `daemon` registers nothing. EPIC 015 lands the enum, the service-interface type, the request schema, the migration and `../database/event.md` in one change.
 
 ## Storage
 

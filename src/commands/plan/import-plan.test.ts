@@ -1411,9 +1411,8 @@ describe("src/commands/plan/import-plan.test", () => {
   });
 
   describe("structural and prose edits, per state", () => {
-    it("submitted on a structural edit is refused at ready, running, awaiting_approval, done, partial and discarded", (t) => {
+    it("submitted on a structural edit is refused at running, awaiting_approval, done, partial and discarded", (t) => {
       const cases: ReadonlyArray<readonly [string, string]> = [
-        ["ready", planFixtureIdentities.task],
         ["running", planFixtureIdentities.task],
         ["done", planFixtureIdentities.task],
         ["discarded", planFixtureIdentities.task],
@@ -1477,8 +1476,8 @@ describe("src/commands/plan/import-plan.test", () => {
       }
     });
 
-    it("submitted on a structural edit is accepted at pending and blocked, and a blocked node keeps its block_reason", (t) => {
-      for (const state of ["pending", "blocked"]) {
+    it("submitted on a structural edit is accepted at pending, blocked and ready, and a blocked node keeps its block_reason", (t) => {
+      for (const state of ["pending", "blocked", "ready"]) {
         const fixture = build([U_REV, U_EDGE]);
         t.after(() => fixture.dispose());
         seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
@@ -1489,6 +1488,12 @@ describe("src/commands/plan/import-plan.test", () => {
               "UPDATE node SET state = 'blocked', block_reason = 'stale-base' WHERE id = ?",
               [planFixtureIdentities.task],
             );
+          });
+        } else if (state === "ready") {
+          fixture.storage.transact((transaction) => {
+            transaction.run("UPDATE node SET state = 'ready' WHERE id = ?", [
+              planFixtureIdentities.task,
+            ]);
           });
         }
         const documents = withTaskDependsOn(fixtureDocuments(fixture));

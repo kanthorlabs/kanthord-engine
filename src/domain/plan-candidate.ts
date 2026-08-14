@@ -1,4 +1,5 @@
 import { parseIdentity } from "./identity.ts";
+import { completenessFindings } from "./plan-completeness.ts";
 import type { Choice, ChoiceVerdict } from "./plan-choice.ts";
 import type { Finding } from "./plan-finding.ts";
 import { sortFindings } from "./plan-finding.ts";
@@ -120,34 +121,21 @@ export function validateCandidate(
     }
   }
 
-  for (const node of candidate.nodes) {
-    if (node.kind === "objective") {
-      const hasTask = candidate.nodes.some(
-        (child) => child.kind === "task" && child.parentId === node.id,
-      );
-      if (!hasTask) {
-        findings.push({
-          code: "objective-without-task",
-          path: null,
-          id: node.id,
-          message: "the objective holds no task",
-        });
-      }
-    }
-    if (node.kind === "initiative") {
-      const hasObjective = candidate.nodes.some(
-        (child) => child.kind === "objective" && child.parentId === node.id,
-      );
-      if (!hasObjective) {
-        findings.push({
-          code: "initiative-without-objective",
-          path: null,
-          id: node.id,
-          message: "the initiative holds no objective",
-        });
-      }
-    }
-  }
+  findings.push(
+    ...completenessFindings({
+      subject: "record",
+      parents: candidate.nodes.map((node) => ({
+        kind: node.kind,
+        key: node.id,
+        path: null,
+        id: node.id,
+      })),
+      children: candidate.nodes.map((node) => ({
+        kind: node.kind,
+        parentKey: node.parentId,
+      })),
+    }),
+  );
 
   for (const node of candidate.nodes) {
     if (node.worker !== null && !context.workerKinds.includes(node.worker)) {

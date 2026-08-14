@@ -32,6 +32,11 @@ allow software-engineer scripts/proof.sh
 deny software-engineer src/services/git/url.test.ts
 deny software-engineer src/domain/plan.spec.ts
 
+allow software-engineer docs/proposal/api/README.md
+allow software-engineer docs/proposal/phase-1/state-machine.md
+deny test-engineer docs/proposal/phase-1/state-machine.md
+deny reviewer-engineer docs/proposal/phase-1/state-machine.md
+
 allow test-engineer .agent/tdd/history/2026-08-05-006-git-primitives.md
 allow test-engineer .agent/tdd/.test-engineer-response-t1.md
 allow test-engineer .agent/tdd/memory/ts-gotchas.md
@@ -63,8 +68,9 @@ for role in test-engineer software-engineer; do
   deny "$role" Containerfile
   deny "$role" compose.yaml
   deny "$role" Makefile
-  deny "$role" docs/proposal/api/README.md
   deny "$role" README.md
+  deny "$role" docs/brainstorm.md
+  deny "$role" docs/diagrams/state-machine.svg
   deny "$role" /etc/passwd
   deny "$role" ../outside.ts
   deny "$role" "src/old.ts -> src/new.ts"

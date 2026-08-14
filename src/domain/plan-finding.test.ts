@@ -1,7 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { findingCodes, sortFindings, type Finding } from "./plan-finding.ts";
+import {
+  findingCodes,
+  findingScope,
+  sortFindings,
+  validationScopes,
+  type Finding,
+} from "./plan-finding.ts";
 
 const expectedCodes: readonly string[] = [
   "acceptance-heading-duplicated",
@@ -36,6 +42,35 @@ describe("src/domain/plan-finding.test", () => {
     assert.deepEqual([...findingCodes], expectedCodes);
     assert.deepEqual([...findingCodes], [...findingCodes].sort());
     assert.equal(new Set(findingCodes).size, 24);
+  });
+
+  it("validationScopes pins the two scopes in order", () => {
+    assert.equal(validationScopes.length, 2);
+    assert.deepEqual([...validationScopes], ["structural", "completeness"]);
+  });
+
+  it("findingScope is total over findingCodes", () => {
+    const keys = Object.keys(findingScope);
+    assert.equal(keys.length, 24);
+    for (const code of findingCodes) {
+      assert.ok(code in findingScope, `findingScope holds ${code}`);
+    }
+    for (const key of keys) {
+      assert.ok(
+        (findingCodes as readonly string[]).includes(key),
+        `${key} is a finding code`,
+      );
+    }
+  });
+
+  it("the completeness scope holds exactly the two completeness codes", () => {
+    const completenessCodes = findingCodes.filter(
+      (code) => findingScope[code] === "completeness",
+    );
+    assert.deepEqual(completenessCodes, [
+      "initiative-without-objective",
+      "objective-without-task",
+    ]);
   });
 
   it("sortFindings orders by path with null first, then code, then id", () => {

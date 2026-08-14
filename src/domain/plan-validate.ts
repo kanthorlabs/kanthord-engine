@@ -1,4 +1,5 @@
 import { BodySplitError, normalizeBody, splitBody } from "./plan-body.ts";
+import { completenessFindings } from "./plan-completeness.ts";
 import { planFrontmatter } from "./plan-document.ts";
 import type { ParsedDocument } from "./plan-document.ts";
 import type { Finding } from "./plan-finding.ts";
@@ -238,34 +239,21 @@ export function validateDocuments(
       });
     }
   }
-  for (const resolvedDocument of resolved) {
-    if (resolvedDocument.kind === "initiative") {
-      const hasObjective = kindChecked.some(
-        (candidate) => candidate.derivedParentPath === resolvedDocument.path,
-      );
-      if (!hasObjective) {
-        findings.push({
-          code: "initiative-without-objective",
-          path: resolvedDocument.path,
-          id: null,
-          message: "the initiative holds no objective document",
-        });
-      }
-    }
-    if (resolvedDocument.kind === "objective") {
-      const hasTask = kindChecked.some(
-        (candidate) => candidate.derivedParentPath === resolvedDocument.path,
-      );
-      if (!hasTask) {
-        findings.push({
-          code: "objective-without-task",
-          path: resolvedDocument.path,
-          id: null,
-          message: "the objective holds no task document",
-        });
-      }
-    }
-  }
+  findings.push(
+    ...completenessFindings({
+      subject: "document",
+      parents: resolved.map((document) => ({
+        kind: document.kind,
+        key: document.path,
+        path: document.path,
+        id: null,
+      })),
+      children: kindChecked.map((document) => ({
+        kind: document.kind,
+        parentKey: document.derivedParentPath,
+      })),
+    }),
+  );
 
   for (const resolvedDocument of resolved) {
     for (const dependency of resolvedDocument.dependencies) {

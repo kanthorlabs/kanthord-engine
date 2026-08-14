@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { choiceVerdict, differingFields, presences } from "./plan-choice.ts";
 import type { Choice, ChoiceFacts, ChoiceVerdict } from "./plan-choice.ts";
@@ -122,7 +124,7 @@ describe("src/domain/plan-choice.test", () => {
     );
   });
 
-  it("ready refuses a structural change", () => {
+  it("ready accepts a structural change", () => {
     assert.deepEqual(
       verdict({
         presence: "both",
@@ -131,13 +133,43 @@ describe("src/domain/plan-choice.test", () => {
         containmentMovable: true,
       }),
       {
-        suggested: "database",
-        submitted: {
-          legal: false,
-          reason: "a structural edit needs pending or blocked",
-        },
+        suggested: "submitted",
+        submitted: { legal: true, reason: null },
         database: { legal: true, reason: null },
       },
+    );
+  });
+
+  it("ready refuses a parent or repo move while a node or descendant is contained", () => {
+    for (const field of ["parent", "repo"] as const) {
+      assert.deepEqual(
+        verdict({
+          presence: "both",
+          state: "ready",
+          fields: [field],
+          containmentMovable: false,
+        }),
+        {
+          suggested: "database",
+          submitted: {
+            legal: false,
+            reason:
+              "the node or a descendant holds a lease, a workspace or a commit",
+          },
+          database: { legal: true, reason: null },
+        },
+        `${field} move at ready`,
+      );
+    }
+    assert.deepEqual(
+      verdict({
+        presence: "both",
+        state: "ready",
+        fields: ["parent"],
+        containmentMovable: true,
+      }).submitted,
+      { legal: true, reason: null },
+      "free parent move at ready",
     );
   });
 
@@ -169,7 +201,7 @@ describe("src/domain/plan-choice.test", () => {
         suggested: "database",
         submitted: {
           legal: false,
-          reason: "a structural edit needs pending or blocked",
+          reason: "a structural edit needs pending, blocked or ready",
         },
         database: { legal: true, reason: null },
       },
@@ -204,7 +236,7 @@ describe("src/domain/plan-choice.test", () => {
         suggested: "database",
         submitted: {
           legal: false,
-          reason: "a structural edit needs pending or blocked",
+          reason: "a structural edit needs pending, blocked or ready",
         },
         database: { legal: true, reason: null },
       },
@@ -229,7 +261,7 @@ describe("src/domain/plan-choice.test", () => {
     > = {
       pending: { suggested: "submitted", legal: true },
       blocked: { suggested: "submitted", legal: true },
-      ready: { suggested: "database", legal: false },
+      ready: { suggested: "submitted", legal: true },
       running: { suggested: "database", legal: false },
       awaiting_approval: { suggested: "database", legal: false },
       done: { suggested: "database", legal: false },
@@ -450,6 +482,47 @@ describe("src/domain/plan-choice.test", () => {
         submitted: { legal: true, reason: null },
         database: { legal: true, reason: null },
       },
+    );
+  });
+
+  it("the phase-1 permutation list admits a structural edit at ready", () => {
+    const sentence = readFileSync(
+      resolve(import.meta.dirname, "../../docs/proposal/phase-1/README.md"),
+      "utf-8",
+    )
+      .split("\n")
+      .find((line) =>
+        line.includes("A choice of `submitted` on a structural edit"),
+      );
+    assert.ok(sentence, "no structural-edit permutation line in README.md");
+    assert.ok(
+      sentence!.includes("`pending`, `blocked` and `ready`"),
+      "the permutation line still refuses a structural edit at ready",
+    );
+  });
+
+  it("the containment rule admits a ready task parent change", () => {
+    const lines = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../docs/proposal/phase-1/plan-format.md",
+      ),
+      "utf-8",
+    ).split("\n");
+    const bullet = lines.find((line) =>
+      line.includes("A task changes parent only while it is"),
+    );
+    assert.ok(
+      bullet,
+      "no task parent-change containment bullet in plan-format.md",
+    );
+    assert.ok(
+      bullet!.includes("`ready`"),
+      "the containment bullet still refuses a parent change at ready",
+    );
+    assert.ok(
+      bullet!.includes("holds no lease"),
+      "the containment bullet lost its no-lease condition",
     );
   });
 });
