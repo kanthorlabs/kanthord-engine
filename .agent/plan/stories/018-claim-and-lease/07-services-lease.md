@@ -216,6 +216,11 @@ New test file `src/services/lease/sqlite.test.ts`, on real SQLite through `creat
 - `a same-owner acquire of a live lease returns acquired false and moves no fence` — assert the fence is identical, `renewedAt` and `expiresAt` moved to the later `now`, and `acquiredAt` unchanged.
 - `an acquire over a free lease writes fence + 1` — acquire, release, acquire again as another owner, assert fence `2`.
 - `an acquire over an expired lease writes fence + 1` — acquire at `now`, acquire at `now + ttlMs` as another owner, assert fence `2` and the new owner.
+- **`an acquire over a pre-existing free row continues that row's fence and never resets to 1`** — `INSERT` a `lease` row directly with a null `owner`, a null `owner_kind`, a null `expires_at` and `fence` of `7`, then acquire it. Assert the fence is **`8`**. Do not accept `1`.
+
+  This is the case the two assertions above cannot catch: both reach a free row that this suite itself created at fence `1`, so an implementation that reset the fence on the insert path would still report `2` and pass them. A reset fence is the exact failure the fence exists to prevent — a stale holder presenting the old owner and fence would match the row again. The `INSERT ... ON CONFLICT` upsert takes its `DO UPDATE` branch here, so `fence = lease.fence + 1` reads `7`; the literal `1` in the `VALUES` clause applies only to a genuinely absent row. Spiked and confirmed against `node:sqlite`.
+
+- `an acquire whose expires_at equals now exactly is admitted` — acquire, then acquire as another owner at `now` equal to the stored `expires_at`. Assert it succeeds with fence `2`, because the guard is `expires_at <= ?`. Pin the boundary, so a later change to `<` is caught.
 - `an acquire of a task held by another owner raises lease-held` — assert the code and assert the `refusal` property carries `relation: "self"`.
 - `an acquire of a task whose parent objective another owner holds raises lease-held with relation ancestor`.
 - `an acquire of a task whose sibling another owner holds raises lease-held with relation sibling`.
