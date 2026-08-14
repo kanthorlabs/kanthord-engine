@@ -16,7 +16,7 @@ A blocked task is diagnosable from another machine, and a stuck node clears by h
 - No startup reconciliation, no `dirty-recovery` block and no automatic recovery. Phase 3 owns all three, per `docs/proposal/phase-3/recovery.md`. The human clears every stuck node by hand in this phase.
 - No `node.discard` and no `node.waive`. Both are `introducedIn: "phase-3"` in `src/http/contract/outcome.ts` and both keep `status: "stubbed"`. A `dependency-discarded` block therefore stays blocked here, because `docs/proposal/api/outcome.md` gives it to `waive`.
 - No journal row. The one git write of this epic is `Git.resetWorkspace` inside the disposable objective workspace, and it moves no ref of the bare home. The second write rule of `.agent/plan/epics/100-phase-2-overview.md` states that exemption, and EPIC 108, EPIC 112 and EPIC 113 own the `sync`, `merge` and `publish` rows.
-- No new table and no new migration. Every row this epic reads exists in `src/services/storage/migration-0003-execution-and-journal.ts`, and EPIC 110 adds migration `6`.
+- No new table and no new migration. Every row this epic reads exists in `src/services/storage/migration-0003-execution-and-journal.ts`, and EPIC 110 adds migration `9`. The external-drive block takes `0005`, `0006` and `0007`, and EPIC 105 takes `0008`.
 - No lease reaper. Nothing in this epic expires a lease by itself. An expired holding stays in the row until a human abandons the node or a later `run.start` of EPIC 110 claims it.
 - No paging on `node.attempts`. The attempt count of one task run is bounded by `attempt_limit`, so a cursor buys nothing.
 
