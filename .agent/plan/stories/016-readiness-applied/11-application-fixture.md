@@ -20,7 +20,17 @@ Add one new file, `src/main.readiness.test.ts`, with the suite name `"src/main.r
 
 Tear down in an `after` hook: `daemon.kill("SIGTERM")`, `await daemon.exited()`, `home.dispose()`. The hook runs whether an `it` failed or not.
 
-Every HTTP call goes through `call()` from `src/cli/client.ts` with `{ baseUrl: `http://127.0.0.1:${port}`, token: "test-token", fetch: globalThis.fetch }`, exactly as `src/main.test.ts:138-142`. `createTemporaryHome().writeConfig`writes the token that`"test-token"` matches; do not invent another.
+Every HTTP call goes through `call()` from `src/cli/client.ts`, with the client dependencies of `src/main.test.ts:138-142`:
+
+```ts
+const clientDependencies = () => ({
+  baseUrl: `http://127.0.0.1:${port}`,
+  token: "test-token",
+  fetch: globalThis.fetch,
+});
+```
+
+`writeConfig` from `test/helpers/home.ts` writes the config whose token that literal matches. Do not invent another token.
 
 **No git operation happens.** `ImportPlanDependencies` at `src/commands/plan/import-plan.ts:35-44` holds `storage`, `plan`, `blobs`, `reader`, `graph`, `ids`, `clock` and `events`, and **no `git` member**. Import resolves `repo: kanthord-verify` to the seeded repository id through a `repository` table read at `src/commands/plan/import-plan.ts:120-127`. It never opens, fetches or clones. That is why the seeded row is the whole registration this test needs.
 
