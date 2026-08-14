@@ -48,6 +48,7 @@ Edit the prose of `:24` only. The `sql` fence at `:5-19` does not move one byte;
 
 - Edit no other file. `docs/proposal/api/README.md:98-104` gains no precondition row: a lease fence is a lease guard, not a revision precondition. `docs/proposal/api/README.md:176-184` already holds `acknowledgement-required` at `:180` and `lease-held` at `:181`.
 - **Add no row to the Routes table and do not touch line 5.** Story 18 owns both, together with the registry row and the two parity counts.
+- **Do not touch the `node.unblock` row and write no `node.unblock` section.** Story 19a owns that row's status change, its phase change and its section, together with the registry lifecycle flip. A `node.unblock` edit here turns `src/http/contract/parity.test.ts` red until Story 19a lands.
 - The aggregation table at `docs/proposal/phase-1/state-machine.md:37-41` gains nothing.
 - Move no `sql` fence in any proposal file. `test/helpers/proposal.ts` compares fences with comments stripped, so a fence edit breaks migration parity.
 - Do not renumber, reorder or reword any other row of the Routes table.

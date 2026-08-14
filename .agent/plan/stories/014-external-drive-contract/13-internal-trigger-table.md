@@ -157,7 +157,7 @@ Implement it by looking the trigger up in `internalTransitions` first and return
 
 ## Constraints
 
-- The set is exact at the close of this epic: **exactly these fifteen internal triggers.** No epic of this block extends it. EPIC 111 is the first epic that adds a row, for `node.unblock` and `node.abandon`.
+- The set is exact at the close of this epic: **exactly these fifteen internal triggers.** EPIC 019 is the first epic that adds a row, and it is the one epic of this block that extends the set: it adds `manual-unblock` for `task blocked → pending`, and reaches sixteen at the close of the block. EPIC 111 is the next such epic, and it adds a row for `node.abandon` alone; its widening of the already-routed `node.unblock` declares no second trigger.
 - Add no `precondition` field to `InternalTransition`. A record of seven `not-applicable` fields is the dead data this table exists to avoid.
 - Do not move an external row to `levels`. An external row keeps its single `level`.
 - Add no `externalTriggerConsumer` entry for an internal trigger. That map binds an external trigger to the command a harness must reach, and an internal trigger is reached by the daemon alone.

@@ -47,6 +47,10 @@ The named tests:
 
 - `it("a report by a human token and a close by a harness token are each 403 actor-forbidden", ...)` — over the real `authorize` middleware and the real command, with a byte-identical database before and after each.
 
+- `it("a task blocked at the attempt limit runs again after an unblock", ...)` — drive three `rejected` reports under an `attempt_limit` of 3, so the task is `blocked` with reason `attempt-limit` and its task run is ended with outcome `blocked`. The **configured human token** then calls `node.unblock`: the answer is `200`, the task reads `ready`, and the events are `node.unblocked` naming that human with `clearedReason: "attempt-limit"`, then `node.ready` naming the daemon instance. The same harness claims that task again; the claim carries a **new** run id, asserted not equal to the ended run id, and attempt number 1. It reports the task `accepted`, the task is `done`, and the objective then attests and closes to `done`. Without the unblock that objective is unclosable, which is why this assertion closes the loop rather than the report alone.
+
+- `it("an unblock by a harness token is 403 actor-forbidden", ...)` — over the real `authorize` middleware, with a byte-identical database before and after.
+
 ## Constraints
 
 - No injected handler map, no `createTestApp` and no direct command import in this file.

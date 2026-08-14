@@ -47,7 +47,7 @@ Write these cases, in this order:
 
   and `assert.deepEqual(actual, harnessOperations)`. `byBytes` compares through `Buffer.compare(Buffer.from(a), Buffer.from(b))`, matching `src/http/contract/registry.ts:24-37`.
 
-- `it("system.status and event.list admit human only", ...)` — assert by name that neither id appears in `actual`, and assert each declares `["human"]` exactly. `015-actor-identity.md:62` excludes `system.status` because it returns operator detail, and `event.list` because it discloses every human decision.
+- `it("system.status, event.list, node.unblock and plan.revisions admit human only", ...)` — assert by name that no one of the four ids appears in `actual`, and assert each declares `["human"]` exactly. `015-actor-identity.md:62` excludes `system.status` because it returns operator detail, and `event.list` because it discloses every human decision. `019-outcome-report.md:41` excludes `node.unblock` because a harness that could clear its own `attempt-limit` block would hold no attempt limit. `plan.revisions` is excluded because its entry carries `submittedBlob` and `choicesBlob`, which `blob.show` dereferences, so it would disclose every superseded submission and every human import choice; a harness reads its guard token from `plan.export` instead, per `015-actor-identity.md:62` and `017-per-node-graph-write.md`. Those four names are the whole absence list, and every other exclusion follows from the set equality alone.
 - `it("every operation outside the harness set declares human alone", ...)` — compute the difference as a set, never as a count:
 
   ```ts

@@ -112,7 +112,7 @@ Add the four existing stubbed rows' `allowedActors` only if EPIC 015 has not alr
 
 ### The authorization assertion
 
-**`src/http/contract/registry.test.ts` holds `harnessOperations`**, per `.agent/plan/stories/015-actor-identity/07-authorization-registry.md:36`, which places the assertion there and forbids creating `src/http/contract/authorization.test.ts` before EPIC 020. Add `"node.report"` to that list, in its bytewise position. **This epic adds exactly one authorization row.** The assertion names that one operation id and states no registry-wide total.
+**`src/http/contract/registry.test.ts` holds `harnessOperations`**, per `.agent/plan/stories/015-actor-identity/07-authorization-registry.md:36`, which places the assertion there and forbids creating `src/http/contract/authorization.test.ts` before EPIC 020. Add `"node.report"` to that list, in its bytewise position. **This story adds exactly one authorization row, and it adds the only one that admits `harness`.** The epic adds a second, `node.unblock` with `allowedActors: ["human"]`, in Story 19a; that row enters no harness list, so `harnessOperations` is unchanged by it. The assertion names the one operation id and states no registry-wide total.
 
 Do not create `src/http/contract/authorization.test.ts` here. EPIC 020 creates it and moves `harnessOperations` into it (`020-wiring-and-scenarios.md:48`); two epics cannot both create one path, and this epic precedes EPIC 020 in sequence order.
 

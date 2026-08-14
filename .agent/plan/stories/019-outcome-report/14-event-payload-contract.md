@@ -75,6 +75,18 @@ const rollUpPayload = z.strictObject({
 
 `node.done` and `node.partial` are each `z.union([closePayload, rollUpPayload])`. `node.discarded` is `rollUpPayload` alone, because no close writes `discarded`.
 
+`node.unblocked` is its own schema, transcribed from `unblockNode` of Story 19a:
+
+```ts
+"node.unblocked": z.strictObject({
+  from: z.literal("blocked"),
+  to: z.literal("pending"),
+  clearedReason: z.enum(blockReasons),
+}),
+```
+
+`clearedReason` is the whole `blockReasons` enum rather than the literal `"attempt-limit"`, because EPIC 111 widens the command to four reasons and a narrowed schema would then reject a payload this build writes. `from` and `to` stay literals, because the state pair does not widen: `manual-unblock` declares exactly `blocked → pending`.
+
 Two payload schemas of equal shape are legal, and the union resolves to the first match. A payload is data a client reads and never a dispatch key, so that ambiguity costs nothing.
 
 ### `src/http/contract/event.ts` — do not edit it

@@ -11,7 +11,7 @@ EPIC 009 owns the mechanism. Each vertical epic added its own `declaredCommands`
 
 Replace every count assertion with a name assertion. Four cases change.
 
-- `it("programCommandPaths returns the fifteen inventory paths", ...)` at `:75-80` — rename to `"programCommandPaths returns exactly the declared paths, by name"`. Delete `assert.equal(paths.length, 15)`. Keep `assert.deepEqual(paths, commandPaths())`, and add one `assert.deepEqual` of `commandPaths()` against an exact ordered literal list of all thirty-two paths, bytewise sorted:
+- `it("programCommandPaths returns the fifteen inventory paths", ...)` at `:75-80` — rename to `"programCommandPaths returns exactly the declared paths, by name"`. Delete `assert.equal(paths.length, 15)`. Keep `assert.deepEqual(paths, commandPaths())`, and add one `assert.deepEqual` of `commandPaths()` against an exact ordered literal list of all thirty-three paths, bytewise sorted:
 
   ```ts
   const expectedCommandPaths: readonly string[] = [
@@ -35,6 +35,7 @@ Replace every count assertion with a name assertion. Four cases change.
     "node release",
     "node report",
     "node show",
+    "node unblock",
     "node update",
     "plan export",
     "plan import",
@@ -42,13 +43,17 @@ Replace every count assertion with a name assertion. Four cases change.
     "project list",
     "project repository",
     "project show",
+    "repository register",
+    "repository show",
     "run",
     "serve",
     "status",
   ];
   ```
 
-  That list holds the fifteen phase-1 paths plus the seventeen of the block. Take the exact ordering from the assertion diff rather than by hand, and state no count anywhere in the file.
+  That list holds the fifteen phase-1 paths plus the eighteen of the block. Take the exact ordering from the assertion diff rather than by hand, and state no count anywhere in the file.
+
+  **`repository register` and `repository show` are in that list because `src/cli/inventory.ts` declares them today.** `declaredCommands` holds fifteen paths at the close of phase 1, and an earlier draft of this literal held thirteen of them, so the literal disagreed with the prose by two. `06-cli-reachability.md` corroborates the first of the two: it holds a case for `repository register` issuing `provider.list`, `repository.inspect` and `repository.register`. A literal short of `declaredCommands` fails `compareCommandSets` on a path the block never touched, which reads as a defect in this epic rather than in the inventory.
 
 - `it("pins seventeen distinct ids across twelve calling entries", ...)` at `:112-122` — rename to `"every calling entry names at least one operation id"`. Delete both scalars. Assert instead that the sorted list of command paths whose `operationIds` is empty deep-equals the exact literal `["config generate", "db migrate", "serve"]`.
 
@@ -88,7 +93,7 @@ Replace every count assertion with a name assertion. Four cases change.
   ];
   ```
 
-  Add one case asserting `event.list` is absent from `uncovered`, because Story 3 ships `kanthord event list`. A ninth id fails the assertion, so a new route with no command becomes a decision rather than an oversight.
+  Add one case asserting `event.list` and `node.unblock` are each absent from `uncovered`: Story 3 ships `kanthord event list`, and EPIC 019 ships `kanthord node unblock` beside its `routed` flip of that row. A ninth id fails the assertion, so a new route with no command becomes a decision rather than an oversight.
 
 ### `src/cli/inventory.test.ts`
 

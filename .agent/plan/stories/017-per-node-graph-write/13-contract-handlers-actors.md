@@ -135,10 +135,12 @@ It runs the whole sequence twice: once on a complete graph, and once on a graph 
 - `src/http/contract/path.test.ts` asserts `node` is a subresource segment and that `update` and `delete` are action segments.
 - Create `src/http/server/node/create-node.test.ts`, `update-node.test.ts` and `delete-node.test.ts`, suite names matching the module path. Each asserts:
   - the success body against the response schema;
+  - the success body parses with a `revision` string member: `nodeCreateResponse`, `nodeUpdateResponse` and `nodeDeleteResponse` each accept the body, and the parsed `revision` is a non-empty string;
   - a `400 invalid-request` for a body missing one editable field, and for a `repo` on a task, and for a missing `repo` on an objective — from the schema, not from the validator;
   - each refusal code with its `details` shape;
   - a repeated `Idempotency-Key` replays the captured `200` and mints no second revision, with the `plan_revision` row count compared before and after; for `node.delete` the replay returns the captured `200` body and not `404`.
 - `node.create`, `node.update` and `node.delete` each answer `200` to a harness token, and `provider.list` with the same token stays `403 actor-forbidden`. Assert the three operation ids present in the harness-readable set by name.
+- **A client obtains the guard token without calling `plan.revisions`.** In `src/main.node-write.test.ts`, two creates run back to back, and the `revision` of the first response is the `fromRevision` of the second, which answers `200`. A third create at the first revision is `409 stale-revision`; the client then refreshes from `plan.export`, the `revision` of that response equals the `revision` of the second create response, and the third create at that value answers `200`. `plan.revisions` is called nowhere in this assertion.
 - `src/main.node-write.test.ts` runs the full sequence twice and exits 0.
 - `node --test src/http/contract/*.test.ts src/http/server/node/create-node.test.ts src/http/server/node/update-node.test.ts src/http/server/node/delete-node.test.ts src/main.node-write.test.ts` exits 0.
 - `npm run verify` exits 0.

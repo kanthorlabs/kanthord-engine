@@ -21,33 +21,33 @@ The command must return nothing. `parseStatusCounts` in `scripts/e2e/lib/scenari
 
 If the grep returns a hit, stop. The defect belongs to EPIC 016, story `12-journey-oracle-repaired.md`. Do not repair it here.
 
-### Check 2 — the twelve routed operations exist
+### Check 2 — the thirteen routed operations exist
 
 ```bash
 node --input-type=module -e "
 import { registry } from './src/http/contract/registry.ts';
-const want = ['actor.list','actor.register','actor.revoke','actor.rotate','actor.show','node.claim','node.create','node.delete','node.heartbeat','node.release','node.report','node.update'];
+const want = ['actor.list','actor.register','actor.revoke','actor.rotate','actor.show','node.claim','node.create','node.delete','node.heartbeat','node.release','node.report','node.unblock','node.update'];
 const have = new Set(registry.filter(e => e.status === 'routed').map(e => e.operationId));
 const missing = want.filter(id => !have.has(id));
 console.log(missing.length === 0 ? 'ok' : 'missing: ' + missing.join(','));
 "
 ```
 
-The output must be `ok`. Twelve, not eleven: `015-actor-identity.md:66` declares five actor rows, `actor.rotate` included, and `015-actor-identity.md:39` instructs this epic to carry twelve rather than eleven.
+The output must be `ok`. Twelve of the thirteen are new registry entries: `015-actor-identity.md:66` declares five actor rows, `actor.rotate` included, and `015-actor-identity.md:39` instructs this epic to carry twelve rather than eleven. The thirteenth is a lifecycle flip: `node.unblock` already exists as a `stubbed` entry, and `019-outcome-report.md:41` sets it `routed` for the reason `attempt-limit`. The registry row count therefore rises by twelve while thirteen operations answer a command.
 
-### Check 3 — the seventeen CLI commands exist
+### Check 3 — the eighteen CLI commands exist
 
 ```bash
 node --input-type=module -e "
 import { declaredCommands } from './src/cli/inventory.ts';
-const want = ['actor register','actor rotate','actor list','actor show','actor revoke','node create','node update','node delete','node list','node show','node claim','node heartbeat','node release','node report','node attest','node close'];
+const want = ['actor register','actor rotate','actor list','actor show','actor revoke','node create','node update','node delete','node list','node show','node claim','node heartbeat','node release','node report','node attest','node close','node unblock'];
 const have = new Set(declaredCommands.map(c => c.path.join(' ')));
 const missing = want.filter(p => !have.has(p));
 console.log(missing.length === 0 ? 'ok' : 'missing: ' + missing.join(' | '));
 "
 ```
 
-The output must be `ok`. Sixteen are checked here; `event list` is the seventeenth and Story 3 adds it.
+The output must be `ok`. Seventeen are checked here; `event list` is the eighteenth and Story 3 adds it. `node unblock` is EPIC 019's, beside `node report`, `node attest` and `node close`.
 
 ### Check 4 — `allowedActors` is a required field
 

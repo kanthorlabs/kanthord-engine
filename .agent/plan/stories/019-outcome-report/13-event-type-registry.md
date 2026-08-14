@@ -20,7 +20,7 @@ export const retiredEventTypes: readonly EventType[] = [];
 
 **Append-only means no member is ever removed. It does not mean appended at the end.** A new member takes its bytewise position in the tuple, and the tuple stays sorted; the file's history is not its order.
 
-The list is sorted **bytewise** and holds no duplicate. Write it as a flat tuple of string literals in exactly this order. This is the expected list at authoring time, 35 members:
+The list is sorted **bytewise** and holds no duplicate. Write it as a flat tuple of string literals in exactly this order. This is the expected list at authoring time, 36 members:
 
 ```
 actor.registered
@@ -39,6 +39,7 @@ node.partial
 node.pending
 node.ready
 node.running
+node.unblocked
 node.updated
 outcome.reported
 plan.imported
@@ -67,14 +68,15 @@ repository.registered
 
 Report every reconciliation in the story hand-off. `retiredEventTypes` is expected to stay empty in this epic; a non-empty value means one of EPICs 015 to 018 landed differently from its story, and that is a finding for the human.
 
-The 35 members come from these producers:
+The 36 members come from these producers:
 
 - eighteen literals under `src/commands/` today, including the two `recovery.leaseRecovered` and `recovery.leaseBlocked` literals of the ternary at `src/commands/startup/recover-expired-leases.ts:157-160`;
 - `actor.registered`, `actor.revoked` and `actor.tokenRotated` of EPIC 015 (`015-actor-identity.md:68`);
 - `node.ready` and `node.pending` of EPIC 016, written in `src/services/readiness/dependency.ts`;
 - `node.created`, `node.updated` and `node.deleted` of EPIC 017;
 - `lease.claimed`, `lease.renewed`, `lease.released` and `node.running` of EPIC 018 (`018-claim-and-lease.md:94,98`);
-- `outcome.reported`, `node.awaitingApproval`, `node.done`, `node.partial` and `node.discarded` of this epic.
+- `outcome.reported`, `node.awaitingApproval`, `node.done`, `node.partial` and `node.discarded` of this epic;
+- `node.unblocked` of this epic, written by `unblockNode` of Story 19a. `eventTypes` holds it from this story, and Story 19a is the story whose command first writes it. A registry member with no producer yet is legal, because the two relations of Story 14 are subset relations and never a bare equality.
 
 ## Constraints
 
@@ -91,7 +93,7 @@ Create `src/domain/event-type.test.ts`, suite name `"src/domain/event-type.test"
 - `it("eventTypes holds no duplicate", ...)` — `new Set(eventTypes).size === eventTypes.length`.
 - `it("every member is a non-empty dotted name", ...)` — each member matches `/^[a-z][a-zA-Z]*(\.[a-z][a-zA-Z]*)+$/`.
 - `it("retiredEventTypes is a subset of eventTypes", ...)` — every member is a member of `eventTypes`, and the array holds no duplicate.
-- `it("the five types of this epic are present", ...)` — assert `outcome.reported`, `node.awaitingApproval`, `node.done`, `node.partial` and `node.discarded` by name.
+- `it("the six types of this epic are present", ...)` — assert `outcome.reported`, `node.awaitingApproval`, `node.done`, `node.partial`, `node.discarded` and `node.unblocked` by name.
 - `node --test src/domain/event-type.test.ts` exits 0.
 - `npm run verify` exits 0.
 - Proof: `src/domain/event-type.test.ts`. Hermetic coverage: `019-outcome-report.md:176` (the sorted and duplicate clauses).

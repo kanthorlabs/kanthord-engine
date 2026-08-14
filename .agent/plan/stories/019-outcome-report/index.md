@@ -7,7 +7,7 @@ A harness reports the outcome of the task it holds through `POST /v1/node/:id/re
 
 ## Dispatch order
 
-Numeric order, `01` to `20`. **Every story is independently green**: `npm run verify` exits 0 at the close of each one. Two pairs are coupled and take no verify gate between their members, because neither half is independently valid:
+Numeric order, `01` to `20`, with `19a` between `19` and `20`. **Every story is independently green**: `npm run verify` exits 0 at the close of each one. Two pairs are coupled and take no verify gate between their members, because neither half is independently valid:
 
 - **7 + 8** — the command and its event payload edit one file.
 - **13 + 14** — `eventTypes` and the payload map are one contract.
@@ -19,6 +19,7 @@ Four ordering facts are load-bearing:
 - Story 4 precedes Story 5, because `taskReportEffect` returns `attempt-failed` and `report-cancelled`.
 - Story 10 precedes Story 11, because `closeObjective` calls `aggregateInitiative`.
 - Story 12 follows Stories 7, 9 and 11, because the on-disk consumer assertion needs the four command files.
+- Story 19a follows Story 19, because it reuses the handler-map and CLI-registration edits Story 19 makes, and it precedes Story 20, because Story 20 drives the unblock through the real composition root.
 - Story 20 is last; it runs the whole Proof block.
 
 ## Stories
@@ -42,9 +43,10 @@ Four ordering facts are load-bearing:
 - 17 — the claim reuses an active run of its own driver → `17-claim-run-reuse.md`
 - 18 — the proposal route row, the contract row, the handler and the actor row → `18-contract-row-handler-actor.md`
 - 19 — the composition root and the CLI → `19-composition-root-and-cli.md`
+- 19a — `node.unblock`, the one exit from `attempt-limit` → `19a-node-unblock.md`
 - 20 — the real-composition-root loop → `20-real-composition-root-loop.md`
 
-The EPIC lists eighteen Story bullets. Two bullets split, each because one half cannot be verified when the other lands:
+The EPIC lists nineteen Story bullets. Two bullets split, each because one half cannot be verified when the other lands:
 
 - `019-outcome-report.md:66` splits into Story 4 (the rows and the map entries) and Story 12 (the on-disk assertion, which needs the four command files).
 - `019-outcome-report.md:80-82` splits into Story 13 (`eventTypes`) and Story 14 (the payload map, the honesty test and the `event.ts` wiring).
@@ -57,7 +59,8 @@ The EPIC lists eighteen Story bullets. Two bullets split, each because one half 
 - **The honesty scan covers `src/commands/` and `src/services/`**, because `src/services/readiness/dependency.ts` writes `node.ready` and `node.pending`.
 - **`eventTypes` holds 35 members**, `actor.tokenRotated` included, plus a `retiredEventTypes` list that is empty here.
 - **The scan and the registry meet in two subset relations**, never a bare equality, because an append-only registry cannot equal a scan of the current tree.
-- **`field-decisions.fixture.ts` grows from `node.report` alone**, in Story 18, and the delta is reviewed rather than accepted from a diff.
+- **`field-decisions.fixture.ts` grows from `node.report` in Story 18 and from `node.unblock` in Story 19a**, and each delta is reviewed rather than accepted from a diff.
+- **`node.unblock` moves from `stubbed` to `routed` in this epic**, in Story 19a, for the reason `attempt-limit` and no other. It declares `allowedActors: ["human"]`, so the harness-admitting set of EPIC 020 stays at sixteen names. EPIC 111 widens the reason set to four and renames `nodeUnblockDetails` to `nodeControlDetails`; it flips no lifecycle and declares no second trigger.
 
 ## Facts (needed for implementation)
 
