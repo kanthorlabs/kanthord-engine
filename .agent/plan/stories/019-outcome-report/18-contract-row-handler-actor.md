@@ -112,7 +112,9 @@ Add the four existing stubbed rows' `allowedActors` only if EPIC 015 has not alr
 
 ### The authorization assertion
 
-`src/http/contract/authorization.test.ts` of `.agent/plan/stories/015-actor-identity/07-authorization-registry.md` holds `harnessOperations`. Add `"node.report"` to that list, in its bytewise position. **This epic adds exactly one authorization row.** The assertion names that one operation id and states no registry-wide total.
+**`src/http/contract/registry.test.ts` holds `harnessOperations`**, per `.agent/plan/stories/015-actor-identity/07-authorization-registry.md:36`, which places the assertion there and forbids creating `src/http/contract/authorization.test.ts` before EPIC 020. Add `"node.report"` to that list, in its bytewise position. **This epic adds exactly one authorization row.** The assertion names that one operation id and states no registry-wide total.
+
+Do not create `src/http/contract/authorization.test.ts` here. EPIC 020 creates it and moves `harnessOperations` into it (`020-wiring-and-scenarios.md:48`); two epics cannot both create one path, and this epic precedes EPIC 020 in sequence order.
 
 ### `src/http/contract/parity.test.ts`
 
@@ -170,8 +172,8 @@ It handles `ReportOutcomeError`, `ReportObjectiveError` and `CloseObjectiveError
   - `it("each refusal maps to its code", ...)` — one case per refusal above, asserting the status and the `details`.
   - `it("the handler branches on no domain rule", ...)` — assert the handler calls the command for every one of the six report kinds, so no kind is decided in the handler.
 - Add to `src/http/contract/registry.test.ts`: `it("node.report declares its lifecycle by operation id", ...)` — `allowedActors` deep-equals `["human", "harness"]`, `idempotency === "memory"`, `replayable` deep-equals `[200]`, `introducedIn === "phase-1"`, `status === "routed"`, and `registryFaults(registry)` is empty.
-- Add to `src/http/contract/authorization.test.ts`: assert `node.report` is in the harness set, and assert `actor.register` still declares `["human"]` alone, so the widening reached this operation only.
-- `node --test src/http/contract/path.test.ts src/http/contract/outcome.test.ts src/http/contract/registry.test.ts src/http/contract/parity.test.ts src/http/contract/coverage.test.ts src/http/contract/authorization.test.ts src/http/contract/openapi.test.ts src/http/contract/example.test.ts src/http/server/node/report-node.test.ts` exits 0. Create `src/http/contract/outcome.test.ts` only if it does not exist; otherwise extend it.
+- Add to `src/http/contract/registry.test.ts`: assert `node.report` is in the harness set, and assert `actor.register` still declares `["human"]` alone, so the widening reached this operation only.
+- `node --test src/http/contract/path.test.ts src/http/contract/outcome.test.ts src/http/contract/registry.test.ts src/http/contract/parity.test.ts src/http/contract/coverage.test.ts src/http/contract/openapi.test.ts src/http/contract/example.test.ts src/http/server/node/report-node.test.ts` exits 0. Create `src/http/contract/outcome.test.ts` only if it does not exist; otherwise extend it.
 - `node --test test/helpers/proposal.test.ts` exits 0, and `node --test src/http/contract/parity.test.ts` exits 0, which together prove the Routes-table row and the registry row agree.
 - `npm run verify` exits 0.
 - Proof: `src/http/contract/path.test.ts`, `src/http/contract/parity.test.ts`, `src/http/contract/registry.test.ts` and `src/http/server/node/report-node.test.ts`. Hermetic coverage: `019-outcome-report.md:150`, `:151`, `:152` (the schema half), `:173` and `:179`.
