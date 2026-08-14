@@ -9,7 +9,7 @@ Depends on: Story 3 (the `owner_kind` column) and Story 5 (`liveLeaseRefusal`).
 
 The current file is 52 lines. Amend it in place.
 
-- `LeaseRecord` at `:5-13` gains `ownerKind: LeaseOwnerKind | null`, declared after `owner`. `LeaseOwnerKind` is imported from `src/domain/lease-hierarchy.ts`; a service interface may import `domain/`.
+- `LeaseRecord` at `:5-13` gains `ownerKind: LeaseOwnerKind | null`, declared after `owner`. **`LeaseOwnerKind` is imported from `src/domain/lease.ts`**, which is the one place Story 5 fixes it, beside the `ownerKind` member EPIC 014 adds to `leaseRow`. Do not import it from `src/domain/lease-hierarchy.ts`, and do not declare a second copy here. A service interface may import `domain/`.
 - `AcquireLeaseInput` at `:15-20` gains `ownerKind: LeaseOwnerKind` and `now: number`. It keeps `subjectKind`, `subjectId`, `owner` and `ttlMs`.
 - `RenewLeaseInput` at `:22-28` gains `ownerKind: LeaseOwnerKind` and `now: number`.
 - `ReleaseLeaseInput` at `:30-34` gains `owner: string`, `ownerKind: LeaseOwnerKind` and `now: number`. **Without `owner` the "release matches owner and fence" promise is unimplementable.**
@@ -26,7 +26,7 @@ The current file is 52 lines. Amend it in place.
 
 - New `ExpireLeasesOfOwnerInput`: `Readonly<{ owner: string; now: number }>`.
 - New `LeaseSubject`: `Readonly<{ subjectKind: LeaseSubjectKind; subjectId: string }>`.
-- New `ReadLeaseInput` and `AssertHeldInput`. `ReadLeaseInput` is `Readonly<{ subjectKind; subjectId }>`. `AssertHeldInput` is `Readonly<{ subjectKind; subjectId; owner; fence }>`.
+- New `ReadLeaseInput` is `Readonly<{ subjectKind: LeaseSubjectKind; subjectId: string; now: number }>`, and `AssertHeldInput` is `Readonly<{ subjectKind: LeaseSubjectKind; subjectId: string; owner: string; fence: number; now: number }>`. **Both carry `now`**, so every input of `Lease` carries it, which is the Decision at `.agent/plan/epics/018-claim-and-lease.md:41` and the surface Story 18 publishes. `read` uses `now` to report liveness; `assertHeld` uses it to refuse an expired holding. Neither carries `ownerKind`: `read` supplies it in the record it returns, and `assertHeld` matches on `owner` and `fence`, which are what the fencing rule compares. Story 18's published surface says "every input carrying `now` and `ownerKind`"; correct that sentence to "every input carries `now`, and every input that **writes** an owner carries `ownerKind`" — those are `acquire`, `renew` and `release`.
 
 The `Lease` interface at `:47-52` becomes exactly these seven methods, in this order:
 
@@ -72,28 +72,45 @@ RETURNING subject_kind, subject_id, owner, owner_kind, fence, acquired_at, renew
 
 Three statements, in this exact order.
 
-**1. The hierarchy read.** One `SELECT` over `lease` joined to `node`, collecting every live lease on the subject, on its parent and on its children, ordered by `subject_id`:
+**1. The hierarchy read. It is rooted in `node`, not in `lease`.** The guaranteed first-acquisition case has an **empty** `lease` table, so a query rooted in `lease` returns no row and yields no `targetKind` and no `parentId` — and `liveLeaseRefusal` requires both. Root the query in the target node and **left-join** the lease.
+
+Two statements, in this order.
+
+**1a. The target node and its relatives.**
 
 ```sql
-SELECT l.subject_id, l.owner, l.owner_kind, l.expires_at, n.kind, n.parent_id
-FROM lease l
-JOIN node n ON n.id = l.subject_id
-WHERE l.subject_kind = 'node'
-  AND l.owner IS NOT NULL
-  AND l.expires_at IS NOT NULL
-  AND l.expires_at > ?
-  AND (
-    l.subject_id = ?
-    OR l.subject_id = (SELECT parent_id FROM node WHERE id = ?)
-    OR n.parent_id = ?
-    OR n.parent_id = (SELECT parent_id FROM node WHERE id = ?)
-  )
-ORDER BY l.subject_id
+SELECT n.id, n.kind, n.parent_id
+FROM node n
+WHERE n.id = ?
+   OR n.id = (SELECT parent_id FROM node WHERE id = ?)
+   OR n.parent_id = ?
+   OR (n.parent_id IS NOT NULL
+       AND n.parent_id = (SELECT parent_id FROM node WHERE id = ?))
+ORDER BY n.id
 ```
 
-The parameters are `input.now` and then `input.subjectId` four times. The last disjunct collects the siblings. Build `LeaseHierarchyInput` from the rows: `targetId` and `targetKind` from the subject node, `parentId` from it, `childIds` from the rows whose `parent_id` equals the subject, `siblingIds` from the rows whose `parent_id` equals the subject's parent and whose `subject_id` differs from the subject. Call `liveLeaseRefusal`. A non-null refusal raises `LeaseError("lease-held", ...)`, and the refusal object travels on the error as a `refusal` property so the command can build `leaseHeldDetails`.
+Parameters: `input.subjectId` four times. An **absent target row** means the caller named an unknown node: throw a plain `Error`, because `claimNode` resolves the node before it calls `acquire` and an unknown node here is a programming fault.
 
-`liveLeaseRefusal` decides no liveness, so the `expires_at > ?` predicate above is what makes every supplied row live.
+The `n.parent_id IS NOT NULL` guard on the fourth disjunct is load-bearing. Without it, a target whose `parent_id` is `NULL` — an initiative — makes the subquery `NULL`, and `NULL = NULL` is `NULL` rather than true, so the disjunct is merely never satisfied. The guard states the intent instead of relying on that: **a node with no parent has no siblings by this rule.** The three-valued logic does not accidentally match unrelated null-parent nodes in either form.
+
+**1b. The live leases over those identities.**
+
+```sql
+SELECT subject_id, owner, owner_kind, fence, expires_at
+FROM lease
+WHERE subject_kind = 'node'
+  AND owner IS NOT NULL
+  AND expires_at IS NOT NULL
+  AND expires_at > ?
+  AND subject_id IN (<one placeholder per identity from 1a>)
+ORDER BY subject_id
+```
+
+Parameters: `input.now`, then the identities returned by 1a in their returned order. Build the placeholder list from that count; supply no literal.
+
+Build `LeaseHierarchyInput` from the two results: `targetId` and `targetKind` and `parentId` from the target row of 1a; `childIds` from the 1a rows whose `parent_id` equals the subject; `siblingIds` from the 1a rows whose `parent_id` equals the subject's parent and whose `id` differs from the subject; `liveLeases` from 1b, each carrying `fence`. Call `liveLeaseRefusal`. A non-null refusal raises `LeaseError("lease-held", ...)`, and the refusal object travels on the error as a `refusal` property so the caller builds `leaseHeldDetails` from it with no second read.
+
+`liveLeaseRefusal` decides no liveness, so the `expires_at > ?` predicate in 1b is what makes every supplied row live.
 
 **2. The idempotent reuse branch.** When the subject row exists, is live, and its `owner` equals `input.owner`:
 
@@ -127,19 +144,21 @@ Return `{ record, acquired: true }`.
 
 ```sql
 UPDATE lease SET renewed_at = ?, expires_at = ?
-WHERE subject_kind = ? AND subject_id = ? AND owner = ? AND fence = ?
+WHERE subject_kind = ? AND subject_id = ? AND owner = ? AND fence = ? AND expires_at > ?
 ```
 
-plus the returning list. It moves no fence. An empty result raises `LeaseError("lease-fenced", ...)`. It does **not** check expiry: a heartbeat that arrives after expiry but before any sweep still names the live owner and fence, and the sweep is the one place expiry is decided.
+plus the returning list. Parameters end with `input.now`. It moves no fence. An empty result raises `LeaseError("lease-fenced", ...)`.
+
+**The `expires_at > ?` predicate is lease safety and it is required.** Without it a heartbeat that arrives after `expires_at`, with no sweep yet run, extends a dead holding and restores the old harness's authority. That contradicts `leaseTtlMs` being the whole bound, contradicts "the current live pair" of the report rule, and defeats abandoned-objective recovery: a harness that stopped reporting could hold its objective for ever by heartbeating late. The claim-driven sweep runs at the next claim, so "expired but not yet swept" is a window of unbounded length, not a moment.
 
 #### `release`
 
 ```sql
 UPDATE lease SET owner = NULL, owner_kind = NULL, acquired_at = NULL, renewed_at = NULL, expires_at = NULL
-WHERE subject_kind = ? AND subject_id = ? AND owner = ? AND fence = ?
+WHERE subject_kind = ? AND subject_id = ? AND owner = ? AND fence = ? AND expires_at > ?
 ```
 
-plus the returning list. It moves no fence. `owner` and `owner_kind` are cleared together, which the null-agreement `CHECK` of migration 0007 requires. An empty result raises `LeaseError("lease-fenced", ...)`.
+plus the returning list, with `input.now` as the last parameter. It moves no fence. `owner` and `owner_kind` are cleared together, which the null-agreement `CHECK` of migration 0007 requires. An empty result raises `LeaseError("lease-fenced", ...)`, and an expired holding is one of the cases that produces it: a harness whose lease died has no release to give, and the sweep frees the row.
 
 **This is a stated amendment to the EPIC.** `.agent/plan/epics/018-claim-and-lease.md:81` enumerates four cleared columns for `release` and leaves `acquired_at` set, while the expiry sweep at `:108` clears five and includes `acquired_at`. Two paths that both free a lease must leave the same row shape, or a reader cannot tell a released lease from an expired one, and a test that asserts a freed row has to branch on which path freed it. **`release` therefore clears the same five columns as the sweep.** `acquired_at` is the start of the current holding, a released lease has no holding, and the column carries no `CHECK`, so clearing it loses nothing. `fence` is the only column that survives either path, and it survives both.
 
@@ -166,11 +185,11 @@ Parameters: `input.now`, `input.owner`, `input.now`. It moves no fence, clears n
 
 #### `read`
 
-One `SELECT` by primary key, returning one `LeaseRecord` or `null`.
+One `SELECT` by primary key, returning one `LeaseRecord` or `null`. It applies **no** expiry predicate and returns the row as stored, because a caller that needs to see an expired holding — the sweep, and the objective-release check of Story 12 — reads it here. `input.now` is not used in the `WHERE`; the caller compares `expiresAt` against it.
 
 #### `assertHeld`
 
-Read the row and raise `LeaseError("lease-fenced", ...)` when it is absent, when its `owner` differs from `input.owner`, or when its `fence` differs from `input.fence`. It writes nothing. It ships for EPIC 110.
+Read the row and raise `LeaseError("lease-fenced", ...)` when it is absent, when its `owner` differs from `input.owner`, when its `fence` differs from `input.fence`, **or when its `expires_at` is null or at or before `input.now`**. It writes nothing. The expiry arm is the same safety rule as `renew`: an expired holding is not held, so an assertion that ignores expiry would license a write from a dead owner. It ships for EPIC 110 and Story 12 uses it.
 
 ### Row mapping
 
@@ -190,7 +209,10 @@ One private mapper turns the SQL row into `LeaseRecord`, converting `owner_kind`
 
 New test file `src/services/lease/sqlite.test.ts`, on real SQLite through `createMigratedStorage` of `test/helpers/database.ts`. Seed one project, one initiative, one objective and two sibling tasks through direct `INSERT` into `node`, so the suite depends on no command. Fixed identities and a fixed `now` of `1700000000000`; `ttlMs` of `300000`.
 
-- `a first acquire against an empty lease table inserts the row with fence 1` — read `lease` before the call and assert it holds no row for the subject, then assert `acquired: true`, `fence: 1`, `owner`, `ownerKind`, `acquiredAt`, `renewedAt` equal to `now`, and `expiresAt` equal to `now + ttlMs`.
+- `a first acquire against an empty lease table inserts the row with fence 1` — **assert the whole `lease` table is empty before the call**, not merely that the subject has no row, so the hierarchy read is exercised with nothing to join. Then assert `acquired: true`, `fence: 1`, `owner`, `ownerKind`, `acquiredAt`, `renewedAt` equal to `now`, and `expiresAt` equal to `now + ttlMs`. This is the case a `lease`-rooted hierarchy query cannot serve.
+- `the hierarchy read resolves the target from node and not from lease` — with an empty `lease` table, acquire the **task**, and assert it succeeds. Then acquire an **initiative** and assert it succeeds with no sibling lookup error, so the null-parent guard is exercised.
+- `an acquire of an unknown node throws a plain Error` — assert it is not a `LeaseError`, because `claimNode` resolves the node first and an unknown node here is a programming fault.
+- `the refusal carries the holder's fence` — assert the `refusal` property of the raised `LeaseError` carries `subjectId`, `holder`, `holderKind`, `fence`, `relation` and `expiresAt`, so `leaseHeldDetails` needs no second read.
 - `a same-owner acquire of a live lease returns acquired false and moves no fence` — assert the fence is identical, `renewedAt` and `expiresAt` moved to the later `now`, and `acquiredAt` unchanged.
 - `an acquire over a free lease writes fence + 1` — acquire, release, acquire again as another owner, assert fence `2`.
 - `an acquire over an expired lease writes fence + 1` — acquire at `now`, acquire at `now + ttlMs` as another owner, assert fence `2` and the new owner.
@@ -202,6 +224,9 @@ New test file `src/services/lease/sqlite.test.ts`, on real SQLite through `creat
 - `renew with the current fence extends the expiry and moves no fence`.
 - `renew with any other fence raises lease-fenced and writes nothing` — assert the row is deep-equal before and after.
 - `renew with the wrong owner raises lease-fenced and writes nothing`.
+- **`renew of an expired holding raises lease-fenced and writes nothing`** — acquire at `now`, then `renew` at `now + ttlMs` with the **right** owner and the **right** fence, and assert it raises and the row is deep-equal before and after. Without the expiry predicate this call succeeds and resurrects a dead claim.
+- **`release of an expired holding raises lease-fenced and writes nothing`** — the same shape, with the right owner and fence.
+- **`assertHeld of an expired holding raises lease-fenced`** — the same shape, and assert `assertHeld` passes for the identical row while it is still live.
 - `release clears owner, owner kind, acquired_at, renewed_at and expires_at, and keeps the fence` — assert all six columns by name.
 - `a released row holds a null in every column but the fence` — assert the row deep-equals `{ subjectKind: "node", subjectId, owner: null, ownerKind: null, fence: <the pre-release fence>, acquiredAt: null, renewedAt: null, expiresAt: null }`. Story 9 asserts the swept row against the same literal shape, which is what the amendment above exists for.
 - `release with the right fence and the wrong owner raises lease-fenced and writes nothing`.

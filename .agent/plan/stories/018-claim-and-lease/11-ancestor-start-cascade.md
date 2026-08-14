@@ -21,6 +21,8 @@ For each ancestor, in that order:
 
 The refusal maps to `409 illegal-transition` in Story 14, the same code the claimed node's own bad state takes.
 
+**There is one refusal for a bad ancestor state, and it is `ancestor-not-startable`.** Story 10's `illegal-transition` refusal covers the **claimed node's own** state and carries `{ state, admitted }` with no `ancestorId`. This one covers an **ancestor's** state and always carries `ancestorId`. Both map to HTTP `409 illegal-transition`, so a client sees one code, and `details.ancestorId` is what distinguishes them. A claim on a task whose objective is in a bad state is therefore `ancestor-not-startable`, never the claimed-node variant — the claimed task itself is `ready`. Story 10's own six-state loop drives the **claimed node** through those states; this story's loop drives the **objective**. Both suites keep their loop, and each asserts its own refusal and its own `details` shape.
+
 ### The events
 
 Each cascade transition writes one `node.running` event with `actorKind: "daemon"`, `actorId: dependencies.instanceId` and payload reason `child-started`, which follows the derived-transition attribution rule of EPIC 016. **The claimed node's own transition keeps the calling actor**, because it is the decision, and the cascade is a consequence.

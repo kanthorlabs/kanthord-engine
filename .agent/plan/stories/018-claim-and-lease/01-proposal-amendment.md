@@ -2,19 +2,11 @@
 
 Epic: `.agent/plan/epics/018-claim-and-lease.md`
 
+**Scope note.** The three **route rows** of `docs/proposal/api/execution.md` are **not** in this story. They land in Story 14, in the same change as the registry entries, because `src/http/contract/parity.test.ts` compares the two sets and a row added on one side alone turns `npm run verify` red for every story in between. This story carries only the amendments that break nothing: the two prose sections and the state-machine note.
+
 ## Change
 
 ### `docs/proposal/api/execution.md`
-
-The Routes table sits at `docs/proposal/api/execution.md:9-20`. Append three rows after the `worker.list` row at `:19`, in this exact order and with these exact cell values:
-
-```
-| `node.claim`     | `POST /v1/node/:id/claim`     | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
-| `node.heartbeat` | `POST /v1/node/:id/heartbeat` | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
-| `node.release`   | `POST /v1/node/:id/release`   | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
-```
-
-`readRouteMatrix` at `test/helpers/proposal.ts:52` reads a table row only when it holds five cells and the third cell is a member of `introducedInValues`. Keep exactly five cells per row.
 
 Rewrite the "Leases have no route" section body at `docs/proposal/api/execution.md:90`. Keep the first two sentences unchanged. Append one amendment clause: the lease is still not addressable, and a claim, a heartbeat and a release are actions on the node, spelled `POST /v1/node/:id/claim`, `POST /v1/node/:id/heartbeat` and `POST /v1/node/:id/release`.
 
@@ -24,7 +16,7 @@ Add one new section after it, titled `## The objective scope of a claim`, holdin
 - A task claim holds the objective and the task.
 - Two actors never hold two sibling tasks of one objective.
 
-Add one section per new route, after that one, in the table order: `## node.claim`, `## node.heartbeat`, `## node.release`. Each section states the request body, the response members and the refusal codes named in Story 14.
+**Add no row to the Routes table at `docs/proposal/api/execution.md:9-20` in this story**, and add no per-route section. `readRouteMatrix` at `test/helpers/proposal.ts:52` reads only table rows, so prose sections naming the three paths are invisible to parity and land safely here.
 
 ### `docs/proposal/phase-1/state-machine.md`
 
@@ -49,7 +41,7 @@ The same row is `src/domain/transition.ts:135-141`. Its `note` at `:140` carries
 - Edit no other row of the matrix, and edit no other `note` string in `src/domain/transition.ts`.
 - `docs/proposal/api/graph.md` needs no edit in this story. EPIC 014 already replaced the stale query-parameter paragraph, and Story 15 owns the `node.list` filter wording.
 - Add no `deferred` row and no `post-mvp` row.
-- Register nothing in `src/http/contract/`, and change no literal in `src/http/contract/parity.test.ts`. Story 14 adds the three registry rows and raises both count literals in one change.
+- Register nothing in `src/http/contract/`, and change no literal in `src/http/contract/parity.test.ts`. Story 14 adds the three proposal rows, the three registry rows and both count literals in one change.
 
 ## Verify
 
@@ -57,6 +49,7 @@ The same row is `src/domain/transition.ts:135-141`. Its `note` at `:140` carries
   - `transitions.length` is unchanged.
   - The `running → ready` row still reports `task: true`, `objective: false`, `initiative: false`.
   - The note-parity assertion of EPIC 002 reads the amended Note cell of `docs/proposal/phase-1/state-machine.md:78` and finds the identical string in `src/domain/transition.ts`.
-- `src/http/contract/parity.test.ts` is **red from this story until Story 14**, on `missingFromRegistry` holding the three new operation ids and on both count literals. That is the intended coupling of a proposal-first amendment. Do not add a registry row and do not move a literal here to hide it. `npm run verify` therefore passes at Story 14 and not before.
-- **Record the two pre-edit literals in the commit message.** Read `src/http/contract/parity.test.ts:16` and `:25` before this story writes anything, and write both values into the commit message. Story 14 checks them against `62` and `66` and stops when they differ, so this reading is the input to that guard.
+- `node --test src/http/contract/parity.test.ts` exits 0, **unchanged by this story**. No route row moved on either side, so parity stays green and `npm run verify` is a live regression gate for every story of this epic.
+- **Record the two count literals in the commit message.** Read `src/http/contract/parity.test.ts:16` and `:25` and write both values into the commit message. Story 14 checks them against `62` and `66` and stops when they differ, so this reading is the input to that guard.
+- `npm run verify` exits 0.
 - Proof: contributes to `PASS EPIC-018` through `src/domain/transition.test.ts`.

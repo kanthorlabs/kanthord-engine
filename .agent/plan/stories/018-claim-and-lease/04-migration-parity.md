@@ -37,7 +37,22 @@ The expectation becomes exactly this, in the original statement order:
 
 The statement order of migration 0003 is `workspace`, `lease`, `run`, `run_one_active`, `attempt`, `agent_invocation`, `candidate`, `check_result`, `git_operation`, `event`. Ten statements. The `it` title keeps the word ten.
 
-Derive each constant by copying the template literal out of `src/services/storage/migration-0003-execution-and-journal.ts` and collapsing whitespace by hand, or by declaring it as a template literal and passing it through the same `normalize` the test already defines at `:404-409`. Prefer the second: it removes the hand-collapsing step and it is a one-line change per constant.
+Declare each constant as a template literal holding the version-3 DDL copied verbatim out of `src/services/storage/migration-0003-execution-and-journal.ts`, and pass it through the same `normalize` the test defines at `:404-409`. Do not collapse the whitespace by hand: `normalize` is already in the file, it is the function the expectation compares through, and a hand-collapsed literal is a second encoding of the same fact that can disagree with it.
+
+```ts
+const historicalLeaseStatement =
+  normalize(`CREATE TABLE lease ( ... )`)[0] ?? "";
+const historicalRunStatements = [
+  ...normalize(`CREATE TABLE run ( ... )`),
+  ...normalize(
+    `CREATE UNIQUE INDEX run_one_active ON run (node_id) WHERE state = 'active'`,
+  ),
+];
+const historicalAttemptStatement =
+  normalize(`CREATE TABLE attempt ( ... )`)[0] ?? "";
+```
+
+`normalize` is declared inside the `it` today. Hoist it to module scope, above the constants, and leave its body unchanged.
 
 ### `src/services/storage/migration-0007-external-execution.test.ts`
 
@@ -58,7 +73,14 @@ Add the domain-to-DDL parity assertion in the same file, beside the shape of `as
 - `each driver-conditional column carries its SQL CHECK` — read the `run` DDL from `sqlite_master` and assert it includes each of the three clause texts `(driver = 'internal') = (workspace_id IS NOT NULL)`, `(driver = 'internal') = (worker IS NOT NULL)` and `(driver = 'internal') = (base_oid IS NOT NULL)`, and does **not** include a clause naming `head_oid`. Read the `attempt` DDL and assert the four matching clause texts.
 - `the domain refinement and the SQL CHECK refuse the same row` — for each of the seven driver-conditional columns, build the row object that `runRow` or `attemptRow` refuses, assert the zod parse fails, and assert the equivalent `INSERT` throws. One `it` per table is enough; loop the columns inside it.
 
-`assertClauseAgrees` is currently a local helper in `src/services/storage/schema-parity.test.ts`. Export it from that file and import it here. Do not copy it.
+`assertClauseAgrees` is currently a local helper in `src/services/storage/schema-parity.test.ts`. **A test must not import another test**: `AGENTS.md` admits a test importing its module under test, `domain/`, service interfaces, `test/helpers/` and `node:` builtins, and a sibling `.test.ts` is none of those.
+
+Move it instead. Create `test/helpers/schema.ts` exporting `tableDdl`, `literalListIn` and `assertClauseAgrees`, lifted verbatim from `src/services/storage/schema-parity.test.ts:30-68`. Change their bodies in no way. Then:
+
+- `src/services/storage/schema-parity.test.ts` imports the three from `test/helpers/schema.ts` and keeps every existing `it` unchanged.
+- `src/services/storage/migration-0007-external-execution.test.ts` imports `assertClauseAgrees` from the same helper.
+
+`tableDdl` takes `SqliteStorage` today. Widen its parameter to the `Storage` interface, which is all it uses (`transact` and `get`), so `test/helpers/schema.ts` imports a service interface rather than an implementation. Copy the helper into neither test file.
 
 `runDrivers` and `leaseOwnerKinds` are the literal lists EPIC 014 declares beside `runRow` and `leaseRow`. Import them from `src/domain/run.ts` and `src/domain/lease.ts`. If EPIC 014 named either list differently, import the name it declared; declare no second copy of the list in this file, because `assertClauseAgrees` exists to compare the DDL against the one domain list.
 

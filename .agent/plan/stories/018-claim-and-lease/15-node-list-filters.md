@@ -97,7 +97,7 @@ export function listNodes(
 - `a repeated filter key is 400 invalid-request` — `?state=ready&state=running`.
 - `an unknown key is 400 invalid-request` — `?owner=me`.
 - `a filter value outside its enum is 400 invalid-request` — `?kind=epic`.
-- `no query returns exactly what it returned before this epic` — drive the fixture of `.agent/plan/epics/008-project-and-plan.md:61` and assert the body is byte-identical to the recorded pre-epic body.
+- `no query returns exactly what it returned before this epic` — the existing `node.list` assertion in this file already pins the body for its fixture. **Do not introduce a "recorded pre-epic body"**: an unquoted recording is not a checkable expectation. Keep that existing `it` and its literal expectation **unchanged**, and assert only that adding the `query` schema did not alter it. If the existing `it` asserts a shape rather than a literal, leave it as it is; widening it is out of scope for this story.
 - `state=ready&kind=task returns only the ready tasks, ordered by identity` — assert the exact identity list.
 - `the handler passes the parsed filter to the query exactly once` — a counting stub asserting the received object.
 

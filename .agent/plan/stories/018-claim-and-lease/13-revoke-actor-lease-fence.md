@@ -38,6 +38,7 @@ A revocation of the bootstrap `human` actor is still `400 invalid-request` with 
 - Call `expireLeasesOfOwner` and nothing else on `Lease`. Do not call `release`, `acquire` or `endRun`.
 - Do not close an attempt, do not end a run and do not move a node state in this command.
 - Do not add a `Storage` transaction of its own, and do not import `src/commands/startup/recover-expired-leases.ts`.
+- Do not import `src/commands/node/claim-node.ts`, in the command or in its test.
 - Do not change any other key of the `actor.revoked` payload.
 - Do not weaken the bootstrap refusal.
 
@@ -45,15 +46,18 @@ A revocation of the bootstrap `human` actor is still `400 invalid-request` with 
 
 `src/commands/actor/revoke-actor.test.ts` — extend the file EPIC 015 authored. Keep every existing assertion green.
 
-- `a revocation fences both the task lease and the objective lease of a harness` — a harness claims a task through `claimNode`, so it holds one task lease and one objective lease. Revoke it, then assert **both** `lease` rows carry `expires_at` equal to the revocation instant, an **unchanged** `owner`, an **unchanged** `owner_kind` and an **unchanged** `fence`. Assert all four columns per row.
+**This test calls no other command.** `src/domain/layout.test.ts:177` asserts no file under `src/commands/` imports another command module, and a command test that reaches `claimNode` to build its fixture reintroduces exactly that coupling in the test tree. **Seed the lease rows directly** with plain `INSERT INTO lease` inside the test's own `storage.transact`: one row for the objective and one for the task, each with the harness's actor id as `owner`, `owner_kind` of `actor`, a known `fence`, and an `expires_at` in the future. That is the state a claim leaves, and this suite asserts what a revocation does to it — not how it came about. Story 10 owns the proof that a claim writes those rows.
+
+- `a revocation fences both the task lease and the objective lease of a harness` — seed the two rows as above, revoke, then assert **both** carry `expires_at` equal to the revocation instant, an **unchanged** `owner`, an **unchanged** `owner_kind` and an **unchanged** `fence`. Assert all four columns per row.
 - `the actor.revoked payload carries leasesFenced 2` — assert the exact payload value.
 - `a revocation closes no attempt, ends no run and moves no node state` — assert the `attempt`, `run` and `node` rows are deep-equal before and after, row by row.
 - `a revoked actor with no lease records leasesFenced 0 and writes no lease row` — assert the payload and assert the `lease` table is deep-equal before and after.
-- `a second actor's claim on that task then succeeds under the new owner` — after the revocation, run `claimNode` as a second actor and assert it answers successfully, the task is `running`, and the lease names the new owner at the old fence plus one. This is what proves the work left the pool for no part of the lease term.
+- `the fenced rows are sweepable` — after the revocation, assert both rows satisfy the sweep's own predicate: `owner IS NOT NULL AND expires_at IS NOT NULL AND expires_at <= now`. That is what proves the work returns to the pool at the next claim. **Assert the predicate, not a `claimNode` call**: the end-to-end proof that a second actor then takes the task belongs to `src/main.claim.test.ts` of Story 17, which drives it over HTTP through the real composition root.
 - `a revocation touches no lease of another actor` — a second harness holds its own objective and task; assert both its rows are deep-equal before and after.
 - `revoking the bootstrap actor is still refused and fences nothing` — assert the refusal and assert the `lease` table is deep-equal before and after.
 
 Run:
 
-- `node --test src/commands/actor/revoke-actor.test.ts src/services/lease/sqlite.test.ts src/commands/node/claim-node.test.ts` exits 0.
+- `node --test src/commands/actor/revoke-actor.test.ts src/services/lease/sqlite.test.ts` exits 0.
+- `npm run typecheck` exits 0. `RevokeActorDependencies` gained two members, so **this story also updates the one call site** in `src/main.ts` to pass `lease` and `clock`. Story 9 already constructs `lease` there. A story that changes a required signature updates its call sites in the same story.
 - Proof: `PASS EPIC-018`, through `src/commands/actor/revoke-actor.test.ts`. Hermetic coverage: `.agent/plan/epics/018-claim-and-lease.md:195`.

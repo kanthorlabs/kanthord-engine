@@ -63,6 +63,18 @@ It reads `CANDIDATE_SQL` with `input.now`, filters to the rows whose `driver` is
 
 An external row calls **no** method of `Git`. It never writes `dirty-recovery`, because a task with no working tree has no tree to be dirty.
 
+**One expired claim yields two candidate rows, and both are swept.** A task claim acquires an objective lease and a task lease on one `now` with one `leaseTtlMs`, so both expire at the same instant. `CANDIDATE_SQL` selects a `running` node with an expired lease, and an abandoned objective stays `running`, so both rows match. The sweep therefore emits **two** `recovery.leaseRecovered` events, in `subject_id` order, and the caller must expect two. It ends two runs, the objective run and the task run, and it moves one node state, the task's.
+
+### `RecoverExpiredLeasesResult` gains one member
+
+`objectivesFreed`, so the startup report distinguishes a freed objective from a requeued task. `LeasesResultLike` at `src/domain/recovery.ts:74-78` gains it, and `RecoveryReport` at `:87-97` gains it beside `returnedToReady`. `renderFinding` is unchanged. Without the member an external objective recovery is invisible in the startup output.
+
+### The composition edit belongs to this story
+
+`RecoverExpiredLeasesDependencies` gains `lease` and `execution` in this story, so **this story also updates the one call site**, `src/main.ts:190-194`, to pass them. `main.ts` already constructs neither, so this story adds `const lease = new SqliteLease();` and `const execution = new SqliteExecution({ ids });` after `events` at `src/main.ts:165`, and Story 17 then reuses those two bindings rather than creating them.
+
+**A story that changes a required signature updates its call sites in the same story.** Leaving the binding to Story 17 makes `npm run typecheck` red from here to there for a reason no story declares, which defeats the gate for seven stories.
+
 ### `recoverExpiredLeases`
 
 Restructure it to reuse the same function. It stays `async`, keeps its own `storage.transact` calls, and it keeps its `RecoverExpiredLeasesResult`.
@@ -110,6 +122,8 @@ Four defects are fixed with it.
 - `the recovery.leaseRecovered payload carries row.fence` — assert the payload `fence` equals the pre-sweep fence, and assert it does **not** equal that value plus one.
 - `sweepExpiredExternalLeases runs inside a supplied transaction` — call it directly inside one `storage.transact`, throw after it returns, and assert the whole transaction rolled back: the node is still `running`, the run is still `active`, the attempt is still open and the lease still names its owner.
 - `the sweep is deterministic in row order` — two expired external task leases whose identities sort in a known bytewise order; assert the `recovery.leaseRecovered` events appear in that order.
+- `one expired claim yields two swept rows` — seed the state a real claim leaves, an expired **objective** lease and an expired **task** lease under it, both nodes `running`. Assert the sweep emits exactly **two** `recovery.leaseRecovered` events in `subject_id` order, ends **both** runs with outcome `expired`, closes the task's attempt `cancelled`, moves the task to `ready`, and leaves the objective `running`. Assert `returnedToReady` is `1` and `objectivesFreed` is `1`.
+- `npm run typecheck exits 0 at the close of this story` — `src/main.ts` passes the two new dependencies, so no signature is left unsatisfied.
 - `no raw node write survives in the file` — a `lintCase` assertion in the pattern of `src/domain/layout.test.ts:68`, driving the eslint rule of EPIC 016 over the file source.
 
 Run:

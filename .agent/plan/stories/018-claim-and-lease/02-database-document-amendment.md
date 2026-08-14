@@ -37,7 +37,17 @@ CREATE TABLE run (
 CREATE UNIQUE INDEX run_one_active ON run (node_id) WHERE state = 'active';
 ```
 
-Keep the `--` comments on the columns that carry one today, and add one comment per new column and per new clause. Comments are stripped before comparison, so their text is free. `head_oid` carries **no** driver clause: EPIC 019 records a harness-reported object id there under both drivers.
+Keep the `--` comments on the columns that carry one today, unchanged. Add exactly these comments on the new columns and clauses, so the fence is one fixed text rather than an author's choice:
+
+```
+driver        -- who executes: the daemon's worker, or an external harness
+workspace_id  -- clone the execution happens in; null on an external run
+worker        -- worker kind that resolved at execution time; null on an external run
+base_oid      -- commit this execution started from; null on an external run
+UNIQUE (id, driver)  -- second candidate key, so attempt can declare a composite foreign key
+```
+
+Comments are stripped before comparison, so a divergence here breaks no test — the text is pinned because an unpinned choice is a build-time decision. `head_oid` carries **no** driver clause: EPIC 019 records a harness-reported object id there under both drivers.
 
 Add one sentence to the prose below the fence: `UNIQUE (id, driver)` is a second candidate key that exists so `attempt` can declare a composite foreign key; `PRIMARY KEY (id)` is unchanged, and every single-column reference to `run(id)` stays valid.
 

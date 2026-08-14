@@ -1,9 +1,25 @@
 # Story 14 — The three routes and their contract entries
 
 Epic: `.agent/plan/epics/018-claim-and-lease.md`
-Depends on: Story 1, Story 5, Story 10, Story 11, Story 12. **This story closes the `src/http/contract/parity.test.ts` failure Story 1 opened.**
+Depends on: Story 1, Story 5, Story 10, Story 11, Story 12. **This story adds the proposal rows and the registry rows in one change, so parity never goes red.**
 
 ## Change
+
+### `docs/proposal/api/execution.md` — the three route rows land here
+
+Story 1 deliberately left them out, because `src/http/contract/parity.test.ts` compares the proposal set against the registry set and a row on one side alone turns `npm run verify` red. **Add both sides in this one change.**
+
+The Routes table sits at `docs/proposal/api/execution.md:9-20`. Append three rows after the `worker.list` row at `:19`, in this exact order:
+
+```
+| `node.claim`     | `POST /v1/node/:id/claim`     | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
+| `node.heartbeat` | `POST /v1/node/:id/heartbeat` | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
+| `node.release`   | `POST /v1/node/:id/release`   | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
+```
+
+`readRouteMatrix` at `test/helpers/proposal.ts:52` reads a table row only when it holds five cells and the third cell is a member of `introducedInValues`. Keep exactly five cells per row.
+
+Add one section per route, after the objective-scope section Story 1 wrote, in the table order: `## node.claim`, `## node.heartbeat`, `## node.release`. Each states the request body, the response members and the refusal codes of the mapper table below.
 
 ### `src/http/contract/path.ts`
 
@@ -38,7 +54,42 @@ Add three operations after the `worker.list` entry at `:58-64`, in this order:
 
 - `node.claim` request is `z.strictObject({})` — an **empty** strict body. The TTL is configuration and the owner is the authenticated actor.
 - `node.heartbeat` and `node.release` requests are each `z.strictObject({ fence: z.int().min(1) })`.
-- The three responses carry, respectively: the claim result of Story 10 (`lease`, `objectiveLease`, `runId`, `objectiveRunId`, `attemptId`, `attemptNo`, `heartbeatIntervalMs`, `node`); the heartbeat result (`lease`, `objectiveLease`, `heartbeatIntervalMs`); and the release result (`node`).
+- The three response schemas are exactly these. Declare `claimedLease` once and reuse it.
+
+  ```ts
+  const claimedLease = z.strictObject({
+    subjectId: nodeIdentity,
+    owner: z.string().min(1),
+    ownerKind: z.literal("actor"),
+    fence: z.int(),
+    expiresAt: epochMillis,
+  });
+
+  export const nodeClaimResponse = z.strictObject({
+    lease: claimedLease,
+    objectiveLease: claimedLease,
+    runId: identity("run"),
+    objectiveRunId: identity("run"),
+    attemptId: identity("attempt").nullable(),
+    attemptNo: z.int().nullable(),
+    heartbeatIntervalMs: z.int(),
+    node: nodeShowResponse.shape.node,
+  });
+
+  export const nodeHeartbeatResponse = z.strictObject({
+    lease: claimedLease,
+    objectiveLease: claimedLease,
+    heartbeatIntervalMs: z.int(),
+  });
+
+  export const nodeReleaseResponse = z.strictObject({
+    node: nodeShowResponse.shape.node,
+  });
+  ```
+
+  `attemptId` and `attemptNo` are nullable because an objective claim opens no attempt. `node` reuses the member `node.show` already publishes at `src/http/contract/graph.ts:347`, so the two routes cannot describe a node differently.
+
+- Each operation declares `examples`. Write `nodeClaimExamples`, `nodeHeartbeatExamples` and `nodeReleaseExamples` as literal objects with a `request`, a `success` and an `error` member, in the shape the sibling entries of `src/http/contract/graph.ts` use. Every value is a fixed literal: the ULID identities of the existing examples, `fence: 1`, `expiresAt: 1722800300000`, `heartbeatIntervalMs: 100000`, `attemptNo: 1`. `npm run verify` validates the generated document against these schemas, so a placeholder that does not parse fails the gate.
 - `baselineErrors` at `src/http/contract/error-baseline.ts:4-13` already carries `invalid-request` and `not-found`. The three operations therefore declare `lease-held`, `illegal-transition` and `plan-invalid` **beside** it, and no operation redeclares `invalid-request` or `not-found`.
 
 `errorStatuses` at `src/http/contract/errors.ts:7-28` already holds `lease-held`, `illegal-transition` and `plan-invalid`. Add no error code in this story.
@@ -58,7 +109,55 @@ export const leaseHeldDetails = z.strictObject({
 });
 ```
 
-`leaseRelations` comes from `src/domain/lease-hierarchy.ts` of Story 5; `http/contract/` may import `domain/`. Add `illegalTransitionDetails` in the same file if it does not exist yet: `z.strictObject({ state: z.string().min(1), admitted: z.array(z.string().min(1)).min(1) })`, widened with an optional `ancestorId` for the cascade refusal of Story 11.
+`leaseRelations` comes from `src/domain/lease-hierarchy.ts` of Story 5 and `leaseOwnerKinds` from `src/domain/lease.ts`; `http/contract/` may import `domain/`. `epochMillis` comes from `src/domain/column.ts`.
+
+**`illegal-transition` carries three different facts, so its schema is an explicit discriminated union and not one loose object.** The three refusals that map to that code emit different shapes, and a single `strictObject` cannot hold all three without making every member optional, which asserts nothing. Discriminate on a required `refusal` member:
+
+```ts
+export const illegalTransitionDetails = z.discriminatedUnion("refusal", [
+  z.strictObject({
+    refusal: z.literal("node-state"),
+    state: z.enum(nodeStates),
+    admitted: z.array(z.enum(nodeStates)).min(1),
+  }),
+  z.strictObject({
+    refusal: z.literal("ancestor-not-startable"),
+    ancestorId: nodeIdentity,
+    state: z.enum(nodeStates),
+    admitted: z.array(z.enum(nodeStates)).min(1),
+  }),
+  z.strictObject({
+    refusal: z.literal("drive-mode-pinned"),
+    pinnedDriver: z.enum(runDrivers),
+    claimDriver: z.enum(runDrivers),
+  }),
+]);
+```
+
+The refusal mapper below sets `refusal` from the command's own refusal: `illegal-transition` becomes `node-state`, `ancestor-not-startable` and `drive-mode-pinned` keep their names.
+
+**`lease-held` likewise carries two shapes.** A hierarchy refusal names a holder; a stale-fence refusal from `renew`, `release` or `assertHeld` has no holder to name, and may face a row that is absent or already free. One union covers both:
+
+```ts
+export const leaseHeldDetails = z.discriminatedUnion("refusal", [
+  z.strictObject({
+    refusal: z.literal("held-by-other"),
+    subject: nodeIdentity,
+    holder: z.string().min(1),
+    holderKind: z.enum(leaseOwnerKinds),
+    fence: z.int(),
+    expiresAt: epochMillis,
+    relation: z.enum(leaseRelations),
+  }),
+  z.strictObject({
+    refusal: z.literal("stale-fence"),
+    subject: nodeIdentity,
+    presentedFence: z.int(),
+  }),
+]);
+```
+
+`held-by-other` is built from the `refusal` property `Lease` puts on its error, which Story 5 and Story 7 make carry every member including `fence`. `stale-fence` carries only what the caller presented, because a refused conditional write reads no row and the command must not run a second read to describe a row it was refused. It names no current fence deliberately: disclosing the live fence to a caller that failed the fence check would hand it the value it needs to overwrite the live holding.
 
 ### `src/http/server/node/`
 
@@ -73,17 +172,21 @@ Each handler:
 
 One new file `src/http/server/node/refusals.ts`, in the exact pattern of `src/http/server/plan/refusals.ts`. `toHttpError(error)` maps each refusal of the three commands, and rethrows anything it does not recognise:
 
-| refusal                    | code                 |
-| -------------------------- | -------------------- |
-| `node-not-found`           | `not-found`          |
-| `initiative-not-claimable` | `invalid-request`    |
-| `plan-incomplete`          | `plan-invalid`       |
-| `drive-mode-pinned`        | `illegal-transition` |
-| `lease-held`               | `lease-held`         |
-| `illegal-transition`       | `illegal-transition` |
-| `ancestor-not-startable`   | `illegal-transition` |
+| refusal                    | code                 | `details`                                                                |
+| -------------------------- | -------------------- | ------------------------------------------------------------------------ |
+| `node-not-found`           | `not-found`          | none                                                                     |
+| `initiative-not-claimable` | `invalid-request`    | `{ refusal: "initiative-not-claimable" }`                                |
+| `plan-incomplete`          | `plan-invalid`       | `{ findings }`                                                           |
+| `drive-mode-pinned`        | `illegal-transition` | `{ refusal: "drive-mode-pinned", pinnedDriver, claimDriver }`            |
+| `illegal-transition`       | `illegal-transition` | `{ refusal: "node-state", state, admitted }`                             |
+| `ancestor-not-startable`   | `illegal-transition` | `{ refusal: "ancestor-not-startable", ancestorId, state, admitted }`     |
+| `lease-held`               | `lease-held`         | `{ refusal: "held-by-other", ... }` or `{ refusal: "stale-fence", ... }` |
+| `no-active-run`            | `illegal-transition` | `{ refusal: "node-state", state, admitted }`                             |
+| `no-open-attempt`          | `illegal-transition` | `{ refusal: "node-state", state, admitted }`                             |
 
-`initiative-not-claimable` carries `details` `{ refusal: "initiative-not-claimable" }`.
+The mapper chooses the `lease-held` variant by whether the error carries a `refusal` property from `Lease`: present means `held-by-other` and is copied member for member; absent means `stale-fence`, built from the node identity and the fence the caller presented.
+
+`no-active-run` and `no-open-attempt` of Story 12 map to `illegal-transition` with the `node-state` variant, because both mean the node is not in a releasable condition. Neither introduces an error code.
 
 ### Authorization
 
@@ -128,7 +231,13 @@ The `it` title at `src/http/contract/parity.test.ts:24` reads `reads fifty-seven
 
 `src/http/contract/error-details.test.ts` — add one describe block:
 
-- `leaseHeldDetails parses the six members and refuses a seventh` — one successful parse asserted with `assert.deepEqual`, one failing parse with an extra key, and one failing parse with a `relation` outside `leaseRelations`.
+- `leaseHeldDetails parses the held-by-other variant` — a successful parse asserted with `assert.deepEqual` over all seven members, one failing parse with an extra key, and one failing parse with a `relation` outside `leaseRelations`.
+- `leaseHeldDetails parses the stale-fence variant` — a successful parse, and a failing parse that omits `presentedFence`.
+- `leaseHeldDetails refuses a variant with no refusal member` — the discriminator is required.
+- `leaseHeldDetails refuses a held-by-other object that omits fence` — the member Story 5 added exists for this schema, so its absence must fail.
+- `illegalTransitionDetails parses all three variants and refuses a fourth refusal literal` — one successful parse per variant asserted with `assert.deepEqual`, plus a failing parse with `refusal: "something-else"`.
+- `illegalTransitionDetails refuses an ancestor variant with no ancestorId` and `refuses a node-state variant that carries an ancestorId` — the two variants are not interchangeable.
+- `every refusal of the three commands has a details variant` — a table-driven assertion listing the nine refusal names of the mapper table and asserting each one's declared `details` object parses against the schema the operation declares for its code.
 
 `src/http/contract/registry.test.ts`:
 

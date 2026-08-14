@@ -55,15 +55,18 @@ These are settled here. No story revisits one.
 
   SQLite treats two `NULL` values as distinct in a `UNIQUE` index, so many `node-write` rows coexist under one project. `statements` holds this exact sequence, in this order, and `src/services/storage/sqlite.ts:77` runs the whole list inside the `BEGIN IMMEDIATE` of `src/services/storage/connection.ts:35`:
 
-  1. `PRAGMA defer_foreign_keys = ON` — the only pragma that defers enforcement to commit inside an open transaction. `PRAGMA foreign_keys` is a no-op inside a transaction, so it is not used.
-  2. `PRAGMA legacy_alter_table = ON` — the rename at step 3 must not rewrite the `node` schema. With the pragma off, the rename repoints `node.revision` at the temporary name, which is the opposite of the wanted result.
-  3. `ALTER TABLE plan_revision RENAME TO plan_revision_old`
-  4. `CREATE TABLE plan_revision (...)` — the final DDL above, verbatim.
-  5. `INSERT INTO plan_revision (id, project_id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob) SELECT id, project_id, parent_id, 'import', import_id, submitted_blob, choices_blob, accepted_blob FROM plan_revision_old`
-  6. `DROP TABLE plan_revision_old`
-  7. `PRAGMA legacy_alter_table = OFF`
+  1. `ALTER TABLE plan_revision RENAME TO plan_revision_old`
+  2. `CREATE TABLE plan_revision (...)` — the final DDL above, verbatim.
+  3. `INSERT INTO plan_revision (id, project_id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob) SELECT id, project_id, parent_id, 'import', import_id, submitted_blob, choices_blob, accepted_blob FROM plan_revision_old`
+  4. `DROP TABLE plan_revision_old`
 
-  `node.revision` at `src/services/storage/migration-0002-graph-and-plan.ts:30` still names `plan_revision`, which step 4 recreates, so the `node` schema text does not move one byte. `defer_foreign_keys` resets at commit. There is no down migration: the `Migration` type in `src/services/storage/migration.ts` declares none, so the guarantee is transactional rollback plus a lossless forward migration. `docs/proposal/database/plan_revision.md` gains the amended `sql` fence in this epic, and `docs/proposal/database/migration.md` gains `0006-revision-origin`.
+  **The pragmas are the migration runner's job, and the earlier in-transaction recipe was wrong.** A spike run for `018-claim-and-lease.md` settles it: `PRAGMA foreign_keys` is a no-op inside an open transaction, and while foreign keys are enabled `ALTER TABLE ... RENAME` rewrites every child `REFERENCES` clause **even under `PRAGMA legacy_alter_table = ON`**. Step 1 would therefore leave `node.revision` pointing at `REFERENCES "plan_revision_old"(id)`, which is exactly the outcome this sequence exists to avoid, and `PRAGMA defer_foreign_keys` does not help because it defers the check rather than the rewrite. `PRAGMA legacy_alter_table` is also connection state rather than transaction state, so it survives a `ROLLBACK` and a trailing `= OFF` statement never runs on the failure path.
+
+  `Migration` at `src/services/storage/migration.ts:1-5` therefore gains one optional member, `rebuild?: true`, and `src/services/storage/sqlite.ts:76-85` honours it: it sets `PRAGMA foreign_keys = OFF` and `PRAGMA legacy_alter_table = ON` **before** `BEGIN IMMEDIATE`, and restores both in a `finally`. Migration 0006 declares `rebuild: true` and its `statements` hold the four statements above and no pragma. **`018-claim-and-lease.md` carries the identical correction**, and whichever of the two epics lands first ships the runner change; the second one consumes it and adds no second mechanism.
+
+  `node.revision` at `src/services/storage/migration-0002-graph-and-plan.ts:30` still names `plan_revision`, which step 2 recreates, so the `node` schema text does not move one byte. There is no down migration: the `Migration` type declares none, so the guarantee is transactional rollback plus a lossless forward migration.
+
+  `plan_revision` carries no index today, so this rebuild needs no `DROP INDEX`. **An index name is global and an index follows its table through a rename**, so a rebuild of a table that does carry one must drop the old index before recreating it; migration 0007 of EPIC 018 does exactly that for `run_one_active`. `docs/proposal/database/plan_revision.md` gains the amended `sql` fence in this epic, and `docs/proposal/database/migration.md` gains `0006-revision-origin`.
 
 - **Migration parity, split in two questions** — `src/services/storage/migration-0002-graph-and-plan.test.ts:214-217` currently compares all three migration-0002 statements with `["plan_revision", "node", "edge"].flatMap(proposalStatements)`. Dropping `plan_revision` from that list deletes historical coverage, so the test keeps three entries. It gains a `historicalPlanRevisionStatement` constant holding the version-2 `plan_revision` DDL verbatim, and the assertion becomes `[historicalPlanRevisionStatement, ...["node", "edge"].flatMap(proposalStatements)]`. That test answers "did migration 0002 ship the schema version 2 declared". A new assertion in `src/services/storage/migration-0006-revision-origin.test.ts` compares the step-4 `CREATE TABLE` statement, filtered out of `statements` by prefix, with `proposalStatements("plan_revision")`. That test answers "does the schema the daemon reaches today equal the proposal fence today".
 

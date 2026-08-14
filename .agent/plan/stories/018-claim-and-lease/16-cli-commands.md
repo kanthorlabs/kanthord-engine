@@ -11,10 +11,36 @@ Depends on: Story 14 and Story 15.
 
 `CallInput` at `src/cli/client.ts:12-16` carries `operationId`, `parameters` and `body`, and `buildRequest` at `:38-79` renders no query string. `node list` takes five filters, so the client cannot reach the route without one. This is a real gap, and it is closed here.
 
-- `CallInput` gains `query?: Readonly<Record<string, string>>`.
-- `DaemonClient.call` at `:28-34` gains a fourth parameter, `query?: Readonly<Record<string, string>>`, after `parameters`. Existing call sites pass three arguments and stay valid.
-- `buildRequest` appends the query string after the path substitution at `:60`. **Iterate the keys in bytewise order through `Buffer.compare`**, skip an `undefined` value, and encode each value with `encodeURIComponent`. Bytewise key order makes the request URL of one input reproducible, which the CLI tests assert on.
-- `call` at `:81-84` passes `input.query` through unchanged.
+- `CallInput` gains two members:
+
+  ```ts
+  query?: Readonly<Record<string, string | undefined>>;
+  idempotencyKey?: string;
+  ```
+
+  **`string | undefined` and not `string`.** A caller builds the query from commander options, most of which are absent, and `Record<string, string>` cannot express an absent value — so "skip an `undefined` value" would be unreachable code under that type. The optional-value form is what makes the skip rule real.
+
+- `DaemonClient.call` at `:28-34` stops growing positional parameters. It takes **one options object** for the two new facts:
+
+  ```ts
+  call(
+    operationId: string,
+    body: unknown,
+    parameters?: Readonly<Record<string, string>>,
+    options?: Readonly<{
+      query?: Readonly<Record<string, string | undefined>>;
+      idempotencyKey?: string;
+    }>,
+  ): Promise<CallResult>;
+  ```
+
+  A fourth and fifth positional parameter would make every future addition a positional guess at a call site. Existing call sites pass two or three arguments and stay valid.
+
+- `buildRequest` appends the query string after the path substitution at `:60`. Sort the keys with `Buffer.compare` over the key names, **skip every entry whose value is `undefined`**, encode each key and each value with `encodeURIComponent`, and join with `&` after a single `?`. When every value is skipped, append **nothing** — not a bare `?`. Bytewise key order makes the URL of one input reproducible, which the CLI tests assert on.
+- `buildRequest` writes `headers["Idempotency-Key"] = input.idempotencyKey` when the member is present, beside the two headers it already sets at `:63-66`.
+- `call` at `:81-84` passes both new members through unchanged.
+
+**The generated key is pinned.** `node claim` and `node heartbeat` each mint one per invocation as `randomBytes(16).toString("hex")` — 16 bytes, lowercase hex, 32 characters. Take `randomBytes` through the register input, as `registerConfigGenerate` already does at `src/cli/program.ts:66`, so the tests inject a counting stub and the value is never read from ambient randomness.
 
 Add these assertions to `src/cli/client.test.ts`:
 
@@ -35,7 +61,29 @@ Five files, each exporting one `registerNodeX` function that takes `{ program, c
 - `src/cli/node/heartbeat.ts` — `registerNodeHeartbeat`, operation `node.heartbeat`, one `<id>` argument and a required `--fence <n>` option. **It mints a fresh `Idempotency-Key` per call.**
 - `src/cli/node/release.ts` — `registerNodeRelease`, operation `node.release`, one `<id>` argument and a required `--fence <n>` option.
 
-`node claim` and `node heartbeat` need an `Idempotency-Key` header. `buildRequest` sets no such header today, so add one more optional `CallInput` member, `idempotencyKey?: string`, written to `headers["Idempotency-Key"]` when present. `node heartbeat` supplies a fresh value from `dependencies.randomBytes` per invocation; `node claim` supplies one too. Take `randomBytes` through the register input, as `registerConfigGenerate` already does at `src/cli/program.ts:66`.
+### The exact output, and the exact refusal output
+
+Every line is pinned. `kanthord: ` is the existing prefix, and every line ends with one `\n`, following `src/cli/project/list.ts:41-44`.
+
+```
+node list, per node:   kanthord: node <id> <kind> <state> <blockReason|-> <parentId|->
+node list, empty:      kanthord: no node
+node show:             kanthord: node <id> <kind> <state> <title>
+node claim:            kanthord: claimed <nodeId> fence <fence> expires <expiresAt> heartbeat <heartbeatIntervalMs>ms
+                       kanthord: run <runId> attempt <attemptNo|-> objective-run <objectiveRunId> objective-fence <objectiveFence>
+node heartbeat:        kanthord: renewed <nodeId> fence <fence> expires <expiresAt>
+node release:          kanthord: released <nodeId> state <state>
+```
+
+`node claim` prints **two** lines, in that order. A null `attemptNo` prints `-`, which is the objective-claim case. `expiresAt` prints the raw epoch-millisecond integer: a formatted date needs a timezone and this output is compared byte for byte.
+
+**Every refusal prints one line and calls `fail` once**, exactly as `src/cli/project/list.ts:26-28` does:
+
+```
+kanthord: <code>: <message>
+```
+
+**`--fence` parsing is explicit.** Parse with `Number.parseInt(value, 10)`, and when the result is not a positive integer, print `kanthord: invalid-request: --fence must be a positive integer` and call `fail` **without** calling the daemon. Commander passes an option value as a string, so an unvalidated `--fence abc` would otherwise send `NaN` and be refused by the server instead of the client.
 
 ### `src/cli/program.ts`
 
@@ -76,11 +124,16 @@ Per file:
 
 Plus, per named case:
 
-- `node list passes only the supplied filters` — invoke with `--state ready --kind task` and assert the recorded `query` is exactly `{ state: "ready", kind: "task" }`. Invoke with no option and assert the recorded `query` is `undefined` or `{}`, and assert the same object either way.
-- `node list prints one line per node in the returned order`.
-- `node claim prints the fence, the expiry, the heartbeat interval, the run id and the attempt number` — assert all five appear in the captured stdout, and assert the objective fence and objective run id appear too.
+- `node list passes only the supplied filters` — invoke with `--state ready --kind task` and assert the recorded `query` is exactly `{ state: "ready", kind: "task" }` with `assert.deepEqual`.
+- `node list with no option passes no query` — assert the recorded `options` argument is `undefined`. **One representation only**: an absent query is `undefined`, never `{}`. A command that supplies an empty object and one that supplies nothing must not both be legal, or the assertion cannot be exact.
+- `node list prints one line per node in the returned order` — assert the exact multi-line stdout string against a literal.
+- `node list prints the empty line when there is no node` — assert `kanthord: no node\n` exactly.
+- `node claim prints its two lines exactly` — assert the full captured stdout against a literal two-line string, including `fence`, `expires`, `heartbeat`, `run`, `attempt`, `objective-run` and `objective-fence`.
+- `node claim prints a dash for a null attempt number` — the objective-claim case, asserted against a literal.
 - `node claim sends an empty body` — assert the recorded body is `{}`, not `undefined`.
-- `node heartbeat mints a different Idempotency-Key on two consecutive calls` — invoke twice against a recording client that captures the header, and assert the two values differ.
+- `node claim and node heartbeat each send an Idempotency-Key of 32 lowercase hex characters` — assert the captured header matches `/^[0-9a-f]{32}$/`.
+- `node heartbeat mints a different Idempotency-Key on two consecutive calls` — invoke twice against a counting `randomBytes` stub that returns a different buffer per call, and assert the two captured headers differ.
+- `node heartbeat and node release refuse a non-numeric fence without calling the daemon` — invoke with `--fence abc`; assert the exact stderr line, one `fail` call, and that the recording client captured **zero** calls. Repeat for `--fence 0` and `--fence -1`.
 - `node heartbeat and node release require a fence` — invoke with no `--fence` and assert commander refuses.
 
 `src/cli/program.test.ts`:
