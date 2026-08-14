@@ -96,20 +96,9 @@ Add three operations after the `worker.list` entry at `:58-64`, in this order:
 
 ### `src/http/contract/error-details.ts`
 
-Append after `invalidRequestDetails` at `:75-79`:
+Append two schemas after `invalidRequestDetails` at `:75-79`, `leaseHeldDetails` then `illegalTransitionDetails`. Both are discriminated unions, declared once each and defined below.
 
-```ts
-export const leaseHeldDetails = z.strictObject({
-  subject: z.string().min(1),
-  holder: z.string().min(1),
-  holderKind: z.enum(leaseOwnerKinds),
-  fence: z.int(),
-  expiresAt: epochMillis,
-  relation: z.enum(leaseRelations),
-});
-```
-
-`leaseRelations` comes from `src/domain/lease-hierarchy.ts` of Story 5 and `leaseOwnerKinds` from `src/domain/lease.ts`; `http/contract/` may import `domain/`. `epochMillis` comes from `src/domain/column.ts`.
+`leaseRelations` comes from `src/domain/lease-hierarchy.ts` of Story 5 and `leaseOwnerKinds` from `src/domain/lease.ts`; `http/contract/` may import `domain/`. `epochMillis` and `nodeIdentity` come from `src/domain/column.ts` and `src/domain/identity.ts`, `nodeStates` from `src/domain/state.ts`, and `runDrivers` from `src/domain/run.ts`.
 
 **`illegal-transition` carries three different facts, so its schema is an explicit discriminated union and not one loose object.** The three refusals that map to that code emit different shapes, and a single `strictObject` cannot hold all three without making every member optional, which asserts nothing. Discriminate on a required `refusal` member:
 
