@@ -35,11 +35,11 @@
     "*.{ts,js,mjs}": "eslint --fix"
   },
   "devDependencies": {
+    "@apidevtools/swagger-parser": "12.1.0",
     "@types/koa": "3.0.3",
     "@types/koa__cors": "5.0.1",
     "@types/node": "24.0.0",
     "@types/supertest": "7.2.1",
-    "@apidevtools/swagger-parser": "12.1.0",
     "eslint": "10.7.0",
     "eslint-plugin-boundaries": "7.0.2",
     "husky": "9.1.7",
@@ -50,9 +50,9 @@
     "typescript-eslint": "8.63.0"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.80.6",
-    "@earendil-works/pi-ai": "0.80.6",
-    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@earendil-works/pi-agent-core": "0.84.1",
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
     "@koa/bodyparser": "6.1.0",
     "@koa/cors": "5.0.0",
     "commander": "15.0.0",
