@@ -53,7 +53,17 @@ Declare it in this file. Do not put it in `src/domain/origin.ts`; that file hold
 );
 ```
 
-The message is the SQL expression EPIC 017 repeats as a table `CHECK`. Copy it exactly.
+Copy the message exactly. It states the all-or-nothing rule as one conjunction, which is the shape a single zod refine needs.
+
+EPIC 017 carries the same rule as **three** table `CHECK` clauses, one per column, because that shape refuses a partially populated row on every evaluation order:
+
+```sql
+CHECK ((origin = 'import') = (import_id IS NOT NULL)),
+CHECK ((origin = 'import') = (submitted_blob IS NOT NULL)),
+CHECK ((origin = 'import') = (choices_blob IS NOT NULL))
+```
+
+Their conjunction equals this refine. The message is therefore not a copy of any one `CHECK`, and no test compares the two.
 
 `acceptedBlob` stays required under both origins, and it stays the whole re-rendered graph, so `plan.export` byte-identity and the `fromRevision` of `plan.import` both survive a per-node write.
 
