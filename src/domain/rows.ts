@@ -1,3 +1,4 @@
+import { actorRow } from "./actor.ts";
 import { agentInvocationRow } from "./agent-invocation.ts";
 import { attemptRow } from "./attempt.ts";
 import { blobRow } from "./blob.ts";
@@ -19,6 +20,7 @@ import { runRow } from "./run.ts";
 import { workspaceRow } from "./workspace.ts";
 
 export const rows = {
+  actor: actorRow,
   agent_invocation: agentInvocationRow,
   attempt: attemptRow,
   blob: blobRow,

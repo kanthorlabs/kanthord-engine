@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { createTestApp } from "../../../../test/helpers/app.ts";
+import { bootstrapActorId } from "../../../domain/actor.ts";
 import type { ProviderView } from "../../../domain/provider-view.ts";
 import type { SetDefaultProviderInput } from "../../../commands/provider/set-default-provider.ts";
 import { SetDefaultProviderError } from "../../../commands/provider/set-default-provider.ts";
@@ -25,7 +26,7 @@ const view: ProviderView = {
 };
 
 describe("src/http/server/credential/set-default-provider.test", () => {
-  it("PUT /v1/provider/<id>/default answers 200 with the view and passes the parsed id and the configured actor", async () => {
+  it("PUT /v1/provider/<id>/default answers 200 with the view and passes the parsed id and the resolved actor", async () => {
     let called: SetDefaultProviderInput | undefined;
     const app = await createTestApp({
       handlers: {
@@ -34,7 +35,6 @@ describe("src/http/server/credential/set-default-provider.test", () => {
             called = input;
             return view;
           },
-          actor: "ulrich",
         }),
       },
     });
@@ -56,7 +56,7 @@ describe("src/http/server/credential/set-default-provider.test", () => {
         credential: "secret",
       }),
     );
-    assert.deepEqual(called, { id: providerId, actor: "ulrich" });
+    assert.deepEqual(called, { id: providerId, actor: bootstrapActorId });
   });
 
   it("an unknown id refusal answers 404 not-found with the refusal message", async () => {
@@ -69,7 +69,6 @@ describe("src/http/server/credential/set-default-provider.test", () => {
               `no provider ${providerId}`,
             );
           },
-          actor: "ulrich",
         }),
       },
     });
@@ -89,7 +88,6 @@ describe("src/http/server/credential/set-default-provider.test", () => {
               `provider ${providerId} of kind git cannot join the default chain`,
             );
           },
-          actor: "ulrich",
         }),
       },
     });
@@ -110,7 +108,6 @@ describe("src/http/server/credential/set-default-provider.test", () => {
               [holderId],
             );
           },
-          actor: "ulrich",
         }),
       },
     });

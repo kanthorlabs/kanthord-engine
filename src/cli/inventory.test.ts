@@ -29,14 +29,14 @@ const readP1E1Block = (): string => {
 };
 
 describe("src/cli/inventory.test", () => {
-  it("declares exactly fifteen commands", () => {
-    assert.equal(declaredCommands.length, 15);
+  it("declares exactly twenty commands", () => {
+    assert.equal(declaredCommands.length, 20);
   });
 
-  it("commandPaths holds fifteen distinct strings", () => {
+  it("commandPaths holds twenty distinct strings", () => {
     const paths = commandPaths();
-    assert.equal(paths.length, 15);
-    assert.equal(new Set(paths).size, 15);
+    assert.equal(paths.length, 20);
+    assert.equal(new Set(paths).size, 20);
   });
 
   it("commandPaths is bytewise sorted", () => {
@@ -73,12 +73,12 @@ describe("src/cli/inventory.test", () => {
     }
   });
 
-  it("flattens to seventeen distinct operation ids", () => {
+  it("flattens to twenty-two distinct operation ids", () => {
     const flattened = declaredCommands.flatMap(
       (entry: DeclaredCommand) => entry.operationIds,
     );
-    assert.equal(flattened.length, 17);
-    assert.equal(new Set(flattened).size, 17);
+    assert.equal(flattened.length, 22);
+    assert.equal(new Set(flattened).size, 22);
   });
 
   it("covers the eight commands the P1-E1 oracle runs", () => {
@@ -113,7 +113,7 @@ describe("src/cli/inventory.test", () => {
     }
   });
 
-  it("pins the seven paths the P1-E1 scan never names", () => {
+  it("pins the twelve paths the P1-E1 scan never names", () => {
     const oracle = new Set<string>();
     const pattern = /`kanthord ((?:[a-z][a-z-]*)(?: [a-z][a-z-]*){0,2})/g;
     for (const match of readP1E1Block().matchAll(pattern)) {
@@ -130,6 +130,11 @@ describe("src/cli/inventory.test", () => {
     assert.deepEqual(
       commandPaths().filter((path) => !oracle.has(path)),
       [
+        "actor list",
+        "actor register",
+        "actor revoke",
+        "actor rotate",
+        "actor show",
         "config generate",
         "db migrate",
         "db status",

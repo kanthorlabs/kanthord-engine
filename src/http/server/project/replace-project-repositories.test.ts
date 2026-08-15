@@ -62,7 +62,6 @@ describe("src/http/server/project/replace-project-repositories.test", () => {
         "project.repositories": replaceProjectRepositoriesHandler({
           replaceProjectRepositories: (input) =>
             replaceProjectRepositories({ storage, clock, events }, input),
-          actor: "ulrich",
         }),
       },
     });
@@ -117,7 +116,6 @@ describe("src/http/server/project/replace-project-repositories.test", () => {
         "project.repositories": replaceProjectRepositoriesHandler({
           replaceProjectRepositories: (input) =>
             replaceProjectRepositories({ storage, clock, events }, input),
-          actor: "ulrich",
         }),
       },
     });
@@ -147,7 +145,6 @@ describe("src/http/server/project/replace-project-repositories.test", () => {
         "project.repositories": replaceProjectRepositoriesHandler({
           replaceProjectRepositories: (input) =>
             replaceProjectRepositories({ storage, clock, events }, input),
-          actor: "ulrich",
         }),
       },
     });

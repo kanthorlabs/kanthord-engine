@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import Koa, { type Context } from "koa";
+import Koa, { type Context, type Next } from "koa";
 import bodyParser from "@koa/bodyparser";
 
 import { envelopeMiddleware } from "./envelope.ts";
@@ -15,6 +15,37 @@ import { defaultIdempotencySettings } from "./idempotency-store.ts";
 import type { Schedule } from "./idempotency-store.ts";
 import { recordKey } from "./idempotency-key.ts";
 import { loopbackAgent, loopbackServer } from "../../../test/helpers/agent.ts";
+import {
+  BOOTSTRAP_ACTOR_FIXTURE,
+  HARNESS_ACTOR_FIXTURE,
+  HARNESS_ACTOR_FIXTURE_B,
+} from "../../../test/helpers/app.ts";
+import type { ActorRow } from "../../domain/actor.ts";
+import { bootstrapActorId } from "../../domain/actor.ts";
+import type { AuthenticatedState } from "./auth.ts";
+import { dispatchMiddleware } from "./dispatch.ts";
+import type { RoutedState } from "./route.ts";
+import { importPlanHandler } from "./plan/import-plan.ts";
+import { importPlan } from "../../commands/plan/import-plan.ts";
+import type {
+  ImportPlanInput,
+  ImportPlanResult,
+} from "../../commands/plan/import-plan.ts";
+import { exportPlan } from "../../queries/plan/export-plan.ts";
+import { canonicalDocumentsJson } from "../../domain/plan-hash.ts";
+import type { EventLog, RecordedEvent } from "../../services/event/index.ts";
+import { createMigratedStorage } from "../../../test/helpers/database.ts";
+import { createMockClock } from "../../../test/helpers/clock.ts";
+import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
+import { fixtureIds } from "../../../test/helpers/rows.ts";
+import {
+  createBlobStore,
+  createPlanGraph,
+  createPlanReader,
+  createPlanStore,
+  planFixtureIdentities,
+  seedPlanFixture,
+} from "../../../test/helpers/plan.ts";
 
 type Fired = { run: () => void; cancelled: boolean };
 
@@ -34,6 +65,7 @@ async function buildApp(input: {
   settings?: IdempotencySettings;
   now?: () => number;
   onInternalError?: (error: unknown) => void;
+  resolveActor?: (presented: string) => ActorRow | null;
 }) {
   const armed: Fired[] = [];
   const schedule: Schedule = (_at, run) => {
@@ -53,6 +85,7 @@ async function buildApp(input: {
     now: input.now ?? (() => 1_000),
     schedule,
   });
+  const resolveActor = input.resolveActor ?? (() => BOOTSTRAP_ACTOR_FIXTURE);
 
   let count = 0;
   const app = new Koa();
@@ -63,6 +96,14 @@ async function buildApp(input: {
   );
   app.use(routeMiddleware());
   app.use(bodyParser({ enableTypes: ["json"] }));
+  app.use(async (context: Context, next: Next) => {
+    const header = context.get("authorization");
+    const presented = header.startsWith("Bearer ")
+      ? header.slice("Bearer ".length)
+      : "";
+    context.state.actor = resolveActor(presented);
+    await next();
+  });
   app.use(middleware);
   app.use(async (context: Context) => {
     count += 1;
@@ -105,6 +146,27 @@ function rawRequest(
 const okHandler = (context: Context): void => {
   context.status = 200;
   context.body = { ok: true };
+};
+
+const encoder = new TextEncoder();
+const U_REV = "01JQZ3NDEKTSV4RRFFQ69G5FAV";
+
+const recordingEvents: EventLog = {
+  append(): RecordedEvent {
+    return {
+      id: "event_1",
+      subjectKind: "",
+      subjectId: "",
+      type: "",
+      actorKind: "human",
+      actorId: "",
+      payload: {},
+      occurredAt: 0,
+    };
+  },
+  list(): readonly RecordedEvent[] {
+    return [];
+  },
 };
 
 describe("src/http/server/idempotency.test", () => {
@@ -189,6 +251,138 @@ describe("src/http/server/idempotency.test", () => {
     assert.equal(store.size(), 2);
   });
 
+  describe("the record key carries the actor", () => {
+    const twoActors = (presented: string): ActorRow =>
+      presented === "token-a" ? HARNESS_ACTOR_FIXTURE : HARNESS_ACTOR_FIXTURE_B;
+
+    it("two actors with the same Idempotency-Key each run their own execution, byte-identical bodies", async () => {
+      const { agent, calls, store } = await buildApp({
+        handler: okHandler,
+        resolveActor: twoActors,
+      });
+      const first = await agent
+        .post("/v1/project")
+        .set("Authorization", "Bearer token-a")
+        .set("Idempotency-Key", "k1")
+        .send({ name: "a" });
+      const second = await agent
+        .post("/v1/project")
+        .set("Authorization", "Bearer token-b")
+        .set("Idempotency-Key", "k1")
+        .send({ name: "a" });
+      assert.equal(first.status, 200);
+      assert.equal(second.status, 200);
+      assert.equal(calls(), 2);
+      assert.equal(store.size(), 2);
+      assert.equal(first.text, second.text);
+    });
+
+    it("two actors with the same Idempotency-Key and different bodies each run their own execution", async () => {
+      const handler = (context: Context): void => {
+        const body = context.request.body as { name?: string } | undefined;
+        context.status = 200;
+        context.body = { echoed: body?.name ?? null };
+      };
+      const { agent, calls, store } = await buildApp({
+        handler,
+        resolveActor: twoActors,
+      });
+      const first = await agent
+        .post("/v1/project")
+        .set("Authorization", "Bearer token-a")
+        .set("Idempotency-Key", "k1")
+        .send({ name: "a" });
+      const second = await agent
+        .post("/v1/project")
+        .set("Authorization", "Bearer token-b")
+        .set("Idempotency-Key", "k1")
+        .send({ name: "b" });
+      assert.equal(first.status, 200);
+      assert.equal(second.status, 200);
+      assert.notEqual(second.status, 409);
+      assert.equal(calls(), 2);
+      assert.equal(store.size(), 2);
+      assert.deepEqual(first.body, { echoed: "a" });
+      assert.deepEqual(second.body, { echoed: "b" });
+    });
+
+    it("a slow first request does not make a second actor's request wait or answer 503", async () => {
+      const arrived = deferred<void>();
+      const gate = deferred<void>();
+      let gated = false;
+      const handler = async (context: Context): Promise<void> => {
+        if (!gated) {
+          gated = true;
+          arrived.resolve();
+          await gate.promise;
+        }
+        context.status = 200;
+        context.body = { ok: true };
+      };
+      const { agent, calls, store } = await buildApp({
+        handler,
+        resolveActor: twoActors,
+      });
+      const first = agent
+        .post("/v1/project")
+        .set("Authorization", "Bearer token-a")
+        .set("Idempotency-Key", "k1")
+        .send({ name: "a" });
+      first.then(
+        () => {},
+        () => {},
+      );
+      await arrived.promise;
+      const second = agent
+        .post("/v1/project")
+        .set("Authorization", "Bearer token-b")
+        .set("Idempotency-Key", "k1")
+        .send({ name: "a" });
+      second.then(
+        () => {},
+        () => {},
+      );
+      const outcome = await Promise.race([
+        second.then((response) => ({ completed: true, response })),
+        new Promise<{ completed: false; response: null }>((resolve) =>
+          setTimeout(() => resolve({ completed: false, response: null }), 2000),
+        ),
+      ]);
+      if (!outcome.completed) {
+        gate.resolve();
+        await Promise.allSettled([first, second]);
+      }
+      assert.equal(
+        outcome.completed,
+        true,
+        "the second request must answer from its own execution while the first is still in flight",
+      );
+      assert.equal(outcome.response.status, 200);
+      assert.equal(calls(), 2);
+      assert.equal(store.size(), 2);
+      gate.resolve();
+      const firstRes = await first;
+      assert.equal(firstRes.status, 200);
+    });
+
+    it("a replay of the same key by the same actor still returns the stored answer", async () => {
+      const { agent, calls, store } = await buildApp({ handler: okHandler });
+      const first = await agent
+        .post("/v1/project")
+        .set("Idempotency-Key", "k1")
+        .send({ name: "a" });
+      const second = await agent
+        .post("/v1/project")
+        .set("Idempotency-Key", "k1")
+        .send({ name: "a" });
+      assert.equal(first.status, 200);
+      assert.equal(second.status, 200);
+      assert.equal(calls(), 1);
+      assert.equal(store.size(), 1);
+      assert.deepEqual(second.body, first.body);
+    });
+  });
+
   it("runs the command once for two duplicates dispatched with no await between them", async () => {
     const arrived = deferred<void>();
     const gate = deferred<void>();
@@ -238,6 +432,7 @@ describe("src/http/server/idempotency.test", () => {
     const key = recordKey({
       operationId: "project.create",
       parameters: {},
+      actorId: bootstrapActorId,
       key: "k1",
     });
     const first = agent
@@ -279,6 +474,7 @@ describe("src/http/server/idempotency.test", () => {
     const key = recordKey({
       operationId: "project.create",
       parameters: {},
+      actorId: bootstrapActorId,
       key: "k1",
     });
     const first = agent
@@ -347,6 +543,7 @@ describe("src/http/server/idempotency.test", () => {
     const key = recordKey({
       operationId: "project.create",
       parameters: {},
+      actorId: bootstrapActorId,
       key: "k1",
     });
     const first = agent
@@ -409,6 +606,7 @@ describe("src/http/server/idempotency.test", () => {
     const key = recordKey({
       operationId: "project.create",
       parameters: {},
+      actorId: bootstrapActorId,
       key: "k1",
     });
     const first = agent
@@ -450,6 +648,7 @@ describe("src/http/server/idempotency.test", () => {
     const key = recordKey({
       operationId: "project.create",
       parameters: {},
+      actorId: bootstrapActorId,
       key: "k1",
     });
     const first = agent
@@ -865,6 +1064,96 @@ describe("src/http/server/idempotency.test", () => {
         .set("Idempotency-Key", "imp_a")
         .send({ importId: "imp_a", documents: [] });
       assert.equal(calls(), 2);
+      assert.equal(store.size(), 0);
+    });
+
+    it("plan.import under two actors with the same importId collapses to one import and reserves nothing", async (t) => {
+      const temporary = createMigratedStorage();
+      t.after(() => temporary.dispose());
+      const storage = temporary.storage;
+      const plan = createPlanStore();
+      const blobs = createBlobStore(
+        storage,
+        createMockClock({ start: 1700000000000, step: 1000 }),
+      );
+      seedPlanFixture(storage, plan, blobs);
+      const exported = exportPlan(
+        { storage, plan, blobs },
+        { projectId: fixtureIds.project },
+      ).documents;
+      const recorded: ImportPlanResult[] = [];
+      const dispatch = dispatchMiddleware({
+        handlers: {
+          "plan.import": importPlanHandler({
+            importPlan: (input: ImportPlanInput): ImportPlanResult => {
+              const outcome = importPlan(
+                {
+                  storage,
+                  plan,
+                  blobs,
+                  reader: createPlanReader(),
+                  graph: createPlanGraph(),
+                  ids: createMockIdGenerator({ ulids: [U_REV] }),
+                  clock: createMockClock({
+                    start: 1700000000000,
+                    step: 1000,
+                  }),
+                  events: recordingEvents,
+                },
+                input,
+              );
+              recorded.push(outcome);
+              return outcome;
+            },
+          }),
+        },
+      });
+      const handler = (context: Context): Promise<void> =>
+        dispatch(context, async () => {});
+      const { agent, store } = await buildApp({
+        handler,
+        resolveActor: (presented) =>
+          presented === "token-a"
+            ? HARNESS_ACTOR_FIXTURE
+            : HARNESS_ACTOR_FIXTURE_B,
+      });
+      const body = (): Record<string, unknown> => ({
+        fromRevision: fixtureIds.planRevision,
+        importId: "imp_two_actors",
+        documents: exported,
+        choices: [
+          { id: planFixtureIdentities.initiative, take: "database" },
+          { id: planFixtureIdentities.objective, take: "database" },
+          { id: planFixtureIdentities.task, take: "database" },
+        ],
+        validatedRevision: fixtureIds.planRevision,
+        documentsHash: blobs.hash(
+          encoder.encode(canonicalDocumentsJson(exported)),
+        ),
+      });
+      const first = await agent
+        .post(`/v1/project/${fixtureIds.project}/plan/import`)
+        .set("Authorization", "Bearer token-a")
+        .set("Idempotency-Key", "imp_two_actors")
+        .send(body());
+      const second = await agent
+        .post(`/v1/project/${fixtureIds.project}/plan/import`)
+        .set("Authorization", "Bearer token-b")
+        .set("Idempotency-Key", "imp_two_actors")
+        .send(body());
+      assert.equal(first.status, 200);
+      assert.equal(second.status, 200);
+      assert.equal(first.body.revision, second.body.revision);
+      assert.equal(
+        recorded.length,
+        2,
+        "the durable path reaches the command for both actors, so it is not actor scoped",
+      );
+      assert.equal(
+        recorded.filter((outcome) => !outcome.retried).length,
+        1,
+        "the import executes once, so the command-level dedup still collapses one identity",
+      );
       assert.equal(store.size(), 0);
     });
 

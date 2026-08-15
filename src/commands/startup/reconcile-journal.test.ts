@@ -152,7 +152,7 @@ function parseEvent(
     subjectKind: string;
     subjectId: string;
     type: string;
-    actorKind: "human" | "daemon";
+    actorKind: "human" | "daemon" | "harness";
     actorId: string;
     payload: unknown;
   }>,

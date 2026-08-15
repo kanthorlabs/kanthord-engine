@@ -7,7 +7,6 @@ import { toHttpError } from "./refusals.ts";
 
 export type RegisterProviderHandlerDependencies = Readonly<{
   registerProvider: (input: RegisterProviderInput) => ProviderView;
-  actor: string;
 }>;
 
 export function registerProviderHandler(
@@ -26,7 +25,7 @@ export function registerProviderHandler(
         name: parsed.data.name,
         kind: parsed.data.kind,
         payload: parsed.data.payload,
-        actor: dependencies.actor,
+        actor: context.actor.id,
       });
       return { status: 200, body: view };
     } catch (error) {

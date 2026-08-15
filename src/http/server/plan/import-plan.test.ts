@@ -18,6 +18,7 @@ import { createPlanGraph } from "../../../../test/helpers/plan.ts";
 import { importPlanHandler } from "./import-plan.ts";
 import { importPlan } from "../../../commands/plan/import-plan.ts";
 import type { ImportPlanInput } from "../../../commands/plan/import-plan.ts";
+import { bootstrapActorId } from "../../../domain/actor.ts";
 import { exportPlan } from "../../../queries/plan/export-plan.ts";
 import { validatePlan } from "../../../queries/plan/validate-plan.ts";
 import { canonicalDocumentsJson } from "../../../domain/plan-hash.ts";
@@ -170,7 +171,6 @@ async function buildHandler(
             },
             input,
           ),
-        actor: "ulrich",
       }),
     },
   });
@@ -516,7 +516,7 @@ describe("src/http/server/plan/import-plan.test", () => {
     assert.equal(second.response.body.revision, first.response.body.revision);
   });
 
-  it("never fabricates the actor 'human' when the handler is built without one", async (t) => {
+  it("the handler forwards the resolved actor id to every appended event, never a fabricated one", async (t) => {
     const temporary = createMigratedStorage();
     t.after(() => temporary.dispose());
     const storage = temporary.storage;
@@ -569,7 +569,6 @@ describe("src/http/server/plan/import-plan.test", () => {
               },
               input,
             ),
-          actor: undefined as unknown as string,
         }),
       },
     });
@@ -594,6 +593,7 @@ describe("src/http/server/plan/import-plan.test", () => {
     assert.equal(response.status, 200);
     assert.ok(recorded.length > 0, "the import appended events");
     for (const event of recorded) {
+      assert.equal(event.actorId, bootstrapActorId);
       assert.notEqual(event.actorId, "human");
     }
   });

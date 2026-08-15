@@ -6,6 +6,7 @@ export const baselineErrors: OperationErrors = {
   unauthenticated: null,
   "origin-forbidden": null,
   "host-forbidden": null,
+  "actor-forbidden": null,
   "not-found": null,
   "not-implemented": null,
   "internal-error": null,

@@ -6,7 +6,6 @@ import { toHttpError } from "./refusals.ts";
 
 export type SetDefaultProviderHandlerDependencies = Readonly<{
   setDefaultProvider: (input: SetDefaultProviderInput) => ProviderView;
-  actor: string;
 }>;
 
 export function setDefaultProviderHandler(
@@ -20,7 +19,7 @@ export function setDefaultProviderHandler(
     try {
       const view = dependencies.setDefaultProvider({
         id,
-        actor: dependencies.actor,
+        actor: context.actor.id,
       });
       return { status: 200, body: view };
     } catch (error) {

@@ -16,6 +16,7 @@ const expected: Readonly<Record<string, number>> = {
   unauthenticated: 120,
   "origin-forbidden": 130,
   "host-forbidden": 131,
+  "actor-forbidden": 132,
   "not-found": 140,
   "stale-revision": 150,
   "illegal-transition": 151,
@@ -47,7 +48,7 @@ describe("src/cli/exit-code.test", () => {
     assert.deepEqual(codes, statuses);
   });
 
-  it("each of the twenty-two codes maps to its literal exit code", () => {
+  it("each of the twenty-three codes maps to its literal exit code", () => {
     let count = 0;
     for (const [code, status] of Object.entries(errorStatuses)) {
       assert.equal(
@@ -57,7 +58,7 @@ describe("src/cli/exit-code.test", () => {
       );
       count += 1;
     }
-    assert.equal(count, 22);
+    assert.equal(count, 23);
   });
 
   it("every value is an integer between 1 and 255 and 0 never appears", () => {
@@ -73,19 +74,38 @@ describe("src/cli/exit-code.test", () => {
     assert.ok(Math.max(...Object.values(exitCodes)) <= 255);
   });
 
-  it("every code lands in the block its status implies", () => {
-    for (const [code, status] of Object.entries(errorStatuses)) {
+  it("every code takes its status base plus its position in that status group", () => {
+    const base: Readonly<Record<number, number>> = {
+      400: 110,
+      401: 120,
+      403: 130,
+      404: 140,
+      409: 150,
+      422: 160,
+      500: 210,
+      501: 220,
+      503: 230,
+    };
+    const distinctStatuses = [...new Set(Object.values(errorStatuses))].sort(
+      (a, b) => a - b,
+    );
+    assert.deepEqual(
+      distinctStatuses,
+      Object.keys(base)
+        .map(Number)
+        .sort((a, b) => a - b),
+    );
+    const entries = Object.entries(errorStatuses);
+    for (const [code, status] of entries) {
+      const group = entries.filter(([, entryStatus]) => entryStatus === status);
+      const index = group.findIndex(([groupCode]) => groupCode === code);
       const value = (exitCodes as Readonly<Record<string, number>>)[code]!;
-      if (status >= 400 && status <= 499) {
-        assert.ok(value >= 100 && value <= 199, `${code} ${value}`);
-      } else {
-        assert.ok(value >= 200 && value <= 255, `${code} ${value}`);
-      }
+      assert.equal(value, base[status]! + index, `${code} exit code`);
     }
   });
 
   it("no two codes share an exit code", () => {
-    assert.equal(new Set(Object.values(exitCodes)).size, 22);
+    assert.equal(new Set(Object.values(exitCodes)).size, 23);
   });
 
   it("unknown codes fall to the category floor", () => {

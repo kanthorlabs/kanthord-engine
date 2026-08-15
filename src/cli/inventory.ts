@@ -5,6 +5,26 @@ export type DeclaredCommand = Readonly<{
 
 export const declaredCommands: readonly DeclaredCommand[] = [
   {
+    path: ["actor", "list"],
+    operationIds: ["actor.list"],
+  },
+  {
+    path: ["actor", "register"],
+    operationIds: ["actor.register"],
+  },
+  {
+    path: ["actor", "revoke"],
+    operationIds: ["actor.revoke"],
+  },
+  {
+    path: ["actor", "rotate"],
+    operationIds: ["actor.rotate"],
+  },
+  {
+    path: ["actor", "show"],
+    operationIds: ["actor.show"],
+  },
+  {
     path: ["config", "generate"],
     operationIds: [],
   },

@@ -7,7 +7,6 @@ import { toHttpError } from "./refusals.ts";
 
 export type RenameProviderHandlerDependencies = Readonly<{
   renameProvider: (input: RenameProviderInput) => ProviderView;
-  actor: string;
 }>;
 
 export function renameProviderHandler(
@@ -26,7 +25,7 @@ export function renameProviderHandler(
       const view = dependencies.renameProvider({
         id,
         name: parsed.data.name,
-        actor: dependencies.actor,
+        actor: context.actor.id,
       });
       return { status: 200, body: view };
     } catch (error) {

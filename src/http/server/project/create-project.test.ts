@@ -62,7 +62,6 @@ describe("src/http/server/project/create-project.test", () => {
         "project.create": createProjectHandler({
           createProject: (input) =>
             createProject({ storage, ids, clock, events }, input),
-          actor: "ulrich",
         }),
       },
     });
@@ -101,7 +100,6 @@ describe("src/http/server/project/create-project.test", () => {
               },
               input,
             ),
-          actor: "ulrich",
         }),
       },
     });
@@ -132,7 +130,6 @@ describe("src/http/server/project/create-project.test", () => {
               },
               input,
             ),
-          actor: "ulrich",
         }),
       },
     });

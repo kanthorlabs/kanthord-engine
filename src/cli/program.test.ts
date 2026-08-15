@@ -45,6 +45,9 @@ const fakeDependencies = (): {
     writeFile: () => {
       throw new Error("the fake writeFile must never be called");
     },
+    createSecretFile: () => {
+      throw new Error("the fake createSecretFile must never be called");
+    },
     stdout: (text) => {
       stdoutText += text;
     },
@@ -119,7 +122,7 @@ describe("src/cli/program.test", () => {
     assert.equal(program.version(), KANTHORD_VERSION);
   });
 
-  it("registers the nine declared top-level commands, sorted bytewise", () => {
+  it("registers the ten declared top-level commands, sorted bytewise", () => {
     const { dependencies } = fakeDependencies();
     const program = buildProgram(dependencies);
 
@@ -131,6 +134,7 @@ describe("src/cli/program.test", () => {
         return Buffer.compare(left, right);
       }),
       [
+        "actor",
         "config",
         "credential",
         "db",

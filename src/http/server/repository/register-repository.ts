@@ -9,7 +9,6 @@ export type RegisterRepositoryHandlerDependencies = Readonly<{
   registerRepository: (
     input: RegisterRepositoryInput,
   ) => Promise<RepositoryView>;
-  actor: string;
 }>;
 
 export function registerRepositoryHandler(
@@ -33,7 +32,7 @@ export function registerRepositoryHandler(
         publishRef: parsed.data.publishRef,
         publishOnApproval: parsed.data.publishOnApproval,
         hostFingerprint: parsed.data.hostFingerprint,
-        actor: dependencies.actor,
+        actor: context.actor.id,
       });
       return { status: 200, body: view };
     } catch (error) {

@@ -7,7 +7,6 @@ import { toHttpError } from "./refusals.ts";
 
 export type CreateProjectHandlerDependencies = Readonly<{
   createProject: (input: CreateProjectInput) => ProjectView;
-  actor: string;
 }>;
 
 export function createProjectHandler(
@@ -21,7 +20,7 @@ export function createProjectHandler(
     try {
       const view = dependencies.createProject({
         name: parsed.data.name,
-        actor: dependencies.actor,
+        actor: context.actor.id,
       });
       return { status: 200, body: view };
     } catch (error) {

@@ -18,6 +18,9 @@ const fakeDependencies = (): ProgramDependencies => ({
   writeFile: () => {
     throw new Error("the fake writeFile must never be called");
   },
+  createSecretFile: () => {
+    throw new Error("the fake createSecretFile must never be called");
+  },
   stdout: () => {
     throw new Error("the fake stdout must never be called");
   },
@@ -72,16 +75,17 @@ describe("src/cli/parity.test", () => {
     );
   });
 
-  it("programCommandPaths returns the fifteen inventory paths", () => {
+  it("programCommandPaths returns the twenty inventory paths", () => {
     const paths = programCommandPaths(buildProgram(fakeDependencies()));
 
-    assert.equal(paths.length, 15);
+    assert.equal(paths.length, 20);
     assert.deepEqual(paths, commandPaths());
   });
 
   it("never lists a group command as a path", () => {
     const paths = programCommandPaths(buildProgram(fakeDependencies()));
 
+    assert.equal(paths.includes("actor"), false);
     assert.equal(paths.includes("db"), false);
     assert.equal(paths.includes("credential"), false);
     assert.equal(paths.includes("project"), false);
@@ -109,15 +113,15 @@ describe("src/cli/parity.test", () => {
     assert.deepEqual(stubbedPaths, ["run"]);
   });
 
-  it("pins seventeen distinct ids across twelve calling entries", () => {
+  it("pins twenty-two distinct ids across seventeen calling entries", () => {
     const calling = declaredCommands.filter(
       (entry) => entry.operationIds.length > 0,
     );
 
-    assert.equal(calling.length, 12);
+    assert.equal(calling.length, 17);
     assert.equal(
       new Set(calling.flatMap((entry) => entry.operationIds)).size,
-      17,
+      22,
     );
   });
 

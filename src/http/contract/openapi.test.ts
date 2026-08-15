@@ -71,11 +71,11 @@ test("documents openapi 3.0.3 and the product info", () => {
   });
 });
 
-test("renders forty-eight distinct paths in bytewise order", () => {
+test("renders fifty-two distinct paths in bytewise order", () => {
   const document = buildOpenApiDocument();
   const paths = document.paths as Readonly<Record<string, unknown>>;
   const keys = Object.keys(paths);
-  assert.equal(keys.length, 48);
+  assert.equal(keys.length, 52);
   assert.deepEqual(keys, sortedBytewise(keys));
 });
 
@@ -112,7 +112,7 @@ test("orders methods within a path by the fixed sequence", () => {
 test("names every operation and matches the registry set", () => {
   const document = buildOpenApiDocument();
   const ids = operationObjects(document).map((entry) => entry.operationId);
-  assert.equal(ids.length, 54);
+  assert.equal(ids.length, 59);
   assert.deepEqual(
     sortedBytewise(ids),
     sortedBytewise(registry.map((entry) => entry.operationId)),
@@ -196,18 +196,34 @@ test("documents the routed success status from successStatus", () => {
       entry.status === "stubbed" ? "501" : String(entry.successStatus ?? 200);
     assert.deepEqual(Object.keys(responses), [expected, "default"]);
   }
-  assert.equal(
-    registry.some((entry) => entry.successStatus !== undefined),
-    false,
-  );
+  for (const entry of registry) {
+    if (entry.successStatus !== undefined) {
+      assert.equal(
+        entry.successStatus,
+        200,
+        `${entry.operationId} overrides the default success status`,
+      );
+    }
+  }
 });
 
-test("registers exactly the sixty schema components in bytewise order", () => {
+test("registers exactly the seventy-three schema components in bytewise order", () => {
   const document = buildOpenApiDocument();
   const components = document.components as Readonly<Record<string, unknown>>;
   const schemas = components.schemas as Readonly<Record<string, unknown>>;
   assert.deepEqual(Object.keys(schemas), [
     "Error",
+    "actor.list.error",
+    "actor.list.response",
+    "actor.register.error",
+    "actor.register.request",
+    "actor.register.response",
+    "actor.revoke.error",
+    "actor.revoke.response",
+    "actor.rotate.error",
+    "actor.rotate.response",
+    "actor.show.error",
+    "actor.show.response",
     "blob.show.error",
     "edge.list.error",
     "edge.list.response",

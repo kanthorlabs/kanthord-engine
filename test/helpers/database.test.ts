@@ -5,10 +5,12 @@ import { basename, dirname } from "node:path";
 import {
   createTemporaryDatabase,
   createMigratedStorage,
+  tableBytes,
   tableCounts,
 } from "./database.ts";
 import { rows } from "../../src/domain/rows.ts";
 import { migrations } from "../../src/services/storage/migrations.ts";
+import { bootstrapActorId } from "../../src/domain/actor.ts";
 
 describe("test/helpers/database.test", () => {
   it("path ends with kanthord.db, parent exists, file does not", () => {
@@ -58,7 +60,7 @@ describe("test/helpers/database.test", () => {
     assert.deepEqual(Object.keys(tableCounts(temporary.storage)), expected);
   });
 
-  it("reports 0 for every table except migration on a fresh database", () => {
+  it("reports 0 for every table except migration and the bootstrap actor row on a fresh database", () => {
     const temporary = createMigratedStorage();
     after(() => temporary.dispose());
 
@@ -66,6 +68,8 @@ describe("test/helpers/database.test", () => {
     for (const [table, count] of Object.entries(counts)) {
       if (table === "migration") {
         assert.equal(count, migrations.length, table);
+      } else if (table === "actor") {
+        assert.equal(count, 1, table);
       } else {
         assert.equal(count, 0, table);
       }
@@ -99,5 +103,39 @@ describe("test/helpers/database.test", () => {
           : (before as Record<string, number>)[table]!;
       assert.equal((after1 as Record<string, number>)[table], expected, table);
     }
+  });
+
+  it("tableBytes changes on an insert and on a cell update and stays stable when nothing changes", () => {
+    const temporary = createMigratedStorage();
+    after(() => temporary.dispose());
+    const storage = temporary.storage;
+
+    const empty = tableBytes(storage, "actor");
+    storage.transact((transaction) => {
+      transaction.run(
+        "INSERT INTO actor (id, kind, name, token_sha256, registered_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [
+          "actor_01HZY8QF3M4N5P6R7S8T9V0W1X",
+          "harness",
+          "worker-a",
+          new Uint8Array(32),
+          bootstrapActorId,
+          1000,
+        ],
+      );
+    });
+    const withRow = tableBytes(storage, "actor");
+    assert.equal(empty.equals(withRow), false);
+
+    storage.transact((transaction) => {
+      transaction.run("UPDATE actor SET name = ? WHERE id = ?", [
+        "worker-b",
+        "actor_01HZY8QF3M4N5P6R7S8T9V0W1X",
+      ]);
+    });
+    const renamed = tableBytes(storage, "actor");
+    assert.equal(withRow.equals(renamed), false);
+
+    assert.equal(tableBytes(storage, "actor").equals(renamed), true);
   });
 });

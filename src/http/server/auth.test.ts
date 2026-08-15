@@ -7,42 +7,64 @@ import assert from "node:assert/strict";
 import Koa from "koa";
 
 import { envelopeMiddleware } from "./envelope.ts";
-import { authMiddleware, bearerToken, tokensMatch } from "./auth.ts";
+import { authMiddleware, bearerToken } from "./auth.ts";
+import type { AuthenticatedState } from "./auth.ts";
+import type { ActorRow } from "../../domain/actor.ts";
+import { bootstrapActorId } from "../../domain/actor.ts";
 import { loopbackAgent } from "../../../test/helpers/agent.ts";
+import { BOOTSTRAP_ACTOR_FIXTURE } from "../../../test/helpers/app.ts";
 
-function buildApp(token: string): Koa {
+function defaultResolveActor(presented: string): ActorRow | null {
+  if (presented === "test-token" || presented === "") {
+    return BOOTSTRAP_ACTOR_FIXTURE;
+  }
+  return null;
+}
+
+function buildApp(
+  token: string,
+  resolveActor: (presented: string) => ActorRow | null = defaultResolveActor,
+): Koa {
   const app = new Koa();
   app.use(envelopeMiddleware({ onInternalError: () => {} }));
-  app.use(authMiddleware({ token }));
+  app.use(authMiddleware({ token, resolveActor }));
   app.use((context) => {
     context.body = { reached: true };
   });
   return app;
 }
 
+function buildRecordingApp(
+  token: string,
+  resolveActor: (presented: string) => ActorRow | null,
+): { app: Koa; recorded: () => ActorRow | undefined } {
+  let recorded: ActorRow | undefined;
+  const app = new Koa();
+  app.use(envelopeMiddleware({ onInternalError: () => {} }));
+  app.use(authMiddleware({ token, resolveActor }));
+  app.use((context) => {
+    recorded = (context.state as AuthenticatedState).actor;
+    context.body = { reached: true };
+  });
+  return { app, recorded: () => recorded };
+}
+
 function sourceText(): string {
   return readFileSync(resolve(import.meta.dirname, "./auth.ts"), "utf8");
 }
 
+const harnessRow: ActorRow = {
+  id: "actor_01JQ8ZAN9P0ABCDEFGHJKMNPQR",
+  kind: "harness",
+  name: "harness-a",
+  tokenSha256: new Uint8Array(32),
+  registeredBy: bootstrapActorId,
+  createdAt: 1720000000000,
+  revokedAt: null,
+  revokedBy: null,
+};
+
 describe("src/http/server/auth.test", () => {
-  it("matches an identical token and rejects a different one", () => {
-    assert.equal(tokensMatch("abc", "abc"), true);
-    assert.equal(tokensMatch("abc", "abd"), false);
-  });
-
-  it("rejects a wrong-length token without throwing", () => {
-    assert.equal(tokensMatch("abc", "abcd"), false);
-  });
-
-  it("treats two empty strings as equal and an empty presented token as wrong", () => {
-    assert.equal(tokensMatch("", ""), true);
-    assert.equal(tokensMatch("abc", ""), false);
-  });
-
-  it("compares the token case-sensitively", () => {
-    assert.equal(tokensMatch("Abc", "abc"), false);
-  });
-
   it("parses the bearer scheme case-insensitively and rejects everything else", () => {
     const cases: ReadonlyArray<readonly [string | undefined, string | null]> = [
       [undefined, null],
@@ -61,25 +83,19 @@ describe("src/http/server/auth.test", () => {
     }
   });
 
-  it("compares in constant time by construction", () => {
-    const source = sourceText();
-    assert.equal(source.includes("timingSafeEqual("), true);
-    assert.equal(source.includes('createHash("sha256")'), true);
-  });
-
-  it("never compares the tokens with an operator or a length-leaking primitive", () => {
-    const source = sourceText();
-    assert.equal(/configured\s*[=!]==?\s*presented/.test(source), false);
-    assert.equal(/presented\s*[=!]==?\s*configured/.test(source), false);
-    assert.equal(source.includes("Buffer.compare"), false);
-    assert.equal(source.includes("localeCompare"), false);
-  });
-
   it("stays route-independent by construction", () => {
     const source = sourceText();
-    assert.equal(source.includes("context.state"), false);
+    assert.equal(source.includes("context.state.match"), false);
     assert.equal(source.includes("registry"), false);
     assert.equal(source.includes("operationId"), false);
+  });
+
+  it("no longer names node:crypto and no longer exports tokensMatch", () => {
+    const source = sourceText();
+    assert.equal(source.includes("timingSafeEqual"), false);
+    assert.equal(source.includes("createHash"), false);
+    assert.equal(source.includes("node:crypto"), false);
+    assert.equal(/export\s+function\s+tokensMatch/.test(source), false);
   });
 
   it("answers 401 unauthenticated when no token is presented", async () => {
@@ -106,6 +122,45 @@ describe("src/http/server/auth.test", () => {
         message: "the bearer token is not valid",
       },
     });
+  });
+
+  it("answers the identical not-valid body for every unresolved token, whatever the resolver", async () => {
+    const resolvers: ReadonlyArray<{
+      name: string;
+      resolve: (presented: string) => ActorRow | null;
+    }> = [
+      { name: "unrecognized shape", resolve: () => null },
+      {
+        name: "unknown actor id",
+        resolve: (presented) => (presented === "" ? null : null),
+      },
+      {
+        name: "revoked actor",
+        resolve: (presented) => {
+          if (presented === "actor_01JQ8ZAN9P0ABCDEFGHJKMNPQR.x") return null;
+          return null;
+        },
+      },
+    ];
+    const bodies: unknown[] = [];
+    for (const { name, resolve } of resolvers) {
+      const response = await (
+        await loopbackAgent(buildApp("test-token", resolve))
+      )
+        .get("/v1/health")
+        .set("Authorization", "Bearer whatever");
+      assert.equal(response.status, 401, name);
+      const expected = {
+        error: {
+          code: "unauthenticated",
+          message: "the bearer token is not valid",
+        },
+      };
+      assert.deepEqual(response.body, expected, name);
+      bodies.push(response.body);
+    }
+    assert.deepEqual(bodies[1], bodies[0]);
+    assert.deepEqual(bodies[2], bodies[0]);
   });
 
   it("treats a wrong scheme as a missing token", async () => {
@@ -146,16 +201,64 @@ describe("src/http/server/auth.test", () => {
     }
   });
 
-  it("passes every request when the configured token is empty", async () => {
-    const bare = await (await loopbackAgent(buildApp(""))).get("/v1/health");
-    assert.equal(bare.status, 200);
-    assert.deepEqual(bare.body, { reached: true });
-    const withHeader = await (
-      await loopbackAgent(buildApp(""))
+  it("a header the resolver accepts reaches the terminal handler and the resolved actor lands on context.state", async () => {
+    const { app, recorded } = buildRecordingApp("test-token", (presented) =>
+      presented === "actor_01JQ8ZAN9P0ABCDEFGHJKMNPQR.s3cr3t"
+        ? harnessRow
+        : null,
+    );
+    const response = await (
+      await loopbackAgent(app)
+    )
+      .get("/v1/health")
+      .set("Authorization", "Bearer actor_01JQ8ZAN9P0ABCDEFGHJKMNPQR.s3cr3t");
+    assert.equal(response.status, 200);
+    assert.deepEqual(recorded(), harnessRow);
+  });
+
+  it("with an empty configured token, a request with no Authorization header reaches the terminal handler with the bootstrap actor, and the resolver is called exactly once with an empty string", async () => {
+    const calls: string[] = [];
+    const { app, recorded } = buildRecordingApp("", (presented) => {
+      calls.push(presented);
+      return BOOTSTRAP_ACTOR_FIXTURE;
+    });
+    const response = await (await loopbackAgent(app)).get("/v1/health");
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { reached: true });
+    assert.deepEqual(recorded(), BOOTSTRAP_ACTOR_FIXTURE);
+    assert.deepEqual(calls, [""]);
+  });
+
+  it("with an empty configured token, an arbitrary Authorization header still reaches the handler with the bootstrap actor", async () => {
+    const calls: string[] = [];
+    const { app, recorded } = buildRecordingApp("", (presented) => {
+      calls.push(presented);
+      return BOOTSTRAP_ACTOR_FIXTURE;
+    });
+    const response = await (
+      await loopbackAgent(app)
     )
       .get("/v1/health")
       .set("Authorization", "Bearer anything");
-    assert.equal(withHeader.status, 200);
-    assert.deepEqual(withHeader.body, { reached: true });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { reached: true });
+    assert.deepEqual(recorded(), BOOTSTRAP_ACTOR_FIXTURE);
+    assert.deepEqual(calls, [""]);
+  });
+
+  it("resolveActor is called exactly once per request with the exact presented token, including a token that holds a dot", async () => {
+    const presented = "actor_01JQ8ZAN9P0ABCDEFGHJKMNPQR.s3cr3t.value";
+    const calls: string[] = [];
+    const app = buildApp("test-token", (value) => {
+      calls.push(value);
+      return value === presented ? BOOTSTRAP_ACTOR_FIXTURE : null;
+    });
+    const response = await (
+      await loopbackAgent(app)
+    )
+      .get("/v1/health")
+      .set("Authorization", `Bearer ${presented}`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls, [presented]);
   });
 });

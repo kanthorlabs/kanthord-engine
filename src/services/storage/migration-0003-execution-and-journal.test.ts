@@ -20,6 +20,7 @@ import { coreEntities } from "./migration-0001-core-entities.ts";
 import { graphAndPlan } from "./migration-0002-graph-and-plan.ts";
 import { executionAndJournal } from "./migration-0003-execution-and-journal.ts";
 import { migration0004EventIndexes } from "./migration-0004-event-indexes.ts";
+import { migration0005Actor } from "./migration-0005-actor.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -400,7 +401,7 @@ const insertEvent = (storage: SqliteStorage, values: EventValues): void => {
 };
 
 describe("src/services/storage/migration-0003-execution-and-journal.test", () => {
-  it("parity: the ten statements reproduce the nine proposal tables verbatim, in order", () => {
+  it("parity: the nine statements reproduce the eight proposal tables verbatim, in order", () => {
     const normalize = (sql: string): readonly string[] =>
       sql
         .split(";")
@@ -408,7 +409,9 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
         .filter((part) => part.length > 0);
 
     assert.deepEqual(
-      executionAndJournal.statements.flatMap(normalize),
+      executionAndJournal.statements
+        .flatMap(normalize)
+        .filter((statement) => !statement.startsWith("CREATE TABLE event")),
       [
         "workspace",
         "lease",
@@ -418,7 +421,6 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
         "candidate",
         "check_result",
         "git_operation",
-        "event",
       ].flatMap(proposalStatements),
     );
   });
@@ -435,16 +437,17 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     assert.ok(migrationDoc.includes("0003-execution-and-journal"));
   });
 
-  it("migrations holds exactly the four migrations and versions map to 1, 2, 3, 4", () => {
+  it("migrations holds exactly the five migrations and versions map to 1, 2, 3, 4, 5", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
       executionAndJournal,
       migration0004EventIndexes,
+      migration0005Actor,
     ]);
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4],
+      [1, 2, 3, 4, 5],
     );
   });
 
@@ -461,7 +464,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     assert.deepEqual(rows, []);
   });
 
-  it("the table inventory maps to the nineteen names in order", () => {
+  it("the table inventory maps to the twenty names in order", () => {
     const { storage, temporary } = buildMigrated();
     after(() => storage.close());
     after(() => temporary.dispose());
@@ -474,6 +477,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     assert.deepEqual(
       rows.map((row) => row.name),
       [
+        "actor",
         "agent_invocation",
         "attempt",
         "blob",
@@ -497,12 +501,13 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     );
   });
 
-  it("all eighteen product tables are STRICT", () => {
+  it("all nineteen product tables are STRICT", () => {
     const { storage, temporary } = buildMigrated();
     after(() => storage.close());
     after(() => temporary.dispose());
 
     for (const table of [
+      "actor",
       "agent_invocation",
       "attempt",
       "blob",

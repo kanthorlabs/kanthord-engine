@@ -5,7 +5,11 @@ import { createApp } from "./app.ts";
 import type { Handler, TransportSettings } from "./app.ts";
 import { registry } from "../contract/registry.ts";
 import { renderPath } from "../contract/path.ts";
-import { createTestApp, unimplementedFor } from "../../../test/helpers/app.ts";
+import {
+  createTestApp,
+  unimplementedFor,
+  BOOTSTRAP_ACTOR_FIXTURE,
+} from "../../../test/helpers/app.ts";
 
 const statusHandler: Handler = () => ({ status: 200, body: { ok: true } });
 const healthHandler: Handler = () => ({
@@ -89,7 +93,7 @@ describe("src/http/server/app.test", () => {
     }
     requests.push({ method: "get", path: "/v1/nope" });
     requests.push({ method: "get", path: "/v1/" });
-    assert.equal(requests.length, 56);
+    assert.equal(requests.length, 61);
 
     const responses: Array<{ status: number; body: unknown }> = [];
     for (const { method, path } of requests) {
@@ -355,16 +359,17 @@ describe("src/http/server/app.test", () => {
       settings,
       handlers: {},
       unimplemented: unimplementedFor({}),
+      resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
       onInternalError: () => {},
     });
     assert.equal(app.proxy, false);
   });
 
-  it("binding system.health and system.db leaves twenty-five unimplemented ids", () => {
+  it("binding system.health and system.db leaves thirty unimplemented ids", () => {
     const bound = {
       "system.health": healthHandler,
       "system.db": statusHandler,
     };
-    assert.equal(unimplementedFor(bound).length, 25);
+    assert.equal(unimplementedFor(bound).length, 30);
   });
 });

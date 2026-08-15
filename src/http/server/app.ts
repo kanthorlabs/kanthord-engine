@@ -2,10 +2,12 @@ import bodyParser from "@koa/bodyparser";
 import Koa from "koa";
 import type { Context, Next } from "koa";
 
+import type { ActorRow } from "../../domain/actor.ts";
 import type { Operation } from "../contract/operation.ts";
 import { registry } from "../contract/registry.ts";
 import { httpError } from "../contract/errors.ts";
 import { authMiddleware } from "./auth.ts";
+import { authorizeMiddleware } from "./authorize.ts";
 import { dispatchMiddleware } from "./dispatch.ts";
 import { envelopeMiddleware } from "./envelope.ts";
 import { hostMiddleware } from "./host.ts";
@@ -29,6 +31,7 @@ export type HandlerContext = Readonly<{
   query: Readonly<Record<string, readonly string[]>>;
   headers: Readonly<Record<string, string>>;
   body: unknown;
+  actor: ActorRow;
 }>;
 
 export type HandlerResult = Readonly<{
@@ -46,6 +49,7 @@ export type AppDependencies = Readonly<{
   handlers: Readonly<Record<string, Handler>>;
   unimplemented: readonly string[];
   onInternalError: (error: unknown) => void;
+  resolveActor: (presented: string) => ActorRow | null;
   idempotency?: IdempotencySettings;
   now?: () => number;
   schedule?: Schedule;
@@ -76,8 +80,14 @@ export function createApp(dependencies: AppDependencies): Koa {
   );
   app.use(hostMiddleware({ allowedHosts: dependencies.settings.allowedHosts }));
   app.use(preflightMiddleware());
-  app.use(authMiddleware({ token: dependencies.settings.token }));
+  app.use(
+    authMiddleware({
+      token: dependencies.settings.token,
+      resolveActor: dependencies.resolveActor,
+    }),
+  );
   app.use(routeMiddleware());
+  app.use(authorizeMiddleware());
   app.use(bodyParserForHandled(dependencies.handlers));
   app.use(
     createIdempotency({
@@ -126,7 +136,7 @@ export function unimplementedFor(
     .filter((operationId) => !(operationId in handlers));
 }
 
-function bindingOffenders(dependencies: AppDependencies): string[] {
+export function bindingOffenders(dependencies: AppDependencies): string[] {
   const offenders: string[] = [];
   for (const entry of registry) {
     if (entry.status !== "routed") {

@@ -2,12 +2,24 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { createTestApp } from "../../../../test/helpers/app.ts";
+import type { ActorRow } from "../../../domain/actor.ts";
 import { PayloadError } from "../../../domain/provider-payload.ts";
 import { RegisterProviderError } from "../../../commands/provider/register-provider.ts";
 import type { RegisterProviderInput } from "../../../commands/provider/register-provider.ts";
 import type { ProviderView } from "../../../domain/provider-view.ts";
 import { registerProviderHandler } from "./register-provider.ts";
 import { providerRegisterResponse } from "../../contract/credential.ts";
+
+const caller: ActorRow = {
+  id: "actor_01HZY8QF3M4N5P6R7S8T9V0W1X",
+  kind: "human",
+  name: "ulrich",
+  tokenSha256: null,
+  registeredBy: null,
+  createdAt: 0,
+  revokedAt: null,
+  revokedBy: null,
+};
 
 const view: ProviderView = {
   id: "provider_01HZY8QF3M4N5P6R7S8T9V0W1X",
@@ -26,13 +38,13 @@ describe("src/http/server/credential/register-provider.test", () => {
   it("POST /v1/provider with a valid body answers 200 and the view", async () => {
     let called: RegisterProviderInput | undefined;
     const app = await createTestApp({
+      resolveActor: () => caller,
       handlers: {
         "provider.register": registerProviderHandler({
           registerProvider: (input) => {
             called = input;
             return view;
           },
-          actor: "ulrich",
         }),
       },
     });
@@ -72,8 +84,9 @@ describe("src/http/server/credential/register-provider.test", () => {
         username: "kanthord-bot",
         token: "ghp_x",
       },
-      actor: "ulrich",
+      actor: caller.id,
     });
+    assert.notEqual(called?.actor, "ulrich");
   });
 
   it("POST /v1/provider with an empty body answers 400 invalid-request and never calls the command", async () => {
@@ -85,7 +98,6 @@ describe("src/http/server/credential/register-provider.test", () => {
             calls += 1;
             return view;
           },
-          actor: "ulrich",
         }),
       },
     });
@@ -104,7 +116,6 @@ describe("src/http/server/credential/register-provider.test", () => {
             calls += 1;
             return view;
           },
-          actor: "ulrich",
         }),
       },
     });
@@ -133,7 +144,6 @@ describe("src/http/server/credential/register-provider.test", () => {
               "aes256-ctr",
             );
           },
-          actor: "ulrich",
         }),
       },
     });
@@ -161,7 +171,6 @@ describe("src/http/server/credential/register-provider.test", () => {
               "a provider named github-bot is already registered",
             );
           },
-          actor: "ulrich",
         }),
       },
     });

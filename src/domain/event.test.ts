@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { eventRow } from "./event.ts";
+import { eventRow, eventActorKinds } from "./event.ts";
 
 const ULID_A = "01HZY8QF3M4N5P6R7S8T9V0W1X";
 
@@ -49,6 +49,17 @@ describe("src/domain/event.test", () => {
   it("accepts actorKind daemon", () => {
     assert.equal(
       eventRow.safeParse({ ...validRow, actorKind: "daemon" }).success,
+      true,
+    );
+  });
+
+  it("eventActorKinds deep-equals human, daemon, harness in that order", () => {
+    assert.deepEqual(eventActorKinds, ["human", "daemon", "harness"]);
+  });
+
+  it("accepts actorKind harness", () => {
+    assert.equal(
+      eventRow.safeParse({ ...validRow, actorKind: "harness" }).success,
       true,
     );
   });

@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import Koa from "koa";
 
 import { envelopeMiddleware } from "./envelope.ts";
+import { authMiddleware } from "./auth.ts";
+import type { AuthenticatedState } from "./auth.ts";
 import { routeMiddleware } from "./route.ts";
 import { dispatchMiddleware } from "./dispatch.ts";
 import { createApp, BindingError } from "./app.ts";
@@ -11,10 +13,13 @@ import type { Handler, HandlerContext, TransportSettings } from "./app.ts";
 import { httpError } from "../contract/errors.ts";
 import { registry } from "../contract/registry.ts";
 import { renderPath } from "../contract/path.ts";
+import type { ActorRow } from "../../domain/actor.ts";
+import { bootstrapActorId } from "../../domain/actor.ts";
 import {
   createTestApp,
   unimplementedFor,
   drive,
+  BOOTSTRAP_ACTOR_FIXTURE,
 } from "../../../test/helpers/app.ts";
 import { loopbackAgent } from "../../../test/helpers/agent.ts";
 import {
@@ -26,6 +31,19 @@ const settings: TransportSettings = {
   token: "test-token",
   allowedHosts: ["kanthord.test"],
   allowedOrigins: [],
+};
+
+const resolveActor = (): ActorRow | null => BOOTSTRAP_ACTOR_FIXTURE;
+
+const harnessActor: ActorRow = {
+  id: "actor_01JQ8ZAN9P0ABCDEFGHJKMNPQR",
+  kind: "harness",
+  name: "harness-a",
+  tokenSha256: new Uint8Array(32),
+  registeredBy: bootstrapActorId,
+  createdAt: 1720000000000,
+  revokedAt: null,
+  revokedBy: null,
 };
 
 const okHandler: Handler = () => ({ status: 200, body: { ok: true } });
@@ -120,6 +138,7 @@ describe("src/http/server/dispatch.test", () => {
           settings,
           handlers: {},
           unimplemented: [],
+          resolveActor,
           onInternalError: () => {},
         }),
       (error: unknown) =>
@@ -136,6 +155,7 @@ describe("src/http/server/dispatch.test", () => {
           settings,
           handlers: both,
           unimplemented: [...unimplementedFor(both), "system.status"],
+          resolveActor,
           onInternalError: () => {},
         }),
       (error: unknown) =>
@@ -152,6 +172,7 @@ describe("src/http/server/dispatch.test", () => {
           settings,
           handlers: invented,
           unimplemented: unimplementedFor(invented),
+          resolveActor,
           onInternalError: () => {},
         }),
       (error: unknown) =>
@@ -167,6 +188,7 @@ describe("src/http/server/dispatch.test", () => {
           settings,
           handlers: stubbed,
           unimplemented: unimplementedFor(stubbed),
+          resolveActor,
           onInternalError: () => {},
         }),
       (error: unknown) =>
@@ -181,6 +203,7 @@ describe("src/http/server/dispatch.test", () => {
           settings,
           handlers: {},
           unimplemented: ["node.unblock"],
+          resolveActor,
           onInternalError: () => {},
         }),
       (error: unknown) =>
@@ -188,15 +211,16 @@ describe("src/http/server/dispatch.test", () => {
     );
   });
 
-  it("the complete binding does not throw and derives twenty-five unimplemented ids", () => {
+  it("the complete binding does not throw and derives thirty unimplemented ids", () => {
     const complete = { "system.health": okHandler, "system.db": okHandler };
     const unimplemented = unimplementedFor(complete);
-    assert.equal(unimplemented.length, 25);
+    assert.equal(unimplemented.length, 30);
     assert.doesNotThrow(() =>
       createApp({
         settings,
         handlers: complete,
         unimplemented,
+        resolveActor,
         onInternalError: () => {},
       }),
     );
@@ -227,6 +251,39 @@ describe("src/http/server/dispatch.test", () => {
     assert.equal(response.status, 200);
     assert.deepEqual(recorded?.parameters, { id: "task_01JQ8ZAN9P" });
     assert.equal(recorded?.operation.operationId, "node.show");
+  });
+
+  it("a handler receives context.actor equal to the actor on context.state", async () => {
+    let stateActor: ActorRow | undefined;
+    let recorded: HandlerContext | undefined;
+    const app = new Koa();
+    app.use(envelopeMiddleware({ onInternalError: () => {} }));
+    app.use(
+      authMiddleware({ token: "test-token", resolveActor: () => harnessActor }),
+    );
+    app.use(async (context, next) => {
+      stateActor = (context.state as AuthenticatedState).actor;
+      await next();
+    });
+    app.use(routeMiddleware());
+    app.use(
+      dispatchMiddleware({
+        handlers: {
+          "system.health": (context) => {
+            recorded = context;
+            return { status: 200, body: { ok: true } };
+          },
+        },
+      }),
+    );
+    const response = await (
+      await loopbackAgent(app)
+    )
+      .get("/v1/health")
+      .set("Authorization", "Bearer test-token");
+    assert.equal(response.status, 200);
+    assert.deepEqual(stateActor, harnessActor);
+    assert.deepEqual(recorded?.actor, stateActor);
   });
 
   it("a handler receives a parsed JSON body", async () => {

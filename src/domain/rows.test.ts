@@ -7,12 +7,13 @@ import { rows } from "./rows.ts";
 import { profileRow } from "./profile.ts";
 
 describe("src/domain/rows.test", () => {
-  it("Object.keys(rows).length equals 19", () => {
-    assert.equal(Object.keys(rows).length, 19);
+  it("Object.keys(rows).length equals 20", () => {
+    assert.equal(Object.keys(rows).length, 20);
   });
 
-  it("Object.keys(rows) deep-equals the 19 table names sorted lexicographically", () => {
+  it("Object.keys(rows) deep-equals the 20 table names sorted lexicographically", () => {
     assert.deepEqual(Object.keys(rows), [
+      "actor",
       "agent_invocation",
       "attempt",
       "blob",

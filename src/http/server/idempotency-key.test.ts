@@ -12,6 +12,10 @@ import {
   recordKey,
 } from "./idempotency-key.ts";
 import { loopbackAgent } from "../../../test/helpers/agent.ts";
+import {
+  HARNESS_ACTOR_FIXTURE,
+  HARNESS_ACTOR_FIXTURE_B,
+} from "../../../test/helpers/app.ts";
 
 describe("src/http/server/idempotency-key.test", () => {
   it("exports the header name and the max key length", () => {
@@ -261,8 +265,13 @@ describe("src/http/server/idempotency-key.test", () => {
   describe("recordKey", () => {
     it("renders with no parameters", () => {
       assert.equal(
-        recordKey({ operationId: "project.create", parameters: {}, key: "k" }),
-        "project.create��k",
+        recordKey({
+          operationId: "project.create",
+          parameters: {},
+          actorId: "actor_A",
+          key: "k",
+        }),
+        "project.create\uFFFD\uFFFDactor_A\uFFFDk",
       );
     });
 
@@ -271,16 +280,27 @@ describe("src/http/server/idempotency-key.test", () => {
         recordKey({
           operationId: "plan.validate",
           parameters: { id: "p_1" },
+          actorId: "actor_A",
           key: "k",
         }),
-        "plan.validate�id=p_1�k",
+        "plan.validate\uFFFDid=p_1\uFFFDactor_A\uFFFDk",
       );
     });
 
     it("differs across operations for the same key", () => {
       assert.notEqual(
-        recordKey({ operationId: "a", parameters: {}, key: "k" }),
-        recordKey({ operationId: "b", parameters: {}, key: "k" }),
+        recordKey({
+          operationId: "a",
+          parameters: {},
+          actorId: "actor_A",
+          key: "k",
+        }),
+        recordKey({
+          operationId: "b",
+          parameters: {},
+          actorId: "actor_A",
+          key: "k",
+        }),
       );
     });
 
@@ -289,11 +309,13 @@ describe("src/http/server/idempotency-key.test", () => {
         recordKey({
           operationId: "x",
           parameters: { id: "p_1" },
+          actorId: "actor_A",
           key: "k",
         }),
         recordKey({
           operationId: "x",
           parameters: { id: "p_2" },
+          actorId: "actor_A",
           key: "k",
         }),
       );
@@ -303,15 +325,75 @@ describe("src/http/server/idempotency-key.test", () => {
       const first = recordKey({
         operationId: "x",
         parameters: { id: "1", hash: "2" },
+        actorId: "actor_A",
         key: "k",
       });
       const second = recordKey({
         operationId: "x",
         parameters: { hash: "2", id: "1" },
+        actorId: "actor_A",
         key: "k",
       });
       assert.equal(first, second);
-      assert.equal(first, "x�hash=2id=1�k");
+      assert.equal(first, "x\uFFFDhash=2\u0001id=1\uFFFDactor_A\uFFFDk");
+    });
+
+    it("two actors whose ids differ by one character render different keys", () => {
+      const first = recordKey({
+        operationId: "project.create",
+        parameters: {},
+        actorId: HARNESS_ACTOR_FIXTURE.id,
+        key: "k",
+      });
+      const second = recordKey({
+        operationId: "project.create",
+        parameters: {},
+        actorId: HARNESS_ACTOR_FIXTURE_B.id,
+        key: "k",
+      });
+      assert.notEqual(first, second);
+    });
+
+    it("a key value containing the separator cannot forge a boundary", () => {
+      const forged = recordKey({
+        operationId: "project.create",
+        parameters: {},
+        actorId: "actor_A",
+        key: "\uFFFDactor_B\uFFFDx",
+      });
+      const genuine = recordKey({
+        operationId: "project.create",
+        parameters: {},
+        actorId: "actor_B",
+        key: "x",
+      });
+      assert.notEqual(forged, genuine);
+    });
+
+    it("a parameter value containing the separator cannot collide with a different actor id", () => {
+      const forged = recordKey({
+        operationId: "project.create",
+        parameters: { id: "\uFFFDactor_B\uFFFDx" },
+        actorId: "actor_A",
+        key: "k",
+      });
+      const genuine = recordKey({
+        operationId: "project.create",
+        parameters: {},
+        actorId: "actor_B",
+        key: "k",
+      });
+      assert.notEqual(forged, genuine);
+    });
+
+    it("the same actor and the same key render the identical string across two calls", () => {
+      const input = {
+        operationId: "project.create",
+        parameters: {},
+        actorId: "actor_A",
+        key: "k",
+      };
+      assert.equal(recordKey(input), recordKey(input));
     });
   });
 

@@ -1,6 +1,7 @@
 import type { Transaction } from "../storage/index.ts";
+import type { EventActorKind } from "../../domain/event.ts";
 
-export type ActorKind = "human" | "daemon";
+export type ActorKind = EventActorKind;
 
 export type AppendEventInput = Readonly<{
   subjectKind: string;

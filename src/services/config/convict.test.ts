@@ -237,19 +237,17 @@ describe("src/services/config/convict.test", () => {
       }
     });
 
-    it("throws config-invalid when http.allowedHosts is omitted", () => {
+    it("omitting http.allowedHosts on a loopback bind loads the derived list", () => {
       const dir = tmpDir();
       try {
         const file = validFile();
         delete (file as any).http.allowedHosts;
         const filePath = writeJson(dir, file);
-        assert.throws(
-          () => config.load(loadInput(dir, filePath)),
-          (err: any) => {
-            assert.equal(err.code, "config-invalid");
-            return true;
-          },
-        );
+        const result = config.load(loadInput(dir, filePath));
+        assert.deepEqual(result.settings.http.allowedHosts, [
+          "127.0.0.1:8080",
+          "localhost:8080",
+        ]);
       } finally {
         fs.rmSync(dir, { recursive: true });
       }
@@ -992,6 +990,118 @@ describe("src/services/config/convict.test", () => {
             return true;
           },
         );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+  });
+
+  describe("derived http.allowedHosts", () => {
+    it("omitting http.allowedHosts on the bind 0.0.0.0 throws config-refused naming http.allowedHosts", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: { bind: "0.0.0.0", port: 8080, token: "test-token" },
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-refused");
+            assert.match(err.message, /http\.allowedHosts/);
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("omitting http.allowedHosts on the bind :: throws config-refused", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: { bind: "::", port: 8080, token: "test-token" },
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-refused");
+            assert.match(err.message, /http\.allowedHosts/);
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("omitting http.allowedHosts with a configured port of 0 throws config-refused", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: { bind: "127.0.0.1", port: 0, token: "test-token" },
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-refused");
+            assert.match(err.message, /http\.allowedHosts/);
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("an explicit http.allowedHosts on the bind 0.0.0.0 loads that list verbatim", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "0.0.0.0",
+              port: 8080,
+              token: "test-token",
+              allowedHosts: ["kanthord.internal:8080"],
+            },
+          }),
+        );
+        const result = config.load(loadInput(dir, filePath));
+        assert.deepEqual(result.settings.http.allowedHosts, [
+          "kanthord.internal:8080",
+        ]);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("an explicit http.allowedHosts on a loopback bind loads verbatim rather than the derived list", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              bind: "127.0.0.1",
+              port: 8080,
+              token: "test-token",
+              allowedHosts: ["h:1"],
+            },
+          }),
+        );
+        const result = config.load(loadInput(dir, filePath));
+        assert.deepEqual(result.settings.http.allowedHosts, ["h:1"]);
       } finally {
         fs.rmSync(dir, { recursive: true });
       }

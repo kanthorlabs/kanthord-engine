@@ -4,6 +4,7 @@ import type { Context, Next } from "koa";
 
 import { httpError } from "../contract/errors.ts";
 import type { Handler } from "./app.ts";
+import type { AuthenticatedState } from "./auth.ts";
 import { readQuery } from "./query.ts";
 import type { RoutedState } from "./route.ts";
 
@@ -35,6 +36,7 @@ export function dispatchMiddleware(
       query: readQuery(context.querystring),
       headers: readHeaders(context.headers),
       body: context.request.body,
+      actor: (context.state as AuthenticatedState).actor,
     });
     context.status = result.status;
     for (const name of Object.keys(result.headers ?? {}).sort((a, b) =>

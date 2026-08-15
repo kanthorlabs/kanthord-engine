@@ -25,12 +25,13 @@ describe("src/http/contract/errors.test", () => {
     }
   });
 
-  it("pins the twenty-two codes in table order", () => {
+  it("pins the codes in table order", () => {
     assert.deepEqual(Object.keys(errorStatuses), [
       "invalid-request",
       "unauthenticated",
       "origin-forbidden",
       "host-forbidden",
+      "actor-forbidden",
       "not-found",
       "stale-revision",
       "illegal-transition",
@@ -52,6 +53,44 @@ describe("src/http/contract/errors.test", () => {
     ]);
   });
 
+  it("the ordered list rejects a code at any position", () => {
+    const keys = Object.keys(errorStatuses);
+    const appended = [...keys, "invented-last"];
+    const middle = Math.floor(keys.length / 2);
+    const spliced = [
+      ...keys.slice(0, middle),
+      "invented-middle",
+      ...keys.slice(middle),
+    ];
+    const withoutHostKey = keys.filter((code) => code !== "host-key-mismatch");
+    const planInvalid = withoutHostKey.indexOf("plan-invalid");
+    const movedInto422 = [
+      ...withoutHostKey.slice(0, planInvalid + 1),
+      "host-key-mismatch",
+      ...withoutHostKey.slice(planInvalid + 1),
+    ];
+
+    for (const variant of [appended, spliced, movedInto422]) {
+      assert.throws(
+        () => assert.deepEqual(variant, keys),
+        (error: unknown) => {
+          assert.ok(error instanceof assert.AssertionError);
+          const actual = error.actual as readonly string[];
+          const expected = error.expected as readonly string[];
+          const differing = actual.findIndex(
+            (value, index) => value !== expected[index],
+          );
+          assert.notEqual(
+            differing,
+            -1,
+            "the failure names the differing position",
+          );
+          return true;
+        },
+      );
+    }
+  });
+
   it("groups the codes by status", () => {
     const groups: Record<number, string[]> = {};
     for (const [code, status] of Object.entries(errorStatuses)) {
@@ -59,7 +98,11 @@ describe("src/http/contract/errors.test", () => {
     }
     assert.deepEqual(groups[400], ["invalid-request"]);
     assert.deepEqual(groups[401], ["unauthenticated"]);
-    assert.deepEqual(groups[403], ["origin-forbidden", "host-forbidden"]);
+    assert.deepEqual(groups[403], [
+      "origin-forbidden",
+      "host-forbidden",
+      "actor-forbidden",
+    ]);
     assert.deepEqual(groups[404], ["not-found"]);
     assert.deepEqual(groups[409], [
       "stale-revision",
@@ -82,16 +125,10 @@ describe("src/http/contract/errors.test", () => {
     assert.deepEqual(groups[500], ["internal-error"]);
     assert.deepEqual(groups[501], ["not-implemented"]);
     assert.deepEqual(groups[503], ["service-unavailable"]);
-    const sum = Object.values(groups).reduce(
-      (total, codes) => total + codes.length,
-      0,
-    );
-    assert.equal(sum, 22);
   });
 
   it("service-unavailable is 503 and carries no details", () => {
     assert.equal(errorStatuses["service-unavailable"], 503);
-    assert.equal(Object.keys(errorStatuses).length, 22);
     const error = httpError("service-unavailable", "declined");
     assert.equal(error.status, 503);
     assert.deepEqual(errorEnvelope(error), {

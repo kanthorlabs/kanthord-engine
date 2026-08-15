@@ -107,6 +107,8 @@ describe("src/domain/loopback.test", () => {
       Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8")),
     );
     assert.deepEqual(sorted, [
+      "cli/config/generate.ts",
+      "domain/host-authority.ts",
       "domain/loopback.ts",
       "http/contract/system.ts",
       "services/config/convict.ts",

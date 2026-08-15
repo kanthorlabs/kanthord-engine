@@ -3,10 +3,12 @@ import { coreEntities } from "./migration-0001-core-entities.ts";
 import { graphAndPlan } from "./migration-0002-graph-and-plan.ts";
 import { executionAndJournal } from "./migration-0003-execution-and-journal.ts";
 import { migration0004EventIndexes } from "./migration-0004-event-indexes.ts";
+import { migration0005Actor } from "./migration-0005-actor.ts";
 
 export const migrations: readonly Migration[] = [
   coreEntities,
   graphAndPlan,
   executionAndJournal,
   migration0004EventIndexes,
+  migration0005Actor,
 ];

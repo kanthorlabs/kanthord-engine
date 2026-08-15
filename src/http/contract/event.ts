@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { actorKinds } from "../../domain/event.ts";
+import { eventActorKinds } from "../../domain/event.ts";
 import { resource } from "./path.ts";
 import { baselineErrors } from "./error-baseline.ts";
 import { EXAMPLE_AT as A, EXAMPLE_ULID as U } from "./example-literal.ts";
@@ -12,7 +12,7 @@ export const eventListRequest = cursorRequest.extend({
   subjectKind: z.string().min(1).optional(),
   subject: z.string().min(1).optional(),
   type: z.string().min(1).optional(),
-  actorKind: z.enum(actorKinds).optional(),
+  actorKind: z.enum(eventActorKinds).optional(),
   actor: z.string().min(1).optional(),
 });
 
@@ -21,7 +21,7 @@ export const eventView = z.strictObject({
   type: z.string(),
   subjectKind: z.string(),
   subjectId: z.string(),
-  actorKind: z.enum(actorKinds),
+  actorKind: z.enum(eventActorKinds),
   actorId: z.string(),
   payload: z.unknown(),
   createdAt: z.number().int(),
@@ -66,6 +66,7 @@ export const event = operations([
     path: [resource("event")],
     introducedIn: "phase-1",
     status: "routed",
+    allowedActors: ["human"],
     query: eventListRequest,
     response: eventListResponse,
     errors: { ...baselineErrors },

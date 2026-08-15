@@ -6,7 +6,10 @@ import type { Handler } from "./app.ts";
 import { listen } from "./start.ts";
 import { HttpError } from "../contract/errors.ts";
 import { systemDbResponse, systemHealthResponse } from "../contract/system.ts";
-import { unimplementedFor } from "../../../test/helpers/app.ts";
+import {
+  unimplementedFor,
+  BOOTSTRAP_ACTOR_FIXTURE,
+} from "../../../test/helpers/app.ts";
 import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import { reservePort } from "../../../test/helpers/port.ts";
 import { healthHandler } from "./system/health.ts";
@@ -27,6 +30,7 @@ function buildApp() {
     },
     handlers: {},
     unimplemented: unimplementedFor({}),
+    resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
     onInternalError: () => {},
   });
 }
@@ -99,6 +103,7 @@ describe("src/http/server/start.test", () => {
       },
       handlers,
       unimplemented: unimplementedFor(handlers),
+      resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
       onInternalError: () => {},
     });
     const server = await listen(app, { bind: "127.0.0.1", port });

@@ -286,6 +286,53 @@ describe("src/http/contract/coverage.test", () => {
     assert.deepEqual(rows, fieldDecisions);
   });
 
+  it("no route returns a token except actor.register and actor.rotate", () => {
+    function holdsTokenProperty(schema: unknown): boolean {
+      if (schema === null || typeof schema !== "object") return false;
+      const record = schema as Record<string, unknown>;
+      if (
+        record.properties !== null &&
+        typeof record.properties === "object" &&
+        !Array.isArray(record.properties)
+      ) {
+        const props = record.properties as Record<string, unknown>;
+        if (Object.hasOwn(props, "token")) return true;
+        for (const value of Object.values(props)) {
+          if (holdsTokenProperty(value)) return true;
+        }
+      }
+      if (record.items !== undefined && holdsTokenProperty(record.items)) {
+        return true;
+      }
+      if (
+        record.additionalProperties !== undefined &&
+        typeof record.additionalProperties === "object" &&
+        record.additionalProperties !== null &&
+        holdsTokenProperty(record.additionalProperties)
+      ) {
+        return true;
+      }
+      for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+        const arr = record[key];
+        if (Array.isArray(arr) && arr.some(holdsTokenProperty)) return true;
+      }
+      return false;
+    }
+
+    const withToken = registry
+      .filter((entry) => {
+        if (entry.response === undefined) return false;
+        const jsonSchema = z.toJSONSchema(entry.response, {
+          target: "openapi-3.0",
+          io: "output",
+        });
+        return holdsTokenProperty(jsonSchema);
+      })
+      .map((entry) => entry.operationId)
+      .sort();
+    assert.deepEqual(withToken, ["actor.register", "actor.rotate"]);
+  });
+
   it("every phase-1 routed operation declares errors as a superset of baselineErrors, and only the named operations add codes", () => {
     const baselineCodes = Object.keys(baselineErrors).sort();
 
@@ -328,8 +375,8 @@ describe("src/http/contract/coverage.test", () => {
     }
   });
 
-  it("every phase-1 routed operation but blob.show carries a response schema", () => {
-    assert.equal(scoped.length, 23);
+  it("every one of the twenty-eight phase-1 routed operations but blob.show carries a response schema", () => {
+    assert.equal(scoped.length, 28);
     for (const entry of scoped) {
       assert.ok(
         entry.response !== undefined,

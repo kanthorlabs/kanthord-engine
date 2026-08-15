@@ -1,3 +1,4 @@
+import { actor } from "./actor.ts";
 import { credential } from "./credential.ts";
 import { event } from "./event.ts";
 import { execution } from "./execution.ts";
@@ -22,6 +23,7 @@ import { repository } from "./repository.ts";
 import { system } from "./system.ts";
 
 export const registry: readonly Operation[] = [
+  ...actor,
   ...system,
   ...credential,
   ...repository,

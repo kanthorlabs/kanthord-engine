@@ -22,6 +22,12 @@ function validInput(overrides?: Partial<StartableInput>): StartableInput {
     // pair (an empty-content tokenFile, in particular) overrides it
     // explicitly.
     resolvedToken: token,
+    // `allowedHosts` defaults to a non-null list and `port` to a non-zero
+    // value so the two derivation refusals never fire for a pre-existing
+    // case; a case that needs either refusal passes the offending value
+    // explicitly.
+    allowedHosts: ["127.0.0.1:31415"],
+    port: 31415,
     ...overrides,
   };
 }
@@ -441,6 +447,66 @@ describe("src/services/config/refusals.test", () => {
           return true;
         },
       );
+    });
+
+    it("rule 6: null allowedHosts on the bind 0.0.0.0 throws config-refused naming http.allowedHosts and requiring an explicit non-empty list", () => {
+      assert.throws(
+        () =>
+          assertStartable(
+            validInput({ bind: "0.0.0.0", token: "t", allowedHosts: null }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof ConfigError);
+          assert.equal(err.code, "config-refused");
+          assert.match(err.message, /http\.allowedHosts/);
+          assert.match(err.message, /explicit/);
+          assert.match(err.message, /non-empty/);
+          return true;
+        },
+      );
+    });
+
+    it("rule 6: null allowedHosts on the bind :: throws config-refused", () => {
+      assert.throws(
+        () =>
+          assertStartable(
+            validInput({ bind: "::", token: "t", allowedHosts: null }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof ConfigError);
+          assert.equal(err.code, "config-refused");
+          return true;
+        },
+      );
+    });
+
+    it("rule 7: null allowedHosts with a configured port of 0 throws config-refused", () => {
+      assert.throws(
+        () =>
+          assertStartable(
+            validInput({ bind: "127.0.0.1", allowedHosts: null, port: 0 }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof ConfigError);
+          assert.equal(err.code, "config-refused");
+          assert.match(err.message, /http\.allowedHosts/);
+          return true;
+        },
+      );
+    });
+
+    it("rule 6: a non-null allowedHosts on a wildcard bind never triggers the new refusal", () => {
+      const result = assertStartable(
+        validInput({ bind: "0.0.0.0", token: "t", allowedHosts: ["h:1"] }),
+      );
+      assert.equal(result, undefined);
+    });
+
+    it("rule 7: a non-null allowedHosts with port 0 never triggers the new refusal", () => {
+      const result = assertStartable(
+        validInput({ bind: "127.0.0.1", allowedHosts: ["h:1"], port: 0 }),
+      );
+      assert.equal(result, undefined);
     });
   });
 });

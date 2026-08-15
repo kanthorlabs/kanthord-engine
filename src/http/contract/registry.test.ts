@@ -11,18 +11,31 @@ import {
   registry,
   registryFaults,
 } from "./registry.ts";
+import { registeredActorKinds } from "../../domain/actor.ts";
 
 const bytewise = (a: string, b: string): number =>
   Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 
+export const harnessOperations = [
+  "blob.show",
+  "edge.list",
+  "node.list",
+  "node.show",
+  "plan.export",
+  "project.list",
+  "project.show",
+  "project.status",
+  "system.health",
+];
+
 describe("src/http/contract/registry.test", () => {
-  it("registers fifty-four operations", () => {
-    assert.equal(registry.length, 54);
+  it("registers fifty-nine operations", () => {
+    assert.equal(registry.length, 59);
   });
 
   it("sorts the registry bytewise by operationId with no duplicates", () => {
     const ids = registry.map((entry) => entry.operationId);
-    assert.equal(new Set(ids).size, 54);
+    assert.equal(new Set(ids).size, 59);
     for (let i = 0; i < ids.length - 1; i += 1) {
       assert.ok(
         Buffer.compare(Buffer.from(ids[i]!), Buffer.from(ids[i + 1]!)) < 0,
@@ -34,7 +47,7 @@ describe("src/http/contract/registry.test", () => {
   it("counts routed and stubbed entries", () => {
     assert.equal(
       registry.filter((entry) => entry.status === "routed").length,
-      27,
+      32,
     );
     assert.equal(
       registry.filter((entry) => entry.status === "stubbed").length,
@@ -45,7 +58,7 @@ describe("src/http/contract/registry.test", () => {
   it("counts introducedIn values with no post-mvp row", () => {
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-1").length,
-      24,
+      29,
     );
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-2").length,
@@ -80,9 +93,10 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("attaches requests to the eight write routes and responses to the twenty-six routes", () => {
+  it("attaches requests to the nine write routes and responses to the thirty-one routes", () => {
     const withRequest = registry.filter((entry) => entry.request !== undefined);
     assert.deepEqual(withRequest.map((entry) => entry.operationId).sort(), [
+      "actor.register",
       "plan.import",
       "plan.validate",
       "project.create",
@@ -96,6 +110,11 @@ describe("src/http/contract/registry.test", () => {
       (entry) => entry.response !== undefined,
     );
     assert.deepEqual(withResponse.map((entry) => entry.operationId).sort(), [
+      "actor.list",
+      "actor.register",
+      "actor.revoke",
+      "actor.rotate",
+      "actor.show",
       "edge.list",
       "event.list",
       "node.list",
@@ -146,6 +165,7 @@ describe("src/http/contract/registry.test", () => {
         path: [system("health")],
         introducedIn: "phase-1",
         status: "stubbed",
+        allowedActors: ["human"],
         query: registry.find((entry) => entry.operationId === "event.list")
           ?.query,
       },
@@ -164,6 +184,7 @@ describe("src/http/contract/registry.test", () => {
         path: [system("health")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
         response: registry.find((entry) => entry.operationId === "node.list")
           ?.response,
         responseMedia: "application/octet-stream",
@@ -277,6 +298,7 @@ describe("src/http/contract/registry.test", () => {
         path: [system("health")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
       },
       {
         operationId: "dup.op",
@@ -284,6 +306,7 @@ describe("src/http/contract/registry.test", () => {
         path: [system("status")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
       },
     ]);
     assert.deepEqual(
@@ -300,6 +323,7 @@ describe("src/http/contract/registry.test", () => {
         path: [system("health")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
       },
       {
         operationId: "a.two",
@@ -307,6 +331,7 @@ describe("src/http/contract/registry.test", () => {
         path: [system("health")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
       },
     ]);
     assert.ok(
@@ -322,6 +347,7 @@ describe("src/http/contract/registry.test", () => {
         path: [resource("node"), parameter("node")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
       },
       {
         operationId: "n.runs",
@@ -329,6 +355,7 @@ describe("src/http/contract/registry.test", () => {
         path: [resource("node"), sub("run")],
         introducedIn: "phase-2",
         status: "stubbed",
+        allowedActors: ["human"],
       },
     ]);
     assert.ok(faults.some((fault) => fault.reason === "path is ambiguous"));
@@ -346,6 +373,7 @@ describe("src/http/contract/registry.test", () => {
         path: [plural],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
       },
     ]);
     assert.ok(
@@ -366,6 +394,7 @@ describe("src/http/contract/registry.test", () => {
         path: [resource("event"), hash()],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
       },
     ]);
     assert.ok(
@@ -383,6 +412,7 @@ describe("src/http/contract/registry.test", () => {
         path: [resource("node"), parameter("deferred")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
       },
     ]);
     assert.ok(
@@ -400,6 +430,7 @@ describe("src/http/contract/registry.test", () => {
         path: [resource("project"), parameter("project"), resource("project")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
       },
     ]);
     assert.ok(
@@ -417,6 +448,7 @@ describe("src/http/contract/registry.test", () => {
         path: [system("status"), system("status")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
       },
     ]);
     assert.ok(
@@ -445,6 +477,7 @@ describe("src/http/contract/registry.test", () => {
           path,
           introducedIn: "phase-1",
           status: "routed",
+          allowedActors: ["human"],
         },
       ]);
       assert.ok(
@@ -465,6 +498,7 @@ describe("src/http/contract/registry.test", () => {
           path: [resource("repository"), action("inspect")],
           introducedIn: "phase-1",
           status: "routed",
+          allowedActors: ["human"],
         },
       ]),
       [],
@@ -498,6 +532,7 @@ describe("src/http/contract/registry.test", () => {
       path: [system("health")],
       introducedIn: "phase-1",
       status: "routed",
+      allowedActors: ["human"],
     };
     assert.equal(idempotencyOf(entry), "none");
   });
@@ -512,7 +547,7 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("declares exactly the nineteen POST policies the story names", () => {
+  it("declares exactly the twenty-two POST policies the story names", () => {
     const keyed = registry
       .filter((entry) => idempotencyOf(entry) !== "none")
       .map((entry) => entry.operationId)
@@ -520,6 +555,9 @@ describe("src/http/contract/registry.test", () => {
     assert.deepEqual(
       keyed,
       [
+        "actor.register",
+        "actor.revoke",
+        "actor.rotate",
         "plan.import",
         "plan.validate",
         "project.create",
@@ -552,10 +590,10 @@ describe("src/http/contract/registry.test", () => {
     );
   });
 
-  it("counts eighteen memory-policy operations", () => {
+  it("counts twenty-one memory-policy operations", () => {
     assert.equal(
       registry.filter((entry) => idempotencyOf(entry) === "memory").length,
-      18,
+      21,
     );
   });
 
@@ -571,6 +609,7 @@ describe("src/http/contract/registry.test", () => {
         path: [system("health")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
         idempotency: "memory",
         replayable: [200],
       },
@@ -589,6 +628,7 @@ describe("src/http/contract/registry.test", () => {
         path: [system("health")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
         idempotency: "none",
       },
     ]);
@@ -603,6 +643,7 @@ describe("src/http/contract/registry.test", () => {
         path: [resource("project"), parameter("project")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
         idempotency: "durable",
       },
     ]);
@@ -623,6 +664,7 @@ describe("src/http/contract/registry.test", () => {
         path: [resource("project")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
         idempotency: "durable",
       },
     ]);
@@ -666,6 +708,7 @@ describe("src/http/contract/registry.test", () => {
         path: [system("health")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
         replayable: [200],
       },
     ]);
@@ -683,6 +726,7 @@ describe("src/http/contract/registry.test", () => {
         path: [resource("project")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
         idempotency: "memory",
       },
     ]);
@@ -700,6 +744,7 @@ describe("src/http/contract/registry.test", () => {
         path: [resource("project")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
         idempotency: "memory",
         replayable: [],
       },
@@ -726,6 +771,7 @@ describe("src/http/contract/registry.test", () => {
           path: [resource("project")],
           introducedIn: "phase-1",
           status: "routed",
+          allowedActors: ["human"],
           idempotency: "memory",
           replayable,
         },
@@ -746,6 +792,7 @@ describe("src/http/contract/registry.test", () => {
         path: [system("health")],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
         replayable: [200, 200],
       },
     ]);
@@ -771,6 +818,7 @@ describe("src/http/contract/registry.test", () => {
         ],
         introducedIn: "phase-1",
         status: "routed",
+        allowedActors: ["human"],
         idempotency: "durable",
         replayable: [200],
       },
@@ -779,5 +827,58 @@ describe("src/http/contract/registry.test", () => {
       faults.map((fault) => fault.reason),
       ["replayable outcome without a memory policy"],
     );
+  });
+
+  describe("allowedActors", () => {
+    it("declares a non-empty allowedActors on every entry", () => {
+      for (const entry of registry) {
+        assert.ok(
+          entry.allowedActors.length > 0,
+          `${entry.operationId} declares no allowed actor`,
+        );
+      }
+    });
+
+    it("admits the human kind on every entry", () => {
+      for (const entry of registry) {
+        assert.ok(
+          entry.allowedActors.includes("human"),
+          `${entry.operationId} does not admit human`,
+        );
+      }
+    });
+
+    it("admits only registered actor kinds", () => {
+      for (const entry of registry) {
+        for (const kind of entry.allowedActors) {
+          assert.ok(
+            registeredActorKinds.includes(kind),
+            `${entry.operationId} admits the unregistered kind ${kind}`,
+          );
+        }
+      }
+    });
+
+    it("the harness set equals the named nine by bytewise order", () => {
+      const actual = registry
+        .filter((entry) => entry.allowedActors.includes("harness"))
+        .map((entry) => entry.operationId)
+        .sort(bytewise);
+      assert.deepEqual(actual, harnessOperations);
+    });
+
+    it("every operation outside the harness set admits human alone", () => {
+      const set = new Set(harnessOperations);
+      for (const entry of registry) {
+        if (!set.has(entry.operationId)) {
+          assert.deepEqual(entry.allowedActors, ["human"], entry.operationId);
+        }
+      }
+    });
+
+    it("excludes system.status and event.list from the harness set by name", () => {
+      assert.ok(!harnessOperations.includes("system.status"));
+      assert.ok(!harnessOperations.includes("event.list"));
+    });
   });
 });

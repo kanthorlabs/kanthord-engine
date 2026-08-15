@@ -9,6 +9,7 @@ export const errorStatuses = {
   unauthenticated: 401,
   "origin-forbidden": 403,
   "host-forbidden": 403,
+  "actor-forbidden": 403,
   "not-found": 404,
   "stale-revision": 409,
   "illegal-transition": 409,

@@ -11,6 +11,7 @@ One file per table. Every table file holds the question the table answers, its `
 | Table                                     | Question it answers                                                                                                                                             |
 | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`migration`](migration.md)               | is this database at the schema version the binary expects?                                                                                                      |
+| [`actor`](actor.md)                       | who may act, and is that principal still allowed to?                                                                                                            |
 | [`blob`](blob.md)                         | which exact immutable payload did another row cite — a prompt, a profile, a plan document, a diff, a tool trace, a check log, an evidence document or an error? |
 | [`provider`](provider.md)                 | which external accounts are registered, and what does each one need to connect?                                                                                 |
 | [`project`](project.md)                   | which worker kind and which end-to-end binding does work under this project inherit?                                                                            |
@@ -103,7 +104,7 @@ A prefix makes a polymorphic column self-describing. `lease.subject_id`, `check_
 | `event`            | keep                       | Append only, ordered by its ULID                                            |
 | `migration`        | **added**                  | `db status` is a phase 1 deliverable and `npm run verify` calls it          |
 
-Nineteen tables. `migration` is infrastructure and not a domain entity, so the domain count is eighteen.
+Twenty tables. `migration` is infrastructure and not a domain entity, so the domain count is nineteen.
 
 ## Tables that do not exist
 

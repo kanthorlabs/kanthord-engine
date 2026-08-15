@@ -7,6 +7,7 @@ import type { Config, LoadInput, Loaded } from "./index.ts";
 import { ConfigError } from "./index.ts";
 import { searchOrder } from "./search-order.ts";
 import { assertStartable } from "./refusals.ts";
+import { deriveAllowedHosts } from "../../domain/host-authority.ts";
 import { canonicalizeOrigin } from "../../domain/origin.ts";
 
 function nonEmptyString(value: unknown): void {
@@ -16,6 +17,9 @@ function nonEmptyString(value: unknown): void {
 }
 
 function hostList(value: unknown): void {
+  if (value === null) {
+    return;
+  }
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error("must be a non-empty array");
   }
@@ -222,7 +226,10 @@ function buildSchema(): Record<string, unknown> {
   };
 }
 
-function normalizeAllowedHosts(raw: unknown): string[] {
+function normalizeAllowedHosts(raw: unknown): string[] | null {
+  if (raw === null || raw === undefined) {
+    return null;
+  }
   if (typeof raw === "string") {
     return raw
       .split(",")
@@ -339,7 +346,8 @@ export class ConvictConfig implements Config {
     }
 
     const rawHosts = config.get("http.allowedHosts");
-    config.set("http.allowedHosts", normalizeAllowedHosts(rawHosts));
+    const normalizedHosts = normalizeAllowedHosts(rawHosts);
+    config.set("http.allowedHosts", normalizedHosts);
 
     config.set(
       "http.allowedOrigins",
@@ -409,6 +417,8 @@ export class ConvictConfig implements Config {
         tokenFileMode,
         resolvedToken,
         allowedOrigins: config.get("http.allowedOrigins") as string[],
+        allowedHosts: normalizedHosts,
+        port: config.get("http.port") as number,
       });
 
       if (tokenHandle !== undefined) {
@@ -447,6 +457,16 @@ export class ConvictConfig implements Config {
       throw new ConfigError(
         "config-invalid",
         `master key must be exactly 32 bytes, got ${masterKey.length}`,
+      );
+    }
+
+    if (normalizedHosts === null) {
+      config.set(
+        "http.allowedHosts",
+        deriveAllowedHosts({
+          bind: config.get("http.bind") as string,
+          port: config.get("http.port") as number,
+        }),
       );
     }
 

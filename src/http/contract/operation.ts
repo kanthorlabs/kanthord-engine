@@ -1,5 +1,6 @@
 import type { ZodType } from "zod";
 
+import type { RegisteredActorKind } from "../../domain/actor.ts";
 import type { ErrorCode } from "./errors.ts";
 import type { Segment } from "./path.ts";
 
@@ -35,6 +36,7 @@ export type Operation = Readonly<{
   path: readonly Segment[];
   introducedIn: IntroducedIn;
   status: "routed" | "stubbed";
+  allowedActors: readonly RegisteredActorKind[];
   idempotency?: IdempotencyPolicy;
   replayable?: readonly number[];
   successStatus?: number;

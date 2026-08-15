@@ -14,16 +14,20 @@ import {
 } from "./identity.ts";
 
 describe("src/domain/identity.test", () => {
-  it("identityKinds has 17 entries", () => {
-    assert.equal(identityKinds.length, 17);
+  it("identityKinds has 18 entries", () => {
+    assert.equal(identityKinds.length, 18);
   });
 
-  it("identityPrefixes has 17 keys", () => {
-    assert.equal(Object.keys(identityPrefixes).length, 17);
+  it("identityPrefixes has 18 keys", () => {
+    assert.equal(Object.keys(identityPrefixes).length, 18);
   });
 
-  it("all 17 prefixes are unique", () => {
-    assert.equal(new Set(Object.values(identityPrefixes)).size, 17);
+  it("all 18 prefixes are unique", () => {
+    assert.equal(new Set(Object.values(identityPrefixes)).size, 18);
+  });
+
+  it("identityPrefixes.actor is actor", () => {
+    assert.equal(identityPrefixes.actor, "actor");
   });
 
   it("the five renamed prefixes are exact strings", () => {

@@ -8,6 +8,7 @@ export const instruction = operations([
     path: [resource("agent")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
   },
   {
     operationId: "template.list",
@@ -15,6 +16,7 @@ export const instruction = operations([
     path: [resource("template")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
   },
   {
     operationId: "template.show",
@@ -22,6 +24,7 @@ export const instruction = operations([
     path: [resource("template"), parameter("deferred")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
   },
   {
     operationId: "profile.instantiate",
@@ -29,6 +32,7 @@ export const instruction = operations([
     path: [resource("repository"), parameter("repository"), sub("profile")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
     idempotency: "memory",
     replayable: [200],
   },
@@ -38,6 +42,7 @@ export const instruction = operations([
     path: [resource("repository"), parameter("repository"), sub("profile")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
   },
   {
     operationId: "profile.import",
@@ -45,6 +50,7 @@ export const instruction = operations([
     path: [resource("repository"), parameter("repository"), sub("profile")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
   },
   {
     operationId: "profile.verify",
@@ -57,6 +63,7 @@ export const instruction = operations([
     ],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
     idempotency: "memory",
     replayable: [200],
   },
@@ -66,5 +73,6 @@ export const instruction = operations([
     path: [resource("instruction"), action("resolve")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
   },
 ]);

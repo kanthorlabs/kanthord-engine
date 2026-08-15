@@ -8,9 +8,10 @@ CREATE TABLE event (
   subject_kind TEXT NOT NULL,                                            -- entity the event is about
   subject_id   TEXT NOT NULL,                                            -- that entity, prefixed
   type         TEXT NOT NULL,                                            -- transition or human decision name
-  actor_kind   TEXT NOT NULL CHECK (actor_kind IN ('human', 'daemon')),  -- who acted
-  actor_id     TEXT NOT NULL,                                            -- which human, or which daemon instance
-  payload_json TEXT NOT NULL                                             -- the fields of this event type, small and fixed in shape
+  actor_kind   TEXT NOT NULL CHECK (actor_kind IN ('human', 'daemon', 'harness')),  -- who acted
+  actor_id     TEXT NOT NULL,                                            -- which human, which daemon instance, or which harness
+  payload_json TEXT NOT NULL,                                            -- the fields of this event type, small and fixed in shape
+  CHECK (actor_kind <> 'harness' OR actor_id LIKE 'actor\_%' ESCAPE '\')
 ) STRICT;
 ```
 

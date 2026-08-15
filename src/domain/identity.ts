@@ -18,6 +18,7 @@ export const identityKinds = [
   "checkResult",
   "gitOperation",
   "event",
+  "actor",
 ] as const;
 
 export type IdentityKind = (typeof identityKinds)[number];
@@ -40,6 +41,7 @@ export const identityPrefixes: Readonly<Record<IdentityKind, string>> = {
   checkResult: "check",
   gitOperation: "gitop",
   event: "event",
+  actor: "actor",
 };
 
 export const ulidPattern = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;

@@ -1,6 +1,7 @@
 import type { IdentityKind } from "../../domain/identity.ts";
 
 export const resourceSegments = [
+  "actor",
   "agent",
   "attempt",
   "blob",
@@ -45,6 +46,8 @@ export const actionSegments = [
   "reconcile",
   "rename",
   "resolve",
+  "revoke",
+  "rotate",
   "unblock",
   "validate",
   "verify",

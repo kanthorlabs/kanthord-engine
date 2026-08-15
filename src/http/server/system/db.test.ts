@@ -6,7 +6,10 @@ import type { ReadMigrationStatusResult } from "../../../queries/system/read-mig
 import { findOperation } from "../../contract/registry.ts";
 import { systemDbResponse } from "../../contract/system.ts";
 import type { HandlerContext } from "../app.ts";
-import { createTestApp } from "../../../../test/helpers/app.ts";
+import {
+  createTestApp,
+  BOOTSTRAP_ACTOR_FIXTURE,
+} from "../../../../test/helpers/app.ts";
 
 const twoLines: ReadMigrationStatusResult = {
   migrations: [
@@ -104,6 +107,7 @@ describe("src/http/server/system/db.test", () => {
       query: {},
       headers: {},
       body: undefined,
+      actor: BOOTSTRAP_ACTOR_FIXTURE,
     };
 
     assert.deepEqual(handler(context), { status: 200, body: twoLines });

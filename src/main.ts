@@ -32,6 +32,7 @@ import { SqliteStorage } from "./services/storage/sqlite.ts";
 import { StorageError } from "./services/storage/index.ts";
 import { migrations } from "./services/storage/migrations.ts";
 import { AesGcmCrypto } from "./services/crypto/aes-gcm.ts";
+import { NodeCryptoSecret } from "./services/secret/node-crypto.ts";
 import { SqliteEventLog } from "./services/event/sqlite.ts";
 import { SqliteBlobStore } from "./services/blob/sqlite.ts";
 import { UlidIdGenerator } from "./services/ids/ulid.ts";
@@ -44,6 +45,7 @@ import { setDefaultProvider } from "./commands/provider/set-default-provider.ts"
 import { removeProvider } from "./commands/provider/remove-provider.ts";
 import { listProviders } from "./queries/provider/list-provider.ts";
 import { showProvider } from "./queries/provider/show-provider.ts";
+import { resolveActor } from "./queries/actor/resolve-actor.ts";
 import { createProject } from "./commands/project/create-project.ts";
 import { replaceProjectRepositories } from "./commands/project/replace-project-repositories.ts";
 import { listProjects } from "./queries/project/list-project.ts";
@@ -61,6 +63,10 @@ import { listRepositories } from "./queries/repository/list-repository.ts";
 import { showRepository } from "./queries/repository/show-repository.ts";
 import { registerRepository } from "./commands/repository/register-repository.ts";
 import { recoverHome } from "./commands/startup/recover-home.ts";
+import {
+  ensureBootstrapActor,
+  EnsureBootstrapActorError,
+} from "./commands/startup/ensure-bootstrap-actor.ts";
 import { reapOrphans } from "./commands/startup/reap-orphans.ts";
 import { sweepRemnants } from "./commands/startup/sweep-remnants.ts";
 import { reconcileJournal } from "./commands/startup/reconcile-journal.ts";
@@ -93,10 +99,21 @@ import { listEventHandler } from "./http/server/event/list-event.ts";
 import { listEvents } from "./queries/event/list-event.ts";
 import { showBlobHandler } from "./http/server/blob/show-blob.ts";
 import { showBlob } from "./queries/blob/show-blob.ts";
+import { registerActor } from "./commands/actor/register-actor.ts";
+import { revokeActor } from "./commands/actor/revoke-actor.ts";
+import { rotateActorToken } from "./commands/actor/rotate-actor-token.ts";
+import { listActors } from "./queries/actor/list-actor.ts";
+import { showActor } from "./queries/actor/show-actor.ts";
+import { registerActorHandler } from "./http/server/actor/register-actor.ts";
+import { listActorHandler } from "./http/server/actor/list-actor.ts";
+import { showActorHandler } from "./http/server/actor/show-actor.ts";
+import { revokeActorHandler } from "./http/server/actor/revoke-actor.ts";
+import { rotateActorTokenHandler } from "./http/server/actor/rotate-actor-token.ts";
 import { CliError } from "./cli/options.ts";
 import type { MigrateHandler } from "./cli/db/migrate.ts";
 import type { PlanDirectoryDependencies } from "./cli/plan/directory.ts";
 import { buildProgram, type ServeOptions } from "./cli/program.ts";
+import { createSecretFile } from "./cli/secret-file.ts";
 import { createApp, unimplementedFor } from "./http/server/app.ts";
 import { listen } from "./http/server/start.ts";
 import { createShutdown } from "./http/server/shutdown.ts";
@@ -158,6 +175,7 @@ async function serve(options: ServeOptions): Promise<void> {
         home: settings.home,
         pending: storage.status().pending,
       });
+      ensureBootstrapActor({ storage }, { actor: settings.actor });
       const ids = new UlidIdGenerator();
       const graph = new GraphologyGraph();
       const plan = new SqlitePlanStore();
@@ -210,6 +228,7 @@ async function serve(options: ServeOptions): Promise<void> {
         key: settings.masterKey,
         keyVersion: 1,
       });
+      const secret = new NodeCryptoSecret();
       const handlers = {
         "system.health": healthHandler({
           readHealth: () => readHealth({ reporters }),
@@ -231,21 +250,17 @@ async function serve(options: ServeOptions): Promise<void> {
         "provider.register": registerProviderHandler({
           registerProvider: (input) =>
             registerProvider({ storage, crypto, ids, clock, events }, input),
-          actor: settings.actor,
         }),
         "provider.rename": renameProviderHandler({
           renameProvider: (input) =>
             renameProvider({ storage, crypto, clock, events }, input),
-          actor: settings.actor,
         }),
         "provider.setDefault": setDefaultProviderHandler({
           setDefaultProvider: (input) =>
             setDefaultProvider({ storage, crypto, clock, events }, input),
-          actor: settings.actor,
         }),
         "provider.remove": removeProviderHandler({
           removeProvider: (input) => removeProvider({ storage, events }, input),
-          actor: settings.actor,
         }),
         "provider.list": listProviderHandler({
           listProviders: (input) => listProviders({ storage, crypto }, input),
@@ -273,7 +288,6 @@ async function serve(options: ServeOptions): Promise<void> {
               },
               input,
             ),
-          actor: settings.actor,
         }),
         "repository.list": listRepositoryHandler({
           listRepositories: (input) =>
@@ -285,7 +299,6 @@ async function serve(options: ServeOptions): Promise<void> {
         "project.create": createProjectHandler({
           createProject: (input) =>
             createProject({ storage, ids, clock, events }, input),
-          actor: settings.actor,
         }),
         "project.list": listProjectHandler({
           listProjects: (input) => listProjects({ storage }, input),
@@ -299,7 +312,6 @@ async function serve(options: ServeOptions): Promise<void> {
         "project.repositories": replaceProjectRepositoriesHandler({
           replaceProjectRepositories: (input) =>
             replaceProjectRepositories({ storage, clock, events }, input),
-          actor: settings.actor,
         }),
         "node.list": listNodeHandler({
           listNodes: (input) => listNodes({ storage, plan }, input),
@@ -332,10 +344,33 @@ async function serve(options: ServeOptions): Promise<void> {
               { storage, plan, blobs, reader, graph, ids, clock, events },
               input,
             ),
-          actor: settings.actor,
+        }),
+        "actor.register": registerActorHandler({
+          registerActor: (input) =>
+            registerActor({ storage, secret, ids, events, clock }, input),
+          configuredToken: settings.http.token,
+        }),
+        "actor.list": listActorHandler({
+          listActors: (input) => listActors({ storage }, input),
+        }),
+        "actor.show": showActorHandler({
+          showActor: (input) => showActor({ storage }, input),
+        }),
+        "actor.revoke": revokeActorHandler({
+          revokeActor: (input) =>
+            revokeActor({ storage, events, clock }, input),
+        }),
+        "actor.rotate": rotateActorTokenHandler({
+          rotateActorToken: (input) =>
+            rotateActorToken({ storage, secret, events, clock }, input),
         }),
       };
       const unimplemented = unimplementedFor(handlers);
+      const resolveActorFor = (presented: string) =>
+        resolveActor(
+          { storage, secret, configuredToken: settings.http.token },
+          { presented },
+        );
       const app = createApp({
         settings: {
           token: settings.http.token,
@@ -344,6 +379,7 @@ async function serve(options: ServeOptions): Promise<void> {
         },
         handlers,
         unimplemented,
+        resolveActor: resolveActorFor,
         idempotency: {
           ttlSeconds: settings.http.idempotency.ttl,
           joinTimeoutSeconds: settings.http.idempotency.joinTimeout,
@@ -392,6 +428,11 @@ async function serve(options: ServeOptions): Promise<void> {
       }
     }
   } catch (error) {
+    if (error instanceof EnsureBootstrapActorError) {
+      process.stderr.write(`kanthord: ${error.refusal}: ${error.message}\n`);
+      process.exitCode = 1;
+      return;
+    }
     if (
       error instanceof ConfigError ||
       error instanceof HomeLockError ||
@@ -503,6 +544,7 @@ try {
       writeFileSync(path, content, { encoding: "utf8", mode: 0o600 });
       chmodSync(path, 0o600);
     },
+    createSecretFile,
     fs: planFs,
     stdout: writeOut,
     stderr: writeErr,

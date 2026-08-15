@@ -7,7 +7,6 @@ import { toHttpError } from "./refusals.ts";
 
 export type ImportPlanHandlerDependencies = Readonly<{
   importPlan: (input: ImportPlanInput) => ImportPlanResult;
-  actor: string;
 }>;
 
 export function importPlanHandler(
@@ -31,7 +30,7 @@ export function importPlanHandler(
         choices: parsed.data.choices,
         validatedRevision: parsed.data.validatedRevision,
         documentsHash: parsed.data.documentsHash,
-        actor: dependencies.actor,
+        actor: context.actor.id,
       });
       const { retried, ...body } = result;
       void retried;

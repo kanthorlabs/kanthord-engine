@@ -26,6 +26,7 @@ One file per domain. A binding route lives in the file of the scope that owns th
 
 | File                                 | Domain                | Reviewer                     |
 | ------------------------------------ | --------------------- | ---------------------------- |
+| [actor.md](actor.md)                 | actor                 | platform and security        |
 | [system.md](system.md)               | daemon                | architect                    |
 | [credential.md](credential.md)       | global registry       | platform and security        |
 | [repository.md](repository.md)       | global git            | git or release engineer      |
@@ -172,6 +173,7 @@ The CLI routes on `code` and never parses `message`. A block reason, a publish r
 | 401    | `unauthenticated`          | no bearer token, or a wrong one                                          |
 | 403    | `origin-forbidden`         | the request carried an `Origin` header                                   |
 | 403    | `host-forbidden`           | the `Host` header is outside the allow list                              |
+| 403    | `actor-forbidden`          | the caller's actor kind is not admitted for the operation                |
 | 404    | `not-found`                | no such resource, or a `post-mvp` path                                   |
 | 409    | `stale-revision`           | a precondition token no longer matches, or the candidate was invalidated |
 | 409    | `illegal-transition`       | the node state does not allow the command                                |

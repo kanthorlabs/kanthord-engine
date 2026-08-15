@@ -5,7 +5,6 @@ import { toHttpError } from "./refusals.ts";
 
 export type RemoveProviderHandlerDependencies = Readonly<{
   removeProvider: (input: RemoveProviderInput) => Readonly<{ id: string }>;
-  actor: string;
 }>;
 
 export function removeProviderHandler(
@@ -19,7 +18,7 @@ export function removeProviderHandler(
     try {
       const removed = dependencies.removeProvider({
         id,
-        actor: dependencies.actor,
+        actor: context.actor.id,
       });
       return { status: 200, body: removed };
     } catch (error) {

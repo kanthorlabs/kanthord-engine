@@ -47,6 +47,24 @@ export function createMigratedStorage(): TemporaryStorage {
   };
 }
 
+export function createStorageAtVersion(version: number): TemporaryStorage {
+  const temporary = createTemporaryDatabase();
+  const storage = new SqliteStorage({
+    path: temporary.path,
+    clock: createMockClock({ start: 1700000000000, step: 1000 }),
+    migrations: migrations.filter((migration) => migration.version <= version),
+  });
+  storage.migrate();
+  return {
+    storage,
+    path: temporary.path,
+    dispose() {
+      storage.close();
+      temporary.dispose();
+    },
+  };
+}
+
 export function tableCounts(
   storage: Storage,
 ): Readonly<Record<TableName, number>> {
@@ -64,4 +82,25 @@ export function tableCounts(
     }
     return result as Readonly<Record<TableName, number>>;
   });
+}
+
+export function tableRows(
+  storage: Storage,
+  table: TableName,
+): readonly Readonly<Record<string, unknown>>[] {
+  return storage.transact((transaction) =>
+    transaction.all(`SELECT * FROM "${table}" ORDER BY rowid`),
+  ) as readonly Readonly<Record<string, unknown>>[];
+}
+
+export function tableBytes(storage: Storage, table: TableName): Buffer {
+  const rows_ = tableRows(storage, table);
+  return Buffer.from(
+    JSON.stringify(rows_, (key, value) =>
+      value instanceof Uint8Array
+        ? { bytes: Buffer.from(value).toString("base64") }
+        : value,
+    ),
+    "utf8",
+  );
 }

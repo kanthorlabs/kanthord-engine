@@ -6,7 +6,10 @@ import type { ReadHealthResult } from "../../../queries/system/read-health.ts";
 import { findOperation } from "../../contract/registry.ts";
 import { systemHealthResponse } from "../../contract/system.ts";
 import type { HandlerContext } from "../app.ts";
-import { createTestApp } from "../../../../test/helpers/app.ts";
+import {
+  createTestApp,
+  BOOTSTRAP_ACTOR_FIXTURE,
+} from "../../../../test/helpers/app.ts";
 
 const okResult: ReadHealthResult = {
   status: "ok",
@@ -122,6 +125,7 @@ describe("src/http/server/system/health.test", () => {
       query: {},
       headers: {},
       body: undefined,
+      actor: BOOTSTRAP_ACTOR_FIXTURE,
     };
 
     assert.deepEqual(handler(context), { status: 200, body: okResult });

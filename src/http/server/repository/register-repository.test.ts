@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { createTestApp } from "../../../../test/helpers/app.ts";
+import { bootstrapActorId } from "../../../domain/actor.ts";
 import { GitError } from "../../../services/git/index.ts";
 import { RegisterRepositoryError } from "../../../commands/repository/register-repository.ts";
 import type { RegisterRepositoryInput } from "../../../commands/repository/register-repository.ts";
@@ -64,7 +65,7 @@ const validBody = {
 
 const expectedInput: RegisterRepositoryInput = {
   ...validBody,
-  actor: "ulrich",
+  actor: bootstrapActorId,
 };
 
 const daemonHome = "/var/lib/kanthord";
@@ -77,7 +78,6 @@ async function handlerApp(
     handlers: {
       "repository.register": registerRepositoryHandler({
         registerRepository,
-        actor: "ulrich",
       }),
     },
   });

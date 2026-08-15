@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { createTestApp } from "../../../../test/helpers/app.ts";
+import { bootstrapActorId } from "../../../domain/actor.ts";
 import type { ProviderView } from "../../../domain/provider-view.ts";
 import type { RenameProviderInput } from "../../../commands/provider/rename-provider.ts";
 import { RenameProviderError } from "../../../commands/provider/rename-provider.ts";
@@ -25,7 +26,7 @@ const view: ProviderView = {
 };
 
 describe("src/http/server/credential/rename-provider.test", () => {
-  it("POST /v1/provider/<id>/rename with a valid body answers 200 with the view and passes the parsed id, name and the configured actor", async () => {
+  it("POST /v1/provider/<id>/rename with a valid body answers 200 with the view and passes the parsed id, name and the resolved actor", async () => {
     let called: RenameProviderInput | undefined;
     const app = await createTestApp({
       handlers: {
@@ -34,7 +35,6 @@ describe("src/http/server/credential/rename-provider.test", () => {
             called = input;
             return view;
           },
-          actor: "ulrich",
         }),
       },
     });
@@ -58,7 +58,7 @@ describe("src/http/server/credential/rename-provider.test", () => {
     assert.deepEqual(called, {
       id: providerId,
       name: "github-release",
-      actor: "ulrich",
+      actor: bootstrapActorId,
     });
   });
 
@@ -72,7 +72,6 @@ describe("src/http/server/credential/rename-provider.test", () => {
               `no provider ${providerId}`,
             );
           },
-          actor: "ulrich",
         }),
       },
     });
@@ -94,7 +93,6 @@ describe("src/http/server/credential/rename-provider.test", () => {
               "a provider named github-bot is already registered",
             );
           },
-          actor: "ulrich",
         }),
       },
     });
@@ -115,7 +113,6 @@ describe("src/http/server/credential/rename-provider.test", () => {
             calls += 1;
             return view;
           },
-          actor: "ulrich",
         }),
       },
     });

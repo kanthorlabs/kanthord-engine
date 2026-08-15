@@ -2,6 +2,7 @@ import type { Context, Next } from "koa";
 
 import { httpError } from "../contract/errors.ts";
 import { idempotencyOf } from "../contract/operation.ts";
+import type { AuthenticatedState } from "./auth.ts";
 import type { RoutedState } from "./route.ts";
 import { materializeError } from "./envelope.ts";
 import { classifyOutcome } from "./idempotency-record.ts";
@@ -90,6 +91,7 @@ export function createIdempotency(
     const key = recordKey({
       operationId: match.operation.operationId,
       parameters: match.parameters,
+      actorId: (context.state as AuthenticatedState).actor.id,
       key: read.key,
     });
     const outcome = store.reserve(key, print);

@@ -9,7 +9,6 @@ export type ReplaceProjectRepositoriesHandlerDependencies = Readonly<{
   replaceProjectRepositories: (
     input: ReplaceProjectRepositoriesInput,
   ) => ProjectView;
-  actor: string;
 }>;
 
 export function replaceProjectRepositoriesHandler(
@@ -31,7 +30,7 @@ export function replaceProjectRepositoriesHandler(
       const view = dependencies.replaceProjectRepositories({
         id,
         repositories: parsed.data.repositories,
-        actor: dependencies.actor,
+        actor: context.actor.id,
       });
       return { status: 200, body: view };
     } catch (error) {

@@ -2,6 +2,8 @@ import type supertest from "supertest";
 
 import { loopbackAgent } from "./agent.ts";
 
+import { bootstrapActorId } from "../../src/domain/actor.ts";
+import type { ActorRow } from "../../src/domain/actor.ts";
 import { createApp, unimplementedFor } from "../../src/http/server/app.ts";
 import type { Handler } from "../../src/http/server/app.ts";
 import { defaultIdempotencySettings } from "../../src/http/server/idempotency-store.ts";
@@ -12,10 +14,39 @@ import type {
 
 export { unimplementedFor };
 
+export const BOOTSTRAP_ACTOR_FIXTURE: ActorRow = {
+  id: bootstrapActorId,
+  kind: "human",
+  name: "bootstrap",
+  tokenSha256: null,
+  registeredBy: null,
+  createdAt: 0,
+  revokedAt: null,
+  revokedBy: null,
+};
+
+export const HARNESS_ACTOR_FIXTURE: ActorRow = {
+  id: "actor_01JQ8ZAN9P0ABCDEFGHJKMNPQR",
+  kind: "harness",
+  name: "harness-a",
+  tokenSha256: new Uint8Array(32),
+  registeredBy: bootstrapActorId,
+  createdAt: 1720000000000,
+  revokedAt: null,
+  revokedBy: null,
+};
+
+export const HARNESS_ACTOR_FIXTURE_B: ActorRow = {
+  ...HARNESS_ACTOR_FIXTURE,
+  id: "actor_01JQ8ZAN9P0ABCDEFGHJKMNPQS",
+  name: "harness-b",
+};
+
 export type TestAppOverrides = Readonly<{
   token?: string;
   allowedHosts?: readonly string[];
   allowedOrigins?: readonly string[];
+  resolveActor?: (presented: string) => ActorRow | null;
   handlers?: Readonly<Record<string, Handler>>;
   onInternalError?: (error: unknown) => void;
   idempotency?: IdempotencySettings;
@@ -76,6 +107,8 @@ export async function createTestApp(
   const token = overrides?.token ?? "test-token";
   const allowedHosts = overrides?.allowedHosts ?? ["kanthord.test"];
   const allowedOrigins = overrides?.allowedOrigins ?? [];
+  const resolveActor =
+    overrides?.resolveActor ?? (() => BOOTSTRAP_ACTOR_FIXTURE);
   const handlers = overrides?.handlers ?? {};
   const captured: unknown[] = [];
   const onInternalError =
@@ -88,6 +121,7 @@ export async function createTestApp(
   const schedule = overrides?.schedule ?? (() => () => {});
   const app = createApp({
     settings: { token, allowedHosts, allowedOrigins },
+    resolveActor,
     handlers,
     unimplemented: unimplementedFor(handlers),
     onInternalError,

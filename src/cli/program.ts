@@ -23,6 +23,12 @@ import { registerProjectRepository } from "./project/repository.ts";
 import { registerRepositoryRegister } from "./repository/register.ts";
 import { registerRepositoryShow } from "./repository/show.ts";
 import { registerRun } from "./run.ts";
+import type { SecretFileSink } from "./secret-file.ts";
+import { registerActorList } from "./actor/list.ts";
+import { registerActorRegister } from "./actor/register.ts";
+import { registerActorRevoke } from "./actor/revoke.ts";
+import { registerActorRotate } from "./actor/rotate.ts";
+import { registerActorShow } from "./actor/show.ts";
 import { registerStatus } from "./status.ts";
 
 export type ServeOptions = Readonly<{
@@ -37,6 +43,7 @@ export type ProgramDependencies = Readonly<{
   username: string;
   randomBytes: (size: number) => Buffer;
   writeFile: (path: string, content: string) => void;
+  createSecretFile: (path: string) => SecretFileSink;
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
@@ -66,6 +73,8 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     randomBytes: dependencies.randomBytes,
     writeFile: dependencies.writeFile,
     stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
   });
 
   program
@@ -189,6 +198,43 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     client,
     cwd: dependencies.cwd,
     fs: dependencies.fs,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+  });
+  registerActorRegister({
+    program,
+    client,
+    createSecretFile: dependencies.createSecretFile,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+  });
+  registerActorList({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+  });
+  registerActorShow({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+  });
+  registerActorRevoke({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+  });
+  registerActorRotate({
+    program,
+    client,
+    createSecretFile: dependencies.createSecretFile,
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,

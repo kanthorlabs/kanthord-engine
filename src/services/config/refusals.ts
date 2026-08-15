@@ -1,4 +1,8 @@
 import { ConfigError } from "./index.ts";
+import {
+  explicitAllowedHostsRequired,
+  isWildcardBind,
+} from "../../domain/host-authority.ts";
 import { isLoopbackHost as isLoopback } from "../../domain/loopback.ts";
 
 export { isLoopbackHost as isLoopback } from "../../domain/loopback.ts";
@@ -13,6 +17,8 @@ export type StartableInput = Readonly<{
   tokenFileMode: number | undefined;
   resolvedToken: string;
   allowedOrigins: readonly string[];
+  allowedHosts: readonly string[] | null;
+  port: number;
 }>;
 
 export function assertStartable(input: StartableInput): void {
@@ -81,5 +87,13 @@ export function assertStartable(input: StartableInput): void {
       "config-refused",
       "a non-empty http.allowedOrigins requires http.token",
     );
+  }
+
+  if (input.allowedHosts === null && isWildcardBind(input.bind)) {
+    throw new ConfigError("config-refused", explicitAllowedHostsRequired);
+  }
+
+  if (input.allowedHosts === null && input.port === 0) {
+    throw new ConfigError("config-refused", explicitAllowedHostsRequired);
   }
 }

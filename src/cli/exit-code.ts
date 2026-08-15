@@ -10,6 +10,7 @@ export const exitCodes: Readonly<Record<ErrorCode, number>> = {
   unauthenticated: 120,
   "origin-forbidden": 130,
   "host-forbidden": 131,
+  "actor-forbidden": 132,
   "not-found": 140,
   "stale-revision": 150,
   "illegal-transition": 151,

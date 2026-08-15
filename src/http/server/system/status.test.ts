@@ -6,7 +6,10 @@ import type { ReadStatusResult } from "../../../queries/system/read-status.ts";
 import { findOperation } from "../../contract/registry.ts";
 import { systemStatusResponse } from "../../contract/system.ts";
 import type { HandlerContext } from "../app.ts";
-import { createTestApp } from "../../../../test/helpers/app.ts";
+import {
+  createTestApp,
+  BOOTSTRAP_ACTOR_FIXTURE,
+} from "../../../../test/helpers/app.ts";
 
 const fixture: ReadStatusResult = {
   version: "27.8.1",
@@ -113,6 +116,7 @@ describe("src/http/server/system/status.test", () => {
       query: {},
       headers: {},
       body: { unused: true },
+      actor: BOOTSTRAP_ACTOR_FIXTURE,
     };
 
     assert.deepEqual(handler(context), { status: 200, body: fixture });

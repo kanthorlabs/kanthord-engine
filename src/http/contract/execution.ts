@@ -8,6 +8,7 @@ export const execution = operations([
     path: [resource("project"), parameter("project"), sub("run")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
     idempotency: "memory",
     replayable: [200],
   },
@@ -17,6 +18,7 @@ export const execution = operations([
     path: [resource("run"), parameter("run"), action("cancel")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
     idempotency: "memory",
     replayable: [200],
   },
@@ -26,6 +28,7 @@ export const execution = operations([
     path: [resource("run")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
   },
   {
     operationId: "run.show",
@@ -33,6 +36,7 @@ export const execution = operations([
     path: [resource("run"), parameter("run")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
   },
   {
     operationId: "node.attempts",
@@ -40,6 +44,7 @@ export const execution = operations([
     path: [resource("node"), parameter("node"), sub("attempt")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
   },
   {
     operationId: "attempt.show",
@@ -47,6 +52,7 @@ export const execution = operations([
     path: [resource("attempt"), parameter("attempt")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
   },
   {
     operationId: "node.checks",
@@ -54,6 +60,7 @@ export const execution = operations([
     path: [resource("node"), parameter("node"), sub("check")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
   },
   {
     operationId: "worker.list",
@@ -61,5 +68,6 @@ export const execution = operations([
     path: [resource("worker")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
   },
 ]);

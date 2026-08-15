@@ -60,6 +60,7 @@ export function fingerprint(input: FingerprintInput): string {
 export type RecordKeyInput = Readonly<{
   operationId: string;
   parameters: Readonly<Record<string, string>>;
+  actorId: string;
   key: string;
 }>;
 
@@ -69,6 +70,6 @@ export function recordKey(input: RecordKeyInput): string {
   );
   const rendered = names
     .map((name) => `${name}=${input.parameters[name] ?? ""}`)
-    .join("");
-  return `${input.operationId}�${rendered}�${input.key}`;
+    .join("\u0001");
+  return `${input.operationId}�${rendered}�${input.actorId}�${input.key}`;
 }

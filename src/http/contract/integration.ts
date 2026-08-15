@@ -8,6 +8,7 @@ export const integration = operations([
     path: [resource("node"), parameter("node"), sub("approval")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
   },
   {
     operationId: "node.approve",
@@ -15,6 +16,7 @@ export const integration = operations([
     path: [resource("node"), parameter("node"), action("approve")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
     idempotency: "memory",
     replayable: [200],
   },
@@ -24,6 +26,7 @@ export const integration = operations([
     path: [resource("repository"), parameter("repository"), action("publish")],
     introducedIn: "phase-2",
     status: "stubbed",
+    allowedActors: ["human"],
     idempotency: "memory",
     replayable: [200],
   },
@@ -33,5 +36,6 @@ export const integration = operations([
     path: [resource("git-operation")],
     introducedIn: "phase-3",
     status: "stubbed",
+    allowedActors: ["human"],
   },
 ]);

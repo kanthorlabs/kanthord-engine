@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { createTestApp } from "../../../../test/helpers/app.ts";
+import { bootstrapActorId } from "../../../domain/actor.ts";
 import type { RemoveProviderInput } from "../../../commands/provider/remove-provider.ts";
 import type { ProviderRemovalBlocker } from "../../../commands/provider/remove-provider.ts";
 import { RemoveProviderError } from "../../../commands/provider/remove-provider.ts";
@@ -18,7 +19,7 @@ const blockers: readonly ProviderRemovalBlocker[] = [
 ];
 
 describe("src/http/server/credential/remove-provider.test", () => {
-  it("DELETE /v1/provider/<id> answers 200 with the removed id and passes the parsed id and the configured actor", async () => {
+  it("DELETE /v1/provider/<id> answers 200 with the removed id and passes the parsed id and the resolved actor", async () => {
     let called: RemoveProviderInput | undefined;
     const app = await createTestApp({
       handlers: {
@@ -27,7 +28,6 @@ describe("src/http/server/credential/remove-provider.test", () => {
             called = input;
             return { id: providerId };
           },
-          actor: "ulrich",
         }),
       },
     });
@@ -39,7 +39,7 @@ describe("src/http/server/credential/remove-provider.test", () => {
     assert.throws(() =>
       providerRemoveResponse.parse({ ...response.body, credential: "secret" }),
     );
-    assert.deepEqual(called, { id: providerId, actor: "ulrich" });
+    assert.deepEqual(called, { id: providerId, actor: bootstrapActorId });
   });
 
   it("an unknown id refusal answers 404 not-found with the refusal message", async () => {
@@ -52,7 +52,6 @@ describe("src/http/server/credential/remove-provider.test", () => {
               `no provider ${providerId}`,
             );
           },
-          actor: "ulrich",
         }),
       },
     });
@@ -73,7 +72,6 @@ describe("src/http/server/credential/remove-provider.test", () => {
               blockers,
             );
           },
-          actor: "ulrich",
         }),
       },
     });
