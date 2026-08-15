@@ -20,6 +20,7 @@ import { graphAndPlan } from "./migration-0002-graph-and-plan.ts";
 import { executionAndJournal } from "./migration-0003-execution-and-journal.ts";
 import { migration0004EventIndexes } from "./migration-0004-event-indexes.ts";
 import { migration0005Actor } from "./migration-0005-actor.ts";
+import { migration0006RevisionOrigin } from "./migration-0006-revision-origin.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -42,6 +43,9 @@ const BLOCK_REASONS = [
   "e2e-failed",
   "abandoned",
 ] as const;
+
+const historicalPlanRevisionStatement =
+  "CREATE TABLE plan_revision ( id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES project(id), parent_id TEXT REFERENCES plan_revision(id), import_id TEXT NOT NULL, submitted_blob TEXT NOT NULL REFERENCES blob(hash), choices_blob TEXT NOT NULL REFERENCES blob(hash), accepted_blob TEXT NOT NULL REFERENCES blob(hash), UNIQUE (project_id, import_id) ) STRICT";
 
 type Context = Readonly<{
   storage: SqliteStorage;
@@ -205,17 +209,17 @@ const insertRevision = (
 };
 
 describe("src/services/storage/migration-0002-graph-and-plan.test", () => {
-  it("parity: the three statements reproduce the three proposal tables verbatim, in order", () => {
+  it("parity: node and edge match the proposal, and plan_revision matches the frozen version-2 DDL", () => {
     const normalize = (sql: string): readonly string[] =>
       sql
         .split(";")
         .map((part) => part.replace(/\s+/g, " ").trim())
         .filter((part) => part.length > 0);
 
-    assert.deepEqual(
-      graphAndPlan.statements.flatMap(normalize),
-      ["plan_revision", "node", "edge"].flatMap(proposalStatements),
-    );
+    assert.deepEqual(graphAndPlan.statements.flatMap(normalize), [
+      historicalPlanRevisionStatement,
+      ...["node", "edge"].flatMap(proposalStatements),
+    ]);
   });
 
   it("graphAndPlan carries version 2 and the name migration.md declares", () => {
@@ -230,13 +234,14 @@ describe("src/services/storage/migration-0002-graph-and-plan.test", () => {
     assert.ok(migrationDoc.includes("0002-graph-and-plan"));
   });
 
-  it("migrations holds exactly coreEntities, graphAndPlan, executionAndJournal, migration0004EventIndexes and migration0005Actor", () => {
+  it("migrations holds exactly coreEntities, graphAndPlan, executionAndJournal, migration0004EventIndexes, migration0005Actor and migration0006RevisionOrigin", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
       executionAndJournal,
       migration0004EventIndexes,
       migration0005Actor,
+      migration0006RevisionOrigin,
     ]);
   });
 

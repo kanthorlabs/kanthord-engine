@@ -36,9 +36,27 @@ describe("src/http/contract/path.test", () => {
 
   it("pins the closed-array sizes", () => {
     assert.equal(resourceSegments.length, 14);
-    assert.equal(subresourceSegments.length, 14);
-    assert.equal(actionSegments.length, 17);
+    assert.equal(subresourceSegments.length, 15);
+    assert.equal(actionSegments.length, 19);
     assert.equal(systemSegments.length, 3);
+  });
+
+  it("node is a subresource segment and update and delete are action segments", () => {
+    assert.ok(subresourceSegments.includes("node"));
+    assert.ok(actionSegments.includes("update"));
+    assert.ok(actionSegments.includes("delete"));
+    assert.equal(
+      renderPath([resource("project"), parameter("project"), sub("node")]),
+      "/v1/project/:id/node",
+    );
+    assert.equal(
+      renderPath([resource("node"), parameter("node"), action("update")]),
+      "/v1/node/:id/update",
+    );
+    assert.equal(
+      renderPath([resource("node"), parameter("node"), action("delete")]),
+      "/v1/node/:id/delete",
+    );
   });
 
   it("keeps every resource and subresource segment singular", () => {

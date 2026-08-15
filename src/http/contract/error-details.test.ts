@@ -9,6 +9,7 @@ import {
   credentialRejectedDetails,
   hostKeyMismatchDetails,
   idempotencyMismatchDetails,
+  illegalTransitionDetails,
   invalidRequestDetails,
   needsReconcileDetails,
   planInvalidDetails,
@@ -17,32 +18,82 @@ import {
 
 describe("src/http/contract/error-details.test", () => {
   describe("staleRevisionDetails", () => {
-    it("parses expected and current as strings", () => {
+    it("parses guard, expected and actual as strings", () => {
       const parsed = staleRevisionDetails.parse({
+        guard: "project",
         expected: "revision_a",
-        current: "revision_b",
+        actual: "revision_b",
       });
       assert.deepEqual(parsed, {
+        guard: "project",
         expected: "revision_a",
-        current: "revision_b",
+        actual: "revision_b",
       });
     });
 
-    it("parses both fields null", () => {
+    it("parses the node guard", () => {
       const parsed = staleRevisionDetails.parse({
-        expected: null,
-        current: null,
+        guard: "node",
+        expected: "revision_a",
+        actual: "revision_b",
       });
-      assert.deepEqual(parsed, { expected: null, current: null });
+      assert.deepEqual(parsed, {
+        guard: "node",
+        expected: "revision_a",
+        actual: "revision_b",
+      });
+    });
+
+    it("parses both revision fields null", () => {
+      const parsed = staleRevisionDetails.parse({
+        guard: "project",
+        expected: null,
+        actual: null,
+      });
+      assert.deepEqual(parsed, {
+        guard: "project",
+        expected: null,
+        actual: null,
+      });
     });
 
     it("rejects a missing expected", () => {
-      assert.throws(() => staleRevisionDetails.parse({ current: "x" }));
+      assert.throws(() =>
+        staleRevisionDetails.parse({ guard: "project", actual: "x" }),
+      );
     });
 
-    it("rejects an unknown key", () => {
+    it("rejects a missing guard", () => {
       assert.throws(() =>
-        staleRevisionDetails.parse({ expected: "a", current: "b", extra: 1 }),
+        staleRevisionDetails.parse({ expected: "a", actual: "b" }),
+      );
+    });
+
+    it("rejects an unknown guard value", () => {
+      assert.throws(() =>
+        staleRevisionDetails.parse({
+          guard: "plan",
+          expected: "a",
+          actual: "b",
+        }),
+      );
+    });
+
+    it("rejects the pre-epic current member and an unknown key", () => {
+      assert.throws(() =>
+        staleRevisionDetails.parse({
+          guard: "project",
+          expected: "a",
+          current: "b",
+        }),
+      );
+      assert.throws(() =>
+        staleRevisionDetails.parse({
+          guard: "project",
+          expected: "a",
+          actual: "b",
+          extra: 1,
+        }),
       );
     });
   });
@@ -82,41 +133,97 @@ describe("src/http/contract/error-details.test", () => {
   });
 
   describe("bindingInUseDetails", () => {
-    it("parses one blocker of each of the four kinds", () => {
-      for (const blocker of [
-        { kind: "default-chain" },
-        { kind: "project-binding", projectId: "project_a" },
-        { kind: "repository", repositoryId: "repository_a" },
-        { kind: "attempt", attemptId: "attempt_a" },
-      ]) {
-        const parsed = bindingInUseDetails.parse({ blockers: [blocker] });
-        assert.deepEqual(parsed, { blockers: [blocker] });
-      }
+    it("parses one nodeId and blocker pair", () => {
+      const parsed = bindingInUseDetails.parse({
+        blockers: [{ nodeId: "task_a", blocker: "workspace" }],
+      });
+      assert.deepEqual(parsed, {
+        blockers: [{ nodeId: "task_a", blocker: "workspace" }],
+      });
+    });
+
+    it("parses several pairs", () => {
+      const parsed = bindingInUseDetails.parse({
+        blockers: [
+          { nodeId: "task_a", blocker: "run" },
+          { nodeId: "task_a", blocker: "attempt" },
+        ],
+      });
+      assert.deepEqual(parsed, {
+        blockers: [
+          { nodeId: "task_a", blocker: "run" },
+          { nodeId: "task_a", blocker: "attempt" },
+        ],
+      });
     });
 
     it("rejects an empty blocker list", () => {
       assert.throws(() => bindingInUseDetails.parse({ blockers: [] }));
     });
 
-    it("rejects a project-binding blocker missing projectId", () => {
+    it("rejects a blocker missing nodeId", () => {
+      assert.throws(() =>
+        bindingInUseDetails.parse({ blockers: [{ blocker: "run" }] }),
+      );
+    });
+
+    it("rejects a blocker missing blocker", () => {
+      assert.throws(() =>
+        bindingInUseDetails.parse({ blockers: [{ nodeId: "task_a" }] }),
+      );
+    });
+
+    it("rejects an unknown blocker key", () => {
       assert.throws(() =>
         bindingInUseDetails.parse({
-          blockers: [{ kind: "project-binding" }],
+          blockers: [{ nodeId: "task_a", blocker: "run", kind: "nope" }],
         }),
       );
     });
 
-    it("rejects an attempt blocker missing attemptId", () => {
+    it("rejects the pre-epic kind-based blocker shape", () => {
       assert.throws(() =>
         bindingInUseDetails.parse({
-          blockers: [{ kind: "attempt" }],
+          blockers: [{ kind: "repository", repositoryId: "repo_a" }],
         }),
       );
     });
+  });
 
-    it("rejects an unknown blocker kind", () => {
+  describe("illegalTransitionDetails", () => {
+    it("parses one node with its state", () => {
+      const parsed = illegalTransitionDetails.parse({
+        nodes: [{ id: "task_a", state: "running" }],
+      });
+      assert.deepEqual(parsed, { nodes: [{ id: "task_a", state: "running" }] });
+    });
+
+    it("parses several nodes", () => {
+      const parsed = illegalTransitionDetails.parse({
+        nodes: [
+          { id: "task_a", state: "done" },
+          { id: "task_b", state: "partial" },
+        ],
+      });
+      assert.deepEqual(parsed, {
+        nodes: [
+          { id: "task_a", state: "done" },
+          { id: "task_b", state: "partial" },
+        ],
+      });
+    });
+
+    it("rejects a node missing its state", () => {
       assert.throws(() =>
-        bindingInUseDetails.parse({ blockers: [{ kind: "nope" }] }),
+        illegalTransitionDetails.parse({ nodes: [{ id: "task_a" }] }),
+      );
+    });
+
+    it("rejects an unregistered state", () => {
+      assert.throws(() =>
+        illegalTransitionDetails.parse({
+          nodes: [{ id: "task_a", state: "exploded" }],
+        }),
       );
     });
   });

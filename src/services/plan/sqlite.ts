@@ -5,10 +5,13 @@ import type { NodeKind, NodeState } from "../../domain/state.ts";
 import type { Transaction } from "../storage/index.ts";
 import type { Readiness } from "../readiness/index.ts";
 import type { ReadinessTransition } from "../../domain/readiness.ts";
+import type { RevisionOrigin } from "../../domain/plan-revision.ts";
+import { executionBlockers } from "../../domain/plan-graph.ts";
 import type {
   ContainmentFacts,
   StoredEdge,
   StoredNode,
+  SubtreeExecutionFact,
   ValidationContext,
 } from "../../domain/plan-graph.ts";
 import type {
@@ -26,13 +29,15 @@ const NODE_COLUMNS =
 const SELECT_NODE = "SELECT " + NODE_COLUMNS + " FROM node";
 
 const SELECT_REVISION =
-  "SELECT id, parent_id, import_id, submitted_blob, choices_blob, accepted_blob FROM plan_revision";
+  "SELECT id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob FROM plan_revision";
 
 const UPDATE_NODE_STATE =
   "UPDATE node SET state = ?, updated_at = ? WHERE id = ? AND state = ?";
 
 const UPDATE_NODE_STATE_AND_REASON =
   "UPDATE node SET state = ?, block_reason = ?, updated_at = ? WHERE id = ? AND state = ?";
+
+const DELETE_NODE = "DELETE FROM node WHERE id = ?";
 
 const INSERT_NODE =
   "INSERT INTO node (" +
@@ -66,9 +71,10 @@ type EdgeRow = Readonly<{
 type RevisionRow = Readonly<{
   id: string;
   parent_id: string | null;
-  import_id: string;
-  submitted_blob: string;
-  choices_blob: string;
+  origin: RevisionOrigin;
+  import_id: string | null;
+  submitted_blob: string | null;
+  choices_blob: string | null;
   accepted_blob: string;
 }>;
 
@@ -199,6 +205,7 @@ export class SqlitePlanStore implements PlanStore {
     return rows.map((row) => ({
       id: row.id,
       parentId: row.parent_id,
+      origin: row.origin,
       importId: row.import_id,
       submittedBlob: row.submitted_blob,
       choicesBlob: row.choices_blob,
@@ -221,6 +228,7 @@ export class SqlitePlanStore implements PlanStore {
     return {
       id: row.id,
       parentId: row.parent_id,
+      origin: row.origin,
       importId: row.import_id,
       submittedBlob: row.submitted_blob,
       choicesBlob: row.choices_blob,
@@ -244,6 +252,16 @@ export class SqlitePlanStore implements PlanStore {
       boundRepositories: boundRows.map((row) => row.name),
       knownRepositories: knownRows.map((row) => row.name),
     };
+  }
+
+  readRepositoryName(
+    transaction: Transaction,
+    repositoryId: string,
+  ): string | null {
+    const row = transaction.get("SELECT name FROM repository WHERE id = ?", [
+      repositoryId,
+    ]) as Readonly<{ name: string }> | undefined;
+    return row === undefined ? null : row.name;
   }
 
   readContainmentFacts(
@@ -302,16 +320,99 @@ export class SqlitePlanStore implements PlanStore {
     };
   }
 
+  readSubtree(transaction: Transaction, nodeId: string): readonly string[] {
+    const rows = transaction.all(
+      "WITH RECURSIVE descendant(id, depth) AS (SELECT ?, 0 UNION ALL SELECT n.id, d.depth + 1 FROM node n JOIN descendant d ON n.parent_id = d.id) SELECT id FROM descendant ORDER BY depth DESC, id ASC",
+      [nodeId],
+    ) as readonly Readonly<{ id: string }>[];
+    return rows.map((row) => row.id);
+  }
+
+  readSubtreeExecutionFacts(
+    transaction: Transaction,
+    nodeId: string,
+  ): readonly SubtreeExecutionFact[] {
+    const rows = transaction.all(
+      "WITH RECURSIVE descendant(id) AS (SELECT ? UNION ALL SELECT n.id FROM node n JOIN descendant d ON n.parent_id = d.id) SELECT id FROM descendant",
+      [nodeId],
+    ) as readonly Readonly<{ id: string }>[];
+    const ids = rows.map((row) => row.id);
+    const inClause = "IN (" + ids.map(() => "?").join(", ") + ")";
+    const queries: readonly Readonly<{
+      blocker: SubtreeExecutionFact["blocker"];
+      sql: string;
+    }>[] = [
+      {
+        blocker: "lease",
+        sql:
+          "SELECT subject_id AS node_id FROM lease WHERE subject_kind = 'node' AND subject_id " +
+          inClause,
+      },
+      {
+        blocker: "workspace",
+        sql: "SELECT node_id FROM workspace WHERE node_id " + inClause,
+      },
+      {
+        blocker: "run",
+        sql: "SELECT node_id FROM run WHERE node_id " + inClause,
+      },
+      {
+        blocker: "attempt",
+        sql:
+          "SELECT r.node_id AS node_id FROM attempt a JOIN run r ON r.id = a.run_id WHERE r.node_id " +
+          inClause,
+      },
+      {
+        blocker: "commit",
+        sql: "SELECT node_id FROM candidate WHERE node_id " + inClause,
+      },
+      {
+        blocker: "check-result",
+        sql: "SELECT node_id FROM check_result WHERE node_id " + inClause,
+      },
+      {
+        blocker: "git-operation",
+        sql: "SELECT node_id FROM git_operation WHERE node_id " + inClause,
+      },
+    ];
+    const facts: SubtreeExecutionFact[] = [];
+    const seen = new Set<string>();
+    for (const { blocker, sql } of queries) {
+      const found = transaction.all(sql, ids) as readonly Readonly<{
+        node_id: string;
+      }>[];
+      for (const row of found) {
+        const key = row.node_id + "\u0000" + blocker;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        facts.push({ nodeId: row.node_id, blocker });
+      }
+    }
+    facts.sort((left, right) => {
+      const byNode = Buffer.compare(
+        Buffer.from(left.nodeId, "utf8"),
+        Buffer.from(right.nodeId, "utf8"),
+      );
+      if (byNode !== 0) return byNode;
+      return (
+        executionBlockers.indexOf(left.blocker) -
+        executionBlockers.indexOf(right.blocker)
+      );
+    });
+    return facts;
+  }
+
   insertRevision(
     transaction: Transaction,
     record: RevisionRecord & Readonly<{ projectId: string }>,
   ): void {
     transaction.run(
-      "INSERT INTO plan_revision (id, project_id, parent_id, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO plan_revision (id, project_id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       [
         record.id,
         record.projectId,
         record.parentId,
+        record.origin,
         record.importId,
         record.submittedBlob,
         record.choicesBlob,
@@ -356,6 +457,9 @@ export class SqlitePlanStore implements PlanStore {
     }
     for (const id of input.deleteEdgeIds) {
       this.removeEdge(transaction, id);
+    }
+    for (const id of input.nodeDeletes) {
+      transaction.run(DELETE_NODE, [id]);
     }
     for (const edge of input.insertEdges) {
       this.addEdge(transaction, edge);

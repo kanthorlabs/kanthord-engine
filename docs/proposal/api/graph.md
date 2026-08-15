@@ -19,6 +19,9 @@ Through this API, or through export, edit and re-import. No agent route exists h
 | `node.list`      | `GET /v1/node`                       | phase-1      | routed | P1-E1, `status` lists nodes                            |
 | `node.show`      | `GET /v1/node/:id`                   | phase-1      | routed | state-machine.md                                       |
 | `edge.list`      | `GET /v1/project/:id/edge`           | phase-1      | routed | plan-format.md, `depends_on`                           |
+| `node.create`    | `POST /v1/project/:id/node`          | phase-1      | routed | 013-external-drive-overview.md:23                      |
+| `node.update`    | `POST /v1/node/:id/update`           | phase-1      | routed | 013-external-drive-overview.md:23                      |
+| `node.delete`    | `POST /v1/node/:id/delete`           | phase-1      | routed | 013-external-drive-overview.md:23                      |
 
 ## `plan.validate`
 
@@ -107,6 +110,8 @@ The filters this route will take are `project`, `kind`, `state`, `blockReason` a
 
 Adds the instruction and the acceptance criteria as blob hashes, the bound worker, the repository on an objective, and the revision that last wrote the node. A task always carries an acceptance hash, because `re@1` judges against it; an initiative and an objective never do.
 
+The response also carries the resolved content beside the hashes: `instruction`, `acceptance` and `repo`, the repository **name**. `node.update` replaces the whole editable field set, so a client that changes one field must resend every other one. One `node.show` read therefore fills the whole update body. The hashes stay, because a client that only compares content reads the hash and skips the body.
+
 `discardReason` is present on a discarded node. It is separate from `blockReason`, and approval evidence lists it for every discarded task.
 
 ## `edge.list`
@@ -116,3 +121,29 @@ Returns every dependency edge of the project: the edge id, the two node identiti
 A waiver is not a deletion. `../database/edge.md` keeps the row and stamps `waived_at`, so the human decision stays readable, and readiness ignores the row. A response that returned only endpoint pairs could not show a waived edge at all.
 
 Containment is not an edge here; a node carries its parent.
+
+## `node.create`
+
+Creates one node and appends it to the project graph. The body carries `fromRevision`, the project revision the guard compares, and the kind-specific fields: an initiative declares no `parentId` and no `repo`; an objective declares a `parentId` and a `repo`; a task declares a `parentId`, an `acceptance` and no `repo`. The daemon mints the node identity and the revision identity, renders the whole resulting graph, and stores it as the accepted blob. Readiness applies inside the same write.
+
+The response holds the created node, the new project revision as `revision`, and the completeness findings as `completeness`. A completeness finding commits the write and refuses nothing.
+
+A structural finding is `422 plan-invalid`, with every finding in `details`, and the write commits nothing. A mismatch against the newest project revision is `409 stale-revision`.
+
+## `node.update`
+
+Updates one node. The body replaces the whole editable field set: `title`, `body`, `acceptance`, `parent`, `repo` and `depends_on`. An omitted field is `400 invalid-request`, so the differing-field computation is exact. The body carries `fromRevision`: the node revision for a field-only update, and the project revision for a topology change. A mismatch is `409 stale-revision`, and `details.guard` names the class. A request that changes the stored kind is `400 invalid-request`.
+
+The response holds the new project revision as `revision` and the completeness findings as `completeness`. A completeness finding commits the write and refuses nothing.
+
+`kanthord node update` fills each omitted field from `node.show`, so a human names only what changes. Two fields need an explicit clear, because an omitted option means "keep": `--no-worker` sends `worker: null`, and `--no-depends-on` sends an empty `dependsOn` list. No value string means a clear, so a worker named `none` stays reachable.
+
+A structural finding is `422 plan-invalid`. A structural edit of a node outside `pending`, `ready` and `blocked` is `409 illegal-transition`. A parent or `repo` move of a node that is not containment-movable is `409 binding-in-use`, and `details.blockers` lists what blocks it.
+
+## `node.delete`
+
+Deletes one node and its containment subtree, together with every edge touching the subtree. The body carries `fromRevision`, the project revision the guard compares. The response holds the new project revision as `revision`, the deleted identities as `deleted`, and the completeness findings as `completeness`.
+
+A structural finding is `422 plan-invalid`. A subtree node outside `pending`, `ready` and `blocked` is `409 illegal-transition`, and `details.nodes` names each one. A subtree node that an execution row references, or a subtree edge holding `waived_at`, is `409 binding-in-use`, and `details.blockers` lists what blocks it.
+
+Two concurrency classes exist. A field-only update carries the node revision. A create, a topology change and a delete carry the project revision. A mismatch is `409 stale-revision`, and `details.guard` names the class. A structural finding refuses the write with `422 plan-invalid`. It refuses at `plan.import` and at every per-node write. A completeness finding refuses nothing. It travels in the success body under `completeness`. The two completeness codes are `initiative-without-objective` and `objective-without-task`.

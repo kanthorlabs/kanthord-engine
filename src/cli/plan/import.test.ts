@@ -23,6 +23,7 @@ const REVISIONS: CallResult = {
       {
         id: REVISION_B,
         parentId: "revision_01HZY8QF3M4N5P6R7S8T9V0W1W",
+        origin: "import",
         importId: "imp_01HZY8QF3M4N5P6R7S8T9V0W1W",
         submittedBlob: hash(0),
         choicesBlob: hash(1),
@@ -62,6 +63,7 @@ const IMPORT_RESPONSE: CallResult = {
     revision: REVISION_C,
     documents: VALIDATE_DOCUMENTS,
     absent: [],
+    completeness: [],
   },
 };
 
@@ -661,6 +663,7 @@ describe("src/cli/plan/import.test", () => {
             revision: REVISION_C,
             documents: [],
             absent: ["task_a", "task_b"],
+            completeness: [],
           },
         },
       ],
@@ -682,7 +685,12 @@ describe("src/cli/plan/import.test", () => {
         {
           ok: true as const,
           status: 200,
-          body: { revision: REVISION_C, documents: [], absent: [] },
+          body: {
+            revision: REVISION_C,
+            documents: [],
+            absent: [],
+            completeness: [],
+          },
         },
       ],
       initialFs: AUTHORED,

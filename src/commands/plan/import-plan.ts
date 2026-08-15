@@ -3,6 +3,7 @@ import type {
   EdgeWrite,
   NodeWrite,
   PlanStore,
+  RevisionRecord,
 } from "../../services/plan/index.ts";
 import type { BlobStore } from "../../services/blob/index.ts";
 import type { DocumentReader } from "../../services/document/index.ts";
@@ -29,9 +30,12 @@ import { renderDocumentSet } from "../../domain/plan-render.ts";
 import { canonicalPaths } from "../../domain/plan-canonical-path.ts";
 import {
   buildCandidate,
-  validateCandidate,
+  validateCandidateCompleteness,
+  validateCandidateStructural,
 } from "../../domain/plan-candidate.ts";
 import type { Candidate } from "../../domain/plan-candidate.ts";
+import type { Finding } from "../../domain/plan-finding.ts";
+import { findingScope, sortFindings } from "../../domain/plan-finding.ts";
 import type { ResolvedDocument } from "../../domain/plan-identity.ts";
 import { validateDocuments } from "../../domain/plan-validate.ts";
 import type { NodeState } from "../../domain/state.ts";
@@ -63,6 +67,7 @@ export type ImportPlanResult = Readonly<{
   documents: readonly RenderedDocument[];
   absent: readonly string[];
   retried: boolean;
+  completeness: readonly Finding[];
 }>;
 
 export type ImportPlanRefusal =
@@ -164,7 +169,7 @@ export function importPlan(
       throw new ImportPlanError(
         "stale-revision",
         `the import names ${String(input.fromRevision)}, the newest revision is ${String(newest)}`,
-        { expected: input.fromRevision, current: newest },
+        { guard: "project", expected: input.fromRevision, actual: newest },
       );
     }
     if (input.validatedRevision !== newest) {
@@ -215,11 +220,14 @@ export function importPlan(
         databasePaths: storedPaths(nodes),
       },
     );
-    if (validation.findings.length > 0) {
+    const structuralFindings = validation.findings.filter(
+      (finding) => findingScope[finding.code] === "structural",
+    );
+    if (structuralFindings.length > 0) {
       throw new ImportPlanError(
         "plan-invalid",
         "the submission is not a valid plan",
-        { findings: validation.findings },
+        { findings: structuralFindings },
       );
     }
 
@@ -334,17 +342,21 @@ export function importPlan(
       choices: [...takes.entries()].map(([id, take]) => ({ id, take })),
       blobHashes,
     });
-    const candidateFindings = validateCandidate(
+    const candidateStructural = validateCandidateStructural(
       { findCycles: (graphInput) => dependencies.graph.cycles(graphInput) },
       { candidate, context },
     );
-    if (candidateFindings.length > 0) {
+    if (candidateStructural.length > 0) {
       throw new ImportPlanError(
         "choices-invalid",
         "the chosen set builds an invalid graph",
-        { findings: candidateFindings },
+        { findings: candidateStructural },
       );
     }
+    const candidateCompleteness = validateCandidateCompleteness(
+      { findCycles: (graphInput) => dependencies.graph.cycles(graphInput) },
+      { candidate, context },
+    );
 
     const absent = nodes
       .map((node) => node.id)
@@ -400,6 +412,7 @@ export function importPlan(
       id: revision,
       projectId: input.projectId,
       parentId: input.fromRevision,
+      origin: "import",
       importId: input.importId,
       submittedBlob,
       choicesBlob,
@@ -480,6 +493,7 @@ export function importPlan(
       nodes: nodeWrites,
       insertEdges,
       deleteEdgeIds,
+      nodeDeletes: [],
       at: updatedAt,
       cause: { revision, importId: input.importId },
     });
@@ -508,8 +522,29 @@ export function importPlan(
       },
     });
 
-    return { revision, documents: accepted, absent, retried: false };
+    return {
+      revision,
+      documents: accepted,
+      absent,
+      retried: false,
+      completeness: deduplicateCompleteness(candidateCompleteness),
+    };
   });
+}
+
+function deduplicateCompleteness(
+  findings: readonly Finding[],
+): readonly Finding[] {
+  const sorted = sortFindings(findings);
+  const seen = new Set<string>();
+  const unique: Finding[] = [];
+  for (const finding of sorted) {
+    const key = `${finding.code}\u0000${finding.path ?? ""}\u0000${finding.id ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(finding);
+  }
+  return unique;
 }
 
 function assertNoDuplicateChoices(
@@ -549,13 +584,7 @@ function staleConflicts(
 function retryResult(
   dependencies: ImportPlanDependencies,
   transaction: Transaction,
-  existing: Readonly<{
-    id: string;
-    parentId: string | null;
-    submittedBlob: string;
-    choicesBlob: string;
-    acceptedBlob: string;
-  }>,
+  existing: RevisionRecord,
   input: ImportPlanInput,
 ): ImportPlanResult {
   const submitted = dependencies.blobs.hash(
@@ -580,6 +609,18 @@ function retryResult(
   if (accepted === null) {
     throw new Error(`blob ${existing.acceptedBlob} is missing from the store`);
   }
+  const context = dependencies.plan.readValidationContext(
+    transaction,
+    input.projectId,
+  );
+  const { nodes } = dependencies.plan.readGraph(transaction, input.projectId);
+  const candidate: Candidate = {
+    nodes: nodes.map((node) => ({ ...node, source: "database" as const })),
+  };
+  const completeness = validateCandidateCompleteness(
+    { findCycles: (graphInput) => dependencies.graph.cycles(graphInput) },
+    { candidate, context },
+  );
   return {
     revision: existing.id,
     documents: JSON.parse(
@@ -587,6 +628,7 @@ function retryResult(
     ) as RenderedDocument[],
     absent: [],
     retried: true,
+    completeness: deduplicateCompleteness(completeness),
   };
 }
 

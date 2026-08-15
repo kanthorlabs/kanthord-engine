@@ -73,6 +73,10 @@ export class SqliteStorage implements Storage {
       if (appliedVersions.has(migration.version)) {
         continue;
       }
+      if (migration.rebuild === true) {
+        this.database.exec("PRAGMA foreign_keys = OFF");
+        this.database.exec("PRAGMA legacy_alter_table = ON");
+      }
       try {
         runInTransaction(this.database, (transaction) => {
           for (const statement of migration.statements) {
@@ -91,6 +95,11 @@ export class SqliteStorage implements Storage {
           ),
           cause,
         );
+      } finally {
+        if (migration.rebuild === true) {
+          this.database.exec("PRAGMA legacy_alter_table = OFF");
+          this.database.exec("PRAGMA foreign_keys = ON");
+        }
       }
     }
 

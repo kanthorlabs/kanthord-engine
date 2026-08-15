@@ -104,3 +104,18 @@ export function tableBytes(storage: Storage, table: TableName): Buffer {
     "utf8",
   );
 }
+
+export function databaseBytes(storage: Storage): Buffer {
+  const tables = (Object.keys(rows) as readonly TableName[])
+    .slice()
+    .sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
+  return Buffer.concat(
+    tables.map((table) =>
+      Buffer.concat([
+        Buffer.from(`${table}:`, "utf8"),
+        tableBytes(storage, table),
+        Buffer.from(";", "utf8"),
+      ]),
+    ),
+  );
+}

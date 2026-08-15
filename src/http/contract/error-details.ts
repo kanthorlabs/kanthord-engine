@@ -2,13 +2,16 @@ import { z } from "zod";
 
 import { choices } from "../../domain/plan-choice.ts";
 import { credentialFailures } from "../../domain/repository.ts";
+import { revisionGuardClasses } from "../../domain/revision-guard.ts";
+import { nodeStates } from "../../domain/state.ts";
 import { planFinding } from "./plan-finding.ts";
 
 const objectId = z.string().regex(/^[0-9a-f]{40}$/);
 
 export const staleRevisionDetails = z.strictObject({
+  guard: z.enum(revisionGuardClasses),
   expected: z.string().nullable(),
-  current: z.string().nullable(),
+  actual: z.string().nullable(),
 });
 
 export const needsReconcileDetails = z.strictObject({
@@ -19,23 +22,21 @@ export const needsReconcileDetails = z.strictObject({
 export const bindingInUseDetails = z.strictObject({
   blockers: z
     .array(
-      z.discriminatedUnion("kind", [
-        z.strictObject({ kind: z.literal("default-chain") }),
-        z.strictObject({
-          kind: z.literal("project-binding"),
-          projectId: z.string().min(1),
-        }),
-        z.strictObject({
-          kind: z.literal("repository"),
-          repositoryId: z.string().min(1),
-        }),
-        z.strictObject({
-          kind: z.literal("attempt"),
-          attemptId: z.string().min(1),
-        }),
-      ]),
+      z.strictObject({
+        nodeId: z.string(),
+        blocker: z.string(),
+      }),
     )
     .min(1),
+});
+
+export const illegalTransitionDetails = z.strictObject({
+  nodes: z.array(
+    z.strictObject({
+      id: z.string(),
+      state: z.enum(nodeStates),
+    }),
+  ),
 });
 
 export const idempotencyMismatchDetails = z.strictObject({

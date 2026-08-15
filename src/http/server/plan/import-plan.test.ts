@@ -11,6 +11,7 @@ import {
   createBlobStore,
   createPlanStore,
   createReadiness,
+  createRevision,
   planFixtureIdentities,
   seedPlanFixture,
 } from "../../../../test/helpers/plan.ts";
@@ -88,6 +89,7 @@ function seedTaskTwoWithEdge(
         },
       ],
       deleteEdgeIds: [],
+      nodeDeletes: [],
       at: 1,
       cause: { revision: fixtureIds.planRevision, importId: null },
     });
@@ -125,6 +127,7 @@ function seedTaskTwo(
       ],
       insertEdges: [],
       deleteEdgeIds: [],
+      nodeDeletes: [],
       at: 1,
       cause: { revision: fixtureIds.planRevision, importId: null },
     });
@@ -170,8 +173,9 @@ async function buildHandler(
   );
   seedPlanFixture(storage, plan, blobs);
   seed(storage, plan, blobs);
+  const revision = createRevision(blobs, plan);
   const exported = exportPlan(
-    { storage, plan, blobs },
+    { storage, plan, revision },
     { projectId: fixtureIds.project },
   );
   const app = await createTestApp({
@@ -420,7 +424,8 @@ describe("src/http/server/plan/import-plan.test", () => {
 
     assert.equal(response.status, 409);
     assert.equal(response.body.error.code, "stale-revision");
-    assert.equal(response.body.error.details.current, fixtureIds.planRevision);
+    assert.equal(response.body.error.details.guard, "project");
+    assert.equal(response.body.error.details.actual, fixtureIds.planRevision);
     assert.deepEqual(after, before);
   });
 
@@ -546,8 +551,9 @@ describe("src/http/server/plan/import-plan.test", () => {
       createMockClock({ start: 1700000000000, step: 1000 }),
     );
     seedPlanFixture(storage, plan, blobs);
+    const revision = createRevision(blobs, plan);
     const exported = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     ).documents;
     const recorded: Readonly<{ actorId: string | undefined }>[] = [];

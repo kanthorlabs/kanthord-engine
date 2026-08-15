@@ -23,7 +23,11 @@ const bannedPropertyNames = [
   "absolutePath",
 ];
 
-const planRelativePathLocations = ["documents.path", "findings.path"];
+const planRelativePathLocations = [
+  "documents.path",
+  "findings.path",
+  "completeness.path",
+];
 
 function collectPropertyNames(
   schema: unknown,
@@ -314,11 +318,11 @@ describe("src/http/contract/system.test", () => {
     }
   });
 
-  it("thirty-one registry entries carry a response and nine carry a request", () => {
+  it("thirty-four registry entries carry a response and twelve carry a request", () => {
     const withResponse = registry.filter(
       (entry) => entry.response !== undefined,
     );
-    assert.equal(withResponse.length, 31);
+    assert.equal(withResponse.length, 34);
     assert.deepEqual(withResponse.map((entry) => entry.operationId).sort(), [
       "actor.list",
       "actor.register",
@@ -327,8 +331,11 @@ describe("src/http/contract/system.test", () => {
       "actor.show",
       "edge.list",
       "event.list",
+      "node.create",
+      "node.delete",
       "node.list",
       "node.show",
+      "node.update",
       "plan.export",
       "plan.import",
       "plan.revisions",
@@ -359,6 +366,9 @@ describe("src/http/contract/system.test", () => {
         .sort(),
       [
         "actor.register",
+        "node.create",
+        "node.delete",
+        "node.update",
         "plan.import",
         "plan.validate",
         "project.create",

@@ -3,10 +3,12 @@ import { z } from "zod";
 import { action, parameter, resource, sub } from "./path.ts";
 import { baselineErrors } from "./error-baseline.ts";
 import {
+  bindingInUseDetails,
   choicesChangedDetails,
   choicesInvalidDetails,
   choicesStaleDetails,
   idempotencyMismatchDetails,
+  illegalTransitionDetails,
   planInvalidDetails,
   staleRevisionDetails,
 } from "./error-details.ts";
@@ -19,6 +21,7 @@ import { operations } from "./operation.ts";
 import type { OperationExamples } from "./operation.ts";
 import { planFinding } from "./plan-finding.ts";
 import { blobHash } from "../../domain/blob.ts";
+import { revisionOrigins } from "../../domain/plan-revision.ts";
 import {
   choices,
   differingFields,
@@ -39,9 +42,10 @@ export const planExportResponse = z.strictObject({
 export const planRevisionEntry = z.strictObject({
   id: z.string(),
   parentId: z.string().nullable(),
-  importId: z.string(),
-  submittedBlob: blobHash,
-  choicesBlob: blobHash,
+  origin: z.enum(revisionOrigins),
+  importId: z.string().nullable(),
+  submittedBlob: blobHash.nullable(),
+  choicesBlob: blobHash.nullable(),
   acceptedBlob: blobHash,
 });
 
@@ -98,6 +102,7 @@ export const planImportResponse = z.strictObject({
   revision: z.string(),
   documents: z.array(planDocument),
   absent: z.array(z.string()),
+  completeness: z.array(planFinding),
 });
 
 export const nodeListItem = z.strictObject({
@@ -119,8 +124,11 @@ export const nodeListResponse = z.strictObject({
 export const nodeShowResponse = nodeListItem.extend({
   instructionBlob: blobHash,
   acceptanceBlob: blobHash.nullable(),
+  instruction: z.string(),
+  acceptance: z.string().nullable(),
   worker: z.string().nullable(),
   repositoryId: z.string().nullable(),
+  repo: z.string().nullable(),
   revision: z.string(),
   updatedAt: z.number(),
 });
@@ -133,6 +141,71 @@ export const edgeView = z.strictObject({
 });
 
 export const edgeListResponse = z.strictObject({ edges: z.array(edgeView) });
+
+const nodeInitiativeFields = z.strictObject({
+  kind: z.literal("initiative"),
+  title: z.string(),
+  instruction: z.string(),
+  worker: z.string().nullable(),
+  dependsOn: z.array(z.string()),
+});
+
+const nodeObjectiveFields = z.strictObject({
+  kind: z.literal("objective"),
+  title: z.string(),
+  parentId: z.string().min(1),
+  repo: z.string().min(1),
+  instruction: z.string(),
+  worker: z.string().nullable(),
+  dependsOn: z.array(z.string()),
+});
+
+const nodeTaskFields = z.strictObject({
+  kind: z.literal("task"),
+  title: z.string(),
+  parentId: z.string().min(1),
+  instruction: z.string(),
+  acceptance: z.string(),
+  worker: z.string().nullable(),
+  dependsOn: z.array(z.string()),
+});
+
+const nodeWriteFields = [
+  nodeInitiativeFields,
+  nodeObjectiveFields,
+  nodeTaskFields,
+] as const;
+
+export const nodeCreateRequest = z.strictObject({
+  fromRevision: z.string().nullable(),
+  node: z.discriminatedUnion("kind", nodeWriteFields),
+});
+
+export const nodeUpdateRequest = z.strictObject({
+  fromRevision: z.string(),
+  node: z.discriminatedUnion("kind", nodeWriteFields),
+});
+
+export const nodeDeleteRequest = z.strictObject({
+  fromRevision: z.string(),
+});
+
+export const nodeCreateResponse = z.strictObject({
+  revision: z.string(),
+  id: z.string(),
+  completeness: z.array(planFinding),
+});
+
+export const nodeUpdateResponse = z.strictObject({
+  revision: z.string(),
+  completeness: z.array(planFinding),
+});
+
+export const nodeDeleteResponse = z.strictObject({
+  revision: z.string(),
+  deleted: z.array(z.string()),
+  completeness: z.array(planFinding),
+});
 
 const planDocument_example = {
   path: "initiative/atlas.md",
@@ -179,12 +252,13 @@ export const planImportExamples: OperationExamples = {
     revision: `revision_${U}`,
     documents: [planDocument_example],
     absent: [],
+    completeness: [],
   },
   error: {
     error: {
       code: "stale-revision",
       message: `the import names null, the newest revision is revision_${U}`,
-      details: { expected: null, current: `revision_${U}` },
+      details: { guard: "project", expected: null, actual: `revision_${U}` },
     },
   },
 };
@@ -200,6 +274,7 @@ export const planRevisionsExamples: OperationExamples = {
       {
         id: `revision_${U}`,
         parentId: null,
+        origin: "import",
         importId: "import-0001",
         submittedBlob: H,
         choicesBlob: H,
@@ -232,8 +307,11 @@ export const nodeShowExamples: OperationExamples = {
     ...nodeListItem_example,
     instructionBlob: H,
     acceptanceBlob: null,
+    instruction: "# atlas\n",
+    acceptance: null,
     worker: null,
     repositoryId: `repo_${U}`,
+    repo: "atlas",
     revision: `revision_${U}`,
     updatedAt: A,
   },
@@ -252,6 +330,75 @@ export const edgeListExamples: OperationExamples = {
     ],
   },
   error: { error: { code: "not-found", message: `no project project_${U}` } },
+};
+
+export const nodeCreateExamples: OperationExamples = {
+  request: {
+    fromRevision: null,
+    node: {
+      kind: "task",
+      title: "add the health route",
+      parentId: `objective_${U}`,
+      instruction: "Build the route.\n",
+      acceptance: "## Acceptance criteria\n- it answers 200\n",
+      worker: null,
+      dependsOn: [],
+    },
+  },
+  success: {
+    revision: `revision_${U}`,
+    id: `task_${U}`,
+    completeness: [],
+  },
+  error: {
+    error: {
+      code: "stale-revision",
+      message: `the write names null, the newest revision is revision_${U}`,
+      details: { guard: "project", expected: null, actual: `revision_${U}` },
+    },
+  },
+};
+
+export const nodeUpdateExamples: OperationExamples = {
+  request: {
+    fromRevision: `revision_${U}`,
+    node: {
+      kind: "task",
+      title: "add the health route",
+      parentId: `objective_${U}`,
+      instruction: "Build the route.\n",
+      acceptance: "## Acceptance criteria\n- it answers 200\n",
+      worker: null,
+      dependsOn: [],
+    },
+  },
+  success: {
+    revision: `revision_${U}`,
+    completeness: [],
+  },
+  error: {
+    error: {
+      code: "illegal-transition",
+      message: "the node is not editable in its state",
+      details: { nodes: [{ id: `task_${U}`, state: "running" }] },
+    },
+  },
+};
+
+export const nodeDeleteExamples: OperationExamples = {
+  request: { fromRevision: `revision_${U}` },
+  success: {
+    revision: `revision_${U}`,
+    deleted: [`task_${U}`],
+    completeness: [],
+  },
+  error: {
+    error: {
+      code: "binding-in-use",
+      message: "the subtree is referenced by execution rows",
+      details: { blockers: [{ nodeId: `task_${U}`, blocker: "run" }] },
+    },
+  },
 };
 
 export const graph = operations([
@@ -364,5 +511,65 @@ export const graph = operations([
     response: edgeListResponse,
     errors: { ...baselineErrors },
     examples: edgeListExamples,
+  },
+  {
+    operationId: "node.create",
+    method: "POST",
+    path: [resource("project"), parameter("project"), sub("node")],
+    introducedIn: "phase-1",
+    status: "routed",
+    allowedActors: ["human", "harness"],
+    idempotency: "memory",
+    replayable: [200],
+    request: nodeCreateRequest,
+    response: nodeCreateResponse,
+    errors: {
+      ...baselineErrors,
+      "stale-revision": staleRevisionDetails,
+      "plan-invalid": planInvalidDetails,
+      "illegal-transition": illegalTransitionDetails,
+      "binding-in-use": bindingInUseDetails,
+    },
+    examples: nodeCreateExamples,
+  },
+  {
+    operationId: "node.update",
+    method: "POST",
+    path: [resource("node"), parameter("node"), action("update")],
+    introducedIn: "phase-1",
+    status: "routed",
+    allowedActors: ["human", "harness"],
+    idempotency: "memory",
+    replayable: [200],
+    request: nodeUpdateRequest,
+    response: nodeUpdateResponse,
+    errors: {
+      ...baselineErrors,
+      "stale-revision": staleRevisionDetails,
+      "plan-invalid": planInvalidDetails,
+      "illegal-transition": illegalTransitionDetails,
+      "binding-in-use": bindingInUseDetails,
+    },
+    examples: nodeUpdateExamples,
+  },
+  {
+    operationId: "node.delete",
+    method: "POST",
+    path: [resource("node"), parameter("node"), action("delete")],
+    introducedIn: "phase-1",
+    status: "routed",
+    allowedActors: ["human", "harness"],
+    idempotency: "memory",
+    replayable: [200],
+    request: nodeDeleteRequest,
+    response: nodeDeleteResponse,
+    errors: {
+      ...baselineErrors,
+      "stale-revision": staleRevisionDetails,
+      "plan-invalid": planInvalidDetails,
+      "illegal-transition": illegalTransitionDetails,
+      "binding-in-use": bindingInUseDetails,
+    },
+    examples: nodeDeleteExamples,
   },
 ]);

@@ -5,13 +5,17 @@
 ```sql
 CREATE TABLE plan_revision (
   id             TEXT PRIMARY KEY,
-  project_id     TEXT NOT NULL REFERENCES project(id),  -- project whose graph this import wrote
-  parent_id      TEXT REFERENCES plan_revision(id),     -- revision the document was exported from; the concurrency check reads it
-  import_id      TEXT NOT NULL,                         -- client-minted idempotency key; a retry returns this same revision
-  submitted_blob TEXT NOT NULL REFERENCES blob(hash),   -- document the human sent, with paths and missing identities
-  choices_blob   TEXT NOT NULL REFERENCES blob(hash),   -- the per-node choice set that decided the outcome
-  accepted_blob  TEXT NOT NULL REFERENCES blob(hash),   -- the whole resulting graph the import returned, canonically rendered
-  UNIQUE (project_id, import_id)
+  project_id     TEXT NOT NULL REFERENCES project(id),  -- project whose graph this write produced
+  parent_id      TEXT REFERENCES plan_revision(id),     -- the parent revision, read inside the transaction
+  origin         TEXT NOT NULL CHECK (origin IN ('import', 'node-write')),  -- which write minted this revision
+  import_id      TEXT,                                  -- client-minted idempotency key, an import only
+  submitted_blob TEXT REFERENCES blob(hash),            -- the document the human sent, an import only
+  choices_blob   TEXT REFERENCES blob(hash),            -- the per-node choice set, an import only
+  accepted_blob  TEXT NOT NULL REFERENCES blob(hash),   -- the whole resulting graph, canonically rendered
+  UNIQUE (project_id, import_id),
+  CHECK ((origin = 'import') = (import_id IS NOT NULL)),
+  CHECK ((origin = 'import') = (submitted_blob IS NOT NULL)),
+  CHECK ((origin = 'import') = (choices_blob IS NOT NULL))
 ) STRICT;
 ```
 

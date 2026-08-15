@@ -96,11 +96,14 @@ A query is `GET`. A command that creates a resource is `POST` on the resource. A
 
 A precondition is per operation. A registration has no prior revision, so it carries none.
 
-| Operation            | Token it carries    | What the daemon enforces                                     | Source                                  |
-| -------------------- | ------------------- | ------------------------------------------------------------ | --------------------------------------- |
-| `plan.import`        | `fromRevision`      | equality against the newest revision, inside the transaction | `../phase-1/plan-format.md`             |
-| `node.approve`       | `candidateRevision` | equality against the frozen candidate, which must be `open`  | `../phase-2/gates-and-approval.md`      |
-| `repository.publish` | `landingOid`        | equality against the local landing ref                       | `../phase-2/integration-and-publish.md` |
+| Operation            | Token it carries    | What the daemon enforces                                                         | Source                                  |
+| -------------------- | ------------------- | -------------------------------------------------------------------------------- | --------------------------------------- |
+| `plan.import`        | `fromRevision`      | equality against the newest revision, inside the transaction                     | `../phase-1/plan-format.md`             |
+| `node.create`        | `fromRevision`      | equality against the newest revision, inside the transaction                     | `graph.md`                              |
+| `node.update`        | `fromRevision`      | equality against the node revision, or the newest revision for a topology change | `graph.md`                              |
+| `node.delete`        | `fromRevision`      | equality against the newest revision, inside the transaction                     | `graph.md`                              |
+| `node.approve`       | `candidateRevision` | equality against the frozen candidate, which must be `open`                      | `../phase-2/gates-and-approval.md`      |
+| `repository.publish` | `landingOid`        | equality against the local landing ref                                           | `../phase-2/integration-and-publish.md` |
 
 A mismatch returns `409` and the current value of the token. The client re-reads and retries. The compare-and-swap of the landing branch is internal to integration, and it is not a route.
 
@@ -167,31 +170,31 @@ Every error is one shape.
 
 The CLI routes on `code` and never parses `message`. A block reason, a publish rejection class and a repository state are codes.
 
-| Status | Code                       | Meaning                                                                  |
-| ------ | -------------------------- | ------------------------------------------------------------------------ |
-| 400    | `invalid-request`          | the body failed schema validation                                        |
-| 401    | `unauthenticated`          | no bearer token, or a wrong one                                          |
-| 403    | `origin-forbidden`         | the request carried an `Origin` header                                   |
-| 403    | `host-forbidden`           | the `Host` header is outside the allow list                              |
-| 403    | `actor-forbidden`          | the caller's actor kind is not admitted for the operation                |
-| 404    | `not-found`                | no such resource, or a `post-mvp` path                                   |
-| 409    | `stale-revision`           | a precondition token no longer matches, or the candidate was invalidated |
-| 409    | `illegal-transition`       | the node state does not allow the command                                |
-| 409    | `binding-in-use`           | a removal is refused, and `details` lists what blocks it                 |
-| 409    | `needs-reconcile`          | the repository diverged, and `details` holds both object ids             |
-| 409    | `acknowledgement-required` | the projection is `partial` and the request omitted the acknowledgement  |
-| 409    | `lease-held`               | a live lease refuses the operation                                       |
-| 409    | `idempotency-mismatch`     | an `importId` came back with a different document                        |
-| 409    | `choices-stale`            | topology moved since `plan.validate`, so the required choice set changed |
-| 409    | `choices-changed`          | a selected outcome is no longer legal against current runtime state      |
-| 409    | `host-key-mismatch`        | the host presented no key matching the confirmed fingerprint             |
-| 422    | `plan-invalid`             | the plan failed validation, and `details` lists every finding            |
-| 422    | `choices-invalid`          | the choice set builds an invalid graph, and `details` names the nodes    |
-| 422    | `identity-kind-mismatch`   | one ULID payload appeared under two kind prefixes                        |
-| 422    | `credential-rejected`      | the forge refused the credential, and `details` holds its response       |
-| 500    | `internal-error`           | the daemon failed unexpectedly, and the message is a constant            |
-| 501    | `not-implemented`          | the route ships in a later phase, and it wrote no state                  |
-| 503    | `service-unavailable`      | the daemon declined the work, and it wrote no state                      |
+| Status | Code                       | Meaning                                                                                           |
+| ------ | -------------------------- | ------------------------------------------------------------------------------------------------- |
+| 400    | `invalid-request`          | the body failed schema validation                                                                 |
+| 401    | `unauthenticated`          | no bearer token, or a wrong one                                                                   |
+| 403    | `origin-forbidden`         | the request carried an `Origin` header                                                            |
+| 403    | `host-forbidden`           | the `Host` header is outside the allow list                                                       |
+| 403    | `actor-forbidden`          | the caller's actor kind is not admitted for the operation                                         |
+| 404    | `not-found`                | no such resource, or a `post-mvp` path                                                            |
+| 409    | `stale-revision`           | a precondition token no longer matches, or the candidate was invalidated                          |
+| 409    | `illegal-transition`       | the node state does not allow the command                                                         |
+| 409    | `binding-in-use`           | a removal, a containment move or a delete is refused, and `details.blockers` lists what blocks it |
+| 409    | `needs-reconcile`          | the repository diverged, and `details` holds both object ids                                      |
+| 409    | `acknowledgement-required` | the projection is `partial` and the request omitted the acknowledgement                           |
+| 409    | `lease-held`               | a live lease refuses the operation                                                                |
+| 409    | `idempotency-mismatch`     | an `importId` came back with a different document                                                 |
+| 409    | `choices-stale`            | topology moved since `plan.validate`, so the required choice set changed                          |
+| 409    | `choices-changed`          | a selected outcome is no longer legal against current runtime state                               |
+| 409    | `host-key-mismatch`        | the host presented no key matching the confirmed fingerprint                                      |
+| 422    | `plan-invalid`             | the plan failed validation, and `details` lists every finding                                     |
+| 422    | `choices-invalid`          | the choice set builds an invalid graph, and `details` names the nodes                             |
+| 422    | `identity-kind-mismatch`   | one ULID payload appeared under two kind prefixes                                                 |
+| 422    | `credential-rejected`      | the forge refused the credential, and `details` holds its response                                |
+| 500    | `internal-error`           | the daemon failed unexpectedly, and the message is a constant                                     |
+| 501    | `not-implemented`          | the route ships in a later phase, and it wrote no state                                           |
+| 503    | `service-unavailable`      | the daemon declined the work, and it wrote no state                                               |
 
 `stale-revision` covers both ways a frozen candidate stops being approvable. A revision mismatch and a `candidate.state` of `invalidated` mean the same thing to the human — read the evidence again — so they are one code, and `details` carries `candidateState` and `invalidatedReason`. A second code would split one condition into two the client must handle identically.
 

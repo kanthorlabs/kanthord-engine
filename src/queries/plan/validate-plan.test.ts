@@ -15,6 +15,7 @@ import {
   createBlobStore,
   createPlanReader,
   createPlanStore,
+  createRevision,
 } from "../../../test/helpers/plan.ts";
 import { createPlanGraph } from "../../../test/helpers/plan.ts";
 import {
@@ -30,6 +31,7 @@ import type { PlanStore } from "../../services/plan/index.ts";
 import type { BlobStore } from "../../services/blob/index.ts";
 import type { DocumentReader } from "../../services/document/index.ts";
 import type { Graph } from "../../services/graph/index.ts";
+import type { Revision } from "../../services/revision/index.ts";
 
 const U_INITIATIVE = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const U_TASK = "01BQZ3NDEKTSV4RRFFQ69G5FAV";
@@ -173,6 +175,7 @@ function build(): {
   storage: Storage;
   plan: PlanStore;
   blobs: BlobStore;
+  revision: Revision;
   reader: DocumentReader;
   graph: Graph;
   path: string;
@@ -188,6 +191,7 @@ function build(): {
     storage: temporary.storage,
     plan,
     blobs,
+    revision: createRevision(blobs, plan),
     reader: createPlanReader(),
     graph: createPlanGraph(),
     path: temporary.path,
@@ -205,7 +209,7 @@ function countTable(storage: Storage, table: string): number {
 
 describe("src/queries/plan/validate-plan.test", () => {
   it("a first validation of a valid plan on an empty project suggests submitted for every document", (t) => {
-    const { storage, plan, blobs, reader, graph, dispose } = build();
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
     t.after(() => dispose());
     storage.transact((transaction) => seedRegistry(transaction));
 
@@ -240,7 +244,7 @@ describe("src/queries/plan/validate-plan.test", () => {
   });
 
   it("the choice set is bytewise ascending and its size equals the union size", (t) => {
-    const { storage, plan, blobs, reader, graph, dispose } = build();
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
     t.after(() => dispose());
     storage.transact((transaction) => seedRegistry(transaction));
 
@@ -271,7 +275,7 @@ describe("src/queries/plan/validate-plan.test", () => {
   });
 
   it("nothing is written for a valid plan and for an invalid one", (t) => {
-    const { storage, plan, blobs, reader, graph, dispose } = build();
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
     t.after(() => dispose());
     storage.transact((transaction) => seedRegistry(transaction));
     const tables = [
@@ -325,12 +329,12 @@ describe("src/queries/plan/validate-plan.test", () => {
   });
 
   it("a re-import of the exported documents suggests database everywhere", (t) => {
-    const { storage, plan, blobs, reader, graph, dispose } = build();
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
 
     const exported = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
     const result = validatePlan(
@@ -359,12 +363,12 @@ describe("src/queries/plan/validate-plan.test", () => {
   });
 
   it("a prose edit to the pending task suggests submitted with fields body", (t) => {
-    const { storage, plan, blobs, reader, graph, dispose } = build();
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
 
     const exported = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
     const edited = exported.documents.map((document) =>
@@ -407,7 +411,7 @@ describe("src/queries/plan/validate-plan.test", () => {
   });
 
   it("a structural edit to a node moved to running suggests database as illegal", (t) => {
-    const { storage, plan, blobs, reader, graph, dispose } = build();
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
     storage.transact((transaction) =>
@@ -417,7 +421,7 @@ describe("src/queries/plan/validate-plan.test", () => {
     );
 
     const exported = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
     const edited = exported.documents.map((document) =>
@@ -454,12 +458,12 @@ describe("src/queries/plan/validate-plan.test", () => {
   });
 
   it("a database-only node appears in the choice set", (t) => {
-    const { storage, plan, blobs, reader, graph, dispose } = build();
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
 
     const exported = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
     const withoutTask = exported.documents.filter(
@@ -492,16 +496,16 @@ describe("src/queries/plan/validate-plan.test", () => {
   });
 
   it("a kind change is an addition and a retention", (t) => {
-    const { storage, plan, blobs, reader, graph, dispose } = build();
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
 
     const exported = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
     const newObjective = {
-      path: `plan/harden-the-verify-cli--${low(planFixtureIdentities.initiative)}/new-objective--${low(U_NEW)}/objective.md`,
+      path: `plan/harden-the-verify-cli--${low(U_INITIATIVE)}/new-objective--${low(U_NEW)}/objective.md`,
       content: `---
 kind: objective
 title: New objective
@@ -532,9 +536,9 @@ New objective work.
     assert.ok(added);
     assert.equal(added.presence, "document-only");
     assert.equal(added.kind, "objective");
-    // Story 09 repair: the new objective has no task child, so the candidate
-    // fails objective-without-task and the whole component resets to database.
-    assert.equal(added.suggested, "database");
+    // Story 05 repair: the repair loop runs the structural set only, so the
+    // new objective's completeness finding no longer resets the component.
+    assert.equal(added.suggested, "submitted");
     const retained = result.choices.find(
       (entry) => entry.id === planFixtureIdentities.task,
     );
@@ -545,7 +549,7 @@ New objective work.
   });
 
   it("revision is the greatest plan_revision id when two revisions exist", (t) => {
-    const { storage, plan, blobs, reader, graph, dispose } = build();
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
     storage.transact((transaction) =>
@@ -553,6 +557,7 @@ New objective work.
         id: "revision_b",
         projectId: fixtureIds.project,
         parentId: fixtureIds.planRevision,
+        origin: "import",
         importId: "imp_b",
         submittedBlob: fixtureIds.instructionBlob,
         choicesBlob: fixtureIds.instructionBlob,
@@ -561,7 +566,7 @@ New objective work.
     );
 
     const exported = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
     const result = validatePlan(
@@ -584,7 +589,7 @@ New objective work.
   });
 
   it("an unknown project throws project-not-found", (t) => {
-    const { storage, plan, blobs, reader, graph, dispose } = build();
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
     t.after(() => dispose());
     storage.transact((transaction) => seedRegistry(transaction));
 
@@ -613,7 +618,8 @@ New objective work.
   });
 
   it("throws repository-unknown naming the id when a node's repository_id names no repository row", (t) => {
-    const { storage, plan, blobs, reader, graph, path, dispose } = build();
+    const { storage, plan, blobs, revision, reader, graph, path, dispose } =
+      build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
     const raw = new DatabaseSync(path);
@@ -645,7 +651,7 @@ New objective work.
   });
 
   it("the whole query is deterministic across two runs with a fresh mock", (t) => {
-    const { storage, plan, blobs, reader, graph, dispose } = build();
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
     t.after(() => dispose());
     storage.transact((transaction) => seedRegistry(transaction));
 
@@ -678,7 +684,7 @@ New objective work.
   });
 
   it("documentsHash is the sha256 of the canonical documents json", (t) => {
-    const { storage, plan, blobs, reader, graph, dispose } = build();
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
     t.after(() => dispose());
     storage.transact((transaction) => seedRegistry(transaction));
 
@@ -709,7 +715,7 @@ New objective work.
   });
 
   it("the normative cycle through the route returns a repaired set, not the local combination", (t) => {
-    const { storage, plan, blobs, reader, graph, dispose } = build();
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
     storage.transact((transaction) => {
@@ -744,13 +750,14 @@ New objective work.
           },
         ],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       });
     });
 
     const exported = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
     const edited = exported.documents

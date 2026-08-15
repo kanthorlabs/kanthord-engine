@@ -75,10 +75,10 @@ describe("src/cli/parity.test", () => {
     );
   });
 
-  it("programCommandPaths returns the twenty inventory paths", () => {
+  it("programCommandPaths returns the twenty-three inventory paths", () => {
     const paths = programCommandPaths(buildProgram(fakeDependencies()));
 
-    assert.equal(paths.length, 20);
+    assert.equal(paths.length, 23);
     assert.deepEqual(paths, commandPaths());
   });
 
@@ -91,6 +91,7 @@ describe("src/cli/parity.test", () => {
     assert.equal(paths.includes("project"), false);
     assert.equal(paths.includes("plan"), false);
     assert.equal(paths.includes("repository"), false);
+    assert.equal(paths.includes("node"), false);
   });
 
   it("no command calls an operation absent from the registry", () => {
@@ -113,19 +114,19 @@ describe("src/cli/parity.test", () => {
     assert.deepEqual(stubbedPaths, ["run"]);
   });
 
-  it("pins twenty-two distinct ids across seventeen calling entries", () => {
+  it("pins twenty-six distinct ids across twenty calling entries", () => {
     const calling = declaredCommands.filter(
       (entry) => entry.operationIds.length > 0,
     );
 
-    assert.equal(calling.length, 17);
+    assert.equal(calling.length, 20);
     assert.equal(
       new Set(calling.flatMap((entry) => entry.operationIds)).size,
-      22,
+      26,
     );
   });
 
-  it("reaches five ids only as a step of another command", () => {
+  it("reaches six ids only as a step of another command", () => {
     const stepOnlyIds = new Set(
       declaredCommands
         .filter((entry) => entry.operationIds.length > 1)
@@ -133,6 +134,7 @@ describe("src/cli/parity.test", () => {
     );
 
     assert.deepEqual([...stepOnlyIds].sort(), [
+      "node.show",
       "plan.revisions",
       "plan.validate",
       "provider.list",

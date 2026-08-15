@@ -158,7 +158,7 @@ describe("src/commands/provider/remove-provider.test", () => {
         ["project_chain", "chain-project", null, null, 1],
       );
       transaction.run(
-        "INSERT INTO plan_revision (id, project_id, parent_id, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO plan_revision (id, project_id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, 'import', ?, ?, ?, ?)",
         [
           "revision_chain",
           "project_chain",

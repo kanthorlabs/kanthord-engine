@@ -19,6 +19,7 @@ import {
 import { canTransition } from "../../domain/transition.ts";
 import { workerKinds } from "../../domain/worker.ts";
 import type { StoredNode } from "../../domain/plan-graph.ts";
+import { executionBlockers } from "../../domain/plan-graph.ts";
 import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import { createReadiness } from "../../../test/helpers/plan.ts";
 import {
@@ -26,6 +27,13 @@ import {
   seedRegistry,
   seedGraph,
   seedExecution,
+  seedSecondRevisionWithTask,
+  seedLeaseOnNode,
+  seedWorkspaceOnNode,
+  seedRunRow,
+  seedCandidateRow,
+  seedCheckResultRow,
+  seedGitOperationRow,
 } from "../../../test/helpers/rows.ts";
 import type {
   AppendEventInput,
@@ -78,6 +86,7 @@ const graphInputWithTrigger: MutateGraphInput = {
   nodes: [],
   insertEdges: [],
   deleteEdgeIds: [],
+  nodeDeletes: [],
   at: 1,
   cause: { revision: "revision_a", importId: null },
   // @ts-expect-error MutateGraphInput declares no trigger member
@@ -108,7 +117,7 @@ function seedSecondProject(t: Transaction): void {
     ["project_b", "second-project", "general@1", null, 1],
   );
   t.run(
-    "INSERT INTO plan_revision (id, project_id, parent_id, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO plan_revision (id, project_id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, 'import', ?, ?, ?, ?)",
     [
       "revision_b",
       "project_b",
@@ -527,7 +536,7 @@ describe("src/services/plan/sqlite.test", () => {
     storage.transact((transaction) => {
       seedAll(transaction);
       transaction.run(
-        "INSERT INTO plan_revision (id, project_id, parent_id, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO plan_revision (id, project_id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, 'import', ?, ?, ?, ?)",
         [
           "revision_b",
           fixtureIds.project,
@@ -561,7 +570,7 @@ describe("src/services/plan/sqlite.test", () => {
     storage.transact((transaction) => {
       seedAll(transaction);
       transaction.run(
-        "INSERT INTO plan_revision (id, project_id, parent_id, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO plan_revision (id, project_id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, 'import', ?, ?, ?, ?)",
         [
           "revision_b",
           fixtureIds.project,
@@ -582,6 +591,7 @@ describe("src/services/plan/sqlite.test", () => {
     assert.deepEqual(revisions[0], {
       id: "revision_b",
       parentId: fixtureIds.planRevision,
+      origin: "import",
       importId: "imp_b",
       submittedBlob: fixtureIds.instructionBlob,
       choicesBlob: fixtureIds.instructionBlob,
@@ -604,6 +614,7 @@ describe("src/services/plan/sqlite.test", () => {
     assert.deepEqual(found, {
       id: fixtureIds.planRevision,
       parentId: null,
+      origin: "import",
       importId: "imp_a",
       submittedBlob: fixtureIds.instructionBlob,
       choicesBlob: fixtureIds.instructionBlob,
@@ -653,6 +664,7 @@ describe("src/services/plan/sqlite.test", () => {
         ],
         insertEdges: [],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 2,
         cause: { revision: fixtureIds.planRevision, importId: null },
       }),
@@ -709,6 +721,7 @@ describe("src/services/plan/sqlite.test", () => {
         ],
         insertEdges: [],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       }),
@@ -756,6 +769,7 @@ describe("src/services/plan/sqlite.test", () => {
         ],
         insertEdges: [],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       }),
@@ -796,6 +810,7 @@ describe("src/services/plan/sqlite.test", () => {
           { id: "edge_new", fromNode: "task_new", toNode: "task_a" },
         ],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 2,
         cause: { revision: fixtureIds.planRevision, importId: null },
       }),
@@ -827,6 +842,7 @@ describe("src/services/plan/sqlite.test", () => {
           { id: "edge_new", fromNode: "task_a", toNode: "objective_a" },
         ],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       }),
@@ -850,6 +866,7 @@ describe("src/services/plan/sqlite.test", () => {
         nodes: [],
         insertEdges: [],
         deleteEdgeIds: ["edge_new"],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       }),
@@ -865,6 +882,7 @@ describe("src/services/plan/sqlite.test", () => {
         nodes: [],
         insertEdges: [],
         deleteEdgeIds: ["edge_missing"],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       }),
@@ -901,6 +919,7 @@ describe("src/services/plan/sqlite.test", () => {
           },
         ],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       }),
@@ -930,7 +949,15 @@ describe("src/services/plan/sqlite.test", () => {
     assert.equal(task?.state, "ready");
   });
 
-  it("mutateGraph declares no trigger member", () => {
+  it("MutateGraphInput declares no trigger member", () => {
+    const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+    const start = source.indexOf("export type MutateGraphInput");
+    assert.ok(start !== -1, "MutateGraphInput is missing");
+    const end = source.indexOf("}>;", start);
+    assert.ok(end !== -1, "MutateGraphInput has no closing }>;");
+    const slice = source.slice(start, end);
+    assert.equal(slice.includes("trigger"), false);
+    assert.equal(slice.includes("nodeDeletes"), true);
     assert.equal(graphInputWithTrigger.projectId, "project_a");
   });
 
@@ -1027,6 +1054,7 @@ describe("src/services/plan/sqlite.test", () => {
           { id: "edge_b", fromNode: "task_b", toNode: fixtureIds.task },
         ],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       }),
@@ -1079,6 +1107,7 @@ describe("src/services/plan/sqlite.test", () => {
         nodes: [],
         insertEdges: [],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       }),
@@ -1223,7 +1252,7 @@ describe("src/services/plan/sqlite.test", () => {
       storage.transact((transaction) => {
         seedRegistry(transaction);
         transaction.run(
-          "INSERT INTO plan_revision (id, project_id, parent_id, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO plan_revision (id, project_id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, 'import', ?, ?, ?, ?)",
           [
             fixtureIds.planRevision,
             fixtureIds.project,
@@ -1457,6 +1486,7 @@ describe("src/services/plan/sqlite.test", () => {
         id: "revision_c",
         projectId: fixtureIds.project,
         parentId: fixtureIds.planRevision,
+        origin: "import",
         importId: "imp_c",
         submittedBlob: fixtureIds.acceptanceBlob,
         choicesBlob: fixtureIds.acceptanceBlob,
@@ -1470,6 +1500,7 @@ describe("src/services/plan/sqlite.test", () => {
     assert.deepEqual(written, {
       id: "revision_c",
       parentId: fixtureIds.planRevision,
+      origin: "import",
       importId: "imp_c",
       submittedBlob: fixtureIds.acceptanceBlob,
       choicesBlob: fixtureIds.acceptanceBlob,
@@ -1482,6 +1513,7 @@ describe("src/services/plan/sqlite.test", () => {
           id: "revision_d",
           projectId: fixtureIds.project,
           parentId: null,
+          origin: "import",
           importId: "imp_c",
           submittedBlob: fixtureIds.instructionBlob,
           choicesBlob: fixtureIds.instructionBlob,
@@ -1489,6 +1521,357 @@ describe("src/services/plan/sqlite.test", () => {
         }),
       ),
     );
+  });
+
+  it("insertRevision writes an import revision with every provenance column", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact(seedAll);
+
+    storage.transact((transaction) =>
+      store.insertRevision(transaction, {
+        id: "revision_i",
+        projectId: fixtureIds.project,
+        parentId: fixtureIds.planRevision,
+        origin: "import",
+        importId: "imp_i",
+        submittedBlob: fixtureIds.acceptanceBlob,
+        choicesBlob: fixtureIds.acceptanceBlob,
+        acceptedBlob: fixtureIds.acceptanceBlob,
+      }),
+    );
+
+    const revisions = storage.transact((transaction) =>
+      store.listRevisions(transaction, fixtureIds.project),
+    );
+    assert.deepEqual(revisions[0], {
+      id: "revision_i",
+      parentId: fixtureIds.planRevision,
+      origin: "import",
+      importId: "imp_i",
+      submittedBlob: fixtureIds.acceptanceBlob,
+      choicesBlob: fixtureIds.acceptanceBlob,
+      acceptedBlob: fixtureIds.acceptanceBlob,
+    });
+  });
+
+  it("insertRevision writes a node-write revision with three null provenance columns", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact(seedAll);
+
+    storage.transact((transaction) =>
+      store.insertRevision(transaction, {
+        id: "revision_w",
+        projectId: fixtureIds.project,
+        parentId: fixtureIds.planRevision,
+        origin: "node-write",
+        importId: null,
+        submittedBlob: null,
+        choicesBlob: null,
+        acceptedBlob: fixtureIds.instructionBlob,
+      }),
+    );
+
+    const revisions = storage.transact((transaction) =>
+      store.listRevisions(transaction, fixtureIds.project),
+    );
+    assert.deepEqual(revisions[0], {
+      id: "revision_w",
+      parentId: fixtureIds.planRevision,
+      origin: "node-write",
+      importId: null,
+      submittedBlob: null,
+      choicesBlob: null,
+      acceptedBlob: fixtureIds.instructionBlob,
+    });
+  });
+
+  it("findByImportId never returns a node-write revision", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedAll(transaction);
+      store.insertRevision(transaction, {
+        id: "revision_nw",
+        projectId: fixtureIds.project,
+        parentId: fixtureIds.planRevision,
+        origin: "node-write",
+        importId: null,
+        submittedBlob: null,
+        choicesBlob: null,
+        acceptedBlob: fixtureIds.instructionBlob,
+      });
+    });
+
+    const found = storage.transact((transaction) =>
+      store.findByImportId(transaction, fixtureIds.project, "imp_a"),
+    );
+    assert.equal(found?.id, fixtureIds.planRevision);
+    assert.equal(found?.origin, "import");
+
+    const unknown = storage.transact((transaction) =>
+      store.findByImportId(transaction, fixtureIds.project, "imp_unknown"),
+    );
+    assert.equal(unknown, null);
+  });
+
+  it("newestRevision returns a node-write revision minted after an import revision", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedAll(transaction);
+      store.insertRevision(transaction, {
+        id: "revision_import_b",
+        projectId: fixtureIds.project,
+        parentId: fixtureIds.planRevision,
+        origin: "import",
+        importId: "imp_b",
+        submittedBlob: fixtureIds.instructionBlob,
+        choicesBlob: fixtureIds.instructionBlob,
+        acceptedBlob: fixtureIds.instructionBlob,
+      });
+      store.insertRevision(transaction, {
+        id: "revision_write_c",
+        projectId: fixtureIds.project,
+        parentId: "revision_import_b",
+        origin: "node-write",
+        importId: null,
+        submittedBlob: null,
+        choicesBlob: null,
+        acceptedBlob: fixtureIds.instructionBlob,
+      });
+    });
+
+    const newest = storage.transact((transaction) =>
+      store.newestRevision(transaction, fixtureIds.project),
+    );
+    assert.equal(newest, "revision_write_c");
+  });
+
+  it("mutateGraph deletes a node", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedAll(transaction);
+      seedTriggerNode(transaction, {
+        id: "del_objective",
+        kind: "objective",
+        parentId: fixtureIds.initiative,
+        state: "pending",
+      });
+      seedTriggerNode(transaction, {
+        id: "del_task",
+        kind: "task",
+        parentId: "del_objective",
+        state: "pending",
+      });
+    });
+
+    storage.transact((transaction) =>
+      store.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [],
+        insertEdges: [],
+        deleteEdgeIds: [],
+        nodeDeletes: ["del_task"],
+        at: 2,
+        cause: { revision: fixtureIds.planRevision, importId: null },
+      }),
+    );
+
+    const graph = storage.transact((transaction) =>
+      store.readGraph(transaction, fixtureIds.project),
+    );
+    assert.equal(
+      graph.nodes.some((node) => node.id === "del_objective"),
+      true,
+    );
+    assert.equal(
+      graph.nodes.some((node) => node.id === "del_task"),
+      false,
+    );
+  });
+
+  it("mutateGraph deletes edges before it deletes nodes", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedAll(transaction);
+      seedTriggerNode(transaction, {
+        id: "ord_a",
+        kind: "task",
+        parentId: fixtureIds.objective,
+        state: "pending",
+      });
+      seedTriggerNode(transaction, {
+        id: "ord_b",
+        kind: "task",
+        parentId: fixtureIds.objective,
+        state: "pending",
+      });
+      transaction.run(
+        "INSERT INTO edge (id, from_node, to_node, waived_at) VALUES (?, ?, ?, NULL)",
+        ["ord_edge", "ord_a", "ord_b"],
+      );
+    });
+
+    storage.transact((transaction) =>
+      store.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [],
+        insertEdges: [],
+        deleteEdgeIds: ["ord_edge"],
+        nodeDeletes: ["ord_b"],
+        at: 2,
+        cause: { revision: fixtureIds.planRevision, importId: null },
+      }),
+    );
+
+    const graph = storage.transact((transaction) =>
+      store.readGraph(transaction, fixtureIds.project),
+    );
+    assert.equal(
+      graph.nodes.some((node) => node.id === "ord_a"),
+      true,
+    );
+    assert.equal(
+      graph.nodes.some((node) => node.id === "ord_b"),
+      false,
+    );
+    assert.deepEqual(graph.edges, []);
+  });
+
+  it("mutateGraph applies nodeDeletes in the given order", (t) => {
+    const buildFixture = (): {
+      storage: Storage;
+      store: SqlitePlanStore;
+      dispose(): void;
+    } => {
+      const { storage, store, dispose } = build();
+      storage.transact((transaction) => {
+        seedAll(transaction);
+        seedTriggerNode(transaction, {
+          id: "ord_objective",
+          kind: "objective",
+          parentId: fixtureIds.initiative,
+          state: "pending",
+        });
+        seedTriggerNode(transaction, {
+          id: "ord_task",
+          kind: "task",
+          parentId: "ord_objective",
+          state: "pending",
+        });
+      });
+      return { storage, store, dispose };
+    };
+
+    {
+      const { storage, store, dispose } = buildFixture();
+      t.after(() => dispose());
+      storage.transact((transaction) =>
+        store.mutateGraph(transaction, {
+          projectId: fixtureIds.project,
+          nodes: [],
+          insertEdges: [],
+          deleteEdgeIds: [],
+          nodeDeletes: ["ord_task", "ord_objective"],
+          at: 2,
+          cause: { revision: fixtureIds.planRevision, importId: null },
+        }),
+      );
+      const graph = storage.transact((transaction) =>
+        store.readGraph(transaction, fixtureIds.project),
+      );
+      assert.equal(
+        graph.nodes.some((node) => node.id === "ord_objective"),
+        false,
+      );
+      assert.equal(
+        graph.nodes.some((node) => node.id === "ord_task"),
+        false,
+      );
+    }
+
+    {
+      const { storage, store, dispose } = buildFixture();
+      t.after(() => dispose());
+      assert.throws(
+        () =>
+          storage.transact((transaction) =>
+            store.mutateGraph(transaction, {
+              projectId: fixtureIds.project,
+              nodes: [],
+              insertEdges: [],
+              deleteEdgeIds: [],
+              nodeDeletes: ["ord_objective", "ord_task"],
+              at: 2,
+              cause: { revision: fixtureIds.planRevision, importId: null },
+            }),
+          ),
+        (error: unknown) =>
+          typeof error === "object" &&
+          error !== null &&
+          String((error as { message?: string }).message).includes(
+            "FOREIGN KEY",
+          ),
+      );
+    }
+  });
+
+  it("mutateGraph applies readiness after the deletes", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedAll(transaction);
+      transaction.run("UPDATE node SET state = 'done' WHERE id IN (?, ?, ?)", [
+        fixtureIds.initiative,
+        fixtureIds.objective,
+        fixtureIds.task,
+      ]);
+      seedTriggerNode(transaction, {
+        id: "read_dep",
+        kind: "task",
+        parentId: fixtureIds.objective,
+        state: "pending",
+      });
+      seedTriggerNode(transaction, {
+        id: "read_subject",
+        kind: "task",
+        parentId: fixtureIds.objective,
+        state: "pending",
+      });
+      transaction.run(
+        "INSERT INTO edge (id, from_node, to_node, waived_at) VALUES (?, ?, ?, NULL)",
+        ["read_edge", "read_subject", "read_dep"],
+      );
+    });
+
+    const transitions = storage.transact((transaction) =>
+      store.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [],
+        insertEdges: [],
+        deleteEdgeIds: ["read_edge"],
+        nodeDeletes: ["read_dep"],
+        at: 2,
+        cause: { revision: fixtureIds.planRevision, importId: null },
+      }),
+    );
+
+    assert.deepEqual(transitions, [
+      {
+        nodeId: "read_subject",
+        from: "pending",
+        to: "ready",
+        trigger: "readiness-promoted",
+      },
+    ]);
+    const node = storage.transact((transaction) =>
+      store.readNode(transaction, "read_subject"),
+    );
+    assert.equal(node?.state, "ready");
   });
 
   it("readValidationContext returns the worker kinds and both repository lists ascending", (t) => {
@@ -1732,6 +2115,139 @@ describe("src/services/plan/sqlite.test", () => {
       attemptCommit: false,
       retainedCommit: false,
     });
+  });
+
+  it("readSubtree orders by depth descending then id ascending", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedAll(transaction);
+      seedSecondRevisionWithTask(transaction);
+    });
+
+    const subtree = storage.transact((transaction) =>
+      store.readSubtree(transaction, "initiative_a"),
+    );
+    assert.deepEqual(subtree, [
+      "task_a",
+      "task_b",
+      "objective_a",
+      "initiative_a",
+    ]);
+  });
+
+  it("readSubtreeExecutionFacts returns nothing on a clean subtree", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+    });
+
+    const facts = storage.transact((transaction) =>
+      store.readSubtreeExecutionFacts(transaction, "initiative_a"),
+    );
+    assert.deepEqual(facts, []);
+  });
+
+  it("readSubtreeExecutionFacts reports one fact per blocker", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedAll(transaction);
+      seedLeaseOnNode(transaction, fixtureIds.task);
+      seedCandidateRow(transaction, {
+        id: "candidate_1",
+        nodeId: fixtureIds.task,
+        runId: fixtureIds.taskRun,
+        workspaceId: fixtureIds.workspace,
+      });
+      seedCheckResultRow(transaction, {
+        id: "check_1",
+        nodeId: fixtureIds.task,
+      });
+      seedGitOperationRow(transaction, {
+        id: "gitop_1",
+        nodeId: fixtureIds.task,
+      });
+    });
+
+    const facts = storage.transact((transaction) =>
+      store.readSubtreeExecutionFacts(transaction, "initiative_a"),
+    );
+    const blockers = new Set(facts.map((fact) => fact.blocker));
+    for (const blocker of executionBlockers) {
+      assert.ok(blockers.has(blocker), `missing ${blocker}`);
+    }
+  });
+
+  it("readSubtreeExecutionFacts deduplicates a repeated pair", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_1",
+        nodeId: fixtureIds.objective,
+      });
+      seedRunRow(transaction, {
+        id: "run_0",
+        kind: "objective",
+        nodeId: fixtureIds.objective,
+        parentRunId: null,
+        workspaceId: "workspace_1",
+      });
+      seedRunRow(transaction, {
+        id: "run_1",
+        kind: "task",
+        nodeId: fixtureIds.task,
+        parentRunId: "run_0",
+        workspaceId: "workspace_1",
+      });
+      seedRunRow(transaction, {
+        id: "run_2",
+        kind: "task",
+        nodeId: fixtureIds.task,
+        parentRunId: "run_0",
+        workspaceId: "workspace_1",
+        state: "ended",
+      });
+    });
+
+    const facts = storage.transact((transaction) =>
+      store.readSubtreeExecutionFacts(transaction, fixtureIds.task),
+    );
+    assert.deepEqual(facts, [{ nodeId: fixtureIds.task, blocker: "run" }]);
+  });
+
+  it("readSubtreeExecutionFacts sorts by node id bytewise then blocker order", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedLeaseOnNode(transaction, fixtureIds.task);
+      seedLeaseOnNode(transaction, fixtureIds.objective);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_1",
+        nodeId: fixtureIds.task,
+      });
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_2",
+        nodeId: fixtureIds.objective,
+      });
+    });
+
+    const facts = storage.transact((transaction) =>
+      store.readSubtreeExecutionFacts(transaction, "initiative_a"),
+    );
+    assert.deepEqual(facts, [
+      { nodeId: fixtureIds.objective, blocker: "lease" },
+      { nodeId: fixtureIds.objective, blocker: "workspace" },
+      { nodeId: fixtureIds.task, blocker: "lease" },
+      { nodeId: fixtureIds.task, blocker: "workspace" },
+    ]);
   });
 
   it("the module interpolates no value into SQL and selects no star", () => {

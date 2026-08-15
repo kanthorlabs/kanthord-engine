@@ -90,8 +90,9 @@ describe("src/http/server/plan/refusals.test", () => {
   it("stale-revision details satisfy staleRevisionDetails", () => {
     const error = toHttpError(
       new ImportPlanError("stale-revision", "the import is stale", {
+        guard: "project",
         expected: "revision_a",
-        current: "revision_b",
+        actual: "revision_b",
       }),
     );
     assert.equal(error.code, "stale-revision");

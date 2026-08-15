@@ -122,7 +122,7 @@ describe("src/cli/program.test", () => {
     assert.equal(program.version(), KANTHORD_VERSION);
   });
 
-  it("registers the ten declared top-level commands, sorted bytewise", () => {
+  it("registers the eleven declared top-level commands, sorted bytewise", () => {
     const { dependencies } = fakeDependencies();
     const program = buildProgram(dependencies);
 
@@ -138,6 +138,7 @@ describe("src/cli/program.test", () => {
         "config",
         "credential",
         "db",
+        "node",
         "plan",
         "project",
         "repository",

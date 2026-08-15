@@ -5,9 +5,11 @@ import {
   buildCandidate,
   repairSuggestions,
   validateCandidate,
+  validateCandidateCompleteness,
+  validateCandidateStructural,
 } from "./plan-candidate.ts";
 import type { Candidate, CandidateNode } from "./plan-candidate.ts";
-import { findingCodes } from "./plan-finding.ts";
+import { findingCodes, findingScope } from "./plan-finding.ts";
 import type { Finding } from "./plan-finding.ts";
 import type { StoredNode, ValidationContext } from "./plan-graph.ts";
 import type { ResolvedDocument } from "./plan-identity.ts";
@@ -448,6 +450,176 @@ describe("validateCandidate", () => {
     assert.equal(findings[0]?.path, null);
   });
 
+  it("a task under an initiative is parent-missing", () => {
+    const candidate = candidateOf(
+      [
+        submittedDocument(initiativeI, "initiative"),
+        submittedDocument(task1, "task", {
+          parentIdentity: initiativeI,
+          worker: "tdd",
+        }),
+      ],
+      [],
+      { [initiativeI]: "submitted", [task1]: "submitted" },
+    );
+    const findings = validateCandidate({ findCycles }, { candidate, context });
+    record(findings);
+    const parentFindings = findings.filter(
+      (finding) => finding.code === "parent-missing",
+    );
+    assert.equal(parentFindings.length, 1);
+    assert.equal(parentFindings[0]?.id, task1);
+    assert.equal(parentFindings[0]?.path, null);
+    assert.equal(
+      parentFindings[0]?.message,
+      `the parent ${initiativeI} is not an objective`,
+    );
+  });
+
+  it("an objective under a task is parent-missing", () => {
+    const candidate = candidateOf(
+      [
+        submittedDocument(task1, "task", {
+          parentIdentity: objectiveO1,
+          worker: "tdd",
+        }),
+        submittedDocument(objectiveO1, "objective", {
+          repo: "repo_a",
+          parentIdentity: task1,
+        }),
+      ],
+      [],
+      { [task1]: "submitted", [objectiveO1]: "submitted" },
+    );
+    const findings = validateCandidate({ findCycles }, { candidate, context });
+    record(findings);
+    const parentFindings = findings.filter(
+      (finding) => finding.code === "parent-missing",
+    );
+    assert.equal(parentFindings.length, 1);
+    assert.equal(parentFindings[0]?.id, objectiveO1);
+    assert.equal(parentFindings[0]?.path, null);
+    assert.equal(
+      parentFindings[0]?.message,
+      `the parent ${task1} is not an initiative`,
+    );
+  });
+
+  it("a task under an objective and an objective under an initiative are clean", () => {
+    const { submitted, takes } = hierarchy();
+    const findings = validateCandidate(
+      { findCycles },
+      { candidate: candidateOf(submitted, [], takes), context },
+    );
+    record(findings);
+    assert.deepEqual(findings, []);
+  });
+
+  it("an initiative is exempt from the parent-kind rule", () => {
+    const candidate = candidateOf(
+      [submittedDocument(initiativeI, "initiative")],
+      [],
+      { [initiativeI]: "submitted" },
+    );
+    const findings = validateCandidate({ findCycles }, { candidate, context });
+    record(findings);
+    assert.deepEqual(
+      findings.filter((finding) => finding.code === "parent-missing"),
+      [],
+    );
+  });
+
+  it("the parent-kind rule is structural", () => {
+    assert.equal(findingScope["parent-missing"], "structural");
+  });
+
+  it("validateCandidateStructural drops both completeness codes", () => {
+    const candidate = candidateOf(
+      [
+        submittedDocument(initiativeI, "initiative"),
+        submittedDocument(initiativeI2, "initiative"),
+        submittedDocument(objectiveO1, "objective", {
+          repo: "repo_a",
+          parentIdentity: initiativeI2,
+        }),
+      ],
+      [],
+      {
+        [initiativeI]: "submitted",
+        [initiativeI2]: "submitted",
+        [objectiveO1]: "submitted",
+      },
+    );
+    assert.deepEqual(
+      validateCandidateStructural({ findCycles }, { candidate, context }),
+      [],
+    );
+  });
+
+  it("validateCandidateCompleteness keeps both completeness codes and nothing else", () => {
+    const candidate = candidateOf(
+      [
+        submittedDocument(initiativeI, "initiative"),
+        submittedDocument(initiativeI2, "initiative"),
+        submittedDocument(objectiveO1, "objective", {
+          repo: "repo_a",
+          parentIdentity: initiativeI2,
+        }),
+      ],
+      [],
+      {
+        [initiativeI]: "submitted",
+        [initiativeI2]: "submitted",
+        [objectiveO1]: "submitted",
+      },
+    );
+    const completeness = validateCandidateCompleteness(
+      { findCycles },
+      { candidate, context },
+    );
+    assert.deepEqual(
+      completeness.map((finding) => finding.code),
+      ["initiative-without-objective", "objective-without-task"],
+    );
+    assert.equal(completeness.length, 2);
+  });
+
+  it("the two partitions are exhaustive", () => {
+    const candidate = candidateOf(
+      [
+        submittedDocument(initiativeI, "initiative"),
+        submittedDocument(initiativeI2, "initiative"),
+        submittedDocument(objectiveO1, "objective", {
+          parentIdentity: initiativeI2,
+        }),
+      ],
+      [],
+      {
+        [initiativeI]: "submitted",
+        [initiativeI2]: "submitted",
+        [objectiveO1]: "submitted",
+      },
+    );
+    const all = validateCandidate({ findCycles }, { candidate, context });
+    const structural = validateCandidateStructural(
+      { findCycles },
+      { candidate, context },
+    );
+    const completeness = validateCandidateCompleteness(
+      { findCycles },
+      { candidate, context },
+    );
+    assert.deepEqual(
+      structural.map((finding) => finding.code),
+      ["repo-missing"],
+    );
+    assert.deepEqual(
+      completeness.map((finding) => finding.code),
+      ["initiative-without-objective", "objective-without-task"],
+    );
+    assert.equal(structural.length + completeness.length, all.length);
+  });
+
   it("reports objective-without-task for an objective with no task child", () => {
     const candidate = candidateOf(
       [
@@ -465,6 +637,10 @@ describe("validateCandidate", () => {
     assert.equal(findings.length, 1);
     assert.equal(findings[0]?.code, "objective-without-task");
     assert.equal(findings[0]?.id, objectiveO1);
+    assert.deepEqual(
+      validateCandidateStructural({ findCycles }, { candidate, context }),
+      [],
+    );
   });
 
   it("reports initiative-without-objective for an initiative with no objective child", () => {
@@ -478,6 +654,10 @@ describe("validateCandidate", () => {
     assert.equal(findings.length, 1);
     assert.equal(findings[0]?.code, "initiative-without-objective");
     assert.equal(findings[0]?.id, initiativeI);
+    assert.deepEqual(
+      validateCandidateStructural({ findCycles }, { candidate, context }),
+      [],
+    );
   });
 
   it("reports repo-on-task for a task carrying a repository", () => {
@@ -1126,5 +1306,30 @@ describe("repairSuggestions", () => {
       context,
     });
     assert.deepEqual([...reversed.entries()], [...first.entries()]);
+  });
+
+  it("repairSuggestions terminates on an incomplete baseline", () => {
+    const stored = [
+      storedNode(initiativeI, "initiative"),
+      storedNode(objectiveO1, "objective", {
+        parentId: initiativeI,
+        repositoryId: "repo_a",
+      }),
+    ];
+    const verdicts = new Map<string, ChoiceVerdict>([
+      [initiativeI, verdict("database")],
+      [objectiveO1, verdict("database")],
+    ]);
+    const repaired = repairSuggestions(repairDependencies, {
+      submitted: [],
+      stored,
+      verdicts,
+      blobHashes: new Map(),
+      context,
+    });
+    assert.deepEqual(sortedEntries(repaired), [
+      [initiativeI, "database"],
+      [objectiveO1, "database"],
+    ]);
   });
 });

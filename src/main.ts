@@ -38,6 +38,7 @@ import { SqliteBlobStore } from "./services/blob/sqlite.ts";
 import { UlidIdGenerator } from "./services/ids/ulid.ts";
 import { GraphologyGraph } from "./services/graph/graphology.ts";
 import { SqlitePlanStore } from "./services/plan/sqlite.ts";
+import { NodeWriteRevision } from "./services/revision/node-write.ts";
 import { DependencyReadiness } from "./services/readiness/dependency.ts";
 import { YamlDocumentReader } from "./services/document/yaml.ts";
 import { registerProvider } from "./commands/provider/register-provider.ts";
@@ -58,6 +59,9 @@ import { validatePlan } from "./queries/plan/validate-plan.ts";
 import { importPlan } from "./commands/plan/import-plan.ts";
 import { listNodes } from "./queries/node/list-node.ts";
 import { showNode } from "./queries/node/show-node.ts";
+import { createNode } from "./commands/node/create-node.ts";
+import { updateNode } from "./commands/node/update-node.ts";
+import { deleteNode } from "./commands/node/delete-node.ts";
 import { listEdges } from "./queries/edge/list-edge.ts";
 import { inspectRepository } from "./queries/repository/inspect-repository.ts";
 import { listRepositories } from "./queries/repository/list-repository.ts";
@@ -95,6 +99,9 @@ import { validatePlanHandler } from "./http/server/plan/validate-plan.ts";
 import { importPlanHandler } from "./http/server/plan/import-plan.ts";
 import { listNodeHandler } from "./http/server/node/list-node.ts";
 import { showNodeHandler } from "./http/server/node/show-node.ts";
+import { createNodeHandler } from "./http/server/node/create-node.ts";
+import { updateNodeHandler } from "./http/server/node/update-node.ts";
+import { deleteNodeHandler } from "./http/server/node/delete-node.ts";
 import { listEdgeHandler } from "./http/server/edge/list-edge.ts";
 import { listEventHandler } from "./http/server/event/list-event.ts";
 import { listEvents } from "./queries/event/list-event.ts";
@@ -185,6 +192,7 @@ async function serve(options: ServeOptions): Promise<void> {
       const readiness = new DependencyReadiness({ events, instanceId });
       const plan = new SqlitePlanStore({ readiness });
       const blobs = new SqliteBlobStore({ storage, clock });
+      const revision = new NodeWriteRevision({ blobs, plan });
       const recovery = await recoverHome({
         reap: () =>
           reapOrphans(
@@ -314,13 +322,34 @@ async function serve(options: ServeOptions): Promise<void> {
         }),
         "project.repositories": replaceProjectRepositoriesHandler({
           replaceProjectRepositories: (input) =>
-            replaceProjectRepositories({ storage, clock, events }, input),
+            replaceProjectRepositories({ storage, plan, clock, events }, input),
         }),
         "node.list": listNodeHandler({
           listNodes: (input) => listNodes({ storage, plan }, input),
         }),
         "node.show": showNodeHandler({
-          showNode: (input) => showNode({ storage, plan }, input),
+          showNode: (input) => showNode({ storage, plan, blobs }, input),
+        }),
+        "node.create": createNodeHandler({
+          createNode: (input) =>
+            createNode(
+              { storage, plan, blobs, graph, ids, clock, events, revision },
+              input,
+            ),
+        }),
+        "node.update": updateNodeHandler({
+          updateNode: (input) =>
+            updateNode(
+              { storage, plan, blobs, graph, ids, clock, events, revision },
+              input,
+            ),
+        }),
+        "node.delete": deleteNodeHandler({
+          deleteNode: (input) =>
+            deleteNode(
+              { storage, plan, blobs, graph, ids, clock, events, revision },
+              input,
+            ),
         }),
         "edge.list": listEdgeHandler({
           listEdges: (input) => listEdges({ storage, plan }, input),
@@ -332,7 +361,7 @@ async function serve(options: ServeOptions): Promise<void> {
           showBlob: (input) => showBlob({ blobs }, input),
         }),
         "plan.export": exportPlanHandler({
-          exportPlan: (input) => exportPlan({ storage, plan, blobs }, input),
+          exportPlan: (input) => exportPlan({ storage, plan, revision }, input),
         }),
         "plan.revisions": listRevisionHandler({
           listRevisions: (input) => listRevisions({ storage, plan }, input),

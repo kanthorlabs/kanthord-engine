@@ -21,6 +21,7 @@ import { graphAndPlan } from "./migration-0002-graph-and-plan.ts";
 import { executionAndJournal } from "./migration-0003-execution-and-journal.ts";
 import { migration0004EventIndexes } from "./migration-0004-event-indexes.ts";
 import { migration0005Actor } from "./migration-0005-actor.ts";
+import { migration0006RevisionOrigin } from "./migration-0006-revision-origin.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -437,17 +438,18 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     assert.ok(migrationDoc.includes("0003-execution-and-journal"));
   });
 
-  it("migrations holds exactly the five migrations and versions map to 1, 2, 3, 4, 5", () => {
+  it("migrations holds exactly the six migrations and versions map to 1, 2, 3, 4, 5, 6", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
       executionAndJournal,
       migration0004EventIndexes,
       migration0005Actor,
+      migration0006RevisionOrigin,
     ]);
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4, 5],
+      [1, 2, 3, 4, 5, 6],
     );
   });
 

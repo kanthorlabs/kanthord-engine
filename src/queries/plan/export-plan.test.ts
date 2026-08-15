@@ -9,12 +9,14 @@ import { fixtureIds } from "../../../test/helpers/rows.ts";
 import {
   createBlobStore,
   createPlanStore,
+  createRevision,
   planFixtureIdentities,
   seedPlanFixture,
 } from "../../../test/helpers/plan.ts";
 import type { Storage } from "../../services/storage/index.ts";
 import type { BlobStore } from "../../services/blob/index.ts";
 import type { PlanStore } from "../../services/plan/index.ts";
+import type { Revision } from "../../services/revision/index.ts";
 
 const lower = (identity: string): string =>
   identity.slice(identity.indexOf("_") + 1).toLowerCase();
@@ -66,6 +68,7 @@ describe("src/queries/plan/export-plan.test", () => {
     storage: Storage;
     plan: PlanStore;
     blobs: BlobStore;
+    revision: Revision;
     path: string;
     dispose(): void;
   } {
@@ -79,18 +82,19 @@ describe("src/queries/plan/export-plan.test", () => {
       storage: temporary.storage,
       plan,
       blobs,
+      revision: createRevision(blobs, plan),
       path: temporary.path,
       dispose: temporary.dispose,
     };
   }
 
   it("exports three documents at canonical paths with the newest revision", (t) => {
-    const { storage, plan, blobs, dispose } = build();
+    const { storage, plan, blobs, revision, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
 
     const result = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
 
@@ -99,12 +103,12 @@ describe("src/queries/plan/export-plan.test", () => {
   });
 
   it("keeps the acceptance heading on the task and off the objective and the initiative", (t) => {
-    const { storage, plan, blobs, dispose } = build();
+    const { storage, plan, blobs, revision, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
 
     const result = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
 
@@ -124,12 +128,12 @@ describe("src/queries/plan/export-plan.test", () => {
   });
 
   it("renders repo on the objective and not on the task or the initiative", (t) => {
-    const { storage, plan, blobs, dispose } = build();
+    const { storage, plan, blobs, revision, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
 
     const result = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
 
@@ -146,12 +150,12 @@ describe("src/queries/plan/export-plan.test", () => {
   });
 
   it("carries no status, block reason or discard reason, and a state change does not move the bytes", (t) => {
-    const { storage, plan, blobs, dispose } = build();
+    const { storage, plan, blobs, revision, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
 
     const before = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
     for (const document of before.documents) {
@@ -178,30 +182,30 @@ describe("src/queries/plan/export-plan.test", () => {
     );
 
     const after = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
     assert.deepEqual(after.documents, before.documents);
   });
 
   it("is deterministic across two calls", (t) => {
-    const { storage, plan, blobs, dispose } = build();
+    const { storage, plan, blobs, revision, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
 
     const first = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
     const second = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
     assert.deepEqual(second, first);
   });
 
   it("reports the newest revision when a second revision row exists", (t) => {
-    const { storage, plan, blobs, dispose } = build();
+    const { storage, plan, blobs, revision, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
     storage.transact((transaction) =>
@@ -209,6 +213,7 @@ describe("src/queries/plan/export-plan.test", () => {
         id: "revision_b",
         projectId: fixtureIds.project,
         parentId: fixtureIds.planRevision,
+        origin: "import",
         importId: "imp_b",
         submittedBlob: fixtureIds.instructionBlob,
         choicesBlob: fixtureIds.instructionBlob,
@@ -217,14 +222,14 @@ describe("src/queries/plan/export-plan.test", () => {
     );
 
     const result = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
     assert.equal(result.revision, "revision_b");
   });
 
   it("exports revision null and an empty document set for a project with no revision", (t) => {
-    const { storage, plan, blobs, dispose } = build();
+    const { storage, plan, blobs, revision, dispose } = build();
     t.after(() => dispose());
     storage.transact((transaction) =>
       transaction.run(
@@ -234,14 +239,14 @@ describe("src/queries/plan/export-plan.test", () => {
     );
 
     const result = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: "project_b" },
     );
     assert.deepEqual(result, { revision: null, documents: [] });
   });
 
   it("throws naming the hash when a node cites a blob the store does not hold", (t) => {
-    const { storage, plan, blobs, path, dispose } = build();
+    const { storage, plan, blobs, revision, path, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
     const missing = `sha256:${"f".repeat(64)}`;
@@ -254,13 +259,16 @@ describe("src/queries/plan/export-plan.test", () => {
 
     assert.throws(
       () =>
-        exportPlan({ storage, plan, blobs }, { projectId: fixtureIds.project }),
+        exportPlan(
+          { storage, plan, revision },
+          { projectId: fixtureIds.project },
+        ),
       (error: unknown) => String(error).includes(missing),
     );
   });
 
   it("exports trailing spaces on the last line byte for byte", (t) => {
-    const { storage, plan, blobs, dispose } = build();
+    const { storage, plan, blobs, revision, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
     storage.transact((transaction) => {
@@ -276,7 +284,7 @@ describe("src/queries/plan/export-plan.test", () => {
     });
 
     const result = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
     const task = result.documents.find(
@@ -287,7 +295,7 @@ describe("src/queries/plan/export-plan.test", () => {
   });
 
   it("exports a store-waived edge as a depends_on entry and re-orders the task ordinal", (t) => {
-    const { storage, plan, blobs, dispose } = build();
+    const { storage, plan, blobs, revision, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
     storage.transact((transaction) => {
@@ -322,6 +330,7 @@ describe("src/queries/plan/export-plan.test", () => {
           },
         ],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       });
@@ -331,7 +340,7 @@ describe("src/queries/plan/export-plan.test", () => {
     });
 
     const result = exportPlan(
-      { storage, plan, blobs },
+      { storage, plan, revision },
       { projectId: fixtureIds.project },
     );
     const byPath = new Map(result.documents.map((d) => [d.path, d.content]));
@@ -348,12 +357,13 @@ describe("src/queries/plan/export-plan.test", () => {
   });
 
   it("throws project-not-found for an unknown project", (t) => {
-    const { storage, plan, blobs, dispose } = build();
+    const { storage, plan, blobs, revision, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
 
     assert.throws(
-      () => exportPlan({ storage, plan, blobs }, { projectId: "project_nope" }),
+      () =>
+        exportPlan({ storage, plan, revision }, { projectId: "project_nope" }),
       (error: unknown) =>
         typeof error === "object" &&
         error !== null &&
@@ -362,7 +372,7 @@ describe("src/queries/plan/export-plan.test", () => {
   });
 
   it("throws repository-unknown naming the id when a node's repository_id names no repository row", (t) => {
-    const { storage, plan, blobs, path, dispose } = build();
+    const { storage, plan, blobs, revision, path, dispose } = build();
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
     const raw = new DatabaseSync(path);
@@ -374,7 +384,10 @@ describe("src/queries/plan/export-plan.test", () => {
 
     assert.throws(
       () =>
-        exportPlan({ storage, plan, blobs }, { projectId: fixtureIds.project }),
+        exportPlan(
+          { storage, plan, revision },
+          { projectId: fixtureIds.project },
+        ),
       (error: unknown) =>
         typeof error === "object" &&
         error !== null &&

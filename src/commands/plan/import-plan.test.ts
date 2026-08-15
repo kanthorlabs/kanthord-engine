@@ -22,6 +22,7 @@ import {
   createPlanReader,
   createPlanStore,
   createReadiness,
+  createRevision,
 } from "../../../test/helpers/plan.ts";
 import { createPlanGraph } from "../../../test/helpers/plan.ts";
 import {
@@ -39,6 +40,7 @@ import type { DocumentReader } from "../../services/document/index.ts";
 import type { Graph } from "../../services/graph/index.ts";
 import type { IdGenerator } from "../../services/ids/index.ts";
 import type { Clock } from "../../services/clock/index.ts";
+import type { Revision } from "../../services/revision/index.ts";
 import type {
   AppendEventInput,
   EventLog,
@@ -366,6 +368,7 @@ type ImportFixture = Readonly<{
   storage: Storage;
   plan: PlanStore;
   blobs: BlobStore;
+  revision: Revision;
   reader: DocumentReader;
   graph: Graph;
   ids: IdGenerator;
@@ -389,6 +392,7 @@ function build(ulids: readonly string[]): ImportFixture {
     storage,
     plan,
     blobs,
+    revision: createRevision(blobs, plan),
     reader: createPlanReader(),
     graph: createPlanGraph(),
     ids: createMockIdGenerator({ ulids }),
@@ -518,6 +522,7 @@ function seedTaskTwo(
           ]
         : [],
       deleteEdgeIds: [],
+      nodeDeletes: [],
       at: 1,
       cause: { revision: fixtureIds.planRevision, importId: null },
     });
@@ -679,7 +684,11 @@ function seedSecondProject(transaction: Transaction): void {
 
 function fixtureDocuments(fixture: ImportFixture): readonly RenderedDocument[] {
   return exportPlan(
-    { storage: fixture.storage, plan: fixture.plan, blobs: fixture.blobs },
+    {
+      storage: fixture.storage,
+      plan: fixture.plan,
+      revision: fixture.revision,
+    },
     { projectId: fixtureIds.project },
   ).documents;
 }
@@ -842,7 +851,7 @@ function seedSixStateProject(
       ["project_b", fixtureIds.repository, 1],
     );
     transaction.run(
-      "INSERT INTO plan_revision (id, project_id, parent_id, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO plan_revision (id, project_id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, 'import', ?, ?, ?, ?)",
       [
         fixtureIds.planRevision,
         "project_b",
@@ -1257,7 +1266,11 @@ describe("src/commands/plan/import-plan.test", () => {
 
       const result = runImport(fixture, roundTripInput(fixture));
       const exported = exportPlan(
-        { storage: fixture.storage, plan: fixture.plan, blobs: fixture.blobs },
+        {
+          storage: fixture.storage,
+          plan: fixture.plan,
+          revision: fixture.revision,
+        },
         { projectId: fixtureIds.project },
       );
 
@@ -1346,8 +1359,9 @@ describe("src/commands/plan/import-plan.test", () => {
 
       assert.equal(error.refusal, "stale-revision");
       assert.deepEqual(error.details, {
+        guard: "project",
         expected: null,
-        current: first.revision,
+        actual: first.revision,
       });
       assert.deepEqual(snapshot(fixture.storage), before);
     });
@@ -1392,8 +1406,9 @@ describe("src/commands/plan/import-plan.test", () => {
 
       assert.equal(error.refusal, "stale-revision");
       assert.deepEqual(error.details, {
+        guard: "project",
         expected: first.revision,
-        current: second.revision,
+        actual: second.revision,
       });
       assert.deepEqual(snapshot(fixture.storage), before);
     });
@@ -1703,7 +1718,11 @@ Build the renderer.
 
       runImport(fixture, roundTripInput(fixture));
       const exported = exportPlan(
-        { storage: fixture.storage, plan: fixture.plan, blobs: fixture.blobs },
+        {
+          storage: fixture.storage,
+          plan: fixture.plan,
+          revision: fixture.revision,
+        },
         { projectId: fixtureIds.project },
       );
 
@@ -3243,6 +3262,262 @@ Make it verifiable.
           );
         }
       }
+    });
+  });
+
+  describe("completeness findings", () => {
+    it("an import of a graph with an empty objective succeeds and reports the finding", (t) => {
+      const fixture = build([U_I, U_O1, U_T2, U_T3, U_O2, U_REV, U_EDGE]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      const documents = roundTripSubmission.filter(
+        (document) => document.path !== "plan/i--01/o--01/01-t.md",
+      );
+      const choices = roundTripChoices.filter(
+        (entry) => entry.id !== `task_${U_T1}`,
+      );
+      const result = runImport(
+        fixture,
+        roundTripInput(fixture, {
+          importId: "imp_empty_objective",
+          documents,
+          choices,
+          documentsHash: planHash(fixture, documents, [
+            U_I,
+            U_O1,
+            U_T2,
+            U_T3,
+            U_O2,
+          ]),
+        }),
+      );
+
+      assert.equal(typeof result.revision, "string");
+      assert.equal(result.revision, `revision_${U_REV}`);
+      assert.deepEqual(
+        result.completeness.map((finding) => finding.code),
+        ["objective-without-task"],
+      );
+    });
+
+    it("an import of a graph with an empty initiative succeeds and reports the finding", (t) => {
+      const fixture = build([U_I, U_REV]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      const documents = [
+        roundTripSubmission.find(
+          (document) => document.path === "plan/i--01/initiative.md",
+        )!,
+      ];
+      const result = runImport(
+        fixture,
+        roundTripInput(fixture, {
+          importId: "imp_empty_initiative",
+          documents,
+          choices: [{ id: `initiative_${U_I}`, take: "submitted" }],
+          documentsHash: planHash(fixture, documents, [U_I]),
+        }),
+      );
+
+      assert.equal(typeof result.revision, "string");
+      assert.deepEqual(
+        result.completeness.map((finding) => finding.code),
+        ["initiative-without-objective"],
+      );
+    });
+
+    it("an import with a structural finding still refuses", (t) => {
+      const fixture = build([U_I, U_O1, U_REV]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      const documents: readonly Readonly<{
+        path: string;
+        content: string;
+      }>[] = [
+        {
+          path: "plan/i--01/initiative.md",
+          content: `---
+kind: initiative
+title: Ship kanthord
+---
+Bootstrap the daemon.
+`,
+        },
+        {
+          path: "plan/i--01/o--01/objective.md",
+          content: `---
+kind: objective
+title: Harden the verify CLI
+---
+Make it verifiable.
+`,
+        },
+      ];
+      const error = importRefusal(
+        fixture,
+        roundTripInput(fixture, {
+          importId: "imp_structural",
+          documents,
+          choices: [
+            { id: `initiative_${U_I}`, take: "submitted" },
+            { id: `objective_${U_O1}`, take: "submitted" },
+          ],
+          documentsHash: planHash(fixture, documents, [U_I, U_O1]),
+        }),
+      );
+
+      assert.equal(error.refusal, "plan-invalid");
+      const findings = (
+        error.details as { findings: readonly { code: string }[] }
+      ).findings;
+      assert.deepEqual(
+        findings.map((finding) => finding.code),
+        ["repo-missing"],
+      );
+    });
+
+    it("completeness is sorted and deduplicated", (t) => {
+      const fixture = build([U_I, U_IZ, U_O1, U_REV]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      const documents: readonly Readonly<{
+        path: string;
+        content: string;
+      }>[] = [
+        {
+          path: "plan/i--01/initiative.md",
+          content: `---
+kind: initiative
+title: First initiative
+---
+Bootstrap the daemon.
+`,
+        },
+        {
+          path: "plan/i--02/initiative.md",
+          content: `---
+kind: initiative
+title: Second initiative
+---
+Bootstrap the daemon.
+`,
+        },
+        {
+          path: "plan/i--02/o--01/objective.md",
+          content: `---
+kind: objective
+title: Harden the verify CLI
+repo: kanthord-verify
+---
+Make it verifiable.
+`,
+        },
+      ];
+      const result = runImport(
+        fixture,
+        roundTripInput(fixture, {
+          importId: "imp_dedup",
+          documents,
+          choices: [
+            { id: `initiative_${U_I}`, take: "submitted" },
+            { id: `initiative_${U_IZ}`, take: "submitted" },
+            { id: `objective_${U_O1}`, take: "submitted" },
+          ],
+          documentsHash: planHash(fixture, documents, [U_I, U_IZ, U_O1]),
+        }),
+      );
+
+      assert.deepEqual(
+        result.completeness.map((finding) => finding.code),
+        ["initiative-without-objective", "objective-without-task"],
+      );
+    });
+
+    it("two empty objectives report two findings that share one code", (t) => {
+      const fixture = build([U_I, U_O1, U_O2, U_REV]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      const documents = roundTripSubmission.filter(
+        (document) =>
+          document.path !== "plan/i--01/o--01/01-t.md" &&
+          document.path !== "plan/i--01/o--02/01-t.md" &&
+          document.path !== "plan/i--01/o--02/02-t.md",
+      );
+      const choices = roundTripChoices.filter(
+        (entry) =>
+          entry.id !== `task_${U_T1}` &&
+          entry.id !== `task_${U_T2}` &&
+          entry.id !== `task_${U_T3}`,
+      );
+      const result = runImport(
+        fixture,
+        roundTripInput(fixture, {
+          importId: "imp_two_empty_objectives",
+          documents,
+          choices,
+          documentsHash: planHash(fixture, documents, [U_I, U_O1, U_O2]),
+        }),
+      );
+
+      assert.equal(typeof result.revision, "string");
+      assert.equal(
+        result.completeness.some(
+          (finding) => finding.code === "initiative-without-objective",
+        ),
+        false,
+      );
+      const objectiveFindings = result.completeness.filter(
+        (finding) => finding.code === "objective-without-task",
+      );
+      assert.equal(objectiveFindings.length, 2);
+      assert.equal(
+        new Set(
+          objectiveFindings.map(
+            (finding) => `${finding.path ?? ""}#${finding.id ?? ""}`,
+          ),
+        ).size,
+        2,
+        "one finding per empty objective, not one per code",
+      );
+    });
+
+    it("a retry of a committed incomplete import repeats the completeness report", (t) => {
+      const fixture = build([U_I, U_O1, U_T2, U_T3, U_O2, U_REV, U_EDGE]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      const documents = roundTripSubmission.filter(
+        (document) => document.path !== "plan/i--01/o--01/01-t.md",
+      );
+      const choices = roundTripChoices.filter(
+        (entry) => entry.id !== `task_${U_T1}`,
+      );
+      const input = roundTripInput(fixture, {
+        importId: "imp_incomplete_retry",
+        documents,
+        choices,
+        documentsHash: planHash(fixture, documents, [
+          U_I,
+          U_O1,
+          U_T2,
+          U_T3,
+          U_O2,
+        ]),
+      });
+
+      const first = runImport(fixture, input);
+      assert.deepEqual(
+        first.completeness.map((finding) => finding.code),
+        ["objective-without-task"],
+      );
+      const retried = runImport(fixture, input);
+      assert.equal(retried.retried, true);
+      assert.deepEqual(retried.completeness, first.completeness);
     });
   });
 });

@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import { action, parameter, resource, sub } from "./path.ts";
 import { baselineErrors } from "./error-baseline.ts";
-import { bindingInUseDetails } from "./error-details.ts";
 import { EXAMPLE_AT as A, EXAMPLE_ULID as U } from "./example-literal.ts";
 import { operations } from "./operation.ts";
 import type { OperationExamples } from "./operation.ts";
@@ -10,6 +9,28 @@ import {
   providerKinds,
   providerProjection,
 } from "../../domain/provider-payload.ts";
+
+const providerBindingInUseDetails = z.strictObject({
+  blockers: z
+    .array(
+      z.discriminatedUnion("kind", [
+        z.strictObject({ kind: z.literal("default-chain") }),
+        z.strictObject({
+          kind: z.literal("project-binding"),
+          projectId: z.string().min(1),
+        }),
+        z.strictObject({
+          kind: z.literal("repository"),
+          repositoryId: z.string().min(1),
+        }),
+        z.strictObject({
+          kind: z.literal("attempt"),
+          attemptId: z.string().min(1),
+        }),
+      ]),
+    )
+    .min(1),
+});
 
 export const providerRegisterRequest = z.strictObject({
   name: z.string().min(1),
@@ -198,7 +219,10 @@ export const credential = operations([
     status: "routed",
     allowedActors: ["human"],
     response: providerRemoveResponse,
-    errors: { ...baselineErrors, "binding-in-use": bindingInUseDetails },
+    errors: {
+      ...baselineErrors,
+      "binding-in-use": providerBindingInUseDetails,
+    },
     examples: providerRemoveExamples,
   },
   {

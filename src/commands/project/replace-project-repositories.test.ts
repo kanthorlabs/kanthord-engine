@@ -9,15 +9,25 @@ import type {
   RecordedEvent,
 } from "../../services/event/index.ts";
 import type { ProjectView } from "../../domain/project-view.ts";
-import { replaceProjectRepositories } from "./replace-project-repositories.ts";
+import type { PlanStore } from "../../services/plan/index.ts";
+import {
+  replaceProjectRepositories,
+  ReplaceProjectRepositoriesError,
+} from "./replace-project-repositories.ts";
 import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
-import { fixtureIds, seedRegistry } from "../../../test/helpers/rows.ts";
+import { createPlanStore } from "../../../test/helpers/plan.ts";
+import {
+  fixtureIds,
+  seedRegistry,
+  seedGraph,
+} from "../../../test/helpers/rows.ts";
 
 type ReplaceProjectRepositoriesDependencies = Readonly<{
   storage: Storage;
   clock: Clock;
   events: EventLog;
+  plan: PlanStore;
 }>;
 
 function createRecordingEventLog(): Readonly<{
@@ -111,6 +121,7 @@ describe("src/commands/project/replace-project-repositories.test", () => {
         storage: temporary.storage,
         clock: createMockClock({ start: 1700000000000, step: 1000 }),
         events: createRecordingEventLog().events,
+        plan: createPlanStore(),
       },
       { id: fixtureIds.project, repositories: [], actor: "ulrich" },
     );
@@ -130,6 +141,7 @@ describe("src/commands/project/replace-project-repositories.test", () => {
         storage: temporary.storage,
         clock: createMockClock({ start: 1700000000000, step: 1000 }),
         events: createRecordingEventLog().events,
+        plan: createPlanStore(),
       },
       {
         id: fixtureIds.project,
@@ -158,6 +170,7 @@ describe("src/commands/project/replace-project-repositories.test", () => {
             storage: temporary.storage,
             clock: createMockClock({ start: 1700000000000, step: 1000 }),
             events: createRecordingEventLog().events,
+            plan: createPlanStore(),
           },
           {
             id: fixtureIds.project,
@@ -182,6 +195,7 @@ describe("src/commands/project/replace-project-repositories.test", () => {
             storage: temporary.storage,
             clock: createMockClock({ start: 1700000000000, step: 1000 }),
             events: createRecordingEventLog().events,
+            plan: createPlanStore(),
           },
           {
             id: fixtureIds.project,
@@ -206,6 +220,7 @@ describe("src/commands/project/replace-project-repositories.test", () => {
             storage: temporary.storage,
             clock: createMockClock({ start: 1700000000000, step: 1000 }),
             events: createRecordingEventLog().events,
+            plan: createPlanStore(),
           },
           {
             id: fixtureIds.project,
@@ -230,6 +245,7 @@ describe("src/commands/project/replace-project-repositories.test", () => {
             storage: temporary.storage,
             clock: createMockClock({ start: 1700000000000, step: 1000 }),
             events: createRecordingEventLog().events,
+            plan: createPlanStore(),
           },
           { id: "project_missing", repositories: [], actor: "ulrich" },
         ),
@@ -254,6 +270,7 @@ describe("src/commands/project/replace-project-repositories.test", () => {
         storage: temporary.storage,
         clock: createMockClock({ start: 1700000000000, step: 1000 }),
         events: createRecordingEventLog().events,
+        plan: createPlanStore(),
       },
       { id: fixtureIds.project, repositories: [], actor: "ulrich" },
     );
@@ -289,6 +306,7 @@ describe("src/commands/project/replace-project-repositories.test", () => {
         storage: temporary.storage,
         clock: createMockClock({ start: 1700000000000, step: 1000 }),
         events: createRecordingEventLog().events,
+        plan: createPlanStore(),
       },
       { id: fixtureIds.project, repositories: [], actor: "ulrich" },
     );
@@ -305,6 +323,7 @@ describe("src/commands/project/replace-project-repositories.test", () => {
         storage: temporary.storage,
         clock: createMockClock({ start: 1700000000000, step: 1000 }),
         events: createRecordingEventLog().events,
+        plan: createPlanStore(),
       },
       {
         id: fixtureIds.project,
@@ -334,6 +353,7 @@ describe("src/commands/project/replace-project-repositories.test", () => {
             storage: temporary.storage,
             clock: createMockClock({ start: 1700000000000, step: 1000 }),
             events: createRecordingEventLog().events,
+            plan: createPlanStore(),
           },
           {
             id: fixtureIds.project,
@@ -356,6 +376,7 @@ describe("src/commands/project/replace-project-repositories.test", () => {
         storage: temporary.storage,
         clock: createMockClock({ start: 1700000000000, step: 1000 }),
         events: log.events,
+        plan: createPlanStore(),
       },
       { id: fixtureIds.project, repositories: [], actor: "ulrich" },
     );
@@ -378,6 +399,7 @@ describe("src/commands/project/replace-project-repositories.test", () => {
         storage: temporary.storage,
         clock: createMockClock({ start: 1700000000000, step: 1000 }),
         events: createRecordingEventLog().events,
+        plan: createPlanStore(),
       },
       {
         id: fixtureIds.project,
@@ -392,5 +414,272 @@ describe("src/commands/project/replace-project-repositories.test", () => {
       repositories: [fixtureIds.repository],
       updatedAt: 1,
     });
+  });
+
+  it("refuses a drop of a repository a stored objective names", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    temporary.storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+    });
+    const before = readBindings(temporary.storage);
+
+    let caught: unknown;
+    try {
+      replaceProjectRepositories(
+        {
+          storage: temporary.storage,
+          clock: createMockClock({ start: 1700000000000, step: 1000 }),
+          events: createRecordingEventLog().events,
+          plan: createPlanStore(),
+        },
+        { id: fixtureIds.project, repositories: [], actor: "ulrich" },
+      );
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof ReplaceProjectRepositoriesError);
+    assert.equal(caught.refusal, "binding-in-use");
+    assert.equal(
+      caught.message,
+      "a stored objective names a repository the new set drops",
+    );
+    assert.deepEqual(caught.details, {
+      blockers: [{ nodeId: fixtureIds.objective, blocker: "repository-bound" }],
+    });
+    assert.deepEqual(readBindings(temporary.storage), before);
+  });
+
+  it("lists every blocked objective, sorted bytewise", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const plan = createPlanStore();
+    temporary.storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      plan.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [
+          {
+            id: "objective_0",
+            projectId: fixtureIds.project,
+            kind: "objective",
+            parentId: fixtureIds.initiative,
+            title: "Zero objective",
+            instructionBlob: fixtureIds.instructionBlob,
+            acceptanceBlob: null,
+            worker: null,
+            repositoryId: fixtureIds.repository,
+            revision: fixtureIds.planRevision,
+            updatedAt: 1,
+          },
+        ],
+        insertEdges: [],
+        deleteEdgeIds: [],
+        nodeDeletes: [],
+        at: 1,
+        cause: { revision: fixtureIds.planRevision, importId: null },
+      });
+    });
+
+    let caught: unknown;
+    try {
+      replaceProjectRepositories(
+        {
+          storage: temporary.storage,
+          clock: createMockClock({ start: 1700000000000, step: 1000 }),
+          events: createRecordingEventLog().events,
+          plan: createPlanStore(),
+        },
+        { id: fixtureIds.project, repositories: [], actor: "ulrich" },
+      );
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof ReplaceProjectRepositoriesError);
+    assert.deepEqual(caught.details, {
+      blockers: [
+        { nodeId: "objective_0", blocker: "repository-bound" },
+        { nodeId: fixtureIds.objective, blocker: "repository-bound" },
+      ],
+    });
+  });
+
+  it("allows a drop of a repository no node names", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    temporary.storage.transact(seedRegistry);
+    insertRepository(temporary.storage, "repo_b");
+
+    const view = replaceProjectRepositories(
+      {
+        storage: temporary.storage,
+        clock: createMockClock({ start: 1700000000000, step: 1000 }),
+        events: createRecordingEventLog().events,
+        plan: createPlanStore(),
+      },
+      { id: fixtureIds.project, repositories: ["repo_b"], actor: "ulrich" },
+    );
+
+    assert.deepEqual(view.repositories, ["repo_b"]);
+    const bindings = readBindings(temporary.storage) as readonly {
+      project_id: string;
+      kind: string;
+      target_id: string;
+    }[];
+    assert.deepEqual(
+      bindings.map(({ project_id, kind, target_id }) => ({
+        project_id,
+        kind,
+        target_id,
+      })),
+      [
+        {
+          project_id: fixtureIds.project,
+          kind: "git",
+          target_id: "repo_b",
+        },
+      ],
+    );
+  });
+
+  it("allows a replacement that keeps every named repository", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    temporary.storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+    });
+
+    const view = replaceProjectRepositories(
+      {
+        storage: temporary.storage,
+        clock: createMockClock({ start: 1700000000000, step: 1000 }),
+        events: createRecordingEventLog().events,
+        plan: createPlanStore(),
+      },
+      {
+        id: fixtureIds.project,
+        repositories: [fixtureIds.repository],
+        actor: "ulrich",
+      },
+    );
+
+    assert.deepEqual(view.repositories, [fixtureIds.repository]);
+  });
+
+  it("an objective in another project never blocks", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const plan = createPlanStore();
+    temporary.storage.transact((transaction) => {
+      seedRegistry(transaction);
+      transaction.run(
+        "INSERT INTO project (id, name, worker, e2e_json, updated_at) VALUES (?, ?, ?, ?, ?)",
+        ["project_b", "second-project", "general@1", null, 1],
+      );
+      transaction.run(
+        "INSERT INTO plan_revision (id, project_id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, 'import', ?, ?, ?, ?)",
+        [
+          "revision_bb",
+          "project_b",
+          null,
+          "imp_bb",
+          fixtureIds.instructionBlob,
+          fixtureIds.instructionBlob,
+          fixtureIds.instructionBlob,
+        ],
+      );
+      plan.mutateGraph(transaction, {
+        projectId: "project_b",
+        nodes: [
+          {
+            id: "initiative_bb",
+            projectId: "project_b",
+            kind: "initiative",
+            parentId: null,
+            title: "Second project initiative",
+            instructionBlob: fixtureIds.instructionBlob,
+            acceptanceBlob: null,
+            worker: null,
+            repositoryId: null,
+            revision: "revision_bb",
+            updatedAt: 1,
+          },
+          {
+            id: "objective_bb",
+            projectId: "project_b",
+            kind: "objective",
+            parentId: "initiative_bb",
+            title: "Second project objective",
+            instructionBlob: fixtureIds.instructionBlob,
+            acceptanceBlob: null,
+            worker: null,
+            repositoryId: fixtureIds.repository,
+            revision: "revision_bb",
+            updatedAt: 1,
+          },
+        ],
+        insertEdges: [],
+        deleteEdgeIds: [],
+        nodeDeletes: [],
+        at: 1,
+        cause: { revision: "revision_bb", importId: null },
+      });
+    });
+
+    const view = replaceProjectRepositories(
+      {
+        storage: temporary.storage,
+        clock: createMockClock({ start: 1700000000000, step: 1000 }),
+        events: createRecordingEventLog().events,
+        plan: createPlanStore(),
+      },
+      { id: fixtureIds.project, repositories: [], actor: "ulrich" },
+    );
+
+    assert.deepEqual(view.repositories, []);
+    const gitBindings = temporary.storage.transact((transaction) =>
+      transaction.all(
+        "SELECT target_id FROM project_binding WHERE project_id = ? AND kind = 'git'",
+        [fixtureIds.project],
+      ),
+    ) as readonly { target_id: string }[];
+    assert.deepEqual(gitBindings, []);
+  });
+
+  it("refuses before it writes", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    temporary.storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      transaction.run(
+        "INSERT INTO project_binding (project_id, kind, target_id, created_at) VALUES (?, 'provider', ?, ?)",
+        [fixtureIds.project, fixtureIds.provider, 2],
+      );
+    });
+    const before = readBindings(temporary.storage);
+    const beforeCount = countGitBindings(temporary.storage);
+
+    let caught: unknown;
+    try {
+      replaceProjectRepositories(
+        {
+          storage: temporary.storage,
+          clock: createMockClock({ start: 1700000000000, step: 1000 }),
+          events: createRecordingEventLog().events,
+          plan: createPlanStore(),
+        },
+        { id: fixtureIds.project, repositories: [], actor: "ulrich" },
+      );
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof ReplaceProjectRepositoriesError);
+    assert.equal(caught.refusal, "binding-in-use");
+    assert.equal(countGitBindings(temporary.storage), beforeCount);
+    assert.deepEqual(readBindings(temporary.storage), before);
   });
 });

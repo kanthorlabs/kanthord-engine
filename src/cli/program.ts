@@ -29,6 +29,9 @@ import { registerActorRegister } from "./actor/register.ts";
 import { registerActorRevoke } from "./actor/revoke.ts";
 import { registerActorRotate } from "./actor/rotate.ts";
 import { registerActorShow } from "./actor/show.ts";
+import { registerNodeCreate } from "./node/create.ts";
+import { registerNodeDelete } from "./node/delete.ts";
+import { registerNodeUpdate } from "./node/update.ts";
 import { registerStatus } from "./status.ts";
 
 export type ServeOptions = Readonly<{
@@ -238,6 +241,32 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+  });
+  registerNodeCreate({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+    exit: dependencies.exit,
+    readFile: dependencies.readFile,
+  });
+  registerNodeUpdate({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+    exit: dependencies.exit,
+    readFile: dependencies.readFile,
+  });
+  registerNodeDelete({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+    exit: dependencies.exit,
   });
 
   return program;

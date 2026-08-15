@@ -43,6 +43,7 @@ import {
   createPlanGraph,
   createPlanReader,
   createPlanStore,
+  createRevision,
   planFixtureIdentities,
   seedPlanFixture,
 } from "../../../test/helpers/plan.ts";
@@ -1077,8 +1078,9 @@ describe("src/http/server/idempotency.test", () => {
         createMockClock({ start: 1700000000000, step: 1000 }),
       );
       seedPlanFixture(storage, plan, blobs);
+      const revision = createRevision(blobs, plan);
       const exported = exportPlan(
-        { storage, plan, blobs },
+        { storage, plan, revision },
         { projectId: fixtureIds.project },
       ).documents;
       const recorded: ImportPlanResult[] = [];

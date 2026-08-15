@@ -2,7 +2,7 @@ import { parseIdentity } from "./identity.ts";
 import { completenessFindings } from "./plan-completeness.ts";
 import type { Choice, ChoiceVerdict } from "./plan-choice.ts";
 import type { Finding } from "./plan-finding.ts";
-import { sortFindings } from "./plan-finding.ts";
+import { findingScope, sortFindings } from "./plan-finding.ts";
 import type { StoredNode, ValidationContext } from "./plan-graph.ts";
 import type { ResolvedDocument } from "./plan-identity.ts";
 import { comparePaths } from "./plan-path.ts";
@@ -118,6 +118,18 @@ export function validateCandidate(
         id: node.id,
         message: `the parent ${node.parentId} is absent from the candidate`,
       });
+    }
+    const parent = node.parentId === null ? undefined : byId.get(node.parentId);
+    if (parent !== undefined) {
+      const required = node.kind === "objective" ? "initiative" : "objective";
+      if (node.kind !== "initiative" && parent.kind !== required) {
+        findings.push({
+          code: "parent-missing",
+          path: null,
+          id: node.id,
+          message: `the parent ${node.parentId} is not an ${required}`,
+        });
+      }
     }
   }
 
@@ -251,6 +263,24 @@ export function validateCandidate(
   return sortFindings(findings);
 }
 
+export function validateCandidateStructural(
+  dependencies: Readonly<{ findCycles: CycleFinder }>,
+  input: Readonly<{ candidate: Candidate; context: ValidationContext }>,
+): readonly Finding[] {
+  return validateCandidate(dependencies, input).filter(
+    (finding) => findingScope[finding.code] === "structural",
+  );
+}
+
+export function validateCandidateCompleteness(
+  dependencies: Readonly<{ findCycles: CycleFinder }>,
+  input: Readonly<{ candidate: Candidate; context: ValidationContext }>,
+): readonly Finding[] {
+  return validateCandidate(dependencies, input).filter(
+    (finding) => findingScope[finding.code] === "completeness",
+  );
+}
+
 export type ComponentFinder = (
   input: Readonly<{
     nodes: readonly Readonly<{ id: string; parentId: string | null }>[];
@@ -288,7 +318,7 @@ export function repairSuggestions(
       choices: [...choices.entries()].map(([id, take]) => ({ id, take })),
       blobHashes,
     });
-    const findings = validateCandidate(
+    const findings = validateCandidateStructural(
       { findCycles: dependencies.findCycles },
       { candidate, context },
     );

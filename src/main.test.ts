@@ -138,6 +138,41 @@ const fixtures: Readonly<Record<string, Fixture>> = {
   "plan.revisions": { parameters: { id: missing("project") }, expect: 404 },
   "node.list": { expect: 200 },
   "node.show": { parameters: { id: missing("node") }, expect: 404 },
+  "node.create": {
+    parameters: { id: missing("project") },
+    body: {
+      fromRevision: null,
+      node: {
+        kind: "initiative",
+        title: "Do the work",
+        instruction: "Do the initiative work.\n",
+        worker: null,
+        dependsOn: [],
+      },
+    },
+    expect: 404,
+  },
+  "node.update": {
+    parameters: { id: missing("node") },
+    body: {
+      fromRevision: "revision_00000000000000000000000000",
+      node: {
+        kind: "task",
+        title: "Do the work",
+        parentId: missing("objective"),
+        instruction: "Do the task work.\n",
+        acceptance: "## Acceptance criteria\n- it works\n",
+        worker: null,
+        dependsOn: [],
+      },
+    },
+    expect: 404,
+  },
+  "node.delete": {
+    parameters: { id: missing("node") },
+    body: { fromRevision: "revision_00000000000000000000000000" },
+    expect: 404,
+  },
   "edge.list": { parameters: { id: missing("project") }, expect: 404 },
   "event.list": { expect: 200 },
   "blob.show": {

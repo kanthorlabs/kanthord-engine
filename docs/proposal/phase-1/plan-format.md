@@ -132,7 +132,7 @@ Two legal choices can build a graph that neither side authored. The database hol
 
 The daemon therefore builds the whole candidate graph from every choice, and re-runs the full validation over it — schema, references, containment, cycles, repository, worker and empty parents. It applies nothing unless the whole candidate is valid, and it never repairs a choice by itself.
 
-A suggestion set is held to the same standard, because a client must never pre-select a combination that the import will reject. The daemon computes the local suggestions, finds each connected component whose combination is invalid, and resets that whole component to `database`. It repeats until the graph is valid. The database baseline is always valid, so the procedure terminates.
+A suggestion set is held to the same standard, because a client must never pre-select a combination that the import will reject. The daemon computes the local suggestions, finds each connected component whose combination is invalid, and resets that whole component to `database`. It repeats until the graph is valid. The database baseline is always structurally valid, so the procedure terminates.
 
 ### A kind change is an addition and a retention
 

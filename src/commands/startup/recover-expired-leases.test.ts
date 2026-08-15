@@ -148,7 +148,7 @@ function insertTask(fixture: RecoveryFixture, id: string, state: string): void {
       [projectId, `project-${ulid}`, "general@1", null, NOW],
     );
     transaction.run(
-      "INSERT INTO plan_revision (id, project_id, parent_id, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO plan_revision (id, project_id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, 'import', ?, ?, ?, ?)",
       [
         revisionId,
         projectId,

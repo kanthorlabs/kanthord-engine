@@ -71,11 +71,11 @@ test("documents openapi 3.0.3 and the product info", () => {
   });
 });
 
-test("renders fifty-two distinct paths in bytewise order", () => {
+test("renders fifty-five distinct paths in bytewise order", () => {
   const document = buildOpenApiDocument();
   const paths = document.paths as Readonly<Record<string, unknown>>;
   const keys = Object.keys(paths);
-  assert.equal(keys.length, 52);
+  assert.equal(keys.length, 55);
   assert.deepEqual(keys, sortedBytewise(keys));
 });
 
@@ -112,7 +112,7 @@ test("orders methods within a path by the fixed sequence", () => {
 test("names every operation and matches the registry set", () => {
   const document = buildOpenApiDocument();
   const ids = operationObjects(document).map((entry) => entry.operationId);
-  assert.equal(ids.length, 59);
+  assert.equal(ids.length, 62);
   assert.deepEqual(
     sortedBytewise(ids),
     sortedBytewise(registry.map((entry) => entry.operationId)),
@@ -207,7 +207,7 @@ test("documents the routed success status from successStatus", () => {
   }
 });
 
-test("registers exactly the seventy-three schema components in bytewise order", () => {
+test("registers exactly the eighty-two schema components in bytewise order", () => {
   const document = buildOpenApiDocument();
   const components = document.components as Readonly<Record<string, unknown>>;
   const schemas = components.schemas as Readonly<Record<string, unknown>>;
@@ -229,10 +229,19 @@ test("registers exactly the seventy-three schema components in bytewise order", 
     "edge.list.response",
     "event.list.error",
     "event.list.response",
+    "node.create.error",
+    "node.create.request",
+    "node.create.response",
+    "node.delete.error",
+    "node.delete.request",
+    "node.delete.response",
     "node.list.error",
     "node.list.response",
     "node.show.error",
     "node.show.response",
+    "node.update.error",
+    "node.update.request",
+    "node.update.response",
     "plan.export.error",
     "plan.export.response",
     "plan.import.error",

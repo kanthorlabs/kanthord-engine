@@ -28,6 +28,25 @@ const operationAdditions: Readonly<Record<string, readonly string[]>> = {
     "idempotency-mismatch",
   ],
   "plan.validate": ["plan-invalid"],
+  "project.repositories": ["binding-in-use"],
+  "node.create": [
+    "stale-revision",
+    "plan-invalid",
+    "illegal-transition",
+    "binding-in-use",
+  ],
+  "node.update": [
+    "stale-revision",
+    "plan-invalid",
+    "illegal-transition",
+    "binding-in-use",
+  ],
+  "node.delete": [
+    "stale-revision",
+    "plan-invalid",
+    "illegal-transition",
+    "binding-in-use",
+  ],
 };
 
 function objectNodes(schema: unknown): readonly Record<string, unknown>[] {
@@ -375,8 +394,8 @@ describe("src/http/contract/coverage.test", () => {
     }
   });
 
-  it("every one of the twenty-eight phase-1 routed operations but blob.show carries a response schema", () => {
-    assert.equal(scoped.length, 28);
+  it("every one of the thirty-one phase-1 routed operations but blob.show carries a response schema", () => {
+    assert.equal(scoped.length, 31);
     for (const entry of scoped) {
       assert.ok(
         entry.response !== undefined,

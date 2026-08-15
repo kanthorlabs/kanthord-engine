@@ -1,25 +1,16 @@
 import type { NodeState } from "./state.ts";
+import { nodeWriteLegality, structuralFields } from "./node-write-legality.ts";
+import type { DifferingField } from "./node-write-legality.ts";
+
+export {
+  differingFields,
+  proseFields,
+  structuralFields,
+  type DifferingField,
+} from "./node-write-legality.ts";
 
 export const choices = ["submitted", "database"] as const;
 export type Choice = (typeof choices)[number];
-
-export const proseFields = ["body", "title"] as const;
-export const structuralFields = [
-  "depends_on",
-  "parent",
-  "repo",
-  "worker",
-] as const;
-
-export const differingFields = [
-  "body",
-  "depends_on",
-  "parent",
-  "repo",
-  "title",
-  "worker",
-] as const;
-export type DifferingField = (typeof differingFields)[number];
 
 export const presences = ["both", "document-only", "database-only"] as const;
 export type Presence = (typeof presences)[number];
@@ -83,25 +74,28 @@ export function choiceVerdict(facts: ChoiceFacts): ChoiceVerdict {
     return { suggested, submitted: { legal: true, reason: null }, database };
   }
 
-  const structuralLegal =
-    !facts.fields.includes("parent") && !facts.fields.includes("repo")
-      ? true
-      : facts.containmentMovable;
+  const legality = nodeWriteLegality({
+    state: facts.state as NodeState,
+    fields: facts.fields,
+    containmentMovable: facts.containmentMovable,
+  });
 
-  if (
-    facts.state === "pending" ||
-    facts.state === "blocked" ||
-    facts.state === "ready"
-  ) {
+  if (legality.legal) {
     return {
-      suggested: structuralLegal ? "submitted" : "database",
-      submitted: structuralLegal
-        ? { legal: true, reason: null }
-        : {
-            legal: false,
-            reason:
-              "the node or a descendant holds a lease, a workspace or a commit",
-          },
+      suggested: "submitted",
+      submitted: { legal: true, reason: null },
+      database,
+    };
+  }
+
+  if (legality.refusal === "containment") {
+    return {
+      suggested: "database",
+      submitted: {
+        legal: false,
+        reason:
+          "the node or a descendant holds a lease, a workspace or a commit",
+      },
       database,
     };
   }

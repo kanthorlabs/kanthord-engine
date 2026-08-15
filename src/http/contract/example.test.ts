@@ -13,8 +13,8 @@ const scoped = registry.filter(
 );
 
 test("src/http/contract/example.test", async (t) => {
-  await t.test("covers the twenty-eight phase-1 routed operations", () => {
-    assert.equal(scoped.length, 28);
+  await t.test("covers the thirty-one phase-1 routed operations", () => {
+    assert.equal(scoped.length, 31);
     for (const entry of scoped) {
       assert.notEqual(
         entry.examples,

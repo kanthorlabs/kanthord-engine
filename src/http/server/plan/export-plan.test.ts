@@ -8,6 +8,7 @@ import { fixtureIds } from "../../../../test/helpers/rows.ts";
 import {
   createBlobStore,
   createPlanStore,
+  createRevision,
   seedPlanFixture,
 } from "../../../../test/helpers/plan.ts";
 import { exportPlanHandler } from "./export-plan.ts";
@@ -36,10 +37,11 @@ describe("src/http/server/plan/export-plan.test", () => {
       createMockClock({ start: 1700000000000, step: 1000 }),
     );
     seedPlanFixture(storage, plan, blobs);
+    const revision = createRevision(blobs, plan);
     const app = await createTestApp({
       handlers: {
         "plan.export": exportPlanHandler({
-          exportPlan: (input) => exportPlan({ storage, plan, blobs }, input),
+          exportPlan: (input) => exportPlan({ storage, plan, revision }, input),
         }),
       },
     });

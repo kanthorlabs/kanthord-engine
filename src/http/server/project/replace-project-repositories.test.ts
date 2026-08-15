@@ -11,7 +11,12 @@ import type { Clock } from "../../../services/clock/index.ts";
 import { createTestApp } from "../../../../test/helpers/app.ts";
 import { createMigratedStorage } from "../../../../test/helpers/database.ts";
 import { createMockClock } from "../../../../test/helpers/clock.ts";
-import { fixtureIds, seedRegistry } from "../../../../test/helpers/rows.ts";
+import { createPlanStore } from "../../../../test/helpers/plan.ts";
+import {
+  fixtureIds,
+  seedRegistry,
+  seedGraph,
+} from "../../../../test/helpers/rows.ts";
 import { replaceProjectRepositoriesHandler } from "./replace-project-repositories.ts";
 import { replaceProjectRepositories } from "../../../commands/project/replace-project-repositories.ts";
 import { projectRepositoriesResponse } from "../../contract/project.ts";
@@ -57,11 +62,12 @@ describe("src/http/server/project/replace-project-repositories.test", () => {
     const storage = temporary.storage;
     const clock: Clock = createMockClock({ start: 1700000000000, step: 1000 });
     const events = silentEventLog();
+    const plan = createPlanStore();
     const app = await createTestApp({
       handlers: {
         "project.repositories": replaceProjectRepositoriesHandler({
           replaceProjectRepositories: (input) =>
-            replaceProjectRepositories({ storage, clock, events }, input),
+            replaceProjectRepositories({ storage, clock, events, plan }, input),
         }),
       },
     });
@@ -111,11 +117,12 @@ describe("src/http/server/project/replace-project-repositories.test", () => {
     const storage = temporary.storage;
     const clock: Clock = createMockClock({ start: 1700000000000, step: 1000 });
     const events = silentEventLog();
+    const plan = createPlanStore();
     const app = await createTestApp({
       handlers: {
         "project.repositories": replaceProjectRepositoriesHandler({
           replaceProjectRepositories: (input) =>
-            replaceProjectRepositories({ storage, clock, events }, input),
+            replaceProjectRepositories({ storage, clock, events, plan }, input),
         }),
       },
     });
@@ -140,11 +147,12 @@ describe("src/http/server/project/replace-project-repositories.test", () => {
     const eventsBefore = countEvents(storage);
     const clock: Clock = createMockClock({ start: 1700000000000, step: 1000 });
     const events = silentEventLog();
+    const plan = createPlanStore();
     const app = await createTestApp({
       handlers: {
         "project.repositories": replaceProjectRepositoriesHandler({
           replaceProjectRepositories: (input) =>
-            replaceProjectRepositories({ storage, clock, events }, input),
+            replaceProjectRepositories({ storage, clock, events, plan }, input),
         }),
       },
     });
@@ -160,5 +168,36 @@ describe("src/http/server/project/replace-project-repositories.test", () => {
     );
     assert.equal(countBindings(storage), bindingsBefore);
     assert.equal(countEvents(storage), eventsBefore);
+  });
+
+  it("PUT dropping a repository a stored objective names answers 409 binding-in-use", async (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    temporary.storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+    });
+    const storage = temporary.storage;
+    const clock: Clock = createMockClock({ start: 1700000000000, step: 1000 });
+    const events = silentEventLog();
+    const plan = createPlanStore();
+    const app = await createTestApp({
+      handlers: {
+        "project.repositories": replaceProjectRepositoriesHandler({
+          replaceProjectRepositories: (input) =>
+            replaceProjectRepositories({ storage, clock, events, plan }, input),
+        }),
+      },
+    });
+
+    const response = await app
+      .put(`/v1/project/${fixtureIds.project}/repository`)
+      .send({ repositories: [] });
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.error.code, "binding-in-use");
+    assert.deepEqual(response.body.error.details, {
+      blockers: [{ nodeId: fixtureIds.objective, blocker: "repository-bound" }],
+    });
   });
 });

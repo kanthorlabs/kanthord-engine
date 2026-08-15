@@ -45,6 +45,7 @@ describe("src/queries/edge/list-edge.test", () => {
           },
         ],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       });
@@ -88,6 +89,7 @@ describe("src/queries/edge/list-edge.test", () => {
           },
         ],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       });
@@ -141,6 +143,7 @@ describe("src/queries/edge/list-edge.test", () => {
           },
         ],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       });
@@ -205,6 +208,7 @@ describe("src/queries/edge/list-edge.test", () => {
           },
         ],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       });

@@ -1,14 +1,12 @@
-import type { Storage, Transaction } from "../../services/storage/index.ts";
+import type { Storage } from "../../services/storage/index.ts";
 import type { PlanStore } from "../../services/plan/index.ts";
-import type { BlobStore } from "../../services/blob/index.ts";
-import type { CanonicalNode } from "../../domain/plan-canonical-path.ts";
-import { renderDocumentSet } from "../../domain/plan-render.ts";
+import { RevisionError, type Revision } from "../../services/revision/index.ts";
 import type { RenderedDocument } from "../../domain/plan-render.ts";
 
 export type ExportPlanDependencies = Readonly<{
   storage: Storage;
   plan: PlanStore;
-  blobs: BlobStore;
+  revision: Revision;
 }>;
 
 export type ExportPlanResult = Readonly<{
@@ -26,17 +24,6 @@ export class ExportPlanError extends Error {
     this.name = "ExportPlanError";
     this.refusal = refusal;
   }
-}
-
-const decoder = new TextDecoder();
-
-function readRepositoryNamesById(
-  transaction: Transaction,
-): ReadonlyMap<string, string> {
-  const rows = transaction.all(
-    "SELECT id, name FROM repository",
-  ) as readonly Readonly<{ id: string; name: string }>[];
-  return new Map(rows.map((row) => [row.id, row.name]));
 }
 
 export function exportPlan(
@@ -61,67 +48,16 @@ export function exportPlan(
       return { revision: null, documents: [] };
     }
     const { nodes } = dependencies.plan.readGraph(transaction, input.projectId);
-    const repositoryNamesById = readRepositoryNamesById(transaction);
-    const bodies = new Map<
-      string,
-      Readonly<{
-        instruction: string;
-        acceptance: string | null;
-        worker: string | null;
-        repo: string | null;
-      }>
-    >();
-    for (const node of nodes) {
-      const instruction = dependencies.blobs.get(
-        node.instructionBlob,
-        transaction,
-      );
-      if (instruction === null) {
-        throw new Error(
-          `blob ${node.instructionBlob} is missing from the store`,
-        );
+    try {
+      return {
+        revision,
+        documents: dependencies.revision.render(transaction, { nodes }),
+      };
+    } catch (error) {
+      if (error instanceof RevisionError) {
+        throw new ExportPlanError(error.refusal, error.message);
       }
-      let acceptance: string | null = null;
-      if (node.acceptanceBlob !== null) {
-        const acceptanceBlob = dependencies.blobs.get(
-          node.acceptanceBlob,
-          transaction,
-        );
-        if (acceptanceBlob === null) {
-          throw new Error(
-            `blob ${node.acceptanceBlob} is missing from the store`,
-          );
-        }
-        acceptance = decoder.decode(acceptanceBlob.content);
-      }
-      let repo: string | null = null;
-      if (node.repositoryId !== null) {
-        const name = repositoryNamesById.get(node.repositoryId);
-        if (name === undefined) {
-          throw new ExportPlanError(
-            "repository-unknown",
-            `repository ${node.repositoryId} is not registered`,
-          );
-        }
-        repo = name;
-      }
-      bodies.set(node.id, {
-        instruction: decoder.decode(instruction.content),
-        acceptance,
-        worker: node.worker,
-        repo,
-      });
+      throw error;
     }
-    const canonicalNodes: readonly CanonicalNode[] = nodes.map((node) => ({
-      identity: node.id,
-      kind: node.kind,
-      title: node.title,
-      parentIdentity: node.parentId,
-      dependencies: node.dependencies,
-    }));
-    return {
-      revision,
-      documents: renderDocumentSet(canonicalNodes, bodies),
-    };
   });
 }

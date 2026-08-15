@@ -50,6 +50,7 @@ describe("src/queries/plan/list-revision.test", () => {
         id: "revision_b",
         projectId: fixtureIds.project,
         parentId: fixtureIds.planRevision,
+        origin: "import",
         importId: "imp_b",
         submittedBlob: fixtureIds.instructionBlob,
         choicesBlob: fixtureIds.instructionBlob,
@@ -88,7 +89,9 @@ describe("src/queries/plan/list-revision.test", () => {
         revision.choicesBlob,
         revision.acceptedBlob,
       ]) {
-        assert.match(hash, blobHashPattern);
+        if (hash !== null) {
+          assert.match(hash, blobHashPattern);
+        }
       }
     }
   });
@@ -105,6 +108,7 @@ describe("src/queries/plan/list-revision.test", () => {
         id: "revision_b",
         projectId: fixtureIds.project,
         parentId: fixtureIds.planRevision,
+        origin: "import",
         importId: "imp_b",
         submittedBlob: hash,
         choicesBlob: hash,

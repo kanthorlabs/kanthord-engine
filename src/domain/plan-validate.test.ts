@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { workerKinds } from "./worker.ts";
 import type { ValidationContext } from "./plan-graph.ts";
+import { findingScope } from "./plan-finding.ts";
 import {
   validateDocuments,
   type CycleFinder,
@@ -1032,6 +1033,10 @@ Nothing below.
     assert.deepEqual(
       result.findings.map((finding) => finding.code),
       ["initiative-without-objective", "objective-without-task"],
+    );
+    assert.deepEqual(
+      result.findings.map((finding) => findingScope[finding.code]),
+      ["completeness", "completeness"],
     );
   });
 

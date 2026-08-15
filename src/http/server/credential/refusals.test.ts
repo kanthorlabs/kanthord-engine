@@ -3,10 +3,8 @@ import assert from "node:assert/strict";
 
 import { toHttpError } from "./refusals.ts";
 import { HttpError } from "../../contract/errors.ts";
-import {
-  bindingInUseDetails,
-  invalidRequestDetails,
-} from "../../contract/error-details.ts";
+import { invalidRequestDetails } from "../../contract/error-details.ts";
+import { findOperation } from "../../contract/registry.ts";
 import { PayloadError } from "../../../domain/provider-payload.ts";
 import { SetDefaultProviderError } from "../../../commands/provider/set-default-provider.ts";
 import { RenameProviderError } from "../../../commands/provider/rename-provider.ts";
@@ -109,7 +107,13 @@ describe("src/http/server/credential/refusals.test", () => {
     assert.equal(error.code, "binding-in-use");
     assert.equal(error.status, 409);
     assert.deepEqual(error.details, { blockers });
-    assert.doesNotThrow(() => bindingInUseDetails.parse(error.details));
+    const declared =
+      findOperation("provider.remove")?.errors?.["binding-in-use"];
+    assert.ok(
+      declared !== undefined && declared !== null,
+      "provider.remove declares binding-in-use",
+    );
+    assert.doesNotThrow(() => declared.parse(error.details));
   });
 
   it("a PayloadError still maps to a 400 invalid-request with refusal and detail", () => {

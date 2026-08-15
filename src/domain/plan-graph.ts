@@ -32,6 +32,22 @@ export type ContainmentFacts = Readonly<{
   retainedCommit: boolean;
 }>;
 
+export const executionBlockers = [
+  "lease",
+  "workspace",
+  "run",
+  "attempt",
+  "commit",
+  "check-result",
+  "git-operation",
+] as const;
+export type ExecutionBlocker = (typeof executionBlockers)[number];
+
+export type SubtreeExecutionFact = Readonly<{
+  nodeId: string;
+  blocker: ExecutionBlocker;
+}>;
+
 export type ValidationContext = Readonly<{
   workerKinds: readonly string[];
   boundRepositories: readonly string[];

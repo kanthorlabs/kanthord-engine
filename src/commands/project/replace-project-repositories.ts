@@ -1,10 +1,12 @@
 import type { Storage } from "../../services/storage/index.ts";
 import type { Clock } from "../../services/clock/index.ts";
 import type { EventLog } from "../../services/event/index.ts";
+import type { PlanStore } from "../../services/plan/index.ts";
 import type { ProjectView } from "../../domain/project-view.ts";
 
 export type ReplaceProjectRepositoriesDependencies = Readonly<{
   storage: Storage;
+  plan: PlanStore;
   clock: Clock;
   events: EventLog;
 }>;
@@ -19,15 +21,22 @@ export type ReplaceProjectRepositoriesRefusal =
   | "project-not-found"
   | "repository-not-found"
   | "too-many-repositories"
-  | "duplicate-repository";
+  | "duplicate-repository"
+  | "binding-in-use";
 
 export class ReplaceProjectRepositoriesError extends Error {
   readonly refusal: ReplaceProjectRepositoriesRefusal;
+  readonly details: unknown;
 
-  constructor(refusal: ReplaceProjectRepositoriesRefusal, message: string) {
+  constructor(
+    refusal: ReplaceProjectRepositoriesRefusal,
+    message: string,
+    details?: unknown,
+  ) {
     super(message);
     this.name = "ReplaceProjectRepositoriesError";
     this.refusal = refusal;
+    this.details = details;
   }
 }
 
@@ -70,6 +79,26 @@ export function replaceProjectRepositories(
           `no repository ${repositoryId}`,
         );
       }
+    }
+    const { nodes } = dependencies.plan.readGraph(transaction, input.id);
+    const kept = new Set(input.repositories);
+    const blockers = nodes
+      .filter(
+        (node) => node.repositoryId !== null && !kept.has(node.repositoryId),
+      )
+      .map((node) => ({ nodeId: node.id, blocker: "repository-bound" }))
+      .sort((a, b) =>
+        Buffer.compare(
+          Buffer.from(a.nodeId, "utf8"),
+          Buffer.from(b.nodeId, "utf8"),
+        ),
+      );
+    if (blockers.length > 0) {
+      throw new ReplaceProjectRepositoriesError(
+        "binding-in-use",
+        "a stored objective names a repository the new set drops",
+        { blockers },
+      );
     }
     transaction.run(
       "DELETE FROM project_binding WHERE project_id = ? AND kind = 'git'",

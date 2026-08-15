@@ -24,7 +24,15 @@ export function toHttpError(error: unknown): HttpError {
         return httpError("invalid-request", error.message, {
           refusal: "duplicate-repository",
         });
+      case "binding-in-use":
+        return httpError("binding-in-use", error.message, details(error));
     }
   }
   throw error;
+}
+
+function details(
+  error: ReplaceProjectRepositoriesError,
+): Readonly<Record<string, unknown>> {
+  return (error.details ?? {}) as Readonly<Record<string, unknown>>;
 }

@@ -12,7 +12,11 @@ import { showNodeHandler } from "./show-node.ts";
 import { showNode } from "../../../queries/node/show-node.ts";
 import { nodeShowResponse } from "../../contract/graph.ts";
 import type { Storage } from "../../../services/storage/index.ts";
-import { createPlanStore } from "../../../../test/helpers/plan.ts";
+import {
+  createBlobStore,
+  createPlanStore,
+} from "../../../../test/helpers/plan.ts";
+import { createMockClock } from "../../../../test/helpers/clock.ts";
 
 const daemonHome = "/var/lib/kanthord";
 
@@ -30,6 +34,10 @@ describe("src/http/server/node/show-node.test", () => {
     const temporary = createMigratedStorage();
     const storage = temporary.storage;
     const plan = createPlanStore();
+    const blobs = createBlobStore(
+      storage,
+      createMockClock({ start: 1700000000000, step: 1000 }),
+    );
     storage.transact((transaction) => {
       seedRegistry(transaction);
       seedGraph(transaction);
@@ -37,7 +45,7 @@ describe("src/http/server/node/show-node.test", () => {
     const app = await createTestApp({
       handlers: {
         "node.show": showNodeHandler({
-          showNode: (input) => showNode({ storage, plan }, input),
+          showNode: (input) => showNode({ storage, plan, blobs }, input),
         }),
       },
     });

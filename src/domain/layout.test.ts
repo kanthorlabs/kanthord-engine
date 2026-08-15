@@ -98,7 +98,7 @@ describe("src/domain/layout.test", () => {
     );
   });
 
-  it("src/services/ holds exactly the sixteen capabilities plus home-lock", () => {
+  it("src/services/ holds exactly the seventeen capabilities plus home-lock", () => {
     const servicesDir = new URL("../services/", import.meta.url);
     const entries = fs.readdirSync(servicesDir, { withFileTypes: true });
     const directoryNames = entries
@@ -120,6 +120,7 @@ describe("src/domain/layout.test", () => {
       "lease",
       "plan",
       "readiness",
+      "revision",
       "secret",
       "storage",
       "verify",
@@ -178,6 +179,7 @@ describe("src/domain/layout.test", () => {
 
   it("no file under src/commands/ imports another command module", () => {
     const commandsDir = fileURLToPath(new URL("../commands/", import.meta.url));
+    const sharedNodeRefusal = resolve(commandsDir, "node/refusal.ts");
     const offenders: string[] = [];
     for (const file of walkFiles(commandsDir)) {
       if (file.endsWith(".test.ts")) continue;
@@ -185,6 +187,7 @@ describe("src/domain/layout.test", () => {
       for (const specifier of relativeImportSpecifiers(content)) {
         const target = resolve(dirname(file), specifier);
         if (target.startsWith(commandsDir)) {
+          if (target === sharedNodeRefusal) continue;
           offenders.push(`${relative(commandsDir, file)} -> ${specifier}`);
         }
       }

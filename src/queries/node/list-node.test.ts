@@ -170,6 +170,7 @@ describe("src/queries/node/list-node.test", () => {
         ],
         insertEdges: [],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       });
@@ -212,6 +213,7 @@ describe("src/queries/node/list-node.test", () => {
           },
         ],
         deleteEdgeIds: [],
+        nodeDeletes: [],
         at: 1,
         cause: { revision: fixtureIds.planRevision, importId: null },
       });

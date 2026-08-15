@@ -113,7 +113,7 @@ export function createRecoveryFixture(): RecoveryFixture {
           [projectId, "fixture-project", null, null, 1700000000000],
         );
         transaction.run(
-          "INSERT INTO plan_revision (id, project_id, parent_id, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO plan_revision (id, project_id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, 'import', ?, ?, ?, ?)",
           [revisionId, projectId, null, "imp_fixture", blob, blob, blob],
         );
         transaction.run(

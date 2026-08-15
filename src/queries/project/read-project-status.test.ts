@@ -68,7 +68,7 @@ describe("src/queries/project/read-project-status.test", () => {
         ["project_b", "second-project", "general@1", null, 1],
       );
       transaction.run(
-        "INSERT INTO plan_revision (id, project_id, parent_id, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO plan_revision (id, project_id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, 'import', ?, ?, ?, ?)",
         [
           "revision_b",
           "project_b",

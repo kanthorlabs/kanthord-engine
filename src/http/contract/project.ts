@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { parameter, resource, sub } from "./path.ts";
 import { baselineErrors } from "./error-baseline.ts";
+import { bindingInUseDetails } from "./error-details.ts";
 import { EXAMPLE_AT as A, EXAMPLE_ULID as U } from "./example-literal.ts";
 import { operations } from "./operation.ts";
 import type { OperationExamples } from "./operation.ts";
@@ -142,7 +143,7 @@ export const project = operations([
     allowedActors: ["human"],
     request: projectRepositoriesRequest,
     response: projectRepositoriesResponse,
-    errors: { ...baselineErrors },
+    errors: { ...baselineErrors, "binding-in-use": bindingInUseDetails },
     examples: projectRepositoriesExamples,
   },
   {
