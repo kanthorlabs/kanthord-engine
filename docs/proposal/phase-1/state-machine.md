@@ -8,7 +8,7 @@ Non-terminal:
 
 | State               | Meaning                                                                  | Leaves by    |
 | ------------------- | ------------------------------------------------------------------------ | ------------ |
-| `pending`           | dependencies are not satisfied                                           | scheduler    |
+| `pending`           | dependencies are not satisfied                                           | daemon       |
 | `ready`             | a worker can claim it                                                    | worker claim |
 | `running`           | a worker holds the lease                                                 | agent result |
 | `blocked`           | attempt limit reached, dependency invalid, base stale, or work abandoned | human        |
@@ -16,7 +16,7 @@ Non-terminal:
 
 `Leaves by` names the normal actor. A human discard, the discard of a dependency, and an abandon leave any non-terminal state. The transition matrix below is normative.
 
-`unblock` writes `blocked → pending`, and a topology write and an import write `ready → pending` when the accepted graph adds an unsatisfied dependency to a node that was already `ready`. `unblock` clears the block reason and nothing else, and the scheduler then re-derives readiness. An abandon never returns a node to `pending`.
+Import, `unblock` and a readiness demotion are the only writers of `pending`. `unblock` clears the block reason and nothing else, and the daemon then re-derives readiness in the same transaction. An abandon never returns a node to `pending`.
 
 Terminal: `done`, `partial`, `discarded`. A task is the one exception: a task holds workspace commits until its objective integrates, and an abandon reverses a `done` task. Integration is what makes an outcome irreversible, and only an objective integrates. `discarded` is terminal at every level, because it carries a human reason, and an abandon never resurrects it.
 
@@ -24,7 +24,7 @@ Block reasons: `attempt-limit`, `dependency-discarded`, `stale-base`, `dirty-rec
 
 ## There is no terminal error state
 
-A failed task parks in `blocked`. A human clears it. The scheduler never propagates failure by itself.
+A failed task parks in `blocked`. A human clears it. The daemon never propagates failure by itself.
 
 ## Terminal states and aggregation
 
@@ -60,7 +60,7 @@ The table holds every ordered pair of different states. `T` is a task, `O` is an
 
 | From                | To                  | T   | O   | I   | Note                                                                                                                                                                                                                                                                                                                   |
 | ------------------- | ------------------- | --- | --- | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pending`           | `ready`             | ✅  | ✅  | ✅  | Every dependency is `done` or `partial`. The scheduler writes it.                                                                                                                                                                                                                                                      |
+| `pending`           | `ready`             | ✅  | ✅  | ✅  | Every dependency is `done` or `partial`. The daemon derives the transition and writes it inside the transaction of the write that changed eligibility.                                                                                                                                                                 |
 | `pending`           | `running`           | ❌  | ❌  | ❌  | A claim reads `ready`. `ready` is the proof that every dependency is satisfied.                                                                                                                                                                                                                                        |
 | `pending`           | `blocked`           | ✅  | ✅  | ✅  | A dependency is discarded, reason `dependency-discarded`. T: also `abandon objective`, reason `abandoned`.                                                                                                                                                                                                             |
 | `pending`           | `awaiting_approval` | ❌  | ❌  | ❌  | The gate needs a frozen candidate, and no work ran.                                                                                                                                                                                                                                                                    |
@@ -82,8 +82,8 @@ The table holds every ordered pair of different states. `T` is a task, `O` is an
 | `running`           | `partial`           | ❌  | ❌  | ✅  | I: every objective is terminal, at least one is `done`, at least one is `discarded`, and the end-to-end check passed or recorded `not-applicable`. T: a task has no child. O: an objective always passes the human gate.                                                                                               |
 | `running`           | `discarded`         | ❌  | ✅  | ✅  | O and I: every child is `discarded`, or a human discards a subtree that holds no commit. T: the task holds a live lease and may hold commits. Abandon it first.                                                                                                                                                        |
 | `blocked`           | `pending`           | ✅  | ✅  | ✅  | `unblock` clears `attempt-limit`, `dirty-recovery`, `stale-base` and `abandoned`. `dependency-discarded` needs `waive`, or a re-import that rewires the edge. `e2e-failed` clears when the repair objective imports.                                                                                                   |
-| `blocked`           | `ready`             | ❌  | ❌  | ❌  | `unblock` writes `pending`, and the scheduler re-derives readiness. A cleared node whose dependency is still discarded must not become claimable.                                                                                                                                                                      |
-| `blocked`           | `running`           | ❌  | ❌  | ❌  | `unblock` writes `pending`, and the scheduler re-derives eligibility before any claim.                                                                                                                                                                                                                                 |
+| `blocked`           | `ready`             | ❌  | ❌  | ❌  | `unblock` writes `pending`, and the daemon re-derives readiness in the same transaction. A cleared node whose dependency is still discarded must not become claimable.                                                                                                                                                 |
+| `blocked`           | `running`           | ❌  | ❌  | ❌  | `unblock` writes `pending`, and the daemon re-derives eligibility in the same transaction, before any claim.                                                                                                                                                                                                           |
 | `blocked`           | `awaiting_approval` | ❌  | ❌  | ❌  | No approved candidate exists.                                                                                                                                                                                                                                                                                          |
 | `blocked`           | `done`              | ❌  | ❌  | ❌  | The check that blocked it never passed.                                                                                                                                                                                                                                                                                |
 | `blocked`           | `partial`           | ❌  | ❌  | ❌  | Aggregation leaves `running`.                                                                                                                                                                                                                                                                                          |
@@ -114,7 +114,7 @@ Task order comes from the dependency graph, with a deterministic tie-break. The 
 
 ## Rules
 
-- A node is `ready` when every dependency is `done` or `partial`. `partial` satisfies a dependency, because it shipped work and holds no error.
+- A node is `ready` when every dependency is `done` or `partial`. `partial` satisfies a dependency, because it shipped work and holds no error. The daemon derives the state, and it writes each `pending` → `ready` and each `ready` → `pending` transition inside the transaction of the write that changed eligibility.
 - Attempt accounting belongs to the domain. Each rejection increments the attempt counter. The limit moves the task to `blocked` with reason `attempt-limit`. The default limit is 3, from configuration.
 - Execution is at-least-once. Agent work is attributed, not idempotent, because a model call is not repeatable. The invariant is that every side effect is attributed to a run and an attempt, and that recovery detects it. See `../phase-3/recovery.md`.
 - A repository in `needs-reconcile` gets no new objective clone. Its objectives stay `ready`, the scheduler skips them, and `status` names the repository. This is a repository state, not a node block reason, because the divergence is between the landing branch and remote origin rather than in any one candidate. See `../phase-2/integration-and-publish.md`.

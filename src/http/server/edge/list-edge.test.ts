@@ -33,10 +33,19 @@ describe("src/http/server/edge/list-edge.test", () => {
     storage.transact((transaction) => {
       seedRegistry(transaction);
       seedGraph(transaction);
-      plan.insertEdge(transaction, {
-        id: "edge_a",
-        fromNode: fixtureIds.task,
-        toNode: fixtureIds.objective,
+      plan.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [],
+        insertEdges: [
+          {
+            id: "edge_a",
+            fromNode: fixtureIds.task,
+            toNode: fixtureIds.objective,
+          },
+        ],
+        deleteEdgeIds: [],
+        at: 1,
+        cause: { revision: fixtureIds.planRevision, importId: null },
       });
     });
     const app = await createTestApp({

@@ -291,26 +291,39 @@ describe("src/queries/plan/export-plan.test", () => {
     t.after(() => dispose());
     seedPlanFixture(storage, plan, blobs);
     storage.transact((transaction) => {
-      plan.upsertNode(transaction, {
-        id: planFixtureIdentities.taskTwo,
+      plan.mutateGraph(transaction, {
         projectId: fixtureIds.project,
-        kind: "task",
-        parentId: planFixtureIdentities.objective,
-        title: "Harden the verify CLI",
-        instructionBlob: blobs.put(
-          transaction,
-          new TextEncoder().encode("Do the second task work.\n"),
-        ),
-        acceptanceBlob: blobs.put(transaction, new TextEncoder().encode("\n")),
-        worker: null,
-        repositoryId: null,
-        revision: fixtureIds.planRevision,
-        updatedAt: 1,
-      });
-      plan.insertEdge(transaction, {
-        id: "edge_01ZZZ3NDEKTSV4RRFFQ69G5FAV",
-        fromNode: planFixtureIdentities.task,
-        toNode: planFixtureIdentities.taskTwo,
+        nodes: [
+          {
+            id: planFixtureIdentities.taskTwo,
+            projectId: fixtureIds.project,
+            kind: "task",
+            parentId: planFixtureIdentities.objective,
+            title: "Harden the verify CLI",
+            instructionBlob: blobs.put(
+              transaction,
+              new TextEncoder().encode("Do the second task work.\n"),
+            ),
+            acceptanceBlob: blobs.put(
+              transaction,
+              new TextEncoder().encode("\n"),
+            ),
+            worker: null,
+            repositoryId: null,
+            revision: fixtureIds.planRevision,
+            updatedAt: 1,
+          },
+        ],
+        insertEdges: [
+          {
+            id: "edge_01ZZZ3NDEKTSV4RRFFQ69G5FAV",
+            fromNode: planFixtureIdentities.task,
+            toNode: planFixtureIdentities.taskTwo,
+          },
+        ],
+        deleteEdgeIds: [],
+        at: 1,
+        cause: { revision: fixtureIds.planRevision, importId: null },
       });
       transaction.run("UPDATE edge SET waived_at = 5 WHERE id = ?", [
         "edge_01ZZZ3NDEKTSV4RRFFQ69G5FAV",

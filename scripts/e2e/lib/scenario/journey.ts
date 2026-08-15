@@ -62,30 +62,28 @@ async function readTree(root: string): Promise<PlanDocument[]> {
 function parseStatusCounts(stdout: string): Readonly<{
   objectiveCount: number;
   taskCount: number;
-  tasksAllPending: boolean;
+  taskStates: Readonly<Record<string, number>>;
 }> {
   let objectiveCount = 0;
   let taskCount = 0;
-  let tasksAllPending = true;
+  const taskStates: Record<string, number> = {};
 
   for (const match of stdout.matchAll(
     /^kanthord: node (\S+) (\S+) (\S+) (\d+)$/gm,
   )) {
     const kind = match[1];
-    const state = match[2];
+    const state = match[2] as string;
     const count = Number(match[4]);
     if (kind === "objective") {
       objectiveCount += count;
     }
     if (kind === "task") {
       taskCount += count;
-      if (state !== "pending") {
-        tasksAllPending = false;
-      }
+      taskStates[state] = (taskStates[state] ?? 0) + count;
     }
   }
 
-  return { objectiveCount, taskCount, tasksAllPending };
+  return { objectiveCount, taskCount, taskStates };
 }
 
 export async function runJourney(
@@ -384,19 +382,27 @@ export async function runJourney(
     projectId,
   ]);
   const firstStatusCounts = parseStatusCounts(firstStatusRecord.stdout);
+  const expectedTaskStates: Record<string, number> = {};
+  if (profile.expectedPendingTaskCount > 0) {
+    expectedTaskStates["pending"] = profile.expectedPendingTaskCount;
+  }
+  if (profile.expectedReadyTaskCount > 0) {
+    expectedTaskStates["ready"] = profile.expectedReadyTaskCount;
+  }
+
   context.assert(
     "status-counts",
     {
       exitCode: 0,
       objectiveCount: profile.expectedObjectiveCount,
       taskCount: profile.expectedTaskCount,
-      tasksAllPending: true,
+      taskStates: expectedTaskStates,
     },
     {
       exitCode: firstStatusRecord.exitCode,
       objectiveCount: firstStatusCounts.objectiveCount,
       taskCount: firstStatusCounts.taskCount,
-      tasksAllPending: firstStatusCounts.tasksAllPending,
+      taskStates: firstStatusCounts.taskStates,
     },
   );
 

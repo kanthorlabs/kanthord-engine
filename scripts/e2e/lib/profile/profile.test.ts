@@ -22,6 +22,8 @@ const expectedFieldNames = [
   "planDirectory",
   "expectedObjectiveCount",
   "expectedTaskCount",
+  "expectedPendingTaskCount",
+  "expectedReadyTaskCount",
   "fixtureRoot",
   "expectedObjectIds",
 ] as const;
@@ -86,7 +88,7 @@ function fakeDriver(
   } as ExecutionDriver;
 }
 
-test("profileFieldNames has exactly the nine ScenarioProfile keys, in declaration order", () => {
+test("profileFieldNames has exactly the eleven ScenarioProfile keys, in declaration order", () => {
   assert.deepEqual(profileFieldNames, expectedFieldNames);
 });
 
@@ -98,14 +100,18 @@ test("createFixtureProfile returns the fixture's own default branch, counts and 
       `/tmp/deliver/${name}`,
     { deliverToken: fakeDeliverToken },
   );
-  const profile = await createFixtureProfile(fakeContext(ledger), driver);
+  try {
+    const profile = await createFixtureProfile(fakeContext(ledger), driver);
 
-  assert.equal(profile.defaultBranch, "main");
-  assert.equal(profile.expectedObjectiveCount, 2);
-  assert.equal(profile.expectedTaskCount, 4);
-  assert.deepEqual(profile.expectedObjectIds, fixtureObjectIds);
-
-  await ledger.releaseAll();
+    assert.equal(profile.defaultBranch, "main");
+    assert.equal(profile.expectedObjectiveCount, 2);
+    assert.equal(profile.expectedTaskCount, 4);
+    assert.equal(profile.expectedPendingTaskCount, 2);
+    assert.equal(profile.expectedReadyTaskCount, 2);
+    assert.deepEqual(profile.expectedObjectIds, fixtureObjectIds);
+  } finally {
+    await ledger.releaseAll();
+  }
 });
 
 test("createFixtureProfile calls deliverDirectory exactly once for the plan fixture, and planDirectory is its return value", async () => {
@@ -208,6 +214,8 @@ test("createRealProfile carries fixtureRoot null and expectedObjectIds null, and
     localPlanPath: "/home/operator/plan",
     expectedObjectiveCount: 5,
     expectedTaskCount: 11,
+    expectedPendingTaskCount: 2,
+    expectedReadyTaskCount: 2,
   });
 
   assert.equal(profile.fixtureRoot, null);
@@ -243,6 +251,8 @@ test("the fixture profile and the real profile carry the same key set", async ()
       localPlanPath: "/home/operator/plan",
       expectedObjectiveCount: 1,
       expectedTaskCount: 1,
+      expectedPendingTaskCount: 2,
+      expectedReadyTaskCount: 2,
     },
   );
 

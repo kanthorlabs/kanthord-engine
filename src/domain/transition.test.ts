@@ -330,7 +330,7 @@ describe("src/domain/transition.test", () => {
     }
   });
 
-  it("the pending-writer paragraph names the blocked→pending and ready→pending writers", () => {
+  it("the pending-writer paragraph names the three writers and the daemon", () => {
     const lines = readFileSync(
       resolve(
         import.meta.dirname,
@@ -343,20 +343,52 @@ describe("src/domain/transition.test", () => {
     );
     assert.ok(paragraph, "no pending-writer paragraph in state-machine.md");
     assert.ok(
-      paragraph!.includes("topology write"),
-      "the paragraph does not name the ready→pending topology writer",
+      paragraph!.includes(
+        "Import, `unblock` and a readiness demotion are the only writers of `pending`",
+      ),
+      "the paragraph does not name the three writers of pending",
     );
     assert.ok(
-      paragraph!.includes("import"),
-      "the paragraph does not name the import writer",
+      paragraph!.includes(
+        "the daemon then re-derives readiness in the same transaction",
+      ),
+      "the paragraph does not name the daemon re-derivation",
     );
-    assert.ok(
-      paragraph!.includes("unblock"),
-      "the paragraph does not name the blocked→pending unblock writer",
+  });
+
+  it("no matrix note names the scheduler", () => {
+    assert.equal(
+      transitions.every((row) => !row.note.includes("scheduler")),
+      true,
     );
-    assert.ok(
-      !paragraph!.includes("the only writers of"),
-      "the paragraph still claims import and unblock are the only pending writers",
+  });
+
+  it("the pending to ready note names the daemon and the transaction", () => {
+    const row = transitions.find(
+      (candidate) => candidate.from === "pending" && candidate.to === "ready",
     );
+    assert.ok(row, "no transitions row for pending→ready");
+    assert.equal(
+      row!.note,
+      "Every dependency is `done` or `partial`. The daemon derives the transition and writes it inside the transaction of the write that changed eligibility.",
+    );
+  });
+
+  it("no phase-1 rule of state-machine.md names the scheduler outside the phase-2 reference", () => {
+    const lines = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../docs/proposal/phase-1/state-machine.md",
+      ),
+      "utf-8",
+    ).split("\n");
+    for (const line of lines) {
+      if (line.includes("scheduler")) {
+        assert.ok(
+          line.includes("phase-2"),
+          `line names the scheduler outside the phase-2 reference: ${line}`,
+        );
+      }
+    }
   });
 });

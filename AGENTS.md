@@ -130,6 +130,7 @@ A rule with no mechanism is a rule a reviewer applies inconsistently. Each of th
 | the import matrix                                | `eslint-plugin-boundaries`                                        |
 | `domain/` purity, and vendor packages by layer   | `no-restricted-imports` per glob                                  |
 | an unclassified `src/` file                      | an eslint file-pattern rule                                       |
+| a node or edge write outside the plan store      | `no-restricted-syntax`, with an enumerated exemption list         |
 | registry equals the proposal contract            | a test in `npm run verify`                                        |
 | a `stubbed` route answers 501 and writes nothing | an integration test that compares database state before and after |
 | canonical serialization                          | exact-byte unit tests                                             |

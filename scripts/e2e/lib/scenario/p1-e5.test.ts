@@ -119,6 +119,8 @@ function baseEnv(workDir: string): Record<string, string | undefined> {
     KANTHORD_E2E_REAL_PLAN: join(workDir, "plan"),
     KANTHORD_E2E_REAL_OBJECTIVES: "2",
     KANTHORD_E2E_REAL_TASKS: "4",
+    KANTHORD_E2E_REAL_PENDING_TASKS: "2",
+    KANTHORD_E2E_REAL_READY_TASKS: "2",
   };
 }
 
@@ -283,6 +285,8 @@ test("checkPrerequisites resolves the RealInputs from the explicit plan and coun
     KANTHORD_E2E_REAL_PLAN: "/tmp/plan",
     KANTHORD_E2E_REAL_OBJECTIVES: "2",
     KANTHORD_E2E_REAL_TASKS: "4",
+    KANTHORD_E2E_REAL_PENDING_TASKS: "2",
+    KANTHORD_E2E_REAL_READY_TASKS: "2",
   };
 
   const result = await checkPrerequisites(context, env, stubLoadEnv());
@@ -294,7 +298,48 @@ test("checkPrerequisites resolves the RealInputs from the explicit plan and coun
     planPath: "/tmp/plan",
     expectedObjectiveCount: 2,
     expectedTaskCount: 4,
+    expectedPendingTaskCount: 2,
+    expectedReadyTaskCount: 2,
   });
+});
+
+test("KANTHORD_E2E_REAL_READY_TASKS=0 is accepted, and the resolved RealInputs carry both task-state counts", async (t) => {
+  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e5-"));
+  mkdirSync(join(workDir, "plan"), { recursive: true });
+  t.after(() => rmSync(workDir, { recursive: true, force: true }));
+
+  const context = fakeContext();
+  const env = {
+    ...baseEnv(workDir),
+    KANTHORD_E2E_REAL_READY_TASKS: "0",
+  };
+
+  const result = await checkPrerequisites(context, env, stubLoadEnv());
+
+  assert.equal(result.expectedPendingTaskCount, 2);
+  assert.equal(result.expectedReadyTaskCount, 0);
+});
+
+test("KANTHORD_E2E_REAL_READY_TASKS=-1 and KANTHORD_E2E_REAL_READY_TASKS=x each reject as unavailable", async (t) => {
+  const workDir = mkdtempSync(join(tmpdir(), "kanthord-e2e-p1e5-"));
+  mkdirSync(join(workDir, "plan"), { recursive: true });
+  t.after(() => rmSync(workDir, { recursive: true, force: true }));
+
+  for (const value of ["-1", "x"]) {
+    await t.test(`KANTHORD_E2E_REAL_READY_TASKS=${value}`, async () => {
+      const context = fakeContext();
+      const env = { ...baseEnv(workDir), KANTHORD_E2E_REAL_READY_TASKS: value };
+
+      await assert.rejects(
+        checkPrerequisites(context, env, stubLoadEnv()),
+        (error: unknown) => {
+          assert.ok(error instanceof RunnerError);
+          assert.equal(error.code, "unavailable");
+          return true;
+        },
+      );
+    });
+  }
 });
 
 test("a loadEnv rejection is wrapped as unavailable naming each missing key", async () => {
@@ -553,7 +598,7 @@ function buildJourneyDispatch(
     if (argv[0] === "status") {
       return record(argv, {
         stdout:
-          "kanthord: node objective ready - 2\nkanthord: node task pending - 4\n",
+          "kanthord: node objective ready - 2\nkanthord: node task pending - 2\nkanthord: node task ready - 2\n",
       });
     }
     if (argv[0] === "run") {
@@ -673,6 +718,8 @@ test("runP1E5 calls deliverToken exactly once with the token, and passes origin,
       planPath: join(workDir, "plan"),
       expectedObjectiveCount: 2,
       expectedTaskCount: 4,
+      expectedPendingTaskCount: 2,
+      expectedReadyTaskCount: 2,
     };
 
     await runP1E5(context, driver, inputs, stableRemoteRefs);
@@ -710,6 +757,8 @@ test("runP1E5 reads the remote refs twice, with the same input both times", asyn
       planPath: join(workDir, "plan"),
       expectedObjectiveCount: 2,
       expectedTaskCount: 4,
+      expectedPendingTaskCount: 2,
+      expectedReadyTaskCount: 2,
     };
     const readInputs: RemoteRefsInput[] = [];
     const readRemoteRefs: ReadRemoteRefs = async (remoteInput) => {
@@ -764,6 +813,8 @@ test("runP1E5 reads the refs before the first journey command and after the last
       planPath: join(workDir, "plan"),
       expectedObjectiveCount: 2,
       expectedTaskCount: 4,
+      expectedPendingTaskCount: 2,
+      expectedReadyTaskCount: 2,
     };
     let readCount = 0;
     let commandCountAtSecondRead = -1;
@@ -810,6 +861,8 @@ test("runP1E5 asserts forge-unchanged with the two maps", async (t) => {
       planPath: join(workDir, "plan"),
       expectedObjectiveCount: 2,
       expectedTaskCount: 4,
+      expectedPendingTaskCount: 2,
+      expectedReadyTaskCount: 2,
     };
     const refs = { "refs/heads/main": "a".repeat(40) };
 
@@ -847,6 +900,8 @@ test("runP1E5 records forge-unchanged as failed when a ref appears during the jo
       planPath: join(workDir, "plan"),
       expectedObjectiveCount: 2,
       expectedTaskCount: 4,
+      expectedPendingTaskCount: 2,
+      expectedReadyTaskCount: 2,
     };
     let readCount = 0;
     const readRemoteRefs: ReadRemoteRefs = async (): Promise<
@@ -928,6 +983,8 @@ test("SECURITY: the token loaded from .env.e2e appears in no recorded command ar
       planPath: join(workDir, "plan"),
       expectedObjectiveCount: 2,
       expectedTaskCount: 4,
+      expectedPendingTaskCount: 2,
+      expectedReadyTaskCount: 2,
     };
 
     await runP1E5(context, driver, inputs, stableRemoteRefs);
@@ -1010,6 +1067,8 @@ test("SECURITY: P1-E5 serializes no token and removes its 0600 token file after 
         planPath: join(workDir, "plan"),
         expectedObjectiveCount: 2,
         expectedTaskCount: 4,
+        expectedPendingTaskCount: 2,
+        expectedReadyTaskCount: 2,
       },
       stableRemoteRefs,
     );

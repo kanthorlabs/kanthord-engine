@@ -46,9 +46,10 @@ const authoredFiles: Readonly<Record<string, string>> = {
 };
 
 const statusStdout =
-  "kanthord: node initiative pending - 1\n" +
-  "kanthord: node objective pending - 2\n" +
-  "kanthord: node task pending - 4\n";
+  "kanthord: node initiative ready - 1\n" +
+  "kanthord: node objective ready - 2\n" +
+  "kanthord: node task pending - 2\n" +
+  "kanthord: node task ready - 2\n";
 
 async function writeTree(
   root: string,
@@ -158,6 +159,8 @@ function buildFixture(overrides: FixtureOverrides): Readonly<{
     planDirectory: join(overrides.workDir, "plan-directory"),
     expectedObjectiveCount: 2,
     expectedTaskCount: 4,
+    expectedPendingTaskCount: 2,
+    expectedReadyTaskCount: 2,
     fixtureRoot: join(overrides.workDir, "plan-directory"),
     expectedObjectIds: { alpha: "alpha-id", beta: "beta-id" },
   };
@@ -769,6 +772,46 @@ test("a profile whose expectedObjectiveCount does not match the daemon's count r
     const brokenProfile: ScenarioProfile = {
       ...fixture.profile,
       expectedObjectiveCount: 3,
+    };
+
+    await assert.rejects(
+      runJourney(fixture.context, fixture.driver, brokenProfile),
+      (error: unknown) => {
+        assert.ok(error instanceof RunnerError);
+        assert.equal(error.code, "assertion-failed");
+        assert.equal(error.message, "status-counts");
+        return true;
+      },
+    );
+  });
+});
+
+test("a profile whose expectedReadyTaskCount does not match the daemon's count rejects naming status-counts", async () => {
+  await withWorkDir(async (workDir, take) => {
+    const fixture = buildFixture({ workDir, take });
+    const brokenProfile: ScenarioProfile = {
+      ...fixture.profile,
+      expectedReadyTaskCount: 3,
+    };
+
+    await assert.rejects(
+      runJourney(fixture.context, fixture.driver, brokenProfile),
+      (error: unknown) => {
+        assert.ok(error instanceof RunnerError);
+        assert.equal(error.code, "assertion-failed");
+        assert.equal(error.message, "status-counts");
+        return true;
+      },
+    );
+  });
+});
+
+test("a profile whose expectedPendingTaskCount does not match the daemon's count rejects naming status-counts", async () => {
+  await withWorkDir(async (workDir, take) => {
+    const fixture = buildFixture({ workDir, take });
+    const brokenProfile: ScenarioProfile = {
+      ...fixture.profile,
+      expectedPendingTaskCount: 3,
     };
 
     await assert.rejects(

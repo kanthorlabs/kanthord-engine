@@ -2,6 +2,12 @@ import { YamlDocumentReader } from "../../src/services/document/yaml.ts";
 import type { DocumentReader } from "../../src/services/document/index.ts";
 import { SqlitePlanStore } from "../../src/services/plan/sqlite.ts";
 import type { PlanStore } from "../../src/services/plan/index.ts";
+import { DependencyReadiness } from "../../src/services/readiness/dependency.ts";
+import type { Readiness } from "../../src/services/readiness/index.ts";
+import type {
+  EventLog,
+  RecordedEvent,
+} from "../../src/services/event/index.ts";
 import { GraphologyGraph } from "../../src/services/graph/graphology.ts";
 import type { Graph } from "../../src/services/graph/index.ts";
 import { fixtureIds, seedGraph, seedRegistry } from "./rows.ts";
@@ -10,8 +16,38 @@ import type { BlobStore } from "../../src/services/blob/index.ts";
 import type { Clock } from "../../src/services/clock/index.ts";
 import type { Storage } from "../../src/services/storage/index.ts";
 
-export function createPlanStore(): PlanStore {
-  return new SqlitePlanStore();
+export function createReadiness(
+  events: EventLog,
+  instanceId = "daemon_test",
+): Readiness {
+  return new DependencyReadiness({ events, instanceId });
+}
+
+function discardingReadiness(): Readiness {
+  const events: EventLog = {
+    append(): RecordedEvent {
+      return {
+        id: "event_1",
+        subjectKind: "node",
+        subjectId: "node_a",
+        type: "node.ready",
+        actorKind: "daemon",
+        actorId: "daemon_test",
+        payload: {},
+        occurredAt: 0,
+      };
+    },
+    list(): readonly RecordedEvent[] {
+      return [];
+    },
+  };
+  return createReadiness(events);
+}
+
+export function createPlanStore(
+  readiness: Readiness = discardingReadiness(),
+): PlanStore {
+  return new SqlitePlanStore({ readiness });
 }
 
 export function createBlobStore(storage: Storage, clock: Clock): BlobStore {
@@ -52,56 +88,65 @@ export function seedPlanFixture(
     transaction.run("DELETE FROM node WHERE project_id = ?", [
       fixtureIds.project,
     ]);
-    plan.upsertNode(transaction, {
-      id: planFixtureIdentities.initiative,
+    plan.mutateGraph(transaction, {
       projectId: fixtureIds.project,
-      kind: "initiative",
-      parentId: null,
-      title: "Harden the verify CLI",
-      instructionBlob: blobs.put(
-        transaction,
-        encoder.encode(planFixtureBodies.initiative),
-      ),
-      acceptanceBlob: null,
-      worker: null,
-      repositoryId: null,
-      revision: fixtureIds.planRevision,
-      updatedAt: 1,
-    });
-    plan.upsertNode(transaction, {
-      id: planFixtureIdentities.objective,
-      projectId: fixtureIds.project,
-      kind: "objective",
-      parentId: planFixtureIdentities.initiative,
-      title: "Harden the verify CLI",
-      instructionBlob: blobs.put(
-        transaction,
-        encoder.encode(planFixtureBodies.objective),
-      ),
-      acceptanceBlob: null,
-      worker: null,
-      repositoryId: fixtureIds.repository,
-      revision: fixtureIds.planRevision,
-      updatedAt: 1,
-    });
-    plan.upsertNode(transaction, {
-      id: planFixtureIdentities.task,
-      projectId: fixtureIds.project,
-      kind: "task",
-      parentId: planFixtureIdentities.objective,
-      title: "Harden the verify CLI",
-      instructionBlob: blobs.put(
-        transaction,
-        encoder.encode(planFixtureBodies.taskInstruction),
-      ),
-      acceptanceBlob: blobs.put(
-        transaction,
-        encoder.encode(planFixtureBodies.taskAcceptance),
-      ),
-      worker: null,
-      repositoryId: null,
-      revision: fixtureIds.planRevision,
-      updatedAt: 1,
+      nodes: [
+        {
+          id: planFixtureIdentities.initiative,
+          projectId: fixtureIds.project,
+          kind: "initiative",
+          parentId: null,
+          title: "Harden the verify CLI",
+          instructionBlob: blobs.put(
+            transaction,
+            encoder.encode(planFixtureBodies.initiative),
+          ),
+          acceptanceBlob: null,
+          worker: null,
+          repositoryId: null,
+          revision: fixtureIds.planRevision,
+          updatedAt: 1,
+        },
+        {
+          id: planFixtureIdentities.objective,
+          projectId: fixtureIds.project,
+          kind: "objective",
+          parentId: planFixtureIdentities.initiative,
+          title: "Harden the verify CLI",
+          instructionBlob: blobs.put(
+            transaction,
+            encoder.encode(planFixtureBodies.objective),
+          ),
+          acceptanceBlob: null,
+          worker: null,
+          repositoryId: fixtureIds.repository,
+          revision: fixtureIds.planRevision,
+          updatedAt: 1,
+        },
+        {
+          id: planFixtureIdentities.task,
+          projectId: fixtureIds.project,
+          kind: "task",
+          parentId: planFixtureIdentities.objective,
+          title: "Harden the verify CLI",
+          instructionBlob: blobs.put(
+            transaction,
+            encoder.encode(planFixtureBodies.taskInstruction),
+          ),
+          acceptanceBlob: blobs.put(
+            transaction,
+            encoder.encode(planFixtureBodies.taskAcceptance),
+          ),
+          worker: null,
+          repositoryId: null,
+          revision: fixtureIds.planRevision,
+          updatedAt: 1,
+        },
+      ],
+      insertEdges: [],
+      deleteEdgeIds: [],
+      at: 1,
+      cause: { revision: fixtureIds.planRevision, importId: null },
     });
   });
 }

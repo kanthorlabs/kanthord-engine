@@ -29,15 +29,24 @@ describe("src/queries/edge/list-edge.test", () => {
     storage.transact((transaction) => {
       seedRegistry(transaction);
       seedGraph(transaction);
-      plan.insertEdge(transaction, {
-        id: "edge_b",
-        fromNode: fixtureIds.task,
-        toNode: fixtureIds.initiative,
-      });
-      plan.insertEdge(transaction, {
-        id: "edge_a",
-        fromNode: fixtureIds.objective,
-        toNode: fixtureIds.initiative,
+      plan.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [],
+        insertEdges: [
+          {
+            id: "edge_b",
+            fromNode: fixtureIds.task,
+            toNode: fixtureIds.initiative,
+          },
+          {
+            id: "edge_a",
+            fromNode: fixtureIds.objective,
+            toNode: fixtureIds.initiative,
+          },
+        ],
+        deleteEdgeIds: [],
+        at: 1,
+        cause: { revision: fixtureIds.planRevision, importId: null },
       });
     });
 
@@ -68,10 +77,19 @@ describe("src/queries/edge/list-edge.test", () => {
     storage.transact((transaction) => {
       seedRegistry(transaction);
       seedGraph(transaction);
-      plan.insertEdge(transaction, {
-        id: "edge_w",
-        fromNode: fixtureIds.task,
-        toNode: fixtureIds.objective,
+      plan.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [],
+        insertEdges: [
+          {
+            id: "edge_w",
+            fromNode: fixtureIds.task,
+            toNode: fixtureIds.objective,
+          },
+        ],
+        deleteEdgeIds: [],
+        at: 1,
+        cause: { revision: fixtureIds.planRevision, importId: null },
       });
       transaction.run("UPDATE edge SET waived_at = ? WHERE id = ?", [
         1700000000000,
@@ -98,23 +116,33 @@ describe("src/queries/edge/list-edge.test", () => {
         "INSERT INTO project (id, name, worker, e2e_json, updated_at) VALUES (?, ?, ?, ?, ?)",
         ["project_b", "second-project", "general@1", null, 1],
       );
-      plan.upsertNode(transaction, {
-        id: "b_node_init",
+      plan.mutateGraph(transaction, {
         projectId: "project_b",
-        kind: "initiative",
-        parentId: null,
-        title: "Second project",
-        instructionBlob: fixtureIds.instructionBlob,
-        acceptanceBlob: null,
-        worker: null,
-        repositoryId: null,
-        revision: fixtureIds.planRevision,
-        updatedAt: 1,
-      });
-      plan.insertEdge(transaction, {
-        id: "edge_x",
-        fromNode: "b_node_init",
-        toNode: fixtureIds.task,
+        nodes: [
+          {
+            id: "b_node_init",
+            projectId: "project_b",
+            kind: "initiative",
+            parentId: null,
+            title: "Second project",
+            instructionBlob: fixtureIds.instructionBlob,
+            acceptanceBlob: null,
+            worker: null,
+            repositoryId: null,
+            revision: fixtureIds.planRevision,
+            updatedAt: 1,
+          },
+        ],
+        insertEdges: [
+          {
+            id: "edge_x",
+            fromNode: "b_node_init",
+            toNode: fixtureIds.task,
+          },
+        ],
+        deleteEdgeIds: [],
+        at: 1,
+        cause: { revision: fixtureIds.planRevision, importId: null },
       });
     });
 
@@ -166,10 +194,19 @@ describe("src/queries/edge/list-edge.test", () => {
     storage.transact((transaction) => {
       seedRegistry(transaction);
       seedGraph(transaction);
-      plan.insertEdge(transaction, {
-        id: "edge_a",
-        fromNode: fixtureIds.task,
-        toNode: fixtureIds.objective,
+      plan.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [],
+        insertEdges: [
+          {
+            id: "edge_a",
+            fromNode: fixtureIds.task,
+            toNode: fixtureIds.objective,
+          },
+        ],
+        deleteEdgeIds: [],
+        at: 1,
+        cause: { revision: fixtureIds.planRevision, importId: null },
       });
     });
 

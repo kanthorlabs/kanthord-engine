@@ -1,5 +1,9 @@
 import type { Storage, Transaction } from "../../services/storage/index.ts";
-import type { PlanStore } from "../../services/plan/index.ts";
+import type {
+  EdgeWrite,
+  NodeWrite,
+  PlanStore,
+} from "../../services/plan/index.ts";
 import type { BlobStore } from "../../services/blob/index.ts";
 import type { DocumentReader } from "../../services/document/index.ts";
 import type { Graph } from "../../services/graph/index.ts";
@@ -403,6 +407,7 @@ export function importPlan(
     });
 
     const repositoryIdsByName = readRepositoryIdsByName(transaction);
+    const nodeWrites: NodeWrite[] = [];
     for (const node of candidate.nodes) {
       let repositoryId: string | null = null;
       if (node.repositoryId !== null) {
@@ -415,7 +420,7 @@ export function importPlan(
         }
         repositoryId = id;
       }
-      dependencies.plan.upsertNode(transaction, {
+      nodeWrites.push({
         id: node.id,
         projectId: input.projectId,
         kind: node.kind,
@@ -447,9 +452,10 @@ export function importPlan(
         });
       }
     }
+    const deleteEdgeIds: string[] = [];
     for (const [key, edge] of storedPairs) {
       if (!candidatePairs.has(key)) {
-        dependencies.plan.deleteEdge(transaction, edge.id);
+        deleteEdgeIds.push(edge.id);
       }
     }
     const toInsert = [...candidatePairs.values()].filter(
@@ -460,13 +466,23 @@ export function importPlan(
       if (byFrom !== 0) return byFrom;
       return comparePaths(left.toNode, right.toNode);
     });
+    const insertEdges: EdgeWrite[] = [];
     for (const pair of toInsert) {
-      dependencies.plan.insertEdge(transaction, {
+      insertEdges.push({
         id: dependencies.ids.mint("edge"),
         fromNode: pair.fromNode,
         toNode: pair.toNode,
       });
     }
+
+    dependencies.plan.mutateGraph(transaction, {
+      projectId: input.projectId,
+      nodes: nodeWrites,
+      insertEdges,
+      deleteEdgeIds,
+      at: updatedAt,
+      cause: { revision, importId: input.importId },
+    });
 
     for (const node of candidate.nodes) {
       dependencies.events.append(transaction, {

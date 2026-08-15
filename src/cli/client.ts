@@ -12,6 +12,7 @@ export type ClientDependencies = Readonly<{
 export type CallInput = Readonly<{
   operationId: string;
   parameters?: Readonly<Record<string, string>>;
+  query?: Readonly<Record<string, string>>;
   body?: unknown;
 }>;
 
@@ -75,7 +76,11 @@ export function buildRequest(
   }
 
   const baseUrl = dependencies.baseUrl.replace(/\/+$/, "");
-  return { url: `${baseUrl}${path}`, init };
+  const query =
+    input.query === undefined
+      ? ""
+      : `?${new URLSearchParams(Object.entries(input.query)).toString()}`;
+  return { url: `${baseUrl}${path}${query}`, init };
 }
 
 export async function call(

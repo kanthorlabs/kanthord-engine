@@ -1,6 +1,10 @@
 import { workerKinds } from "../../domain/worker.ts";
+import { triggerTransition } from "../../domain/node-trigger.ts";
+import { canTransition } from "../../domain/transition.ts";
 import type { NodeKind, NodeState } from "../../domain/state.ts";
 import type { Transaction } from "../storage/index.ts";
+import type { Readiness } from "../readiness/index.ts";
+import type { ReadinessTransition } from "../../domain/readiness.ts";
 import type {
   ContainmentFacts,
   StoredEdge,
@@ -9,9 +13,11 @@ import type {
 } from "../../domain/plan-graph.ts";
 import type {
   EdgeWrite,
+  MutateGraphInput,
   NodeWrite,
   PlanStore,
   RevisionRecord,
+  SetNodeStateInput,
 } from "./index.ts";
 
 const NODE_COLUMNS =
@@ -21,6 +27,12 @@ const SELECT_NODE = "SELECT " + NODE_COLUMNS + " FROM node";
 
 const SELECT_REVISION =
   "SELECT id, parent_id, import_id, submitted_blob, choices_blob, accepted_blob FROM plan_revision";
+
+const UPDATE_NODE_STATE =
+  "UPDATE node SET state = ?, updated_at = ? WHERE id = ? AND state = ?";
+
+const UPDATE_NODE_STATE_AND_REASON =
+  "UPDATE node SET state = ?, block_reason = ?, updated_at = ? WHERE id = ? AND state = ?";
 
 const INSERT_NODE =
   "INSERT INTO node (" +
@@ -112,7 +124,15 @@ const buildNodes = (
   return nodeRows.map((row) => toNode(row, dependencies.get(row.id) ?? []));
 };
 
+export type SqlitePlanStoreDependencies = Readonly<{ readiness: Readiness }>;
+
 export class SqlitePlanStore implements PlanStore {
+  private readonly dependencies: SqlitePlanStoreDependencies;
+
+  constructor(dependencies: SqlitePlanStoreDependencies) {
+    this.dependencies = dependencies;
+  }
+
   readGraph(
     transaction: Transaction,
     projectId: string,
@@ -300,7 +320,7 @@ export class SqlitePlanStore implements PlanStore {
     );
   }
 
-  upsertNode(transaction: Transaction, node: NodeWrite): void {
+  private insertNode(transaction: Transaction, node: NodeWrite): void {
     transaction.run(INSERT_NODE, [
       node.id,
       node.projectId,
@@ -316,15 +336,109 @@ export class SqlitePlanStore implements PlanStore {
     ]);
   }
 
-  insertEdge(transaction: Transaction, edge: EdgeWrite): void {
+  private addEdge(transaction: Transaction, edge: EdgeWrite): void {
     transaction.run(
       "INSERT INTO edge (id, from_node, to_node, waived_at) VALUES (?, ?, ?, NULL)",
       [edge.id, edge.fromNode, edge.toNode],
     );
   }
 
-  deleteEdge(transaction: Transaction, id: string): void {
+  private removeEdge(transaction: Transaction, id: string): void {
     transaction.run("DELETE FROM edge WHERE id = ?", [id]);
+  }
+
+  mutateGraph(
+    transaction: Transaction,
+    input: MutateGraphInput,
+  ): readonly ReadinessTransition[] {
+    for (const node of input.nodes) {
+      this.insertNode(transaction, node);
+    }
+    for (const id of input.deleteEdgeIds) {
+      this.removeEdge(transaction, id);
+    }
+    for (const edge of input.insertEdges) {
+      this.addEdge(transaction, edge);
+    }
+    const graph = this.readGraph(transaction, input.projectId);
+    const transitions = this.dependencies.readiness.apply(transaction, {
+      projectId: input.projectId,
+      nodes: graph.nodes.map(({ id, state }) => ({ id, state })),
+      edges: graph.edges,
+      at: input.at,
+      cause: input.cause,
+    });
+    for (const transition of transitions) {
+      transaction.run(UPDATE_NODE_STATE, [
+        transition.to,
+        input.at,
+        transition.nodeId,
+        transition.from,
+      ]);
+    }
+    return transitions;
+  }
+
+  setNodeState(
+    transaction: Transaction,
+    input: SetNodeStateInput,
+  ): readonly ReadinessTransition[] {
+    const before = this.readNode(transaction, input.id);
+    if (before === null) {
+      return [];
+    }
+    if (!canTransition(before.kind, input.from, input.to)) {
+      throw new Error(
+        `${before.kind} ${input.from} -> ${input.to} is not in the transition matrix`,
+      );
+    }
+    const declared = triggerTransition(input.trigger);
+    if (declared.from !== input.from || declared.to !== input.to) {
+      throw new Error(
+        `trigger ${input.trigger} declares ${declared.from} -> ${declared.to}, the write names ${input.from} -> ${input.to}`,
+      );
+    }
+    if (!declared.levels.includes(before.kind)) {
+      throw new Error(
+        `trigger ${input.trigger} declares levels ${declared.levels.join(",")}, the node is a ${before.kind}`,
+      );
+    }
+    if (before.state !== input.from) {
+      return [];
+    }
+    if (input.blockReason === null) {
+      transaction.run(UPDATE_NODE_STATE, [
+        input.to,
+        input.at,
+        input.id,
+        input.from,
+      ]);
+    } else {
+      transaction.run(UPDATE_NODE_STATE_AND_REASON, [
+        input.to,
+        input.blockReason,
+        input.at,
+        input.id,
+        input.from,
+      ]);
+    }
+    const graph = this.readGraph(transaction, before.projectId);
+    const transitions = this.dependencies.readiness.apply(transaction, {
+      projectId: before.projectId,
+      nodes: graph.nodes.map(({ id, state }) => ({ id, state })),
+      edges: graph.edges,
+      at: input.at,
+      cause: input.cause,
+    });
+    for (const transition of transitions) {
+      transaction.run(UPDATE_NODE_STATE, [
+        transition.to,
+        input.at,
+        transition.nodeId,
+        transition.from,
+      ]);
+    }
+    return transitions;
   }
 
   private leaseHeld(transaction: Transaction, ids: readonly string[]): boolean {

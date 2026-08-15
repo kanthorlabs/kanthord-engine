@@ -71,6 +71,37 @@ describe("src/cli/client.test", () => {
     assert.ok(request.url.endsWith("/v1/node/task_01JQ8ZAN9P"));
   });
 
+  it("buildRequest renders query members into the url", () => {
+    const request = buildRequest(dependencies(), {
+      operationId: "event.list",
+      query: { limit: "200" },
+    });
+
+    assert.equal(request.url, "http://127.0.0.1:7421/v1/event?limit=200");
+  });
+
+  it("buildRequest percent-encodes reserved characters in query names and values", () => {
+    const request = buildRequest(dependencies(), {
+      operationId: "event.list",
+      query: { q: "a b&c=d", "na#me": "x+y" },
+    });
+
+    assert.equal(
+      request.url,
+      "http://127.0.0.1:7421/v1/event?q=a+b%26c%3Dd&na%23me=x%2By",
+    );
+  });
+
+  it("a rendered query round-trips through URL parsing to the original values", () => {
+    const request = buildRequest(dependencies(), {
+      operationId: "event.list",
+      query: { q: "a&b=c#d e" },
+    });
+
+    const parsed = new URL(request.url);
+    assert.equal(parsed.searchParams.get("q"), "a&b=c#d e");
+  });
+
   it("a parameter is not percent-encoded", () => {
     const request = buildRequest(dependencies(), {
       operationId: "blob.show",

@@ -274,6 +274,8 @@ async function buildRealProfile(topology: Topology): Promise<ScenarioProfile> {
     planDirectory: fixturePlanSource,
     expectedObjectiveCount: 2,
     expectedTaskCount: 4,
+    expectedPendingTaskCount: 2,
+    expectedReadyTaskCount: 2,
     fixtureRoot: fixtureRootPath,
     expectedObjectIds: fixtureObjectIds,
   };

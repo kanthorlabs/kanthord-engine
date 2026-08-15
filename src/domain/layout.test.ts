@@ -98,7 +98,7 @@ describe("src/domain/layout.test", () => {
     );
   });
 
-  it("src/services/ holds exactly the fifteen capabilities plus home-lock", () => {
+  it("src/services/ holds exactly the sixteen capabilities plus home-lock", () => {
     const servicesDir = new URL("../services/", import.meta.url);
     const entries = fs.readdirSync(servicesDir, { withFileTypes: true });
     const directoryNames = entries
@@ -119,6 +119,7 @@ describe("src/domain/layout.test", () => {
       "ids",
       "lease",
       "plan",
+      "readiness",
       "secret",
       "storage",
       "verify",
@@ -306,6 +307,133 @@ describe("src/domain/layout.test", () => {
       }
     });
   }
+
+  it("a delete-from-edge literal in src/commands/plan/import-plan.ts triggers no-restricted-syntax", async () => {
+    const rules = await lintCase({
+      filePath: "src/commands/plan/import-plan.ts",
+      code: 'const q = "DELETE FROM ' + 'edge WHERE id = ?";',
+    });
+    assert.ok(
+      rules.includes("no-restricted-syntax"),
+      `expected no-restricted-syntax, got [${rules.join(", ")}]`,
+    );
+  });
+
+  it("the same literal in src/services/plan/sqlite.ts triggers nothing", async () => {
+    const rules = await lintCase({
+      filePath: "src/services/plan/sqlite.ts",
+      code: 'const q = "DELETE FROM ' + 'edge WHERE id = ?";',
+    });
+    assert.ok(
+      !rules.includes("no-restricted-syntax"),
+      `unexpected no-restricted-syntax`,
+    );
+  });
+
+  it("a lowercase delete-from-edge literal triggers no-restricted-syntax", async () => {
+    const rules = await lintCase({
+      filePath: "src/commands/plan/import-plan.ts",
+      code: 'const q = "delete from ' + 'edge where id = ?";',
+    });
+    assert.ok(
+      rules.includes("no-restricted-syntax"),
+      `expected no-restricted-syntax, got [${rules.join(", ")}]`,
+    );
+  });
+
+  it("an update-edge literal triggers no-restricted-syntax", async () => {
+    const rules = await lintCase({
+      filePath: "src/commands/plan/import-plan.ts",
+      code: 'const q = "UPDATE ' + 'edge SET waived_at = ?";',
+    });
+    assert.ok(
+      rules.includes("no-restricted-syntax"),
+      `expected no-restricted-syntax, got [${rules.join(", ")}]`,
+    );
+  });
+
+  it("an update-node template literal triggers no-restricted-syntax", async () => {
+    const rules = await lintCase({
+      filePath: "src/commands/plan/import-plan.ts",
+      code: "const q = `UPDATE " + "node SET state = ${x}`;",
+    });
+    assert.ok(
+      rules.includes("no-restricted-syntax"),
+      `expected no-restricted-syntax, got [${rules.join(", ")}]`,
+    );
+  });
+
+  it("an insert-into-node literal triggers no-restricted-syntax", async () => {
+    const rules = await lintCase({
+      filePath: "src/commands/startup/recover-expired-leases.ts",
+      code: 'const q = "INSERT INTO ' + 'node (id) VALUES (?)";',
+    });
+    assert.ok(
+      rules.includes("no-restricted-syntax"),
+      `expected no-restricted-syntax, got [${rules.join(", ")}]`,
+    );
+  });
+
+  it("an UPDATE lease literal triggers nothing", async () => {
+    const rules = await lintCase({
+      filePath: "src/commands/startup/recover-expired-leases.ts",
+      code: 'const q = "UPDATE lease SET owner = NULL";',
+    });
+    assert.ok(
+      !rules.includes("no-restricted-syntax"),
+      `unexpected no-restricted-syntax`,
+    );
+  });
+
+  it("a SELECT FROM node literal triggers nothing", async () => {
+    const rules = await lintCase({
+      filePath: "src/queries/node/list-node.ts",
+      code: 'const q = "SELECT id FROM node";',
+    });
+    assert.ok(
+      !rules.includes("no-restricted-syntax"),
+      `unexpected no-restricted-syntax`,
+    );
+  });
+
+  it("a new test file is not exempt from the node and edge write ban", async () => {
+    const rules = await lintCase({
+      filePath: "src/queries/node/new-thing.test.ts",
+      code: 'const q = "INSERT INTO ' + 'node (id) VALUES (?)";',
+    });
+    assert.ok(
+      rules.includes("no-restricted-syntax"),
+      `expected no-restricted-syntax, got [${rules.join(", ")}]`,
+    );
+  });
+
+  it("a listed legacy test file is exempt", async () => {
+    const rules = await lintCase({
+      filePath: "src/queries/node/list-node.test.ts",
+      code: 'const q = "INSERT INTO ' + 'node (id) VALUES (?)";',
+    });
+    assert.ok(
+      !rules.includes("no-restricted-syntax"),
+      `unexpected no-restricted-syntax`,
+    );
+  });
+
+  it("the node and edge write exemption list holds exactly fifteen exact paths", () => {
+    const configPath = fileURLToPath(
+      new URL("../../eslint.config.js", import.meta.url),
+    );
+    const source = fs.readFileSync(configPath, "utf8");
+    const start = source.indexOf("const nodeEdgeWriteExemptions = [");
+    assert.ok(start !== -1, "nodeEdgeWriteExemptions is missing");
+    const end = source.indexOf("];", start);
+    assert.ok(end !== -1, "nodeEdgeWriteExemptions is unterminated");
+    const slice = source.slice(start, end);
+    const quoted = slice.match(/"[^"]*"/g) ?? [];
+    assert.equal(quoted.length, 15);
+    for (const entry of quoted) {
+      assert.ok(!entry.includes("*"), `${entry} is a glob, not an exact path`);
+    }
+  });
 
   it("the collection predicate reports every default shape", () => {
     for (const path of harnessScenarioPaths) {

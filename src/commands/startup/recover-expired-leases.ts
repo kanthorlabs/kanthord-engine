@@ -1,14 +1,15 @@
 import { join } from "node:path";
 
-import { canTransition } from "../../domain/transition.ts";
 import type { RecoveryFinding } from "../../domain/recovery.ts";
 import type { Clock } from "../../services/clock/index.ts";
 import type { EventLog } from "../../services/event/index.ts";
 import { GitError, type Git } from "../../services/git/index.ts";
+import type { PlanStore } from "../../services/plan/index.ts";
 import type { Storage } from "../../services/storage/index.ts";
 
 export type RecoverExpiredLeasesDependencies = Readonly<{
   storage: Storage;
+  plan: PlanStore;
   git: Git;
   events: EventLog;
   clock: Clock;
@@ -29,10 +30,11 @@ type CandidateRow = Readonly<{
   base_oid: string | null;
   path: string | null;
   repository_id: string | null;
+  revision: string;
 }>;
 
 const CANDIDATE_SQL = `
-SELECT l.subject_id, l.fence, n.kind, r.base_oid, w.path, w.repository_id
+SELECT l.subject_id, l.fence, n.kind, r.base_oid, w.path, w.repository_id, n.revision AS revision
 FROM lease l
 JOIN node n ON n.id = l.subject_id
 LEFT JOIN run r ON r.node_id = n.id AND r.state = 'active'
@@ -139,14 +141,16 @@ function writeVerdict(
   }>,
 ): void {
   dependencies.storage.transact((transaction) => {
-    if (!canTransition("task", "running", verdict.target)) {
-      throw new Error(`running -> ${verdict.target} is not a task transition`);
-    }
-    const blockReason = verdict.target === "ready" ? null : "dirty-recovery";
-    transaction.run(
-      "UPDATE node SET state = ?, block_reason = ?, updated_at = ? WHERE id = ? AND state = 'running'",
-      [verdict.target, blockReason, now, row.subject_id],
-    );
+    dependencies.plan.setNodeState(transaction, {
+      id: row.subject_id,
+      from: "running",
+      to: verdict.target,
+      trigger:
+        verdict.target === "ready" ? "recovery-requeued" : "recovery-blocked",
+      blockReason: verdict.target === "ready" ? null : "dirty-recovery",
+      at: now,
+      cause: { revision: row.revision, importId: null },
+    });
     transaction.run(
       "UPDATE lease SET owner = NULL, expires_at = NULL, renewed_at = NULL, fence = fence + 1 WHERE subject_kind = 'node' AND subject_id = ?",
       [row.subject_id],

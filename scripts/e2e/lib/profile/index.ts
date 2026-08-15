@@ -8,6 +8,8 @@ export type ScenarioProfile = Readonly<{
   planDirectory: string;
   expectedObjectiveCount: number;
   expectedTaskCount: number;
+  expectedPendingTaskCount: number;
+  expectedReadyTaskCount: number;
   fixtureRoot: string | null;
   expectedObjectIds: Readonly<Record<string, string>> | null;
 }>;
@@ -20,6 +22,8 @@ export const profileFieldNames: readonly (keyof ScenarioProfile)[] = [
   "planDirectory",
   "expectedObjectiveCount",
   "expectedTaskCount",
+  "expectedPendingTaskCount",
+  "expectedReadyTaskCount",
   "fixtureRoot",
   "expectedObjectIds",
 ];

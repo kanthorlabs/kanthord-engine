@@ -17,7 +17,7 @@ export const transitions: readonly TransitionRow[] = [
     task: true,
     objective: true,
     initiative: true,
-    note: "Every dependency is `done` or `partial`. The scheduler writes it.",
+    note: "Every dependency is `done` or `partial`. The daemon derives the transition and writes it inside the transaction of the write that changed eligibility.",
   },
   {
     from: "pending",
@@ -193,7 +193,7 @@ export const transitions: readonly TransitionRow[] = [
     task: false,
     objective: false,
     initiative: false,
-    note: "`unblock` writes `pending`, and the scheduler re-derives readiness. A cleared node whose dependency is still discarded must not become claimable.",
+    note: "`unblock` writes `pending`, and the daemon re-derives readiness in the same transaction. A cleared node whose dependency is still discarded must not become claimable.",
   },
   {
     from: "blocked",
@@ -201,7 +201,7 @@ export const transitions: readonly TransitionRow[] = [
     task: false,
     objective: false,
     initiative: false,
-    note: "`unblock` writes `pending`, and the scheduler re-derives eligibility before any claim.",
+    note: "`unblock` writes `pending`, and the daemon re-derives eligibility in the same transaction, before any claim.",
   },
   {
     from: "blocked",

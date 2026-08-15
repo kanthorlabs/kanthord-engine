@@ -6,6 +6,32 @@ import boundaries from "eslint-plugin-boundaries";
 
 const gitLibraries = ["isomorphic-git", "simple-git", "nodegit"];
 
+const nodeEdgeWritePattern = String.raw`\b(insert\s+into|update|delete\s+from)\s+[\x22\x27\x60\x5b]?(node|edge)\b`;
+const nodeEdgeWriteMessage =
+  "a node or edge write belongs in src/services/plan/sqlite.ts";
+
+// The only files that may hold a node or edge write. src/services/plan/sqlite.ts
+// is the mutation boundary. The rest are pre-existing test fixtures that seed
+// rows with raw SQL; a NEW file belongs on neither list — seed through
+// test/helpers/rows.ts instead.
+const nodeEdgeWriteExemptions = [
+  "src/services/plan/sqlite.ts",
+  "src/commands/plan/import-plan.test.ts",
+  "src/commands/provider/remove-provider.test.ts",
+  "src/commands/startup/recover-expired-leases.test.ts",
+  "src/http/server/plan/import-plan.test.ts",
+  "src/queries/edge/list-edge.test.ts",
+  "src/queries/node/list-node.test.ts",
+  "src/queries/node/show-node.test.ts",
+  "src/queries/plan/export-plan.test.ts",
+  "src/queries/plan/validate-plan.test.ts",
+  "src/queries/project/read-project-status.test.ts",
+  "src/queries/system/read-status.test.ts",
+  "src/services/event/atomicity.test.ts",
+  "src/services/plan/sqlite.test.ts",
+  "src/services/storage/migration-0002-graph-and-plan.test.ts",
+];
+
 const vendorPackages = [
   "koa",
   "@koa/*",
@@ -336,6 +362,23 @@ export default [
                 "the git service runs the git binary through spawn; see docs/proposal/phase-1/git-foundation.md",
             },
           ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/**/*.ts"],
+    ignores: nodeEdgeWriteExemptions,
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: `Literal[value=/${nodeEdgeWritePattern}/i]`,
+          message: nodeEdgeWriteMessage,
+        },
+        {
+          selector: `TemplateElement[value.raw=/${nodeEdgeWritePattern}/i]`,
+          message: nodeEdgeWriteMessage,
         },
       ],
     },

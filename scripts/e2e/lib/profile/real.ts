@@ -12,6 +12,8 @@ export async function createRealProfile(
     localPlanPath: string;
     expectedObjectiveCount: number;
     expectedTaskCount: number;
+    expectedPendingTaskCount: number;
+    expectedReadyTaskCount: number;
   }>,
 ): Promise<ScenarioProfile> {
   const planDirectory = await driver.deliverDirectory(
@@ -28,6 +30,8 @@ export async function createRealProfile(
     planDirectory,
     expectedObjectiveCount: input.expectedObjectiveCount,
     expectedTaskCount: input.expectedTaskCount,
+    expectedPendingTaskCount: input.expectedPendingTaskCount,
+    expectedReadyTaskCount: input.expectedReadyTaskCount,
     fixtureRoot: null,
     expectedObjectIds: null,
   };

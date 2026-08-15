@@ -21,6 +21,7 @@ import {
   createBlobStore,
   createPlanReader,
   createPlanStore,
+  createReadiness,
 } from "../../../test/helpers/plan.ts";
 import { createPlanGraph } from "../../../test/helpers/plan.ts";
 import {
@@ -58,6 +59,47 @@ const U_REV = "01JQZ3NDEKTSV4RRFFQ69G5FAV";
 const U_EDGE = "01KQZ3NDEKTSV4RRFFQ69G5FAV";
 const U_REV2 = "01KRZ3NDEKTSV4RRFFQ69G5FAV";
 const U_NEW = "01MRZ3NDEKTSV4RRFFQ69G5FAV";
+const U_T4 = "01WRZ3NDEKTSV4RRFFQ69G5FAV";
+const U_EDGE2 = "01KQZ3NDEKTSV4RRFFQ69G5FAW";
+const U_SIX_REV = "01KQZ3NDEKTSV4RRFFQ69G5FAX";
+const U_SIX_E1 = "01KQZ3NDEKTSV4RRFFQ69G5FAY";
+const U_SIX_E2 = "01KQZ3NDEKTSV4RRFFQ69G5FAZ";
+const U_SIX_E3 = "01KQZ3NDEKTSV4RRFFQ69G5FB1";
+const U_SIX_E4 = "01KQZ3NDEKTSV4RRFFQ69G5FB2";
+const U_SIX_E5 = "01KQZ3NDEKTSV4RRFFQ69G5FB3";
+const U_SIX_E6 = "01KQZ3NDEKTSV4RRFFQ69G5FB4";
+
+const SIX_ULIDS = {
+  run_t: "01ARZ3NDEKTSV4RRFFQ69G5FB5",
+  block_t: "01ARZ3NDEKTSV4RRFFQ69G5FB6",
+  await_o: "01ARZ3NDEKTSV4RRFFQ69G5FB7",
+  done_t: "01ARZ3NDEKTSV4RRFFQ69G5FB8",
+  part_o: "01ARZ3NDEKTSV4RRFFQ69G5FB9",
+  disc_t: "01ARZ3NDEKTSV4RRFFQ69G5FBA",
+  init_main: "01ARZ3NDEKTSV4RRFFQ69G5FBB",
+  obj_main: "01ARZ3NDEKTSV4RRFFQ69G5FBC",
+  dep_t: "01ARZ3NDEKTSV4RRFFQ69G5FBD",
+  dep_o: "01ARZ3NDEKTSV4RRFFQ69G5FBE",
+  child_a: "01ARZ3NDEKTSV4RRFFQ69G5FAZ",
+  child_p: "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+  child_d: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+} as const;
+
+const SIX_IDS = {
+  run_t: `task_${SIX_ULIDS.run_t}`,
+  block_t: `task_${SIX_ULIDS.block_t}`,
+  await_o: `objective_${SIX_ULIDS.await_o}`,
+  done_t: `task_${SIX_ULIDS.done_t}`,
+  part_o: `objective_${SIX_ULIDS.part_o}`,
+  disc_t: `task_${SIX_ULIDS.disc_t}`,
+  init_main: `initiative_${SIX_ULIDS.init_main}`,
+  obj_main: `objective_${SIX_ULIDS.obj_main}`,
+  dep_t: `task_${SIX_ULIDS.dep_t}`,
+  dep_o: `objective_${SIX_ULIDS.dep_o}`,
+  child_a: `task_${SIX_ULIDS.child_a}`,
+  child_p: `task_${SIX_ULIDS.child_p}`,
+  child_d: `task_${SIX_ULIDS.child_d}`,
+} as const;
 const U_A = "01NRZ3NDEKTSV4RRFFQ69G5FAV";
 const U_O2NEW = "01PRZ3NDEKTSV4RRFFQ69G5FAV";
 const U_IZ = "01QRZ3NDEKTSV4RRFFQ69G5FAV";
@@ -337,12 +379,12 @@ type ImportFixture = Readonly<{
 function build(ulids: readonly string[]): ImportFixture {
   const temporary = createMigratedStorage();
   const storage = temporary.storage;
-  const plan = createPlanStore();
+  const log = createRecordingEventLog();
+  const plan = createPlanStore(createReadiness(log.events, "daemon_test"));
   const blobs = createBlobStore(
     storage,
     createMockClock({ start: 1700000000000, step: 1000 }),
   );
-  const log = createRecordingEventLog();
   return {
     storage,
     plan,
@@ -443,32 +485,42 @@ function seedTaskTwo(
   withEdge: boolean,
 ): void {
   storage.transact((transaction) => {
-    plan.upsertNode(transaction, {
-      id: planFixtureIdentities.taskTwo,
+    plan.mutateGraph(transaction, {
       projectId: fixtureIds.project,
-      kind: "task",
-      parentId: planFixtureIdentities.objective,
-      title: "Harden the verify CLI",
-      instructionBlob: blobs.put(
-        transaction,
-        encoder.encode("Do the second task work.\n"),
-      ),
-      acceptanceBlob: blobs.put(
-        transaction,
-        encoder.encode("## Acceptance criteria\n- it works\n"),
-      ),
-      worker: null,
-      repositoryId: null,
-      revision: fixtureIds.planRevision,
-      updatedAt: 1,
+      nodes: [
+        {
+          id: planFixtureIdentities.taskTwo,
+          projectId: fixtureIds.project,
+          kind: "task",
+          parentId: planFixtureIdentities.objective,
+          title: "Harden the verify CLI",
+          instructionBlob: blobs.put(
+            transaction,
+            encoder.encode("Do the second task work.\n"),
+          ),
+          acceptanceBlob: blobs.put(
+            transaction,
+            encoder.encode("## Acceptance criteria\n- it works\n"),
+          ),
+          worker: null,
+          repositoryId: null,
+          revision: fixtureIds.planRevision,
+          updatedAt: 1,
+        },
+      ],
+      insertEdges: withEdge
+        ? [
+            {
+              id: "edge_01ZZZ3NDEKTSV4RRFFQ69G5FAV",
+              fromNode: planFixtureIdentities.taskTwo,
+              toNode: planFixtureIdentities.task,
+            },
+          ]
+        : [],
+      deleteEdgeIds: [],
+      at: 1,
+      cause: { revision: fixtureIds.planRevision, importId: null },
     });
-    if (withEdge) {
-      plan.insertEdge(transaction, {
-        id: "edge_01ZZZ3NDEKTSV4RRFFQ69G5FAV",
-        fromNode: planFixtureIdentities.taskTwo,
-        toNode: planFixtureIdentities.task,
-      });
-    }
   });
 }
 
@@ -717,6 +769,299 @@ function roundTripInput(
   };
 }
 
+const sixStateNodes: readonly Readonly<{
+  id: string;
+  kind: "initiative" | "objective" | "task";
+  parentId: string;
+  state: string;
+  blockReason: string | null;
+  discardReason: string | null;
+}>[] = [
+  {
+    id: SIX_IDS.run_t,
+    kind: "task",
+    parentId: SIX_IDS.obj_main,
+    state: "running",
+    blockReason: null,
+    discardReason: null,
+  },
+  {
+    id: SIX_IDS.block_t,
+    kind: "task",
+    parentId: SIX_IDS.obj_main,
+    state: "blocked",
+    blockReason: "stale-base",
+    discardReason: null,
+  },
+  {
+    id: SIX_IDS.await_o,
+    kind: "objective",
+    parentId: SIX_IDS.init_main,
+    state: "awaiting_approval",
+    blockReason: null,
+    discardReason: null,
+  },
+  {
+    id: SIX_IDS.done_t,
+    kind: "task",
+    parentId: SIX_IDS.obj_main,
+    state: "done",
+    blockReason: null,
+    discardReason: null,
+  },
+  {
+    id: SIX_IDS.part_o,
+    kind: "objective",
+    parentId: SIX_IDS.init_main,
+    state: "partial",
+    blockReason: null,
+    discardReason: null,
+  },
+  {
+    id: SIX_IDS.disc_t,
+    kind: "task",
+    parentId: SIX_IDS.obj_main,
+    state: "discarded",
+    blockReason: null,
+    discardReason: "wontfix",
+  },
+];
+
+function seedSixStateProject(
+  storage: Storage,
+  depState: "done" | "pending",
+): void {
+  storage.transact((transaction) => {
+    seedRegistry(transaction);
+    transaction.run(
+      "INSERT INTO project (id, name, worker, e2e_json, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ["project_b", "six-state", "general@1", null, 1],
+    );
+    transaction.run(
+      "INSERT INTO project_binding (project_id, kind, target_id, created_at) VALUES (?, 'git', ?, ?)",
+      ["project_b", fixtureIds.repository, 1],
+    );
+    transaction.run(
+      "INSERT INTO plan_revision (id, project_id, parent_id, import_id, submitted_blob, choices_blob, accepted_blob) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [
+        fixtureIds.planRevision,
+        "project_b",
+        null,
+        "imp_a",
+        fixtureIds.instructionBlob,
+        fixtureIds.instructionBlob,
+        fixtureIds.instructionBlob,
+      ],
+    );
+    const insertNode = (
+      id: string,
+      kind: string,
+      parentId: string | null,
+      state: string,
+      blockReason: string | null,
+      discardReason: string | null,
+    ): void => {
+      transaction.run(
+        "INSERT INTO node (id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, repository_id, state, block_reason, discard_reason, revision, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+          id,
+          "project_b",
+          kind,
+          parentId,
+          "six state node",
+          fixtureIds.instructionBlob,
+          kind === "task" ? fixtureIds.acceptanceBlob : null,
+          null,
+          kind === "objective" ? fixtureIds.repository : null,
+          state,
+          blockReason,
+          discardReason,
+          fixtureIds.planRevision,
+          1,
+        ],
+      );
+    };
+    insertNode(SIX_IDS.init_main, "initiative", null, "pending", null, null);
+    insertNode(
+      SIX_IDS.obj_main,
+      "objective",
+      SIX_IDS.init_main,
+      "pending",
+      null,
+      null,
+    );
+    for (const row of sixStateNodes) {
+      insertNode(
+        row.id,
+        row.kind,
+        row.parentId,
+        row.state,
+        row.blockReason,
+        row.discardReason,
+      );
+    }
+    insertNode(SIX_IDS.dep_t, "task", SIX_IDS.obj_main, depState, null, null);
+    insertNode(
+      SIX_IDS.dep_o,
+      "objective",
+      SIX_IDS.init_main,
+      depState,
+      null,
+      null,
+    );
+    insertNode(SIX_IDS.child_a, "task", SIX_IDS.await_o, "done", null, null);
+    insertNode(SIX_IDS.child_p, "task", SIX_IDS.part_o, "done", null, null);
+    insertNode(SIX_IDS.child_d, "task", SIX_IDS.dep_o, "done", null, null);
+    const insertDependency = (
+      id: string,
+      subjectId: string,
+      dependencyId: string,
+    ): void => {
+      transaction.run(
+        "INSERT INTO edge (id, from_node, to_node, waived_at) VALUES (?, ?, ?, NULL)",
+        [id, subjectId, dependencyId],
+      );
+    };
+    insertDependency("edge_run", SIX_IDS.run_t, SIX_IDS.dep_t);
+    insertDependency("edge_block", SIX_IDS.block_t, SIX_IDS.dep_t);
+    insertDependency("edge_await", SIX_IDS.await_o, SIX_IDS.dep_o);
+    insertDependency("edge_done", SIX_IDS.done_t, SIX_IDS.dep_t);
+    insertDependency("edge_part", SIX_IDS.part_o, SIX_IDS.dep_o);
+    insertDependency("edge_disc", SIX_IDS.disc_t, SIX_IDS.dep_t);
+  });
+}
+
+const sixStateTaskPath = (name: string): string =>
+  `plan/six-state-node--${low(SIX_ULIDS.init_main)}/six-state-node--${low(SIX_ULIDS.obj_main)}/${name}.md`;
+
+function sixStateDocuments(): readonly Readonly<{
+  path: string;
+  content: string;
+}>[] {
+  return [
+    {
+      path: sixStateTaskPath("run"),
+      content: `---
+id: "${SIX_IDS.run_t}"
+kind: "task"
+title: "Run task"
+worker: "tdd@1"
+depends_on:
+  - "${SIX_IDS.dep_t}"
+---
+Run task work.
+
+## Acceptance criteria
+
+- It works.
+`,
+    },
+    {
+      path: sixStateTaskPath("block"),
+      content: `---
+id: "${SIX_IDS.block_t}"
+kind: "task"
+title: "Block task"
+worker: "tdd@1"
+depends_on:
+  - "${SIX_IDS.dep_t}"
+---
+Block task work.
+
+## Acceptance criteria
+
+- It works.
+`,
+    },
+    {
+      path: sixStateTaskPath("done"),
+      content: `---
+id: "${SIX_IDS.done_t}"
+kind: "task"
+title: "Done task"
+worker: "tdd@1"
+depends_on:
+  - "${SIX_IDS.dep_t}"
+---
+Done task work.
+
+## Acceptance criteria
+
+- It works.
+`,
+    },
+    {
+      path: sixStateTaskPath("disc"),
+      content: `---
+id: "${SIX_IDS.disc_t}"
+kind: "task"
+title: "Disc task"
+worker: "tdd@1"
+depends_on:
+  - "${SIX_IDS.dep_t}"
+---
+Disc task work.
+
+## Acceptance criteria
+
+- It works.
+`,
+    },
+  ];
+}
+
+function sixStateImportInput(
+  fixture: ImportFixture,
+  documents: readonly Readonly<{ path: string; content: string }>[],
+): ImportPlanInput {
+  const allIds = [
+    SIX_IDS.init_main,
+    SIX_IDS.obj_main,
+    ...sixStateNodes.map((row) => row.id),
+    SIX_IDS.dep_t,
+    SIX_IDS.dep_o,
+    SIX_IDS.child_a,
+    SIX_IDS.child_p,
+    SIX_IDS.child_d,
+  ];
+  const documentsHash = validatePlan(
+    {
+      storage: fixture.storage,
+      plan: fixture.plan,
+      blobs: fixture.blobs,
+      reader: fixture.reader,
+      graph: fixture.graph,
+      ids: createMockIdGenerator({ ulids: [] }),
+    },
+    {
+      projectId: "project_b",
+      fromRevision: fixtureIds.planRevision,
+      documents,
+    },
+  ).documentsHash;
+  return {
+    projectId: "project_b",
+    fromRevision: fixtureIds.planRevision,
+    importId: "imp_six",
+    documents,
+    choices: allIds.map((id) => ({ id, take: "database" })),
+    validatedRevision: fixtureIds.planRevision,
+    documentsHash,
+    actor: "human_1",
+  };
+}
+
+function sixStateRows(
+  fixture: ImportFixture,
+): ReadonlyMap<string, Readonly<Record<string, unknown>>> {
+  const rows = fixture.storage.transact((transaction) =>
+    transaction.all(
+      "SELECT id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, repository_id, state, block_reason, discard_reason, revision, updated_at FROM node WHERE project_id = 'project_b' ORDER BY id ASC",
+    ),
+  ) as readonly Readonly<Record<string, unknown>>[];
+  return new Map(rows.map((row) => [row.id as string, { ...row }]));
+}
+
 describe("src/commands/plan/import-plan.test", () => {
   describe("the round trip", () => {
     it("a two-objective plan imports with every node row asserted field by field", (t) => {
@@ -741,6 +1086,7 @@ describe("src/commands/plan/import-plan.test", () => {
       const taskNode = (
         id: string,
         parentId: string,
+        state: string,
       ): Record<string, unknown> => ({
         id,
         project_id: fixtureIds.project,
@@ -755,7 +1101,7 @@ describe("src/commands/plan/import-plan.test", () => {
         ),
         worker: "tdd@1",
         repository_id: null,
-        state: "pending",
+        state,
         block_reason: null,
         discard_reason: null,
         revision: result.revision,
@@ -774,7 +1120,7 @@ describe("src/commands/plan/import-plan.test", () => {
           acceptance_blob: null,
           worker: null,
           repository_id: null,
-          state: "pending",
+          state: "ready",
           block_reason: null,
           discard_reason: null,
           revision: result.revision,
@@ -792,7 +1138,7 @@ describe("src/commands/plan/import-plan.test", () => {
           acceptance_blob: null,
           worker: null,
           repository_id: "repo_a",
-          state: "pending",
+          state: "ready",
           block_reason: null,
           discard_reason: null,
           revision: result.revision,
@@ -810,15 +1156,15 @@ describe("src/commands/plan/import-plan.test", () => {
           acceptance_blob: null,
           worker: null,
           repository_id: "repo_a",
-          state: "pending",
+          state: "ready",
           block_reason: null,
           discard_reason: null,
           revision: result.revision,
           updated_at: 1700000000000,
         },
-        taskNode(`task_${U_T1}`, `objective_${U_O1}`),
-        taskNode(`task_${U_T2}`, `objective_${U_O2}`),
-        taskNode(`task_${U_T3}`, `objective_${U_O2}`),
+        taskNode(`task_${U_T1}`, `objective_${U_O1}`, "ready"),
+        taskNode(`task_${U_T2}`, `objective_${U_O2}`, "ready"),
+        taskNode(`task_${U_T3}`, `objective_${U_O2}`, "pending"),
       ]);
 
       assert.deepEqual(
@@ -859,6 +1205,11 @@ describe("src/commands/plan/import-plan.test", () => {
       assert.deepEqual(
         fixture.recorded.map((entry) => entry.input.type),
         [
+          "node.ready",
+          "node.ready",
+          "node.ready",
+          "node.ready",
+          "node.ready",
           "node.imported",
           "node.imported",
           "node.imported",
@@ -1045,6 +1396,318 @@ describe("src/commands/plan/import-plan.test", () => {
         current: second.revision,
       });
       assert.deepEqual(snapshot(fixture.storage), before);
+    });
+  });
+
+  describe("the derived frontier", () => {
+    it("an import leaves a ready frontier", (t) => {
+      const fixture = build([U_I, U_T1, U_O1, U_T2, U_T3, U_O2, U_REV, U_EDGE]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      runImport(fixture, roundTripInput(fixture));
+      const graph = fixture.storage.transact((transaction) =>
+        fixture.plan.readGraph(transaction, fixtureIds.project),
+      );
+      const byId = new Map(graph.nodes.map((node) => [node.id, node.state]));
+      assert.equal(byId.get(`initiative_${U_I}`), "ready");
+      assert.equal(byId.get(`objective_${U_O1}`), "ready");
+      assert.equal(byId.get(`objective_${U_O2}`), "ready");
+      assert.equal(byId.get(`task_${U_T1}`), "ready");
+      assert.equal(byId.get(`task_${U_T2}`), "ready");
+      assert.equal(byId.get(`task_${U_T3}`), "pending");
+    });
+
+    it("a task with a sibling dependency stays pending and its dependency is ready", (t) => {
+      const fixture = build([U_REV, U_EDGE]);
+      t.after(() => fixture.dispose());
+      seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+      seedTaskTwo(fixture.storage, fixture.plan, fixture.blobs, false);
+
+      const documents = withTaskDependsOn(fixtureDocuments(fixture));
+      runImport(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: fixtureIds.planRevision,
+        importId: "imp_sibling",
+        documents,
+        choices: [
+          { id: planFixtureIdentities.initiative, take: "database" },
+          { id: planFixtureIdentities.objective, take: "database" },
+          { id: planFixtureIdentities.task, take: "submitted" },
+          { id: planFixtureIdentities.taskTwo, take: "database" },
+        ],
+        validatedRevision: fixtureIds.planRevision,
+        documentsHash: planHash(fixture, documents, []),
+        actor: "human_1",
+      });
+
+      const task = fixture.storage.transact((transaction) =>
+        fixture.plan.readNode(transaction, planFixtureIdentities.task),
+      );
+      const taskTwo = fixture.storage.transact((transaction) =>
+        fixture.plan.readNode(transaction, planFixtureIdentities.taskTwo),
+      );
+      assert.ok(task);
+      assert.ok(taskTwo);
+      assert.equal(task.state, "pending");
+      assert.equal(taskTwo.state, "ready");
+    });
+
+    it("a re-import that adds an unsatisfied dependency demotes a ready node", (t) => {
+      const fixture = build([
+        U_I,
+        U_T1,
+        U_O1,
+        U_T2,
+        U_T3,
+        U_O2,
+        U_REV,
+        U_EDGE,
+        U_T4,
+        U_REV2,
+        U_EDGE2,
+      ]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      const first = runImport(fixture, roundTripInput(fixture));
+      const taskFourPath = `plan/ship-kanthord--${low(U_I)}/harden-the-verify-cli--${low(U_O2)}/03-render-the-manifest--${low(U_T4)}.md`;
+      const secondDocuments = [
+        ...first.documents.map((document) =>
+          document.content.includes(`id: "task_${U_T2}"`)
+            ? {
+                ...document,
+                content: document.content.replace(
+                  "---\n",
+                  `---\ndepends_on:\n  - "task_${U_T4}"\n`,
+                ),
+              }
+            : document,
+        ),
+        {
+          path: taskFourPath,
+          content: `---
+kind: "task"
+title: "Render the manifest"
+worker: "tdd@1"
+---
+Build the renderer.
+
+## Acceptance criteria
+
+- The bytes match.
+`,
+        },
+      ];
+      const dependentBefore = fixture.storage.transact((transaction) => {
+        const row = transaction.get("SELECT * FROM node WHERE id = ?", [
+          `task_${U_T3}`,
+        ]) as Readonly<Record<string, unknown>>;
+        return { ...row };
+      });
+      const second = runImport(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: first.revision,
+        importId: "imp_demote",
+        documents: secondDocuments,
+        choices: [
+          ...roundTripIdentities.map((id) =>
+            id === `task_${U_T2}`
+              ? ({ id, take: "submitted" } as const)
+              : ({ id, take: "database" } as const),
+          ),
+          { id: `task_${U_T4}`, take: "submitted" as const },
+        ],
+        validatedRevision: first.revision,
+        documentsHash: planHash(fixture, secondDocuments, [U_T4]),
+        actor: "human_1",
+      });
+
+      assert.equal(second.revision, `revision_${U_REV2}`);
+      const node = fixture.storage.transact((transaction) =>
+        fixture.plan.readNode(transaction, `task_${U_T2}`),
+      );
+      assert.ok(node);
+      assert.equal(node.state, "pending");
+      const pendingEvents = fixture.recorded.filter(
+        (entry) => entry.input.type === "node.pending",
+      );
+      assert.equal(pendingEvents.length, 1);
+      assert.equal(pendingEvents[0]!.input.subjectId, `task_${U_T2}`);
+      assert.deepEqual(pendingEvents[0]!.input.payload, {
+        from: "ready",
+        to: "pending",
+        reason: "dependency-unsatisfied",
+        revision: second.revision,
+        importId: "imp_demote",
+      });
+      const dependentAfter = fixture.storage.transact((transaction) => {
+        const row = transaction.get("SELECT * FROM node WHERE id = ?", [
+          `task_${U_T3}`,
+        ]) as Readonly<Record<string, unknown>>;
+        return { ...row };
+      });
+      assert.deepEqual(
+        {
+          ...dependentAfter,
+          revision: dependentBefore.revision,
+          updated_at: dependentBefore.updated_at,
+        },
+        dependentBefore,
+        "the dependent keeps every field but the import's revision and timestamp",
+      );
+      assert.equal(dependentAfter.revision, second.revision);
+      assert.equal(dependentAfter.updated_at, 1700000001000);
+    });
+
+    it("a retry of a committed importId writes no transition and appends no readiness event", (t) => {
+      const fixture = build([U_I, U_T1, U_O1, U_T2, U_T3, U_O2, U_REV, U_EDGE]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      runImport(fixture, roundTripInput(fixture));
+      const before = snapshot(fixture.storage);
+      const recordedBefore = fixture.recorded.length;
+      const retried = runImport(fixture, roundTripInput(fixture));
+
+      assert.equal(retried.retried, true);
+      assert.deepEqual(snapshot(fixture.storage), before);
+      const gained = fixture.recorded.slice(recordedBefore);
+      assert.equal(
+        gained.filter(
+          (entry) =>
+            entry.input.type === "node.ready" ||
+            entry.input.type === "node.pending",
+        ).length,
+        0,
+      );
+    });
+
+    it("an import that satisfies a dependency leaves a running, blocked, awaiting_approval, done, partial or discarded node untouched", (t) => {
+      const fixture = build([
+        U_SIX_REV,
+        U_SIX_E1,
+        U_SIX_E2,
+        U_SIX_E3,
+        U_SIX_E4,
+        U_SIX_E5,
+        U_SIX_E6,
+      ]);
+      t.after(() => fixture.dispose());
+      seedSixStateProject(fixture.storage, "done");
+
+      const before = sixStateRows(fixture);
+      const result = runImport(
+        fixture,
+        sixStateImportInput(fixture, sixStateDocuments()),
+      );
+      const after = sixStateRows(fixture);
+
+      for (const row of sixStateNodes) {
+        const prior = before.get(row.id);
+        const current = after.get(row.id);
+        assert.ok(prior && current, row.id);
+        assert.deepEqual(
+          {
+            ...current,
+            revision: prior.revision,
+            updated_at: prior.updated_at,
+          },
+          prior,
+          row.id,
+        );
+        assert.equal(current.revision, result.revision, row.id);
+        assert.equal(current.updated_at, 1700000000000, row.id);
+      }
+    });
+
+    it("an import that adds an unsatisfied dependency leaves a running, blocked, awaiting_approval, done, partial or discarded node untouched", (t) => {
+      const fixture = build([
+        U_SIX_REV,
+        U_SIX_E1,
+        U_SIX_E2,
+        U_SIX_E3,
+        U_SIX_E4,
+        U_SIX_E5,
+        U_SIX_E6,
+      ]);
+      t.after(() => fixture.dispose());
+      seedSixStateProject(fixture.storage, "pending");
+
+      const before = sixStateRows(fixture);
+      const result = runImport(
+        fixture,
+        sixStateImportInput(fixture, sixStateDocuments()),
+      );
+      const after = sixStateRows(fixture);
+
+      for (const row of sixStateNodes) {
+        const prior = before.get(row.id);
+        const current = after.get(row.id);
+        assert.ok(prior && current, row.id);
+        assert.deepEqual(
+          {
+            ...current,
+            revision: prior.revision,
+            updated_at: prior.updated_at,
+          },
+          prior,
+          row.id,
+        );
+        assert.equal(current.revision, result.revision, row.id);
+        assert.equal(current.updated_at, 1700000000000, row.id);
+      }
+    });
+
+    it("the readiness event order of one import is bytewise by node identity", (t) => {
+      const fixture = build([U_I, U_T1, U_O1, U_T2, U_T3, U_O2, U_REV, U_EDGE]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      runImport(fixture, roundTripInput(fixture));
+      const ready = fixture.recorded.filter(
+        (entry) => entry.input.type === "node.ready",
+      );
+      const subjects = ready.map((entry) => entry.input.subjectId);
+      const sorted = [...subjects].sort((left, right) =>
+        Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8")),
+      );
+      assert.deepEqual(subjects, sorted);
+      assert.deepEqual(subjects, [
+        `initiative_${U_I}`,
+        `objective_${U_O1}`,
+        `objective_${U_O2}`,
+        `task_${U_T1}`,
+        `task_${U_T2}`,
+      ]);
+    });
+
+    it("the readiness events precede the node.imported events", (t) => {
+      const fixture = build([U_I, U_T1, U_O1, U_T2, U_T3, U_O2, U_REV, U_EDGE]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      runImport(fixture, roundTripInput(fixture));
+      const types = fixture.recorded.map((entry) => entry.input.type);
+      const lastReady = types.lastIndexOf("node.ready");
+      const firstImported = types.indexOf("node.imported");
+      assert.ok(lastReady !== -1, "a node.ready event exists");
+      assert.ok(firstImported !== -1, "a node.imported event exists");
+      assert.ok(lastReady < firstImported);
+    });
+
+    it("plan.export is byte-identical after readiness lands", (t) => {
+      const fixture = build([U_I, U_T1, U_O1, U_T2, U_T3, U_O2, U_REV, U_EDGE]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      runImport(fixture, roundTripInput(fixture));
+      const exported = exportPlan(
+        { storage: fixture.storage, plan: fixture.plan, blobs: fixture.blobs },
+        { projectId: fixtureIds.project },
+      );
+
+      assert.deepEqual(exported.documents, expectedDocuments);
     });
   });
 
@@ -1551,6 +2214,19 @@ describe("src/commands/plan/import-plan.test", () => {
         const fixture = build([U_REV]);
         t.after(() => fixture.dispose());
         seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+        if (state === "pending") {
+          seedTaskTwo(fixture.storage, fixture.plan, fixture.blobs, false);
+          fixture.storage.transact((transaction) => {
+            transaction.run(
+              "INSERT INTO edge (id, from_node, to_node, waived_at) VALUES (?, ?, ?, NULL)",
+              [
+                "edge_prose",
+                planFixtureIdentities.task,
+                planFixtureIdentities.taskTwo,
+              ],
+            );
+          });
+        }
         fixture.storage.transact((transaction) => {
           const sets: string[] = ["state = ?"];
           const values: unknown[] = [state];
@@ -1587,6 +2263,14 @@ describe("src/commands/plan/import-plan.test", () => {
             take:
               nodeId === planFixtureIdentities.task ? "submitted" : "database",
           },
+          ...(state === "pending"
+            ? [
+                {
+                  id: planFixtureIdentities.taskTwo,
+                  take: "database" as const,
+                },
+              ]
+            : []),
         ];
         const result = runImport(fixture, {
           projectId: fixtureIds.project,

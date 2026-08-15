@@ -6,8 +6,15 @@ import { nodeRow } from "../../domain/node.ts";
 import { canTransition } from "../../domain/transition.ts";
 import type { RecoveryFinding } from "../../domain/recovery.ts";
 import { GitError, type Git } from "../../services/git/index.ts";
+import type { PlanStore } from "../../services/plan/index.ts";
+import type { SetNodeStateInput } from "../../services/plan/index.ts";
+import type { Transaction } from "../../services/storage/index.ts";
 import { createRecoveryFixture } from "../../../test/helpers/recovery.ts";
 import type { RecoveryFixture } from "../../../test/helpers/recovery.ts";
+import {
+  createPlanStore,
+  createReadiness,
+} from "../../../test/helpers/plan.ts";
 import {
   seedExecution,
   seedGraph,
@@ -341,16 +348,46 @@ function seedTaskFixture(
 async function runRecover(
   fixture: RecoveryFixture,
   mock: Mock,
+  plan: PlanStore = createPlanStore(
+    createReadiness(fixture.events, "daemon_test"),
+  ),
 ): Promise<RecoverExpiredLeasesResult> {
   return recoverExpiredLeases(
     {
       storage: fixture.storage,
+      plan,
       git: mock.git,
       events: fixture.events,
       clock: fixture.clock,
     },
     { actor: ACTOR },
   );
+}
+
+function recordingPlanStore(plan: PlanStore): Readonly<{
+  plan: PlanStore;
+  setNodeStateInputs: readonly SetNodeStateInput[];
+  setNodeStateResults: readonly unknown[][];
+}> {
+  const setNodeStateInputs: SetNodeStateInput[] = [];
+  const setNodeStateResults: unknown[][] = [];
+  const recording: PlanStore = new Proxy(plan, {
+    get(target, property, receiver) {
+      if (property === "setNodeState") {
+        return (
+          transaction: Transaction,
+          input: SetNodeStateInput,
+        ): readonly unknown[] => {
+          setNodeStateInputs.push(input);
+          const result = target.setNodeState(transaction, input);
+          setNodeStateResults.push([...result]);
+          return result;
+        };
+      }
+      return Reflect.get(target, property, target);
+    },
+  });
+  return { plan: recording, setNodeStateInputs, setNodeStateResults };
 }
 
 function readNode(
@@ -810,6 +847,160 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
       "workspaces/task-b",
       "workspaces/task-c",
     ]);
+  });
+
+  it("a clean expired lease writes running to ready under recovery-requeued", async (t) => {
+    const fixture = seedTaskFixture(t, TASK_A);
+    insertWorkspace(
+      fixture,
+      "workspace_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "workspaces/task-a",
+    );
+    insertRun(
+      fixture,
+      "run_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      TASK_A,
+      "workspace_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    );
+    insertLease(fixture, TASK_A, EXPIRED);
+    const recording = recordingPlanStore(
+      createPlanStore(createReadiness(fixture.events, "daemon_test")),
+    );
+    const mock = gitMock({ clean: true, head: BASE });
+    await runRecover(fixture, mock, recording.plan);
+
+    assert.equal(recording.setNodeStateInputs.length, 1);
+    assert.deepEqual(recording.setNodeStateInputs[0], {
+      id: TASK_A,
+      from: "running",
+      to: "ready",
+      trigger: "recovery-requeued",
+      blockReason: null,
+      at: NOW,
+      cause: {
+        revision: `revision_${TASK_A.slice(TASK_A.indexOf("_") + 1)}`,
+        importId: null,
+      },
+    });
+  });
+
+  it("a dirty expired lease writes running to blocked under recovery-blocked", async (t) => {
+    const fixture = seedTaskFixture(t, TASK_A);
+    insertWorkspace(
+      fixture,
+      "workspace_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "workspaces/task-a",
+    );
+    insertRun(
+      fixture,
+      "run_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      TASK_A,
+      "workspace_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    );
+    insertLease(fixture, TASK_A, EXPIRED);
+    const recording = recordingPlanStore(
+      createPlanStore(createReadiness(fixture.events, "daemon_test")),
+    );
+    const mock = gitMock({ clean: false, head: BASE });
+    await runRecover(fixture, mock, recording.plan);
+
+    assert.equal(recording.setNodeStateInputs.length, 1);
+    assert.deepEqual(recording.setNodeStateInputs[0], {
+      id: TASK_A,
+      from: "running",
+      to: "blocked",
+      trigger: "recovery-blocked",
+      blockReason: "dirty-recovery",
+      at: NOW,
+      cause: {
+        revision: `revision_${TASK_A.slice(TASK_A.indexOf("_") + 1)}`,
+        importId: null,
+      },
+    });
+  });
+
+  it("readiness returns an empty transition list for both recovery writes", async (t) => {
+    const cleanFixture = seedTaskFixture(t, TASK_A);
+    insertWorkspace(
+      cleanFixture,
+      "workspace_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "workspaces/task-a",
+    );
+    insertRun(
+      cleanFixture,
+      "run_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      TASK_A,
+      "workspace_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    );
+    insertLease(cleanFixture, TASK_A, EXPIRED);
+    const cleanRecording = recordingPlanStore(
+      createPlanStore(createReadiness(cleanFixture.events, "daemon_test")),
+    );
+    await runRecover(
+      cleanFixture,
+      gitMock({ clean: true, head: BASE }),
+      cleanRecording.plan,
+    );
+
+    const dirtyFixture = seedTaskFixture(t, TASK_B);
+    insertWorkspace(
+      dirtyFixture,
+      "workspace_01ARZ3NDEKTSV4RRFFQ69G5FAW",
+      "workspaces/task-b",
+    );
+    insertRun(
+      dirtyFixture,
+      "run_01ARZ3NDEKTSV4RRFFQ69G5FAW",
+      TASK_B,
+      "workspace_01ARZ3NDEKTSV4RRFFQ69G5FAW",
+    );
+    insertLease(dirtyFixture, TASK_B, EXPIRED);
+    const dirtyRecording = recordingPlanStore(
+      createPlanStore(createReadiness(dirtyFixture.events, "daemon_test")),
+    );
+    await runRecover(
+      dirtyFixture,
+      gitMock({ clean: false, head: BASE }),
+      dirtyRecording.plan,
+    );
+
+    assert.deepEqual(cleanRecording.setNodeStateResults[0], []);
+    assert.deepEqual(dirtyRecording.setNodeStateResults[0], []);
+  });
+
+  it("recovery appends no node.ready and no node.pending event", async (t) => {
+    const fixture = seedTaskFixture(t, TASK_A);
+    insertWorkspace(
+      fixture,
+      "workspace_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "workspaces/task-a",
+    );
+    insertRun(
+      fixture,
+      "run_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      TASK_A,
+      "workspace_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    );
+    insertLease(fixture, TASK_A, EXPIRED);
+    const readinessEvents = (): number =>
+      fixture
+        .listEvents()
+        .filter(
+          (event) =>
+            event.type === "node.ready" || event.type === "node.pending",
+        ).length;
+    const before = readinessEvents();
+    const recording = recordingPlanStore(
+      createPlanStore(createReadiness(fixture.events, "daemon_test")),
+    );
+    await runRecover(
+      fixture,
+      gitMock({ clean: true, head: BASE }),
+      recording.plan,
+    );
+
+    assert.equal(before, 0);
+    assert.equal(readinessEvents(), 0);
   });
 
   it("canTransition pins the guard's premise for both targets", () => {

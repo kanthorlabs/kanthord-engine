@@ -21,10 +21,16 @@ const requiredEnvVars = [
   "KANTHORD_E2E_REAL_PLAN",
   "KANTHORD_E2E_REAL_OBJECTIVES",
   "KANTHORD_E2E_REAL_TASKS",
+  "KANTHORD_E2E_REAL_PENDING_TASKS",
+  "KANTHORD_E2E_REAL_READY_TASKS",
 ] as const;
 
 function isPositiveInteger(value: string | undefined): boolean {
   return value !== undefined && /^[1-9]\d*$/.test(value);
+}
+
+function isNonNegativeInteger(value: string | undefined): boolean {
+  return value !== undefined && /^(0|[1-9]\d*)$/.test(value);
 }
 
 export type RealInputs = Readonly<{
@@ -34,6 +40,8 @@ export type RealInputs = Readonly<{
   planPath: string;
   expectedObjectiveCount: number;
   expectedTaskCount: number;
+  expectedPendingTaskCount: number;
+  expectedReadyTaskCount: number;
 }>;
 
 export async function checkPrerequisites(
@@ -72,6 +80,18 @@ export async function checkPrerequisites(
       "P1-E5 needs KANTHORD_E2E_REAL_TASKS to be a positive integer",
     );
   }
+  if (!isNonNegativeInteger(resolved.KANTHORD_E2E_REAL_PENDING_TASKS)) {
+    throw new RunnerError(
+      "unavailable",
+      "P1-E5 needs KANTHORD_E2E_REAL_PENDING_TASKS to be a nonnegative integer",
+    );
+  }
+  if (!isNonNegativeInteger(resolved.KANTHORD_E2E_REAL_READY_TASKS)) {
+    throw new RunnerError(
+      "unavailable",
+      "P1-E5 needs KANTHORD_E2E_REAL_READY_TASKS to be a nonnegative integer",
+    );
+  }
 
   let e2eEnv: E2eEnv;
   try {
@@ -97,6 +117,14 @@ export async function checkPrerequisites(
     ),
     expectedTaskCount: Number.parseInt(
       resolved.KANTHORD_E2E_REAL_TASKS as string,
+      10,
+    ),
+    expectedPendingTaskCount: Number.parseInt(
+      resolved.KANTHORD_E2E_REAL_PENDING_TASKS as string,
+      10,
+    ),
+    expectedReadyTaskCount: Number.parseInt(
+      resolved.KANTHORD_E2E_REAL_READY_TASKS as string,
       10,
     ),
   };
@@ -144,6 +172,8 @@ export async function runP1E5(
     localPlanPath: inputs.planPath,
     expectedObjectiveCount: inputs.expectedObjectiveCount,
     expectedTaskCount: inputs.expectedTaskCount,
+    expectedPendingTaskCount: inputs.expectedPendingTaskCount,
+    expectedReadyTaskCount: inputs.expectedReadyTaskCount,
   });
 
   await runJourney(context, driver, profile);

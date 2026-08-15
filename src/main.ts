@@ -38,6 +38,7 @@ import { SqliteBlobStore } from "./services/blob/sqlite.ts";
 import { UlidIdGenerator } from "./services/ids/ulid.ts";
 import { GraphologyGraph } from "./services/graph/graphology.ts";
 import { SqlitePlanStore } from "./services/plan/sqlite.ts";
+import { DependencyReadiness } from "./services/readiness/dependency.ts";
 import { YamlDocumentReader } from "./services/document/yaml.ts";
 import { registerProvider } from "./commands/provider/register-provider.ts";
 import { renameProvider } from "./commands/provider/rename-provider.ts";
@@ -145,12 +146,13 @@ async function serve(options: ServeOptions): Promise<void> {
     const held = new SqliteHomeLock({ probe }).acquire({
       home: settings.home,
     });
+    const instanceId = ulid();
     held.publishIdentity({
       version: 1,
       pid: process.pid,
       host: hostname(),
       startedAt: new Date().toISOString(),
-      instanceId: ulid(),
+      instanceId,
     });
     const probed = await probeTools({
       tools: settings.tools,
@@ -178,9 +180,10 @@ async function serve(options: ServeOptions): Promise<void> {
       ensureBootstrapActor({ storage }, { actor: settings.actor });
       const ids = new UlidIdGenerator();
       const graph = new GraphologyGraph();
-      const plan = new SqlitePlanStore();
       const reader = new YamlDocumentReader();
       const events = new SqliteEventLog({ storage, ids });
+      const readiness = new DependencyReadiness({ events, instanceId });
+      const plan = new SqlitePlanStore({ readiness });
       const blobs = new SqliteBlobStore({ storage, clock });
       const recovery = await recoverHome({
         reap: () =>
@@ -208,7 +211,7 @@ async function serve(options: ServeOptions): Promise<void> {
           ),
         leases: () =>
           recoverExpiredLeases(
-            { storage, git, events, clock },
+            { storage, plan, git, events, clock },
             { actor: "daemon" },
           ),
       });

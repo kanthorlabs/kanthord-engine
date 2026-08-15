@@ -1,5 +1,8 @@
 import type { Transaction } from "../storage/index.ts";
-import type { NodeKind } from "../../domain/state.ts";
+import type { NodeKind, NodeState } from "../../domain/state.ts";
+import type { NodeTriggerId } from "../../domain/node-trigger.ts";
+import type { ReadinessTransition } from "../../domain/readiness.ts";
+import type { ReadinessCause } from "../readiness/index.ts";
 import type {
   StoredNode,
   StoredEdge,
@@ -34,6 +37,25 @@ export type EdgeWrite = Readonly<{
   id: string;
   fromNode: string;
   toNode: string;
+}>;
+
+export type MutateGraphInput = Readonly<{
+  projectId: string;
+  nodes: readonly NodeWrite[];
+  insertEdges: readonly EdgeWrite[];
+  deleteEdgeIds: readonly string[];
+  at: number;
+  cause: ReadinessCause;
+}>;
+
+export type SetNodeStateInput = Readonly<{
+  id: string;
+  from: NodeState;
+  to: NodeState;
+  trigger: NodeTriggerId;
+  blockReason: string | null;
+  at: number;
+  cause: ReadinessCause;
 }>;
 
 export interface PlanStore {
@@ -72,7 +94,12 @@ export interface PlanStore {
     transaction: Transaction,
     record: RevisionRecord & Readonly<{ projectId: string }>,
   ): void;
-  upsertNode(transaction: Transaction, node: NodeWrite): void;
-  insertEdge(transaction: Transaction, edge: EdgeWrite): void;
-  deleteEdge(transaction: Transaction, id: string): void;
+  mutateGraph(
+    transaction: Transaction,
+    input: MutateGraphInput,
+  ): readonly ReadinessTransition[];
+  setNodeState(
+    transaction: Transaction,
+    input: SetNodeStateInput,
+  ): readonly ReadinessTransition[];
 }

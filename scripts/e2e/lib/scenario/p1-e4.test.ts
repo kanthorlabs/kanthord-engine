@@ -66,6 +66,8 @@ function buildProfile(workDir: string): ScenarioProfile {
     planDirectory,
     expectedObjectiveCount: 2,
     expectedTaskCount: 4,
+    expectedPendingTaskCount: 2,
+    expectedReadyTaskCount: 2,
     fixtureRoot: planDirectory,
     expectedObjectIds: { alpha: "alpha-id", beta: "beta-id" },
   };
@@ -277,7 +279,7 @@ function buildFakes(options: FakeOptions): Readonly<{
     if (sub[0] === "status") {
       return record(
         argv,
-        "kanthord: node objective ready - 2\nkanthord: node task pending - 4\n",
+        "kanthord: node objective ready - 2\nkanthord: node task pending - 2\nkanthord: node task ready - 2\n",
       );
     }
     if (sub[0] === "run") {

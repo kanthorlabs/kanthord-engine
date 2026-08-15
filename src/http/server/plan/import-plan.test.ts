@@ -10,6 +10,7 @@ import { fixtureIds } from "../../../../test/helpers/rows.ts";
 import {
   createBlobStore,
   createPlanStore,
+  createReadiness,
   planFixtureIdentities,
   seedPlanFixture,
 } from "../../../../test/helpers/plan.ts";
@@ -56,29 +57,39 @@ function seedTaskTwoWithEdge(
   blobs: BlobStore,
 ): void {
   storage.transact((transaction) => {
-    plan.upsertNode(transaction, {
-      id: planFixtureIdentities.taskTwo,
+    plan.mutateGraph(transaction, {
       projectId: fixtureIds.project,
-      kind: "task",
-      parentId: planFixtureIdentities.objective,
-      title: "Harden the verify CLI",
-      instructionBlob: blobs.put(
-        transaction,
-        encoder.encode("Do the second task work.\n"),
-      ),
-      acceptanceBlob: blobs.put(
-        transaction,
-        encoder.encode("## Acceptance criteria\n- it works\n"),
-      ),
-      worker: null,
-      repositoryId: null,
-      revision: fixtureIds.planRevision,
-      updatedAt: 1,
-    });
-    plan.insertEdge(transaction, {
-      id: "edge_01ZZZ3NDEKTSV4RRFFQ69G5FAV",
-      fromNode: planFixtureIdentities.taskTwo,
-      toNode: planFixtureIdentities.task,
+      nodes: [
+        {
+          id: planFixtureIdentities.taskTwo,
+          projectId: fixtureIds.project,
+          kind: "task",
+          parentId: planFixtureIdentities.objective,
+          title: "Harden the verify CLI",
+          instructionBlob: blobs.put(
+            transaction,
+            encoder.encode("Do the second task work.\n"),
+          ),
+          acceptanceBlob: blobs.put(
+            transaction,
+            encoder.encode("## Acceptance criteria\n- it works\n"),
+          ),
+          worker: null,
+          repositoryId: null,
+          revision: fixtureIds.planRevision,
+          updatedAt: 1,
+        },
+      ],
+      insertEdges: [
+        {
+          id: "edge_01ZZZ3NDEKTSV4RRFFQ69G5FAV",
+          fromNode: planFixtureIdentities.taskTwo,
+          toNode: planFixtureIdentities.task,
+        },
+      ],
+      deleteEdgeIds: [],
+      at: 1,
+      cause: { revision: fixtureIds.planRevision, importId: null },
     });
   });
 }
@@ -89,24 +100,33 @@ function seedTaskTwo(
   blobs: BlobStore,
 ): void {
   storage.transact((transaction) => {
-    plan.upsertNode(transaction, {
-      id: planFixtureIdentities.taskTwo,
+    plan.mutateGraph(transaction, {
       projectId: fixtureIds.project,
-      kind: "task",
-      parentId: planFixtureIdentities.objective,
-      title: "Harden the verify CLI",
-      instructionBlob: blobs.put(
-        transaction,
-        encoder.encode("Do the second task work.\n"),
-      ),
-      acceptanceBlob: blobs.put(
-        transaction,
-        encoder.encode("## Acceptance criteria\n- it works\n"),
-      ),
-      worker: null,
-      repositoryId: null,
-      revision: fixtureIds.planRevision,
-      updatedAt: 1,
+      nodes: [
+        {
+          id: planFixtureIdentities.taskTwo,
+          projectId: fixtureIds.project,
+          kind: "task",
+          parentId: planFixtureIdentities.objective,
+          title: "Harden the verify CLI",
+          instructionBlob: blobs.put(
+            transaction,
+            encoder.encode("Do the second task work.\n"),
+          ),
+          acceptanceBlob: blobs.put(
+            transaction,
+            encoder.encode("## Acceptance criteria\n- it works\n"),
+          ),
+          worker: null,
+          repositoryId: null,
+          revision: fixtureIds.planRevision,
+          updatedAt: 1,
+        },
+      ],
+      insertEdges: [],
+      deleteEdgeIds: [],
+      at: 1,
+      cause: { revision: fixtureIds.planRevision, importId: null },
     });
   });
 }
@@ -143,7 +163,7 @@ async function buildHandler(
 ): Promise<HandlerFixture> {
   const temporary = createMigratedStorage();
   const storage = temporary.storage;
-  const plan = createPlanStore();
+  const plan = createPlanStore(createReadiness(recordingEvents, "daemon_test"));
   const blobs = createBlobStore(
     storage,
     createMockClock({ start: 1700000000000, step: 1000 }),

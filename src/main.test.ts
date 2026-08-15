@@ -395,6 +395,37 @@ describe("src/main.test", () => {
     );
   });
 
+  it("main.ts mints one instance identity and passes it to readiness", () => {
+    const source = readFileSync(
+      resolve(import.meta.dirname, "./main.ts"),
+      "utf8",
+    );
+    assert.equal(
+      source.split("ulid()").length - 1,
+      1,
+      "ulid() appears exactly once",
+    );
+    assert.equal(source.includes("const instanceId = ulid();"), true);
+    assert.equal(
+      source.includes("new DependencyReadiness({ events, instanceId })"),
+      true,
+    );
+    assert.equal(source.includes("new SqlitePlanStore({ readiness })"), true);
+    const events = source.indexOf("new SqliteEventLog");
+    const readiness = source.indexOf("new DependencyReadiness");
+    const plan = source.indexOf("new SqlitePlanStore");
+    assert.notEqual(events, -1);
+    assert.notEqual(readiness, -1);
+    assert.notEqual(plan, -1);
+    assert.ok(events < readiness, "events before readiness");
+    assert.ok(readiness < plan, "readiness before plan");
+    assert.equal(
+      (source.match(/actor: "daemon"/g) ?? []).length,
+      4,
+      "the four startup steps keep their daemon attribution",
+    );
+  });
+
   it("the daemon stops cleanly on SIGTERM and releases the home lock", async () => {
     daemon!.kill("SIGTERM");
     const exit = await daemon!.exited();

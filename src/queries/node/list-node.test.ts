@@ -125,44 +125,53 @@ describe("src/queries/node/list-node.test", () => {
         "INSERT INTO project (id, name, worker, e2e_json, updated_at) VALUES (?, ?, ?, ?, ?)",
         ["project_b", "second-project", "general@1", null, 1],
       );
-      plan.upsertNode(transaction, {
-        id: "b_node_init",
+      plan.mutateGraph(transaction, {
         projectId: "project_b",
-        kind: "initiative",
-        parentId: null,
-        title: "Second project",
-        instructionBlob: fixtureIds.instructionBlob,
-        acceptanceBlob: null,
-        worker: null,
-        repositoryId: null,
-        revision: fixtureIds.planRevision,
-        updatedAt: 1,
-      });
-      plan.upsertNode(transaction, {
-        id: "j_node_obj",
-        projectId: "project_b",
-        kind: "objective",
-        parentId: "b_node_init",
-        title: "Second project objective",
-        instructionBlob: fixtureIds.instructionBlob,
-        acceptanceBlob: null,
-        worker: null,
-        repositoryId: fixtureIds.repository,
-        revision: fixtureIds.planRevision,
-        updatedAt: 1,
-      });
-      plan.upsertNode(transaction, {
-        id: "u_node_task",
-        projectId: "project_b",
-        kind: "task",
-        parentId: "j_node_obj",
-        title: "Second project task",
-        instructionBlob: fixtureIds.instructionBlob,
-        acceptanceBlob: fixtureIds.acceptanceBlob,
-        worker: null,
-        repositoryId: null,
-        revision: fixtureIds.planRevision,
-        updatedAt: 1,
+        nodes: [
+          {
+            id: "b_node_init",
+            projectId: "project_b",
+            kind: "initiative",
+            parentId: null,
+            title: "Second project",
+            instructionBlob: fixtureIds.instructionBlob,
+            acceptanceBlob: null,
+            worker: null,
+            repositoryId: null,
+            revision: fixtureIds.planRevision,
+            updatedAt: 1,
+          },
+          {
+            id: "j_node_obj",
+            projectId: "project_b",
+            kind: "objective",
+            parentId: "b_node_init",
+            title: "Second project objective",
+            instructionBlob: fixtureIds.instructionBlob,
+            acceptanceBlob: null,
+            worker: null,
+            repositoryId: fixtureIds.repository,
+            revision: fixtureIds.planRevision,
+            updatedAt: 1,
+          },
+          {
+            id: "u_node_task",
+            projectId: "project_b",
+            kind: "task",
+            parentId: "j_node_obj",
+            title: "Second project task",
+            instructionBlob: fixtureIds.instructionBlob,
+            acceptanceBlob: fixtureIds.acceptanceBlob,
+            worker: null,
+            repositoryId: null,
+            revision: fixtureIds.planRevision,
+            updatedAt: 1,
+          },
+        ],
+        insertEdges: [],
+        deleteEdgeIds: [],
+        at: 1,
+        cause: { revision: fixtureIds.planRevision, importId: null },
       });
     });
 
@@ -187,15 +196,24 @@ describe("src/queries/node/list-node.test", () => {
     storage.transact((transaction) => {
       seedRegistry(transaction);
       seedGraph(transaction);
-      plan.insertEdge(transaction, {
-        id: "edge_b",
-        fromNode: fixtureIds.task,
-        toNode: fixtureIds.objective,
-      });
-      plan.insertEdge(transaction, {
-        id: "edge_a",
-        fromNode: fixtureIds.task,
-        toNode: fixtureIds.initiative,
+      plan.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [],
+        insertEdges: [
+          {
+            id: "edge_b",
+            fromNode: fixtureIds.task,
+            toNode: fixtureIds.objective,
+          },
+          {
+            id: "edge_a",
+            fromNode: fixtureIds.task,
+            toNode: fixtureIds.initiative,
+          },
+        ],
+        deleteEdgeIds: [],
+        at: 1,
+        cause: { revision: fixtureIds.planRevision, importId: null },
       });
       transaction.run("UPDATE edge SET waived_at = 1 WHERE id = ?", ["edge_a"]);
     });
