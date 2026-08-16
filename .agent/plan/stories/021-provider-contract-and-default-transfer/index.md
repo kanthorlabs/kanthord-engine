@@ -11,13 +11,15 @@ Run Story 1, then Story 2, then Story 3, then Story 4, in that order. Each passe
 
 Story 2 depends on Story 1: the coverage guard at `src/http/contract/coverage.test.ts:92-134` asserts `additionalProperties: false` on every object node of every registered schema, and a bare `z.object` emits no `additionalProperties` at all, so registering `llmPayload` before it is strict fails the gate.
 
-Story 3 depends on Story 2: the widened example scope makes the `provider.register` request example verifiable, and the pre-Story-2 tree passes it only because `payload` is `z.unknown()`.
+Story 3 follows Story 2 for ordering only, with no technical dependency: `provider.register` is phase-1 routed and already inside the current example scope, so the widened filter adds `provider.rename`, `provider.remove` and `provider.setDefault` and nothing else. Story 2 is what makes the `provider.register` request example verifiable, by typing `payload`. Run Story 3 second so the corrected `token` example sits under the widened guard from the first run.
 
 Story 4 depends on Story 2: its two handler cases assert the behaviour of the typed request schema.
 
 Then run Stories 5, 6 and 7 as one coupled unit, in that order, with no full gate between them. Story 5 deletes `"default-already-set"` from `SetDefaultProviderRefusal`, which makes the comparison at `src/http/server/credential/refusals.ts:24` a type error until Story 7 deletes that branch. Story 6 has no file of its own; it is the event half of Story 5's clearing loop. Story 7 closes the unit and runs the gate.
 
 Then run Story 8, then Story 9.
+
+Story 10 runs last, and only after the EPIC amends D8. It replaces D8's deletion of `ids` with a narrowing: the baseline drops the field and `plan.import` keeps it in its own details schema. It is independent of Stories 1 to 9 and changes no wire response.
 
 ## Stories
 
@@ -27,9 +29,10 @@ Then run Story 8, then Story 9.
 - 4 — The register handler is untouched → `04-register-handler-untouched.md`
 - 5 — `provider.setDefault` transfers → `05-set-default-transfers.md`
 - 6 — `provider.defaultUnset` → `06-default-unset-event.md`
-- 7 — The refusal map shrinks (Part B **blocked**, see the file) → `07-refusal-map-and-error-shape-shrink.md`
+- 7 — The refusal map shrinks → `07-refusal-map-and-error-shape-shrink.md`
 - 8 — The proposal records the transfer → `08-proposal-records-the-transfer.md`
 - 9 — Inherited provider regressions → `09-inherited-provider-regressions.md`
+- 10 — `ids` narrows to `plan.import` (**needs the D8 amendment first**) → `10-ids-narrows-to-plan-import.md`
 
 ## Facts (needed for implementation)
 
@@ -48,7 +51,9 @@ Then run Story 8, then Story 9.
 - `src/commands/provider/remove-provider.ts:48-52` sorts ids with `Buffer.compare` in the command. Match it.
 - `src/commands/provider/set-default-provider.test.ts` uses `createMigratedStorage()`, `createMockClock({ start: 1700000000000, step: 1000 })`, `createMockIdGenerator`, a real `AesGcmCrypto` keyed `Buffer.alloc(32, 7)` at version 1, a real `SqliteEventLog`, and local `readProvider` / `readEvents` / `countRows` helpers. Its provider ids are `provider_01HZY8QF3M4N5P6R7S8T9V0W1X` and `provider_01HZY8QF3M4N5P6R7S8T9V0W20`.
 - `src/http/server/credential/*.test.ts` builds the app through `createTestApp({ handlers: { "<operationId>": handler } })` from `test/helpers/app.ts` and drives it with a supertest agent. The command is a stub lambda; these tests inspect no database.
-- **`ids` is a shared field with a live second producer, and D8 is blocked on it.** `src/http/contract/error-baseline.ts:5` assigns `invalidRequestDetails.optional()` to the shared `invalid-request` code, and `src/http/server/plan/refusals.ts:33-36` emits `ids` for the three `choice-*` refusals of `importPlan`. `src/http/contract/error-details.test.ts:359-363` and `src/http/server/plan/refusals.test.ts:133` assert it. D8's premise that the credential map is the only producer is false. Story 7 Part B is blocked; the human decides.
+- **`ids` is a shared field with a live second producer, so D8's premise is false.** `src/http/contract/error-baseline.ts:5` assigns `invalidRequestDetails.optional()` to the shared `invalid-request` code, and `src/http/server/plan/refusals.ts:33-36` emits `ids` for the three `choice-*` refusals of `importPlan`, built at `src/commands/plan/import-plan.ts:566`. `src/http/contract/error-details.test.ts:359-363` and `src/http/server/plan/refusals.test.ts:133` assert it. Story 10 narrows the field to `plan.import` instead of deleting it.
+- **`plan.import` is the whole of the `ids` surface.** `src/http/server/plan/refusals.ts` is imported by exactly one handler, `src/http/server/plan/import-plan.ts:6`; `validate-plan.ts`, `export-plan.ts` and `list-revision.ts` do not import it. So one operation-specific override covers every producer that survives this epic.
+- An operation overrides a baseline error code by declaring it after the `...baselineErrors` spread. `src/http/contract/credential.ts` already adds `"binding-in-use"` that way, and no operation overrides `invalid-request` today.
 - **The emitted union is `oneOf`, and a literal emits as `{ type: "string", enum: [...] }`.** The EPIC's Hermetic bullet 4 says `anyOf` and `{ const: "llm" }`; both are wrong for the `openapi-3.0` target. `src/http/contract/field-decisions.fixture.ts:64-69` already proves it: `node.create.request#/properties/node/oneOf/0/…` with `enum=initiative`.
 - **An unrecognized key reports `path: ["payload"]` and `keys: ["<key>"]`.** The EPIC's Hermetic bullet 2 says `path: ["payload", "<the extra key>"]`; zod reports the issue against the holding object, not the key. For `parsePayload("llm", …)` the resulting `PayloadError.detail` is exactly `'.Unrecognized key: "apikey"'`, leading dot included, because `src/domain/provider-payload.ts:100-105` joins an empty path onto the message.
 - `src/commands/provider/set-default-provider.test.ts:113-119` reads events with `SELECT … FROM event` and **no `ORDER BY`**, and the suite mints ids from `createMockIdGenerator`, not the production monotonic factory. Story 5 adds `ORDER BY id ASC` and pins an ascending literal ULID list; every event-order assertion of Stories 5 and 6 depends on both.
