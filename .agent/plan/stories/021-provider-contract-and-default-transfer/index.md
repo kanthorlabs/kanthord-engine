@@ -19,7 +19,7 @@ Then run Stories 5, 6 and 7 as one coupled unit, in that order, with no full gat
 
 Then run Story 8, then Story 9.
 
-Story 10 runs last, and only after the EPIC amends D8. It replaces D8's deletion of `ids` with a narrowing: the baseline drops the field and `plan.import` keeps it in its own details schema. It is independent of Stories 1 to 9 and changes no wire response.
+Story 10 runs last. D8 is amended, so it is unblocked. It narrows `ids` rather than deleting it: the baseline drops the field and `plan.import` keeps it in its own details schema. It is independent of Stories 1 to 9 and changes no wire response.
 
 ## Stories
 
@@ -32,7 +32,7 @@ Story 10 runs last, and only after the EPIC amends D8. It replaces D8's deletion
 - 7 — The refusal map shrinks → `07-refusal-map-and-error-shape-shrink.md`
 - 8 — The proposal records the transfer → `08-proposal-records-the-transfer.md`
 - 9 — Inherited provider regressions → `09-inherited-provider-regressions.md`
-- 10 — `ids` narrows to `plan.import` (**needs the D8 amendment first**) → `10-ids-narrows-to-plan-import.md`
+- 10 — `ids` narrows to `plan.import` → `10-ids-narrows-to-plan-import.md`
 
 ## Facts (needed for implementation)
 

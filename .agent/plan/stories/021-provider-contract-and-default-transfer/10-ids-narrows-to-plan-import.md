@@ -57,12 +57,6 @@ export const planImportInvalidRequestDetails = z.strictObject({
 - Run `npm run verify`; it exits 0.
 - Proof: Hermetic coverage "The transfer" bullet 10, in full: the `Object.keys(error).sort()` clause from Story 5, the `invalidRequestDetails.safeParse({ refusal: "x", ids: [] })` failure from this story, and the `grep` clause scoped to `src/http/server/credential/` as this story restates it.
 
-## The EPIC amendment this story needs
+## The EPIC amendment, applied
 
-Do not implement this story until D8 is rewritten. The implementer must not reconcile the EPIC's text with this file on their own authority. D8 must say:
-
-- `ids` leaves the shared `invalidRequestDetails` and moves to a `plan.import`-specific details schema.
-- The reason is that `ids` has exactly one meaning, the offending choice ids of an import, while `baselineErrors` advertises it on all 62 operations and `refusal: z.string()` expresses no link between a refusal and the presence of `ids`.
-- No wire response changes; only the published contract narrows to match what the daemon already sends.
-- The Hermetic bullet "`grep` over `src/http/server/` finds no `ids:` in a `httpError` details argument" must scope to `src/http/server/credential/`. Over all of `src/http/server/` it is false by design, because the plan producer survives.
-- The client action in `kanthord-apps` is to retire `default-already-set` from `errors.md:68-69` and `operations.md:164-165`, and to keep `details.ids` documented under the three `plan.import` choice refusals. It is not "drop `details.ids`".
+D8 is rewritten as "`ids` narrows to `plan.import`", and the epic's Goal, Stories list, Hermetic coverage and Open items all match this story. No amendment is outstanding. The Hermetic `grep` bullet now scopes to `src/http/server/credential/`, because over all of `src/http/server/` it is false by design: the plan producer survives.

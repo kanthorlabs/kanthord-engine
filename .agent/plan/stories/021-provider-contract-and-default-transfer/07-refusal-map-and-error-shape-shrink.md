@@ -3,7 +3,7 @@
 Epic: `.agent/plan/epics/021-provider-contract-and-default-transfer.md`
 Depends on: Story 5. Coupled with Stories 5 and 6; this story closes the unit and runs the gate.
 
-This story changes the credential refusal map only. The `ids` half of D8 moved to Story 10, which narrows `ids` to a `plan.import`-specific schema instead of deleting it. Story 10 still needs an EPIC amendment before it runs; this story does not.
+This story changes the credential refusal map only. The `ids` half of D8 moved to Story 10, which narrows `ids` to a `plan.import`-specific schema instead of deleting it. D8 is amended to match.
 
 ## Change — the refusal map
 
@@ -16,7 +16,7 @@ Do not touch `src/http/contract/error-details.ts` in this story.
 
 D8 claims `src/http/server/credential/refusals.ts:27` is the only producer of `ids`. It is not: `src/http/server/plan/refusals.ts:33-36` emits `ids` for the `choice-duplicate`, `choice-missing` and `choice-extra` refusals of `importPlan`, and `src/http/contract/error-baseline.ts:5` puts `invalidRequestDetails` on all 62 operations. Deleting the field outright would make the daemon emit plan-choice details its own published contract refuses.
 
-Story 10 resolves it by narrowing rather than deleting: the baseline drops `ids`, and `plan.import` gains its own details schema that keeps it. Run this story now; run Story 10 after the EPIC amendment it names.
+Story 10 resolves it by narrowing rather than deleting: the baseline drops `ids`, and `plan.import` gains its own details schema that keeps it.
 
 ## Constraints
 
