@@ -4,18 +4,24 @@
 
 ```sql
 CREATE TABLE attempt (
-  id          TEXT PRIMARY KEY,
-  run_id      TEXT NOT NULL REFERENCES run(id),                                   -- task run this try belongs to
-  attempt_no  INTEGER NOT NULL,                                                   -- try number the attempt-limit block counts, from 1
-  provider_id TEXT NOT NULL REFERENCES provider(id),                              -- registration pinned for the whole try
-  provider_model TEXT NOT NULL,                                                   -- model pinned for the whole try
-  timeout_ms  INTEGER NOT NULL,                                                   -- wall clock budget; expiry kills the process tree
-  base_oid    TEXT NOT NULL,                                                      -- workspace head when the try started
-  head_oid    TEXT,                                                               -- workspace head when it finished; the pair attributes its commits
-  outcome     TEXT CHECK (outcome IS NULL OR outcome IN
-                ('accepted', 'rejected', 'failed', 'timed-out', 'cancelled')),  -- how the try ended
-  ended_at    INTEGER,                                                            -- close time; the id is the start time
-  UNIQUE (run_id, attempt_no)
+  id             TEXT PRIMARY KEY,
+  run_id         TEXT NOT NULL REFERENCES run(id),                    -- task run this try belongs to
+  driver         TEXT NOT NULL CHECK (driver IN ('internal', 'external')),  -- who executes: the daemon's worker, or an external harness
+  attempt_no     INTEGER NOT NULL,                                    -- try number the attempt-limit block counts, from 1
+  provider_id    TEXT REFERENCES provider(id),                        -- registration pinned for the whole try
+  provider_model TEXT,                                                -- model pinned for the whole try
+  timeout_ms     INTEGER,                                             -- wall clock budget; expiry kills the process tree
+  base_oid       TEXT,                                                -- workspace head when the try started
+  head_oid       TEXT,                                                -- workspace head when it finished; the pair attributes its commits
+  outcome        TEXT CHECK (outcome IS NULL OR outcome IN
+                  ('accepted', 'rejected', 'failed', 'timed-out', 'cancelled')),  -- how the try ended
+  ended_at       INTEGER,                                             -- close time; the id is the start time
+  UNIQUE (run_id, attempt_no),
+  CHECK ((driver = 'internal') = (provider_id IS NOT NULL)),
+  CHECK ((driver = 'internal') = (provider_model IS NOT NULL)),
+  CHECK ((driver = 'internal') = (timeout_ms IS NOT NULL)),
+  CHECK ((driver = 'internal') = (base_oid IS NOT NULL)),
+  FOREIGN KEY (run_id, driver) REFERENCES run(id, driver)
 ) STRICT;
 ```
 

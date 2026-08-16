@@ -1937,7 +1937,7 @@ describe("src/services/plan/sqlite.test", () => {
     storage.transact((transaction) => {
       seedAll(transaction);
       transaction.run(
-        "INSERT INTO lease (subject_kind, subject_id, owner, fence, acquired_at, renewed_at, expires_at) VALUES ('repository', ?, 'daemon-1', 1, 1, 1, 1)",
+        "INSERT INTO lease (subject_kind, subject_id, owner, owner_kind, fence, acquired_at, renewed_at, expires_at) VALUES ('repository', ?, 'daemon-1', 'daemon', 1, 1, 1, 1)",
         [fixtureIds.task],
       );
     });
@@ -1949,7 +1949,7 @@ describe("src/services/plan/sqlite.test", () => {
 
     storage.transact((transaction) => {
       transaction.run(
-        "INSERT INTO lease (subject_kind, subject_id, owner, fence, acquired_at, renewed_at, expires_at) VALUES ('node', ?, 'daemon-1', 1, 1, 1, 1)",
+        "INSERT INTO lease (subject_kind, subject_id, owner, owner_kind, fence, acquired_at, renewed_at, expires_at) VALUES ('node', ?, 'daemon-1', 'daemon', 1, 1, 1, 1)",
         [fixtureIds.task],
       );
     });
@@ -1961,7 +1961,7 @@ describe("src/services/plan/sqlite.test", () => {
 
     storage.transact((transaction) => {
       transaction.run(
-        "UPDATE lease SET owner = NULL WHERE subject_kind = 'node' AND subject_id = ?",
+        "UPDATE lease SET owner = NULL, owner_kind = NULL WHERE subject_kind = 'node' AND subject_id = ?",
         [fixtureIds.task],
       );
     });
@@ -2066,7 +2066,7 @@ describe("src/services/plan/sqlite.test", () => {
     storage.transact((transaction) => {
       seedAll(transaction);
       transaction.run(
-        "INSERT INTO lease (subject_kind, subject_id, owner, fence, acquired_at, renewed_at, expires_at) VALUES ('node', ?, 'daemon-1', 1, 1, 1, 1)",
+        "INSERT INTO lease (subject_kind, subject_id, owner, owner_kind, fence, acquired_at, renewed_at, expires_at) VALUES ('node', ?, 'daemon-1', 'daemon', 1, 1, 1, 1)",
         [fixtureIds.task],
       );
     });
@@ -2098,7 +2098,7 @@ describe("src/services/plan/sqlite.test", () => {
       seedAll(transaction);
       seedSecondProject(transaction);
       transaction.run(
-        "INSERT INTO lease (subject_kind, subject_id, owner, fence, acquired_at, renewed_at, expires_at) VALUES ('node', 'initiative_b', 'daemon-1', 1, 1, 1, 1)",
+        "INSERT INTO lease (subject_kind, subject_id, owner, owner_kind, fence, acquired_at, renewed_at, expires_at) VALUES ('node', 'initiative_b', 'daemon-1', 'daemon', 1, 1, 1, 1)",
       );
       transaction.run(
         "INSERT INTO edge (id, from_node, to_node, waived_at) VALUES (?, ?, ?, ?)",

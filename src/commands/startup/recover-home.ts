@@ -28,6 +28,7 @@ export async function recoverHome(
     leftOpen: reconcile.leftOpen,
     refusesNewWork: reconcile.refusesNewWork,
     returnedToReady: leases.returnedToReady,
+    objectivesFreed: leases.objectivesFreed,
     blocked: leases.blocked,
     findings: [
       ...reap.findings,

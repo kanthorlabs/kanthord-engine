@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 
 import { eventRow } from "../../domain/event.ts";
 import { nodeRow } from "../../domain/node.ts";
@@ -16,12 +17,24 @@ import {
   createReadiness,
 } from "../../../test/helpers/plan.ts";
 import {
+  createBackedExecutionFake,
+  createExecutionFake,
+  type ExecutionFake,
+} from "../../../test/helpers/execution.ts";
+import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
+import {
+  createLeaseFake,
+  type LeaseFake,
+} from "../../../test/helpers/lease.ts";
+import { lintCase } from "../../../test/helpers/lint.ts";
+import {
   seedExecution,
   seedGraph,
   seedRegistry,
 } from "../../../test/helpers/rows.ts";
 import {
   recoverExpiredLeases,
+  sweepExpiredExternalLeases,
   type RecoverExpiredLeasesResult,
 } from "./recover-expired-leases.ts";
 
@@ -272,7 +285,7 @@ function insertWorkspace(
     );
     if (taken !== undefined) {
       transaction.run(
-        "INSERT INTO run (id, kind, node_id, parent_run_id, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
           "run_a",
           "objective",
@@ -302,7 +315,7 @@ function insertRun(
 ): void {
   fixture.storage.transact((transaction) => {
     transaction.run(
-      "INSERT INTO run (id, kind, node_id, parent_run_id, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         id,
         "task",
@@ -335,6 +348,182 @@ function insertLease(
   });
 }
 
+function insertHeldLease(
+  fixture: RecoveryFixture,
+  input: Readonly<{
+    subjectId: string;
+    owner: string;
+    fence: number;
+    expiresAt: number;
+  }>,
+): void {
+  fixture.storage.transact((transaction) => {
+    transaction.run(
+      "INSERT INTO lease (subject_kind, subject_id, owner, owner_kind, fence, acquired_at, renewed_at, expires_at) VALUES ('node', ?, ?, 'actor', ?, ?, ?, ?)",
+      [
+        input.subjectId,
+        input.owner,
+        input.fence,
+        EXPIRED,
+        EXPIRED,
+        input.expiresAt,
+      ],
+    );
+  });
+}
+
+function insertExternalRun(
+  fixture: RecoveryFixture,
+  input: Readonly<{
+    id: string;
+    kind: "objective" | "task";
+    nodeId: string;
+    parentRunId: string | null;
+    fence: number;
+  }>,
+): void {
+  fixture.storage.transact((transaction) => {
+    transaction.run(
+      "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'external', NULL, NULL, ?, 3, NULL, NULL, 'active', NULL, NULL)",
+      [input.id, input.kind, input.nodeId, input.parentRunId, input.fence],
+    );
+  });
+}
+
+function insertExternalAttempt(
+  fixture: RecoveryFixture,
+  input: Readonly<{ id: string; runId: string }>,
+): void {
+  fixture.storage.transact((transaction) => {
+    transaction.run(
+      "INSERT INTO attempt (id, run_id, driver, attempt_no, provider_id, provider_model, timeout_ms, base_oid, head_oid, outcome, ended_at) VALUES (?, ?, 'external', 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL)",
+      [input.id, input.runId],
+    );
+  });
+}
+
+const ulidOf = (id: string): string => id.slice(id.indexOf("_") + 1);
+
+const runIdFor = (kind: "objective" | "task", id: string): string =>
+  `run_ext_${kind}_${ulidOf(id)}`;
+
+const attemptIdFor = (id: string): string => `attempt_ext_${ulidOf(id)}`;
+
+function seedExternalTaskClaim(
+  t: { after(fn: () => void): void },
+  taskId: string,
+): Readonly<{
+  fixture: RecoveryFixture;
+  runId: string;
+  attemptId: string;
+  executionFake: ExecutionFake;
+  leaseFake: LeaseFake;
+  recording: ReturnType<typeof recordingPlanStore>;
+  mock: Mock;
+}> {
+  const fixture = seedTaskFixture(t, taskId);
+  const objectiveId = `objective_${ulidOf(taskId)}`;
+  const runId = runIdFor("task", taskId);
+  const attemptId = attemptIdFor(taskId);
+  insertExternalRun(fixture, {
+    id: runIdFor("objective", objectiveId),
+    kind: "objective",
+    nodeId: objectiveId,
+    parentRunId: null,
+    fence: 5,
+  });
+  insertExternalRun(fixture, {
+    id: runId,
+    kind: "task",
+    nodeId: taskId,
+    parentRunId: runIdFor("objective", objectiveId),
+    fence: 5,
+  });
+  insertExternalAttempt(fixture, { id: attemptId, runId });
+  insertHeldLease(fixture, {
+    subjectId: taskId,
+    owner: "actor_harness",
+    fence: 5,
+    expiresAt: EXPIRED,
+  });
+  const executionFake = createExecutionFake();
+  executionFake.attemptsByRun.set(runId, [
+    {
+      id: attemptId,
+      runId,
+      driver: "external",
+      attemptNo: 1,
+      headOid: null,
+      outcome: null,
+      endedAt: null,
+    },
+  ]);
+  const recording = recordingPlanStore(
+    createPlanStore(createReadiness(fixture.events, "daemon_test")),
+  );
+  const leaseFake = createLeaseFake();
+  const mock = gitMock({});
+  return {
+    fixture,
+    runId,
+    attemptId,
+    executionFake,
+    leaseFake,
+    recording,
+    mock,
+  };
+}
+
+function seedExternalObjectiveClaim(
+  t: { after(fn: () => void): void },
+  taskId: string,
+): Readonly<{
+  fixture: RecoveryFixture;
+  objectiveId: string;
+  runId: string;
+  executionFake: ExecutionFake;
+  leaseFake: LeaseFake;
+  recording: ReturnType<typeof recordingPlanStore>;
+  mock: Mock;
+}> {
+  const fixture = seedTaskFixture(t, taskId);
+  const objectiveId = `objective_${ulidOf(taskId)}`;
+  fixture.storage.transact((transaction) => {
+    transaction.run("UPDATE node SET state = 'running' WHERE id = ?", [
+      objectiveId,
+    ]);
+  });
+  const runId = runIdFor("objective", objectiveId);
+  insertExternalRun(fixture, {
+    id: runId,
+    kind: "objective",
+    nodeId: objectiveId,
+    parentRunId: null,
+    fence: 3,
+  });
+  insertHeldLease(fixture, {
+    subjectId: objectiveId,
+    owner: "actor_harness",
+    fence: 3,
+    expiresAt: EXPIRED,
+  });
+  const executionFake = createExecutionFake();
+  const recording = recordingPlanStore(
+    createPlanStore(createReadiness(fixture.events, "daemon_test")),
+  );
+  const leaseFake = createLeaseFake();
+  const mock = gitMock({});
+  return {
+    fixture,
+    objectiveId,
+    runId,
+    executionFake,
+    leaseFake,
+    recording,
+    mock,
+  };
+}
+
 function seedTaskFixture(
   t: { after(fn: () => void): void },
   taskId: string,
@@ -351,12 +540,16 @@ async function runRecover(
   plan: PlanStore = createPlanStore(
     createReadiness(fixture.events, "daemon_test"),
   ),
+  executionFake: ExecutionFake = createExecutionFake(),
+  leaseFake: LeaseFake = createLeaseFake(),
 ): Promise<RecoverExpiredLeasesResult> {
   return recoverExpiredLeases(
     {
       storage: fixture.storage,
       plan,
       git: mock.git,
+      lease: leaseFake.lease,
+      execution: executionFake.execution,
       events: fixture.events,
       clock: fixture.clock,
     },
@@ -407,6 +600,19 @@ function readLease(
   const row = fixture.storage.transact((transaction) =>
     transaction.get(
       "SELECT owner, expires_at, renewed_at, fence FROM lease WHERE subject_kind = 'node' AND subject_id = ?",
+      [subjectId],
+    ),
+  ) as Readonly<Record<string, unknown>>;
+  return { ...row };
+}
+
+function readLeaseRow(
+  fixture: RecoveryFixture,
+  subjectId: string,
+): Readonly<Record<string, unknown>> {
+  const row = fixture.storage.transact((transaction) =>
+    transaction.get(
+      "SELECT subject_kind, subject_id, owner, owner_kind, fence, acquired_at, renewed_at, expires_at FROM lease WHERE subject_kind = 'node' AND subject_id = ?",
       [subjectId],
     ),
   ) as Readonly<Record<string, unknown>>;
@@ -489,7 +695,7 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
       owner: null,
       expires_at: null,
       renewed_at: null,
-      fence: 2,
+      fence: 1,
     });
     parseNode(fixture, TASK_A);
     const events = fixture.listEvents();
@@ -504,7 +710,7 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
       clean: true,
       headOid: BASE,
       baseOid: BASE,
-      fence: 2,
+      fence: 1,
     });
     parseEvent(events[0]!);
   });
@@ -536,7 +742,7 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
       owner: null,
       expires_at: null,
       renewed_at: null,
-      fence: 2,
+      fence: 1,
     });
     parseNode(fixture, TASK_A);
     const events = fixture.listEvents();
@@ -547,7 +753,7 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
       clean: false,
       headOid: BASE,
       baseOid: BASE,
-      fence: 2,
+      fence: 1,
     });
     parseEvent(events[0]!);
   });
@@ -579,7 +785,7 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
       clean: true,
       headOid: OTHER,
       baseOid: BASE,
-      fence: 2,
+      fence: 1,
     });
   });
 
@@ -683,7 +889,7 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
     assert.equal(fixture.listEvents().length, 0);
   });
 
-  it("an expired lease on an objective node is reported and changes nothing", async (t) => {
+  it("an internal non-task lease still emits lease-expired-on-non-task", async (t) => {
     const fixture = seedBase(t);
     fixture.storage.transact((transaction) => {
       transaction.run(
@@ -1006,5 +1212,582 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
   it("canTransition pins the guard's premise for both targets", () => {
     assert.equal(canTransition("task", "running", "ready"), true);
     assert.equal(canTransition("task", "running", "blocked"), true);
+  });
+
+  it("the external task path returns the task to ready under trigger claim-expired", async (t) => {
+    const {
+      fixture,
+      runId,
+      attemptId,
+      executionFake,
+      leaseFake,
+      recording,
+      mock,
+    } = seedExternalTaskClaim(t, TASK_A);
+    const result = await runRecover(
+      fixture,
+      mock,
+      recording.plan,
+      executionFake,
+      leaseFake,
+    );
+    assert.equal(result.returnedToReady, 1);
+    assert.equal(result.blocked, 0);
+    assert.equal(result.objectivesFreed, 0);
+    assert.deepEqual(result.findings, []);
+    assert.deepEqual(readNode(fixture, TASK_A), {
+      state: "ready",
+      block_reason: null,
+    });
+    assert.equal(recording.setNodeStateInputs.length, 1);
+    assert.deepEqual(recording.setNodeStateInputs[0], {
+      id: TASK_A,
+      from: "running",
+      to: "ready",
+      trigger: "claim-expired",
+      blockReason: null,
+      at: NOW,
+      cause: {
+        revision: `revision_${ulidOf(TASK_A)}`,
+        importId: null,
+      },
+    });
+    assert.deepEqual(executionFake.endRunCalls, [
+      { runId, outcome: "expired", at: NOW },
+    ]);
+    assert.deepEqual(executionFake.closeAttemptCalls, [
+      { attemptId, outcome: "cancelled", at: NOW },
+    ]);
+    assert.deepEqual(executionFake.attemptsOfRunCalls, [runId]);
+    assert.deepEqual(leaseFake.calls, []);
+    assert.deepEqual(readLease(fixture, TASK_A), {
+      owner: null,
+      expires_at: null,
+      renewed_at: null,
+      fence: 5,
+    });
+    parseNode(fixture, TASK_A);
+    const events = fixture.listEvents();
+    assert.equal(events.length, 1);
+    assert.equal(events[0]!.type, "recovery.leaseRecovered");
+    assert.equal(events[0]!.subjectKind, "node");
+    assert.equal(events[0]!.subjectId, TASK_A);
+    assert.equal(events[0]!.actorKind, "daemon");
+    assert.equal(events[0]!.actorId, ACTOR);
+    assert.deepEqual(events[0]!.payload, {
+      target: "ready",
+      clean: false,
+      headOid: null,
+      baseOid: null,
+      fence: 5,
+      driver: "external",
+      runId,
+    });
+    parseEvent(events[0]!);
+  });
+
+  it("the external task path calls no method of the Git fake", async (t) => {
+    const { fixture, executionFake, leaseFake, recording, mock } =
+      seedExternalTaskClaim(t, TASK_A);
+    await runRecover(fixture, mock, recording.plan, executionFake, leaseFake);
+    assert.deepEqual(mock.worktreeCalls, []);
+    assert.deepEqual(mock.headCalls, []);
+  });
+
+  it("the external task path never writes dirty-recovery", async (t) => {
+    const { fixture, executionFake, leaseFake, recording, mock } =
+      seedExternalTaskClaim(t, TASK_A);
+    await runRecover(fixture, mock, recording.plan, executionFake, leaseFake);
+    assert.deepEqual(readNode(fixture, TASK_A), {
+      state: "ready",
+      block_reason: null,
+    });
+    assert.equal(
+      fixture
+        .listEvents()
+        .filter((event) => event.type === "recovery.leaseBlocked").length,
+      0,
+    );
+    assert.equal(recording.setNodeStateInputs[0]!.trigger, "claim-expired");
+  });
+
+  it("the external objective path ends the objective run and moves no node state", async (t) => {
+    const {
+      fixture,
+      objectiveId,
+      runId,
+      executionFake,
+      leaseFake,
+      recording,
+      mock,
+    } = seedExternalObjectiveClaim(t, TASK_A);
+    const result = await runRecover(
+      fixture,
+      mock,
+      recording.plan,
+      executionFake,
+      leaseFake,
+    );
+    assert.equal(result.objectivesFreed, 1);
+    assert.equal(result.returnedToReady, 0);
+    assert.equal(result.blocked, 0);
+    assert.deepEqual(executionFake.endRunCalls, [
+      { runId, outcome: "expired", at: NOW },
+    ]);
+    assert.deepEqual(executionFake.closeAttemptCalls, []);
+    assert.equal(recording.setNodeStateInputs.length, 0);
+    const node = fixture.storage.transact((transaction) =>
+      transaction.get("SELECT state FROM node WHERE id = ?", [objectiveId]),
+    ) as { state: string };
+    assert.equal(node.state, "running");
+    assert.deepEqual(readLease(fixture, objectiveId), {
+      owner: null,
+      expires_at: null,
+      renewed_at: null,
+      fence: 3,
+    });
+    const events = fixture.listEvents();
+    assert.equal(events.length, 1);
+    assert.equal(events[0]!.subjectId, objectiveId);
+    assert.deepEqual(events[0]!.payload, {
+      target: "running",
+      clean: false,
+      headOid: null,
+      baseOid: null,
+      fence: 3,
+      driver: "external",
+      runId,
+    });
+  });
+
+  it("the external objective path emits no lease-expired-on-non-task finding", async (t) => {
+    const { fixture, executionFake, leaseFake, recording, mock } =
+      seedExternalObjectiveClaim(t, TASK_A);
+    const result = await runRecover(
+      fixture,
+      mock,
+      recording.plan,
+      executionFake,
+      leaseFake,
+    );
+    assert.equal(result.findings.length, 0);
+    assert.ok(
+      !result.findings.some(
+        (finding) => finding.code === "lease-expired-on-non-task",
+      ),
+    );
+  });
+
+  it("the driver branch precedes the missing-workspace check", async (t) => {
+    const { fixture, executionFake, leaseFake, recording, mock } =
+      seedExternalTaskClaim(t, TASK_A);
+    const result = await runRecover(
+      fixture,
+      mock,
+      recording.plan,
+      executionFake,
+      leaseFake,
+    );
+    assert.equal(result.blocked, 0);
+    assert.equal(result.returnedToReady, 1);
+    assert.ok(
+      !result.findings.some(
+        (finding) => finding.code === "recovery-inputs-missing",
+      ),
+    );
+    assert.deepEqual(readNode(fixture, TASK_A), {
+      state: "ready",
+      block_reason: null,
+    });
+  });
+
+  it("the lease clear keeps the fence on both paths", async (t) => {
+    const fixture = seedTaskFixture(t, TASK_A);
+    insertExternalRun(fixture, {
+      id: runIdFor("objective", `objective_${ulidOf(TASK_A)}`),
+      kind: "objective",
+      nodeId: `objective_${ulidOf(TASK_A)}`,
+      parentRunId: null,
+      fence: 5,
+    });
+    insertExternalRun(fixture, {
+      id: runIdFor("task", TASK_A),
+      kind: "task",
+      nodeId: TASK_A,
+      parentRunId: runIdFor("objective", `objective_${ulidOf(TASK_A)}`),
+      fence: 5,
+    });
+    insertHeldLease(fixture, {
+      subjectId: TASK_A,
+      owner: "actor_harness",
+      fence: 5,
+      expiresAt: EXPIRED,
+    });
+    insertTask(fixture, TASK_B, "running");
+    insertWorkspace(
+      fixture,
+      "workspace_01ARZ3NDEKTSV4RRFFQ69G5FAW",
+      "workspaces/task-b",
+      TASK_B,
+    );
+    insertRun(
+      fixture,
+      "run_01ARZ3NDEKTSV4RRFFQ69G5FAW",
+      TASK_B,
+      "workspace_01ARZ3NDEKTSV4RRFFQ69G5FAW",
+    );
+    insertLease(fixture, TASK_B, EXPIRED);
+    const mock = gitMock({ clean: true, head: BASE });
+    const result = await runRecover(fixture, mock);
+    assert.equal(result.returnedToReady, 2);
+    assert.deepEqual(readLease(fixture, TASK_A), {
+      owner: null,
+      expires_at: null,
+      renewed_at: null,
+      fence: 5,
+    });
+    assert.deepEqual(readLease(fixture, TASK_B), {
+      owner: null,
+      expires_at: null,
+      renewed_at: null,
+      fence: 1,
+    });
+  });
+
+  it("a swept row holds a null in every column but the fence", async (t) => {
+    const { fixture, executionFake, leaseFake, recording, mock } =
+      seedExternalTaskClaim(t, TASK_A);
+    await runRecover(fixture, mock, recording.plan, executionFake, leaseFake);
+    assert.deepEqual(readLeaseRow(fixture, TASK_A), {
+      subject_kind: "node",
+      subject_id: TASK_A,
+      owner: null,
+      owner_kind: null,
+      fence: 5,
+      acquired_at: null,
+      renewed_at: null,
+      expires_at: null,
+    });
+  });
+
+  it("the recovery.leaseRecovered payload carries row.fence", async (t) => {
+    const { fixture, executionFake, leaseFake, recording, mock } =
+      seedExternalTaskClaim(t, TASK_A);
+    await runRecover(fixture, mock, recording.plan, executionFake, leaseFake);
+    const payload = fixture.listEvents()[0]!.payload as Readonly<{
+      fence: number;
+    }>;
+    assert.equal(payload.fence, 5);
+    assert.notEqual(payload.fence, 6);
+  });
+
+  it("sweepExpiredExternalLeases runs inside a supplied transaction", async (t) => {
+    const { fixture, runId, attemptId, executionFake, leaseFake, recording } =
+      seedExternalTaskClaim(t, TASK_A);
+    let swept = false;
+    assert.throws(() => {
+      fixture.storage.transact((transaction) => {
+        const result = sweepExpiredExternalLeases(
+          {
+            plan: recording.plan,
+            lease: leaseFake.lease,
+            execution: executionFake.execution,
+            events: fixture.events,
+          },
+          transaction,
+          { actor: ACTOR, now: NOW },
+        );
+        swept = true;
+        assert.equal(result.returnedToReady, 1);
+        throw new Error("rollback probe");
+      });
+    }, /rollback probe/);
+    assert.equal(swept, true);
+    assert.equal(executionFake.endRunCalls.length, 1);
+    assert.deepEqual(readNode(fixture, TASK_A), {
+      state: "running",
+      block_reason: null,
+    });
+    const run = fixture.storage.transact((transaction) =>
+      transaction.get("SELECT state, outcome FROM run WHERE id = ?", [runId]),
+    ) as { state: string; outcome: string | null };
+    assert.equal(run.state, "active");
+    assert.equal(run.outcome, null);
+    const attempt = fixture.storage.transact((transaction) =>
+      transaction.get("SELECT outcome FROM attempt WHERE id = ?", [attemptId]),
+    ) as { outcome: string | null };
+    assert.equal(attempt.outcome, null);
+    const lease = fixture.storage.transact((transaction) =>
+      transaction.get(
+        "SELECT owner, fence FROM lease WHERE subject_kind = 'node' AND subject_id = ?",
+        [TASK_A],
+      ),
+    ) as { owner: string | null; fence: number };
+    assert.equal(lease.owner, "actor_harness");
+    assert.equal(lease.fence, 5);
+    assert.equal(fixture.listEvents().length, 0);
+  });
+
+  it("the sweep is deterministic in row order", async (t) => {
+    const fixture = seedTaskFixture(t, TASK_A);
+    insertExternalRun(fixture, {
+      id: runIdFor("objective", `objective_${ulidOf(TASK_A)}`),
+      kind: "objective",
+      nodeId: `objective_${ulidOf(TASK_A)}`,
+      parentRunId: null,
+      fence: 2,
+    });
+    insertExternalRun(fixture, {
+      id: runIdFor("task", TASK_A),
+      kind: "task",
+      nodeId: TASK_A,
+      parentRunId: runIdFor("objective", `objective_${ulidOf(TASK_A)}`),
+      fence: 2,
+    });
+    insertHeldLease(fixture, {
+      subjectId: TASK_A,
+      owner: "actor_harness",
+      fence: 2,
+      expiresAt: EXPIRED,
+    });
+    insertTask(fixture, TASK_B, "running");
+    insertExternalRun(fixture, {
+      id: runIdFor("objective", `objective_${ulidOf(TASK_B)}`),
+      kind: "objective",
+      nodeId: `objective_${ulidOf(TASK_B)}`,
+      parentRunId: null,
+      fence: 4,
+    });
+    insertExternalRun(fixture, {
+      id: runIdFor("task", TASK_B),
+      kind: "task",
+      nodeId: TASK_B,
+      parentRunId: runIdFor("objective", `objective_${ulidOf(TASK_B)}`),
+      fence: 4,
+    });
+    insertHeldLease(fixture, {
+      subjectId: TASK_B,
+      owner: "actor_harness",
+      fence: 4,
+      expiresAt: EXPIRED,
+    });
+    const result = await runRecover(fixture, gitMock({}));
+    assert.equal(result.returnedToReady, 2);
+    const events = fixture.listEvents();
+    assert.equal(events.length, 2);
+    assert.deepEqual(
+      events.map((event) => event.subjectId),
+      [TASK_A, TASK_B],
+    );
+  });
+
+  it("one expired claim yields two swept rows", async (t) => {
+    const {
+      fixture,
+      objectiveId,
+      runId,
+      executionFake,
+      leaseFake,
+      recording,
+      mock,
+    } = seedExternalObjectiveClaim(t, TASK_A);
+    const taskRunId = runIdFor("task", TASK_A);
+    const attemptId = attemptIdFor(TASK_A);
+    insertExternalRun(fixture, {
+      id: taskRunId,
+      kind: "task",
+      nodeId: TASK_A,
+      parentRunId: runId,
+      fence: 2,
+    });
+    insertExternalAttempt(fixture, { id: attemptId, runId: taskRunId });
+    insertHeldLease(fixture, {
+      subjectId: TASK_A,
+      owner: "actor_harness",
+      fence: 2,
+      expiresAt: EXPIRED,
+    });
+    executionFake.attemptsByRun.set(taskRunId, [
+      {
+        id: attemptId,
+        runId: taskRunId,
+        driver: "external",
+        attemptNo: 1,
+        headOid: null,
+        outcome: null,
+        endedAt: null,
+      },
+    ]);
+    const result = await runRecover(
+      fixture,
+      mock,
+      recording.plan,
+      executionFake,
+      leaseFake,
+    );
+    assert.equal(result.returnedToReady, 1);
+    assert.equal(result.objectivesFreed, 1);
+    assert.equal(result.blocked, 0);
+    const events = fixture.listEvents();
+    assert.equal(events.length, 2);
+    assert.deepEqual(
+      events.map((event) => event.subjectId),
+      [objectiveId, TASK_A],
+    );
+    for (const event of events) {
+      assert.equal(event.type, "recovery.leaseRecovered");
+    }
+    assert.deepEqual(executionFake.endRunCalls, [
+      { runId, outcome: "expired", at: NOW },
+      { runId: taskRunId, outcome: "expired", at: NOW },
+    ]);
+    assert.deepEqual(executionFake.closeAttemptCalls, [
+      { attemptId, outcome: "cancelled", at: NOW },
+    ]);
+    assert.deepEqual(readNode(fixture, TASK_A), {
+      state: "ready",
+      block_reason: null,
+    });
+    const objective = fixture.storage.transact((transaction) =>
+      transaction.get("SELECT state FROM node WHERE id = ?", [objectiveId]),
+    ) as { state: string };
+    assert.equal(objective.state, "running");
+  });
+
+  it("the sweep closes only the open attempt of a run with mixed completed and open history", async (t) => {
+    const fixture = seedTaskFixture(t, TASK_A);
+    const objectiveId = `objective_${ulidOf(TASK_A)}`;
+    const runId = runIdFor("task", TASK_A);
+    insertExternalRun(fixture, {
+      id: runIdFor("objective", objectiveId),
+      kind: "objective",
+      nodeId: objectiveId,
+      parentRunId: null,
+      fence: 5,
+    });
+    insertExternalRun(fixture, {
+      id: runId,
+      kind: "task",
+      nodeId: TASK_A,
+      parentRunId: runIdFor("objective", objectiveId),
+      fence: 5,
+    });
+    const completedAttemptId = "attempt_ext_01ARZ3NDEKTSV4RRFFQ69G5FAZ";
+    const openAttemptId = attemptIdFor(TASK_A);
+    fixture.storage.transact((transaction) => {
+      transaction.run(
+        "INSERT INTO attempt (id, run_id, driver, attempt_no, provider_id, provider_model, timeout_ms, base_oid, head_oid, outcome, ended_at) VALUES (?, ?, 'external', 1, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)",
+        [completedAttemptId, runId, NOW - 1000],
+      );
+      transaction.run(
+        "INSERT INTO attempt (id, run_id, driver, attempt_no, provider_id, provider_model, timeout_ms, base_oid, head_oid, outcome, ended_at) VALUES (?, ?, 'external', 2, NULL, NULL, NULL, NULL, NULL, NULL, NULL)",
+        [openAttemptId, runId],
+      );
+    });
+    insertHeldLease(fixture, {
+      subjectId: TASK_A,
+      owner: "actor_harness",
+      fence: 5,
+      expiresAt: EXPIRED,
+    });
+    const mock = gitMock({});
+    const backed = createBackedExecutionFake({
+      ids: createMockIdGenerator({ ulids: [] }),
+    });
+    const result = await recoverExpiredLeases(
+      {
+        storage: fixture.storage,
+        plan: createPlanStore(createReadiness(fixture.events, "daemon_test")),
+        git: mock.git,
+        lease: createLeaseFake().lease,
+        execution: backed.execution,
+        events: fixture.events,
+        clock: fixture.clock,
+      },
+      { actor: ACTOR },
+    );
+    assert.equal(result.returnedToReady, 1);
+    assert.equal(result.blocked, 0);
+    assert.equal(result.objectivesFreed, 0);
+    assert.deepEqual(result.findings, []);
+    const attemptRows = fixture.storage.transact((transaction) =>
+      transaction.all(
+        "SELECT id, attempt_no, outcome, ended_at FROM attempt WHERE run_id = ? ORDER BY attempt_no ASC",
+        [runId],
+      ),
+    ) as readonly Readonly<Record<string, unknown>>[];
+    assert.deepEqual(
+      attemptRows.map((row) => ({ ...row })),
+      [
+        {
+          id: completedAttemptId,
+          attempt_no: 1,
+          outcome: "rejected",
+          ended_at: NOW - 1000,
+        },
+        {
+          id: openAttemptId,
+          attempt_no: 2,
+          outcome: "cancelled",
+          ended_at: NOW,
+        },
+      ],
+    );
+    const run = fixture.storage.transact((transaction) =>
+      transaction.get(
+        "SELECT id, state, outcome, ended_at FROM run WHERE id = ?",
+        [runId],
+      ),
+    ) as Readonly<Record<string, unknown>>;
+    assert.deepEqual(
+      { ...run },
+      {
+        id: runId,
+        state: "ended",
+        outcome: "expired",
+        ended_at: NOW,
+      },
+    );
+    assert.deepEqual(readNode(fixture, TASK_A), {
+      state: "ready",
+      block_reason: null,
+    });
+    assert.deepEqual(readLease(fixture, TASK_A), {
+      owner: null,
+      expires_at: null,
+      renewed_at: null,
+      fence: 5,
+    });
+    const events = fixture.listEvents();
+    assert.equal(events.length, 1);
+    assert.equal(events[0]!.type, "recovery.leaseRecovered");
+    assert.equal(events[0]!.subjectId, TASK_A);
+    assert.deepEqual(events[0]!.payload, {
+      target: "ready",
+      clean: false,
+      headOid: null,
+      baseOid: null,
+      fence: 5,
+      driver: "external",
+      runId,
+    });
+    assert.deepEqual(backed.closeAttemptCalls, [
+      { attemptId: openAttemptId, outcome: "cancelled", at: NOW },
+    ]);
+  });
+
+  it("no raw node write survives in the file", async () => {
+    const source = fs.readFileSync(
+      new URL("./recover-expired-leases.ts", import.meta.url),
+      "utf8",
+    );
+    const rules = await lintCase({
+      filePath: "src/commands/startup/recover-expired-leases.ts",
+      code: source,
+    });
+    assert.ok(
+      !rules.includes("no-restricted-syntax"),
+      `unexpected no-restricted-syntax`,
+    );
   });
 });

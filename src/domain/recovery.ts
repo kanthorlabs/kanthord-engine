@@ -73,6 +73,7 @@ export type ReconcileResultLike = Readonly<{
 
 export type LeasesResultLike = Readonly<{
   returnedToReady: number;
+  objectivesFreed: number;
   blocked: number;
   findings: readonly RecoveryFinding[];
 }>;
@@ -92,6 +93,7 @@ export type RecoveryReport = Readonly<{
   leftOpen: number;
   refusesNewWork: readonly string[];
   returnedToReady: number;
+  objectivesFreed: number;
   blocked: number;
   findings: readonly RecoveryFinding[];
 }>;

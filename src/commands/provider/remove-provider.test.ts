@@ -243,7 +243,7 @@ describe("src/commands/provider/remove-provider.test", () => {
         ],
       );
       transaction.run(
-        "INSERT INTO run (id, kind, node_id, parent_run_id, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
           "run_objective",
           "objective",
@@ -297,7 +297,7 @@ describe("src/commands/provider/remove-provider.test", () => {
           ],
         );
         transaction.run(
-          "INSERT INTO run (id, kind, node_id, parent_run_id, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           [
             `run_${attemptId}`,
             "task",
@@ -315,7 +315,7 @@ describe("src/commands/provider/remove-provider.test", () => {
           ],
         );
         transaction.run(
-          "INSERT INTO attempt (id, run_id, attempt_no, provider_id, provider_model, timeout_ms, base_oid, head_oid, outcome, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO attempt (id, run_id, driver, attempt_no, provider_id, provider_model, timeout_ms, base_oid, head_oid, outcome, ended_at) VALUES (?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?)",
           [
             attemptId,
             `run_${attemptId}`,

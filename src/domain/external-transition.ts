@@ -8,6 +8,8 @@ export const externalTriggerIds = [
   "object-reported",
   "human-close",
   "human-close-partial",
+  "claim-released",
+  "claim-expired",
 ] as const;
 export type ExternalTriggerId = (typeof externalTriggerIds)[number];
 
@@ -124,6 +126,36 @@ export const externalTransitions: readonly ExternalTransition[] = [
       childAggregation: "at-least-one-task-discarded",
     },
   },
+  {
+    level: "task",
+    from: "running",
+    to: "ready",
+    trigger: "claim-released",
+    precondition: {
+      runDriver: "external",
+      activeRun: true,
+      leaseFence: "valid",
+      actorKind: "harness",
+      attemptLimit: "under",
+      reportedObjectId: "absent",
+      childAggregation: "not-applicable",
+    },
+  },
+  {
+    level: "task",
+    from: "running",
+    to: "ready",
+    trigger: "claim-expired",
+    precondition: {
+      runDriver: "external",
+      activeRun: true,
+      leaseFence: "none",
+      actorKind: "daemon",
+      attemptLimit: "under",
+      reportedObjectId: "absent",
+      childAggregation: "not-applicable",
+    },
+  },
 ] as const;
 
 export type DrivePinInput = Readonly<{
@@ -157,4 +189,6 @@ export const externalTriggerConsumer: Readonly<
   "object-reported": "src/commands/outcome/report-objective.ts",
   "human-close": "src/commands/outcome/close-objective.ts",
   "human-close-partial": "src/commands/outcome/close-objective.ts",
+  "claim-released": "src/commands/node/release-node.ts",
+  "claim-expired": "src/commands/startup/recover-expired-leases.ts",
 };

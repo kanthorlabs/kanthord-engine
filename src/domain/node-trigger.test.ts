@@ -170,7 +170,7 @@ describe("src/domain/node-trigger.test", () => {
     }
   });
 
-  it("the internal id set and the external id set are disjoint", () => {
+  it("the external id set and the internal id set stay disjoint", () => {
     const external = new Set<string>([...externalTriggerIds]);
     for (const id of internalTriggerIds) {
       assert.ok(
@@ -179,7 +179,7 @@ describe("src/domain/node-trigger.test", () => {
       );
     }
     const union = new Set([...internalTriggerIds, ...externalTriggerIds]);
-    assert.equal(union.size, 21);
+    assert.equal(union.size, 23);
   });
 
   it("triggerTransition returns the declared triple for every internal trigger", () => {
@@ -200,6 +200,19 @@ describe("src/domain/node-trigger.test", () => {
         to: row.to,
       });
     }
+  });
+
+  it("triggerTransition returns the declared triple for claim-released and for claim-expired", () => {
+    assert.deepEqual(triggerTransition("claim-released"), {
+      levels: ["task"],
+      from: "running",
+      to: "ready",
+    });
+    assert.deepEqual(triggerTransition("claim-expired"), {
+      levels: ["task"],
+      from: "running",
+      to: "ready",
+    });
   });
 
   it("the union of both tables covers every pair a command of EPICs 016, 018, 019 and 110 writes", () => {

@@ -31,6 +31,7 @@ describe("test/helpers/home.test", () => {
         allowedHosts: ["127.0.0.1:7421"],
       },
       attemptLimit: 3,
+      leaseTtlMs: 300000,
     });
   });
 
@@ -95,6 +96,7 @@ describe("test/helpers/home.test", () => {
         allowedHosts: ["127.0.0.1:7421"],
       },
       attemptLimit: 3,
+      leaseTtlMs: 300000,
     });
   });
 

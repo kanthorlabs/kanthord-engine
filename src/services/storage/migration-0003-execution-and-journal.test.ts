@@ -22,6 +22,7 @@ import { executionAndJournal } from "./migration-0003-execution-and-journal.ts";
 import { migration0004EventIndexes } from "./migration-0004-event-indexes.ts";
 import { migration0005Actor } from "./migration-0005-actor.ts";
 import { migration0006RevisionOrigin } from "./migration-0006-revision-origin.ts";
+import { migration0007ExternalExecution } from "./migration-0007-external-execution.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -55,6 +56,73 @@ const CHECK_RESULTS = [
 ] as const;
 
 const unstoredHash = `sha256:${"f".repeat(64)}`;
+
+const normalize = (sql: string): readonly string[] =>
+  sql
+    .split(";")
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .filter((part) => part.length > 0);
+
+const historicalLeaseStatement =
+  normalize(`CREATE TABLE lease (
+  subject_kind TEXT NOT NULL CHECK (subject_kind IN ('node', 'repository')),
+  subject_id   TEXT NOT NULL,
+  owner        TEXT,
+  fence        INTEGER NOT NULL,
+  acquired_at  INTEGER,
+  renewed_at   INTEGER,
+  expires_at   INTEGER,
+  PRIMARY KEY (subject_kind, subject_id)
+) STRICT`)[0] ?? "";
+
+const historicalRunStatements = [
+  ...normalize(`CREATE TABLE run (
+  id            TEXT PRIMARY KEY,
+  kind          TEXT NOT NULL CHECK (kind IN ('objective', 'task')),
+  node_id       TEXT NOT NULL REFERENCES node(id),
+  parent_run_id TEXT REFERENCES run(id),
+  workspace_id  TEXT NOT NULL REFERENCES workspace(id),
+  worker        TEXT NOT NULL,
+  lease_fence   INTEGER NOT NULL,
+  attempt_limit INTEGER NOT NULL,
+  base_oid      TEXT NOT NULL,
+  head_oid      TEXT,
+  state         TEXT NOT NULL CHECK (state IN ('active', 'ended')),
+  outcome       TEXT,
+  ended_at      INTEGER,
+  CHECK ((kind = 'objective') = (parent_run_id IS NULL))
+) STRICT`),
+  ...normalize(
+    `CREATE UNIQUE INDEX run_one_active ON run (node_id) WHERE state = 'active'`,
+  ),
+];
+
+const historicalAttemptStatement =
+  normalize(`CREATE TABLE attempt (
+  id             TEXT PRIMARY KEY,
+  run_id         TEXT NOT NULL REFERENCES run(id),
+  attempt_no     INTEGER NOT NULL,
+  provider_id    TEXT NOT NULL REFERENCES provider(id),
+  provider_model TEXT NOT NULL,
+  timeout_ms     INTEGER NOT NULL,
+  base_oid       TEXT NOT NULL,
+  head_oid       TEXT,
+  outcome        TEXT CHECK (outcome IS NULL OR outcome IN
+                 ('accepted', 'rejected', 'failed', 'timed-out', 'cancelled')),
+  ended_at       INTEGER,
+  UNIQUE (run_id, attempt_no)
+) STRICT`)[0] ?? "";
+
+const historicalEventStatement =
+  normalize(`CREATE TABLE event (
+  id           TEXT PRIMARY KEY,
+  subject_kind TEXT NOT NULL,
+  subject_id   TEXT NOT NULL,
+  type         TEXT NOT NULL,
+  actor_kind   TEXT NOT NULL CHECK (actor_kind IN ('human', 'daemon')),
+  actor_id     TEXT NOT NULL,
+  payload_json TEXT NOT NULL
+) STRICT`)[0] ?? "";
 
 type Context = Readonly<{
   storage: SqliteStorage;
@@ -125,7 +193,7 @@ type RunValues = Readonly<{
 const insertRun = (storage: SqliteStorage, values: RunValues): void => {
   storage.transact((t) => {
     t.run(
-      "INSERT INTO run (id, kind, node_id, parent_run_id, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         values.id,
         values.kind ?? "task",
@@ -188,7 +256,7 @@ type AttemptValues = Readonly<{
 const insertAttempt = (storage: SqliteStorage, values: AttemptValues): void => {
   storage.transact((t) => {
     t.run(
-      "INSERT INTO attempt (id, run_id, attempt_no, provider_id, provider_model, timeout_ms, base_oid, head_oid, outcome, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO attempt (id, run_id, driver, attempt_no, provider_id, provider_model, timeout_ms, base_oid, head_oid, outcome, ended_at) VALUES (?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         values.id,
         values.runId ?? fixtureIds.taskRun,
@@ -402,28 +470,20 @@ const insertEvent = (storage: SqliteStorage, values: EventValues): void => {
 };
 
 describe("src/services/storage/migration-0003-execution-and-journal.test", () => {
-  it("parity: the nine statements reproduce the eight proposal tables verbatim, in order", () => {
-    const normalize = (sql: string): readonly string[] =>
-      sql
-        .split(";")
-        .map((part) => part.replace(/\s+/g, " ").trim())
-        .filter((part) => part.length > 0);
-
-    assert.deepEqual(
-      executionAndJournal.statements
-        .flatMap(normalize)
-        .filter((statement) => !statement.startsWith("CREATE TABLE event")),
-      [
-        "workspace",
-        "lease",
-        "run",
-        "attempt",
+  it("parity: the ten statements reproduce the nine proposal tables verbatim, in order", () => {
+    assert.deepEqual(executionAndJournal.statements.flatMap(normalize), [
+      ...proposalStatements("workspace"),
+      historicalLeaseStatement,
+      ...historicalRunStatements,
+      historicalAttemptStatement,
+      ...[
         "agent_invocation",
         "candidate",
         "check_result",
         "git_operation",
       ].flatMap(proposalStatements),
-    );
+      historicalEventStatement,
+    ]);
   });
 
   it("executionAndJournal carries version 3 and the name migration.md declares", () => {
@@ -438,7 +498,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     assert.ok(migrationDoc.includes("0003-execution-and-journal"));
   });
 
-  it("migrations holds exactly the six migrations and versions map to 1, 2, 3, 4, 5, 6", () => {
+  it("migrations holds exactly the seven migrations and versions map to 1, 2, 3, 4, 5, 6, 7", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
@@ -446,10 +506,11 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
       migration0004EventIndexes,
       migration0005Actor,
       migration0006RevisionOrigin,
+      migration0007ExternalExecution,
     ]);
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4, 5, 6],
+      [1, 2, 3, 4, 5, 6, 7],
     );
   });
 

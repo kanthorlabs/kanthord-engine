@@ -12,7 +12,8 @@ export type ClientDependencies = Readonly<{
 export type CallInput = Readonly<{
   operationId: string;
   parameters?: Readonly<Record<string, string>>;
-  query?: Readonly<Record<string, string>>;
+  query?: Readonly<Record<string, string | undefined>>;
+  idempotencyKey?: string;
   body?: unknown;
 }>;
 
@@ -31,6 +32,10 @@ export type DaemonClient = Readonly<{
     operationId: string,
     body: unknown,
     parameters?: Readonly<Record<string, string>>,
+    options?: Readonly<{
+      query?: Readonly<Record<string, string | undefined>>;
+      idempotencyKey?: string;
+    }>,
   ): Promise<CallResult>;
 }>;
 
@@ -68,6 +73,9 @@ export function buildRequest(
   if (dependencies.token !== undefined) {
     headers.Authorization = `Bearer ${dependencies.token}`;
   }
+  if (input.idempotencyKey !== undefined) {
+    headers["Idempotency-Key"] = input.idempotencyKey;
+  }
 
   const init: RequestInit = { method: operation.method, headers };
   if (input.body !== undefined) {
@@ -76,10 +84,22 @@ export function buildRequest(
   }
 
   const baseUrl = dependencies.baseUrl.replace(/\/+$/, "");
-  const query =
-    input.query === undefined
-      ? ""
-      : `?${new URLSearchParams(Object.entries(input.query)).toString()}`;
+  let query = "";
+  if (input.query !== undefined) {
+    const entries = Object.entries(input.query)
+      .filter((entry): entry is [string, string] => entry[1] !== undefined)
+      .sort(([a], [b]) =>
+        Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8")),
+      );
+    if (entries.length > 0) {
+      query = `?${entries
+        .map(
+          ([key, value]) =>
+            `${encodeURIComponent(key)}=${encodeURIComponent(value)}`,
+        )
+        .join("&")}`;
+    }
+  }
   return { url: `${baseUrl}${path}${query}`, init };
 }
 

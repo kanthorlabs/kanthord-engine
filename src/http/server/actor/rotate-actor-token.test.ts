@@ -12,6 +12,7 @@ import {
 } from "../../../../test/helpers/database.ts";
 import { createMockClock } from "../../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../../test/helpers/ids.ts";
+import { createBackedLeaseFake } from "../../../../test/helpers/lease.ts";
 import { NodeCryptoSecret } from "../../../services/secret/node-crypto.ts";
 import { SqliteEventLog } from "../../../services/event/sqlite.ts";
 import type { Storage } from "../../../services/storage/index.ts";
@@ -94,7 +95,12 @@ describe("src/http/server/actor/rotate-actor-token.test", () => {
       },
     );
     revokeActor(
-      { storage: temporary.storage, events, clock },
+      {
+        storage: temporary.storage,
+        events,
+        clock,
+        lease: createBackedLeaseFake().lease,
+      },
       { id: registered.view.id, actor: BOOTSTRAP_ACTOR_FIXTURE },
     );
     const beforeActor = tableBytes(temporary.storage, "actor");

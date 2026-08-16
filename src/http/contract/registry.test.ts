@@ -1,7 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { action, hash, parameter, resource, sub, system } from "./path.ts";
+import {
+  action,
+  hash,
+  parameter,
+  renderPath,
+  resource,
+  sub,
+  system,
+} from "./path.ts";
 import type { Segment } from "./path.ts";
 import { idempotencyOf, idempotencyPolicies } from "./operation.ts";
 import type { Operation } from "./operation.ts";
@@ -19,9 +27,12 @@ const bytewise = (a: string, b: string): number =>
 export const harnessOperations = [
   "blob.show",
   "edge.list",
+  "node.claim",
   "node.create",
   "node.delete",
+  "node.heartbeat",
   "node.list",
+  "node.release",
   "node.show",
   "node.update",
   "plan.export",
@@ -32,13 +43,13 @@ export const harnessOperations = [
 ];
 
 describe("src/http/contract/registry.test", () => {
-  it("registers sixty-two operations", () => {
-    assert.equal(registry.length, 62);
+  it("registers sixty-five operations", () => {
+    assert.equal(registry.length, 65);
   });
 
   it("sorts the registry bytewise by operationId with no duplicates", () => {
     const ids = registry.map((entry) => entry.operationId);
-    assert.equal(new Set(ids).size, 62);
+    assert.equal(new Set(ids).size, 65);
     for (let i = 0; i < ids.length - 1; i += 1) {
       assert.ok(
         Buffer.compare(Buffer.from(ids[i]!), Buffer.from(ids[i + 1]!)) < 0,
@@ -50,7 +61,7 @@ describe("src/http/contract/registry.test", () => {
   it("counts routed and stubbed entries", () => {
     assert.equal(
       registry.filter((entry) => entry.status === "routed").length,
-      35,
+      38,
     );
     assert.equal(
       registry.filter((entry) => entry.status === "stubbed").length,
@@ -61,7 +72,7 @@ describe("src/http/contract/registry.test", () => {
   it("counts introducedIn values with no post-mvp row", () => {
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-1").length,
-      32,
+      35,
     );
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-2").length,
@@ -96,12 +107,15 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("attaches requests to the twelve write routes and responses to the thirty-four routes", () => {
+  it("attaches requests to the fifteen write routes and responses to the thirty-seven routes", () => {
     const withRequest = registry.filter((entry) => entry.request !== undefined);
     assert.deepEqual(withRequest.map((entry) => entry.operationId).sort(), [
       "actor.register",
+      "node.claim",
       "node.create",
       "node.delete",
+      "node.heartbeat",
+      "node.release",
       "node.update",
       "plan.import",
       "plan.validate",
@@ -123,9 +137,12 @@ describe("src/http/contract/registry.test", () => {
       "actor.show",
       "edge.list",
       "event.list",
+      "node.claim",
       "node.create",
       "node.delete",
+      "node.heartbeat",
       "node.list",
+      "node.release",
       "node.show",
       "node.update",
       "plan.export",
@@ -157,12 +174,12 @@ describe("src/http/contract/registry.test", () => {
     assert.deepEqual(registryFaults(registry), []);
   });
 
-  it("event.list is the only operation with a query schema", () => {
+  it("event.list and node.list are the only operations with a query schema", () => {
     assert.deepEqual(
       registry
         .filter((entry) => entry.query !== undefined)
         .map((entry) => entry.operationId),
-      ["event.list"],
+      ["event.list", "node.list"],
     );
   });
 
@@ -556,7 +573,7 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("declares exactly the twenty-five POST policies the story names", () => {
+  it("declares exactly the twenty-eight POST policies the story names", () => {
     const keyed = registry
       .filter((entry) => idempotencyOf(entry) !== "none")
       .map((entry) => entry.operationId)
@@ -567,8 +584,11 @@ describe("src/http/contract/registry.test", () => {
         "actor.register",
         "actor.revoke",
         "actor.rotate",
+        "node.claim",
         "node.create",
         "node.delete",
+        "node.heartbeat",
+        "node.release",
         "node.update",
         "plan.import",
         "plan.validate",
@@ -602,10 +622,10 @@ describe("src/http/contract/registry.test", () => {
     );
   });
 
-  it("counts twenty-four memory-policy operations", () => {
+  it("counts twenty-seven memory-policy operations", () => {
     assert.equal(
       registry.filter((entry) => idempotencyOf(entry) === "memory").length,
-      24,
+      27,
     );
   });
 
@@ -710,6 +730,42 @@ describe("src/http/contract/registry.test", () => {
         entry.operationId,
       );
     }
+  });
+
+  it("node.claim, node.heartbeat and node.release each declare memory idempotency and replayable [200]", () => {
+    for (const operationId of [
+      "node.claim",
+      "node.heartbeat",
+      "node.release",
+    ]) {
+      const entry = findOperation(operationId);
+      assert.notEqual(entry, undefined, operationId);
+      assert.equal(idempotencyOf(entry!), "memory", operationId);
+      assert.deepEqual(entry!.replayable, [200], operationId);
+    }
+  });
+
+  it("each of the three admits human and harness", () => {
+    for (const operationId of [
+      "node.claim",
+      "node.heartbeat",
+      "node.release",
+    ]) {
+      assert.deepEqual(
+        findOperation(operationId)?.allowedActors,
+        ["human", "harness"],
+        operationId,
+      );
+    }
+  });
+
+  it("the three new paths render as expected", () => {
+    const claim = findOperation("node.claim");
+    const heartbeat = findOperation("node.heartbeat");
+    const release = findOperation("node.release");
+    assert.equal(renderPath(claim!.path), "/v1/node/:id/claim");
+    assert.equal(renderPath(heartbeat!.path), "/v1/node/:id/heartbeat");
+    assert.equal(renderPath(release!.path), "/v1/node/:id/release");
   });
 
   it("flags a replayable outcome declared without a memory policy", () => {
@@ -871,7 +927,7 @@ describe("src/http/contract/registry.test", () => {
       }
     });
 
-    it("the harness set equals the named twelve by bytewise order", () => {
+    it("the harness set equals the named fifteen by bytewise order", () => {
       const actual = registry
         .filter((entry) => entry.allowedActors.includes("harness"))
         .map((entry) => entry.operationId)
@@ -879,8 +935,15 @@ describe("src/http/contract/registry.test", () => {
       assert.deepEqual(actual, harnessOperations);
     });
 
-    it("the harness set names node.create, node.update and node.delete", () => {
-      for (const operationId of ["node.create", "node.update", "node.delete"]) {
+    it("the harness set names the six node operations of EPIC 017 and 018", () => {
+      for (const operationId of [
+        "node.claim",
+        "node.create",
+        "node.delete",
+        "node.heartbeat",
+        "node.release",
+        "node.update",
+      ]) {
         assert.ok(
           harnessOperations.includes(operationId),
           `${operationId} is missing from the harness set`,

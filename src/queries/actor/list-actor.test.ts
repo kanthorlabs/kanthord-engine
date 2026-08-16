@@ -10,6 +10,7 @@ import { BOOTSTRAP_ACTOR_FIXTURE } from "../../../test/helpers/app.ts";
 import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
+import { createBackedLeaseFake } from "../../../test/helpers/lease.ts";
 import { registerActor } from "../../commands/actor/register-actor.ts";
 import { revokeActor } from "../../commands/actor/revoke-actor.ts";
 import { listActors } from "./list-actor.ts";
@@ -117,7 +118,12 @@ describe("src/queries/actor/list-actor.test", () => {
       configuredToken: "test-token",
     });
     revokeActor(
-      { storage: temporary.storage, events, clock },
+      {
+        storage: temporary.storage,
+        events,
+        clock,
+        lease: createBackedLeaseFake().lease,
+      },
       { id: `actor_${ACTOR_B}`, actor: BOOTSTRAP_ACTOR_FIXTURE },
     );
 

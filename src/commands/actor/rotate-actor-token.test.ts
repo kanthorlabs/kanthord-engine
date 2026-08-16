@@ -16,6 +16,7 @@ import {
 } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
+import { createBackedLeaseFake } from "../../../test/helpers/lease.ts";
 import { ActorCommandError } from "../../domain/actor-command-error.ts";
 import { registerActor } from "./register-actor.ts";
 import { revokeActor } from "./revoke-actor.ts";
@@ -277,7 +278,12 @@ describe("src/commands/actor/rotate-actor-token.test", () => {
     const registered = registerOne(temporary.storage, ids, clock);
     const events = new SqliteEventLog({ storage: temporary.storage, ids });
     revokeActor(
-      { storage: temporary.storage, events, clock },
+      {
+        storage: temporary.storage,
+        events,
+        clock,
+        lease: createBackedLeaseFake().lease,
+      },
       { id: registered.id, actor: BOOTSTRAP_ACTOR_FIXTURE },
     );
     const beforeActor = tableBytes(temporary.storage, "actor");
@@ -313,7 +319,7 @@ describe("src/commands/actor/rotate-actor-token.test", () => {
     const events = new SqliteEventLog({ storage: temporary.storage, ids });
     temporary.storage.transact((transaction) => {
       transaction.run(
-        "INSERT INTO lease (subject_kind, subject_id, owner, fence, acquired_at, renewed_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO lease (subject_kind, subject_id, owner, owner_kind, fence, acquired_at, renewed_at, expires_at) VALUES (?, ?, ?, 'daemon', ?, ?, ?, ?)",
         [
           "node",
           "node_01HZY8QF3M4N5P6R7S8T9V0W30",

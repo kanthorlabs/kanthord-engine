@@ -21,6 +21,7 @@ import { operations } from "./operation.ts";
 import type { OperationExamples } from "./operation.ts";
 import { planFinding } from "./plan-finding.ts";
 import { blobHash } from "../../domain/blob.ts";
+import { identity } from "../../domain/identity.ts";
 import { revisionOrigins } from "../../domain/plan-revision.ts";
 import {
   choices,
@@ -119,6 +120,14 @@ export const nodeListItem = z.strictObject({
 
 export const nodeListResponse = z.strictObject({
   nodes: z.array(nodeListItem),
+});
+
+export const nodeListQuery = z.strictObject({
+  project: identity("project").optional(),
+  kind: z.enum(nodeKinds).optional(),
+  state: z.enum(nodeStates).optional(),
+  blockReason: z.enum(blockReasons).optional(),
+  repository: identity("repository").optional(),
 });
 
 export const nodeShowResponse = nodeListItem.extend({
@@ -298,6 +307,13 @@ const nodeListItem_example = {
 };
 
 export const nodeListExamples: OperationExamples = {
+  query: {
+    project: `project_${U}`,
+    kind: "task",
+    state: "ready",
+    blockReason: "dirty-recovery",
+    repository: `repo_${U}`,
+  },
   success: { nodes: [nodeListItem_example] },
   error: { error: { code: "not-found", message: `no project project_${U}` } },
 };
@@ -380,7 +396,11 @@ export const nodeUpdateExamples: OperationExamples = {
     error: {
       code: "illegal-transition",
       message: "the node is not editable in its state",
-      details: { nodes: [{ id: `task_${U}`, state: "running" }] },
+      details: {
+        refusal: "node-state",
+        state: "running",
+        admitted: ["ready", "running"],
+      },
     },
   },
 };
@@ -486,6 +506,7 @@ export const graph = operations([
     introducedIn: "phase-1",
     status: "routed",
     allowedActors: ["human", "harness"],
+    query: nodeListQuery,
     response: nodeListResponse,
     errors: { ...baselineErrors },
     examples: nodeListExamples,

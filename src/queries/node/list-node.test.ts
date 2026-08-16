@@ -7,6 +7,7 @@ import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import {
   fixtureIds,
   seedGraph,
+  seedListFilterFixture,
   seedRegistry,
 } from "../../../test/helpers/rows.ts";
 import { nodeListItem } from "../../http/contract/graph.ts";
@@ -295,6 +296,179 @@ describe("src/queries/node/list-node.test", () => {
       occurrences,
       1,
       "list-edge.ts holds exactly the project check",
+    );
+  });
+
+  it("the project filter alone selects the rows of one project", (t) => {
+    const { storage, plan, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => seedListFilterFixture(transaction));
+
+    assert.deepEqual(
+      listNodes({ storage, plan }, { project: fixtureIds.project }).map(
+        (item) => item.id,
+      ),
+      [fixtureIds.initiative, fixtureIds.objective, fixtureIds.task, "task_a2"],
+    );
+    assert.deepEqual(
+      listNodes({ storage, plan }, { project: "project_b" }).map(
+        (item) => item.id,
+      ),
+      ["initiative_pb", "objective_pb", "task_pb1", "task_pb2"],
+    );
+  });
+
+  it("the kind filter alone selects the rows of one kind", (t) => {
+    const { storage, plan, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => seedListFilterFixture(transaction));
+
+    assert.deepEqual(
+      listNodes({ storage, plan }, { kind: "task" }).map((item) => item.id),
+      ["task_a", "task_a2", "task_pb1", "task_pb2"],
+    );
+    assert.deepEqual(
+      listNodes({ storage, plan }, { kind: "objective" }).map(
+        (item) => item.id,
+      ),
+      [fixtureIds.objective, "objective_pb"],
+    );
+  });
+
+  it("the state filter alone selects the rows of one state", (t) => {
+    const { storage, plan, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => seedListFilterFixture(transaction));
+
+    assert.deepEqual(
+      listNodes({ storage, plan }, { state: "ready" }).map((item) => item.id),
+      [fixtureIds.objective, "objective_pb", "task_pb1", "task_pb2"],
+    );
+    assert.deepEqual(
+      listNodes({ storage, plan }, { state: "blocked" }).map((item) => item.id),
+      ["task_a2"],
+    );
+    assert.deepEqual(
+      listNodes({ storage, plan }, { state: "running" }).map((item) => item.id),
+      [fixtureIds.task],
+    );
+  });
+
+  it("the blockReason filter alone selects the rows of one block reason", (t) => {
+    const { storage, plan, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => seedListFilterFixture(transaction));
+
+    assert.deepEqual(
+      listNodes({ storage, plan }, { blockReason: "dirty-recovery" }).map(
+        (item) => item.id,
+      ),
+      ["task_a2"],
+    );
+  });
+
+  it("the repository filter alone selects the rows of one repository", (t) => {
+    const { storage, plan, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => seedListFilterFixture(transaction));
+
+    assert.deepEqual(
+      listNodes({ storage, plan }, { repository: fixtureIds.repository }).map(
+        (item) => item.id,
+      ),
+      [fixtureIds.objective, fixtureIds.task, "task_a2"],
+    );
+    assert.deepEqual(
+      listNodes({ storage, plan }, { repository: "repo_b" }).map(
+        (item) => item.id,
+      ),
+      ["objective_pb", "task_pb1", "task_pb2"],
+    );
+  });
+
+  it("two filters combine with AND", (t) => {
+    const { storage, plan, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => seedListFilterFixture(transaction));
+
+    const combined = listNodes(
+      { storage, plan },
+      {
+        state: "ready",
+        kind: "task",
+      },
+    ).map((item) => item.id);
+    const byState = new Set(
+      listNodes({ storage, plan }, { state: "ready" }).map((item) => item.id),
+    );
+    const byKind = new Set(
+      listNodes({ storage, plan }, { kind: "task" }).map((item) => item.id),
+    );
+
+    assert.deepEqual(combined, ["task_pb1", "task_pb2"]);
+    assert.ok(combined.every((id) => byState.has(id) && byKind.has(id)));
+    assert.ok(combined.length < byState.size);
+    assert.ok(combined.length < byKind.size);
+  });
+
+  it("repository matches an objective and its tasks, and never an initiative", (t) => {
+    const { storage, plan, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => seedListFilterFixture(transaction));
+
+    const items = listNodes(
+      { storage, plan },
+      { repository: fixtureIds.repository },
+    );
+
+    assert.deepEqual(
+      items.map((item) => item.id),
+      [fixtureIds.objective, fixtureIds.task, "task_a2"],
+    );
+    assert.equal(
+      items.some((item) => item.kind === "initiative"),
+      false,
+    );
+    assert.equal(
+      items.some((item) => item.id === "objective_pb"),
+      false,
+    );
+    assert.equal(
+      items.some((item) => item.id === "task_pb1"),
+      false,
+    );
+  });
+
+  it("a filter that matches nothing returns an empty list", (t) => {
+    const { storage, plan, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => seedListFilterFixture(transaction));
+
+    assert.deepEqual(listNodes({ storage, plan }, { state: "done" }), []);
+    assert.deepEqual(
+      listNodes({ storage, plan }, { repository: "repo_z" }),
+      [],
+    );
+    assert.deepEqual(
+      listNodes({ storage, plan }, { kind: "objective", state: "blocked" }),
+      [],
+    );
+  });
+
+  it("the order does not depend on the filter", (t) => {
+    const { storage, plan, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => seedListFilterFixture(transaction));
+
+    const unfiltered = listNodes({ storage, plan }, {});
+    const filtered = listNodes({ storage, plan }, { state: "ready" });
+
+    assert.ok(filtered.length > 0);
+    assert.ok(filtered.length < unfiltered.length);
+    const readyIds = new Set(filtered.map((item) => item.id));
+    assert.deepEqual(
+      filtered.map((item) => item.id),
+      unfiltered.filter((item) => readyIds.has(item.id)).map((item) => item.id),
     );
   });
 });

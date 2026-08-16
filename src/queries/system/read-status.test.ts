@@ -68,8 +68,8 @@ function insertLease(
   expiresAt: number | null,
 ): void {
   transaction.run(
-    "INSERT INTO lease (subject_kind, subject_id, owner, fence, expires_at) VALUES (?, ?, ?, ?, ?)",
-    [subjectKind, subjectId, owner, 1, expiresAt],
+    "INSERT INTO lease (subject_kind, subject_id, owner, owner_kind, fence, expires_at) VALUES (?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE 'daemon' END, ?, ?)",
+    [subjectKind, subjectId, owner, owner, 1, expiresAt],
   );
 }
 

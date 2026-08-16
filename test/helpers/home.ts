@@ -25,6 +25,7 @@ export function createTemporaryHome(): TemporaryHome {
           allowedHosts: ["127.0.0.1:7421"],
         },
         attemptLimit: 3,
+        leaseTtlMs: 300000,
       };
 
       if (overrides) {

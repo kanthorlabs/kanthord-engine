@@ -93,7 +93,7 @@ describe("src/http/server/app.test", () => {
     }
     requests.push({ method: "get", path: "/v1/nope" });
     requests.push({ method: "get", path: "/v1/" });
-    assert.equal(requests.length, 64);
+    assert.equal(requests.length, 67);
 
     const responses: Array<{ status: number; body: unknown }> = [];
     for (const { method, path } of requests) {
@@ -365,11 +365,11 @@ describe("src/http/server/app.test", () => {
     assert.equal(app.proxy, false);
   });
 
-  it("binding system.health and system.db leaves thirty-three unimplemented ids", () => {
+  it("binding system.health and system.db leaves thirty-six unimplemented ids", () => {
     const bound = {
       "system.health": healthHandler,
       "system.db": statusHandler,
     };
-    assert.equal(unimplementedFor(bound).length, 33);
+    assert.equal(unimplementedFor(bound).length, 36);
   });
 });

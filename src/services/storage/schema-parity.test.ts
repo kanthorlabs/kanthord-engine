@@ -9,6 +9,7 @@ import {
   createTemporaryDatabase,
   type TemporaryDatabase,
 } from "../../../test/helpers/database.ts";
+import { assertClauseAgrees, tableDdl } from "../../../test/helpers/schema.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -26,46 +27,6 @@ const buildMigrated = (): Context => {
   });
   storage.migrate();
   return { storage, temporary };
-};
-
-const tableDdl = (storage: SqliteStorage, table: string): string => {
-  const row = storage.transact((t) =>
-    t.get("SELECT sql FROM sqlite_master WHERE name = ?", [table]),
-  ) as { sql: string | null } | undefined;
-  assert.ok(row !== undefined && row.sql !== null, `no DDL row for ${table}`);
-  return row.sql;
-};
-
-const literalListIn = (ddl: string, column: string): readonly string[] => {
-  const pattern = new RegExp(`\\b${column}\\s+IN\\s*\\(([\\s\\S]*?)\\)`);
-  const match = ddl.match(pattern);
-  assert.ok(match !== null, `no IN clause for ${column} in the DDL`);
-  const literals = [...(match[1] ?? "").matchAll(/'([^']*)'/g)].map(
-    (item) => item[1] ?? "",
-  );
-  return literals;
-};
-
-const assertClauseAgrees = (
-  storage: SqliteStorage,
-  table: string,
-  column: string,
-  domain: readonly string[],
-): void => {
-  const ddl = tableDdl(storage, table);
-  const extracted = literalListIn(ddl, column);
-  for (const value of domain) {
-    assert.ok(
-      ddl.includes(`'${value}'`),
-      `${value} is absent from the ${table} DDL`,
-    );
-  }
-  assert.equal(
-    extracted.length,
-    domain.length,
-    `${table}.${column} literal count`,
-  );
-  assert.deepEqual(extracted, [...domain], `${table}.${column} literal list`);
 };
 
 describe("src/services/storage/schema-parity.test", () => {

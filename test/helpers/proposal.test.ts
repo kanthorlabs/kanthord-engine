@@ -34,7 +34,7 @@ describe("test/helpers/proposal.test", () => {
 
   it("run yields the table and the unique index as two statements in order", () => {
     assert.deepEqual(proposalStatements("run"), [
-      "CREATE TABLE run ( id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('objective', 'task')), node_id TEXT NOT NULL REFERENCES node(id), parent_run_id TEXT REFERENCES run(id), workspace_id TEXT NOT NULL REFERENCES workspace(id), worker TEXT NOT NULL, lease_fence INTEGER NOT NULL, attempt_limit INTEGER NOT NULL, base_oid TEXT NOT NULL, head_oid TEXT, state TEXT NOT NULL CHECK (state IN ('active', 'ended')), outcome TEXT, ended_at INTEGER, CHECK ((kind = 'objective') = (parent_run_id IS NULL)) ) STRICT",
+      "CREATE TABLE run ( id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('objective', 'task')), node_id TEXT NOT NULL REFERENCES node(id), parent_run_id TEXT REFERENCES run(id), driver TEXT NOT NULL CHECK (driver IN ('internal', 'external')), workspace_id TEXT REFERENCES workspace(id), worker TEXT, lease_fence INTEGER NOT NULL, attempt_limit INTEGER NOT NULL, base_oid TEXT, head_oid TEXT, state TEXT NOT NULL CHECK (state IN ('active', 'ended')), outcome TEXT, ended_at INTEGER, CHECK ((kind = 'objective') = (parent_run_id IS NULL)), CHECK ((driver = 'internal') = (workspace_id IS NOT NULL)), CHECK ((driver = 'internal') = (worker IS NOT NULL)), CHECK ((driver = 'internal') = (base_oid IS NOT NULL)), UNIQUE (id, driver) ) STRICT",
       "CREATE UNIQUE INDEX run_one_active ON run (node_id) WHERE state = 'active'",
     ]);
   });

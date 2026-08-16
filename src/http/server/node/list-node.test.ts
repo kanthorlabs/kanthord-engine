@@ -13,6 +13,7 @@ import { listNodes } from "../../../queries/node/list-node.ts";
 import { nodeListResponse } from "../../contract/graph.ts";
 import type { Storage } from "../../../services/storage/index.ts";
 import { createPlanStore } from "../../../../test/helpers/plan.ts";
+import { seedListFilterFixture } from "../../../../test/helpers/rows.ts";
 
 const daemonHome = "/var/lib/kanthord";
 
@@ -118,5 +119,90 @@ describe("src/http/server/node/list-node.test", () => {
         assert.equal(countEvents(storage), eventsBefore);
       });
     }
+  });
+
+  async function buildFilterApp() {
+    const temporary = createMigratedStorage();
+    const storage = temporary.storage;
+    const plan = createPlanStore();
+    storage.transact((transaction) => seedListFilterFixture(transaction));
+    const app = await createTestApp({
+      handlers: {
+        "node.list": listNodeHandler({
+          listNodes: (input) => listNodes({ storage, plan }, input),
+        }),
+      },
+    });
+    return { temporary, app };
+  }
+
+  it("a repeated filter key is 400 invalid-request", async (t) => {
+    const { temporary, app } = await buildFilterApp();
+    t.after(() => temporary.dispose());
+
+    const response = await app.get("/v1/node?state=ready&state=running");
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "invalid-request");
+  });
+
+  it("an unknown key is 400 invalid-request", async (t) => {
+    const { temporary, app } = await buildFilterApp();
+    t.after(() => temporary.dispose());
+
+    const response = await app.get("/v1/node?owner=me");
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "invalid-request");
+  });
+
+  it("a filter value outside its enum is 400 invalid-request", async (t) => {
+    const { temporary, app } = await buildFilterApp();
+    t.after(() => temporary.dispose());
+
+    const response = await app.get("/v1/node?kind=epic");
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "invalid-request");
+  });
+
+  it("state=ready&kind=task returns only the ready tasks, ordered by identity", async (t) => {
+    const { temporary, app } = await buildFilterApp();
+    t.after(() => temporary.dispose());
+
+    const response = await app.get("/v1/node?state=ready&kind=task");
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      response.body.nodes.map((node: { id: string }) => node.id),
+      ["task_pb1", "task_pb2"],
+    );
+  });
+
+  it("the handler passes the parsed filter to the query exactly once", async (t) => {
+    let calls = 0;
+    let received: unknown;
+    const app = await createTestApp({
+      handlers: {
+        "node.list": listNodeHandler({
+          listNodes: (input) => {
+            calls += 1;
+            received = input;
+            return [];
+          },
+        }),
+      },
+    });
+
+    const response = await app.get(
+      "/v1/node?project=project_01JQ8Z7G3HZZZZZZZZZZZZZZZW&state=ready",
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(calls, 1);
+    assert.deepEqual(received, {
+      project: "project_01JQ8Z7G3HZZZZZZZZZZZZZZZW",
+      state: "ready",
+    });
   });
 });

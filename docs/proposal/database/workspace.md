@@ -18,7 +18,7 @@ CREATE TABLE workspace (
 ) STRICT;
 ```
 
-`node_id` is an objective, and the unique index is the clone granularity rule of [git-foundation.md](../phase-1/git-foundation.md). All tasks of one objective share this clone.
+`node_id` is an objective, and the unique index is the clone granularity rule of [git-foundation.md](../phase-1/git-foundation.md). All tasks of one objective share this clone. A workspace row exists for an internal run only, because an external harness owns its own working tree.
 
 `profile_blob` is the pin. An edit of the profile during the run cannot change the instruction, because every render resolves this hash. `convention_version` pins the verification convention the same way, so a later change cannot alter what "verified" meant.
 

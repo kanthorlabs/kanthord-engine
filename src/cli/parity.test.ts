@@ -75,10 +75,10 @@ describe("src/cli/parity.test", () => {
     );
   });
 
-  it("programCommandPaths returns the twenty-three inventory paths", () => {
+  it("programCommandPaths returns the twenty-eight inventory paths", () => {
     const paths = programCommandPaths(buildProgram(fakeDependencies()));
 
-    assert.equal(paths.length, 23);
+    assert.equal(paths.length, 28);
     assert.deepEqual(paths, commandPaths());
   });
 
@@ -114,15 +114,15 @@ describe("src/cli/parity.test", () => {
     assert.deepEqual(stubbedPaths, ["run"]);
   });
 
-  it("pins twenty-six distinct ids across twenty calling entries", () => {
+  it("pins thirty distinct ids across twenty-five calling entries", () => {
     const calling = declaredCommands.filter(
       (entry) => entry.operationIds.length > 0,
     );
 
-    assert.equal(calling.length, 20);
+    assert.equal(calling.length, 25);
     assert.equal(
       new Set(calling.flatMap((entry) => entry.operationIds)).size,
-      26,
+      30,
     );
   });
 

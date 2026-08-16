@@ -37,7 +37,7 @@ describe("src/http/contract/path.test", () => {
   it("pins the closed-array sizes", () => {
     assert.equal(resourceSegments.length, 14);
     assert.equal(subresourceSegments.length, 15);
-    assert.equal(actionSegments.length, 19);
+    assert.equal(actionSegments.length, 22);
     assert.equal(systemSegments.length, 3);
   });
 
@@ -56,6 +56,24 @@ describe("src/http/contract/path.test", () => {
     assert.equal(
       renderPath([resource("node"), parameter("node"), action("delete")]),
       "/v1/node/:id/delete",
+    );
+  });
+
+  it("claim, heartbeat and release are action segments under the node parameter", () => {
+    for (const segment of ["claim", "heartbeat", "release"] as const) {
+      assert.ok(actionSegments.includes(segment), `${segment} is missing`);
+    }
+    assert.equal(
+      renderPath([resource("node"), parameter("node"), action("claim")]),
+      "/v1/node/:id/claim",
+    );
+    assert.equal(
+      renderPath([resource("node"), parameter("node"), action("heartbeat")]),
+      "/v1/node/:id/heartbeat",
+    );
+    assert.equal(
+      renderPath([resource("node"), parameter("node"), action("release")]),
+      "/v1/node/:id/release",
     );
   });
 

@@ -1,8 +1,13 @@
 import { z } from "zod";
 
+import { epochMillis } from "../../domain/column.ts";
+import { nodeIdentity } from "../../domain/identity.ts";
+import { leaseOwnerKinds } from "../../domain/lease.ts";
+import { leaseRelations } from "../../domain/lease-hierarchy.ts";
 import { choices } from "../../domain/plan-choice.ts";
 import { credentialFailures } from "../../domain/repository.ts";
 import { revisionGuardClasses } from "../../domain/revision-guard.ts";
+import { runDrivers } from "../../domain/run.ts";
 import { nodeStates } from "../../domain/state.ts";
 import { planFinding } from "./plan-finding.ts";
 
@@ -30,14 +35,24 @@ export const bindingInUseDetails = z.strictObject({
     .min(1),
 });
 
-export const illegalTransitionDetails = z.strictObject({
-  nodes: z.array(
-    z.strictObject({
-      id: z.string(),
-      state: z.enum(nodeStates),
-    }),
-  ),
-});
+export const illegalTransitionDetails = z.discriminatedUnion("refusal", [
+  z.strictObject({
+    refusal: z.literal("node-state"),
+    state: z.enum(nodeStates),
+    admitted: z.array(z.enum(nodeStates)).min(1),
+  }),
+  z.strictObject({
+    refusal: z.literal("ancestor-not-startable"),
+    ancestorId: nodeIdentity,
+    state: z.enum(nodeStates),
+    admitted: z.array(z.enum(nodeStates)).min(1),
+  }),
+  z.strictObject({
+    refusal: z.literal("drive-mode-pinned"),
+    pinnedDriver: z.enum(runDrivers),
+    claimDriver: z.enum(runDrivers),
+  }),
+]);
 
 export const idempotencyMismatchDetails = z.strictObject({
   differed: z.string(),
@@ -78,3 +93,20 @@ export const invalidRequestDetails = z.strictObject({
   detail: z.string().optional(),
   ids: z.array(z.string()).optional(),
 });
+
+export const leaseHeldDetails = z.discriminatedUnion("refusal", [
+  z.strictObject({
+    refusal: z.literal("held-by-other"),
+    subject: nodeIdentity,
+    holder: z.string().min(1),
+    holderKind: z.enum(leaseOwnerKinds),
+    fence: z.int(),
+    expiresAt: epochMillis,
+    relation: z.enum(leaseRelations),
+  }),
+  z.strictObject({
+    refusal: z.literal("stale-fence"),
+    subject: nodeIdentity,
+    presentedFence: z.int(),
+  }),
+]);

@@ -12,6 +12,7 @@ import {
 } from "../../../../test/helpers/database.ts";
 import { createMockClock } from "../../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../../test/helpers/ids.ts";
+import { createBackedLeaseFake } from "../../../../test/helpers/lease.ts";
 import { SqliteEventLog } from "../../../services/event/sqlite.ts";
 import { bootstrapActorId } from "../../../domain/actor.ts";
 import { revokeActor } from "../../../commands/actor/revoke-actor.ts";
@@ -31,7 +32,15 @@ describe("src/http/server/actor/revoke-actor.test", () => {
       handlers: {
         "actor.revoke": revokeActorHandler({
           revokeActor: (input: RevokeActorInput) =>
-            revokeActor({ storage: temporary.storage, events, clock }, input),
+            revokeActor(
+              {
+                storage: temporary.storage,
+                events,
+                clock,
+                lease: createBackedLeaseFake().lease,
+              },
+              input,
+            ),
         }),
       },
       resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,

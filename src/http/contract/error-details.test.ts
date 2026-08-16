@@ -11,10 +11,13 @@ import {
   idempotencyMismatchDetails,
   illegalTransitionDetails,
   invalidRequestDetails,
+  leaseHeldDetails,
   needsReconcileDetails,
   planInvalidDetails,
   staleRevisionDetails,
 } from "./error-details.ts";
+import { baselineErrors } from "./error-baseline.ts";
+import { buildErrorEnvelope } from "./errors.ts";
 
 describe("src/http/contract/error-details.test", () => {
   describe("staleRevisionDetails", () => {
@@ -190,42 +193,202 @@ describe("src/http/contract/error-details.test", () => {
     });
   });
 
-  describe("illegalTransitionDetails", () => {
-    it("parses one node with its state", () => {
-      const parsed = illegalTransitionDetails.parse({
-        nodes: [{ id: "task_a", state: "running" }],
-      });
-      assert.deepEqual(parsed, { nodes: [{ id: "task_a", state: "running" }] });
-    });
+  describe("leaseHeldDetails", () => {
+    const heldByOther = {
+      refusal: "held-by-other",
+      subject: "task_01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
+      holder: "actor_01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
+      holderKind: "actor",
+      fence: 1,
+      expiresAt: 1722800300000,
+      relation: "self",
+    };
 
-    it("parses several nodes", () => {
-      const parsed = illegalTransitionDetails.parse({
-        nodes: [
-          { id: "task_a", state: "done" },
-          { id: "task_b", state: "partial" },
-        ],
-      });
-      assert.deepEqual(parsed, {
-        nodes: [
-          { id: "task_a", state: "done" },
-          { id: "task_b", state: "partial" },
-        ],
-      });
-    });
-
-    it("rejects a node missing its state", () => {
+    it("parses the held-by-other variant", () => {
+      assert.deepEqual(leaseHeldDetails.parse(heldByOther), heldByOther);
+      assert.throws(() => leaseHeldDetails.parse({ ...heldByOther, extra: 1 }));
       assert.throws(() =>
-        illegalTransitionDetails.parse({ nodes: [{ id: "task_a" }] }),
+        leaseHeldDetails.parse({ ...heldByOther, relation: "cousin" }),
       );
     });
 
-    it("rejects an unregistered state", () => {
+    it("parses the stale-fence variant", () => {
+      const staleFence = {
+        refusal: "stale-fence",
+        subject: "task_01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
+        presentedFence: 2,
+      };
+      assert.deepEqual(leaseHeldDetails.parse(staleFence), staleFence);
       assert.throws(() =>
-        illegalTransitionDetails.parse({
-          nodes: [{ id: "task_a", state: "exploded" }],
+        leaseHeldDetails.parse({
+          refusal: "stale-fence",
+          subject: "task_01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
         }),
       );
     });
+
+    it("refuses a variant with no refusal member", () => {
+      const { refusal: _refusal, ...withoutDiscriminator } = heldByOther;
+      assert.throws(() => leaseHeldDetails.parse(withoutDiscriminator));
+    });
+
+    it("refuses a held-by-other object that omits fence", () => {
+      const { fence: _fence, ...withoutFence } = heldByOther;
+      assert.throws(() => leaseHeldDetails.parse(withoutFence));
+    });
+  });
+
+  describe("illegalTransitionDetails", () => {
+    const nodeState = {
+      refusal: "node-state",
+      state: "running",
+      admitted: ["ready", "running"],
+    };
+    const ancestorNotStartable = {
+      refusal: "ancestor-not-startable",
+      ancestorId: "objective_01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
+      state: "done",
+      admitted: ["ready", "running"],
+    };
+    const driveModePinned = {
+      refusal: "drive-mode-pinned",
+      pinnedDriver: "internal",
+      claimDriver: "external",
+    };
+
+    it("parses all three variants and refuses a fourth refusal literal", () => {
+      assert.deepEqual(illegalTransitionDetails.parse(nodeState), nodeState);
+      assert.deepEqual(
+        illegalTransitionDetails.parse(ancestorNotStartable),
+        ancestorNotStartable,
+      );
+      assert.deepEqual(
+        illegalTransitionDetails.parse(driveModePinned),
+        driveModePinned,
+      );
+      assert.throws(() =>
+        illegalTransitionDetails.parse({ refusal: "something-else" }),
+      );
+    });
+
+    it("refuses an ancestor variant with no ancestorId", () => {
+      const { ancestorId: _ancestorId, ...withoutAncestor } =
+        ancestorNotStartable;
+      assert.throws(() => illegalTransitionDetails.parse(withoutAncestor));
+    });
+
+    it("refuses a node-state variant that carries an ancestorId", () => {
+      assert.throws(() =>
+        illegalTransitionDetails.parse({
+          ...nodeState,
+          ancestorId: "objective_01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
+        }),
+      );
+    });
+  });
+
+  it("every refusal of the three commands has a details variant", () => {
+    const operationErrors = {
+      ...baselineErrors,
+      "lease-held": leaseHeldDetails,
+      "illegal-transition": illegalTransitionDetails,
+      "plan-invalid": planInvalidDetails,
+    };
+    const envelope = buildErrorEnvelope(operationErrors);
+    const cases = [
+      { refusal: "node-not-found", code: "not-found" },
+      {
+        refusal: "initiative-not-claimable",
+        code: "invalid-request",
+        details: { refusal: "initiative-not-claimable" },
+      },
+      {
+        refusal: "plan-incomplete",
+        code: "plan-invalid",
+        details: {
+          findings: [
+            {
+              code: "path-invalid",
+              path: "plan/i--01/01-a.md",
+              id: null,
+              message: "the path is not legal",
+            },
+          ],
+        },
+      },
+      {
+        refusal: "drive-mode-pinned",
+        code: "illegal-transition",
+        details: {
+          refusal: "drive-mode-pinned",
+          pinnedDriver: "internal",
+          claimDriver: "external",
+        },
+      },
+      {
+        refusal: "illegal-transition",
+        code: "illegal-transition",
+        details: {
+          refusal: "node-state",
+          state: "running",
+          admitted: ["ready", "running"],
+        },
+      },
+      {
+        refusal: "ancestor-not-startable",
+        code: "illegal-transition",
+        details: {
+          refusal: "ancestor-not-startable",
+          ancestorId: "objective_01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
+          state: "done",
+          admitted: ["ready", "running"],
+        },
+      },
+      {
+        refusal: "lease-held",
+        code: "lease-held",
+        details: {
+          refusal: "held-by-other",
+          subject: "task_01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
+          holder: "actor_01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
+          holderKind: "actor",
+          fence: 1,
+          expiresAt: 1722800300000,
+          relation: "sibling",
+        },
+      },
+      {
+        refusal: "no-active-run",
+        code: "illegal-transition",
+        details: {
+          refusal: "node-state",
+          state: "ready",
+          admitted: ["ready", "running"],
+        },
+      },
+      {
+        refusal: "no-open-attempt",
+        code: "illegal-transition",
+        details: {
+          refusal: "node-state",
+          state: "running",
+          admitted: ["ready", "running"],
+        },
+      },
+    ];
+    for (const row of cases) {
+      assert.doesNotThrow(
+        () =>
+          envelope.parse({
+            error: {
+              code: row.code,
+              message: "the refusal",
+              ...(row.details === undefined ? {} : { details: row.details }),
+            },
+          }),
+        `${row.refusal} has no details variant`,
+      );
+    }
   });
 
   describe("choicesStaleDetails and choicesChangedDetails", () => {

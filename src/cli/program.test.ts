@@ -194,4 +194,23 @@ describe("src/cli/program.test", () => {
 
     assert.notEqual(first, second);
   });
+
+  it("buildProgram registers node list, node show, node claim, node heartbeat and node release", () => {
+    const { dependencies } = fakeDependencies();
+    const program = buildProgram(dependencies);
+
+    const node = program.commands.find((command) => command.name() === "node");
+    assert.ok(node, "the node group exists");
+    const names = node.commands.map((command) => command.name());
+    assert.deepEqual(names, [
+      "create",
+      "update",
+      "delete",
+      "list",
+      "show",
+      "claim",
+      "heartbeat",
+      "release",
+    ]);
+  });
 });

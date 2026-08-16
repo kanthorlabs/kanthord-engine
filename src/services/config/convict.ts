@@ -223,6 +223,11 @@ function buildSchema(): Record<string, unknown> {
       default: 3,
       env: "KANTHORD_ATTEMPT_LIMIT",
     },
+    leaseTtlMs: {
+      format: "positiveInteger",
+      default: 300000,
+      env: "KANTHORD_LEASE_TTL_MS",
+    },
   };
 }
 
@@ -337,6 +342,7 @@ export class ConvictConfig implements Config {
       ["KANTHORD_HTTP_IDEMPOTENCY_MAX_ENTRIES", "http.idempotency.maxEntries"],
       ["KANTHORD_HTTP_IDEMPOTENCY_MAX_BYTES", "http.idempotency.maxBytes"],
       ["KANTHORD_ATTEMPT_LIMIT", "attemptLimit"],
+      ["KANTHORD_LEASE_TTL_MS", "leaseTtlMs"],
     ];
     for (const [envVar, configPath] of idempotencyEnvIntegers) {
       const rawValue = input.env[envVar];
@@ -494,6 +500,7 @@ export class ConvictConfig implements Config {
           sshKeyscan: config.get("tools.sshKeyscan") as string,
         },
         attemptLimit: config.get("attemptLimit") as number,
+        leaseTtlMs: config.get("leaseTtlMs") as number,
       },
       discovery: {
         resolved: resolvedPath,

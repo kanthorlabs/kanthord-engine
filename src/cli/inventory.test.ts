@@ -29,14 +29,14 @@ const readP1E1Block = (): string => {
 };
 
 describe("src/cli/inventory.test", () => {
-  it("declares exactly twenty-three commands", () => {
-    assert.equal(declaredCommands.length, 23);
+  it("declares exactly twenty-eight commands", () => {
+    assert.equal(declaredCommands.length, 28);
   });
 
-  it("commandPaths holds twenty-three distinct strings", () => {
+  it("commandPaths holds twenty-eight distinct strings", () => {
     const paths = commandPaths();
-    assert.equal(paths.length, 23);
-    assert.equal(new Set(paths).size, 23);
+    assert.equal(paths.length, 28);
+    assert.equal(new Set(paths).size, 28);
   });
 
   it("commandPaths is bytewise sorted", () => {
@@ -73,12 +73,12 @@ describe("src/cli/inventory.test", () => {
     }
   });
 
-  it("flattens to thirty entries naming twenty-six distinct operation ids", () => {
+  it("flattens to thirty-five entries naming thirty distinct operation ids", () => {
     const flattened = declaredCommands.flatMap(
       (entry: DeclaredCommand) => entry.operationIds,
     );
-    assert.equal(flattened.length, 30);
-    assert.equal(new Set(flattened).size, 26);
+    assert.equal(flattened.length, 35);
+    assert.equal(new Set(flattened).size, 30);
   });
 
   it("covers the eight commands the P1-E1 oracle runs", () => {
@@ -138,8 +138,13 @@ describe("src/cli/inventory.test", () => {
         "config generate",
         "db migrate",
         "db status",
+        "node claim",
         "node create",
         "node delete",
+        "node heartbeat",
+        "node list",
+        "node release",
+        "node show",
         "node update",
         "project list",
         "project repository",

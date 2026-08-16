@@ -6,12 +6,15 @@
 CREATE TABLE lease (
   subject_kind TEXT NOT NULL CHECK (subject_kind IN ('node', 'repository')),  -- what is held: an objective node, or a repository
   subject_id   TEXT NOT NULL,                                                 -- the held subject, prefixed
-  owner        TEXT,                                                          -- daemon instance holding it; null means released
+  owner        TEXT,                                                          -- a daemon owner is a daemon instance, an actor owner is a registered actor identity; null means released
+  owner_kind   TEXT CHECK (owner_kind IS NULL OR owner_kind IN ('daemon', 'actor')),  -- who owns the lease; null means released
   fence        INTEGER NOT NULL,                                              -- acquisition generation, never reset; a stale holder cannot write
   acquired_at  INTEGER,                                                       -- start of the current holding
   renewed_at   INTEGER,                                                       -- last renewal, so a long holding stays visibly alive
   expires_at   INTEGER,                                                       -- after this, startup treats the holding as stale
-  PRIMARY KEY (subject_kind, subject_id)
+  PRIMARY KEY (subject_kind, subject_id),
+  CHECK ((owner IS NULL) = (owner_kind IS NULL)),
+  CHECK (owner_kind <> 'actor' OR owner LIKE 'actor\_%' ESCAPE '\')
 ) STRICT;
 ```
 

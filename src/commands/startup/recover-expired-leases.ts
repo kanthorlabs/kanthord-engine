@@ -3,9 +3,12 @@ import { join } from "node:path";
 import type { RecoveryFinding } from "../../domain/recovery.ts";
 import type { Clock } from "../../services/clock/index.ts";
 import type { EventLog } from "../../services/event/index.ts";
+import type { Execution } from "../../services/execution/index.ts";
 import { GitError, type Git } from "../../services/git/index.ts";
+import type { Lease } from "../../services/lease/index.ts";
 import type { PlanStore } from "../../services/plan/index.ts";
 import type { Storage } from "../../services/storage/index.ts";
+import type { Transaction } from "../../services/storage/index.ts";
 
 export type RecoverExpiredLeasesDependencies = Readonly<{
   storage: Storage;
@@ -13,12 +16,15 @@ export type RecoverExpiredLeasesDependencies = Readonly<{
   git: Git;
   events: EventLog;
   clock: Clock;
+  lease: Lease;
+  execution: Execution;
 }>;
 
 export type RecoverExpiredLeasesInput = Readonly<{ actor: string }>;
 
 export type RecoverExpiredLeasesResult = Readonly<{
   returnedToReady: number;
+  objectivesFreed: number;
   blocked: number;
   findings: readonly RecoveryFinding[];
 }>;
@@ -28,13 +34,15 @@ type CandidateRow = Readonly<{
   fence: number;
   kind: string;
   base_oid: string | null;
+  run_id: string | null;
+  driver: string | null;
   path: string | null;
   repository_id: string | null;
   revision: string;
 }>;
 
 const CANDIDATE_SQL = `
-SELECT l.subject_id, l.fence, n.kind, r.base_oid, w.path, w.repository_id, n.revision AS revision
+SELECT l.subject_id, l.fence, n.kind, r.base_oid, r.id AS run_id, r.driver, w.path, w.repository_id, n.revision AS revision
 FROM lease l
 JOIN node n ON n.id = l.subject_id
 LEFT JOIN run r ON r.node_id = n.id AND r.state = 'active'
@@ -46,6 +54,95 @@ WHERE l.subject_kind = 'node'
 ORDER BY l.subject_id
 `;
 
+export type SweepExpiredExternalLeasesDependencies = Readonly<{
+  plan: PlanStore;
+  lease: Lease;
+  execution: Execution;
+  events: EventLog;
+}>;
+
+export type SweepExpiredExternalLeasesInput = Readonly<{
+  actor: string;
+  now: number;
+}>;
+
+export type SweepExpiredExternalLeasesResult = Readonly<{
+  returnedToReady: number;
+  objectivesFreed: number;
+}>;
+
+export function sweepExpiredExternalLeases(
+  dependencies: SweepExpiredExternalLeasesDependencies,
+  transaction: Transaction,
+  input: SweepExpiredExternalLeasesInput,
+): SweepExpiredExternalLeasesResult {
+  const rows = transaction.all(CANDIDATE_SQL, [
+    input.now,
+  ]) as readonly CandidateRow[];
+  let returnedToReady = 0;
+  let objectivesFreed = 0;
+  for (const row of rows) {
+    if (row.driver !== "external") {
+      continue;
+    }
+    if (row.run_id !== null) {
+      for (const attempt of dependencies.execution.attemptsOfRun(
+        transaction,
+        row.run_id,
+      )) {
+        if (attempt.outcome !== null) {
+          continue;
+        }
+        dependencies.execution.closeAttempt(transaction, {
+          attemptId: attempt.id,
+          outcome: "cancelled",
+          at: input.now,
+        });
+      }
+      dependencies.execution.endRun(transaction, {
+        runId: row.run_id,
+        outcome: "expired",
+        at: input.now,
+      });
+    }
+    transaction.run(
+      "UPDATE lease SET owner = NULL, owner_kind = NULL, acquired_at = NULL, renewed_at = NULL, expires_at = NULL WHERE subject_kind = 'node' AND subject_id = ?",
+      [row.subject_id],
+    );
+    if (row.kind === "task") {
+      dependencies.plan.setNodeState(transaction, {
+        id: row.subject_id,
+        from: "running",
+        to: "ready",
+        trigger: "claim-expired",
+        blockReason: null,
+        at: input.now,
+        cause: { revision: row.revision, importId: null },
+      });
+      returnedToReady++;
+    } else {
+      objectivesFreed++;
+    }
+    dependencies.events.append(transaction, {
+      subjectKind: "node",
+      subjectId: row.subject_id,
+      type: "recovery.leaseRecovered",
+      actorKind: "daemon",
+      actorId: input.actor,
+      payload: {
+        target: row.kind === "task" ? "ready" : "running",
+        clean: false,
+        headOid: null,
+        baseOid: row.base_oid,
+        fence: row.fence,
+        driver: "external",
+        runId: row.run_id,
+      },
+    });
+  }
+  return { returnedToReady, objectivesFreed };
+}
+
 export async function recoverExpiredLeases(
   dependencies: RecoverExpiredLeasesDependencies,
   input: RecoverExpiredLeasesInput,
@@ -56,10 +153,31 @@ export async function recoverExpiredLeases(
   ) as readonly CandidateRow[];
 
   let returnedToReady = 0;
+  let objectivesFreed = 0;
   let blocked = 0;
   const findings: RecoveryFinding[] = [];
 
-  for (const row of rows) {
+  const externalRows = rows.filter((row) => row.driver === "external");
+  const internalRows = rows.filter((row) => row.driver !== "external");
+
+  if (externalRows.length > 0) {
+    const swept = dependencies.storage.transact((transaction) =>
+      sweepExpiredExternalLeases(
+        {
+          plan: dependencies.plan,
+          lease: dependencies.lease,
+          execution: dependencies.execution,
+          events: dependencies.events,
+        },
+        transaction,
+        { actor: input.actor, now },
+      ),
+    );
+    returnedToReady += swept.returnedToReady;
+    objectivesFreed += swept.objectivesFreed;
+  }
+
+  for (const row of internalRows) {
     if (row.kind !== "task") {
       findings.push({
         step: "leases",
@@ -126,7 +244,7 @@ export async function recoverExpiredLeases(
     }
   }
 
-  return { returnedToReady, blocked, findings };
+  return { returnedToReady, objectivesFreed, blocked, findings };
 }
 
 function writeVerdict(
@@ -152,7 +270,7 @@ function writeVerdict(
       cause: { revision: row.revision, importId: null },
     });
     transaction.run(
-      "UPDATE lease SET owner = NULL, expires_at = NULL, renewed_at = NULL, fence = fence + 1 WHERE subject_kind = 'node' AND subject_id = ?",
+      "UPDATE lease SET owner = NULL, owner_kind = NULL, acquired_at = NULL, renewed_at = NULL, expires_at = NULL WHERE subject_kind = 'node' AND subject_id = ?",
       [row.subject_id],
     );
     dependencies.events.append(transaction, {
@@ -169,7 +287,7 @@ function writeVerdict(
         clean: verdict.clean,
         headOid: verdict.head,
         baseOid: row.base_oid,
-        fence: row.fence + 1,
+        fence: row.fence,
       },
     });
   });

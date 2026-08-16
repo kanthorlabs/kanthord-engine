@@ -47,6 +47,9 @@ const operationAdditions: Readonly<Record<string, readonly string[]>> = {
     "illegal-transition",
     "binding-in-use",
   ],
+  "node.claim": ["illegal-transition", "lease-held", "plan-invalid"],
+  "node.heartbeat": ["illegal-transition", "lease-held", "plan-invalid"],
+  "node.release": ["illegal-transition", "lease-held", "plan-invalid"],
 };
 
 function objectNodes(schema: unknown): readonly Record<string, unknown>[] {
@@ -394,8 +397,8 @@ describe("src/http/contract/coverage.test", () => {
     }
   });
 
-  it("every one of the thirty-one phase-1 routed operations but blob.show carries a response schema", () => {
-    assert.equal(scoped.length, 31);
+  it("every one of the thirty-four phase-1 routed operations but blob.show carries a response schema", () => {
+    assert.equal(scoped.length, 34);
     for (const entry of scoped) {
       assert.ok(
         entry.response !== undefined,

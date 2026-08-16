@@ -5,6 +5,7 @@ import { coreEntities } from "../../src/services/storage/migration-0001-core-ent
 import { graphAndPlan } from "../../src/services/storage/migration-0002-graph-and-plan.ts";
 import { executionAndJournal } from "../../src/services/storage/migration-0003-execution-and-journal.ts";
 import { SqliteStorage } from "../../src/services/storage/sqlite.ts";
+import { migrations } from "../../src/services/storage/migrations.ts";
 import { createMockClock } from "./clock.ts";
 import { createTemporaryDatabase } from "./database.ts";
 import { fixtureIds, seedExecution, seedGraph, seedRegistry } from "./rows.ts";
@@ -111,7 +112,7 @@ describe("test/helpers/rows.test", () => {
     const storage = new SqliteStorage({
       path: temporary.path,
       clock: createMockClock({ start: 1700000000000 }),
-      migrations: [coreEntities, graphAndPlan, executionAndJournal],
+      migrations,
     });
     after(() => storage.close());
     storage.migrate();

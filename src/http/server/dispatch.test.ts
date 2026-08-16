@@ -211,10 +211,10 @@ describe("src/http/server/dispatch.test", () => {
     );
   });
 
-  it("the complete binding does not throw and derives thirty-three unimplemented ids", () => {
+  it("the complete binding does not throw and derives thirty-six unimplemented ids", () => {
     const complete = { "system.health": okHandler, "system.db": okHandler };
     const unimplemented = unimplementedFor(complete);
-    assert.equal(unimplemented.length, 33);
+    assert.equal(unimplemented.length, 36);
     assert.doesNotThrow(() =>
       createApp({
         settings,

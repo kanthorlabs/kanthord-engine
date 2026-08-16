@@ -1,0 +1,35 @@
+import type { Handler } from "../app.ts";
+import { httpError } from "../../contract/errors.ts";
+import { nodeReleaseRequest } from "../../contract/execution.ts";
+import type { ReleaseNodeInput } from "../../../commands/node/release-node.ts";
+import { toHttpError } from "./refusals.ts";
+
+export type ReleaseNodeHandlerDependencies = Readonly<{
+  releaseNode: (input: ReleaseNodeInput) => unknown;
+}>;
+
+export function releaseNodeHandler(
+  dependencies: ReleaseNodeHandlerDependencies,
+): Handler {
+  return async (context) => {
+    const id = context.parameters["id"];
+    if (id === undefined) {
+      throw httpError("not-found", "no node id in the request path");
+    }
+    const parsed = nodeReleaseRequest.safeParse(context.body);
+    if (!parsed.success) {
+      throw httpError("invalid-request", "the release body is invalid");
+    }
+    try {
+      const result = dependencies.releaseNode({
+        nodeId: id,
+        fence: parsed.data.fence,
+        actorId: context.actor.id,
+        actorKind: context.actor.kind,
+      });
+      return { status: 200, body: result };
+    } catch (error) {
+      throw toHttpError(error, { subject: id, fence: parsed.data.fence });
+    }
+  };
+}

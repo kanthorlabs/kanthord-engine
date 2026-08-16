@@ -8,20 +8,27 @@ CREATE TABLE run (
   kind          TEXT NOT NULL CHECK (kind IN ('objective', 'task')),  -- execution level; an objective run schedules its task runs
   node_id       TEXT NOT NULL REFERENCES node(id),                    -- node being executed
   parent_run_id TEXT REFERENCES run(id),                              -- objective run that scheduled this task run; null on an objective run
-  workspace_id  TEXT NOT NULL REFERENCES workspace(id),               -- clone the execution happens in
-  worker        TEXT NOT NULL,                                        -- worker kind that actually resolved at execution time
+  driver        TEXT NOT NULL CHECK (driver IN ('internal', 'external')),  -- who executes: the daemon's worker, or an external harness
+  workspace_id  TEXT REFERENCES workspace(id),                        -- clone the execution happens in; null on an external run
+  worker        TEXT,                                                 -- worker kind that resolved at execution time; null on an external run
   lease_fence   INTEGER NOT NULL,                                     -- lease generation that authorized this epoch
   attempt_limit INTEGER NOT NULL,                                     -- limit in force for this execution, from configuration
-  base_oid      TEXT NOT NULL,                                        -- commit this execution started from; abandon resets here
+  base_oid      TEXT,                                                 -- commit this execution started from; null on an external run
   head_oid      TEXT,                                                 -- commit it ended at
   state         TEXT NOT NULL CHECK (state IN ('active', 'ended')),   -- one active run per node, by the index below
   outcome       TEXT,                                                 -- how it ended: done, abandoned, blocked or failed
   ended_at      INTEGER,                                              -- close time; the id is the start time
-  CHECK ((kind = 'objective') = (parent_run_id IS NULL))
+  CHECK ((kind = 'objective') = (parent_run_id IS NULL)),
+  CHECK ((driver = 'internal') = (workspace_id IS NOT NULL)),
+  CHECK ((driver = 'internal') = (worker IS NOT NULL)),
+  CHECK ((driver = 'internal') = (base_oid IS NOT NULL)),
+  UNIQUE (id, driver)  -- second candidate key, so attempt can declare a composite foreign key
 ) STRICT;
 
 CREATE UNIQUE INDEX run_one_active ON run (node_id) WHERE state = 'active';
 ```
+
+`UNIQUE (id, driver)` is a second candidate key that exists so `attempt` can declare a composite foreign key; `PRIMARY KEY (id)` is unchanged, and every single-column reference to `run(id)` stays valid.
 
 A run is one execution epoch of one node. `kind` names the level, as it does on `node`.
 

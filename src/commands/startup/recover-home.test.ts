@@ -30,7 +30,7 @@ type StepOverrides = Readonly<{
   reapReport?: ReapReport;
   sweepResult?: SweepRemnantsResultLike;
   reconcileResult?: ReconcileResultLike;
-  leasesResult?: LeasesResultLike;
+  leasesResult?: Readonly<Record<string, unknown>>;
   reapError?: unknown;
   reconcileError?: unknown;
   plainNames?: boolean;
@@ -98,13 +98,13 @@ function recordingSteps(overrides: StepOverrides = {}): Recording {
       markStart("leases");
       await new Promise((resolve) => setImmediate(resolve));
       markEnd("leases");
-      return (
-        overrides.leasesResult ?? {
-          returnedToReady: 0,
-          blocked: 0,
-          findings: [],
-        }
-      );
+      return {
+        returnedToReady: 0,
+        blocked: 0,
+        objectivesFreed: 0,
+        findings: [],
+        ...overrides.leasesResult,
+      } as LeasesResultLike;
     }) as LeasesStep,
   };
 
@@ -184,6 +184,7 @@ describe("src/commands/startup/recover-home.test", () => {
       leasesResult: {
         returnedToReady: 5,
         blocked: 6,
+        objectivesFreed: 2,
         findings: [leasesFinding],
       },
     });
@@ -197,6 +198,7 @@ describe("src/commands/startup/recover-home.test", () => {
       refusesNewWork: ["repo_b", "repo_a"],
       returnedToReady: 5,
       blocked: 6,
+      objectivesFreed: 2,
       findings: [reapFinding, sweepFinding, reconcileFinding, leasesFinding],
     });
   });

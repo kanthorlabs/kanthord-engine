@@ -6,6 +6,7 @@ import {
   externalTriggerIds,
   externalTransitions,
   objectiveDrivePin,
+  type ExternalPrecondition,
   type ExternalTransition,
 } from "./external-transition.ts";
 import { internalTriggerIds } from "./node-trigger.ts";
@@ -102,6 +103,36 @@ const expected: readonly ExternalTransition[] = [
       childAggregation: "at-least-one-task-discarded",
     },
   },
+  {
+    level: "task",
+    from: "running",
+    to: "ready",
+    trigger: "claim-released",
+    precondition: {
+      runDriver: "external",
+      activeRun: true,
+      leaseFence: "valid",
+      actorKind: "harness",
+      attemptLimit: "under",
+      reportedObjectId: "absent",
+      childAggregation: "not-applicable",
+    },
+  },
+  {
+    level: "task",
+    from: "running",
+    to: "ready",
+    trigger: "claim-expired",
+    precondition: {
+      runDriver: "external",
+      activeRun: true,
+      leaseFence: "none",
+      actorKind: "daemon",
+      attemptLimit: "under",
+      reportedObjectId: "absent",
+      childAggregation: "not-applicable",
+    },
+  },
 ];
 
 function rowByTrigger(trigger: string): ExternalTransition {
@@ -111,8 +142,8 @@ function rowByTrigger(trigger: string): ExternalTransition {
 }
 
 describe("src/domain/external-transition.test", () => {
-  it("externalTriggerIds pins the six trigger ids in row order", () => {
-    assert.equal(externalTriggerIds.length, 6);
+  it("externalTransitions holds eight trigger ids", () => {
+    assert.equal(externalTriggerIds.length, 8);
     assert.deepEqual(
       [...externalTriggerIds],
       [
@@ -122,13 +153,15 @@ describe("src/domain/external-transition.test", () => {
         "object-reported",
         "human-close",
         "human-close-partial",
+        "claim-released",
+        "claim-expired",
       ],
     );
-    assert.equal(new Set(externalTriggerIds).size, 6);
+    assert.equal(new Set(externalTriggerIds).size, 8);
   });
 
-  it("externalTransitions holds exactly six rows in exactly the declared order", () => {
-    assert.equal(externalTransitions.length, 6);
+  it("externalTransitions holds exactly eight rows in exactly the declared order", () => {
+    assert.equal(externalTransitions.length, 8);
     assert.deepEqual(externalTransitions, expected);
     assert.deepEqual(
       externalTransitions.map((row) => row.trigger),
@@ -254,6 +287,58 @@ describe("src/domain/external-transition.test", () => {
     );
   });
 
+  it("the claim-released row carries every ExternalPrecondition field", () => {
+    assert.deepEqual(rowByTrigger("claim-released"), {
+      level: "task",
+      from: "running",
+      to: "ready",
+      trigger: "claim-released",
+      precondition: {
+        runDriver: "external",
+        activeRun: true,
+        leaseFence: "valid",
+        actorKind: "harness",
+        attemptLimit: "under",
+        reportedObjectId: "absent",
+        childAggregation: "not-applicable",
+      },
+    });
+  });
+
+  it("the claim-expired row carries every ExternalPrecondition field", () => {
+    assert.deepEqual(rowByTrigger("claim-expired"), {
+      level: "task",
+      from: "running",
+      to: "ready",
+      trigger: "claim-expired",
+      precondition: {
+        runDriver: "external",
+        activeRun: true,
+        leaseFence: "none",
+        actorKind: "daemon",
+        attemptLimit: "under",
+        reportedObjectId: "absent",
+        childAggregation: "not-applicable",
+      },
+    });
+    const released = rowByTrigger("claim-released").precondition;
+    const expired = rowByTrigger("claim-expired").precondition;
+    const differing = (
+      Object.keys(released) as (keyof ExternalPrecondition)[]
+    ).filter((key) => released[key] !== expired[key]);
+    assert.deepEqual(differing, ["leaseFence", "actorKind"]);
+  });
+
+  it("both new rows name a legal matrix cell", () => {
+    for (const trigger of ["claim-released", "claim-expired"] as const) {
+      const row = rowByTrigger(trigger);
+      assert.equal(row.level, "task");
+      assert.equal(row.from, "running");
+      assert.equal(row.to, "ready");
+      assert.equal(canTransition(row.level, row.from, row.to), true);
+    }
+  });
+
   describe("objectiveDrivePin", () => {
     it("an empty run history pins nothing under either claim driver", () => {
       assert.equal(
@@ -336,9 +421,9 @@ describe("src/domain/external-transition.test", () => {
   });
 
   describe("externalTriggerConsumer", () => {
-    it("is total over the external trigger ids", () => {
+    it("is total over the eight trigger ids", () => {
       const keys = Object.keys(externalTriggerConsumer);
-      assert.equal(keys.length, 6);
+      assert.equal(keys.length, 8);
       assert.equal(externalTriggerIds.length, keys.length);
       for (const id of externalTriggerIds) {
         assert.ok(id in externalTriggerConsumer, `missing key ${id}`);
@@ -364,6 +449,17 @@ describe("src/domain/external-transition.test", () => {
       assert.equal(
         externalTriggerConsumer["object-reported"],
         "src/commands/outcome/report-objective.ts",
+      );
+    });
+
+    it("claim-released names the release command and claim-expired names the sweep", () => {
+      assert.equal(
+        externalTriggerConsumer["claim-released"],
+        "src/commands/node/release-node.ts",
+      );
+      assert.equal(
+        externalTriggerConsumer["claim-expired"],
+        "src/commands/startup/recover-expired-leases.ts",
       );
     });
 

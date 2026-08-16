@@ -1,6 +1,7 @@
 import type { Storage, Transaction } from "../../services/storage/index.ts";
 import type { Clock } from "../../services/clock/index.ts";
 import type { EventLog } from "../../services/event/index.ts";
+import type { Lease } from "../../services/lease/index.ts";
 import {
   actorRow,
   bootstrapActorId,
@@ -14,6 +15,7 @@ export type RevokeActorDependencies = Readonly<{
   storage: Storage;
   events: EventLog;
   clock: Clock;
+  lease: Lease;
 }>;
 
 export type RevokeActorInput = Readonly<{
@@ -95,7 +97,10 @@ export function revokeActor(
       "UPDATE actor SET revoked_at = ?, revoked_by = ? WHERE id = ?",
       [revokedAt, input.actor.id, input.id],
     );
-    const leasesFenced = 0;
+    const fenced = dependencies.lease.expireLeasesOfOwner(transaction, {
+      owner: input.id,
+      now: revokedAt,
+    });
     dependencies.events.append(transaction, {
       subjectKind: "actor",
       subjectId: input.id,
@@ -108,7 +113,7 @@ export function revokeActor(
         name: row.name,
         revokedBy: input.actor.id,
         revokedAt,
-        leasesFenced,
+        leasesFenced: fenced.length,
       },
     });
     return { row, revokedAt, revokedBy: input.actor.id };

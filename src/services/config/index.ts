@@ -27,6 +27,7 @@ export type Settings = Readonly<{
   http: HttpSettings;
   tools: ToolSettings;
   attemptLimit: number;
+  leaseTtlMs: number;
 }>;
 
 export type Discovery = Readonly<{

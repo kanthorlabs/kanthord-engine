@@ -88,7 +88,66 @@ describe("src/cli/client.test", () => {
 
     assert.equal(
       request.url,
-      "http://127.0.0.1:7421/v1/event?q=a+b%26c%3Dd&na%23me=x%2By",
+      "http://127.0.0.1:7421/v1/event?na%23me=x%2By&q=a%20b%26c%3Dd",
+    );
+  });
+
+  it("buildRequest appends no query string when query is absent or fully skipped", () => {
+    const absent = buildRequest(dependencies(), { operationId: "event.list" });
+
+    assert.equal(absent.url, "http://127.0.0.1:7421/v1/event");
+
+    const skipped = buildRequest(dependencies(), {
+      operationId: "event.list",
+      query: { limit: undefined },
+    });
+
+    assert.equal(skipped.url, "http://127.0.0.1:7421/v1/event");
+  });
+
+  it("buildRequest appends the query keys in bytewise order", () => {
+    const request = buildRequest(dependencies(), {
+      operationId: "event.list",
+      query: { state: "ready", kind: "task" },
+    });
+
+    assert.equal(
+      request.url,
+      "http://127.0.0.1:7421/v1/event?kind=task&state=ready",
+    );
+  });
+
+  it("buildRequest skips an undefined value", () => {
+    const request = buildRequest(dependencies(), {
+      operationId: "event.list",
+      query: { state: "ready", kind: undefined },
+    });
+
+    assert.equal(request.url, "http://127.0.0.1:7421/v1/event?state=ready");
+  });
+
+  it("buildRequest percent-encodes a value that holds a space", () => {
+    const request = buildRequest(dependencies(), {
+      operationId: "event.list",
+      query: { q: "a b" },
+    });
+
+    assert.equal(request.url, "http://127.0.0.1:7421/v1/event?q=a%20b");
+  });
+
+  it("buildRequest writes the Idempotency-Key header when present and omits it when absent", () => {
+    const withKey = buildRequest(dependencies(), {
+      operationId: "event.list",
+      idempotencyKey: "a".repeat(32),
+    });
+    assert.equal(headersOf(withKey.init)["Idempotency-Key"], "a".repeat(32));
+
+    const withoutKey = buildRequest(dependencies(), {
+      operationId: "event.list",
+    });
+    assert.equal(
+      Object.hasOwn(headersOf(withoutKey.init), "Idempotency-Key"),
+      false,
     );
   });
 

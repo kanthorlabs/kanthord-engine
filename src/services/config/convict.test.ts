@@ -70,6 +70,7 @@ describe("src/services/config/convict.test", () => {
         assert.equal(result.settings.http.token, "test-token");
         assert.deepEqual(result.settings.http.allowedHosts, ["localhost:8080"]);
         assert.equal(result.settings.attemptLimit, 3);
+        assert.equal(result.settings.leaseTtlMs, 300000);
       } finally {
         fs.rmSync(dir, { recursive: true });
       }
@@ -100,7 +101,7 @@ describe("src/services/config/convict.test", () => {
       }
     });
 
-    it("Settings key order is home, actor, masterKey, http, tools, attemptLimit", () => {
+    it("Settings key order is home, actor, masterKey, http, tools, attemptLimit, leaseTtlMs", () => {
       const dir = tmpDir();
       try {
         const filePath = writeJson(dir, validFile());
@@ -112,6 +113,7 @@ describe("src/services/config/convict.test", () => {
           "http",
           "tools",
           "attemptLimit",
+          "leaseTtlMs",
         ]);
       } finally {
         fs.rmSync(dir, { recursive: true });
@@ -502,6 +504,21 @@ describe("src/services/config/convict.test", () => {
           }),
         );
         assert.equal(result.settings.attemptLimit, 7);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("KANTHORD_LEASE_TTL_MS=700000 wins over file leaseTtlMs", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile({ leaseTtlMs: 300000 }));
+        const result = config.load(
+          loadInput(dir, filePath, {
+            env: { KANTHORD_LEASE_TTL_MS: "700000" },
+          }),
+        );
+        assert.equal(result.settings.leaseTtlMs, 700000);
       } finally {
         fs.rmSync(dir, { recursive: true });
       }

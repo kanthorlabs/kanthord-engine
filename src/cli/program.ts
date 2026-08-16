@@ -32,6 +32,11 @@ import { registerActorShow } from "./actor/show.ts";
 import { registerNodeCreate } from "./node/create.ts";
 import { registerNodeDelete } from "./node/delete.ts";
 import { registerNodeUpdate } from "./node/update.ts";
+import { registerNodeList } from "./node/list.ts";
+import { registerNodeShow } from "./node/show.ts";
+import { registerNodeClaim } from "./node/claim.ts";
+import { registerNodeHeartbeat } from "./node/heartbeat.ts";
+import { registerNodeRelease } from "./node/release.ts";
 import { registerStatus } from "./status.ts";
 
 export type ServeOptions = Readonly<{
@@ -97,8 +102,14 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     };
   };
   const client: DaemonClient = {
-    call: (operationId, body, parameters) =>
-      call(clientFactory(), { operationId, body, parameters }),
+    call: (operationId, body, parameters, options) =>
+      call(clientFactory(), {
+        operationId,
+        body,
+        parameters,
+        query: options?.query,
+        idempotencyKey: options?.idempotencyKey,
+      }),
   };
 
   registerDbMigrate({
@@ -267,6 +278,43 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stderr: dependencies.stderr,
     fail: dependencies.fail,
     exit: dependencies.exit,
+  });
+  registerNodeList({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+  });
+  registerNodeShow({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+  });
+  registerNodeClaim({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+    randomBytes: dependencies.randomBytes,
+  });
+  registerNodeHeartbeat({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+    randomBytes: dependencies.randomBytes,
+  });
+  registerNodeRelease({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
   });
 
   return program;

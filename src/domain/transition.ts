@@ -137,7 +137,7 @@ export const transitions: readonly TransitionRow[] = [
     task: true,
     objective: false,
     initiative: false,
-    note: "T: recovery finds an expired lease, a clean tree, and the head at the base, or an external harness reports a rejected attempt under the attempt limit, which ends the attempt and returns the task to the pool. O and I: no operation rewinds a running parent to a claimable state.",
+    note: "T: recovery finds an expired lease, a clean tree, and the head at the base, or an external harness reports a rejected attempt under the attempt limit, which ends the attempt and returns the task to the pool. A released or expired external claim also returns the task to the pool, and the daemon writes no `dirty-recovery` for a task that has no working tree. O and I: no operation rewinds a running parent to a claimable state.",
   },
   {
     from: "running",

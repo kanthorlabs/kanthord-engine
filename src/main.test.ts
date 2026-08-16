@@ -19,7 +19,8 @@ import { reservePort } from "../test/helpers/port.ts";
 const byBytes = (a: string, b: string): number =>
   Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 
-// EPIC 010 has bound every routed operation; nothing is pending.
+// EPIC 018 Story 14 added the three claim routes; Story 17 binds them in
+// main.ts and adds their fixture rows, so the pending list is empty.
 const pending = [] as const;
 
 const MISSING_ID = "01JZZZZZZZZZZZZZZZZZZZZZZZ";
@@ -138,6 +139,21 @@ const fixtures: Readonly<Record<string, Fixture>> = {
   "plan.revisions": { parameters: { id: missing("project") }, expect: 404 },
   "node.list": { expect: 200 },
   "node.show": { parameters: { id: missing("node") }, expect: 404 },
+  "node.claim": {
+    parameters: { id: missing("node") },
+    body: {},
+    expect: 404,
+  },
+  "node.heartbeat": {
+    parameters: { id: missing("node") },
+    body: { fence: 1 },
+    expect: 404,
+  },
+  "node.release": {
+    parameters: { id: missing("node") },
+    body: { fence: 1 },
+    expect: 404,
+  },
   "node.create": {
     parameters: { id: missing("project") },
     body: {

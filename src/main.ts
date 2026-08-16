@@ -34,6 +34,8 @@ import { migrations } from "./services/storage/migrations.ts";
 import { AesGcmCrypto } from "./services/crypto/aes-gcm.ts";
 import { NodeCryptoSecret } from "./services/secret/node-crypto.ts";
 import { SqliteEventLog } from "./services/event/sqlite.ts";
+import { SqliteExecution } from "./services/execution/sqlite.ts";
+import { SqliteLease } from "./services/lease/sqlite.ts";
 import { SqliteBlobStore } from "./services/blob/sqlite.ts";
 import { UlidIdGenerator } from "./services/ids/ulid.ts";
 import { GraphologyGraph } from "./services/graph/graphology.ts";
@@ -62,6 +64,9 @@ import { showNode } from "./queries/node/show-node.ts";
 import { createNode } from "./commands/node/create-node.ts";
 import { updateNode } from "./commands/node/update-node.ts";
 import { deleteNode } from "./commands/node/delete-node.ts";
+import { claimNode } from "./commands/node/claim-node.ts";
+import { heartbeatNode } from "./commands/node/heartbeat-node.ts";
+import { releaseNode } from "./commands/node/release-node.ts";
 import { listEdges } from "./queries/edge/list-edge.ts";
 import { inspectRepository } from "./queries/repository/inspect-repository.ts";
 import { listRepositories } from "./queries/repository/list-repository.ts";
@@ -75,7 +80,10 @@ import {
 import { reapOrphans } from "./commands/startup/reap-orphans.ts";
 import { sweepRemnants } from "./commands/startup/sweep-remnants.ts";
 import { reconcileJournal } from "./commands/startup/reconcile-journal.ts";
-import { recoverExpiredLeases } from "./commands/startup/recover-expired-leases.ts";
+import {
+  recoverExpiredLeases,
+  sweepExpiredExternalLeases,
+} from "./commands/startup/recover-expired-leases.ts";
 import { RecoveryError, renderFinding } from "./domain/recovery.ts";
 import { KANTHORD_VERSION } from "./domain/version.ts";
 import { registerProviderHandler } from "./http/server/credential/register-provider.ts";
@@ -102,6 +110,9 @@ import { showNodeHandler } from "./http/server/node/show-node.ts";
 import { createNodeHandler } from "./http/server/node/create-node.ts";
 import { updateNodeHandler } from "./http/server/node/update-node.ts";
 import { deleteNodeHandler } from "./http/server/node/delete-node.ts";
+import { claimNodeHandler } from "./http/server/node/claim-node.ts";
+import { heartbeatNodeHandler } from "./http/server/node/heartbeat-node.ts";
+import { releaseNodeHandler } from "./http/server/node/release-node.ts";
 import { listEdgeHandler } from "./http/server/edge/list-edge.ts";
 import { listEventHandler } from "./http/server/event/list-event.ts";
 import { listEvents } from "./queries/event/list-event.ts";
@@ -189,6 +200,8 @@ async function serve(options: ServeOptions): Promise<void> {
       const graph = new GraphologyGraph();
       const reader = new YamlDocumentReader();
       const events = new SqliteEventLog({ storage, ids });
+      const lease = new SqliteLease();
+      const execution = new SqliteExecution({ ids });
       const readiness = new DependencyReadiness({ events, instanceId });
       const plan = new SqlitePlanStore({ readiness });
       const blobs = new SqliteBlobStore({ storage, clock });
@@ -219,7 +232,7 @@ async function serve(options: ServeOptions): Promise<void> {
           ),
         leases: () =>
           recoverExpiredLeases(
-            { storage, plan, git, events, clock },
+            { storage, plan, git, events, clock, lease, execution },
             { actor: "daemon" },
           ),
       });
@@ -330,6 +343,71 @@ async function serve(options: ServeOptions): Promise<void> {
         "node.show": showNodeHandler({
           showNode: (input) => showNode({ storage, plan, blobs }, input),
         }),
+        "node.claim": claimNodeHandler({
+          claimNode: (input) => {
+            const result = claimNode(
+              {
+                storage,
+                plan,
+                lease,
+                execution,
+                events,
+                clock,
+                ids,
+                sweepExpiredExternalLeases: (transaction, sweepInput) =>
+                  sweepExpiredExternalLeases(
+                    { plan, lease, execution, events },
+                    transaction,
+                    sweepInput,
+                  ),
+                attemptLimit: settings.attemptLimit,
+                leaseTtlMs: settings.leaseTtlMs,
+                instanceId,
+              },
+              input,
+            );
+            const view = showNode(
+              { storage, plan, blobs },
+              { id: result.node.id },
+            );
+            if (view === null) {
+              throw new Error(`the claimed node ${result.node.id} has no view`);
+            }
+            return { ...result, node: view };
+          },
+        }),
+        "node.heartbeat": heartbeatNodeHandler({
+          heartbeatNode: (input) =>
+            heartbeatNode(
+              {
+                storage,
+                plan,
+                lease,
+                events,
+                clock,
+                leaseTtlMs: settings.leaseTtlMs,
+              },
+              input,
+            ),
+        }),
+        "node.release": releaseNodeHandler({
+          releaseNode: (input) => {
+            const result = releaseNode(
+              { storage, plan, lease, execution, events, clock },
+              input,
+            );
+            const view = showNode(
+              { storage, plan, blobs },
+              { id: result.node.id },
+            );
+            if (view === null) {
+              throw new Error(
+                `the released node ${result.node.id} has no view`,
+              );
+            }
+            return { ...result, node: view };
+          },
+        }),
         "node.create": createNodeHandler({
           createNode: (input) =>
             createNode(
@@ -390,7 +468,7 @@ async function serve(options: ServeOptions): Promise<void> {
         }),
         "actor.revoke": revokeActorHandler({
           revokeActor: (input) =>
-            revokeActor({ storage, events, clock }, input),
+            revokeActor({ storage, events, clock, lease }, input),
         }),
         "actor.rotate": rotateActorTokenHandler({
           rotateActorToken: (input) =>

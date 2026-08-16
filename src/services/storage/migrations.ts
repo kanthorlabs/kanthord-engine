@@ -5,6 +5,7 @@ import { executionAndJournal } from "./migration-0003-execution-and-journal.ts";
 import { migration0004EventIndexes } from "./migration-0004-event-indexes.ts";
 import { migration0005Actor } from "./migration-0005-actor.ts";
 import { migration0006RevisionOrigin } from "./migration-0006-revision-origin.ts";
+import { migration0007ExternalExecution } from "./migration-0007-external-execution.ts";
 
 export const migrations: readonly Migration[] = [
   coreEntities,
@@ -13,4 +14,5 @@ export const migrations: readonly Migration[] = [
   migration0004EventIndexes,
   migration0005Actor,
   migration0006RevisionOrigin,
+  migration0007ExternalExecution,
 ];

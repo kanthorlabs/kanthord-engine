@@ -13,8 +13,8 @@ const scoped = registry.filter(
 );
 
 test("src/http/contract/example.test", async (t) => {
-  await t.test("covers the thirty-one phase-1 routed operations", () => {
-    assert.equal(scoped.length, 31);
+  await t.test("covers the thirty-four phase-1 routed operations", () => {
+    assert.equal(scoped.length, 34);
     for (const entry of scoped) {
       assert.notEqual(
         entry.examples,
@@ -66,7 +66,7 @@ test("src/http/contract/example.test", async (t) => {
     );
     assert.deepEqual(
       withQueryExample.map((entry) => entry.operationId),
-      ["event.list"],
+      ["event.list", "node.list"],
     );
     for (const entry of scoped) {
       if (entry.query !== undefined) {
