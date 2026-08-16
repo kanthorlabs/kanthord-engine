@@ -3,7 +3,7 @@
 Epic: `.agent/plan/epics/020-wiring-and-scenarios.md`
 Depends on: Story 1.
 
-`AGENTS.md` makes `docs/proposal/` the source of truth for behaviour, and the three ids live in planning files only today. **This story lands before the three scenario files**, because EPIC 021 runs no scenario the proposal does not declare.
+`AGENTS.md` makes `docs/proposal/` the source of truth for behaviour, and the three ids live in planning files only today. **This story lands before the three scenario files**, because EPIC 025 runs no scenario the proposal does not declare.
 
 ## Change
 

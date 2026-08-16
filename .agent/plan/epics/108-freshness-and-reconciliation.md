@@ -1,6 +1,6 @@
 # EPIC 108 — Freshness and reconciliation
 
-Status: **blocked**. The external-drive block of EPICs 013 to 021 took the `services/lease` implementation, and EPIC 018 ships `SqliteLease` with `ownerKind` and the lease hierarchy rule. This epic becomes ready when EPIC 018 has landed, so the widened `Lease` interface exists to be consumed.
+Status: **blocked**. The external-drive block of EPICs 013 to 025 took the `services/lease` implementation, and EPIC 018 ships `SqliteLease` with `ownerKind` and the lease hierarchy rule. This epic becomes ready when EPIC 018 has landed, so the widened `Lease` interface exists to be consumed.
 
 ## Goal
 

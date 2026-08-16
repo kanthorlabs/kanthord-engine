@@ -1,9 +1,9 @@
 # Story 5 — The run frame
 
-Epic: `.agent/plan/epics/021-external-drive-acceptance-run.md`
+Epic: `.agent/plan/epics/025-external-drive-acceptance-run.md`
 Depends on: Story 3.
 
-This is the EPIC bullet at `021-external-drive-acceptance-run.md:129`. It establishes the one tag, the one directory and the one report every later story writes into. **It writes no code.**
+This is the EPIC bullet at `025-external-drive-acceptance-run.md:129`. It establishes the one tag, the one directory and the one report every later story writes into. **It writes no code.**
 
 ## Change
 
@@ -56,5 +56,5 @@ node scripts/e2e/run.mjs --record-verify --tag "$TAG"
 - `node scripts/e2e/run.mjs --mint-tag` prints one tag and exits 0, and the tag matches `tagPattern` at `scripts/e2e/lib/main.ts:55`.
 - After Story 6, `.data/acceptance-<tag>/` holds exactly seven scenario directories and `verify.json`.
 - `git rev-parse HEAD` returns the same commit that every `bundle.json` under the tag names in its `commit` field.
-- `git status --porcelain` names no path under `src/` and no path under `docs/proposal/`, asserted against the commit under test. This is the check `021-external-drive-acceptance-run.md:241` requires.
-- Proof: the `TAG` and `--record-verify` lines of the run block at `021-external-drive-acceptance-run.md:201,209`.
+- `git status --porcelain` names no path under `src/` and no path under `docs/proposal/`, asserted against the commit under test. This is the check `025-external-drive-acceptance-run.md:241` requires.
+- Proof: the `TAG` and `--record-verify` lines of the run block at `025-external-drive-acceptance-run.md:201,209`.

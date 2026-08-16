@@ -8,7 +8,7 @@ Status: **draft**.
 
 ## The defect this epic closes
 
-`src/domain/readiness.ts:12` defines `isReady`. No production file outside `src/domain/` imports it. `src/services/plan/sqlite.ts:25` writes the literal `'pending'` on every node insert, and its `ON CONFLICT` clause never updates `state`. `src/commands/plan/import-plan.ts:418` is the only caller. `src/commands/startup/recover-expired-leases.ts:147` writes `ready`, but only from `running`. An imported plan therefore holds every node in `pending` for ever, and nothing is claimable. `docs/proposal/phase-1/state-machine.md:63` says the scheduler writes the transition, and `013-external-drive-overview.md:85` refuses a scheduler.
+`src/domain/readiness.ts:12` defines `isReady`. No production file outside `src/domain/` imports it. `src/services/plan/sqlite.ts:25` writes the literal `'pending'` on every node insert, and its `ON CONFLICT` clause never updates `state`. `src/commands/plan/import-plan.ts:418` is the only caller. `src/commands/startup/recover-expired-leases.ts:147` writes `ready`, but only from `running`. An imported plan therefore holds every node in `pending` for ever, and nothing is claimable. `docs/proposal/phase-1/state-machine.md:63` says the scheduler writes the transition, and `013-external-drive-overview.md:98` refuses a scheduler.
 
 ## Non-goals
 
@@ -19,7 +19,7 @@ Status: **draft**.
 - **No `pending → blocked` on a discarded dependency.** That row needs a discard route. EPIC 019 owns it.
 - **No per-node graph write.** `node.create`, `node.update` and `node.delete` belong to EPIC 017. EPIC 017 writes through the closed mutation API this epic builds.
 - **No claim and no lease.** EPIC 018 owns the claim that reads `ready`, and the `node.list` state filter.
-- **No scheduler, no queue and no timer.** `013-external-drive-overview.md:85` decides this for the whole block.
+- **No scheduler, no queue and no timer.** `013-external-drive-overview.md:98` decides this for the whole block.
 - **No CLI command.** This epic registers no command in `src/cli/program.ts` and adds no row to `src/cli/inventory.ts`. It closes on `plan.import`, `node.list`, `node.show` and `event.list`, which EPIC 008 and EPIC 009 already registered. Any claim that every epic of this block owns a CLI registration excludes this one.
 
 ## Decisions

@@ -1,9 +1,9 @@
 # Story 6 — The run order
 
-Epic: `.agent/plan/epics/021-external-drive-acceptance-run.md`
+Epic: `.agent/plan/epics/025-external-drive-acceptance-run.md`
 Depends on: Story 5.
 
-This is the EPIC bullet at `021-external-drive-acceptance-run.md:131`. It fixes the order of the seven invocations. **No run story restates it**, and Stories 7 to 10 name only their own position in it.
+This is the EPIC bullet at `025-external-drive-acceptance-run.md:131`. It fixes the order of the seven invocations. **No run story restates it**, and Stories 7 to 10 name only their own position in it.
 
 ## Change
 
@@ -51,6 +51,6 @@ An unmet group prerequisite reports `unavailable` for each scenario of that grou
 
 - Each of the seven lines writes `.data/acceptance-<tag>/<id>/bundle.json`.
 - `declaredScenarioOrder` in `scripts/e2e/lib/record/manifest.ts`, written by Story 1, equals these seven ids in this order. Assert it by reading the file, and never restate the order in a second place.
-- The manifest `scenarios` array of Story 13 lists the seven ids in invocation order, and `node scripts/e2e/run.mjs --check-manifest "$TAG"` exits 0 on it. `--check-manifest` is the mechanism that asserts this order, per `021-external-drive-acceptance-run.md:222`.
+- The manifest `scenarios` array of Story 13 lists the seven ids in invocation order, and `node scripts/e2e/run.mjs --check-manifest "$TAG"` exits 0 on it. `--check-manifest` is the mechanism that asserts this order, per `025-external-drive-acceptance-run.md:222`.
 - A scenario that exits non-zero still leaves a `bundle.json` whose `outcome` is `failed` or `unavailable`, and the next line still runs.
-- Proof: lines `202` to `208` of the run block at `021-external-drive-acceptance-run.md:200-218`.
+- Proof: lines `202` to `208` of the run block at `025-external-drive-acceptance-run.md:200-218`.

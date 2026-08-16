@@ -1,9 +1,9 @@
 # Story 12 — The human gate
 
-Epic: `.agent/plan/epics/021-external-drive-acceptance-run.md`
+Epic: `.agent/plan/epics/025-external-drive-acceptance-run.md`
 Depends on: Story 11. The rehearsal must be green before the drive begins.
 
-This is the EPIC bullet at `021-external-drive-acceptance-run.md:143`. Ulrich drives the `P1B-E2` journey himself, through the CLI, on the commit under test. **This is the acceptance axis, and the block does not exit without it.**
+This is the EPIC bullet at `025-external-drive-acceptance-run.md:143`. Ulrich drives the `P1B-E2` journey himself, through the CLI, on the commit under test. **This is the acceptance axis, and the block does not exit without it.**
 
 ## Change
 
@@ -47,7 +47,7 @@ node scripts/e2e/run.mjs --record-acceptance --tag "$TAG" --by Ulrich \
 
 - **The signature is written once.** `recordAcceptance` refuses a second write at `scripts/e2e/lib/record/acceptance.ts:96-100` with `tag-reused`, because a signature is not edited. Correct the manifest checklist instead; Story 2 permits a `--record-manifest` overwrite.
 - **The signed record carries one `drive`, one `judgment` and one free-form `note`** — `AcceptanceRecord` at `scripts/e2e/lib/record/acceptance.ts:21-31` holds nine fields and no per-row structure. **The manifest is the only place a row appears by itself.**
-- Ulrich drives the journey. He does not read a transcript of the rehearsal. That the human drove it is a reviewer judgment, recorded by `--drive confirmed`, per `021-external-drive-acceptance-run.md:46`.
+- Ulrich drives the journey. He does not read a transcript of the rehearsal. That the human drove it is a reviewer judgment, recorded by `--drive confirmed`, per `025-external-drive-acceptance-run.md:46`.
 - The checklist answers being truthful is a reviewer judgment. No mechanism checks it.
 - Drive through the CLI only. Open no database and read no log file.
 - Repair no defect found here. A rejected row opens a fix epic in Story 13.
@@ -57,6 +57,6 @@ node scripts/e2e/run.mjs --record-acceptance --tag "$TAG" --by Ulrich \
 - `.data/acceptance-<tag>/acceptance.json` exists and names `by`, `drive: confirmed`, `judgment: accepted`, the commit under test and the proposal revision.
 - A second `--record-acceptance` for the same tag exits `2` with `tag-reused`, and the file on disk stays byte-identical.
 - The manifest `checklist` array holds exactly six rows, numbered 1 to 6, each with an `answer` of `confirmed` or `rejected`, and each `rejected` row carries a non-empty `note`.
-- `node scripts/e2e/run.mjs --check-manifest "$TAG"` exits 0 on the checklist. This is the mechanism `021-external-drive-acceptance-run.md:41` names; the acceptance record represents no row by itself.
+- `node scripts/e2e/run.mjs --check-manifest "$TAG"` exits 0 on the checklist. This is the mechanism `025-external-drive-acceptance-run.md:41` names; the acceptance record represents no row by itself.
 - The acceptance record names the same commit as every bundle and the verify record.
-- Proof: lines `212` and `213` of the run block at `021-external-drive-acceptance-run.md:200-218`.
+- Proof: lines `212` and `213` of the run block at `025-external-drive-acceptance-run.md:200-218`.

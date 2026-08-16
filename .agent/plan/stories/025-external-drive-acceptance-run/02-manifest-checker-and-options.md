@@ -1,9 +1,9 @@
 # Story 2 — The manifest checker and the runner option pair
 
-Epic: `.agent/plan/epics/021-external-drive-acceptance-run.md`
+Epic: `.agent/plan/epics/025-external-drive-acceptance-run.md`
 Depends on: Story 1.
 
-This is the second half of the EPIC bullet at `021-external-drive-acceptance-run.md:125`. It lands `recordManifest`, `checkManifest` and the two runner options. **This is the code deliverable `npm run verify` gates**, per `021-external-drive-acceptance-run.md:28`.
+This is the second half of the EPIC bullet at `025-external-drive-acceptance-run.md:125`. It lands `recordManifest`, `checkManifest` and the two runner options. **This is the code deliverable `npm run verify` gates**, per `025-external-drive-acceptance-run.md:28`.
 
 **`--record-manifest` refuses a second write for one tag.** See "The settled write rule" below.
 
@@ -141,16 +141,16 @@ In `main`, add two branches beside `:561-584`. The `recordManifest` branch calls
 
 **`--record-manifest` refuses a second write for one tag.** Ulrich decided this on 2026-08-14, and no story revisits it.
 
-The EPIC fixes the refusal for the acceptance record at `021-external-drive-acceptance-run.md:129` and `acceptance.ts:96-100`, and it says nothing about the manifest. The manifest takes the same rule for three reasons: it follows the only precedent in `scripts/e2e/lib/record/`; it makes the ledger as immutable as the signature it sits beside; and a refusal is the recoverable error, while a silent overwrite destroys the evidence of the run it describes.
+The EPIC fixes the refusal for the acceptance record at `025-external-drive-acceptance-run.md:129` and `acceptance.ts:96-100`, and it says nothing about the manifest. The manifest takes the same rule for three reasons: it follows the only precedent in `scripts/e2e/lib/record/`; it makes the ledger as immutable as the signature it sits beside; and a refusal is the recoverable error, while a silent overwrite destroys the evidence of the run it describes.
 
-The cost is accepted: **a corrected checklist row costs a new tag**, and a new tag repeats every story of this epic, six container image builds and the real-forge run included, per `021-external-drive-acceptance-run.md:171`. Write the checklist rows once, after the human gate of Story 12 answers all six.
+The cost is accepted: **a corrected checklist row costs a new tag**, and a new tag repeats every story of this epic, six container image builds and the real-forge run included, per `025-external-drive-acceptance-run.md:171`. Write the checklist rows once, after the human gate of Story 12 answers all six.
 
-There is **no `--force`**. `021-external-drive-acceptance-run.md:241` authorises one runner option pair, and a third option is a scope change this epic does not take.
+There is **no `--force`**. `025-external-drive-acceptance-run.md:241` authorises one runner option pair, and a third option is a scope change this epic does not take.
 
 ## Constraints
 
 - Edit no file under `src/` and no file under `docs/proposal/`.
-- **Edit `scripts/e2e/lib/main.test.ts` not at all.** `021-external-drive-acceptance-run.md:241` permits three files plus the `main.ts` option pair, and `main.test.ts` is a fifth file. Every parser test of this story lives in `scripts/e2e/lib/record/manifest.test.ts`, which imports `parseArguments`, `main` and `exitCodeFor` from `../main.ts` and `RunnerError` from `../errors.ts`.
+- **Edit `scripts/e2e/lib/main.test.ts` not at all.** `025-external-drive-acceptance-run.md:241` permits three files plus the `main.ts` option pair, and `main.test.ts` is a fifth file. Every parser test of this story lives in `scripts/e2e/lib/record/manifest.test.ts`, which imports `parseArguments`, `main` and `exitCodeFor` from `../main.ts` and `RunnerError` from `../errors.ts`.
 - Do not change `scripts/e2e/lib/record/verdict.ts`. The seven-id verdict set is EPIC 020's story at `020-wiring-and-scenarios.md:77`.
 - Do not change `exitCodeFor` and do not add an exit status.
 - `checkManifest` opens no bundle `logs/` directory. `writeBundle` at `scripts/e2e/lib/bundle.ts:272-282` writes `logs/` only for a non-empty `bundle.logs`, so an absent `logs/` is not a finding.
@@ -211,7 +211,7 @@ Add one fixture builder `writeRun(tag)` that writes seven bundle files through `
   - `main(["--check-manifest", tag])` over a complete run returns `0` and writes nothing to stderr.
   - over a run with one `assertion-failed` failure it returns `1`, and stderr holds exactly one line beginning `e2e: manifest: `.
   - over an absent manifest it returns `3`.
-  - with two failures whose first is `unavailable` and second `assertion-failed`, it returns `3`, proving the branch takes `failures[0]` and not the worst code. Assert the returned number against `exitCodeFor(failures[0].code)` so the mapping is read from `main.ts:460-470` and restated nowhere. This is the assertion `021-external-drive-acceptance-run.md:231` requires.
+  - with two failures whose first is `unavailable` and second `assertion-failed`, it returns `3`, proving the branch takes `failures[0]` and not the worst code. Assert the returned number against `exitCodeFor(failures[0].code)` so the mapping is read from `main.ts:460-470` and restated nowhere. This is the assertion `025-external-drive-acceptance-run.md:231` requires.
   - `main(["--record-manifest","--tag",tag,"--manifest",file])` returns `0` and the file exists.
 - `npm run verify` exits 0. This is the gate for the coupled pair of Stories 1 and 2.
-- Proof: `PASS EPIC-021-UNIT`, jointly with Story 1.
+- Proof: `PASS EPIC-025-UNIT`, jointly with Story 1.

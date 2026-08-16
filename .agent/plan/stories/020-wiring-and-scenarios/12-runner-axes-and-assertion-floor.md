@@ -11,7 +11,7 @@ Depends on: Story 8, Story 11.
 
 - `scripts/e2e/lib/tag.ts:6` — the `ScenarioId` union.
 - `scripts/e2e/lib/main.ts:44-48` — `knownScenarioIds`.
-- `scripts/e2e/lib/record/verdict.ts:20-25` — `knownScenarioIds`, so EPIC 021 cannot close the block on a partial run.
+- `scripts/e2e/lib/record/verdict.ts:20-25` — `knownScenarioIds`, so EPIC 025 cannot close the block on a partial run.
 
 `tagPattern` at `scripts/e2e/lib/main.ts:55` validates `--tag` only and is not edited.
 
