@@ -14,7 +14,7 @@ This story changes the credential refusal map only. The `ids` half of D8 moved t
 
 Do not touch `src/http/contract/error-details.ts` in this story.
 
-D8 claims `src/http/server/credential/refusals.ts:27` is the only producer of `ids`. It is not: `src/http/server/plan/refusals.ts:33-36` emits `ids` for the `choice-duplicate`, `choice-missing` and `choice-extra` refusals of `importPlan`, and `src/http/contract/error-baseline.ts:5` puts `invalidRequestDetails` on all 62 operations. Deleting the field outright would make the daemon emit plan-choice details its own published contract refuses.
+`src/http/server/credential/refusals.ts:27` is not the only producer of `ids`: `src/http/server/plan/refusals.ts:33-36` emits `ids` for the `choice-duplicate`, `choice-missing` and `choice-extra` refusals of `importPlan`, and `src/http/contract/error-baseline.ts:5` puts `invalidRequestDetails` on all 62 operations. Deleting the field outright would make the daemon emit plan-choice details its own published contract refuses.
 
 Story 10 resolves it by narrowing rather than deleting: the baseline drops `ids`, and `plan.import` gains its own details schema that keeps it.
 
