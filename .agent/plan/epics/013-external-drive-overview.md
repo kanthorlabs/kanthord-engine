@@ -68,14 +68,27 @@ Each one was taken before authoring. An epic implements it and never revisits it
 | 018 | Claim, lease and the execution record  | A harness holds a task exclusively, with a fence, an expiry and a persisted attempt.                                                                                                  |
 | 019 | Outcome report and aggregation         | A reported outcome moves the task and counts the attempt. An attestation moves the objective, and a human closes it. A human returns a task blocked at the attempt limit to the pool. |
 | 020 | Wiring, CLI and the scenarios          | The composition root is complete, the CLI carries every command, and P1B-E1 runs.                                                                                                     |
-| 021 | External-drive acceptance run          | The scenarios ran once, in order, and one verdict closes the block.                                                                                                                   |
+| 021 | Provider contract and default transfer | `provider.register` declares its payload, every published example is validated, and a human moves the llm default.                                                                    |
+| 022 | Project-scoped graph read              | One project's nodes and one atomic topology snapshot are readable without reading every other project.                                                                                |
+| 023 | Version compatibility policy           | The daemon states which client versions it serves, and a client reads that answer instead of guessing.                                                                                |
+| 024 | Release-bound contract publish         | The published contract comes from a tagged, clean tree, so a client pins an artifact instead of a local generation result.                                                            |
+| 025 | External-drive acceptance run          | The scenarios ran once, in order, and one verdict closes the block.                                                                                                                   |
 
 ## Dependencies
 
 ```
 012 ─> 014 ─> 015 ─> 016 ─┬─> 017 ─────────────┐
-                          └─> 018 ─> 019 ──────┴─> 020 ─> 021
+                          └─> 018 ─> 019 ──────┴─> 020 ─> 022 ─┐
+                                                               ├─> 025
+021, 023, 024 ─────────────────────────────────────────────────┘
 ```
+
+022 needs 020, because it adds one name to two authorization lists that 020 pins.
+
+**021, 023 and 024 depend on nothing in this block, and each one must land before 025.** 021 and 023
+add or change `routed` surface, so the acceptance run must certify what the product ships. 024 ships
+the mechanism that turns the 025 verdict into a pinnable artifact. Their numbers state a sequence and
+not a dependency, so any of the three may land earlier if a client date needs it.
 
 016 comes before 017 and 018 because nothing is claimable until something writes `ready`. Phase 1 defines readiness in `domain/` and no code applies it, so a phase-1 graph holds every node in `pending` for ever. A claim epic on top of that passes every unit test and claims nothing.
 
@@ -90,7 +103,10 @@ The phase-1 rule holds here: an epic that cannot be driven through a route does 
 - **016 closes on initial readiness only.** Aggregation from a terminal child has no terminal-child route until 019, so aggregation lands in 019 and not here.
 - **018 owns the execution record, not 019.** A claim is what opens a run and an attempt, and an epic that promises a lease and silently invents an attempt table is the defect this ordering exists to prevent.
 
-**014 is the one named exception.** It writes no route, because it ratifies the contract every later epic reads. It is a contract milestone and it does not close like a vertical epic. No second exception exists in this block.
+**Two epics are named exceptions, and there is no third.**
+
+- **014** writes no route, because it ratifies the contract every later epic reads. It is a contract milestone and it does not close like a vertical epic.
+- **024** writes no route, because it is release tooling. It closes on a command — `npm run contract:publish` refusing a dirty tree and refusing an untagged commit — and a command is as drivable as a route. An earlier draft of this file claimed 014 was the only exception, and folding the client's E4 made that claim false.
 
 ## A schema change lands with its migration, never before it
 
@@ -110,9 +126,34 @@ Each database document therefore moves with its migration, and 014 holds none of
 
 The same reason 009 and 011 exist. An epic can close with every unit test green and no working program. 020 owns the seams no vertical epic owns: the composition root asserted complete over every operation this block adds, the CLI inventory parity, and the scenario that drives a real harness loop through the real binary. **020 implements no domain behaviour.** A missing route found in 020 is a defect in the epic that owed it.
 
-## Why 021 exists
+## Why 025 exists
 
-011 makes a scenario runnable and 012 runs it. 020 and 021 keep that split. A block can hold green scenarios and no decision.
+011 makes a scenario runnable and 012 runs it. 020 and 025 keep that split. A block can hold green scenarios and no decision.
+
+## Why 021 to 024 are in this block
+
+The client of `kanthord-apps` records what it needs from the daemon in `docs/api/blockers.md`. Four of
+those asks are open engine work, and each one is a defect or a gap on a surface that already ships.
+None of them drives external execution, so **the block's exit criterion does not cover them** and
+they widen its scope. That cost is accepted, because the alternative is a second block for four
+epics.
+
+| Ask | Epic | What is wrong today                                                                                                              |
+| --- | ---- | -------------------------------------------------------------------------------------------------------------------------------- |
+| E9  | 021  | `provider.register` declares `payload` as `z.unknown()`, and the published example is invalid against the daemon's own validator |
+| D1  | 022  | A project screen reads every node of every project                                                                               |
+| E6  | 023  | Nothing states which client and daemon versions pair, so the client guesses                                                      |
+| E4  | 024  | `scripts/publish-contract.ts` publishes a dirty working tree and records `dirty: true`                                           |
+
+Three of the four sit after 020 for one reason each. 021 and 022 add `routed` surface, so 025 must
+certify them and 020 must have pinned the authorization lists they extend. 023 changes a response
+schema that 025 exercises. 024 is different: it ships the mechanism that turns the 025 verdict into a
+pinnable artifact, so it lands before the run and the publish itself executes from the accepted tag
+after it.
+
+E5 of the same file — a daemon-side `wait` on `event.list` — is **not** in this block. Interval
+polling is already correct, the exit criterion does not need it, and it is the first route that would
+hold a connection open. `.agent/plan/epics/026-event-long-poll.md` owns it, after the block closes.
 
 ## What this block does not do
 

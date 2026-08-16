@@ -1,6 +1,6 @@
 # EPIC 110 — Scheduler, leases and the `general@1` worker
 
-Status: **blocked**. The external-drive block of EPICs 013 to 021 took the `services/execution` capability, the `services/lease` implementation, the closed `PlanStore` mutation API and migrations 0005 to 0007. This epic becomes ready when EPIC 018 has landed, so its `Execution` and `Lease` interfaces, its `driver` column and its lease hierarchy rule exist to be consumed.
+Status: **blocked**. The external-drive block of EPICs 013 to 025 took the `services/execution` capability, the `services/lease` implementation, the closed `PlanStore` mutation API and migrations 0005 to 0007. This epic becomes ready when EPIC 018 has landed, so its `Execution` and `Lease` interfaces, its `driver` column and its lease hierarchy rule exist to be consumed.
 
 ## Goal
 

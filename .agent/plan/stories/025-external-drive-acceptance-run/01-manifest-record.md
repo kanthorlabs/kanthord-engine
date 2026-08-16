@@ -1,9 +1,9 @@
 # Story 1 — The manifest record and its canonical serialization
 
-Epic: `.agent/plan/epics/021-external-drive-acceptance-run.md`
+Epic: `.agent/plan/epics/025-external-drive-acceptance-run.md`
 Depends on: EPIC 020, for the three `P1B-*` members of `ScenarioId` at `scripts/e2e/lib/tag.ts:6`.
 
-This is the first half of the EPIC bullet at `021-external-drive-acceptance-run.md:125`. This story lands the record type, the declared order, the path helper and the serializer. Story 2 lands the checker and the runner option pair. **Stories 1 and 2 are a coupled pair and take no verify gate between them.**
+This is the first half of the EPIC bullet at `025-external-drive-acceptance-run.md:125`. This story lands the record type, the declared order, the path helper and the serializer. Story 2 lands the checker and the runner option pair. **Stories 1 and 2 are a coupled pair and take no verify gate between them.**
 
 ## Change
 
@@ -17,7 +17,7 @@ import { redact } from "../redact.ts";
 import { runDirectory, type ScenarioId } from "../tag.ts";
 ```
 
-**The path helper lives in this file and not in `tag.ts`.** `021-external-drive-acceptance-run.md:241` fixes the file list of this epic, and `tag.ts` is not in it.
+**The path helper lives in this file and not in `tag.ts`.** `025-external-drive-acceptance-run.md:241` fixes the file list of this epic, and `tag.ts` is not in it.
 
 Export, in this order:
 
@@ -49,7 +49,7 @@ export function digestOf(content: Buffer): string {
 }
 ```
 
-`declaredScenarioOrder` is the single statement of the run order of `021-external-drive-acceptance-run.md:131`. No other file restates it.
+`declaredScenarioOrder` is the single statement of the run order of `025-external-drive-acceptance-run.md:131`. No other file restates it.
 
 The record types:
 
@@ -227,7 +227,7 @@ const sampleManifest = {
 
 - `node --test scripts/e2e/lib/record/manifest.test.ts` exits 0.
 - Cases, each named as a full sentence:
-  - `serializeManifest(sampleManifest)` equals one inline expected string, asserted with `assert.equal` over the whole text. Write the expected string as a template literal in the test file, with the nine root keys in the declared order and each nested object in the key order the serializer fixes. This is the byte-exact fixture `021-external-drive-acceptance-run.md:229` requires.
+  - `serializeManifest(sampleManifest)` equals one inline expected string, asserted with `assert.equal` over the whole text. Write the expected string as a template literal in the test file, with the nine root keys in the declared order and each nested object in the key order the serializer fixes. This is the byte-exact fixture `025-external-drive-acceptance-run.md:229` requires.
   - **the nested key order is the serializer's and not the input's** — build a second manifest whose `report` object literal is written `{ bytes, sha256, path }` and whose scenario literals are written `{ outcome, sha256, bundlePath, id }`, otherwise equal to `sampleManifest`, and assert its serialization is byte-identical to the first. This is the case a root-only literal fails.
   - the serialized text ends with exactly one `\n`, asserted with `assert.equal(text.at(-1), "\n")` and `assert.equal(text.at(-2), "}")`.
   - `serializeManifest` redacts a secret, asserted with the value `token-aaaaaaaa` placed in a finding `description` and `token-bbbbbbbb` placed in a checklist `note`. Hold each through `secrets.hold` from `../redact.ts` inside the test; each is fourteen characters, above the eight-character floor at `scripts/e2e/lib/redact.ts:24-32`. Assert the output holds `[redacted]` twice and holds neither token.
@@ -235,4 +235,4 @@ const sampleManifest = {
   - `manifestRecordPath("t1")` equals `.data/acceptance-t1/manifest.json`, asserted by exact string.
   - `digestOf(Buffer.from("manifest"))` returns a 64-character lowercase hex string. Assert the length, assert `/^[0-9a-f]{64}$/`, and assert it equals `createHash("sha256").update(Buffer.from("manifest")).digest("hex")` computed in the test, so the story pins no digest literal by hand.
 - `npx tsc --noEmit` exits 0. **Do not gate this story on `npm run verify`** — Story 2 adds the runner options that make the pair complete, and `index.md` places the verify gate at the close of Story 2.
-- Proof: `PASS EPIC-021-UNIT`, the `node --test scripts/e2e/lib/record/manifest.test.ts` line of `021-external-drive-acceptance-run.md:192-194`. Story 2 completes the same Proof line.
+- Proof: `PASS EPIC-025-UNIT`, the `node --test scripts/e2e/lib/record/manifest.test.ts` line of `025-external-drive-acceptance-run.md:192-194`. Story 2 completes the same Proof line.

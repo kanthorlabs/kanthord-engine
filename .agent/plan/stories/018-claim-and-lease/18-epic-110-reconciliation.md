@@ -3,7 +3,7 @@
 Epic: `.agent/plan/epics/018-claim-and-lease.md`
 Depends on: Story 7 and Story 3. **This is a planning-document story. It edits no source file and no test.**
 
-`.agent/plan/epics/013-external-drive-overview.md:108` creates the obligation and no other story delivers it.
+`.agent/plan/epics/013-external-drive-overview.md:124` creates the obligation and no other story delivers it.
 
 ## Change
 
@@ -47,4 +47,4 @@ Record in `.agent/plan/epics/110-scheduler-leases-and-the-general-worker.md` tha
   - every `run_one_active_objective` mention carries `AND driver = 'internal'`;
   - the published-surface list above appears once, and it names all seven `Lease` methods.
 - `npm run verify` exits 0, unchanged by this story.
-- Proof: this story delivers no `PASS` line of the Proof block. It closes the reconciliation obligation of `.agent/plan/epics/013-external-drive-overview.md:108`, which the Gates line covers through `npm run verify` staying green.
+- Proof: this story delivers no `PASS` line of the Proof block. It closes the reconciliation obligation of `.agent/plan/epics/013-external-drive-overview.md:124`, which the Gates line covers through `npm run verify` staying green.

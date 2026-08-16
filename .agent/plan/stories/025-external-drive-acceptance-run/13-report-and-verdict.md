@@ -1,9 +1,9 @@
 # Story 13 — The report and the verdict
 
-Epic: `.agent/plan/epics/021-external-drive-acceptance-run.md`
+Epic: `.agent/plan/epics/025-external-drive-acceptance-run.md`
 Depends on: Story 12. This story is last.
 
-This is the EPIC bullet at `021-external-drive-acceptance-run.md:145`. It writes the report, records the findings, and takes the verdict that closes the block or opens a fix epic.
+This is the EPIC bullet at `025-external-drive-acceptance-run.md:145`. It writes the report, records the findings, and takes the verdict that closes the block or opens a fix epic.
 
 ## Change
 
@@ -36,7 +36,7 @@ Group them by root cause. Copy every blocker into the manifest `findings` array 
 
 **A fix epic takes the next unused decimal suffix under the epic that owed the defect, and it names the owner in metadata.** A defect in EPIC 018 opens `.agent/plan/epics/018.<n>-<slug>.md`, where `<n>` is the lowest integer that no file under `.agent/plan/epics/` already uses. The file carries a `Fixes: EPIC 018` line beside `Status:`.
 
-**The filename encodes no convention.** The decimal namespace is a general insertion namespace, and `007.5`, `009.5`, `010.5`, `010.6`, `011.1` and `011.2` are insertions rather than fixes. **The metadata line is the only statement of what a fix epic repairs.** A defect that no epic of the block owed opens `021.<n>-<slug>.md` under the same rule.
+**The filename encodes no convention.** The decimal namespace is a general insertion namespace, and `007.5`, `009.5`, `010.5`, `010.6`, `011.1` and `011.2` are insertions rather than fixes. **The metadata line is the only statement of what a fix epic repairs.** A defect that no epic of the block owed opens `025.<n>-<slug>.md` under the same rule.
 
 A blocker opens one fix epic. A suggestion opens none.
 
@@ -69,4 +69,4 @@ node scripts/e2e/run.mjs --verdict "$TAG"
 - A `blocked` outcome exits `2` or `3` and a `failed` outcome exits `1`, per the exit-code table at `.claude/commands/e2e.md:151-157`, so a stopped run never reads as a pass and never reads as a defect.
 - **The block closes on** a zero exit status from both commands, a `P1B-E2` bundle, a proposal revision and an implementation commit. Any other outcome keeps the block open.
 - `git status --porcelain` names no path under `src/` and no path under `docs/proposal/`.
-- Proof: `PASS EPIC-021`, lines `214` to `217` of the run block at `021-external-drive-acceptance-run.md:200-218`.
+- Proof: `PASS EPIC-025`, lines `214` to `217` of the run block at `025-external-drive-acceptance-run.md:200-218`.

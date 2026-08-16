@@ -1,9 +1,9 @@
 # Story 8 — Run the single-harness loop: P1B-E1
 
-Epic: `.agent/plan/epics/021-external-drive-acceptance-run.md`
+Epic: `.agent/plan/epics/025-external-drive-acceptance-run.md`
 Depends on: Story 6, for the third position in the order.
 
-This is the EPIC bullet at `021-external-drive-acceptance-run.md:135`. The `local` driver and the `fixture` profile.
+This is the EPIC bullet at `025-external-drive-acceptance-run.md:135`. The `local` driver and the `fixture` profile.
 
 ## The five tasks
 
@@ -44,4 +44,4 @@ Append one row to the manifest `scenarios` array in the third position, with `id
 - The bundle names the commit under test.
 - On a green run the bundle reports `outcome: "passed"`.
 - A failure does not stop `P1-E4`, and the bundle is still written.
-- Proof: line `204` of the run block at `021-external-drive-acceptance-run.md:200-218`.
+- Proof: line `204` of the run block at `025-external-drive-acceptance-run.md:200-218`.

@@ -1,9 +1,9 @@
 # Story 11 — The rehearsal
 
-Epic: `.agent/plan/epics/021-external-drive-acceptance-run.md`
+Epic: `.agent/plan/epics/025-external-drive-acceptance-run.md`
 Depends on: Stories 7, 8, 9 and 10.
 
-This is the EPIC bullet at `021-external-drive-acceptance-run.md:141`. A coding agent runs the seven scenarios and the verify record under one tag, writes the manifest scenario rows, and reports the scenario axis green. **The rehearsal never closes the block.**
+This is the EPIC bullet at `025-external-drive-acceptance-run.md:141`. A coding agent runs the seven scenarios and the verify record under one tag, writes the manifest scenario rows, and reports the scenario axis green. **The rehearsal never closes the block.**
 
 ## Change
 
@@ -36,7 +36,7 @@ The rehearsal is **repeatable and unattended**, because no scenario pauses for a
 
 - `node scripts/e2e/run.mjs --record-verify --tag "$TAG"` exits 0 and writes `.data/acceptance-<tag>/verify.json` with `exitCode: 0`.
 - `node scripts/e2e/run.mjs --verdict "$TAG" --scenarios-only` exits 0. Record the command and its exit status for the report.
-- `node scripts/e2e/run.mjs --verdict "$TAG"` **without** `--scenarios-only` exits non-zero at this point, with one `acceptance` axis failure reading that the tag has no acceptance record. This is the assertion `021-external-drive-acceptance-run.md:239` requires: the rehearsal passes `--scenarios-only` and the full verdict still fails until the gate is signed.
+- `node scripts/e2e/run.mjs --verdict "$TAG"` **without** `--scenarios-only` exits non-zero at this point, with one `acceptance` axis failure reading that the tag has no acceptance record. This is the assertion `025-external-drive-acceptance-run.md:239` requires: the rehearsal passes `--scenarios-only` and the full verdict still fails until the gate is signed.
 - `.data/acceptance-<tag>/manifest.json` exists and holds seven `scenarios` rows in the declared order.
 - Every bundle, the verify record and the manifest name one commit under test.
-- Proof: lines `209` and `210` of the run block at `021-external-drive-acceptance-run.md:200-218`.
+- Proof: lines `209` and `210` of the run block at `025-external-drive-acceptance-run.md:200-218`.

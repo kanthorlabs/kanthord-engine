@@ -1,9 +1,9 @@
 # Story 7 — Run the amended phase-1 axis: P1-E1, P1-E2, P1-E4 and P1-E5
 
-Epic: `.agent/plan/epics/021-external-drive-acceptance-run.md`
+Epic: `.agent/plan/epics/025-external-drive-acceptance-run.md`
 Depends on: Story 6, for the position of each of the four invocations.
 
-This is the EPIC bullet at `021-external-drive-acceptance-run.md:133`. It is the regression evidence that the block preserved transport, packaging, import, export and real-forge compatibility. It runs the journey **EPIC 016 amended**, and it repairs nothing.
+This is the EPIC bullet at `025-external-drive-acceptance-run.md:133`. It is the regression evidence that the block preserved transport, packaging, import, export and real-forge compatibility. It runs the journey **EPIC 016 amended**, and it repairs nothing.
 
 ## The five tasks
 
@@ -47,7 +47,7 @@ Append to the manifest `scenarios` array, in invocation order, one row per id wi
 
 - **The oracle is the amended one.** `scripts/e2e/lib/scenario/journey.ts:388-399` asserted `tasksAllPending: true`, and EPIC 016 amends it to the derived ready frontier. `runJourney` is called by `p1-e1.ts:10`, `p1-e4.ts:225` and `p1-e5.ts:149`, so all three depend on that repair. **Re-running the old oracle guarantees failure and proves no compatibility.** Story 3 proves the repair landed.
 - Assert nothing of your own. EPIC 020 and phase 1 own every oracle. A gap is a finding about the oracle.
-- Repair no defect. A failure on this axis is a **phase-1 regression** and a blocker against the block epic that caused it, per `021-external-drive-acceptance-run.md:133`.
+- Repair no defect. A failure on this axis is a **phase-1 regression** and a blocker against the block epic that caused it, per `025-external-drive-acceptance-run.md:133`.
 - Do not merge, edit or move a bundle.
 
 ## Verify
@@ -56,4 +56,4 @@ Append to the manifest `scenarios` array, in invocation order, one row per id wi
 - Each bundle names its own id in `scenarioId` and the run tag in `tag`. `Bundle` carries both at `scripts/e2e/lib/bundle.ts:39-60`, and `--check-manifest` of Story 2 asserts them.
 - On a green axis each of the four bundles reports `outcome: "passed"`.
 - A failing line does not stop the next line, and it still writes a bundle.
-- Proof: lines `202`, `203`, `205` and `208` of the run block at `021-external-drive-acceptance-run.md:200-218`.
+- Proof: lines `202`, `203`, `205` and `208` of the run block at `025-external-drive-acceptance-run.md:200-218`.

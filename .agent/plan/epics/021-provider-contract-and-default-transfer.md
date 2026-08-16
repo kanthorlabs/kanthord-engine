@@ -1,6 +1,11 @@
-# EPIC 101.5 — Provider payload contract and default transfer
+# EPIC 021 — Provider contract and default transfer
 
 Status: **draft**. EPIC 101 is closed at `61fc5e7`, and this epic amends two of its decisions.
+
+This epic sits in the external-drive block because it repairs two defects on routes that are already
+live, not because it drives external execution. `013-external-drive-overview.md` states the scope
+consequence. It shares no file with EPICs 014 to 020, so it takes no dependency on them beyond the
+sequence position.
 
 ## Goal
 
@@ -118,15 +123,15 @@ Two things the draft of this epic overstated and this one does not: re-adding `i
 
 The fourth needs restating before it can be assigned, because "`node.list` accepts no filter" describes a symptom and two different epics own two different cures:
 
-| The client's actual requirement                          | Owner                                                                   |
-| -------------------------------------------------------- | ----------------------------------------------------------------------- |
-| A project screen reads one project's nodes and no others | `.agent/plan/epics/020.5-project-scoped-graph-read.md`, still **draft** |
-| A screen filters nodes by kind, state or block reason    | EPIC 018, which owns the query mechanism                                |
-| `node.list` itself becomes filterable                    | **Neither.** 020.5 explicitly changes no `node.list` behaviour          |
+| The client's actual requirement                          | Owner                                                               |
+| -------------------------------------------------------- | ------------------------------------------------------------------- |
+| A project screen reads one project's nodes and no others | `.agent/plan/epics/022-project-scoped-graph-read.md`, the next epic |
+| A screen filters nodes by kind, state or block reason    | EPIC 018, which owns the query mechanism                            |
+| `node.list` itself becomes filterable                    | **Neither.** EPIC 022 explicitly changes no `node.list` behaviour   |
 
-The client's requirement is the first row: the screens the handover scopes are per project. So EPIC 020.5 is the owner, and this epic neither duplicates it nor claims to unblock it. Duplicating a project-scoped read here would give one route two owners.
+The client's requirement is the first row: the screens the handover scopes are per project. So EPIC 022 is the owner, and this epic neither duplicates it nor claims to unblock it. Duplicating a project-scoped read here would give one route two owners.
 
-**This epic therefore closes three of four findings and declares a blocking dependency, rather than claiming the client is unblocked.** A draft epic is not a delivery commitment: EPIC 020.5 must move from `draft` to ready and be sequenced before the client builds a project screen. That is a planning act this epic recommends and does not perform.
+**This epic therefore closes three of four findings and declares a dependency, rather than claiming the client is unblocked.** EPIC 022 is the next epic of the block and it owns the fourth. The client builds its project screen after 022 lands.
 
 ## Stories
 
@@ -156,7 +161,7 @@ node --test src/domain/provider-payload.test.ts \
   src/commands/provider/*.test.ts \
   src/queries/provider/*.test.ts \
   src/http/server/credential/*.test.ts \
-  scripts/publish-contract.test.ts && echo "PASS EPIC-101.5"
+  scripts/publish-contract.test.ts && echo "PASS EPIC-021"
 ```
 
 The epic does not close on `npm run verify` alone. `npm run verify` proves the repository; it does not prove the artifact the client reads. The gate therefore also requires, into a temporary directory and never into the client repository from this epic:
@@ -203,4 +208,4 @@ Hermetic coverage required beyond the Proof:
 
 - **EPIC 114 gains a silent overwrite, and its owner must decide.** Onboarding calls `provider.setDefault`. Before this epic a call against an existing default failed loudly with `default-already-set`; after it, the call silently moves a default the human may have set deliberately. That is a behaviour change, not the removal of a failure mode. EPIC 114 either shows the previous holder and confirms, or records that onboarding runs only on an empty registry. This epic does not decide it and must not close before 114 acknowledges it.
 - The published artifact changes shape, so `npm run contract:publish -- ../kanthord-apps/docs/api/contract` runs from a clean tree after this epic lands, and the three closed findings are retired from `kanthord-apps/docs/api/blockers.md`, `operations.md` and `errors.md` — including `details.ids`, per D8. That is a commit in the client repository.
-- EPIC 020.5 moves from `draft` to ready, per "The client requirement this epic does not close". This epic is not blocked by it, and the client's project screen is.
+- EPIC 022 delivers the project-scoped read, per "The client requirement this epic does not close". This epic is not blocked by it, and the client's project screen is.

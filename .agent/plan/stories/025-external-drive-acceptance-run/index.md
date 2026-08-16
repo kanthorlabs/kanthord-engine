@@ -1,6 +1,6 @@
-# EPIC 021 — External-drive acceptance run — stories
+# EPIC 025 — External-drive acceptance run — stories
 
-Epic: `.agent/plan/epics/021-external-drive-acceptance-run.md`
+Epic: `.agent/plan/epics/025-external-drive-acceptance-run.md`
 Prereq: EPIC 020 (sequence order). EPIC 020 supplies the three `P1B-*` scenario files, the `three-objective` fixture, the widened `ScenarioId`, the widened verdict id set, the proposal declarations and `kanthord event list`. EPIC 016 supplies the amended `journey.ts` ready-frontier oracle. EPIC 019 supplies `attestedObjectId` and `projection` on `node.show`.
 
 A coding agent runs the seven declared scenarios under one tag and writes one machine-readable run manifest; a human then drives the two-client journey, answers six checklist rows and signs one acceptance record; and one verdict, gated by `--check-manifest`, closes the block or opens a fix epic per blocker.
@@ -10,7 +10,7 @@ A coding agent runs the seven declared scenarios under one tag and writes one ma
 Numeric order, `01` to `13`. The epic has three story kinds, and the dispatch splits accordingly.
 
 - **Stories 1 and 2 are a coupled pair.** They are the only code in this epic and they take no verify gate between their members: Story 1 writes the record type and the serializer, Story 2 writes the checker and the runner options, and neither half is independently useful. Story 1 gates on `npx tsc --noEmit` and its own test file; `npm run verify` exits 0 at the close of Story 2.
-- **Story 3 is a gate, not work.** It edits no file. It proves the five obligations `021-external-drive-acceptance-run.md:177-183` places on EPIC 013, EPIC 016 and EPIC 020. A false fact stops the epic before six container image builds and one real-forge run are spent against it.
+- **Story 3 is a gate, not work.** It edits no file. It proves the five obligations `025-external-drive-acceptance-run.md:177-183` places on EPIC 013, EPIC 016 and EPIC 020. A false fact stops the epic before six container image builds and one real-forge run are spent against it.
 - **Story 4 is independent** of the run and may land beside Stories 1 and 2.
 - **Stories 5 to 13 are one run, executed once, in order.** They are not independently repeatable: a re-run after a fix epic lands is a **new tag** and repeats every one of them.
 
@@ -40,8 +40,8 @@ Five ordering facts are load-bearing:
 
 The EPIC lists eleven Story bullets. Two differences:
 
-- `021-external-drive-acceptance-run.md:125` splits into Story 1 and Story 2, because the record and its serializer are verifiable on their own while the checker and the two runner options are a second, larger surface with its own failure fixtures.
-- Story 3 is added. `021-external-drive-acceptance-run.md:177-183` states five obligations on other epics and the epic body depends on all five, but no bullet checks them. The pattern is the one `.agent/plan/stories/019-outcome-report/02-epic-014-precondition-check.md` already uses.
+- `025-external-drive-acceptance-run.md:125` splits into Story 1 and Story 2, because the record and its serializer are verifiable on their own while the checker and the two runner options are a second, larger surface with its own failure fixtures.
+- Story 3 is added. `025-external-drive-acceptance-run.md:177-183` states five obligations on other epics and the epic body depends on all five, but no bullet checks them. The pattern is the one `.agent/plan/stories/019-outcome-report/02-epic-014-precondition-check.md` already uses.
 
 ## Settled before this expansion shipped
 
@@ -60,13 +60,13 @@ The EPIC lists eleven Story bullets. Two differences:
 - **`noteKeys`** — `scripts/e2e/lib/bundle.ts:82-91` is a **closed allowlist of eight names**: `productDigest`, `baseDigest`, `imageId`, `architecture`, `podmanRootless`, `bindAddress`, `daemonNamespace`, `clientNamespace`. `note()` throws `invalid-argument` outside it. **There is no takeover-latency key**, so Story 10 records the latency in the report and not in the bundle.
 - **`writeBundle`** — `scripts/e2e/lib/bundle.ts:261-283`. It writes `logs/` only when `bundle.logs` is non-empty at `:272-282`. An absent `logs/` is not a finding.
 - **sha256 form** — `scripts/e2e/lib/bundle.ts:299-301` emits **bare lowercase hex**, no `sha256:` prefix. The manifest takes the same form.
-- **Tag paths** — `scripts/e2e/lib/tag.ts:15-29`, all relative to `runRoot = ".data"` at `:8`. **There is no `manifest.json` helper and no `bundle.json` helper**; callers hand-build `join(bundleDirectory(tag, id), "bundle.json")` at `acceptance.ts:86` and `verdict.ts:67`. Story 1 puts `manifestRecordPath` in `manifest.ts`, because `021-external-drive-acceptance-run.md:241` fixes the file list and `tag.ts` is not in it.
+- **Tag paths** — `scripts/e2e/lib/tag.ts:15-29`, all relative to `runRoot = ".data"` at `:8`. **There is no `manifest.json` helper and no `bundle.json` helper**; callers hand-build `join(bundleDirectory(tag, id), "bundle.json")` at `acceptance.ts:86` and `verdict.ts:67`. Story 1 puts `manifestRecordPath` in `manifest.ts`, because `025-external-drive-acceptance-run.md:241` fixes the file list and `tag.ts` is not in it.
 - **`claimBundleDirectory`** — `scripts/e2e/lib/tag.ts:31-53`. `mkdir(recursive: false)` is the atomic claim; `EEXIST` raises `tag-reused`. It refuses per scenario directory only, so a re-run is a new tag by procedure.
 - **A second stale id list** — `scripts/e2e/lib/record/acceptance.ts:63-68` holds its **own** private four-id `knownScenarioIds`, which `020-wiring-and-scenarios.md:77` does not name. It gates only the "tag holds at least one bundle" check at `:83-94`, so a stale list blocks no run in which any phase-1 bundle exists. Story 3 records it as a suggestion and edits it not at all.
 - **Test convention under `scripts/e2e/lib/`** — flat `test(...)` from `node:test` with `assert` from `node:assert/strict`. **No `describe` and no `it` anywhere in `scripts/e2e/lib/record/`.** Test names are full sentences.
 - **`withTempCwd`** — `scripts/e2e/lib/record/acceptance.test.ts:34-44`. It `mkdtemp`s, `process.chdir`es and restores in `finally`. Because `tag.ts` paths are relative, chdir is what sandboxes them. Story 2 copies it.
 - **`walkDigests`** — `scripts/e2e/lib/record/verdict.test.ts:121-148`, an sha256 tree snapshot used by the "modifies no file" tests at `:514` and `:526`. Story 2 copies it.
-- **`main.test.ts` is out of scope.** `021-external-drive-acceptance-run.md:241` permits `manifest.ts`, `manifest.test.ts`, `.claude/commands/e2e.md` and the `main.ts` option pair — four things, and `scripts/e2e/lib/main.test.ts` is a fifth. Every parser and exit-status test of Story 2 therefore lives in `manifest.test.ts`, which imports `parseArguments`, `main` and `exitCodeFor` from `../main.ts`.
+- **`main.test.ts` is out of scope.** `025-external-drive-acceptance-run.md:241` permits `manifest.ts`, `manifest.test.ts`, `.claude/commands/e2e.md` and the `main.ts` option pair — four things, and `scripts/e2e/lib/main.test.ts` is a fifth. Every parser and exit-status test of Story 2 therefore lives in `manifest.test.ts`, which imports `parseArguments`, `main` and `exitCodeFor` from `../main.ts`.
 - **`parseArguments` guard blocks return early.** The `--verdict` block at `scripts/e2e/lib/main.ts:359-380` returns before any block added after it, so a new guard placed at the end is unreachable for `--verdict t --check-manifest t`. Story 2 therefore edits the five **existing** guard blocks to reject the new flags, and its parser tests assert every pair in both argument orders.
 - **`JSON.stringify` emits nested keys in construction order.** `serializeAcceptanceRecord` orders a flat record, so a root-only literal was canonical there. The manifest nests, so Story 1's serializer reconstructs `scenarios`, `checklist`, `report` and `findings` element by element. A root-only literal makes two equal manifests digest differently.
 - **`npm test` is a bare `node --test`**, so a new `*.test.ts` under `scripts/e2e/lib/` is discovered with no script change. `npm run verify` is `typecheck && test && lint && verify-db-status`.
