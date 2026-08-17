@@ -4,11 +4,14 @@ import { identity, nodeIdentity } from "./identity.ts";
 import { epochMillis, objectId } from "./column.ts";
 import { blobHash } from "./blob.ts";
 
+export const gitIntents = ["merge", "sync", "publish", "revert"] as const;
+export type GitIntent = (typeof gitIntents)[number];
+
 export const gitOperationRow = z
   .object({
     id: identity("gitOperation"),
     repositoryId: identity("repository"),
-    intent: z.enum(["merge", "sync", "publish", "revert"]),
+    intent: z.enum(gitIntents),
     nodeId: nodeIdentity.nullable(),
     runId: identity("run").nullable(),
     candidateId: identity("candidate").nullable(),

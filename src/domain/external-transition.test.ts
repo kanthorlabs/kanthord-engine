@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   externalTriggerConsumer,
@@ -12,7 +15,9 @@ import {
 import { internalTriggerIds } from "./node-trigger.ts";
 import { canTransition } from "./transition.ts";
 
-const expected: readonly ExternalTransition[] = [
+const expected: readonly (Omit<ExternalTransition, "trigger"> & {
+  trigger: string;
+})[] = [
   {
     level: "task",
     from: "running",
@@ -133,6 +138,36 @@ const expected: readonly ExternalTransition[] = [
       childAggregation: "not-applicable",
     },
   },
+  {
+    level: "task",
+    from: "running",
+    to: "ready",
+    trigger: "attempt-failed",
+    precondition: {
+      runDriver: "external",
+      activeRun: true,
+      leaseFence: "valid",
+      actorKind: "harness",
+      attemptLimit: "under",
+      reportedObjectId: "absent",
+      childAggregation: "not-applicable",
+    },
+  },
+  {
+    level: "task",
+    from: "running",
+    to: "ready",
+    trigger: "report-cancelled",
+    precondition: {
+      runDriver: "external",
+      activeRun: true,
+      leaseFence: "valid",
+      actorKind: "harness",
+      attemptLimit: "under",
+      reportedObjectId: "absent",
+      childAggregation: "not-applicable",
+    },
+  },
 ];
 
 function rowByTrigger(trigger: string): ExternalTransition {
@@ -142,8 +177,8 @@ function rowByTrigger(trigger: string): ExternalTransition {
 }
 
 describe("src/domain/external-transition.test", () => {
-  it("externalTransitions holds eight trigger ids", () => {
-    assert.equal(externalTriggerIds.length, 8);
+  it("externalTransitions holds ten trigger ids", () => {
+    assert.equal(externalTriggerIds.length, 10);
     assert.deepEqual(
       [...externalTriggerIds],
       [
@@ -155,13 +190,15 @@ describe("src/domain/external-transition.test", () => {
         "human-close-partial",
         "claim-released",
         "claim-expired",
+        "attempt-failed",
+        "report-cancelled",
       ],
     );
-    assert.equal(new Set(externalTriggerIds).size, 8);
+    assert.equal(new Set(externalTriggerIds).size, 10);
   });
 
-  it("externalTransitions holds exactly eight rows in exactly the declared order", () => {
-    assert.equal(externalTransitions.length, 8);
+  it("externalTransitions holds exactly ten rows in exactly the declared order", () => {
+    assert.equal(externalTransitions.length, 10);
     assert.deepEqual(externalTransitions, expected);
     assert.deepEqual(
       externalTransitions.map((row) => row.trigger),
@@ -339,6 +376,63 @@ describe("src/domain/external-transition.test", () => {
     }
   });
 
+  it("the attempt-failed row is field by field the failed report contract", () => {
+    const row = rowByTrigger("attempt-failed");
+    assert.equal(row.level, "task");
+    assert.equal(row.from, "running");
+    assert.equal(row.to, "ready");
+    assert.equal(row.precondition.runDriver, "external");
+    assert.equal(row.precondition.activeRun, true);
+    assert.equal(row.precondition.leaseFence, "valid");
+    assert.equal(row.precondition.actorKind, "harness");
+    assert.equal(row.precondition.attemptLimit, "under");
+    assert.equal(row.precondition.reportedObjectId, "absent");
+    assert.equal(row.precondition.childAggregation, "not-applicable");
+  });
+
+  it("the report-cancelled row is field by field the cancelled report contract", () => {
+    const row = rowByTrigger("report-cancelled");
+    assert.equal(row.level, "task");
+    assert.equal(row.from, "running");
+    assert.equal(row.to, "ready");
+    assert.equal(row.precondition.runDriver, "external");
+    assert.equal(row.precondition.activeRun, true);
+    assert.equal(row.precondition.leaseFence, "valid");
+    assert.equal(row.precondition.actorKind, "harness");
+    assert.equal(row.precondition.attemptLimit, "under");
+    assert.equal(row.precondition.reportedObjectId, "absent");
+    assert.equal(row.precondition.childAggregation, "not-applicable");
+  });
+
+  it("both new rows name a legal cell", () => {
+    for (const trigger of ["attempt-failed", "report-cancelled"] as const) {
+      const row = rowByTrigger(trigger);
+      assert.equal(row.level, "task");
+      assert.equal(row.from, "running");
+      assert.equal(row.to, "ready");
+      assert.equal(canTransition(row.level, row.from, row.to), true);
+    }
+  });
+
+  it("the three initiative roll-up triggers are internal", () => {
+    const external = externalTriggerIds as readonly string[];
+    const internal = internalTriggerIds as readonly string[];
+    for (const id of [
+      "initiative-aggregated-done",
+      "initiative-aggregated-partial",
+      "initiative-aggregated-discarded",
+    ] as const) {
+      assert.ok(
+        !external.includes(id),
+        `${id} must stay out of the external table`,
+      );
+      assert.ok(internal.includes(id), `${id} must stay internal`);
+    }
+    for (const to of ["done", "partial", "discarded"] as const) {
+      assert.equal(canTransition("initiative", "running", to), true);
+    }
+  });
+
   describe("objectiveDrivePin", () => {
     it("an empty run history pins nothing under either claim driver", () => {
       assert.equal(
@@ -421,9 +515,9 @@ describe("src/domain/external-transition.test", () => {
   });
 
   describe("externalTriggerConsumer", () => {
-    it("is total over the eight trigger ids", () => {
+    it("is total over the ten trigger ids", () => {
       const keys = Object.keys(externalTriggerConsumer);
-      assert.equal(keys.length, 8);
+      assert.equal(keys.length, 10);
       assert.equal(externalTriggerIds.length, keys.length);
       for (const id of externalTriggerIds) {
         assert.ok(id in externalTriggerConsumer, `missing key ${id}`);
@@ -449,6 +543,20 @@ describe("src/domain/external-transition.test", () => {
       assert.equal(
         externalTriggerConsumer["object-reported"],
         "src/commands/outcome/report-objective.ts",
+      );
+    });
+
+    it("the two new triggers name report-outcome.ts", () => {
+      const consumer = externalTriggerConsumer as Readonly<
+        Record<string, string | undefined>
+      >;
+      assert.equal(
+        consumer["attempt-failed"],
+        "src/commands/outcome/report-outcome.ts",
+      );
+      assert.equal(
+        consumer["report-cancelled"],
+        "src/commands/outcome/report-outcome.ts",
       );
     });
 
@@ -488,6 +596,8 @@ describe("src/domain/external-transition.test", () => {
         "attempt-rejected",
         "outcome-accepted",
         "attempt-limit-reached",
+        "attempt-failed",
+        "report-cancelled",
       ]);
       const closeObjectiveKeys = externalTriggerIds.filter(
         (id) =>
@@ -498,6 +608,56 @@ describe("src/domain/external-transition.test", () => {
         "human-close",
         "human-close-partial",
       ]);
+    });
+  });
+
+  describe("externalTriggerConsumer on disk", () => {
+    const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
+
+    it("every consumer path exists on disk", () => {
+      for (const [trigger, path] of Object.entries(externalTriggerConsumer)) {
+        assert.ok(
+          existsSync(resolve(repoRoot, path)),
+          `${trigger}: ${path} is absent`,
+        );
+      }
+    });
+
+    it("every consumer file holds its own trigger id as a literal", () => {
+      for (const [trigger, path] of Object.entries(externalTriggerConsumer)) {
+        const content = readFileSync(resolve(repoRoot, path), "utf8");
+        assert.ok(
+          content.includes(`"${trigger}"`),
+          `${trigger} is not a literal of ${path}`,
+        );
+      }
+    });
+
+    it("no consumer path names aggregate-objective", () => {
+      for (const value of Object.values(externalTriggerConsumer)) {
+        assert.notEqual(value, "src/commands/outcome/aggregate-objective.ts");
+        assert.ok(
+          !value.includes("src/commands/outcome/aggregate-objective.ts"),
+        );
+      }
+      assert.equal(
+        existsSync(
+          resolve(repoRoot, "src/commands/outcome/aggregate-objective.ts"),
+        ),
+        false,
+      );
+    });
+
+    it("the assertion read at least one file", () => {
+      const files = new Set(Object.values(externalTriggerConsumer));
+      for (const path of files) {
+        readFileSync(resolve(repoRoot, path), "utf8");
+      }
+      assert.equal(
+        files.size,
+        new Set(Object.values(externalTriggerConsumer)).size,
+      );
+      assert.ok(files.size > 0);
     });
   });
 });

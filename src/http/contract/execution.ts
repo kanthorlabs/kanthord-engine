@@ -76,6 +76,8 @@ const nodeClaim_node = {
   repo: "atlas",
   revision: `revision_${U}`,
   updatedAt: A,
+  attestedObjectId: null,
+  projection: null,
 };
 
 const nodeRelease_node = {

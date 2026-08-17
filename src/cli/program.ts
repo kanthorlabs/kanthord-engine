@@ -37,6 +37,10 @@ import { registerNodeShow } from "./node/show.ts";
 import { registerNodeClaim } from "./node/claim.ts";
 import { registerNodeHeartbeat } from "./node/heartbeat.ts";
 import { registerNodeRelease } from "./node/release.ts";
+import { registerNodeReport } from "./node/report.ts";
+import { registerNodeAttest } from "./node/attest.ts";
+import { registerNodeClose } from "./node/close.ts";
+import { registerNodeUnblock } from "./node/unblock.ts";
 import { registerStatus } from "./status.ts";
 
 export type ServeOptions = Readonly<{
@@ -310,6 +314,34 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     randomBytes: dependencies.randomBytes,
   });
   registerNodeRelease({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+  });
+  registerNodeReport({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+  });
+  registerNodeAttest({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+  });
+  registerNodeClose({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+  });
+  registerNodeUnblock({
     program,
     client,
     stdout: dependencies.stdout,

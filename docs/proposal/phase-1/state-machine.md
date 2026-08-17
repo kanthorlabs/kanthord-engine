@@ -115,6 +115,6 @@ Task order comes from the dependency graph, with a deterministic tie-break. The 
 ## Rules
 
 - A node is `ready` when every dependency is `done` or `partial`. `partial` satisfies a dependency, because it shipped work and holds no error. The daemon derives the state, and it writes each `pending` → `ready` and each `ready` → `pending` transition inside the transaction of the write that changed eligibility.
-- Attempt accounting belongs to the domain. Each rejection increments the attempt counter. The limit moves the task to `blocked` with reason `attempt-limit`. The default limit is 3, from configuration.
+- Attempt accounting belongs to the domain. The attempt counter is `MAX(attempt_no)` of the active task run. Every closed attempt spends a try, whatever its outcome. The limit moves the task to `blocked` with reason `attempt-limit`. The default limit is 3, from configuration.
 - Execution is at-least-once. Agent work is attributed, not idempotent, because a model call is not repeatable. The invariant is that every side effect is attributed to a run and an attempt, and that recovery detects it. See `../phase-3/recovery.md`.
 - A repository in `needs-reconcile` gets no new objective clone. Its objectives stay `ready`, the scheduler skips them, and `status` names the repository. This is a repository state, not a node block reason, because the divergence is between the landing branch and remote origin rather than in any one candidate. See `../phase-2/integration-and-publish.md`.

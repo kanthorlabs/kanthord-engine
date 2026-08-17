@@ -41,8 +41,16 @@ export const declaredCommands: readonly DeclaredCommand[] = [
     operationIds: ["system.db"],
   },
   {
+    path: ["node", "attest"],
+    operationIds: ["node.report"],
+  },
+  {
     path: ["node", "claim"],
     operationIds: ["node.claim"],
+  },
+  {
+    path: ["node", "close"],
+    operationIds: ["node.report"],
   },
   {
     path: ["node", "create"],
@@ -65,8 +73,16 @@ export const declaredCommands: readonly DeclaredCommand[] = [
     operationIds: ["node.release"],
   },
   {
+    path: ["node", "report"],
+    operationIds: ["node.report"],
+  },
+  {
     path: ["node", "show"],
     operationIds: ["node.show"],
+  },
+  {
+    path: ["node", "unblock"],
+    operationIds: ["node.unblock"],
   },
   {
     path: ["node", "update"],

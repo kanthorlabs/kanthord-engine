@@ -21,6 +21,7 @@ export const internalTriggerIds = [
   "initiative-aggregated-done",
   "initiative-aggregated-partial",
   "initiative-aggregated-discarded",
+  "manual-unblock",
 ] as const;
 export type InternalTriggerId = (typeof internalTriggerIds)[number];
 export type NodeTriggerId = ExternalTriggerId | InternalTriggerId;
@@ -122,6 +123,12 @@ export const internalTransitions: readonly InternalTransition[] = [
     from: "running",
     to: "discarded",
     trigger: "initiative-aggregated-discarded",
+  },
+  {
+    levels: ["task"],
+    from: "blocked",
+    to: "pending",
+    trigger: "manual-unblock",
   },
 ] as const;
 

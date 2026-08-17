@@ -17,6 +17,8 @@ import {
   createPlanStore,
 } from "../../../../test/helpers/plan.ts";
 import { createMockClock } from "../../../../test/helpers/clock.ts";
+import { createBackedExecutionFake } from "../../../../test/helpers/execution.ts";
+import { createMockIdGenerator } from "../../../../test/helpers/ids.ts";
 
 const daemonHome = "/var/lib/kanthord";
 
@@ -38,6 +40,9 @@ describe("src/http/server/node/show-node.test", () => {
       storage,
       createMockClock({ start: 1700000000000, step: 1000 }),
     );
+    const execution = createBackedExecutionFake({
+      ids: createMockIdGenerator({ ulids: [] }),
+    }).execution;
     storage.transact((transaction) => {
       seedRegistry(transaction);
       seedGraph(transaction);
@@ -45,7 +50,8 @@ describe("src/http/server/node/show-node.test", () => {
     const app = await createTestApp({
       handlers: {
         "node.show": showNodeHandler({
-          showNode: (input) => showNode({ storage, plan, blobs }, input),
+          showNode: (input) =>
+            showNode({ storage, plan, blobs, execution }, input),
         }),
       },
     });

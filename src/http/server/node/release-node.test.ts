@@ -38,6 +38,8 @@ const fullNode = {
   repo: "atlas",
   revision: `revision_${U}`,
   updatedAt: 1722800300000,
+  attestedObjectId: null,
+  projection: null,
 };
 
 const successResult = { node: fullNode };

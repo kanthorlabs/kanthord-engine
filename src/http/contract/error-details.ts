@@ -8,7 +8,11 @@ import { choices } from "../../domain/plan-choice.ts";
 import { credentialFailures } from "../../domain/repository.ts";
 import { revisionGuardClasses } from "../../domain/revision-guard.ts";
 import { runDrivers } from "../../domain/run.ts";
-import { nodeStates } from "../../domain/state.ts";
+import {
+  blockReasons,
+  nodeStates,
+  unblockRefusals,
+} from "../../domain/state.ts";
 import { planFinding } from "./plan-finding.ts";
 
 const objectId = z.string().regex(/^[0-9a-f]{40}$/);
@@ -52,6 +56,15 @@ export const illegalTransitionDetails = z.discriminatedUnion("refusal", [
     pinnedDriver: z.enum(runDrivers),
     claimDriver: z.enum(runDrivers),
   }),
+  z.strictObject({
+    refusal: z.literal("run-driver"),
+    runDriver: z.enum(runDrivers),
+    expectedDriver: z.enum(runDrivers),
+  }),
+  z.strictObject({ refusal: z.literal("no-active-run") }),
+  z.strictObject({ refusal: z.literal("children-not-terminal") }),
+  z.strictObject({ refusal: z.literal("projection-discarded") }),
+  z.strictObject({ refusal: z.literal("object-not-attested") }),
 ]);
 
 export const idempotencyMismatchDetails = z.strictObject({
@@ -110,3 +123,8 @@ export const leaseHeldDetails = z.discriminatedUnion("refusal", [
     presentedFence: z.int(),
   }),
 ]);
+
+export const nodeUnblockDetails = z.strictObject({
+  refusal: z.enum(unblockRefusals),
+  blockReason: z.enum(blockReasons).nullable(),
+});

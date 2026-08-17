@@ -10,6 +10,8 @@ export const externalTriggerIds = [
   "human-close-partial",
   "claim-released",
   "claim-expired",
+  "attempt-failed",
+  "report-cancelled",
 ] as const;
 export type ExternalTriggerId = (typeof externalTriggerIds)[number];
 
@@ -156,6 +158,36 @@ export const externalTransitions: readonly ExternalTransition[] = [
       childAggregation: "not-applicable",
     },
   },
+  {
+    level: "task",
+    from: "running",
+    to: "ready",
+    trigger: "attempt-failed",
+    precondition: {
+      runDriver: "external",
+      activeRun: true,
+      leaseFence: "valid",
+      actorKind: "harness",
+      attemptLimit: "under",
+      reportedObjectId: "absent",
+      childAggregation: "not-applicable",
+    },
+  },
+  {
+    level: "task",
+    from: "running",
+    to: "ready",
+    trigger: "report-cancelled",
+    precondition: {
+      runDriver: "external",
+      activeRun: true,
+      leaseFence: "valid",
+      actorKind: "harness",
+      attemptLimit: "under",
+      reportedObjectId: "absent",
+      childAggregation: "not-applicable",
+    },
+  },
 ] as const;
 
 export type DrivePinInput = Readonly<{
@@ -191,4 +223,6 @@ export const externalTriggerConsumer: Readonly<
   "human-close-partial": "src/commands/outcome/close-objective.ts",
   "claim-released": "src/commands/node/release-node.ts",
   "claim-expired": "src/commands/startup/recover-expired-leases.ts",
+  "attempt-failed": "src/commands/outcome/report-outcome.ts",
+  "report-cancelled": "src/commands/outcome/report-outcome.ts",
 };

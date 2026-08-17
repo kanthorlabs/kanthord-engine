@@ -61,7 +61,68 @@ describe("src/domain/attempt-accounting", () => {
     });
   });
 
-  it("a failure at the limit does not block: [1 failed, 2 failed, 3 failed], limit 3", () => {
+  it("an accepted attempt at the limit is exhausted", () => {
+    const attempts: AttemptRecord[] = [{ attemptNo: 3, outcome: "accepted" }];
+    assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
+      counter: 3,
+      rejections: 0,
+      exhausted: true,
+      nextAttemptNo: 4,
+    });
+  });
+
+  it("an open attempt at the counter is not exhausted", () => {
+    const attempts: AttemptRecord[] = [
+      { attemptNo: 1, outcome: "rejected" },
+      { attemptNo: 2, outcome: "rejected" },
+      { attemptNo: 3, outcome: null },
+    ];
+    assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
+      counter: 3,
+      rejections: 2,
+      exhausted: false,
+      nextAttemptNo: 4,
+    });
+  });
+
+  it("a closed attempt under the limit is not exhausted", () => {
+    const attempts: AttemptRecord[] = [{ attemptNo: 1, outcome: "cancelled" }];
+    assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
+      counter: 1,
+      rejections: 0,
+      exhausted: false,
+      nextAttemptNo: 2,
+    });
+  });
+
+  it("rejections counts rejected alone", () => {
+    const attempts: AttemptRecord[] = [
+      { attemptNo: 1, outcome: "rejected" },
+      { attemptNo: 2, outcome: "failed" },
+      { attemptNo: 3, outcome: "cancelled" },
+    ];
+    assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
+      counter: 3,
+      rejections: 1,
+      exhausted: true,
+      nextAttemptNo: 4,
+    });
+  });
+
+  it("a gap never lowers the counter", () => {
+    const attempts: AttemptRecord[] = [
+      { attemptNo: 1, outcome: "failed" },
+      { attemptNo: 3, outcome: "failed" },
+    ];
+    assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
+      counter: 3,
+      rejections: 0,
+      exhausted: true,
+      nextAttemptNo: 4,
+    });
+  });
+
+  it("a failure at the limit is exhausted: [1 failed, 2 failed, 3 failed], limit 3", () => {
     const attempts: AttemptRecord[] = [
       { attemptNo: 1, outcome: "failed" },
       { attemptNo: 2, outcome: "failed" },
@@ -70,12 +131,12 @@ describe("src/domain/attempt-accounting", () => {
     assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
       counter: 3,
       rejections: 0,
-      exhausted: false,
+      exhausted: true,
       nextAttemptNo: 4,
     });
   });
 
-  it("timed-out at the limit does not block", () => {
+  it("timed-out at the limit is exhausted", () => {
     const attempts: AttemptRecord[] = [
       { attemptNo: 1, outcome: "timed-out" },
       { attemptNo: 2, outcome: "timed-out" },
@@ -84,12 +145,12 @@ describe("src/domain/attempt-accounting", () => {
     assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
       counter: 3,
       rejections: 0,
-      exhausted: false,
+      exhausted: true,
       nextAttemptNo: 4,
     });
   });
 
-  it("cancelled at the limit does not block", () => {
+  it("cancelled at the limit is exhausted", () => {
     const attempts: AttemptRecord[] = [
       { attemptNo: 1, outcome: "cancelled" },
       { attemptNo: 2, outcome: "cancelled" },
@@ -98,12 +159,12 @@ describe("src/domain/attempt-accounting", () => {
     assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
       counter: 3,
       rejections: 0,
-      exhausted: false,
+      exhausted: true,
       nextAttemptNo: 4,
     });
   });
 
-  it("accepted at the limit does not block", () => {
+  it("three accepted attempts at the limit are exhausted", () => {
     const attempts: AttemptRecord[] = [
       { attemptNo: 1, outcome: "accepted" },
       { attemptNo: 2, outcome: "accepted" },
@@ -112,7 +173,7 @@ describe("src/domain/attempt-accounting", () => {
     assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
       counter: 3,
       rejections: 0,
-      exhausted: false,
+      exhausted: true,
       nextAttemptNo: 4,
     });
   });
@@ -140,6 +201,34 @@ describe("src/domain/attempt-accounting", () => {
     assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
       counter: 3,
       rejections: 1,
+      exhausted: true,
+      nextAttemptNo: 4,
+    });
+  });
+
+  it("a cancellation at the limit blocks even with earlier failures", () => {
+    const attempts: AttemptRecord[] = [
+      { attemptNo: 1, outcome: "failed" },
+      { attemptNo: 2, outcome: "failed" },
+      { attemptNo: 3, outcome: "cancelled" },
+    ];
+    assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
+      counter: 3,
+      rejections: 0,
+      exhausted: true,
+      nextAttemptNo: 4,
+    });
+  });
+
+  it("a timeout at the limit blocks even with earlier failures", () => {
+    const attempts: AttemptRecord[] = [
+      { attemptNo: 1, outcome: "failed" },
+      { attemptNo: 2, outcome: "failed" },
+      { attemptNo: 3, outcome: "timed-out" },
+    ];
+    assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
+      counter: 3,
+      rejections: 0,
       exhausted: true,
       nextAttemptNo: 4,
     });
@@ -183,6 +272,51 @@ describe("src/domain/attempt-accounting", () => {
     assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
       counter: 4,
       rejections: 4,
+      exhausted: true,
+      nextAttemptNo: 5,
+    });
+  });
+
+  it("overshoot: [1 failed, 2 failed, 3 failed, 4 failed], limit 3", () => {
+    const attempts: AttemptRecord[] = [
+      { attemptNo: 1, outcome: "failed" },
+      { attemptNo: 2, outcome: "failed" },
+      { attemptNo: 3, outcome: "failed" },
+      { attemptNo: 4, outcome: "failed" },
+    ];
+    assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
+      counter: 4,
+      rejections: 0,
+      exhausted: true,
+      nextAttemptNo: 5,
+    });
+  });
+
+  it("overshoot: [1 cancelled, 2 cancelled, 3 cancelled, 4 cancelled], limit 3", () => {
+    const attempts: AttemptRecord[] = [
+      { attemptNo: 1, outcome: "cancelled" },
+      { attemptNo: 2, outcome: "cancelled" },
+      { attemptNo: 3, outcome: "cancelled" },
+      { attemptNo: 4, outcome: "cancelled" },
+    ];
+    assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
+      counter: 4,
+      rejections: 0,
+      exhausted: true,
+      nextAttemptNo: 5,
+    });
+  });
+
+  it("overshoot: [1 timed-out, 2 timed-out, 3 timed-out, 4 timed-out], limit 3", () => {
+    const attempts: AttemptRecord[] = [
+      { attemptNo: 1, outcome: "timed-out" },
+      { attemptNo: 2, outcome: "timed-out" },
+      { attemptNo: 3, outcome: "timed-out" },
+      { attemptNo: 4, outcome: "timed-out" },
+    ];
+    assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
+      counter: 4,
+      rejections: 0,
       exhausted: true,
       nextAttemptNo: 5,
     });
@@ -239,6 +373,36 @@ describe("src/domain/attempt-accounting", () => {
     });
   });
 
+  it("a failed gap past the limit still blocks: [5 failed], limit 3", () => {
+    const attempts: AttemptRecord[] = [{ attemptNo: 5, outcome: "failed" }];
+    assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
+      counter: 5,
+      rejections: 0,
+      exhausted: true,
+      nextAttemptNo: 6,
+    });
+  });
+
+  it("a cancelled gap past the limit still blocks: [5 cancelled], limit 3", () => {
+    const attempts: AttemptRecord[] = [{ attemptNo: 5, outcome: "cancelled" }];
+    assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
+      counter: 5,
+      rejections: 0,
+      exhausted: true,
+      nextAttemptNo: 6,
+    });
+  });
+
+  it("a timed-out gap past the limit still blocks: [5 timed-out], limit 3", () => {
+    const attempts: AttemptRecord[] = [{ attemptNo: 5, outcome: "timed-out" }];
+    assert.deepEqual(accountAttempts({ attempts, limit: 3 }), {
+      counter: 5,
+      rejections: 0,
+      exhausted: true,
+      nextAttemptNo: 6,
+    });
+  });
+
   it("limit 1, [1 rejected]: exhausted is true", () => {
     const attempts: AttemptRecord[] = [{ attemptNo: 1, outcome: "rejected" }];
     assert.deepEqual(accountAttempts({ attempts, limit: 1 }), {
@@ -249,12 +413,32 @@ describe("src/domain/attempt-accounting", () => {
     });
   });
 
-  it("limit 1, [1 failed]: exhausted is false", () => {
+  it("limit 1, [1 failed]: exhausted is true", () => {
     const attempts: AttemptRecord[] = [{ attemptNo: 1, outcome: "failed" }];
     assert.deepEqual(accountAttempts({ attempts, limit: 1 }), {
       counter: 1,
       rejections: 0,
-      exhausted: false,
+      exhausted: true,
+      nextAttemptNo: 2,
+    });
+  });
+
+  it("limit 1, [1 cancelled]: exhausted is true", () => {
+    const attempts: AttemptRecord[] = [{ attemptNo: 1, outcome: "cancelled" }];
+    assert.deepEqual(accountAttempts({ attempts, limit: 1 }), {
+      counter: 1,
+      rejections: 0,
+      exhausted: true,
+      nextAttemptNo: 2,
+    });
+  });
+
+  it("limit 1, [1 timed-out]: exhausted is true", () => {
+    const attempts: AttemptRecord[] = [{ attemptNo: 1, outcome: "timed-out" }];
+    assert.deepEqual(accountAttempts({ attempts, limit: 1 }), {
+      counter: 1,
+      rejections: 0,
+      exhausted: true,
       nextAttemptNo: 2,
     });
   });

@@ -71,11 +71,11 @@ test("documents openapi 3.0.3 and the product info", () => {
   });
 });
 
-test("renders fifty-eight distinct paths in bytewise order", () => {
+test("renders fifty-nine distinct paths in bytewise order", () => {
   const document = buildOpenApiDocument();
   const paths = document.paths as Readonly<Record<string, unknown>>;
   const keys = Object.keys(paths);
-  assert.equal(keys.length, 58);
+  assert.equal(keys.length, 59);
   assert.deepEqual(keys, sortedBytewise(keys));
 });
 
@@ -112,7 +112,7 @@ test("orders methods within a path by the fixed sequence", () => {
 test("names every operation and matches the registry set", () => {
   const document = buildOpenApiDocument();
   const ids = operationObjects(document).map((entry) => entry.operationId);
-  assert.equal(ids.length, 65);
+  assert.equal(ids.length, 66);
   assert.deepEqual(
     sortedBytewise(ids),
     sortedBytewise(registry.map((entry) => entry.operationId)),
@@ -167,12 +167,12 @@ test("documents each entry as its success or stub status", () => {
     >
   ).responses as Readonly<Record<string, unknown>>;
   assert.equal(Object.hasOwn(healthResponses, "200"), true);
-  const unblockResponses = (
-    (paths["/v1/node/{id}/unblock"] as Readonly<Record<string, unknown>>)
+  const abandonResponses = (
+    (paths["/v1/node/{id}/abandon"] as Readonly<Record<string, unknown>>)
       .post as Readonly<Record<string, unknown>>
   ).responses as Readonly<Record<string, unknown>>;
-  assert.equal(Object.hasOwn(unblockResponses, "501"), true);
-  assert.equal(Object.hasOwn(unblockResponses, "200"), false);
+  assert.equal(Object.hasOwn(abandonResponses, "501"), true);
+  assert.equal(Object.hasOwn(abandonResponses, "200"), false);
   for (const entry of operationObjects(document)) {
     const responses = entry.operation.responses as Readonly<
       Record<string, unknown>
@@ -207,7 +207,7 @@ test("documents the routed success status from successStatus", () => {
   }
 });
 
-test("registers exactly the ninety-one schema components in bytewise order", () => {
+test("registers every schema component in bytewise order", () => {
   const document = buildOpenApiDocument();
   const components = document.components as Readonly<Record<string, unknown>>;
   const schemas = components.schemas as Readonly<Record<string, unknown>>;
@@ -218,44 +218,69 @@ test("registers exactly the ninety-one schema components in bytewise order", () 
     "actor.register.error",
     "actor.register.request",
     "actor.register.response",
+    "actor.registered",
     "actor.revoke.error",
     "actor.revoke.response",
+    "actor.revoked",
     "actor.rotate.error",
     "actor.rotate.response",
     "actor.show.error",
     "actor.show.response",
+    "actor.tokenRotated",
     "blob.show.error",
     "edge.list.error",
     "edge.list.response",
     "event.list.error",
     "event.list.response",
+    "lease.claimed",
+    "lease.released",
+    "lease.renewed",
+    "node.awaitingApproval",
     "node.claim.error",
     "node.claim.request",
     "node.claim.response",
     "node.create.error",
     "node.create.request",
     "node.create.response",
+    "node.created",
     "node.delete.error",
     "node.delete.request",
     "node.delete.response",
+    "node.deleted",
+    "node.discarded",
+    "node.done",
     "node.heartbeat.error",
     "node.heartbeat.request",
     "node.heartbeat.response",
+    "node.imported",
     "node.list.error",
     "node.list.response",
+    "node.partial",
+    "node.pending",
+    "node.ready",
     "node.release.error",
     "node.release.request",
     "node.release.response",
+    "node.report.error",
+    "node.report.request",
+    "node.report.response",
+    "node.running",
     "node.show.error",
     "node.show.response",
+    "node.unblock.error",
+    "node.unblock.response",
+    "node.unblocked",
     "node.update.error",
     "node.update.request",
     "node.update.response",
+    "node.updated",
+    "outcome.reported",
     "plan.export.error",
     "plan.export.response",
     "plan.import.error",
     "plan.import.request",
     "plan.import.response",
+    "plan.imported",
     "plan.revisions.error",
     "plan.revisions.response",
     "plan.validate.error",
@@ -264,37 +289,53 @@ test("registers exactly the ninety-one schema components in bytewise order", () 
     "project.create.error",
     "project.create.request",
     "project.create.response",
+    "project.created",
     "project.list.error",
     "project.list.response",
     "project.repositories.error",
     "project.repositories.request",
     "project.repositories.response",
+    "project.repositoriesReplaced",
     "project.show.error",
     "project.show.response",
     "project.status.error",
     "project.status.response",
+    "provider.defaultSet",
     "provider.list.error",
     "provider.list.response",
     "provider.register.error",
     "provider.register.request",
     "provider.register.response",
+    "provider.registered",
     "provider.remove.error",
     "provider.remove.response",
+    "provider.removed",
     "provider.rename.error",
     "provider.rename.request",
     "provider.rename.response",
+    "provider.renamed",
     "provider.setDefault.error",
     "provider.setDefault.response",
     "provider.show.error",
     "provider.show.response",
+    "recovery.childReaped",
+    "recovery.journalReconciled",
+    "recovery.leaseBlocked",
+    "recovery.leaseRecovered",
+    "recovery.publishReconcilePending",
+    "recovery.remnantRefused",
+    "recovery.remnantRemoved",
     "repository.inspect.error",
     "repository.inspect.request",
     "repository.inspect.response",
     "repository.list.error",
     "repository.list.response",
+    "repository.outsideWriter",
+    "repository.register.credentialRejected",
     "repository.register.error",
     "repository.register.request",
     "repository.register.response",
+    "repository.registered",
     "repository.show.error",
     "repository.show.response",
     "system.db.error",

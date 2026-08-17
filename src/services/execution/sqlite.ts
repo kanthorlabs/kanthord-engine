@@ -14,6 +14,7 @@ import {
   type OpenRunInput,
   type RunKind,
   type RunRecord,
+  type StampRunHeadInput,
 } from "./index.ts";
 
 const RUN_COLUMNS =
@@ -120,6 +121,17 @@ WHERE node_id = ? AND state = 'active'`,
     return row === undefined ? null : toRunRecord(row);
   }
 
+  latestRunOfNode(transaction: Transaction, nodeId: string): RunRecord | null {
+    const row = transaction.get(
+      `SELECT ${RUN_COLUMNS}
+FROM run
+WHERE node_id = ?
+ORDER BY id DESC LIMIT 1`,
+      [nodeId],
+    ) as RunRow | undefined;
+    return row === undefined ? null : toRunRecord(row);
+  }
+
   adoptRun(transaction: Transaction, input: AdoptRunInput): RunRecord {
     const rows = transaction.all(
       `UPDATE run SET lease_fence = ?
@@ -152,6 +164,22 @@ RETURNING ${RUN_COLUMNS}`,
       );
     }
     return toRunRecord(row);
+  }
+
+  stampRunHead(transaction: Transaction, input: StampRunHeadInput): void {
+    const rows = transaction.all(
+      `UPDATE run SET head_oid = ?
+WHERE id = ? AND ended_at IS NULL
+RETURNING ${RUN_COLUMNS}`,
+      [input.headOid, input.runId],
+    ) as readonly RunRow[];
+    const row = rows[0];
+    if (row === undefined) {
+      throw new ExecutionError(
+        "run-not-active",
+        `run ${input.runId} is not active`,
+      );
+    }
   }
 
   openAttempt(
@@ -193,11 +221,18 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL)`,
     transaction: Transaction,
     input: CloseAttemptInput,
   ): AttemptRecord {
+    const writesHeadOid = input.headOid !== undefined;
     const rows = transaction.all(
-      `UPDATE attempt SET outcome = ?, ended_at = ?
+      writesHeadOid
+        ? `UPDATE attempt SET outcome = ?, head_oid = ?, ended_at = ?
+WHERE id = ? AND outcome IS NULL
+RETURNING ${ATTEMPT_COLUMNS}`
+        : `UPDATE attempt SET outcome = ?, ended_at = ?
 WHERE id = ? AND outcome IS NULL
 RETURNING ${ATTEMPT_COLUMNS}`,
-      [input.outcome, input.at, input.attemptId],
+      writesHeadOid
+        ? [input.outcome, input.headOid, input.at, input.attemptId]
+        : [input.outcome, input.at, input.attemptId],
     ) as readonly AttemptRow[];
     const row = rows[0];
     if (row === undefined) {

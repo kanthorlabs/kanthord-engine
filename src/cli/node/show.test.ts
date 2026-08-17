@@ -25,6 +25,8 @@ const NODE = {
   repo: "atlas",
   revision: "revision_01JQ8Z7G3HZZZZZZZZZZZZZZZT",
   updatedAt: 1738368000000,
+  attestedObjectId: null,
+  projection: null,
 };
 
 type CallOptions = Readonly<{

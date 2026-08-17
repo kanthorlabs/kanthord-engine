@@ -353,6 +353,99 @@ describe("src/domain/readiness.test", () => {
         ["readiness-promoted", "readiness-demoted"],
       );
     });
+
+    describe("focusNodeId", () => {
+      it("an unrelated satisfied pending node yields no transition under a focus", () => {
+        const nodes: ReadinessNode[] = [
+          { id: "task_focus", state: "pending" },
+          { id: "task_unrelated", state: "pending" },
+        ];
+        assert.deepEqual(deriveReadiness(nodes, [], "task_focus"), [
+          promotion("task_focus"),
+        ]);
+        assert.deepEqual(deriveReadiness(nodes, []), [
+          promotion("task_focus"),
+          promotion("task_unrelated"),
+        ]);
+      });
+
+      it("an unrelated unsatisfied ready node yields no demotion under a focus", () => {
+        const nodes: ReadinessNode[] = [
+          { id: "task_focus", state: "pending" },
+          { id: "task_unrelated", state: "ready" },
+          { id: "task_running", state: "running" },
+        ];
+        const edges: StoredEdge[] = [
+          edge("e1", "task_unrelated", "task_running"),
+        ];
+        assert.deepEqual(deriveReadiness(nodes, edges, "task_focus"), [
+          promotion("task_focus"),
+        ]);
+        assert.deepEqual(deriveReadiness(nodes, edges), [
+          promotion("task_focus"),
+          demotion("task_unrelated"),
+        ]);
+      });
+
+      it("a direct dependent of the focus node yields its transition", () => {
+        const nodes: ReadinessNode[] = [
+          { id: "task_dependent", state: "pending" },
+          { id: "task_focus", state: "done" },
+        ];
+        const edges: StoredEdge[] = [
+          edge("e1", "task_dependent", "task_focus"),
+        ];
+        assert.deepEqual(deriveReadiness(nodes, edges, "task_focus"), [
+          promotion("task_dependent"),
+        ]);
+      });
+
+      it("a dependent two edges from the focus node yields nothing", () => {
+        const nodes: ReadinessNode[] = [
+          { id: "task_far", state: "pending" },
+          { id: "task_near", state: "done" },
+          { id: "task_focus", state: "done" },
+        ];
+        const edges: StoredEdge[] = [
+          edge("e1", "task_far", "task_near"),
+          edge("e2", "task_near", "task_focus"),
+        ];
+        assert.deepEqual(deriveReadiness(nodes, edges, "task_focus"), []);
+        assert.deepEqual(deriveReadiness(nodes, edges), [
+          promotion("task_far"),
+        ]);
+      });
+
+      it("the focus node itself yields nothing when a dependency is unsatisfied", () => {
+        const nodes: ReadinessNode[] = [
+          { id: "task_focus", state: "pending" },
+          { id: "task_blocker", state: "running" },
+        ];
+        const edges: StoredEdge[] = [edge("e1", "task_focus", "task_blocker")];
+        assert.deepEqual(deriveReadiness(nodes, edges, "task_focus"), []);
+      });
+
+      it("a focus node that is absent from the node set yields nothing", () => {
+        const nodes: ReadinessNode[] = [{ id: "task_1", state: "pending" }];
+        assert.deepEqual(deriveReadiness(nodes, [], "task_absent"), []);
+      });
+
+      it("a focused derivation keeps bytewise order over the focus and its dependents", () => {
+        const nodes: ReadinessNode[] = [
+          { id: "task_c", state: "pending" },
+          { id: "task_a", state: "pending" },
+          { id: "task_focus", state: "done" },
+        ];
+        const edges: StoredEdge[] = [
+          edge("e1", "task_c", "task_focus"),
+          edge("e2", "task_a", "task_focus"),
+        ];
+        assert.deepEqual(deriveReadiness(nodes, edges, "task_focus"), [
+          promotion("task_a"),
+          promotion("task_c"),
+        ]);
+      });
+    });
   });
 
   describe("blockReasonClearance", () => {

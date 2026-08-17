@@ -13,7 +13,7 @@ describe("src/http/contract/parity.test", () => {
     const comparable = proposalRows.filter(
       (row) => row.status === "routed" || row.status === "stubbed",
     );
-    assert.equal(comparable.length, 65);
+    assert.equal(comparable.length, 66);
     assert.deepEqual(compareRouteSets(registryRows(registry), comparable), {
       missingFromRegistry: [],
       missingFromProposal: [],
@@ -22,7 +22,7 @@ describe("src/http/contract/parity.test", () => {
   });
 
   it("pins the four deferred rows", () => {
-    assert.equal(proposalRows.length, 69);
+    assert.equal(proposalRows.length, 70);
     const deferred = proposalRows.filter((row) => row.status === "deferred");
     assert.deepEqual(deferred.map((row) => row.operationId).sort(), [
       "binding.e2e.project",

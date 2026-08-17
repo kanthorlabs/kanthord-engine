@@ -1,5 +1,33 @@
 export const ZERO_OID = "0000000000000000000000000000000000000000";
 
+export const reapFindings = [
+  "no-pid-file",
+  "pid-file-unreadable",
+  "process-absent",
+  "started-later",
+  "stopped",
+] as const;
+
+export const reconcileVerdicts = [
+  "complete",
+  "discarded",
+  "absent",
+  "unexpected",
+] as const;
+
+export const remnantClasses = ["lock", "staging", "key-material"] as const;
+
+export const remnantRefusalReasons = [
+  "outside-boundary",
+  "not-a-regular-file",
+  "not-a-directory",
+  "symlink-on-path",
+] as const;
+
+export const leaseSweepTargets = ["ready", "running"] as const;
+
+export const leaseVerdictTargets = ["ready", "blocked"] as const;
+
 export type RecoveryFinding = Readonly<{
   step: "reap" | "sweep" | "reconcile" | "leases";
   code: string;

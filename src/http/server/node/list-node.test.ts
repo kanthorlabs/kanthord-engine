@@ -91,7 +91,6 @@ describe("src/http/server/node/list-node.test", () => {
 
   describe("the stubbed outcome routes write nothing", () => {
     const cases: ReadonlyArray<readonly [string, string, string]> = [
-      ["unblock", "ships in phase-2", "node.unblock"],
       ["abandon", "ships in phase-2", "node.abandon"],
       ["discard", "ships in phase-3", "node.discard"],
       ["waive", "ships in phase-3", "node.waive"],

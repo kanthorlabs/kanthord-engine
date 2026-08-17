@@ -252,6 +252,69 @@ export function seedNodeState(
   );
 }
 
+export function seedNodeBlockReason(
+  transaction: Transaction,
+  id: string,
+  blockReason: string | null,
+): void {
+  transaction.run("UPDATE node SET block_reason = ? WHERE id = ?", [
+    blockReason,
+    id,
+  ]);
+}
+
+export function seedNode(
+  transaction: Transaction,
+  input: Readonly<{
+    id: string;
+    kind: string;
+    parentId: string | null;
+    title: string;
+    state: string;
+    acceptanceBlob?: string | null;
+    worker?: string | null;
+    repositoryId?: string | null;
+  }>,
+): void {
+  transaction.run(
+    "INSERT INTO node (id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, repository_id, state, block_reason, discard_reason, revision, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
+    [
+      input.id,
+      fixtureIds.project,
+      input.kind,
+      input.parentId,
+      input.title,
+      fixtureIds.instructionBlob,
+      input.acceptanceBlob ?? null,
+      input.worker ?? null,
+      input.repositoryId ?? null,
+      input.state,
+      fixtureIds.planRevision,
+      1,
+    ],
+  );
+}
+
+export function seedEdge(
+  transaction: Transaction,
+  input: Readonly<{ id: string; fromNode: string; toNode: string }>,
+): void {
+  transaction.run(
+    "INSERT INTO edge (id, from_node, to_node, waived_at) VALUES (?, ?, ?, NULL)",
+    [input.id, input.fromNode, input.toNode],
+  );
+}
+
+export function probeNodeTitle(
+  transaction: Transaction,
+  input: Readonly<{ id: string; title: string }>,
+): void {
+  transaction.run("UPDATE node SET title = ? WHERE id = ?", [
+    input.title,
+    input.id,
+  ]);
+}
+
 const SECOND_PROJECT_NODES = [
   {
     id: "initiative_pb",

@@ -14,6 +14,7 @@ export type ReadinessInput = Readonly<{
   projectId: string;
   nodes: readonly ReadinessNode[];
   edges: readonly StoredEdge[];
+  focusNodeId?: string;
   at: number;
   cause: ReadinessCause;
 }>;

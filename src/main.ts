@@ -30,6 +30,7 @@ import { createBinaryGit } from "./services/git/binary.ts";
 import { SystemClock } from "./services/clock/system.ts";
 import { SqliteStorage } from "./services/storage/sqlite.ts";
 import { StorageError } from "./services/storage/index.ts";
+import type { Transaction } from "./services/storage/index.ts";
 import { migrations } from "./services/storage/migrations.ts";
 import { AesGcmCrypto } from "./services/crypto/aes-gcm.ts";
 import { NodeCryptoSecret } from "./services/secret/node-crypto.ts";
@@ -67,6 +68,26 @@ import { deleteNode } from "./commands/node/delete-node.ts";
 import { claimNode } from "./commands/node/claim-node.ts";
 import { heartbeatNode } from "./commands/node/heartbeat-node.ts";
 import { releaseNode } from "./commands/node/release-node.ts";
+import { unblockNode } from "./commands/node/unblock-node.ts";
+import {
+  aggregateInitiative,
+  type AggregateInitiativeInput,
+} from "./commands/outcome/aggregate-initiative.ts";
+import {
+  closeObjective,
+  type CloseObjectiveInput,
+  type CloseObjectiveResult,
+} from "./commands/outcome/close-objective.ts";
+import {
+  reportObjective,
+  type ReportObjectiveInput,
+  type ReportObjectiveResult,
+} from "./commands/outcome/report-objective.ts";
+import {
+  reportOutcome,
+  type ReportOutcomeInput,
+  type ReportOutcomeResult,
+} from "./commands/outcome/report-outcome.ts";
 import { listEdges } from "./queries/edge/list-edge.ts";
 import { inspectRepository } from "./queries/repository/inspect-repository.ts";
 import { listRepositories } from "./queries/repository/list-repository.ts";
@@ -113,6 +134,8 @@ import { deleteNodeHandler } from "./http/server/node/delete-node.ts";
 import { claimNodeHandler } from "./http/server/node/claim-node.ts";
 import { heartbeatNodeHandler } from "./http/server/node/heartbeat-node.ts";
 import { releaseNodeHandler } from "./http/server/node/release-node.ts";
+import { reportNodeHandler } from "./http/server/node/report-node.ts";
+import { unblockNodeHandler } from "./http/server/node/unblock-node.ts";
 import { listEdgeHandler } from "./http/server/edge/list-edge.ts";
 import { listEventHandler } from "./http/server/event/list-event.ts";
 import { listEvents } from "./queries/event/list-event.ts";
@@ -206,6 +229,53 @@ async function serve(options: ServeOptions): Promise<void> {
       const plan = new SqlitePlanStore({ readiness });
       const blobs = new SqliteBlobStore({ storage, clock });
       const revision = new NodeWriteRevision({ blobs, plan });
+      const boundAggregateInitiative = (
+        transaction: Transaction,
+        input: AggregateInitiativeInput,
+      ): void =>
+        aggregateInitiative({ plan, events, instanceId }, transaction, input);
+      const boundCloseObjective = (
+        transaction: Transaction,
+        input: CloseObjectiveInput,
+      ): CloseObjectiveResult =>
+        closeObjective(
+          {
+            plan,
+            execution,
+            events,
+            clock,
+            aggregateInitiative: boundAggregateInitiative,
+            instanceId,
+          },
+          transaction,
+          input,
+        );
+      const boundReportObjective = (
+        transaction: Transaction,
+        input: ReportObjectiveInput,
+      ): ReportObjectiveResult =>
+        reportObjective(
+          { plan, lease, execution, events, clock, instanceId },
+          transaction,
+          input,
+        );
+      const boundReportOutcome = (
+        input: ReportOutcomeInput,
+      ): ReportOutcomeResult =>
+        reportOutcome(
+          {
+            storage,
+            plan,
+            lease,
+            execution,
+            events,
+            clock,
+            reportObjective: boundReportObjective,
+            closeObjective: boundCloseObjective,
+            instanceId,
+          },
+          input,
+        );
       const recovery = await recoverHome({
         reap: () =>
           reapOrphans(
@@ -341,7 +411,26 @@ async function serve(options: ServeOptions): Promise<void> {
           listNodes: (input) => listNodes({ storage, plan }, input),
         }),
         "node.show": showNodeHandler({
-          showNode: (input) => showNode({ storage, plan, blobs }, input),
+          showNode: (input) =>
+            showNode({ storage, plan, blobs, execution }, input),
+        }),
+        "node.report": reportNodeHandler({
+          reportOutcome: (input) => boundReportOutcome(input),
+        }),
+        "node.unblock": unblockNodeHandler({
+          unblockNode: (input) => {
+            const result = unblockNode({ storage, plan, events, clock }, input);
+            const view = showNode(
+              { storage, plan, blobs, execution },
+              { id: result.node.id },
+            );
+            if (view === null) {
+              throw new Error(
+                `the unblocked node ${result.node.id} has no view`,
+              );
+            }
+            return { ...result, node: view };
+          },
         }),
         "node.claim": claimNodeHandler({
           claimNode: (input) => {
@@ -367,7 +456,7 @@ async function serve(options: ServeOptions): Promise<void> {
               input,
             );
             const view = showNode(
-              { storage, plan, blobs },
+              { storage, plan, blobs, execution },
               { id: result.node.id },
             );
             if (view === null) {
@@ -397,7 +486,7 @@ async function serve(options: ServeOptions): Promise<void> {
               input,
             );
             const view = showNode(
-              { storage, plan, blobs },
+              { storage, plan, blobs, execution },
               { id: result.node.id },
             );
             if (view === null) {

@@ -29,14 +29,14 @@ const readP1E1Block = (): string => {
 };
 
 describe("src/cli/inventory.test", () => {
-  it("declares exactly twenty-eight commands", () => {
-    assert.equal(declaredCommands.length, 28);
+  it("declares exactly thirty-two commands", () => {
+    assert.equal(declaredCommands.length, 32);
   });
 
-  it("commandPaths holds twenty-eight distinct strings", () => {
+  it("commandPaths holds thirty-two distinct strings", () => {
     const paths = commandPaths();
-    assert.equal(paths.length, 28);
-    assert.equal(new Set(paths).size, 28);
+    assert.equal(paths.length, 32);
+    assert.equal(new Set(paths).size, 32);
   });
 
   it("commandPaths is bytewise sorted", () => {
@@ -73,12 +73,12 @@ describe("src/cli/inventory.test", () => {
     }
   });
 
-  it("flattens to thirty-five entries naming thirty distinct operation ids", () => {
+  it("flattens to thirty-nine entries naming thirty-two distinct operation ids", () => {
     const flattened = declaredCommands.flatMap(
       (entry: DeclaredCommand) => entry.operationIds,
     );
-    assert.equal(flattened.length, 35);
-    assert.equal(new Set(flattened).size, 30);
+    assert.equal(flattened.length, 39);
+    assert.equal(new Set(flattened).size, 32);
   });
 
   it("covers the eight commands the P1-E1 oracle runs", () => {
@@ -113,7 +113,7 @@ describe("src/cli/inventory.test", () => {
     }
   });
 
-  it("pins the fifteen paths the P1-E1 scan never names", () => {
+  it("pins the paths the P1-E1 scan never names", () => {
     const oracle = new Set<string>();
     const pattern = /`kanthord ((?:[a-z][a-z-]*)(?: [a-z][a-z-]*){0,2})/g;
     for (const match of readP1E1Block().matchAll(pattern)) {
@@ -138,13 +138,17 @@ describe("src/cli/inventory.test", () => {
         "config generate",
         "db migrate",
         "db status",
+        "node attest",
         "node claim",
+        "node close",
         "node create",
         "node delete",
         "node heartbeat",
         "node list",
         "node release",
+        "node report",
         "node show",
+        "node unblock",
         "node update",
         "project list",
         "project repository",

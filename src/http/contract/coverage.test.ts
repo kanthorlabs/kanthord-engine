@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { z } from "zod";
 
 import { registry } from "./registry.ts";
@@ -50,6 +50,12 @@ const operationAdditions: Readonly<Record<string, readonly string[]>> = {
   "node.claim": ["illegal-transition", "lease-held", "plan-invalid"],
   "node.heartbeat": ["illegal-transition", "lease-held", "plan-invalid"],
   "node.release": ["illegal-transition", "lease-held", "plan-invalid"],
+  "node.report": [
+    "acknowledgement-required",
+    "illegal-transition",
+    "lease-held",
+  ],
+  "node.unblock": ["illegal-transition"],
 };
 
 function objectNodes(schema: unknown): readonly Record<string, unknown>[] {
@@ -308,6 +314,15 @@ describe("src/http/contract/coverage.test", () => {
     assert.deepEqual(rows, fieldDecisions);
   });
 
+  it("the reviewed field-decision coverage has no redundant derivation script", () => {
+    assert.equal(
+      existsSync(
+        new URL("../../../scripts/derive-field-decisions.mjs", import.meta.url),
+      ),
+      false,
+    );
+  });
+
   it("no route returns a token except actor.register and actor.rotate", () => {
     function holdsTokenProperty(schema: unknown): boolean {
       if (schema === null || typeof schema !== "object") return false;
@@ -397,8 +412,8 @@ describe("src/http/contract/coverage.test", () => {
     }
   });
 
-  it("every one of the thirty-four phase-1 routed operations but blob.show carries a response schema", () => {
-    assert.equal(scoped.length, 34);
+  it("every one of the thirty-six phase-1 routed operations but blob.show carries a response schema", () => {
+    assert.equal(scoped.length, 36);
     for (const entry of scoped) {
       assert.ok(
         entry.response !== undefined,
@@ -427,7 +442,7 @@ describe("src/http/contract/coverage.test", () => {
 
   it("a stubbed operation declares no schema, no example and no errors", () => {
     const stubbed = registry.filter((entry) => entry.status === "stubbed");
-    assert.equal(stubbed.length, 27);
+    assert.equal(stubbed.length, 26);
     for (const entry of stubbed) {
       assert.equal(
         entry.query,

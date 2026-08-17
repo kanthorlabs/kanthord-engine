@@ -7,6 +7,8 @@ import { workerKind } from "./worker.ts";
 export const runDrivers = ["internal", "external"] as const;
 export type RunDriver = (typeof runDrivers)[number];
 
+export const runningReasons = ["claim-taken", "child-started"] as const;
+
 export const runRow = z
   .object({
     id: identity("run"),

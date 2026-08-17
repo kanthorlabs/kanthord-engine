@@ -38,6 +38,8 @@ const fullNode = {
   repo: "atlas",
   revision: `revision_${U}`,
   updatedAt: 1722800300000,
+  attestedObjectId: null,
+  projection: null,
 };
 
 const successResult = {
@@ -144,6 +146,21 @@ describe("src/http/server/node/claim-node.test", () => {
           refusal: "drive-mode-pinned",
           pinnedDriver: "internal",
           claimDriver: "external",
+        },
+      },
+      {
+        refusal: "run-driver-mismatch" as const,
+        error: new ClaimNodeError(
+          "run-driver-mismatch",
+          `the active run of ${TASK} is internal and is never adopted`,
+          { runDriver: "internal", claimDriver: "external" },
+        ),
+        code: "illegal-transition",
+        status: 409,
+        details: {
+          refusal: "run-driver",
+          runDriver: "internal",
+          expectedDriver: "external",
         },
       },
       {

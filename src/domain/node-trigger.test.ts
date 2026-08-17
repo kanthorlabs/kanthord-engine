@@ -104,13 +104,19 @@ const expected: readonly InternalTransition[] = [
     to: "discarded",
     trigger: "initiative-aggregated-discarded",
   },
+  {
+    levels: ["task"],
+    from: "blocked",
+    to: "pending",
+    trigger: "manual-unblock",
+  },
 ];
 
 const fixedLevelOrder = ["initiative", "objective", "task"] as const;
 
 describe("src/domain/node-trigger.test", () => {
-  it("internalTriggerIds pins the fifteen trigger ids in row order", () => {
-    assert.equal(internalTriggerIds.length, 15);
+  it("internalTriggerIds pins the sixteen trigger ids in row order", () => {
+    assert.equal(internalTriggerIds.length, 16);
     assert.deepEqual(
       [...internalTriggerIds],
       [
@@ -129,13 +135,14 @@ describe("src/domain/node-trigger.test", () => {
         "initiative-aggregated-done",
         "initiative-aggregated-partial",
         "initiative-aggregated-discarded",
+        "manual-unblock",
       ],
     );
-    assert.equal(new Set(internalTriggerIds).size, 15);
+    assert.equal(new Set(internalTriggerIds).size, 16);
   });
 
-  it("internalTransitions holds exactly fifteen rows in exactly the declared order", () => {
-    assert.equal(internalTransitions.length, 15);
+  it("internalTransitions holds exactly sixteen rows in exactly the declared order", () => {
+    assert.equal(internalTransitions.length, 16);
     assert.deepEqual(internalTransitions, expected);
     assert.deepEqual(
       internalTransitions.map((row) => row.trigger),
@@ -179,7 +186,7 @@ describe("src/domain/node-trigger.test", () => {
       );
     }
     const union = new Set([...internalTriggerIds, ...externalTriggerIds]);
-    assert.equal(union.size, 23);
+    assert.equal(union.size, 26);
   });
 
   it("triggerTransition returns the declared triple for every internal trigger", () => {
@@ -239,6 +246,7 @@ describe("src/domain/node-trigger.test", () => {
       "objective|ready|running",
       "objective|running|awaiting_approval",
       "objective|running|blocked",
+      "task|blocked|pending",
       "task|pending|ready",
       "task|ready|pending",
       "task|ready|running",

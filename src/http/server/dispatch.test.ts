@@ -51,12 +51,12 @@ const okHandler: Handler = () => ({ status: 200, body: { ok: true } });
 describe("src/http/server/dispatch.test", () => {
   it("a stubbed route answers 501 with its ships-in message from an empty handler map", async () => {
     const app = await createTestApp();
-    const response = await app.post("/v1/node/task_01JQ8ZAN9P/unblock");
+    const response = await app.post("/v1/node/task_01JQ8ZAN9P/abandon");
     assert.equal(response.status, 501);
     assert.deepEqual(response.body, {
       error: {
         code: "not-implemented",
-        message: "node.unblock ships in phase-2",
+        message: "node.abandon ships in phase-2",
       },
     });
   });
@@ -69,7 +69,7 @@ describe("src/http/server/dispatch.test", () => {
     app.use(
       dispatchMiddleware({
         handlers: {
-          "node.unblock": () => {
+          "node.abandon": () => {
             calls += 1;
             return { status: 200, body: { ok: true } };
           },
@@ -78,12 +78,12 @@ describe("src/http/server/dispatch.test", () => {
     );
     const response = await (
       await loopbackAgent(app)
-    ).post("/v1/node/task_01/unblock");
+    ).post("/v1/node/task_01/abandon");
     assert.equal(response.status, 501);
     assert.deepEqual(response.body, {
       error: {
         code: "not-implemented",
-        message: "node.unblock ships in phase-2",
+        message: "node.abandon ships in phase-2",
       },
     });
     assert.equal(calls, 0);
@@ -92,14 +92,14 @@ describe("src/http/server/dispatch.test", () => {
   it("a stubbed route carrying a malformed JSON body answers 501 and the body is never parsed", async () => {
     const app = await createTestApp();
     const response = await app
-      .post("/v1/node/task_01/unblock")
+      .post("/v1/node/task_01/abandon")
       .set("Content-Type", "application/json")
       .send('{"oops');
     assert.equal(response.status, 501);
     assert.deepEqual(response.body, {
       error: {
         code: "not-implemented",
-        message: "node.unblock ships in phase-2",
+        message: "node.abandon ships in phase-2",
       },
     });
   });
@@ -107,14 +107,14 @@ describe("src/http/server/dispatch.test", () => {
   it("a stubbed route carrying a valid JSON body answers 501 and never reaches a handler", async () => {
     const app = await createTestApp();
     const response = await app
-      .post("/v1/node/task_01/unblock")
+      .post("/v1/node/task_01/abandon")
       .set("Content-Type", "application/json")
       .send('{"ok":1}');
     assert.equal(response.status, 501);
     assert.deepEqual(response.body, {
       error: {
         code: "not-implemented",
-        message: "node.unblock ships in phase-2",
+        message: "node.abandon ships in phase-2",
       },
     });
   });
@@ -181,7 +181,7 @@ describe("src/http/server/dispatch.test", () => {
   });
 
   it("createApp refuses a stubbed id in handlers", () => {
-    const stubbed = { "node.unblock": okHandler };
+    const stubbed = { "node.abandon": okHandler };
     assert.throws(
       () =>
         createApp({
@@ -192,7 +192,7 @@ describe("src/http/server/dispatch.test", () => {
           onInternalError: () => {},
         }),
       (error: unknown) =>
-        error instanceof BindingError && error.message.includes("node.unblock"),
+        error instanceof BindingError && error.message.includes("node.abandon"),
     );
   });
 
@@ -202,19 +202,19 @@ describe("src/http/server/dispatch.test", () => {
         createApp({
           settings,
           handlers: {},
-          unimplemented: ["node.unblock"],
+          unimplemented: ["node.abandon"],
           resolveActor,
           onInternalError: () => {},
         }),
       (error: unknown) =>
-        error instanceof BindingError && error.message.includes("node.unblock"),
+        error instanceof BindingError && error.message.includes("node.abandon"),
     );
   });
 
-  it("the complete binding does not throw and derives thirty-six unimplemented ids", () => {
+  it("the complete binding does not throw and derives thirty-eight unimplemented ids", () => {
     const complete = { "system.health": okHandler, "system.db": okHandler };
     const unimplemented = unimplementedFor(complete);
-    assert.equal(unimplemented.length, 36);
+    assert.equal(unimplemented.length, 38);
     assert.doesNotThrow(() =>
       createApp({
         settings,
@@ -512,7 +512,7 @@ describe("src/http/server/dispatch.test", () => {
       driven,
       registry.filter((entry) => entry.status === "stubbed").length,
     );
-    assert.equal(driven, 27);
+    assert.equal(driven, 26);
     assert.equal(writes(), 0);
     assert.deepEqual(tableCounts(temporary.storage), before);
   });

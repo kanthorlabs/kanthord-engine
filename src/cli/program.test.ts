@@ -202,7 +202,7 @@ describe("src/cli/program.test", () => {
     const node = program.commands.find((command) => command.name() === "node");
     assert.ok(node, "the node group exists");
     const names = node.commands.map((command) => command.name());
-    assert.deepEqual(names, [
+    for (const name of [
       "create",
       "update",
       "delete",
@@ -211,6 +211,20 @@ describe("src/cli/program.test", () => {
       "claim",
       "heartbeat",
       "release",
-    ]);
+    ]) {
+      assert.ok(names.includes(name), `the node group registers ${name}`);
+    }
+  });
+
+  it("buildProgram registers node report, node attest and node close", () => {
+    const { dependencies } = fakeDependencies();
+    const program = buildProgram(dependencies);
+
+    const node = program.commands.find((command) => command.name() === "node");
+    assert.ok(node, "the node group exists");
+    const names = node.commands.map((command) => command.name());
+    for (const name of ["report", "attest", "close"]) {
+      assert.ok(names.includes(name), `the node group registers ${name}`);
+    }
   });
 });

@@ -370,5 +370,40 @@ describe("src/services/readiness/dependency.test", () => {
       );
       assert.equal(recorded.length, 0);
     });
+
+    it("a focus node limits the pass to that node and its direct dependents", () => {
+      const { events, recorded } = createRecordingEventLog();
+      const readiness = createReadiness({ events, instanceId: "instance_1" });
+      const result = readiness.apply(throwingTransaction(), {
+        ...readinessInput(mixedNodes, mixedEdges),
+        focusNodeId: "task_done",
+      });
+      assert.deepEqual(
+        result,
+        deriveReadiness(mixedNodes, mixedEdges, "task_done"),
+      );
+      assert.deepEqual(
+        result.map((transition) => transition.nodeId),
+        ["node_B"],
+      );
+      assert.deepEqual(
+        recorded.map((append) => append.input.type),
+        ["node.ready"],
+      );
+    });
+
+    it("an absent focus keeps the whole-project pass", () => {
+      const { events, recorded } = createRecordingEventLog();
+      const readiness = createReadiness({ events, instanceId: "instance_1" });
+      const result = readiness.apply(
+        throwingTransaction(),
+        readinessInput(mixedNodes, mixedEdges),
+      );
+      assert.deepEqual(result, deriveReadiness(mixedNodes, mixedEdges));
+      assert.deepEqual(
+        recorded.map((append) => append.input.type),
+        ["node.ready", "node.pending"],
+      );
+    });
   });
 });

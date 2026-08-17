@@ -256,7 +256,13 @@ describe("src/http/contract/error-details.test", () => {
       claimDriver: "external",
     };
 
-    it("parses all three variants and refuses a fourth refusal literal", () => {
+    const runDriver = {
+      refusal: "run-driver",
+      runDriver: "internal",
+      expectedDriver: "external",
+    };
+
+    it("parses all four variants and refuses a fifth refusal literal", () => {
       assert.deepEqual(illegalTransitionDetails.parse(nodeState), nodeState);
       assert.deepEqual(
         illegalTransitionDetails.parse(ancestorNotStartable),
@@ -266,8 +272,18 @@ describe("src/http/contract/error-details.test", () => {
         illegalTransitionDetails.parse(driveModePinned),
         driveModePinned,
       );
+      assert.deepEqual(illegalTransitionDetails.parse(runDriver), runDriver);
       assert.throws(() =>
         illegalTransitionDetails.parse({ refusal: "something-else" }),
+      );
+    });
+
+    it("refuses a run-driver variant that carries a pinnedDriver", () => {
+      assert.throws(() =>
+        illegalTransitionDetails.parse({
+          ...runDriver,
+          pinnedDriver: "internal",
+        }),
       );
     });
 

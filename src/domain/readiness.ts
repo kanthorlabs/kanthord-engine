@@ -2,6 +2,11 @@ import type { NodeTriggerId } from "./node-trigger.ts";
 import type { StoredEdge } from "./plan-graph.ts";
 import type { BlockReason, NodeState } from "./state.ts";
 
+export const readinessReasons = [
+  "dependency-satisfied",
+  "dependency-unsatisfied",
+] as const;
+
 export type Dependency = Readonly<{
   state: NodeState;
   waived: boolean;
@@ -30,6 +35,7 @@ export type ReadinessTransition = Readonly<{
 export function deriveReadiness(
   nodes: readonly ReadinessNode[],
   edges: readonly StoredEdge[],
+  focusNodeId?: string,
 ): readonly ReadinessTransition[] {
   const stateById = new Map(nodes.map((node) => [node.id, node.state]));
   const dependenciesByNode = new Map<string, Dependency[]>();
@@ -42,8 +48,20 @@ export function deriveReadiness(
     dependencies.push({ state, waived: edge.waivedAt !== null });
     dependenciesByNode.set(edge.fromNode, dependencies);
   }
+  const focusedNodeIds =
+    focusNodeId === undefined
+      ? null
+      : new Set([
+          focusNodeId,
+          ...edges
+            .filter((edge) => edge.toNode === focusNodeId)
+            .map((edge) => edge.fromNode),
+        ]);
   const transitions: ReadinessTransition[] = [];
   for (const node of nodes) {
+    if (focusedNodeIds !== null && !focusedNodeIds.has(node.id)) {
+      continue;
+    }
     const ready = isReady(dependenciesByNode.get(node.id) ?? []);
     if (node.state === "pending" && ready) {
       transitions.push({

@@ -32,6 +32,8 @@ const NODE = {
   repo: "atlas",
   revision: "revision_01JQ8Z7G3HZZZZZZZZZZZZZZZO",
   updatedAt: 1738368000000,
+  attestedObjectId: null,
+  projection: null,
 };
 
 const claimedBody = (attemptNo: number | null) => ({

@@ -50,6 +50,8 @@ const SHOW: CallResult = {
     repo: null,
     revision: REVISION_B,
     updatedAt: 100,
+    attestedObjectId: null,
+    projection: null,
   },
 };
 
@@ -75,6 +77,8 @@ const SHOW_OBJECTIVE: CallResult = {
     repo: "kanthord-engine",
     revision: REVISION_B,
     updatedAt: 100,
+    attestedObjectId: null,
+    projection: null,
   },
 };
 

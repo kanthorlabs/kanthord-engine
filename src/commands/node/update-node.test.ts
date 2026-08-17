@@ -44,6 +44,7 @@ import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import { tableCounts } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
+import { createBackedExecutionFake } from "../../../test/helpers/execution.ts";
 import {
   fixtureIds,
   seedLeaseOnNode,
@@ -983,7 +984,12 @@ describe("src/commands/node/update-node.test", () => {
       ["objective-without-task"],
     );
     const objective = showNode(
-      { storage: fixture.storage, plan: fixture.plan, blobs: fixture.blobs },
+      {
+        storage: fixture.storage,
+        plan: fixture.plan,
+        blobs: fixture.blobs,
+        execution: createBackedExecutionFake({ ids: fixture.ids }).execution,
+      },
       { id: objectiveId },
     );
     assert.equal(objective?.state, "ready");

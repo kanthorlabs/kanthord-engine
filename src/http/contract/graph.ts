@@ -28,7 +28,12 @@ import {
   differingFields,
   presences,
 } from "../../domain/plan-choice.ts";
-import { blockReasons, nodeKinds, nodeStates } from "../../domain/state.ts";
+import {
+  blockReasons,
+  nodeKinds,
+  nodeStates,
+  terminalStates,
+} from "../../domain/state.ts";
 
 export const planDocument = z.strictObject({
   path: z.string().min(1),
@@ -140,6 +145,8 @@ export const nodeShowResponse = nodeListItem.extend({
   repo: z.string().nullable(),
   revision: z.string(),
   updatedAt: z.number(),
+  attestedObjectId: z.string().nullable(),
+  projection: z.enum(terminalStates).nullable(),
 });
 
 export const edgeView = z.strictObject({
@@ -330,6 +337,8 @@ export const nodeShowExamples: OperationExamples = {
     repo: "atlas",
     revision: `revision_${U}`,
     updatedAt: A,
+    attestedObjectId: null,
+    projection: null,
   },
   error: { error: { code: "not-found", message: `no node task_${U}` } },
 };

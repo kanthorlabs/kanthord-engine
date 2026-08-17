@@ -1,9 +1,11 @@
-import type { HttpError } from "../../contract/errors.ts";
-import { httpError } from "../../contract/errors.ts";
+import { HttpError, httpError } from "../../contract/errors.ts";
 import { NodeWriteError } from "../../../commands/node/refusal.ts";
 import { ClaimNodeError } from "../../../commands/node/claim-node.ts";
 import { HeartbeatNodeError } from "../../../commands/node/heartbeat-node.ts";
 import { ReleaseNodeError } from "../../../commands/node/release-node.ts";
+import { ReportOutcomeError } from "../../../commands/outcome/report-outcome.ts";
+import { ReportObjectiveError } from "../../../commands/outcome/report-objective.ts";
+import { CloseObjectiveError } from "../../../commands/outcome/close-objective.ts";
 
 export function toHttpError(
   error: unknown,
@@ -35,7 +37,88 @@ export function toHttpError(
   if (error instanceof ReleaseNodeError) {
     return releaseRefusal(error, presented);
   }
+  if (error instanceof ReportOutcomeError) {
+    return reportOutcomeRefusal(error, presented);
+  }
+  if (error instanceof ReportObjectiveError) {
+    return reportObjectiveRefusal(error, presented);
+  }
+  if (error instanceof CloseObjectiveError) {
+    return closeObjectiveRefusal(error);
+  }
   throw error;
+}
+
+function reportOutcomeRefusal(
+  error: ReportOutcomeError,
+  presented: Readonly<{ subject: string; fence: number }> | undefined,
+): HttpError {
+  switch (error.refusal) {
+    case "node-not-found":
+      return httpError("not-found", error.message);
+    case "initiative-not-reportable":
+    case "body-kind-mismatch":
+      return httpError("invalid-request", error.message, {
+        refusal: error.refusal,
+      });
+    case "actor-forbidden":
+      return httpError("actor-forbidden", error.message);
+    case "illegal-transition":
+      return outcomeTransitionRefusal(error);
+    case "lease-held":
+      return leaseHeld(error, presented);
+  }
+}
+
+function reportObjectiveRefusal(
+  error: ReportObjectiveError,
+  presented: Readonly<{ subject: string; fence: number }> | undefined,
+): HttpError {
+  switch (error.refusal) {
+    case "actor-forbidden":
+      return httpError("actor-forbidden", error.message);
+    case "illegal-transition":
+      return outcomeTransitionRefusal(error);
+    case "lease-held":
+      return leaseHeld(error, presented);
+  }
+}
+
+function closeObjectiveRefusal(error: CloseObjectiveError): HttpError {
+  switch (error.refusal) {
+    case "actor-forbidden":
+      return httpError("actor-forbidden", error.message);
+    case "illegal-transition":
+      return outcomeTransitionRefusal(error);
+    case "acknowledgement-required":
+      return new HttpError("acknowledgement-required", error.message);
+  }
+}
+
+function outcomeTransitionRefusal(
+  error: ReportOutcomeError | ReportObjectiveError | CloseObjectiveError,
+): HttpError {
+  const refusal = details(error);
+  if (refusal.state !== undefined) {
+    return httpError("illegal-transition", error.message, {
+      refusal: "node-state",
+      state: refusal.state,
+      admitted: refusal.admitted,
+    });
+  }
+  if (refusal.runDriver !== undefined) {
+    return httpError("illegal-transition", error.message, {
+      refusal: "run-driver",
+      runDriver: refusal.runDriver,
+      expectedDriver: refusal.expectedDriver,
+    });
+  }
+  if (refusal.guard !== undefined) {
+    return httpError("illegal-transition", error.message, {
+      refusal: refusal.guard,
+    });
+  }
+  return httpError("not-found", error.message);
 }
 
 function claimRefusal(error: ClaimNodeError): HttpError {
@@ -55,6 +138,12 @@ function claimRefusal(error: ClaimNodeError): HttpError {
         refusal: "drive-mode-pinned",
         pinnedDriver: details(error).pinnedDriver,
         claimDriver: details(error).claimDriver,
+      });
+    case "run-driver-mismatch":
+      return httpError("illegal-transition", error.message, {
+        refusal: "run-driver",
+        runDriver: details(error).runDriver,
+        expectedDriver: details(error).claimDriver,
       });
     case "illegal-transition":
       return httpError("illegal-transition", error.message, {
@@ -125,7 +214,12 @@ function releaseRefusal(
 }
 
 function leaseHeld(
-  error: ClaimNodeError | HeartbeatNodeError | ReleaseNodeError,
+  error:
+    | ClaimNodeError
+    | HeartbeatNodeError
+    | ReleaseNodeError
+    | ReportOutcomeError
+    | ReportObjectiveError,
   presented: Readonly<{ subject: string; fence: number }> | undefined,
 ): HttpError {
   const refusal = details(error);
@@ -152,7 +246,13 @@ function leaseHeld(
 
 function details(
   error:
-    NodeWriteError | ClaimNodeError | HeartbeatNodeError | ReleaseNodeError,
+    | NodeWriteError
+    | ClaimNodeError
+    | HeartbeatNodeError
+    | ReleaseNodeError
+    | ReportOutcomeError
+    | ReportObjectiveError
+    | CloseObjectiveError,
 ): Readonly<Record<string, unknown>> {
   return (error.details ?? {}) as Readonly<Record<string, unknown>>;
 }

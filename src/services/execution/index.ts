@@ -44,12 +44,18 @@ export type EndRunInput = Readonly<{
   at: number;
 }>;
 
+export type StampRunHeadInput = Readonly<{
+  runId: string;
+  headOid: string;
+}>;
+
 export type OpenAttemptInput = Readonly<{ runId: string }>;
 
 export type CloseAttemptInput = Readonly<{
   attemptId: string;
   outcome: AttemptOutcome;
   at: number;
+  headOid?: string | null;
 }>;
 
 export type ExecutionErrorCode =
@@ -68,8 +74,10 @@ export class ExecutionError extends Error {
 export interface Execution {
   openRun(transaction: Transaction, input: OpenRunInput): RunRecord;
   activeRunOfNode(transaction: Transaction, nodeId: string): RunRecord | null;
+  latestRunOfNode(transaction: Transaction, nodeId: string): RunRecord | null;
   adoptRun(transaction: Transaction, input: AdoptRunInput): RunRecord;
   endRun(transaction: Transaction, input: EndRunInput): RunRecord;
+  stampRunHead(transaction: Transaction, input: StampRunHeadInput): void;
   openAttempt(transaction: Transaction, input: OpenAttemptInput): AttemptRecord;
   closeAttempt(
     transaction: Transaction,

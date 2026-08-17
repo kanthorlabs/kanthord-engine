@@ -33,6 +33,7 @@ export const harnessOperations = [
   "node.heartbeat",
   "node.list",
   "node.release",
+  "node.report",
   "node.show",
   "node.update",
   "plan.export",
@@ -43,13 +44,13 @@ export const harnessOperations = [
 ];
 
 describe("src/http/contract/registry.test", () => {
-  it("registers sixty-five operations", () => {
-    assert.equal(registry.length, 65);
+  it("registers sixty-six operations", () => {
+    assert.equal(registry.length, 66);
   });
 
   it("sorts the registry bytewise by operationId with no duplicates", () => {
     const ids = registry.map((entry) => entry.operationId);
-    assert.equal(new Set(ids).size, 65);
+    assert.equal(new Set(ids).size, 66);
     for (let i = 0; i < ids.length - 1; i += 1) {
       assert.ok(
         Buffer.compare(Buffer.from(ids[i]!), Buffer.from(ids[i + 1]!)) < 0,
@@ -61,22 +62,22 @@ describe("src/http/contract/registry.test", () => {
   it("counts routed and stubbed entries", () => {
     assert.equal(
       registry.filter((entry) => entry.status === "routed").length,
-      38,
+      40,
     );
     assert.equal(
       registry.filter((entry) => entry.status === "stubbed").length,
-      27,
+      26,
     );
   });
 
   it("counts introducedIn values with no post-mvp row", () => {
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-1").length,
-      35,
+      37,
     );
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-2").length,
-      27,
+      26,
     );
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-3").length,
@@ -107,7 +108,7 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("attaches requests to the fifteen write routes and responses to the thirty-seven routes", () => {
+  it("attaches requests to the sixteen write routes and responses to the thirty-nine routes", () => {
     const withRequest = registry.filter((entry) => entry.request !== undefined);
     assert.deepEqual(withRequest.map((entry) => entry.operationId).sort(), [
       "actor.register",
@@ -116,6 +117,7 @@ describe("src/http/contract/registry.test", () => {
       "node.delete",
       "node.heartbeat",
       "node.release",
+      "node.report",
       "node.update",
       "plan.import",
       "plan.validate",
@@ -143,7 +145,9 @@ describe("src/http/contract/registry.test", () => {
       "node.heartbeat",
       "node.list",
       "node.release",
+      "node.report",
       "node.show",
+      "node.unblock",
       "node.update",
       "plan.export",
       "plan.import",
@@ -573,7 +577,7 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("declares exactly the twenty-eight POST policies the story names", () => {
+  it("declares exactly the twenty-nine POST policies the story names", () => {
     const keyed = registry
       .filter((entry) => idempotencyOf(entry) !== "none")
       .map((entry) => entry.operationId)
@@ -589,6 +593,7 @@ describe("src/http/contract/registry.test", () => {
         "node.delete",
         "node.heartbeat",
         "node.release",
+        "node.report",
         "node.update",
         "plan.import",
         "plan.validate",
@@ -622,10 +627,10 @@ describe("src/http/contract/registry.test", () => {
     );
   });
 
-  it("counts twenty-seven memory-policy operations", () => {
+  it("counts twenty-eight memory-policy operations", () => {
     assert.equal(
       registry.filter((entry) => idempotencyOf(entry) === "memory").length,
-      27,
+      28,
     );
   });
 
@@ -766,6 +771,17 @@ describe("src/http/contract/registry.test", () => {
     assert.equal(renderPath(claim!.path), "/v1/node/:id/claim");
     assert.equal(renderPath(heartbeat!.path), "/v1/node/:id/heartbeat");
     assert.equal(renderPath(release!.path), "/v1/node/:id/release");
+  });
+
+  it("node.report declares its lifecycle by operation id", () => {
+    const entry = findOperation("node.report");
+    assert.notEqual(entry, undefined);
+    assert.deepEqual(entry!.allowedActors, ["human", "harness"]);
+    assert.equal(idempotencyOf(entry!), "memory");
+    assert.deepEqual(entry!.replayable, [200]);
+    assert.equal(entry!.introducedIn, "phase-1");
+    assert.equal(entry!.status, "routed");
+    assert.deepEqual(registryFaults(registry), []);
   });
 
   it("flags a replayable outcome declared without a memory policy", () => {
@@ -927,7 +943,7 @@ describe("src/http/contract/registry.test", () => {
       }
     });
 
-    it("the harness set equals the named fifteen by bytewise order", () => {
+    it("the harness set equals the named list by bytewise order", () => {
       const actual = registry
         .filter((entry) => entry.allowedActors.includes("harness"))
         .map((entry) => entry.operationId)
@@ -949,6 +965,13 @@ describe("src/http/contract/registry.test", () => {
           `${operationId} is missing from the harness set`,
         );
       }
+    });
+
+    it("node.report joins the harness set and actor.register stays human alone", () => {
+      assert.ok(harnessOperations.includes("node.report"));
+      assert.deepEqual(findOperation("actor.register")?.allowedActors, [
+        "human",
+      ]);
     });
 
     it("every operation outside the harness set admits human alone", () => {

@@ -11,6 +11,7 @@ import type {
   OpenRunInput,
   RunKind,
   RunRecord,
+  StampRunHeadInput,
 } from "../../src/services/execution/index.ts";
 import { ExecutionError } from "../../src/services/execution/index.ts";
 import type { AdoptRunInput } from "../../src/services/execution/index.ts";
@@ -62,6 +63,12 @@ export function createExecutionFake(): ExecutionFake {
         headOid: null,
         endedAt: input.at,
       };
+    },
+    stampRunHead(_transaction: Transaction, _input: unknown): never {
+      return unexpected("stampRunHead");
+    },
+    latestRunOfNode(_transaction: Transaction, _nodeId: string): never {
+      return unexpected("latestRunOfNode");
     },
     openAttempt(_transaction: Transaction, _input: OpenAttemptInput): never {
       return unexpected("openAttempt");
@@ -282,6 +289,34 @@ RETURNING ${RUN_COLUMNS}`,
       }
       return toRunRecord(row);
     },
+    stampRunHead(transaction: Transaction, input: StampRunHeadInput): void {
+      const rows = transaction.all(
+        `UPDATE run SET head_oid = ?
+WHERE id = ? AND ended_at IS NULL
+RETURNING id`,
+        [input.headOid, input.runId],
+      ) as readonly Readonly<{ id: string }>[];
+      if (rows.length === 0) {
+        throw new ExecutionError(
+          "run-not-active",
+          `run ${input.runId} is not active`,
+        );
+      }
+    },
+    latestRunOfNode(
+      transaction: Transaction,
+      nodeId: string,
+    ): RunRecord | null {
+      const row = transaction.get(
+        `SELECT ${RUN_COLUMNS}
+FROM run
+WHERE node_id = ?
+ORDER BY id DESC
+LIMIT 1`,
+        [nodeId],
+      ) as RunRow | undefined;
+      return row === undefined ? null : toRunRecord(row);
+    },
     openAttempt(
       transaction: Transaction,
       input: OpenAttemptInput,
@@ -323,11 +358,13 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL)`,
       input: CloseAttemptInput,
     ): AttemptRecord {
       closeAttemptCalls.push(input);
+      const headOid =
+        "headOid" in input ? (input.headOid as string | null) : null;
       const rows = transaction.all(
-        `UPDATE attempt SET outcome = ?, ended_at = ?
+        `UPDATE attempt SET outcome = ?, head_oid = ?, ended_at = ?
 WHERE id = ? AND outcome IS NULL
 RETURNING ${ATTEMPT_COLUMNS}`,
-        [input.outcome, input.at, input.attemptId],
+        [input.outcome, headOid, input.at, input.attemptId],
       ) as readonly AttemptRow[];
       const row = rows[0];
       if (row === undefined) {

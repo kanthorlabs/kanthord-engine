@@ -15,7 +15,7 @@ Each `it` follows this fixture shape:
 2. Migrate it through the CLI migrate path the EPIC 018 file already uses.
 3. Launch the daemon with `launchDaemon` at `test/helpers/daemon.ts:29`, which spawns `src/main.ts`, and `await ready()`.
 4. Register a `harness` actor with the bootstrap human token, and keep both tokens.
-5. Import one plan holding one initiative, one objective with two dependent tasks, and a second objective that depends on the first.
+5. Import one plan holding one initiative, one objective with two dependent tasks, and a second objective that depends on the first and holds one task.
 6. Drive HTTP requests against the listening daemon and assert from the database and from the responses.
 
 The named tests:
@@ -32,8 +32,10 @@ The named tests:
   9. `node.show` returns that same `attestedObjectId`.
   10. A `human` token closes it; the objective is `done`.
   11. The objective run is ended with outcome `done`.
-  12. The initiative is `done`.
+  12. The initiative is still `running`, because the second objective is not terminal. Aggregation rolls up only when every child objective is terminal.
   13. The second objective is `ready`.
+  14. The harness claims the task of the second objective, reports it `accepted`, and attests the second objective. A `human` token closes it, and the second objective is `done`.
+  15. The initiative is `done`.
 
   Every state is asserted by identity, never by count.
 

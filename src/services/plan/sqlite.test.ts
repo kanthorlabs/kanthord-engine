@@ -1023,6 +1023,69 @@ describe("src/services/plan/sqlite.test", () => {
     assert.equal(node?.blockReason, "dirty-recovery");
   });
 
+  it("setNodeState clears a block reason when blockReason is null", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedAll(transaction);
+      transaction.run(
+        "UPDATE node SET state = 'blocked', block_reason = 'attempt-limit' WHERE id = ?",
+        [fixtureIds.task],
+      );
+    });
+
+    storage.transact((transaction) =>
+      store.setNodeState(transaction, {
+        id: fixtureIds.task,
+        from: "blocked",
+        to: "pending",
+        trigger: "manual-unblock",
+        blockReason: null,
+        at: 3,
+        cause: { revision: fixtureIds.planRevision, importId: null },
+      }),
+    );
+
+    const node = storage.transact((transaction) =>
+      store.readNode(transaction, fixtureIds.task),
+    );
+    assert.equal(node?.blockReason, null);
+  });
+
+  it("a readiness transition leaves block_reason null", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedAll(transaction);
+      transaction.run(
+        "UPDATE node SET state = 'blocked', block_reason = 'attempt-limit' WHERE id = ?",
+        [fixtureIds.task],
+      );
+    });
+
+    const transitions = storage.transact((transaction) =>
+      store.setNodeState(transaction, {
+        id: fixtureIds.task,
+        from: "blocked",
+        to: "pending",
+        trigger: "manual-unblock",
+        blockReason: null,
+        at: 3,
+        cause: { revision: fixtureIds.planRevision, importId: null },
+      }),
+    );
+
+    assert.deepEqual(
+      transitions.map((transition) => [transition.nodeId, transition.to]),
+      [[fixtureIds.task, "ready"]],
+    );
+    const node = storage.transact((transaction) =>
+      store.readNode(transaction, fixtureIds.task),
+    );
+    assert.equal(node?.state, "ready");
+    assert.equal(node?.blockReason, null);
+  });
+
   it("setNodeState applies readiness after the write", (t) => {
     const { storage, store, dispose } = build();
     t.after(() => dispose());

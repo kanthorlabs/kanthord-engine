@@ -27,7 +27,7 @@ CREATE TABLE attempt (
 
 An attempt is one task try, and it is the unit of provider selection. The daemon resolves the binding once here and pins `provider_id` and `provider_model` for the whole attempt. See [../phase-2/providers-and-credentials.md](../phase-2/providers-and-credentials.md).
 
-`attempt_no` stays even though the id already orders the rows, because the attempt number is what the block reason `attempt-limit` counts and what the human reads. The attempt counter is `MAX(attempt_no)` of the active task run. `attempt_no = attempt_limit` with an `outcome` of `rejected` moves the task to `blocked` with reason `attempt-limit`.
+`attempt_no` stays even though the id already orders the rows, because the attempt number is what the block reason `attempt-limit` counts and what the human reads. The attempt counter is `MAX(attempt_no)` of the active task run. `attempt_no = attempt_limit` with any non-null `outcome` moves the task to `blocked` with reason `attempt-limit`.
 
 `base_oid` and `head_oid` attribute every commit of the attempt. The invariant of [../phase-3/recovery.md](../phase-3/recovery.md) is attribution, not idempotence, and a diff alone cannot say which attempt produced which commit. The commit message also carries the run id and the attempt id, so the git history is readable without the database.
 

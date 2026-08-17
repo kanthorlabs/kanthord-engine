@@ -17,6 +17,8 @@ import {
 const NOW = 1700000000000;
 const AT = NOW + 5000;
 const BASE = `sha256:${"0".repeat(64)}`;
+const OID40 = "a1".repeat(20);
+const OID64 = "a1".repeat(32);
 
 const RUN1 = "01HZY8QF3M4N5P6R7S8T9V0W1A";
 const RUN2 = "01HZY8QF3M4N5P6R7S8T9V0W1B";
@@ -543,6 +545,220 @@ describe("src/services/execution/sqlite.test", () => {
           assert.equal(attempt.outcome, null);
           assert.equal(attempt.endedAt, null);
         }
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it("stampRunHead writes head_oid on an active run and moves no other column", () => {
+    const { storage, execution, dispose } = build([RUN1]);
+    try {
+      storage.transact((transaction) => {
+        const record = execution.openRun(transaction, objectiveRunInput);
+        const before = transaction.get("SELECT * FROM run WHERE id = ?", [
+          record.id,
+        ]) as Readonly<Record<string, unknown>>;
+        execution.stampRunHead(transaction, {
+          runId: record.id,
+          headOid: OID40,
+        });
+        const after = transaction.get("SELECT * FROM run WHERE id = ?", [
+          record.id,
+        ]) as Readonly<Record<string, unknown>>;
+        assert.equal(after.head_oid, OID40);
+        for (const column of Object.keys(before)) {
+          if (column === "head_oid") {
+            continue;
+          }
+          assert.deepEqual(after[column], before[column]);
+        }
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it("stampRunHead accepts a 64-character object id", () => {
+    const { storage, execution, dispose } = build([RUN1]);
+    try {
+      storage.transact((transaction) => {
+        const record = execution.openRun(transaction, objectiveRunInput);
+        execution.stampRunHead(transaction, {
+          runId: record.id,
+          headOid: OID64,
+        });
+        const row = transaction.get("SELECT head_oid FROM run WHERE id = ?", [
+          record.id,
+        ]) as Readonly<{ head_oid: string | null }>;
+        assert.equal(row.head_oid, OID64);
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it("stampRunHead refuses an ended run", () => {
+    const { storage, execution, dispose } = build([RUN1]);
+    try {
+      storage.transact((transaction) => {
+        const record = execution.openRun(transaction, objectiveRunInput);
+        execution.endRun(transaction, {
+          runId: record.id,
+          outcome: "expired",
+          at: AT,
+        });
+        const before = transaction.get("SELECT * FROM run WHERE id = ?", [
+          record.id,
+        ]) as Readonly<Record<string, unknown>>;
+        assertExecutionError(
+          () =>
+            execution.stampRunHead(transaction, {
+              runId: record.id,
+              headOid: OID40,
+            }),
+          "run-not-active",
+        );
+        const after = transaction.get("SELECT * FROM run WHERE id = ?", [
+          record.id,
+        ]) as Readonly<Record<string, unknown>>;
+        assert.deepEqual(after, before);
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it("stampRunHead refuses an unknown run id", () => {
+    const { storage, execution, dispose } = build([RUN1]);
+    try {
+      storage.transact((transaction) => {
+        assertExecutionError(
+          () =>
+            execution.stampRunHead(transaction, {
+              runId: "run_unknown",
+              headOid: OID40,
+            }),
+          "run-not-active",
+        );
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it("latestRunOfNode returns the run with the greatest id", () => {
+    const { storage, execution, dispose } = build([RUN1, RUN2]);
+    try {
+      storage.transact((transaction) => {
+        const first = execution.openRun(transaction, objectiveRunInput);
+        assert.equal(
+          execution.latestRunOfNode(transaction, fixtureIds.objective)?.id,
+          first.id,
+        );
+        execution.endRun(transaction, {
+          runId: first.id,
+          outcome: "expired",
+          at: AT,
+        });
+        const ended = execution.latestRunOfNode(
+          transaction,
+          fixtureIds.objective,
+        );
+        assert.ok(ended !== null);
+        assert.equal(ended.id, first.id);
+        assert.equal(ended.state, "ended");
+        const second = execution.openRun(transaction, objectiveRunInput);
+        const latest = execution.latestRunOfNode(
+          transaction,
+          fixtureIds.objective,
+        );
+        assert.ok(latest !== null);
+        assert.equal(latest.id, second.id);
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it("latestRunOfNode returns null for a node with no run", () => {
+    const { storage, execution, dispose } = build([]);
+    try {
+      storage.transact((transaction) => {
+        assert.equal(
+          execution.latestRunOfNode(transaction, fixtureIds.objective),
+          null,
+        );
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it("latestRunOfNode returns the ended run after the close", () => {
+    const { storage, execution, dispose } = build([RUN1, RUN2]);
+    try {
+      storage.transact((transaction) => {
+        const first = execution.openRun(transaction, objectiveRunInput);
+        execution.endRun(transaction, {
+          runId: first.id,
+          outcome: "expired",
+          at: AT,
+        });
+        const second = execution.openRun(transaction, objectiveRunInput);
+        execution.stampRunHead(transaction, {
+          runId: second.id,
+          headOid: OID40,
+        });
+        execution.endRun(transaction, {
+          runId: second.id,
+          outcome: "done",
+          at: AT,
+        });
+        const latest = execution.latestRunOfNode(
+          transaction,
+          fixtureIds.objective,
+        );
+        assert.ok(latest !== null);
+        assert.equal(latest.id, second.id);
+        assert.equal(latest.state, "ended");
+        assert.equal(latest.headOid, OID40);
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it("attemptsOfRun returns head_oid", () => {
+    const { storage, execution, dispose } = build([RUN1, RUN2, ATTEMPT1]);
+    try {
+      storage.transact((transaction) => {
+        const objectiveRun = execution.openRun(transaction, objectiveRunInput);
+        const taskRun = execution.openRun(transaction, {
+          nodeId: fixtureIds.task,
+          kind: "task",
+          parentRunId: objectiveRun.id,
+          leaseFence: 1,
+          attemptLimit: 3,
+        });
+        const attempt = execution.openAttempt(transaction, {
+          runId: taskRun.id,
+        });
+        transaction.run("UPDATE attempt SET head_oid = ? WHERE id = ?", [
+          OID40,
+          attempt.id,
+        ]);
+        execution.closeAttempt(transaction, {
+          attemptId: attempt.id,
+          outcome: "accepted",
+          at: AT,
+        });
+        const attempts = execution.attemptsOfRun(transaction, taskRun.id);
+        assert.equal(attempts.length, 1);
+        const closed = attempts[0];
+        assert.ok(closed !== undefined);
+        assert.equal(closed.id, attempt.id);
+        assert.equal(closed.headOid, OID40);
       });
     } finally {
       dispose();

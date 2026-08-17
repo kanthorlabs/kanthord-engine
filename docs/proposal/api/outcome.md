@@ -2,16 +2,30 @@
 
 Reviewer: runtime or backend engineer. Conventions are [README.md](README.md). The decisions are `../phase-3/outcomes.md` and `../phase-2/agents-and-workers.md`.
 
-The operations a human calls to clear a stuck graph. Every one of them writes an event that records the human decision.
+The operations an actor calls to clear a stuck graph. Every one of them writes an event that records the decision.
 
 ## Routes
 
-| operationId    | Method and path             | introducedIn | status  | Source                                              |
-| -------------- | --------------------------- | ------------ | ------- | --------------------------------------------------- |
-| `node.unblock` | `POST /v1/node/:id/unblock` | phase-2      | stubbed | agents-and-workers.md, "manual controls"            |
-| `node.abandon` | `POST /v1/node/:id/abandon` | phase-2      | stubbed | outcomes.md, `abandon task` and `abandon objective` |
-| `node.discard` | `POST /v1/node/:id/discard` | phase-3      | stubbed | outcomes.md, discard                                |
-| `node.waive`   | `POST /v1/node/:id/waive`   | phase-3      | stubbed | outcomes.md, waive                                  |
+| operationId    | Method and path             | introducedIn | status  | Source                                                |
+| -------------- | --------------------------- | ------------ | ------- | ----------------------------------------------------- |
+| `node.report`  | `POST /v1/node/:id/report`  | phase-1      | routed  | 013-external-drive-overview.md, external drive report |
+| `node.unblock` | `POST /v1/node/:id/unblock` | phase-1      | routed  | agents-and-workers.md, "manual controls"              |
+| `node.abandon` | `POST /v1/node/:id/abandon` | phase-2      | stubbed | outcomes.md, `abandon task` and `abandon objective`   |
+| `node.discard` | `POST /v1/node/:id/discard` | phase-3      | stubbed | outcomes.md, discard                                  |
+| `node.waive`   | `POST /v1/node/:id/waive`   | phase-3      | stubbed | outcomes.md, waive                                    |
+
+## node.report
+
+One route, and the node kind decides the behaviour. It repeats the one-path rule of [One path for abandon](#one-path-for-abandon) rather than restating it.
+
+- A task report carries one of `accepted`, `rejected`, `failed` and `cancelled`. `accepted` moves the task `running → done` and records the reported object id. `rejected`, `failed` and `cancelled` close the attempt and return the task to `ready` under the attempt limit, and reach `blocked` with reason `attempt-limit` at the limit.
+- `timed-out` is not a reported outcome, because an external attempt carries no timeout budget.
+- A task report requires a live lease on the task: a matching owner, a matching fence and an unexpired row. Every refusal is `409 lease-held`.
+- The authenticated actor is the owner. The request body carries no owner field.
+- An objective report with `attested` carries the combined object id, moves the objective `running → awaiting_approval` and releases the objective lease. The daemon infers no objective result.
+- An objective report with `closed` carries `acknowledgePartial` only. The daemon derives `done` or `partial` from the task states. A derived `partial` with no acknowledgement is `409 acknowledgement-required`.
+- A report on an initiative is `400 invalid-request`.
+- A task report admits a `harness` actor, an attestation admits a `harness` actor, and a close admits a `human` actor.
 
 ## One path for abandon
 
@@ -44,4 +58,9 @@ The route stamps `waived_at` and never deletes the row, so the human decision su
 
 ## `node.unblock`
 
-Returns the node to `pending`. It clears the block reason and nothing else. It never resets a workspace, so a block that holds commits needs `node.abandon` first.
+Only a human can call `node.unblock`. It clears `attempt-limit` and no other block reason.
+
+- A blocked task with `attempt-limit` returns to `pending`, then readiness promotes it to `ready` when its dependencies are satisfied.
+- `dependency-discarded`, `dirty-recovery`, `stale-base` and `abandoned` refuse with `409 illegal-transition`.
+- An objective or initiative refuses with `400 invalid-request`. A task that is not blocked refuses with `409 illegal-transition`.
+- The route reads no lease and resets no workspace. A block that holds commits needs `node.abandon` first.

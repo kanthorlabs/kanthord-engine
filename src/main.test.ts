@@ -21,6 +21,8 @@ const byBytes = (a: string, b: string): number =>
 
 // EPIC 018 Story 14 added the three claim routes; Story 17 binds them in
 // main.ts and adds their fixture rows, so the pending list is empty.
+// EPIC 019 Story 18 routes node.report; Story 19 binds it in main.ts and
+// adds its fixture row, so the pending list is empty again.
 const pending = [] as const;
 
 const MISSING_ID = "01JZZZZZZZZZZZZZZZZZZZZZZZ";
@@ -152,6 +154,15 @@ const fixtures: Readonly<Record<string, Fixture>> = {
   "node.release": {
     parameters: { id: missing("node") },
     body: { fence: 1 },
+    expect: 404,
+  },
+  "node.report": {
+    parameters: { id: missing("node") },
+    body: { report: "accepted", fence: 1, objectId: "a".repeat(40) },
+    expect: 404,
+  },
+  "node.unblock": {
+    parameters: { id: missing("node") },
     expect: 404,
   },
   "node.create": {
@@ -286,6 +297,20 @@ describe("src/main.test", () => {
       .filter((id) => !(id in fixtures))
       .sort(byBytes);
     assert.deepEqual(residue, [...pending].sort(byBytes));
+  });
+
+  it("the production handler map implements node.report", async () => {
+    const result = await call(clientDependencies(), {
+      operationId: "node.report",
+      parameters: { id: missing("node") },
+      body: { report: "accepted", fence: 1, objectId: "a".repeat(40) },
+    });
+
+    assert.notEqual(
+      result.status,
+      501,
+      "an unbound node.report answers 501 through the dispatch fallback",
+    );
   });
 
   it("kanthord status answers against the started daemon", async () => {

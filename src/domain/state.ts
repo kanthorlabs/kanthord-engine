@@ -30,3 +30,10 @@ export const blockReasons = [
 ] as const;
 export const blockReason = z.enum(blockReasons);
 export type BlockReason = z.infer<typeof blockReason>;
+
+export const unblockRefusals = [
+  "node-kind-invalid",
+  "not-blocked",
+  "block-reason-not-clearable",
+] as const;
+export type UnblockRefusal = (typeof unblockRefusals)[number];

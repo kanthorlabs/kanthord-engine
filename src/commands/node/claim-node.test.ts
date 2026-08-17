@@ -15,6 +15,7 @@ import {
   ClaimNodeError,
   type ClaimNodeResult,
 } from "./claim-node.ts";
+import { reportOutcome } from "../outcome/report-outcome.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import {
   createMigratedStorage,
@@ -158,6 +159,51 @@ function seedTaskLease(fixture: ClaimFixture): void {
       now: NOW,
     });
   });
+}
+
+// Drives the real reportOutcome command of Story 7+8 to build the
+// post-report state this story's fixtures need: the task back to `ready`,
+// its run still active, its attempt closed with the reported outcome, the
+// task lease free, and the objective lease still held by the reporting
+// actor. The delegated objective commands throw, because a task report
+// must never reach them.
+function reportTaskOutcome(
+  fixture: ClaimFixture,
+  clock: Clock,
+  input: Readonly<{
+    nodeId: string;
+    actorId: string;
+    outcome: "rejected" | "failed" | "cancelled";
+    fence: number;
+  }>,
+): void {
+  reportOutcome(
+    {
+      storage: fixture.storage,
+      plan: fixture.plan.plan,
+      lease: fixture.lease.lease,
+      execution: fixture.execution.execution,
+      events: fixture.events,
+      clock,
+      reportObjective: () => {
+        throw new Error("unexpected reportObjective call");
+      },
+      closeObjective: () => {
+        throw new Error("unexpected closeObjective call");
+      },
+      instanceId: INSTANCE,
+    },
+    {
+      nodeId: input.nodeId,
+      actorId: input.actorId,
+      actorKind: "harness",
+      body: {
+        report: input.outcome,
+        fence: input.fence,
+        reason: "fixture-driven report",
+      },
+    },
+  );
 }
 
 type ClaimInput = Readonly<{
@@ -1047,6 +1093,7 @@ describe("src/commands/node/claim-node.test", () => {
         nodeId: fixtureIds.objective,
         parentRunId: null,
         workspaceId: "workspace_a",
+        state: "ended",
       });
     });
     const before = databaseBytes(fixture.storage);
@@ -1062,7 +1109,7 @@ describe("src/commands/node/claim-node.test", () => {
     assert.deepEqual(databaseBytes(fixture.storage), before);
   });
 
-  it("a claim over an active internal run under that objective is the same refusal and never adopts", (t) => {
+  it("a claim over an active run of another driver is drive-mode-pinned and adopts nothing", (t) => {
     const fixture = createClaimFixture();
     t.after(() => fixture.dispose());
     fixture.storage.transact((transaction) => {
@@ -1083,12 +1130,179 @@ describe("src/commands/node/claim-node.test", () => {
         workspaceId: "workspace_a",
       });
     });
+    const before = databaseBytes(fixture.storage);
     const error = refused(fixture, createMockClock({ start: NOW }), {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
     });
     assert.equal(error.refusal, "drive-mode-pinned");
+    assert.deepEqual(error.details, {
+      pinnedDriver: "internal",
+      claimDriver: "external",
+    });
     assert.equal(fixture.execution.adoptRunCalls.length, 0);
+    assert.deepEqual(databaseBytes(fixture.storage), before);
+  });
+
+  it("a second claim after a rejected report adopts the same run", (t) => {
+    const fixture = createClaimFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const clock = createMockClock({ start: NOW });
+    const first = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    reportTaskOutcome(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+      outcome: "rejected",
+      fence: first.lease.fence,
+    });
+    const second = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    assert.equal(second.runId, first.runId);
+    assert.equal(second.objectiveRunId, first.objectiveRunId);
+    assert.equal(second.attemptNo, 2);
+    assert.equal(second.lease.fence, first.lease.fence + 1);
+    assert.equal(second.objectiveLease.fence, first.objectiveLease.fence);
+    const attempts = attemptRows(fixture);
+    assert.equal(attempts.length, 2);
+    assert.equal(attempts[0]!.run_id, first.runId);
+    assert.equal(attempts[0]!.attempt_no, 1);
+    assert.equal(attempts[0]!.outcome, "rejected");
+    assert.equal(attempts[1]!.run_id, first.runId);
+    assert.equal(attempts[1]!.attempt_no, 2);
+    assert.equal(attempts[1]!.outcome, null);
+  });
+
+  it("a second claim after a cancelled report and after a failed report adopts the same run", (t) => {
+    for (const outcome of ["cancelled", "failed"] as const) {
+      const fixture = createClaimFixture();
+      t.after(() => fixture.dispose());
+      seedReadyFixture(fixture);
+      const clock = createMockClock({ start: NOW });
+      const first = claim(fixture, clock, {
+        nodeId: fixtureIds.task,
+        actorId: ACTOR_A,
+      });
+      reportTaskOutcome(fixture, clock, {
+        nodeId: fixtureIds.task,
+        actorId: ACTOR_A,
+        outcome,
+        fence: first.lease.fence,
+      });
+      const second = claim(fixture, clock, {
+        nodeId: fixtureIds.task,
+        actorId: ACTOR_A,
+      });
+      assert.equal(second.runId, first.runId, outcome);
+      assert.equal(second.objectiveRunId, first.objectiveRunId, outcome);
+      assert.equal(second.attemptNo, 2, outcome);
+      assert.equal(second.lease.fence, first.lease.fence + 1, outcome);
+      assert.equal(
+        second.objectiveLease.fence,
+        first.objectiveLease.fence,
+        outcome,
+      );
+    }
+  });
+
+  it("a second actor cannot claim a task whose objective lease is held", (t) => {
+    const fixture = createClaimFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const clock = createMockClock({ start: NOW });
+    const first = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    reportTaskOutcome(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+      outcome: "rejected",
+      fence: first.lease.fence,
+    });
+    const before = databaseBytes(fixture.storage);
+    const error = refused(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_B,
+    });
+    assert.equal(error.refusal, "lease-held");
+    assert.deepEqual(error.details, {
+      subject: fixtureIds.objective,
+      holder: ACTOR_A,
+      holderKind: "actor",
+      fence: 1,
+      expiresAt: NOW + TTL,
+      relation: "ancestor",
+    });
+    assert.deepEqual(databaseBytes(fixture.storage), before);
+  });
+
+  it("the same actor claims a sibling task under the held objective lease", (t) => {
+    const fixture = createClaimFixture();
+    t.after(() => fixture.dispose());
+    seedReadySiblingFixture(fixture);
+    const clock = createMockClock({ start: NOW });
+    const first = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    reportTaskOutcome(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+      outcome: "rejected",
+      fence: first.lease.fence,
+    });
+    const second = claim(fixture, clock, {
+      nodeId: TASK_B,
+      actorId: ACTOR_A,
+    });
+    assert.equal(second.objectiveRunId, first.objectiveRunId);
+    assert.equal(second.objectiveLease.fence, first.objectiveLease.fence);
+    const objectiveRuns = runRows(fixture).filter(
+      (row) => row.node_id === fixtureIds.objective,
+    );
+    assert.equal(objectiveRuns.length, 1);
+    const siblingRun = runRows(fixture).find((row) => row.node_id === TASK_B);
+    assert.ok(siblingRun !== undefined);
+    assert.equal(siblingRun.parent_run_id, first.objectiveRunId);
+  });
+
+  it("the active run survives a restart and adoption is the only recovery", (t) => {
+    const fixture = createClaimFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const clock = createMockClock({ start: NOW });
+    const first = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    reportTaskOutcome(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+      outcome: "rejected",
+      fence: first.lease.fence,
+    });
+    // The restart itself is covered end to end in Story 20. This is the
+    // unit-level part: with the run active and the task lease free, a claim
+    // adopts rather than opens, proved by the run row count staying at one.
+    const taskRunsBefore = runRows(fixture).filter(
+      (row) => row.node_id === fixtureIds.task,
+    );
+    assert.equal(taskRunsBefore.length, 1);
+    const second = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    const taskRunsAfter = runRows(fixture).filter(
+      (row) => row.node_id === fixtureIds.task,
+    );
+    assert.equal(taskRunsAfter.length, 1);
+    assert.equal(second.runId, first.runId);
   });
 
   it("a claim whose run history is empty succeeds, and a claim whose history holds external runs only succeeds", (t) => {

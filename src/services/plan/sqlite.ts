@@ -32,7 +32,7 @@ const SELECT_REVISION =
   "SELECT id, parent_id, origin, import_id, submitted_blob, choices_blob, accepted_blob FROM plan_revision";
 
 const UPDATE_NODE_STATE =
-  "UPDATE node SET state = ?, updated_at = ? WHERE id = ? AND state = ?";
+  "UPDATE node SET state = ?, block_reason = NULL, updated_at = ? WHERE id = ? AND state = ?";
 
 const UPDATE_NODE_STATE_AND_REASON =
   "UPDATE node SET state = ?, block_reason = ?, updated_at = ? WHERE id = ? AND state = ?";
@@ -531,6 +531,7 @@ export class SqlitePlanStore implements PlanStore {
       projectId: before.projectId,
       nodes: graph.nodes.map(({ id, state }) => ({ id, state })),
       edges: graph.edges,
+      focusNodeId: input.id,
       at: input.at,
       cause: input.cause,
     });

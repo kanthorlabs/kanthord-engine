@@ -37,6 +37,8 @@ const SHOW: CallResult = {
     repo: null,
     revision: REVISION_B,
     updatedAt: 100,
+    attestedObjectId: null,
+    projection: null,
   },
 };
 

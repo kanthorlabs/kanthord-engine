@@ -20,7 +20,11 @@ export class DependencyReadiness implements Readiness {
     transaction: Transaction,
     input: ReadinessInput,
   ): readonly ReadinessTransition[] {
-    const transitions = deriveReadiness(input.nodes, input.edges);
+    const transitions = deriveReadiness(
+      input.nodes,
+      input.edges,
+      input.focusNodeId,
+    );
     for (const transition of transitions) {
       this.dependencies.events.append(transaction, {
         subjectKind: "node",

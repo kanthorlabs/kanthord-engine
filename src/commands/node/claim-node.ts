@@ -29,6 +29,7 @@ export type ClaimRefusal =
   | "initiative-not-claimable"
   | "plan-incomplete"
   | "drive-mode-pinned"
+  | "run-driver-mismatch"
   | "lease-held"
   | "illegal-transition"
   | "ancestor-not-startable";
@@ -470,9 +471,9 @@ function openOrAdoptRun(
   }
   if (active.driver !== "external") {
     throw new ClaimNodeError(
-      "drive-mode-pinned",
-      `the active run of ${input.nodeId} is internal and is never adopted`,
-      { pinnedDriver: active.driver, claimDriver: "external" },
+      "run-driver-mismatch",
+      `the active run of ${input.nodeId} is ${active.driver} and is never adopted`,
+      { runDriver: active.driver, claimDriver: "external" },
     );
   }
   return dependencies.execution.adoptRun(transaction, {

@@ -70,7 +70,7 @@ export function accountAttempts(
   const counterRecord = input.attempts.find((a) => a.attemptNo === counter);
   const exhausted =
     counterRecord !== undefined &&
-    counterRecord.outcome === "rejected" &&
+    counterRecord.outcome !== null &&
     counter >= input.limit;
 
   return {

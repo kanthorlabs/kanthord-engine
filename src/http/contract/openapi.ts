@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { KANTHORD_VERSION } from "../../domain/version.ts";
 import { buildErrorEnvelope, errorEnvelopeSchema } from "./errors.ts";
+import { eventPayloads } from "./event-payload.ts";
 import { parameterNames, renderOpenApiPath } from "./path.ts";
 import type { Operation } from "./operation.ts";
 import { registry } from "./registry.ts";
@@ -53,6 +54,12 @@ export function buildOpenApiDocument(
       io: "output",
     }),
   );
+  for (const [type, schema] of Object.entries(eventPayloads)) {
+    schemas.set(
+      type,
+      z.toJSONSchema(schema, { target: "openapi-3.0", io: "output" }),
+    );
+  }
 
   const byPath = new Map<string, Map<string, Operation>>();
   for (const entry of entries) {
