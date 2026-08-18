@@ -38,7 +38,53 @@ Sort the result in the command, never in SQL, with `[...others].sort((a, b) => B
 - Call `dependencies.clock.now()` exactly once, before the clearing loop, and bind it to `stampedAt`. Every write and every event of the transaction carries that one value.
 - For each other holder, in the sorted order, run `UPDATE provider SET set_default_at = NULL, updated_at = ? WHERE id = ?` with `[stampedAt, other.id]`, and append the `provider.defaultUnset` event Story 6 specifies. The update and its append happen per row, in the sorted order, before the next row is touched.
 - Then stamp the target with the existing `UPDATE provider SET set_default_at = ?, updated_at = ? WHERE id = ?` at lines 99-102 and append the existing `provider.defaultSet` at lines 103-114, both unchanged and both carrying `stampedAt`.
-- Keep the return shape at lines 115-119 and `projectView` at lines 129-161 unchanged.
+- Collect the cleared rows while the loop runs, in the same sorted order, as `{ id, name }` values. That list is the `displaced` member below; build it from the rows already selected and read the table no second time.
+- Keep `projectView` at lines 129-161 unchanged. Change the return at lines 115-119 to spread its result and add `displaced`:
+
+```ts
+return {
+  ...projectView(
+    dependencies,
+    outcome.row,
+    outcome.setDefaultAt,
+    outcome.updatedAt,
+  ),
+  displaced: outcome.displaced,
+};
+```
+
+The already-stamped early return of lines 79-85 and the empty-registry path both carry `displaced: []`.
+
+- Add two types to `src/commands/provider/set-default-provider.ts`, after `SetDefaultProviderInput` at lines 19-22. **Do not edit `src/domain/provider-view.ts`**: `ProviderView` is the shared entity view and a one-operation result belongs with its command, as `src/commands/plan/import-plan.ts:65` declares `ImportPlanResult`.
+
+```ts
+export type DisplacedProvider = Readonly<{
+  id: string;
+  name: string;
+}>;
+
+export type ProviderDefaultTransfer = ProviderView &
+  Readonly<{ displaced: readonly DisplacedProvider[] }>;
+```
+
+- Change the return type of `setDefaultProvider` from `ProviderView` to `ProviderDefaultTransfer`. The existing `ProviderView` import at line 10 is unchanged, because the new type extends it in the same file.
+- Edit `src/http/contract/credential.ts`. Add `displacedProvider` and extend the response, replacing `export const providerSetDefaultResponse = providerView;` at line 60:
+
+```ts
+export const displacedProvider = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+});
+
+export const providerSetDefaultResponse = providerView.extend({
+  displaced: z.array(displacedProvider),
+});
+```
+
+- Add `EXAMPLE_ULID_B` to `src/http/contract/example-literal.ts`, a second valid ULID distinct from `EXAMPLE_ULID`. No test enumerates that module's exports.
+- Add `displaced` to `providerSetDefaultExamples.success` at `src/http/contract/credential.ts:145-153`, as its last member, holding **one** entry: `{ id: `provider_${B}`, name: "anthropic" }` with `B` the new literal. An empty list would publish no example of the member, per D9.
+- Edit `src/http/server/credential/set-default-provider.ts`. Change the dependency type at line 9 from `(input: SetDefaultProviderInput) => ProviderView` to `(input: SetDefaultProviderInput) => ProviderDefaultTransfer`. Add `ProviderDefaultTransfer` to the existing `commands/provider/set-default-provider.ts` type import at line 4, and delete the now-unused `ProviderView` import at line 3. `http/server/` may import `commands/`, and `src/http/server/plan/import-plan.ts:5` is the precedent. Change the function body in no way; `return { status: 200, body: view }` stays exactly as it is.
+- Regenerate `src/http/contract/field-decisions.fixture.ts` through `node scripts/field-decisions-probe.mjs --write`, then confirm with the same command and no flag. Two rows appear, `provider.setDefault.response#/properties/displaced/items/properties/id required=true nullable=false enum=-` and the same for `name`, beside the existing `provider.setDefault.response` rows at lines 407-418. Never edit that file by hand, and expect no other row to move.
 
 ## Constraints
 
@@ -50,6 +96,11 @@ Sort the result in the command, never in SQL, with `[...others].sort((a, b) => B
 - Keep the projection fallback: a `crypto.open`, `deserializePayload` or `projectPayload` throw returns `projection: null` and changes no state and no event.
 - Import no query and no other command.
 - `src/commands/provider/register-provider.ts`, `rename-provider.ts` and `remove-provider.ts` change in no way.
+- `ProviderView` gains no member. `provider.register`, `provider.list`, `provider.show` and `provider.rename` keep the exact body they answer today, and `providerView` in `src/http/contract/credential.ts:41-48` is not edited.
+- `displaced` is required, so build it on every returned path and never omit it. An `undefined` member is a defect.
+- Nest nothing: the response is `providerView`'s members plus `displaced` at the top level, never `{ provider, displaced }`.
+- Give `displaced` no `kind` member and no timestamp.
+- The handler body branches on nothing. A handler that reads `displaced.length` to choose a status is a defect.
 
 ## Verify
 
@@ -67,7 +118,15 @@ Sort the result in the command, never in SQL, with `[...others].sort((a, b) => B
 - Add `"a transfer with an unreadable target still clears the previous holder"` — set the target row's `payload_tag` to sixteen zero bytes, then transfer. Assert `view.projection === null`, that the previous holder was cleared, and that both events were appended.
 - Add `"a reentrant transaction refuses and leaves one holder"` — an `EventLog` fake whose `append` calls `dependencies.storage.transact(() => {})`. Assert the call throws a `StorageError` whose `code` is `"storage-transaction-failed"` and whose `message` is `"a transaction is already open"`, that exactly one row holds a non-null `set_default_at` afterwards, and that the event row count is unchanged. Race no timers.
 - **Name what that test proves and what it does not.** It proves one of the three mechanisms D1 and D3 rely on: `assertIdle` refuses a second transaction on one `SqliteStorage` instance. It does **not** exercise a second top-level transfer, a second SQLite connection, `BEGIN IMMEDIATE` serialization between connections, or the home-lock exclusion between daemon processes — a competing process does not enter through the first transaction's callback. The EPIC's Hermetic bullet 9 calls this a proof of the whole serialization claim; it is a proof of the first mechanism only. Write the test title and the story's claim to that narrower fact, and assert nothing about cross-process behaviour that this harness cannot observe.
+- Add `"a transfer names the row it displaced"` — reuse the two-provider setup of the first transfer case, then assert `view.displaced` deep-equals `[{ id: <A>, name: <A's registered name> }]`, and that `view.id`, `view.setDefaultAt` and `view.updatedAt` are B's values.
+- Add `"the displaced order is the unset event order"` — reuse the three-holder case, then assert `view.displaced.map((entry) => entry.id)` deep-equals the `subject_id` values of the three `provider.defaultUnset` events read by event `id`. Assert one list against the other, not each against a literal.
+- Add `"nothing displaced is an empty list"` — two cases in one: `setDefaultProvider` on the row that already holds the default, and `setDefaultProvider` on the only `llm` row of a registry that has one holder. Assert `view.displaced` deep-equals `[]` for both.
+- Add to `src/http/contract/credential.test.ts`: `providerSetDefaultResponse.safeParse` succeeds on `providerSetDefaultExamples.success`; fails on the same object with `displaced` deleted; fails on the same object with `displaced: [{ id: "x", name: "y", kind: "llm" }]`; and `providerView.safeParse` fails on a body carrying `displaced`, which pins that the four other provider operations did not gain the member.
+- Edit `src/http/server/credential/set-default-provider.test.ts`. Three edits, and the second is the one a story that omitted it would leave to be discovered as a failure:
+  - The stub command's returned `view` gains a `displaced` member, or `providerSetDefaultResponse.parse` at line 44 throws on a missing required key.
+  - The `Object.keys(parsed).sort()` literal at line 45 gains `"displaced"` in sorted position. Read the existing array and insert, rather than rewriting it.
+  - Add a case: a transfer through the handler answers `200` with a body whose `displaced` is the command's list, unmodified and in the same order.
 - Add `"no refusal carries ids"` — for the `not-found` and the `kind-not-chainable` refusals, assert `Object.keys(error).sort()` deep-equals `["name", "refusal"]`.
 - Run `node --test --test-timeout=60000 src/commands/provider/set-default-provider.test.ts` during the coupled batch of Stories 5, 6 and 7.
 - After Story 7, run `npm run verify`; it exits 0.
-- Proof: `PASS EPIC-021` for `src/commands/provider/*.test.ts`, plus Hermetic coverage "The transfer" bullets 1 and 3 to 9, and the first clause of bullet 10.
+- Proof: `PASS EPIC-021` for `src/commands/provider/*.test.ts`, `src/http/contract/credential.test.ts` and `src/http/server/credential/set-default-provider.test.ts`, plus every Hermetic coverage bullet of "The transfer" except the one naming the exact event payloads, which Story 6 owns, and the first clause of the credential `ids` bullet.

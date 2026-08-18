@@ -13,7 +13,7 @@ const scoped = registry.filter((entry) => entry.examples !== undefined);
 
 Delete the `entry.status === "routed"`, the `entry.introducedIn === "phase-1"` and the `entry.operationId !== "blob.show"` clauses. `blob.show` carries no examples, so it leaves `scoped` by the filter itself rather than by name.
 
-- Replace the sub-test at line 17 titled `"covers the thirty-one phase-1 routed operations"`. Its new title is `"covers every operation that carries examples"`, and its body asserts
+- Replace the sub-test at line 17 titled `"covers the thirty-six phase-1 routed operations"`. Its new title is `"covers every operation that carries examples"`, and its body asserts
 
 ```ts
 assert.deepEqual(
@@ -26,10 +26,15 @@ assert.deepEqual(
     "actor.show",
     "edge.list",
     "event.list",
+    "node.claim",
     "node.create",
     "node.delete",
+    "node.heartbeat",
     "node.list",
+    "node.release",
+    "node.report",
     "node.show",
+    "node.unblock",
     "node.update",
     "plan.export",
     "plan.import",
@@ -57,7 +62,7 @@ assert.deepEqual(
 );
 ```
 
-`registry` is already sorted bytewise by `operationId` at `src/http/contract/registry.ts:25-39`, so `scoped` preserves that order and the list is written in it. Assert no count.
+`registry` is already sorted bytewise by `operationId` at `src/http/contract/registry.ts:25-39`, so `scoped` preserves that order and the list is written in it. Assert no count. The list holds 39 ids; if it does not deep-equal the live value, a later epic added a routed operation, and the fix is to add its id in bytewise position, never to relax the assertion.
 
 - Replace the sub-test at line 165 titled `"blob.show carries no example"` with one titled `"blob.show is the only routed operation with no example"`, whose body asserts
 
