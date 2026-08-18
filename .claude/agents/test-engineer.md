@@ -1,7 +1,8 @@
 ---
 name: test-engineer
 description: "TDD test-engineer for kanthord — writes the failing test on node:test (RED), confirms GREEN, signals ready. Never touches production code."
-model: opus
+model: sonnet
+effort: high
 tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 

@@ -2,6 +2,7 @@
 name: software-engineer
 description: "TDD software-engineer for kanthord — makes the failing test pass (GREEN) plus the named REFACTOR. Never writes or runs tests."
 model: opus
+effort: high
 tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 
