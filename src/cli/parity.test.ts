@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 
-import { findOperation } from "../http/contract/registry.ts";
+import { findOperation, registry } from "../http/contract/registry.ts";
 import { commandPaths, declaredCommands } from "./inventory.ts";
 import { compareCommandSets, programCommandPaths } from "./parity.ts";
 import { buildProgram, type ProgramDependencies } from "./program.ts";
@@ -75,11 +75,45 @@ describe("src/cli/parity.test", () => {
     );
   });
 
-  it("programCommandPaths returns the thirty-two inventory paths", () => {
+  it("programCommandPaths returns exactly the declared paths, by name", () => {
     const paths = programCommandPaths(buildProgram(fakeDependencies()));
 
-    assert.equal(paths.length, 32);
     assert.deepEqual(paths, commandPaths());
+    assert.deepEqual(commandPaths(), [
+      "actor list",
+      "actor register",
+      "actor revoke",
+      "actor rotate",
+      "actor show",
+      "config generate",
+      "credential register",
+      "db migrate",
+      "db status",
+      "event list",
+      "node attest",
+      "node claim",
+      "node close",
+      "node create",
+      "node delete",
+      "node heartbeat",
+      "node list",
+      "node release",
+      "node report",
+      "node show",
+      "node unblock",
+      "node update",
+      "plan export",
+      "plan import",
+      "project create",
+      "project list",
+      "project repository",
+      "project show",
+      "repository register",
+      "repository show",
+      "run",
+      "serve",
+      "status",
+    ]);
   });
 
   it("never lists a group command as a path", () => {
@@ -114,19 +148,17 @@ describe("src/cli/parity.test", () => {
     assert.deepEqual(stubbedPaths, ["run"]);
   });
 
-  it("pins thirty-two distinct ids across twenty-nine calling entries", () => {
-    const calling = declaredCommands.filter(
-      (entry) => entry.operationIds.length > 0,
-    );
-
-    assert.equal(calling.length, 29);
-    assert.equal(
-      new Set(calling.flatMap((entry) => entry.operationIds)).size,
-      32,
+  it("every calling entry names at least one operation id", () => {
+    assert.deepEqual(
+      declaredCommands
+        .filter((entry) => entry.operationIds.length === 0)
+        .map((entry) => entry.path.join(" "))
+        .sort(),
+      ["config generate", "db migrate", "serve"],
     );
   });
 
-  it("reaches six ids only as a step of another command", () => {
+  it("reaches ids only as a step of another command", () => {
     const stepOnlyIds = new Set(
       declaredCommands
         .filter((entry) => entry.operationIds.length > 1)
@@ -179,5 +211,40 @@ describe("src/cli/parity.test", () => {
       missingFromProgram: [],
       missingFromInventory: [],
     });
+  });
+
+  it("every operation id every command names resolves through findOperation", () => {
+    for (const entry of declaredCommands) {
+      for (const id of entry.operationIds) {
+        assert.ok(
+          findOperation(id),
+          `${entry.path.join(" ")} names missing operation ${id}`,
+        );
+      }
+    }
+  });
+
+  it("the routed operations that no command names are exactly the eight accepted ones", () => {
+    const named = new Set(
+      declaredCommands.flatMap((entry) => entry.operationIds),
+    );
+    const uncovered = registry
+      .filter((entry) => entry.status === "routed")
+      .map((entry) => entry.operationId)
+      .filter((id) => !named.has(id))
+      .sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
+
+    assert.deepEqual(uncovered, [
+      "blob.show",
+      "edge.list",
+      "project.status",
+      "provider.remove",
+      "provider.rename",
+      "provider.setDefault",
+      "provider.show",
+      "system.health",
+    ]);
+    assert.equal(uncovered.includes("event.list"), false);
+    assert.equal(uncovered.includes("node.unblock"), false);
   });
 });

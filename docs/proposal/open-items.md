@@ -66,6 +66,20 @@ Three obligations follow for the release, and none is a code change.
 
 A host `git` is a supply-chain surface the product inherits. Its patches are the operator's responsibility on a host install, and the image's responsibility on a container install.
 
+## Deferred to the CLI normalization epic, 2026-08-18
+
+The CLI has no written grammar and no mechanism. `api/README.md` pins the HTTP path grammar, and `AGENTS.md` gives it a typed segment tuple, so a route edit cannot introduce a plural or a free-form segment. No equivalent exists for a command. Three epics each chose an option shape on their own, and every gate stayed green.
+
+One rule is settled and already applied. A command names its own subject `--id`. A command names a reference to another entity `--<entity>`. EPIC 020 normalized `node claim`, `node heartbeat`, `node release`, `node show` and `node unblock` to it, and amended the three planning files that specified the superseded grammar: `018-claim-and-lease/16-cli-commands.md`, `019-outcome-report/19a-node-unblock.md` and `epics/111-inspection-and-manual-controls.md`. Every command that names its own subject now takes `--id`.
+
+Three questions stay open, and each one needs a decision before the rule becomes a test.
+
+- **A reference flag addresses by id or by name.** `node list` takes `--repository <id>`. `repository register` takes `--credential <name>`. Both forms ship today. Decide one, and give the other form its own flag name if a human-readable reference earns one.
+- **One entity carries one flag name.** `node create` and `node update` take `--repo <name>`. `node list` takes `--repository <id>`. The path grammar already refuses an abbreviation of a resource segment.
+- **One flag name carries one meaning.** `config generate` takes `--actor <name>`. `event list` takes `--actor <id>`.
+
+The mechanism is a test over `buildProgram`, in the pattern of `src/cli/parity.test.ts`. Commander exposes `command.options[].long` and `command.registeredArguments`, so the test reads the real program and needs no second manifest. The code change behind the three questions is three flags. The grammar is the work.
+
 ## Known trade-offs, accepted deliberately
 
 - **The profile does not travel in a pull request.** It lives in SQLite, so a teammate cannot review a profile change in git. Export and import exist as the escape hatch if drift between teammates becomes a problem.

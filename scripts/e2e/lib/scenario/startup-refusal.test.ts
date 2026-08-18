@@ -70,7 +70,16 @@ function buildRefusalDriver(
     async cli() {
       throw new Error("not used by this test");
     },
+    async cliAs() {
+      throw new Error("not used by this test");
+    },
     issue: async () => {
+      throw new Error("not used by this test");
+    },
+    async issueAs() {
+      throw new Error("not used by this test");
+    },
+    async registerActor() {
       throw new Error("not used by this test");
     },
     async startDaemon() {

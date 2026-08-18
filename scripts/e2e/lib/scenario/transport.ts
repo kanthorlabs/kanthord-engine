@@ -144,6 +144,7 @@ export async function runStartupRefusal(
     },
     tools: resolveTools(),
     attemptLimit: 3,
+    leaseTtlMs: 300000,
   };
 
   const record = await driver.startDaemonExpectingRefusal(config);

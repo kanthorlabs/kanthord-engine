@@ -8,6 +8,7 @@ import {
   type Topology,
 } from "../podman/topology.ts";
 import { pollHealth } from "../podman/readiness.ts";
+import { RunnerError } from "../errors.ts";
 import { podmanIssuer } from "./podman-issuer.ts";
 import { runOriginProbe } from "./origin-probe.ts";
 import type { OriginProbeInput, ProbeRow } from "./origin-probe.ts";
@@ -16,6 +17,7 @@ import type {
   DaemonHandle,
   ExecutionDriver,
   HostRole,
+  HttpIssuer,
 } from "./index.ts";
 
 export type PodmanExecutor = (
@@ -37,6 +39,7 @@ function toSettingsPayload(config: DaemonConfig): unknown {
     masterKeyFile: masterKeyMountPath,
     tools: config.tools,
     attemptLimit: config.attemptLimit,
+    leaseTtlMs: config.leaseTtlMs,
   };
 }
 
@@ -91,18 +94,128 @@ export async function createPodmanDriver(
   podman: PodmanDriverContext,
 ): Promise<ExecutionDriver> {
   const { execute, topology, architecture } = podman;
-  const issue = podmanIssuer(
-    execute,
-    topology.clientContainer,
-    `http://${topology.allowedHost}`,
-  );
-  let clientBaseUrl = "";
-  let clientToken = "";
+  const roleSettings: Record<
+    HostRole,
+    { baseUrl: string; configured: boolean }
+  > = {
+    daemon: { baseUrl: "", configured: false },
+    client: { baseUrl: "", configured: false },
+    client2: { baseUrl: "", configured: false },
+  };
+  const tokenCounters: Record<HostRole, number> = {
+    daemon: 0,
+    client: 0,
+    client2: 0,
+  };
+  const tokenDirectories = new Set<HostRole>();
 
   function containerFor(role: HostRole): string {
-    return role === "daemon"
-      ? topology.daemonContainer
-      : topology.clientContainer;
+    switch (role) {
+      case "daemon":
+        return topology.daemonContainer;
+      case "client":
+        return topology.clientContainer;
+      case "client2":
+        return topology.secondClientContainer;
+    }
+  }
+
+  const issuers: Record<HostRole, HttpIssuer> = {
+    daemon: podmanIssuer(
+      execute,
+      topology.daemonContainer,
+      `http://${topology.allowedHost}`,
+    ),
+    client: podmanIssuer(
+      execute,
+      topology.clientContainer,
+      `http://${topology.allowedHost}`,
+    ),
+    client2: podmanIssuer(
+      execute,
+      topology.secondClientContainer,
+      `http://${topology.allowedHost}`,
+    ),
+  };
+  const issue = issuers.client;
+
+  async function nextTokenFile(role: HostRole): Promise<string> {
+    if (!tokenDirectories.has(role)) {
+      await execute([
+        "podman",
+        "exec",
+        containerFor(role),
+        "mkdir",
+        "-p",
+        "/opt/e2e/tokens",
+      ]);
+      tokenDirectories.add(role);
+    }
+    tokenCounters[role] += 1;
+    return `/opt/e2e/tokens/${role}-${String(tokenCounters[role])}`;
+  }
+
+  function parseActorId(record: CommandRecord): string {
+    if (record.exitCode !== 0) {
+      throw new RunnerError(
+        "unavailable",
+        `actor registration exited with code ${String(record.exitCode)}`,
+      );
+    }
+    const actorId = record.stdout.split(/\r?\n/u)[0]?.trim() ?? "";
+    if (actorId.length === 0) {
+      throw new RunnerError(
+        "assertion-failed",
+        "actor registration returned no actor id",
+      );
+    }
+    return actorId;
+  }
+
+  async function cliAs(
+    role: HostRole,
+    argv: readonly string[],
+    options?: Readonly<{ tokenFile?: string }>,
+  ): Promise<CommandRecord> {
+    const settings = roleSettings[role];
+    const authArgs: string[] = [];
+    if (settings.baseUrl.length > 0) {
+      authArgs.push("--base-url", settings.baseUrl);
+    }
+    if (options?.tokenFile !== undefined) {
+      authArgs.push("--api-token-file", options.tokenFile);
+    }
+    const execOptions = ["podman", "exec"];
+    if (options?.tokenFile === undefined && settings.configured) {
+      execOptions.push("--env", `KANTHORD_API_TOKEN_FILE=${tokenMountPath}`);
+    }
+    return execute([
+      ...execOptions,
+      containerFor(role),
+      "kanthordc",
+      ...authArgs,
+      ...argv,
+    ]);
+  }
+
+  async function issueAs(role: HostRole, request: Parameters<HttpIssuer>[0]) {
+    return issuers[role](request);
+  }
+
+  async function registerActor(
+    role: HostRole,
+    name: string,
+  ): Promise<Readonly<{ actorId: string; tokenFile: string }>> {
+    const tokenFile = await nextTokenFile(role);
+    const record = await cliAs(role, [
+      "actor",
+      "register",
+      "--name",
+      name,
+      "--token-file",
+      tokenFile,
+    ]);
+    return { actorId: parseActorId(record), tokenFile };
   }
 
   return {
@@ -193,24 +306,15 @@ export async function createPodmanDriver(
     async assertBareMachine() {
       return;
     },
+    cliAs,
     async cli(argv: readonly string[]): Promise<CommandRecord> {
-      const authArgs: string[] = [];
-      if (clientBaseUrl.length > 0) {
-        authArgs.push("--base-url", clientBaseUrl);
-      }
-      if (clientToken.length > 0) {
-        authArgs.push("--api-token-file", tokenMountPath);
-      }
-      return execute([
-        "podman",
-        "exec",
-        topology.clientContainer,
-        "kanthordc",
-        ...authArgs,
-        ...argv,
-      ]);
+      return cliAs("client", argv);
     },
-    issue,
+    issueAs,
+    registerActor,
+    async issue(request) {
+      return issueAs("client", request);
+    },
     async daemonNetwork(): Promise<
       Readonly<{ bind: string; port: number; allowedHosts: readonly string[] }>
     > {
@@ -221,8 +325,13 @@ export async function createPodmanDriver(
       };
     },
     async startDaemon(config: DaemonConfig): Promise<DaemonHandle> {
-      clientBaseUrl = `http://${topology.allowedHost}`;
-      clientToken = config.http.token;
+      const baseUrl = `http://${topology.allowedHost}`;
+      for (const role of ["daemon", "client", "client2"] as const) {
+        roleSettings[role] = {
+          baseUrl,
+          configured: config.http.token.length > 0,
+        };
+      }
       await execute(
         [
           "podman",
@@ -248,6 +357,11 @@ export async function createPodmanDriver(
 
       await deliverToken(execute, topology.daemonContainer, config.http.token);
       await deliverToken(execute, topology.clientContainer, config.http.token);
+      await deliverToken(
+        execute,
+        topology.secondClientContainer,
+        config.http.token,
+      );
 
       await execute([
         "podman",
@@ -332,9 +446,15 @@ export async function createPodmanDriver(
         "logs",
         topology.clientContainer,
       ]);
+      const client2 = await execute([
+        "podman",
+        "logs",
+        topology.secondClientContainer,
+      ]);
       return {
         daemon: `${daemon.stdout}${daemon.stderr}`,
         client: `${client.stdout}${client.stderr}`,
+        client2: `${client2.stdout}${client2.stderr}`,
       };
     },
   };

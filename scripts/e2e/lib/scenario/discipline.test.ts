@@ -6,6 +6,9 @@ import { resolve, sep } from "node:path";
 import type { ScenarioContext } from "./context.ts";
 import type { CommandSink } from "../command.ts";
 import { createLedger } from "../resources.ts";
+import { scenarios } from "./index.ts";
+import { expectedAssertions } from "./assertions.ts";
+import { knownScenarioIds } from "../main.ts";
 
 const FORBIDDEN_TOKENS = [
   "releaseAll",
@@ -14,6 +17,16 @@ const FORBIDDEN_TOKENS = [
   "podman network rm",
   "podman volume rm",
 ];
+
+test("every declared scenario id holds an expectedAssertions entry", () => {
+  for (const scenario of scenarios) {
+    assert.equal(
+      Object.hasOwn(expectedAssertions, scenario.id),
+      true,
+      `scenario ${scenario.id} has no expectedAssertions entry`,
+    );
+  }
+});
 
 test("no scenario file contains a forbidden teardown token", async () => {
   const directory = resolve(import.meta.dirname);
@@ -93,5 +106,67 @@ test("no scenario file imports from src/", async () => {
         `${file} imports ${specifier}, which resolves into src/`,
       );
     }
+  }
+});
+
+test("the proposal declares exactly the known scenario ids, in order", async () => {
+  const proposal = await readFile(
+    resolve(import.meta.dirname, "../../../../docs/proposal/phase-1/README.md"),
+    "utf8",
+  );
+  const section = proposal.split("\n## End-to-end scenarios\n")[1];
+  assert.notEqual(section, undefined, "the proposal has no scenario section");
+  const body = (section as string).split("\n## ")[0] as string;
+  const declared = [...body.matchAll(/^### (\S+) — /gmu)].map(
+    (match) => match[1] as string,
+  );
+
+  assert.deepEqual(declared, [...knownScenarioIds]);
+});
+
+test("no P1B entry of expectedAssertions is empty", () => {
+  for (const id of knownScenarioIds) {
+    if (!id.startsWith("P1B-")) {
+      continue;
+    }
+    const entry = expectedAssertions[id];
+    assert.equal(
+      Array.isArray(entry),
+      true,
+      `${id} declares no assertion list`,
+    );
+    assert.equal(
+      (entry as readonly string[]).length > 0,
+      true,
+      `${id} declares an empty assertion list`,
+    );
+  }
+});
+
+test("no expected fragment is imported from its producer", async () => {
+  const source = await readFile(
+    resolve(import.meta.dirname, "assertions.ts"),
+    "utf8",
+  );
+  const specifiers = [
+    ...source.matchAll(/^import[^"']*["']([^"']+)["']/gmu),
+  ].map((match) => match[1] as string);
+  const producers = [
+    "./journey.ts",
+    "../profile/fixture.ts",
+    "./transport.ts",
+    "./p1b-e1.ts",
+    "./p1b-e2.ts",
+    "./p1b-e3.ts",
+    "./p1-e4.ts",
+    "./p1-e5.ts",
+  ];
+
+  for (const specifier of specifiers) {
+    assert.equal(
+      producers.includes(specifier),
+      false,
+      `assertions.ts imports its producer ${specifier}`,
+    );
   }
 });

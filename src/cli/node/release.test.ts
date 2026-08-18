@@ -104,7 +104,7 @@ const run = async (
 describe("src/cli/node/release.test", () => {
   it("node release calls node.release with the id parameter and the fence body", async () => {
     const h = harness();
-    await run(h.program, ["node", "release", TASK, "--fence", "1"]);
+    await run(h.program, ["node", "release", "--id", TASK, "--fence", "1"]);
 
     assert.deepEqual(h.calls()[0]?.operationId, "node.release");
     assert.deepEqual(h.calls()[0]?.parameters, { id: TASK });
@@ -114,7 +114,7 @@ describe("src/cli/node/release.test", () => {
 
   it("node release prints the released line", async () => {
     const h = harness();
-    await run(h.program, ["node", "release", TASK, "--fence", "1"]);
+    await run(h.program, ["node", "release", "--id", TASK, "--fence", "1"]);
 
     assert.equal(h.stdoutText(), `kanthord: released ${TASK} state ready\n`);
     assert.equal(h.stderrText(), "");
@@ -124,7 +124,7 @@ describe("src/cli/node/release.test", () => {
   it("node release refuses a non-numeric fence without calling the daemon", async () => {
     for (const value of ["abc", "0", "-1"]) {
       const h = harness();
-      await run(h.program, ["node", "release", TASK, "--fence", value]);
+      await run(h.program, ["node", "release", "--id", TASK, "--fence", value]);
 
       assert.equal(
         h.stderrText(),
@@ -148,7 +148,7 @@ describe("src/cli/node/release.test", () => {
     overrideExits(h.program);
 
     await assert.rejects(
-      () => run(h.program, ["node", "release", TASK]),
+      () => run(h.program, ["node", "release", "--id", TASK]),
       (err: unknown) =>
         err instanceof Error &&
         (err as Readonly<{ code?: string }>).code ===
@@ -167,7 +167,7 @@ describe("src/cli/node/release.test", () => {
         details: undefined,
       }),
     });
-    await run(h.program, ["node", "release", TASK, "--fence", "2"]);
+    await run(h.program, ["node", "release", "--id", TASK, "--fence", "2"]);
 
     assert.equal(h.stdoutText(), "");
     assert.equal(
@@ -175,5 +175,18 @@ describe("src/cli/node/release.test", () => {
       `kanthord: lease-held: the lease of ${TASK} is not held at fence 2\n`,
     );
     assert.equal(h.failCalls(), 1);
+  });
+
+  it("node release without --id writes the invalid-request line and records zero calls", async () => {
+    const h = harness();
+    await run(h.program, ["node", "release", "--fence", "1"]);
+
+    assert.equal(h.failCalls(), 1);
+    assert.equal(h.calls().length, 0);
+    assert.equal(
+      h.stderrText(),
+      "kanthord: invalid-request: --id is required\n",
+    );
+    assert.equal(h.stdoutText(), "");
   });
 });

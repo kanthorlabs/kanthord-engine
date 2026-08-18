@@ -6,7 +6,7 @@ import { runJourney } from "./journey.ts";
 
 async function run(context: ScenarioContext): Promise<void> {
   const driver = await createLocalDriver(context);
-  const profile = await createFixtureProfile(context, driver);
+  const profile = await createFixtureProfile(context, driver, "two-objective");
   await runJourney(context, driver, profile);
 }
 
@@ -15,5 +15,6 @@ export const p1e1: ScenarioDeclaration = {
   mode: "deterministic",
   driver: "local",
   profile: "fixture",
+  plan: "two-objective",
   run,
 };

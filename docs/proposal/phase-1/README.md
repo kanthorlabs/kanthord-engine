@@ -73,7 +73,7 @@ The convention, the modes and the evidence format are in [../README.md](../READM
   - `kanthord plan import` of the two-objective fixture exits zero and reports a plan revision.
   - `kanthord plan export` returns documents byte-identical to the ones the import accepted.
   - A re-import of the exported documents at the same revision exits zero, and every choice is the suggested one. A re-import at the previous revision exits non-zero and names the revision.
-  - `kanthord status` lists two objectives and four tasks, all `pending`.
+  - `kanthord status` lists two objectives and four tasks, two tasks `pending` and two `ready`.
   - `kanthord run` exits non-zero with `not-implemented`, and `kanthord status` is unchanged.
 - **Evidence:** the bundle holds every command, its exit status, and the two plan documents.
 
@@ -111,3 +111,35 @@ The convention, the modes and the evidence format are in [../README.md](../READM
 P1-E4 and P1-E5 divide the matrix and neither substitutes for the other. P1-E4 proves the two-host logic against a fixture the harness controls. P1-E5 proves real-forge behaviour on one machine. The phase exits by pointing at a P1-E5 bundle.
 
 No phase-1 scenario crosses the VPN. Routing, binding across two machines and token distribution are proved once, in phase 3, by [../phase-3/README.md](../phase-3/README.md). Phase 1 exits on the product, never on a network.
+
+### P1B-E1 — The single-harness loop
+
+- **Mode:** `deterministic`
+- **Driver:** `local`. **Profile:** fixture. **Plan:** `three-objective`.
+- **Why it exists:** one registered harness must complete the claim, report, attestation and close loop through the packaged daemon.
+- **Automation:** `scripts/e2e/run.mjs P1B-E1`
+- **Human action:** none
+- **Oracle:** one registered harness lists the ready frontier; each alpha task claims with attempt number 1, heartbeats, and reports `accepted`; alpha reaches `awaiting_approval` on an attestation; `node show` returns that `attestedObjectId` and the computed `projection`; an attest by the human token is `403 actor-forbidden`; `node close` by the human token moves alpha to `done`; `gamma` still reads `pending` and beta's first task still reads `ready`.
+- **Evidence:** every command with its exit status, and the node state of each of the five tasks by identity.
+
+### P1B-E2 — Two harness clients on one daemon
+
+- **Mode:** `deterministic`
+- **Driver:** `podman`. **Profile:** fixture. **Plan:** `three-objective`.
+- **Why it exists:** two harness clients must exercise independent identities, network namespaces and server-side arbitration against one daemon.
+- **Automation:** `scripts/e2e/run.mjs P1B-E2`
+- **Human action:** none
+- **Topology:** four containers in three network namespaces: the fixture-remote and daemon pod of P1-E4, and two client containers, each with no daemon volume.
+- **Oracle:** the ten phases of the exit journey, in order, as Story 15 states them. This is the block's exit criterion.
+- **Evidence:** the bundle records the second client identity, the product artifact digest, the base image digest and the architecture.
+
+### P1B-E3 — The stale harness loses its claim
+
+- **Mode:** `deterministic`
+- **Driver:** `podman`. **Profile:** fixture. **Plan:** `two-objective`.
+- **Why it exists:** a stale harness must lose its lease, and a second harness must take over without accepting the stale report.
+- **Automation:** `scripts/e2e/run.mjs P1B-E3`
+- **Human action:** none
+- **Topology:** the topology of P1B-E2.
+- **Oracle:** an unheartbeated lease expires; the second client's first `200` carries a fence greater than the first; a report on the stale fence is `409 lease-held` and changes no node state; exactly one `outcome.reported` event exists for the task, naming the second actor.
+- **Evidence:** the bundle records the observed takeover latency, which is diagnostic.

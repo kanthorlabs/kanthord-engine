@@ -1,7 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -18,6 +25,7 @@ import type { ResourceFailure } from "./resources.ts";
 import { runDirectory } from "./tag.ts";
 import type { CommandRecord } from "./command.ts";
 import type { PodmanExecutor } from "./driver/podman.ts";
+import type { ScenarioDeclaration } from "./scenario/index.ts";
 
 test("parseArguments resolves the scenario id and defaults every optional flag to null", () => {
   const invocation = parseArguments(["P1-E1"], "minted");
@@ -60,7 +68,7 @@ const refusals: ReadonlyArray<
     "a positional not in scenarios",
     ["P1-E9"],
     "invalid-argument",
-    "unknown scenario P1-E9; known ids are P1-E1, P1-E2, P1-E4, P1-E5",
+    "unknown scenario P1-E9; known ids are P1-E1, P1-E2, P1-E4, P1-E5, P1B-E1, P1B-E2, P1B-E3",
   ],
   [
     "an option token that is not one of the three",
@@ -151,7 +159,7 @@ test("main(['P1-E3']) returns 2 and names every known id", async (t) => {
   assert.equal(code, 2);
   assert.equal(
     captured,
-    "e2e: invalid-argument: unknown scenario P1-E3; known ids are P1-E1, P1-E2, P1-E4, P1-E5\n",
+    "e2e: invalid-argument: unknown scenario P1-E3; known ids are P1-E1, P1-E2, P1-E4, P1-E5, P1B-E1, P1B-E2, P1B-E3\n",
   );
 });
 
@@ -218,6 +226,40 @@ test("main(['P1-E5', '--client-host', 'a']) refuses a client host", async (t) =>
     "e2e: invalid-argument: --client-host belongs to a phase-3 deployment scenario\n",
   );
 });
+
+for (const scenarioId of ["P1B-E1", "P1B-E2", "P1B-E3"]) {
+  test(`main(['${scenarioId}', '--daemon-host', 'a']) refuses a daemon host`, async (t) => {
+    let captured = "";
+    t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+      captured += chunk.toString();
+      return true;
+    });
+
+    const code = await main([scenarioId, "--daemon-host", "a"]);
+
+    assert.equal(code, 2);
+    assert.equal(
+      captured,
+      "e2e: invalid-argument: --daemon-host belongs to a phase-3 deployment scenario\n",
+    );
+  });
+
+  test(`main(['${scenarioId}', '--client-host', 'a']) refuses a client host`, async (t) => {
+    let captured = "";
+    t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+      captured += chunk.toString();
+      return true;
+    });
+
+    const code = await main([scenarioId, "--client-host", "a"]);
+
+    assert.equal(code, 2);
+    assert.equal(
+      captured,
+      "e2e: invalid-argument: --client-host belongs to a phase-3 deployment scenario\n",
+    );
+  });
+}
 
 test("a refused host option claims no bundle directory", async (t) => {
   const cwd = process.cwd();
@@ -760,4 +802,46 @@ test("main with a stub acceptance dependency resolves 0 on the happy path, 3 on 
     { acceptance },
   );
   assert.equal(secondWriteCode, 2);
+});
+
+test("a scenario that records no assertion fails rather than passes", async (t) => {
+  const tag = "noop-floor";
+  const directory = await mkdtemp(join(tmpdir(), "kanthord-e2e-floor-"));
+  const previous = process.cwd();
+  process.chdir(directory);
+  let captured = "";
+  t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+    captured += chunk.toString();
+    return true;
+  });
+
+  try {
+    const noOpScenario: ScenarioDeclaration = {
+      id: "P1B-E1",
+      mode: "deterministic",
+      driver: "local",
+      profile: "fixture",
+      plan: "three-objective",
+      run: async () => undefined,
+    };
+
+    const code = await main(["P1B-E1", "--tag", tag], {
+      scenarios: [noOpScenario],
+    });
+
+    assert.notEqual(code, 0);
+    assert.equal(
+      captured,
+      "e2e: assertion-failed: scenario P1B-E1 assertion name mismatch at position 0: expected fixture-head-symref, recorded <none>\n",
+    );
+
+    const bundle = JSON.parse(
+      await readFile(join(runDirectory(tag), "P1B-E1", "bundle.json"), "utf8"),
+    ) as Readonly<{ outcome: string; assertions: readonly unknown[] }>;
+    assert.notEqual(bundle.outcome, "passed");
+    assert.deepEqual(bundle.assertions, []);
+  } finally {
+    process.chdir(previous);
+    await rm(directory, { recursive: true, force: true });
+  }
 });

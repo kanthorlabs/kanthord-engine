@@ -121,6 +121,7 @@ export async function assertNoDisclosure(
     topology.fixtureContainer,
     topology.daemonContainer,
     topology.clientContainer,
+    topology.secondClientContainer,
   ]);
   context.assert(
     "no-disclosure-podman-inspect",

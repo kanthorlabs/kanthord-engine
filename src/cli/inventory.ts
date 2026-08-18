@@ -41,6 +41,10 @@ export const declaredCommands: readonly DeclaredCommand[] = [
     operationIds: ["system.db"],
   },
   {
+    path: ["event", "list"],
+    operationIds: ["event.list"],
+  },
+  {
     path: ["node", "attest"],
     operationIds: ["node.report"],
   },

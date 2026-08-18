@@ -28,6 +28,9 @@ const allScenarioIds: readonly ScenarioId[] = [
   "P1-E2",
   "P1-E4",
   "P1-E5",
+  "P1B-E1",
+  "P1B-E2",
+  "P1B-E3",
 ];
 
 async function withTempCwd(run: () => Promise<void>): Promise<void> {

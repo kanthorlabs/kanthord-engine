@@ -13,7 +13,7 @@ import { resolveTools } from "./tools.ts";
 
 async function run(context: ScenarioContext): Promise<void> {
   const driver = await createLocalDriver(context);
-  await createFixtureProfile(context, driver);
+  await createFixtureProfile(context, driver, "two-objective");
 
   const workspace = await takeTemporaryDirectory(
     context,
@@ -37,6 +37,7 @@ async function run(context: ScenarioContext): Promise<void> {
     },
     tools: resolveTools(),
     attemptLimit: 3,
+    leaseTtlMs: 300000,
   };
 
   const handle = await driver.startDaemon(daemonConfig);
@@ -55,5 +56,6 @@ export const p1e2: ScenarioDeclaration = {
   mode: "deterministic",
   driver: "local",
   profile: "fixture",
+  plan: "two-objective",
   run,
 };

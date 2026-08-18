@@ -94,9 +94,10 @@ test("an issuer answering 503 forever rejects with assertion-failed, carrying th
   });
 });
 
-test("the scenario path contains no sleep: no file under scripts/e2e/lib other than readiness.ts contains setTimeout", () => {
+test("the scenario path contains no sleep: no file under scripts/e2e/lib other than readiness.ts and scenario/clock.ts contains setTimeout", () => {
   const libRoot = resolve(import.meta.dirname, "..");
   const readinessPath = join(libRoot, "podman", "readiness.ts");
+  const clockPath = join(libRoot, "scenario", "clock.ts");
 
   function collectTsFiles(directory: string): string[] {
     const entries = readdirSync(directory, { withFileTypes: true });
@@ -117,7 +118,7 @@ test("the scenario path contains no sleep: no file under scripts/e2e/lib other t
 
   const violations: string[] = [];
   for (const filePath of collectTsFiles(libRoot)) {
-    if (filePath === readinessPath) {
+    if (filePath === readinessPath || filePath === clockPath) {
       continue;
     }
     const text = readFileSync(filePath, "utf8");

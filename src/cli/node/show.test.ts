@@ -102,7 +102,7 @@ const run = async (
 describe("src/cli/node/show.test", () => {
   it("node show calls node.show with the id parameter and no body", async () => {
     const h = harness();
-    await run(h.program, ["node", "show", NODE.id]);
+    await run(h.program, ["node", "show", "--id", NODE.id]);
 
     assert.deepEqual(h.calls(), [
       {
@@ -117,7 +117,7 @@ describe("src/cli/node/show.test", () => {
 
   it("node show prints the node line", async () => {
     const h = harness();
-    await run(h.program, ["node", "show", NODE.id]);
+    await run(h.program, ["node", "show", "--id", NODE.id]);
 
     assert.equal(
       h.stdoutText(),
@@ -137,10 +137,23 @@ describe("src/cli/node/show.test", () => {
         details: undefined,
       }),
     });
-    await run(h.program, ["node", "show", NODE.id]);
+    await run(h.program, ["node", "show", "--id", NODE.id]);
 
     assert.equal(h.stdoutText(), "");
     assert.equal(h.stderrText(), `kanthord: not-found: no node ${NODE.id}\n`);
     assert.equal(h.failCalls(), 1);
+  });
+
+  it("node show without --id writes the invalid-request line and records zero calls", async () => {
+    const h = harness();
+    await run(h.program, ["node", "show"]);
+
+    assert.equal(h.failCalls(), 1);
+    assert.equal(h.calls().length, 0);
+    assert.equal(
+      h.stderrText(),
+      "kanthord: invalid-request: --id is required\n",
+    );
+    assert.equal(h.stdoutText(), "");
   });
 });

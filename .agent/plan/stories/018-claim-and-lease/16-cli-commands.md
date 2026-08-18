@@ -56,10 +56,10 @@ Add these assertions to `src/cli/client.test.ts`:
 Five files, each exporting one `registerNodeX` function that takes `{ program, client, stdout, stderr, fail }` and guards against a duplicate registration with the `group.commands.some(...)` check of `src/cli/project/list.ts:17-19`. Each one calls its operation over HTTP through `client.call`, parses the response through the contract schema, and prints. **Each imports no command and no query.**
 
 - `src/cli/node/list.ts` — `registerNodeList`, operation `node.list`. It takes the five filters as commander options: `--project <id>`, `--kind <kind>`, `--state <state>`, `--block-reason <reason>`, `--repository <id>`. It builds the `query` object from the options that are present, omitting every absent one, and passes it as the fourth `client.call` argument. It prints one line per node, in the order the daemon returned.
-- `src/cli/node/show.ts` — `registerNodeShow`, operation `node.show`, one `<id>` argument.
-- `src/cli/node/claim.ts` — `registerNodeClaim`, operation `node.claim`, one `<id>` argument, an empty body. It **prints the fence, the expiry, the heartbeat interval, the run id and the attempt number**, because the harness passes the fence back on every later call. It prints the objective fence and the objective run id on the same output.
-- `src/cli/node/heartbeat.ts` — `registerNodeHeartbeat`, operation `node.heartbeat`, one `<id>` argument and a required `--fence <n>` option. **It mints a fresh `Idempotency-Key` per call.**
-- `src/cli/node/release.ts` — `registerNodeRelease`, operation `node.release`, one `<id>` argument and a required `--fence <n>` option.
+- `src/cli/node/show.ts` — `registerNodeShow`, operation `node.show`, a required `--id <id>` option.
+- `src/cli/node/claim.ts` — `registerNodeClaim`, operation `node.claim`, a required `--id <id>` option, an empty body. It **prints the fence, the expiry, the heartbeat interval, the run id and the attempt number**, because the harness passes the fence back on every later call. It prints the objective fence and the objective run id on the same output.
+- `src/cli/node/heartbeat.ts` — `registerNodeHeartbeat`, operation `node.heartbeat`, a required `--id <id>` option and a required `--fence <n>` option. **It mints a fresh `Idempotency-Key` per call.**
+- `src/cli/node/release.ts` — `registerNodeRelease`, operation `node.release`, a required `--id <id>` option and a required `--fence <n>` option.
 
 ### The exact output, and the exact refusal output
 

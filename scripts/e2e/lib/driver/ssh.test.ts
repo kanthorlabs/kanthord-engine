@@ -239,6 +239,7 @@ test("deliverBinary(role) returns the delivered kanthord binary path for the tag
     },
     tools: { git: "git", ssh: "ssh", sshKeyscan: "ssh-keyscan" },
     attemptLimit: 3,
+    leaseTtlMs: 300000,
   });
   await driver.startDaemon({
     home: "~/.kanthord-e2e-home",
@@ -252,6 +253,7 @@ test("deliverBinary(role) returns the delivered kanthord binary path for the tag
     },
     tools: { git: "git", ssh: "ssh", sshKeyscan: "ssh-keyscan" },
     attemptLimit: 3,
+    leaseTtlMs: 300000,
   });
 
   const rejectingExecute: SshExecutor = async () => {

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
 import { runJourney } from "./journey.ts";
+import { journeyAssertionNames } from "./assertions.ts";
 import type {
   ExecutionDriver,
   DaemonConfig,
@@ -371,6 +372,9 @@ function buildFixture(overrides: FixtureOverrides): Readonly<{
       sink.record(result);
       return result;
     },
+    async cliAs(_role, argv: readonly string[]): Promise<CommandRecord> {
+      return record(argv);
+    },
     issue: async (request) => {
       issuedRequests.push({ method: request.method, path: request.path });
       if (request.method === "GET" && request.path === "/v1/status") {
@@ -409,7 +413,11 @@ function buildFixture(overrides: FixtureOverrides): Readonly<{
           body: JSON.stringify({
             code: "stale-revision",
             message: "the import names a stale revision",
-            details: { expected: body.fromRevision, current: "rev_2" },
+            details: {
+              guard: "project",
+              expected: body.fromRevision,
+              actual: "rev_2",
+            },
           }),
         };
       }
@@ -417,6 +425,12 @@ function buildFixture(overrides: FixtureOverrides): Readonly<{
         status: 200,
         body: JSON.stringify({ revision: "rev_3", documents: [], absent: [] }),
       };
+    },
+    async issueAs(_role, _request) {
+      return { status: 200, body: "{}" };
+    },
+    async registerActor() {
+      return { actorId: "actor_1", tokenFile: "/tmp/journey-test-token" };
     },
     async startDaemon(config: DaemonConfig): Promise<DaemonHandle> {
       const startRecord = record(["kanthord", "serve"], {
@@ -822,6 +836,19 @@ test("a profile whose expectedPendingTaskCount does not match the daemon's count
         assert.equal(error.message, "status-counts");
         return true;
       },
+    );
+  });
+});
+
+test("journeyAssertionNames equals the names runJourney actually records, in order", async () => {
+  await withWorkDir(async (workDir, take) => {
+    const fixture = buildFixture({ workDir, take });
+
+    await runJourney(fixture.context, fixture.driver, fixture.profile);
+
+    assert.deepEqual(
+      fixture.assertions.map((entry) => entry.name),
+      [...journeyAssertionNames],
     );
   });
 });

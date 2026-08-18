@@ -1,5 +1,20 @@
 import { request } from "node:http";
 import { connect } from "node:net";
+import { readFileSync } from "node:fs";
+
+function headersFor(input) {
+  if (input.tokenFile === undefined) {
+    return input.headers;
+  }
+
+  const headers = Object.fromEntries(
+    Object.entries(input.headers).filter(
+      ([key]) => key.toLowerCase() !== "authorization",
+    ),
+  );
+  const token = readFileSync(input.tokenFile, "utf8").replace(/\r?\n$/, "");
+  return { ...headers, Authorization: `Bearer ${token}` };
+}
 
 function issueWithNoHostHeader(hostname, port, method, path, headers, body) {
   return new Promise((resolve, reject) => {
@@ -66,6 +81,7 @@ process.stdin.on("end", async () => {
   const input = JSON.parse(raw);
   const url = new URL(input.path, input.baseUrl);
   const path = `${url.pathname}${url.search}`;
+  const headers = headersFor(input);
 
   const result = input.omitHost
     ? await issueWithNoHostHeader(
@@ -73,10 +89,10 @@ process.stdin.on("end", async () => {
         Number(url.port),
         input.method,
         path,
-        input.headers,
+        headers,
         input.body,
       )
-    : await issueWithHost(url, path, input);
+    : await issueWithHost(url, path, { ...input, headers });
 
   process.stdout.write(`${String(result.status)}\n${result.body}`);
 });

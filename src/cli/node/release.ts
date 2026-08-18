@@ -12,7 +12,7 @@ export type NodeReleaseCliInput = Readonly<{
   fail: () => void;
 }>;
 
-type ReleaseOptions = Readonly<{ fence?: string }>;
+type ReleaseOptions = Readonly<{ id?: string; fence?: string }>;
 
 export function registerNodeRelease(input: NodeReleaseCliInput): void {
   const group = nodeCommand(input.program);
@@ -22,9 +22,15 @@ export function registerNodeRelease(input: NodeReleaseCliInput): void {
   group
     .command("release")
     .description("release the lease of a node")
-    .argument("<id>", "node id")
+    .option("--id <id>", "node id")
     .requiredOption("--fence <n>", "lease fence")
-    .action(async (id: string, options: ReleaseOptions) => {
+    .action(async (options: ReleaseOptions) => {
+      if (options.id === undefined) {
+        input.stderr("kanthord: invalid-request: --id is required\n");
+        input.fail();
+        return;
+      }
+      const id = options.id;
       const fence = Number.parseInt(options.fence ?? "", 10);
       if (!Number.isInteger(fence) || fence < 1) {
         input.stderr(

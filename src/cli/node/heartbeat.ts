@@ -13,7 +13,7 @@ export type NodeHeartbeatCliInput = Readonly<{
   randomBytes: (size: number) => Buffer;
 }>;
 
-type HeartbeatOptions = Readonly<{ fence?: string }>;
+type HeartbeatOptions = Readonly<{ id?: string; fence?: string }>;
 
 export function registerNodeHeartbeat(input: NodeHeartbeatCliInput): void {
   const group = nodeCommand(input.program);
@@ -23,9 +23,15 @@ export function registerNodeHeartbeat(input: NodeHeartbeatCliInput): void {
   group
     .command("heartbeat")
     .description("renew the lease of a node")
-    .argument("<id>", "node id")
+    .option("--id <id>", "node id")
     .requiredOption("--fence <n>", "lease fence")
-    .action(async (id: string, options: HeartbeatOptions) => {
+    .action(async (options: HeartbeatOptions) => {
+      if (options.id === undefined) {
+        input.stderr("kanthord: invalid-request: --id is required\n");
+        input.fail();
+        return;
+      }
+      const id = options.id;
       const fence = Number.parseInt(options.fence ?? "", 10);
       if (!Number.isInteger(fence) || fence < 1) {
         input.stderr(

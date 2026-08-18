@@ -12,6 +12,8 @@ export type NodeShowCliInput = Readonly<{
   fail: () => void;
 }>;
 
+type ShowOptions = Readonly<{ id?: string }>;
+
 export function registerNodeShow(input: NodeShowCliInput): void {
   const group = nodeCommand(input.program);
   if (group.commands.some((command) => command.name() === "show")) {
@@ -20,9 +22,16 @@ export function registerNodeShow(input: NodeShowCliInput): void {
   group
     .command("show")
     .description("show a node")
-    .argument("<id>", "node id")
-    .action(async (id: string) => {
-      const result = await input.client.call("node.show", undefined, { id });
+    .option("--id <id>", "node id")
+    .action(async (options: ShowOptions) => {
+      if (options.id === undefined) {
+        input.stderr("kanthord: invalid-request: --id is required\n");
+        input.fail();
+        return;
+      }
+      const result = await input.client.call("node.show", undefined, {
+        id: options.id,
+      });
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
         input.fail();

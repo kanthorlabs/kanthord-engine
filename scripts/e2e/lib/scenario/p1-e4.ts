@@ -19,13 +19,15 @@ import {
 } from "../podman/topology.ts";
 import {
   fixtureCredentialArguments,
+  fixturePlanSource,
+  fixturePlanTable,
   fixtureRepositoryUrl,
 } from "../profile/fixture.ts";
 import { writeSecretFile } from "../secret-file.ts";
 import { assertNoDisclosure } from "../disclosure.ts";
 import { runCommand } from "../command.ts";
 import type { BundleIdentity, BundleVersions } from "../bundle.ts";
-import type { ScenarioDeclaration } from "./index.ts";
+import type { PlanAxis, ScenarioDeclaration } from "./index.ts";
 import type { ScenarioContext } from "./context.ts";
 import { runJourney } from "./journey.ts";
 import { runTransportCases } from "./transport.ts";
@@ -40,9 +42,8 @@ type P1E4Context = ScenarioContext & {
 };
 
 const localAllowedHost = "127.0.0.1:7421";
-const fixturePlanSource = "test/e2e/fixtures/two-objective/plan";
 const fixturePlanDeliveryName = "plan";
-const fixtureRootPath = "test/e2e/fixtures/two-objective";
+const p1e4Plan: PlanAxis = "two-objective";
 
 async function resolveFixtureCredentialArguments(
   driver: ExecutionDriver,
@@ -69,16 +70,14 @@ async function resolveFixtureCredentialArguments(
 async function resolveFixturePlanDirectory(
   driver: ExecutionDriver,
   planDirectory: string,
+  plan: PlanAxis,
 ): Promise<string> {
-  if (planDirectory !== fixturePlanSource) {
+  const planSource = fixturePlanSource(plan);
+  if (planDirectory !== planSource) {
     return planDirectory;
   }
 
-  return driver.deliverDirectory(
-    "client",
-    fixturePlanSource,
-    fixturePlanDeliveryName,
-  );
+  return driver.deliverDirectory("client", planSource, fixturePlanDeliveryName);
 }
 
 export async function runP1E4(
@@ -154,6 +153,7 @@ export async function runP1E4(
       masterKey,
       tools: resolveTools(),
       attemptLimit: 3,
+      leaseTtlMs: 300000,
     };
 
     // Phase 6: the startup refusal, across the boundary
@@ -221,6 +221,7 @@ export async function runP1E4(
     const planDirectory = await resolveFixturePlanDirectory(
       driver,
       profile.planDirectory,
+      p1e4Plan,
     );
     const journey = await runJourney(context, driver, {
       ...profile,
@@ -265,18 +266,22 @@ function createHostExecutor(context: ScenarioContext): PodmanExecutor {
     });
 }
 
-async function buildRealProfile(topology: Topology): Promise<ScenarioProfile> {
+async function buildRealProfile(
+  topology: Topology,
+  plan: PlanAxis,
+): Promise<ScenarioProfile> {
+  const planDefinition = fixturePlanTable[plan];
   return {
     name: "fixture",
     origin: fixtureRepositoryUrl(topology.fixtureOrigin),
     credentialArguments: fixtureCredentialArguments("", ""),
     defaultBranch: "main",
-    planDirectory: fixturePlanSource,
-    expectedObjectiveCount: 2,
-    expectedTaskCount: 4,
-    expectedPendingTaskCount: 2,
-    expectedReadyTaskCount: 2,
-    fixtureRoot: fixtureRootPath,
+    planDirectory: planDefinition.planSource,
+    expectedObjectiveCount: planDefinition.expectedObjectiveCount,
+    expectedTaskCount: planDefinition.expectedTaskCount,
+    expectedPendingTaskCount: planDefinition.expectedPendingTaskCount,
+    expectedReadyTaskCount: planDefinition.expectedReadyTaskCount,
+    fixtureRoot: planDefinition.fixtureRoot,
     expectedObjectIds: fixtureObjectIds,
   };
 }
@@ -285,7 +290,7 @@ async function run(context: ScenarioContext): Promise<void> {
   const topology = planTopology(context.tag);
   const execute = createHostExecutor(context);
   const executeHost = createHostExecutor(context);
-  const profile = await buildRealProfile(topology);
+  const profile = await buildRealProfile(topology, p1e4Plan);
   await runP1E4(context, execute, executeHost, profile);
 }
 
@@ -294,5 +299,6 @@ export const p1e4: ScenarioDeclaration = {
   mode: "deterministic",
   driver: "podman",
   profile: "fixture",
+  plan: p1e4Plan,
   run,
 };

@@ -4,7 +4,7 @@ import type { OriginProbeInput, ProbeRow } from "./origin-probe.ts";
 
 export type DriverName = "local" | "podman" | "ssh";
 
-export type HostRole = "daemon" | "client";
+export type HostRole = "daemon" | "client" | "client2";
 
 export type DaemonConfig = Readonly<{
   home: string;
@@ -18,6 +18,7 @@ export type DaemonConfig = Readonly<{
   }>;
   tools: Readonly<{ git: string; ssh: string; sshKeyscan: string }>;
   attemptLimit: number;
+  leaseTtlMs: number;
 }>;
 
 export type DaemonHandle = Readonly<{
@@ -28,15 +29,18 @@ export type DaemonHandle = Readonly<{
   logs(): Promise<Readonly<{ stdout: string; stderr: string }>>;
 }>;
 
-export type HttpIssuer = (
-  request: Readonly<{
-    method: string;
-    path: string;
-    headers: Readonly<Record<string, string>>;
-    omitHost: boolean;
-    body?: string;
-  }>,
-) => Promise<Readonly<{ status: number; body: string }>>;
+export type HttpRequest = Readonly<{
+  method: string;
+  path: string;
+  headers: Readonly<Record<string, string>>;
+  omitHost: boolean;
+  body?: string;
+  tokenFile?: string;
+}>;
+
+export type HttpResponse = Readonly<{ status: number; body: string }>;
+
+export type HttpIssuer = (request: HttpRequest) => Promise<HttpResponse>;
 
 export type ExecutionDriver = Readonly<{
   name: DriverName;
@@ -57,7 +61,17 @@ export type ExecutionDriver = Readonly<{
   probeOrigin(input: OriginProbeInput): Promise<readonly ProbeRow[]>;
   assertBareMachine(): Promise<void>;
   cli(argv: readonly string[]): Promise<CommandRecord>;
+  cliAs(
+    role: HostRole,
+    argv: readonly string[],
+    options?: Readonly<{ tokenFile?: string }>,
+  ): Promise<CommandRecord>;
   issue: HttpIssuer;
+  issueAs(role: HostRole, request: HttpRequest): Promise<HttpResponse>;
+  registerActor(
+    role: HostRole,
+    name: string,
+  ): Promise<Readonly<{ actorId: string; tokenFile: string }>>;
   daemonNetwork?(): Promise<
     Readonly<{ bind: string; port: number; allowedHosts: readonly string[] }>
   >;
@@ -79,7 +93,10 @@ export const driverMethodNames: readonly (keyof ExecutionDriver)[] = [
   "probeOrigin",
   "assertBareMachine",
   "cli",
+  "cliAs",
   "issue",
+  "issueAs",
+  "registerActor",
   "daemonNetwork",
   "startDaemon",
   "startDaemonExpectingRefusal",

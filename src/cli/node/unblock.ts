@@ -12,7 +12,7 @@ export type NodeUnblockCliInput = Readonly<{
   fail: () => void;
 }>;
 
-type UnblockOptions = Readonly<{ node?: string }>;
+type UnblockOptions = Readonly<{ id?: string }>;
 
 export function registerNodeUnblock(input: NodeUnblockCliInput): void {
   const group = nodeCommand(input.program);
@@ -22,15 +22,15 @@ export function registerNodeUnblock(input: NodeUnblockCliInput): void {
   group
     .command("unblock")
     .description("return a blocked node to the pool")
-    .option("--node <id>", "node id")
+    .option("--id <id>", "node id")
     .action(async (options: UnblockOptions) => {
-      if (options.node === undefined) {
-        input.stderr("kanthord: invalid-request: --node is required\n");
+      if (options.id === undefined) {
+        input.stderr("kanthord: invalid-request: --id is required\n");
         input.fail();
         return;
       }
       const result = await input.client.call("node.unblock", undefined, {
-        id: options.node,
+        id: options.id,
       });
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);

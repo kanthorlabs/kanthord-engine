@@ -466,6 +466,9 @@ function fakeDriver(
     async cli(argv: readonly string[]): Promise<CommandRecord> {
       return cliDispatch(argv);
     },
+    async cliAs(_role, argv: readonly string[]): Promise<CommandRecord> {
+      return cliDispatch(argv);
+    },
     issue: async (request) => {
       if (request.method === "GET" && request.path === "/v1/status") {
         return {
@@ -493,13 +496,26 @@ function fakeDriver(
           body: JSON.stringify({
             code: "stale-revision",
             message: "the import names a stale revision",
-            details: { expected: body.fromRevision, current: "rev_2" },
+            details: {
+              guard: "project",
+              expected: body.fromRevision,
+              actual: "rev_2",
+            },
           }),
         };
       }
       return {
         status: 200,
         body: JSON.stringify({ revision: "rev_3", documents: [], absent: [] }),
+      };
+    },
+    async issueAs(_role, _request) {
+      return { status: 200, body: "{}" };
+    },
+    async registerActor() {
+      return {
+        actorId: "actor_1",
+        tokenFile: "~/.kanthord-e2e-p1e5-test/tokens/client-1",
       };
     },
     async startDaemon(config: DaemonConfig): Promise<DaemonHandle> {

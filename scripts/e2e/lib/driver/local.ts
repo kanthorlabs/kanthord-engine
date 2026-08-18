@@ -15,7 +15,7 @@ import {
 import { dirname, join } from "node:path";
 
 import { runCommand } from "../command.ts";
-import type { CommandRecord } from "../command.ts";
+import type { CommandRecord, CommandSink } from "../command.ts";
 import { RunnerError } from "../errors.ts";
 import { secrets } from "../redact.ts";
 import {
@@ -170,6 +170,61 @@ export function createLocalIssuer(getBaseUrl: () => string): HttpIssuer {
   };
 }
 
+function parseChildResponse(
+  record: CommandRecord,
+): Readonly<{ status: number; body: string }> {
+  if (record.exitCode !== 0) {
+    throw new RunnerError(
+      "unavailable",
+      `the local request helper exited with code ${String(record.exitCode)}`,
+    );
+  }
+
+  const separatorIndex = record.stdout.indexOf("\n");
+  const statusText =
+    separatorIndex === -1
+      ? record.stdout
+      : record.stdout.slice(0, separatorIndex);
+  const body =
+    separatorIndex === -1 ? "" : record.stdout.slice(separatorIndex + 1);
+
+  return { status: Number.parseInt(statusText, 10), body };
+}
+
+function createLocalChildIssuer(
+  getBaseUrl: () => string,
+  sink: CommandSink,
+): HttpIssuer {
+  const helper = join(import.meta.dirname, "../../podman/bin/e2e-request.mjs");
+
+  return async (input) => {
+    const record = await runCommand(sink, {
+      argv: [process.execPath, helper],
+      stdin: JSON.stringify({ ...input, baseUrl: getBaseUrl() }),
+      env: { PATH: process.env.PATH ?? "" },
+    });
+    return parseChildResponse(record);
+  };
+}
+
+function parseActorId(record: CommandRecord): string {
+  if (record.exitCode !== 0) {
+    throw new RunnerError(
+      "unavailable",
+      `actor registration exited with code ${String(record.exitCode)}`,
+    );
+  }
+
+  const actorId = record.stdout.split(/\r?\n/u)[0]?.trim() ?? "";
+  if (actorId.length === 0) {
+    throw new RunnerError(
+      "assertion-failed",
+      "actor registration returned no actor id",
+    );
+  }
+  return actorId;
+}
+
 export async function createLocalDriver(
   context: ScenarioContext,
 ): Promise<ExecutionDriver> {
@@ -185,9 +240,16 @@ export async function createLocalDriver(
   });
   const home = join(base, "home");
   await mkdir(home, { recursive: true });
+  const tokenDirectory = join(base, "tokens");
+  await mkdir(tokenDirectory, { recursive: true });
 
   let token = "";
   let baseUrl = "";
+  const tokenCounters: Record<HostRole, number> = {
+    daemon: 0,
+    client: 0,
+    client2: 0,
+  };
   let daemonLogs: Readonly<{ stdout: string; stderr: string }> = {
     stdout: "",
     stderr: "",
@@ -212,6 +274,60 @@ export async function createLocalDriver(
       },
     });
     return { child };
+  }
+
+  function nextTokenFile(role: HostRole): string {
+    tokenCounters[role] += 1;
+    return join(tokenDirectory, `${role}-${String(tokenCounters[role])}`);
+  }
+
+  const issue = createLocalChildIssuer(() => baseUrl, context.sink);
+
+  async function cliAs(
+    _role: HostRole,
+    argv: readonly string[],
+    options?: Readonly<{ tokenFile?: string }>,
+  ): Promise<CommandRecord> {
+    const binary = await ensureBinary(context);
+    const authArgs: string[] = [];
+    const environment: Record<string, string> = {
+      PATH: `${dirname(binary)}:${dirname(process.execPath)}`,
+      HOME: home,
+      KANTHORD_BASE_URL: baseUrl,
+    };
+    if (options?.tokenFile !== undefined) {
+      authArgs.push("--api-token-file", options.tokenFile);
+    } else {
+      environment.KANTHORD_TOKEN = token;
+    }
+    return runCommand(context.sink, {
+      argv: [binary, ...authArgs, ...argv],
+      cwd: home,
+      env: environment,
+    });
+  }
+
+  async function issueAs(
+    _role: HostRole,
+    input: Parameters<HttpIssuer>[0],
+  ): Promise<Readonly<{ status: number; body: string }>> {
+    return issue(input);
+  }
+
+  async function registerActor(
+    role: HostRole,
+    name: string,
+  ): Promise<Readonly<{ actorId: string; tokenFile: string }>> {
+    const tokenFile = nextTokenFile(role);
+    const record = await cliAs(role, [
+      "actor",
+      "register",
+      "--name",
+      name,
+      "--token-file",
+      tokenFile,
+    ]);
+    return { actorId: parseActorId(record), tokenFile };
   }
 
   const driver: ExecutionDriver = {
@@ -275,20 +391,15 @@ export async function createLocalDriver(
         "/etc/kanthord/config.json exists on the daemon host; P1-E1 needs a bare machine",
       );
     },
+    cliAs,
     async cli(argv: readonly string[]): Promise<CommandRecord> {
-      const binary = await ensureBinary(context);
-      return runCommand(context.sink, {
-        argv: [binary, ...argv],
-        cwd: home,
-        env: {
-          PATH: `${dirname(binary)}:${dirname(process.execPath)}`,
-          HOME: home,
-          KANTHORD_TOKEN: token,
-          KANTHORD_BASE_URL: baseUrl,
-        },
-      });
+      return cliAs("client", argv);
     },
-    issue: createLocalIssuer(() => baseUrl),
+    issueAs,
+    registerActor,
+    async issue(input) {
+      return issueAs("client", input);
+    },
     async daemonNetwork(): Promise<
       Readonly<{ bind: string; port: number; allowedHosts: readonly string[] }>
     > {

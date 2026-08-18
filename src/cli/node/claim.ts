@@ -13,6 +13,8 @@ export type NodeClaimCliInput = Readonly<{
   randomBytes: (size: number) => Buffer;
 }>;
 
+type ClaimOptions = Readonly<{ id?: string }>;
+
 export function registerNodeClaim(input: NodeClaimCliInput): void {
   const group = nodeCommand(input.program);
   if (group.commands.some((command) => command.name() === "claim")) {
@@ -21,8 +23,14 @@ export function registerNodeClaim(input: NodeClaimCliInput): void {
   group
     .command("claim")
     .description("claim a node for execution")
-    .argument("<id>", "node id")
-    .action(async (id: string) => {
+    .option("--id <id>", "node id")
+    .action(async (options: ClaimOptions) => {
+      if (options.id === undefined) {
+        input.stderr("kanthord: invalid-request: --id is required\n");
+        input.fail();
+        return;
+      }
+      const id = options.id;
       const idempotencyKey = input.randomBytes(16).toString("hex");
       const result = await input.client.call(
         "node.claim",

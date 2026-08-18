@@ -7,15 +7,50 @@ import {
 import { RunnerError } from "../errors.ts";
 import { secrets } from "../redact.ts";
 import type { ExecutionDriver } from "../driver/index.ts";
+import type { PodmanExecutor } from "../driver/podman.ts";
+import type { Topology } from "../podman/topology.ts";
 import type { ScenarioContext } from "../scenario/context.ts";
+import type { PlanAxis } from "../scenario/index.ts";
 import type { ScenarioProfile } from "./index.ts";
 
-const fixturePlanSource = "test/e2e/fixtures/two-objective/plan";
 const fixturePlanDeliveryName = "plan";
-const fixtureRootPath = "test/e2e/fixtures/two-objective";
 const fixtureDefaultBranch = "main";
 
 export const fixtureRepositoryPath = "/fixture.git";
+
+export type FixturePlanDefinition = Readonly<{
+  planSource: string;
+  fixtureRoot: string;
+  expectedObjectiveCount: number;
+  expectedTaskCount: number;
+  expectedPendingTaskCount: number;
+  expectedReadyTaskCount: number;
+}>;
+
+export const fixturePlanTable: Readonly<
+  Record<PlanAxis, FixturePlanDefinition>
+> = {
+  "two-objective": {
+    planSource: "test/e2e/fixtures/two-objective/plan",
+    fixtureRoot: "test/e2e/fixtures/two-objective",
+    expectedObjectiveCount: 2,
+    expectedTaskCount: 4,
+    expectedPendingTaskCount: 2,
+    expectedReadyTaskCount: 2,
+  },
+  "three-objective": {
+    planSource: "test/e2e/fixtures/three-objective/plan",
+    fixtureRoot: "test/e2e/fixtures/three-objective",
+    expectedObjectiveCount: 3,
+    expectedTaskCount: 5,
+    expectedPendingTaskCount: 2,
+    expectedReadyTaskCount: 3,
+  },
+};
+
+export function fixturePlanSource(plan: PlanAxis): string {
+  return fixturePlanTable[plan].planSource;
+}
 
 export function fixtureRepositoryUrl(origin: string): string {
   return `${origin}${fixtureRepositoryPath}`;
@@ -86,7 +121,9 @@ export function fixtureCredentialArguments(
 export async function createFixtureProfile(
   context: ScenarioContext,
   driver: ExecutionDriver,
+  plan: PlanAxis,
 ): Promise<ScenarioProfile> {
+  const planDefinition = fixturePlanTable[plan];
   const resolveOrigin = originSources[driver.name];
   if (resolveOrigin === undefined) {
     throw new Error(
@@ -119,7 +156,7 @@ export async function createFixtureProfile(
 
   const planDirectory = await driver.deliverDirectory(
     "client",
-    fixturePlanSource,
+    planDefinition.planSource,
     fixturePlanDeliveryName,
   );
 
@@ -129,11 +166,108 @@ export async function createFixtureProfile(
     credentialArguments: fixtureCredentialArguments(username, tokenFile),
     defaultBranch: fixtureDefaultBranch,
     planDirectory,
-    expectedObjectiveCount: 2,
-    expectedTaskCount: 4,
-    expectedPendingTaskCount: 2,
-    expectedReadyTaskCount: 2,
-    fixtureRoot: fixtureRootPath,
+    expectedObjectiveCount: planDefinition.expectedObjectiveCount,
+    expectedTaskCount: planDefinition.expectedTaskCount,
+    expectedPendingTaskCount: planDefinition.expectedPendingTaskCount,
+    expectedReadyTaskCount: planDefinition.expectedReadyTaskCount,
+    fixtureRoot: planDefinition.fixtureRoot,
+    expectedObjectIds: fixtureObjectIds,
+  };
+}
+
+const daemonFixtureTokenPath = "/opt/e2e/tokens/fixture-http";
+
+async function deliverDaemonFixtureToken(
+  execute: PodmanExecutor,
+  topology: Topology,
+  token: string,
+): Promise<string> {
+  await execute([
+    "podman",
+    "exec",
+    topology.daemonContainer,
+    "mkdir",
+    "-p",
+    "/opt/e2e/tokens",
+  ]);
+  await execute([
+    "podman",
+    "exec",
+    topology.daemonContainer,
+    "install",
+    "-m",
+    "600",
+    "/dev/null",
+    daemonFixtureTokenPath,
+  ]);
+  await execute(
+    [
+      "podman",
+      "exec",
+      "--interactive",
+      topology.daemonContainer,
+      "sh",
+      "-c",
+      `cat > ${daemonFixtureTokenPath}`,
+    ],
+    token,
+  );
+  return daemonFixtureTokenPath;
+}
+
+export async function createPodmanFixtureProfile(
+  context: ScenarioContext,
+  execute: PodmanExecutor,
+  topology: Topology,
+  driver: ExecutionDriver,
+  plan: PlanAxis,
+): Promise<ScenarioProfile> {
+  const planDefinition = fixturePlanTable[plan];
+  const token = httpCredentials.writer.token;
+  secrets.hold(token);
+
+  const tokenFile = await driver.deliverToken(token);
+  const daemonTokenPath = await deliverDaemonFixtureToken(
+    execute,
+    topology,
+    token,
+  );
+
+  const probeRows = await driver.probeOrigin({
+    origin: fixtureRepositoryUrl(topology.fixtureOrigin),
+    username: httpCredentials.writer.username,
+    tokenPath: daemonTokenPath,
+    wrongToken: httpWrongCredential.token,
+    defaultBranch: fixtureDefaultBranch,
+  });
+  for (const row of probeRows) {
+    try {
+      context.assert(row.name, true, row.passed);
+    } catch {
+      throw new RunnerError("unavailable", `fixture row ${row.name} failed`);
+    }
+  }
+
+  const planDirectory = await driver.deliverDirectory(
+    "client",
+    planDefinition.planSource,
+    fixturePlanDeliveryName,
+  );
+
+  return {
+    name: "fixture",
+    origin: fixtureRepositoryUrl(topology.fixtureOrigin),
+    credentialArguments: fixtureCredentialArguments(
+      httpCredentials.writer.username,
+      tokenFile,
+    ),
+    defaultBranch: fixtureDefaultBranch,
+    planDirectory,
+    expectedObjectiveCount: planDefinition.expectedObjectiveCount,
+    expectedTaskCount: planDefinition.expectedTaskCount,
+    expectedPendingTaskCount: planDefinition.expectedPendingTaskCount,
+    expectedReadyTaskCount: planDefinition.expectedReadyTaskCount,
+    fixtureRoot: planDefinition.fixtureRoot,
     expectedObjectIds: fixtureObjectIds,
   };
 }

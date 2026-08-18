@@ -52,12 +52,47 @@ export async function createSshDriver(
   const clientTarget: SshTarget = { role: "client", host: ssh.clientHost };
   const localTarget: SshTarget = { role: "client", host: "local" };
   const home = `~/.kanthord-e2e-${context.tag}`;
+  const tokenDirectory = `${home}/tokens`;
+  const tokenCounters: Record<HostRole, number> = {
+    daemon: 0,
+    client: 0,
+    client2: 0,
+  };
 
   let memoizedTarball: Promise<string> | undefined;
   let baseUrl = "";
+  let clientTokenPath = "";
 
   function targetFor(role: HostRole): SshTarget {
-    return role === "daemon" ? daemonTarget : clientTarget;
+    switch (role) {
+      case "daemon":
+        return daemonTarget;
+      case "client":
+      case "client2":
+        return clientTarget;
+    }
+  }
+
+  function nextTokenFile(role: HostRole): string {
+    tokenCounters[role] += 1;
+    return `${tokenDirectory}/${role}-${String(tokenCounters[role])}`;
+  }
+
+  function parseActorId(record: CommandRecord): string {
+    if (record.exitCode !== 0) {
+      throw new RunnerError(
+        "unavailable",
+        `actor registration exited with code ${String(record.exitCode)}`,
+      );
+    }
+    const actorId = record.stdout.split(/\r?\n/u)[0]?.trim() ?? "";
+    if (actorId.length === 0) {
+      throw new RunnerError(
+        "assertion-failed",
+        "actor registration returned no actor id",
+      );
+    }
+    return actorId;
   }
 
   async function packLocally(): Promise<string> {
@@ -198,6 +233,7 @@ export async function createSshDriver(
 
   async function deliverToken(token: string): Promise<string> {
     const path = `${home}/token`;
+    clientTokenPath = path;
     for (const target of [daemonTarget, clientTarget]) {
       await writeRemoteSecret(target, path, token);
     }
@@ -233,6 +269,7 @@ export async function createSshDriver(
       masterKeyFile: masterKeyPath,
       tools: config.tools,
       attemptLimit: config.attemptLimit,
+      leaseTtlMs: config.leaseTtlMs,
     };
 
     const configPath = `${home}/kanthord.config.json`;
@@ -274,21 +311,23 @@ export async function createSshDriver(
     }
   }
 
-  const issue: HttpIssuer = async (request) => {
-    const target = clientTarget;
-    const script =
-      "const http=require('http');const chunks=[];process.stdin.on('data',c=>chunks.push(c));" +
-      "process.stdin.on('end',()=>{const req=JSON.parse(Buffer.concat(chunks).toString('utf8'));" +
-      "const url=new URL(req.path,req.baseUrl);" +
-      "const outgoing=http.request({method:req.method,hostname:url.hostname,port:url.port,path:url.pathname+url.search,headers:req.headers},(res)=>{" +
-      "const body=[];res.on('data',d=>body.push(d));res.on('end',()=>{process.stdout.write(res.statusCode+'\\n'+Buffer.concat(body).toString('utf8'));});});" +
-      "outgoing.on('error',()=>process.stdout.write('0\\n'));" +
-      "if(req.body!==undefined)outgoing.write(req.body);outgoing.end();});";
+  const issueScript =
+    "const fs=require('node:fs');const http=require('node:http');const chunks=[];" +
+    "process.stdin.on('data',c=>chunks.push(c));" +
+    "process.stdin.on('end',()=>{const req=JSON.parse(Buffer.concat(chunks).toString('utf8'));" +
+    "const url=new URL(req.path,req.baseUrl);const headers={...req.headers};" +
+    "if(req.tokenFile!==undefined)headers.Authorization='Bearer '+fs.readFileSync(req.tokenFile,'utf8').replace(/\\r?\\n$/,'');" +
+    "const outgoing=http.request({method:req.method,hostname:url.hostname,port:url.port,path:url.pathname+url.search,headers},(res)=>{" +
+    "const body=[];res.on('data',d=>body.push(d));res.on('end',()=>{process.stdout.write(res.statusCode+'\\n'+Buffer.concat(body).toString('utf8'));});});" +
+    "outgoing.on('error',()=>process.stdout.write('0\\n'));" +
+    "if(req.body!==undefined)outgoing.write(req.body);outgoing.end();});";
 
+  async function issueAs(role: HostRole, input: Parameters<HttpIssuer>[0]) {
+    const target = targetFor(role);
     const record = await ssh.execute(
       target,
-      sshArgv(target.host, ["node", "-e", script]),
-      JSON.stringify({ ...request, baseUrl }),
+      sshArgv(target.host, ["node", "-e", issueScript]),
+      JSON.stringify({ ...input, baseUrl }),
     );
 
     const separatorIndex = record.stdout.indexOf("\n");
@@ -300,7 +339,9 @@ export async function createSshDriver(
       separatorIndex === -1 ? "" : record.stdout.slice(separatorIndex + 1);
 
     return { status: Number.parseInt(statusText, 10), body };
-  };
+  }
+
+  const issue: HttpIssuer = (input) => issueAs("client", input);
 
   async function daemonNetwork(): Promise<
     Readonly<{ bind: string; port: number; allowedHosts: readonly string[] }>
@@ -390,6 +431,60 @@ export async function createSshDriver(
     return { daemon: record.stdout };
   }
 
+  async function cliAs(
+    role: HostRole,
+    argv: readonly string[],
+    options?: Readonly<{ tokenFile?: string }>,
+  ): Promise<CommandRecord> {
+    const environment: string[] = [];
+    if (baseUrl.length > 0) {
+      environment.push(`KANTHORD_BASE_URL=${baseUrl}`);
+    }
+    if (options?.tokenFile === undefined && clientTokenPath.length > 0) {
+      environment.push(`KANTHORD_API_TOKEN_FILE=${clientTokenPath}`);
+    }
+    const authArgs =
+      options?.tokenFile === undefined
+        ? []
+        : ["--api-token-file", options.tokenFile];
+    return ssh.execute(targetFor(role), [
+      ...(environment.length > 0 ? ["env", ...environment] : []),
+      ...authArgs,
+      ...argv,
+    ]);
+  }
+
+  async function registerActor(
+    role: HostRole,
+    name: string,
+  ): Promise<Readonly<{ actorId: string; tokenFile: string }>> {
+    const tokenFile = nextTokenFile(role);
+    const target = targetFor(role);
+    await ssh.execute(
+      target,
+      sshArgv(target.host, ["mkdir", "-p", tokenDirectory]),
+    );
+    context.take({
+      kind: "secret",
+      id: `${target.host}:${tokenFile}`,
+      async release(): Promise<void> {
+        await ssh.execute(
+          target,
+          sshArgv(target.host, ["rm", "-f", tokenFile]),
+        );
+      },
+    });
+    const record = await cliAs(role, [
+      "actor",
+      "register",
+      "--name",
+      name,
+      "--token-file",
+      tokenFile,
+    ]);
+    return { actorId: parseActorId(record), tokenFile };
+  }
+
   return {
     name: "ssh",
     identity,
@@ -400,10 +495,15 @@ export async function createSshDriver(
     deliverToken,
     probeOrigin,
     assertBareMachine,
+    cliAs,
     async cli(argv: readonly string[]): Promise<CommandRecord> {
-      return ssh.execute({ role: "client", host: ssh.clientHost }, argv);
+      return cliAs("client", argv);
     },
-    issue,
+    issueAs,
+    registerActor,
+    async issue(input) {
+      return issueAs("client", input);
+    },
     daemonNetwork,
     startDaemon,
     startDaemonExpectingRefusal,

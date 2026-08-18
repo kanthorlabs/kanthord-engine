@@ -235,5 +235,6 @@ export const p1e5: ScenarioDeclaration = {
   mode: "integration",
   driver: "local",
   profile: "real",
+  plan: "two-objective",
   run,
 };

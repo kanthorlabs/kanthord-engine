@@ -69,6 +69,7 @@ export type BundleWriter = Readonly<{
   setVersions(versions: Partial<BundleVersions>): void;
   logs(): Readonly<Record<string, string>>;
   printedLines(): readonly string[];
+  assertionNames(): readonly string[];
   commandsRecorded(): readonly CommandRecord[];
   finish(
     input: Readonly<{
@@ -88,6 +89,7 @@ const noteKeys = [
   "bindAddress",
   "daemonNamespace",
   "clientNamespace",
+  "takeoverLatency",
 ] as const;
 
 type NoteKey = (typeof noteKeys)[number];
@@ -144,6 +146,9 @@ export function createBundleWriter(
     },
     printedLines(): readonly string[] {
       return [...printedLines];
+    },
+    assertionNames(): readonly string[] {
+      return assertions.map(({ name }) => name);
     },
     commandsRecorded(): readonly CommandRecord[] {
       return [...commands];

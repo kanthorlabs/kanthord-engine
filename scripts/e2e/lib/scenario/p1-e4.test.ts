@@ -154,7 +154,10 @@ function decideResponse(
     return {
       status: 409,
       body: JSON.stringify({
-        error: { code: "stale-revision", details: { current: "rev-second" } },
+        error: {
+          code: "stale-revision",
+          details: { guard: "project", actual: "rev-second" },
+        },
       }),
     };
   }

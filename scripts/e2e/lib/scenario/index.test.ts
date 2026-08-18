@@ -7,21 +7,75 @@ import { join } from "node:path";
 import { scenarios } from "./index.ts";
 
 const expectedTable: Readonly<
-  Record<string, Readonly<{ mode: string; driver: string; profile: string }>>
+  Record<
+    string,
+    Readonly<{
+      mode: string;
+      driver: string;
+      profile: string;
+      plan: string;
+    }>
+  >
 > = {
-  "P1-E1": { mode: "deterministic", driver: "local", profile: "fixture" },
-  "P1-E2": { mode: "deterministic", driver: "local", profile: "fixture" },
-  "P1-E4": { mode: "deterministic", driver: "podman", profile: "fixture" },
-  "P1-E5": { mode: "integration", driver: "local", profile: "real" },
+  "P1-E1": {
+    mode: "deterministic",
+    driver: "local",
+    profile: "fixture",
+    plan: "two-objective",
+  },
+  "P1-E2": {
+    mode: "deterministic",
+    driver: "local",
+    profile: "fixture",
+    plan: "two-objective",
+  },
+  "P1-E4": {
+    mode: "deterministic",
+    driver: "podman",
+    profile: "fixture",
+    plan: "two-objective",
+  },
+  "P1-E5": {
+    mode: "integration",
+    driver: "local",
+    profile: "real",
+    plan: "two-objective",
+  },
+  "P1B-E1": {
+    mode: "deterministic",
+    driver: "local",
+    profile: "fixture",
+    plan: "three-objective",
+  },
+  "P1B-E2": {
+    mode: "deterministic",
+    driver: "podman",
+    profile: "fixture",
+    plan: "three-objective",
+  },
+  "P1B-E3": {
+    mode: "deterministic",
+    driver: "podman",
+    profile: "fixture",
+    plan: "two-objective",
+  },
 };
 
-test("scenarios has exactly four entries", () => {
-  assert.equal(scenarios.length, 4);
+test("scenarios has exactly seven entries", () => {
+  assert.equal(scenarios.length, 7);
 });
 
-test("the ids are P1-E1, P1-E2, P1-E4, P1-E5, bytewise ascending", () => {
+test("the ids are P1-E1, P1-E2, P1-E4, P1-E5, P1B-E1, P1B-E2, P1B-E3, bytewise ascending", () => {
   const ids = scenarios.map((scenario) => scenario.id);
-  assert.deepEqual(ids, ["P1-E1", "P1-E2", "P1-E4", "P1-E5"]);
+  assert.deepEqual(ids, [
+    "P1-E1",
+    "P1-E2",
+    "P1-E4",
+    "P1-E5",
+    "P1B-E1",
+    "P1B-E2",
+    "P1B-E3",
+  ]);
 
   const sorted = [...ids].sort((a, b) =>
     Buffer.compare(Buffer.from(a), Buffer.from(b)),
@@ -29,13 +83,14 @@ test("the ids are P1-E1, P1-E2, P1-E4, P1-E5, bytewise ascending", () => {
   assert.deepEqual(ids, sorted);
 });
 
-test("each row's mode, driver and profile match the declared table", () => {
+test("each row's mode, driver, profile and plan match the declared table", () => {
   for (const scenario of scenarios) {
     assert.deepEqual(
       {
         mode: scenario.mode,
         driver: scenario.driver,
         profile: scenario.profile,
+        plan: scenario.plan,
       },
       expectedTable[scenario.id],
     );

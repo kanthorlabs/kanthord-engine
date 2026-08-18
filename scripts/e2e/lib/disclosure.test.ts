@@ -105,6 +105,7 @@ function cleanFixtures(
       topology.fixtureContainer,
       topology.daemonContainer,
       topology.clientContainer,
+      topology.secondClientContainer,
     ].join(" ")]: "clean inspect output\n",
     [[
       "podman",
@@ -253,6 +254,33 @@ test("an inspect output containing the token rejects naming no-disclosure-podman
       error instanceof RunnerError &&
       error.message === "no-disclosure-podman-inspect",
   );
+});
+
+test("a leak present only in the second client's inspect output rejects naming no-disclosure-podman-inspect", async () => {
+  secrets.hold("leaked-second-client-token");
+  const topology = planTopology("RD2A");
+  const fixtures = cleanFixtures(topology, "leaked-second-client-token");
+  let inspectedSecondClient = false;
+  const execute = async (argv: readonly string[]): Promise<CommandRecord> => {
+    if (
+      argv[0] === "podman" &&
+      argv[1] === "inspect" &&
+      argv.includes(topology.secondClientContainer)
+    ) {
+      inspectedSecondClient = true;
+      return fakeRecord(argv, "contains leaked-second-client-token in env\n");
+    }
+    return fixtures.execute(argv);
+  };
+  const { context } = fakeContext(fixtures);
+
+  await assert.rejects(
+    assertNoDisclosure(context, execute, topology),
+    (error: unknown) =>
+      error instanceof RunnerError &&
+      error.message === "no-disclosure-podman-inspect",
+  );
+  assert.equal(inspectedSecondClient, true);
 });
 
 test("an attached http log carrying the raw bearer token rejects naming no-disclosure-bearer-header", async () => {

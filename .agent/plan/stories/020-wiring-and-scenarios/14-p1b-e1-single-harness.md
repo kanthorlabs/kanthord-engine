@@ -59,7 +59,7 @@ Then drive the whole external loop through the packaged binary, in this order. E
 
    Assertion name `authoring-operation-ids`. That is the assembled-binary proof that a harness reaches every guard token it needs. **The assertion is scoped to the harness-signed requests by design**: the human `plan import` of `runJourney` issues one `plan.revisions` call of its own (`008-project-and-plan.md:70`), so an absolute claim over the whole run would be false.
 
-7. `node list --state ready --kind task` returns the ready frontier of EPIC 016. Assert the returned identities equal exactly alpha's first task, `durableId` and beta's first task, sorted bytewise. Assertion name `ready-frontier`. The authored task appears there because readiness promoted it in the transaction of its write, and alpha's second task does not, because it depends on alpha's first.
+7. `node list --state ready --kind task` returns the ready frontier of EPIC 016. Assert the returned identities equal exactly alpha's first task, `durableId`, beta's first task and gamma's first task, sorted bytewise. Assertion name `ready-frontier`. The authored task appears there because readiness promoted it in the transaction of its write, and alpha's second task does not, because it depends on alpha's first. **Gamma's first task appears there as well**, because readiness gates on `depends_on` edges alone and that task declares none; its parent objective is `pending`, and containment gates no readiness.
 8. For each alpha task, in this exact order — alpha's first task, alpha's second task, then the authored task:
    - `runHarnessTask` with the label `alpha-1`, then `alpha-2`, then `alpha-authored`, and a distinct fixed object id per task, taken from `profile.expectedObjectIds`.
    - The first claim answers attempt number `1`.
@@ -89,7 +89,7 @@ Suite name `"scripts/e2e/lib/scenario/p1b-e1.test"`. Drive `run` over a fake dri
 - `it("signs no plan.revisions request with the harness token", ...)` — assert that no request the fake driver received under the harness token file resolves to `plan.revisions`.
 - `it("sends the node revision on the update and the project revision on the delete", ...)` — assert the recorded `fromRevision` of the update equals the `revision` the create response returned, and the recorded `fromRevision` of the delete equals the `revision` the update response returned.
 - `it("reads the authored task as ready before it claims it", ...)` — assert the recorded `node.show` on the durable identity precedes its claim, and that the recorded expected value is that identity with the state `ready`.
-- `it("reads the ready frontier as three identities, the authored task included", ...)` — assert the recorded expected value of `ready-frontier` holds alpha's first task, the durable identity and beta's first task.
+- `it("reads the ready frontier as four identities, the authored task included", ...)` — assert the recorded expected value of `ready-frontier` holds alpha's first task, the durable identity, beta's first task and gamma's first task.
 - `it("asserts gamma pending by identity and never by count", ...)` — assert the recorded expected value is the node identity and its state.
 - `it("builds the fixture profile on the three-objective axis", ...)`.
 

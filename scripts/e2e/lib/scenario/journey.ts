@@ -9,6 +9,8 @@ import { takeTemporaryDirectory } from "../resources.ts";
 import type { ScenarioContext } from "./context.ts";
 import { resolveTools } from "./tools.ts";
 
+export type JourneyOptions = Readonly<{ leaseTtlMs?: number }>;
+
 export type PlanDocument = Readonly<{ path: string; bytes: Buffer }>;
 
 export type JourneyResult = Readonly<{
@@ -90,6 +92,7 @@ export async function runJourney(
   context: ScenarioContext,
   driver: ExecutionDriver,
   profile: ScenarioProfile,
+  options: JourneyOptions = {},
 ): Promise<JourneyResult> {
   await driver.assertBareMachine();
 
@@ -134,6 +137,7 @@ export async function runJourney(
     },
     tools: resolveTools(),
     attemptLimit: 3,
+    leaseTtlMs: options.leaseTtlMs ?? 300000,
   };
 
   const handle = await driver.startDaemon(daemonConfig);
@@ -365,14 +369,20 @@ export async function runJourney(
   const staleEnvelope =
     (staleParsed.error as Record<string, unknown> | undefined) ?? staleParsed;
   const staleDetails = staleEnvelope.details as
-    Readonly<{ current?: unknown }> | undefined;
+    Readonly<{ guard?: unknown; actual?: unknown }> | undefined;
   context.assert(
     "reimport-stale-revision",
-    { status: 409, code: "stale-revision", current: secondRevision },
+    {
+      status: 409,
+      code: "stale-revision",
+      guard: "project",
+      actual: secondRevision,
+    },
     {
       status: staleResponse.status,
       code: staleEnvelope.code,
-      current: staleDetails?.current,
+      guard: staleDetails?.guard,
+      actual: staleDetails?.actual,
     },
   );
 

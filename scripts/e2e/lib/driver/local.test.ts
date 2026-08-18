@@ -44,6 +44,7 @@ function buildConfig(home: string): DaemonConfig {
     },
     tools: resolveTools(),
     attemptLimit: 3,
+    leaseTtlMs: 300000,
   };
 }
 
@@ -111,6 +112,7 @@ test("SECURITY: startDaemon holds the daemon's bearer token in the shared secret
     },
     tools: resolveTools(),
     attemptLimit: 3,
+    leaseTtlMs: 300000,
   };
 
   const handle = await driver.startDaemon(config);

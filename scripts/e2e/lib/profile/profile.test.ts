@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { profileFieldNames } from "./index.ts";
+import { fixtureProfileAssertionNames } from "../scenario/assertions.ts";
 import { createFixtureProfile } from "./fixture.ts";
 import { createRealProfile } from "./real.ts";
 import { createLedger } from "../resources.ts";
@@ -80,7 +81,10 @@ function fakeDriver(
     probeOrigin: passingProbe,
     assertBareMachine: notImplemented,
     cli: notImplemented,
+    cliAs: notImplemented,
     issue: notImplemented,
+    issueAs: notImplemented,
+    registerActor: notImplemented,
     startDaemon: notImplemented,
     startDaemonExpectingRefusal: notImplemented,
     collectLogs: notImplemented,
@@ -101,7 +105,11 @@ test("createFixtureProfile returns the fixture's own default branch, counts and 
     { deliverToken: fakeDeliverToken },
   );
   try {
-    const profile = await createFixtureProfile(fakeContext(ledger), driver);
+    const profile = await createFixtureProfile(
+      fakeContext(ledger),
+      driver,
+      "two-objective",
+    );
 
     assert.equal(profile.defaultBranch, "main");
     assert.equal(profile.expectedObjectiveCount, 2);
@@ -113,6 +121,75 @@ test("createFixtureProfile returns the fixture's own default branch, counts and 
     await ledger.releaseAll();
   }
 });
+
+const planAxisExpectations = [
+  {
+    plan: "two-objective" as const,
+    planSource: "test/e2e/fixtures/two-objective/plan",
+    fixtureRoot: "test/e2e/fixtures/two-objective",
+    objectives: 2,
+    tasks: 4,
+    pending: 2,
+    ready: 2,
+  },
+  {
+    plan: "three-objective" as const,
+    planSource: "test/e2e/fixtures/three-objective/plan",
+    fixtureRoot: "test/e2e/fixtures/three-objective",
+    objectives: 3,
+    tasks: 5,
+    pending: 2,
+    ready: 3,
+  },
+];
+
+for (const row of planAxisExpectations) {
+  test(`createFixtureProfile on the ${row.plan} axis returns that fixture's counts, root and object ids`, async () => {
+    const ledger = createLedger();
+    const driver = fakeDriver(
+      "local",
+      async (_role: HostRole, _source: string, name: string) =>
+        `/tmp/deliver/${name}`,
+      { deliverToken: fakeDeliverToken },
+    );
+    try {
+      const profile = await createFixtureProfile(
+        fakeContext(ledger),
+        driver,
+        row.plan,
+      );
+
+      assert.equal(profile.expectedObjectiveCount, row.objectives);
+      assert.equal(profile.expectedTaskCount, row.tasks);
+      assert.equal(profile.expectedPendingTaskCount, row.pending);
+      assert.equal(profile.expectedReadyTaskCount, row.ready);
+      assert.equal(profile.fixtureRoot, row.fixtureRoot);
+      assert.deepEqual(profile.expectedObjectIds, fixtureObjectIds);
+    } finally {
+      await ledger.releaseAll();
+    }
+  });
+
+  test(`createFixtureProfile on the ${row.plan} axis delivers that axis's plan source`, async () => {
+    const ledger = createLedger();
+    const calls: Array<[HostRole, string, string]> = [];
+    const driver = fakeDriver(
+      "local",
+      async (role: HostRole, source: string, name: string) => {
+        calls.push([role, source, name]);
+        return "/tmp/deliver/plan-sentinel";
+      },
+      { deliverToken: fakeDeliverToken },
+    );
+    try {
+      await createFixtureProfile(fakeContext(ledger), driver, row.plan);
+
+      assert.deepEqual(calls, [["client", row.planSource, "plan"]]);
+    } finally {
+      await ledger.releaseAll();
+    }
+  });
+}
 
 test("createFixtureProfile calls deliverDirectory exactly once for the plan fixture, and planDirectory is its return value", async () => {
   const ledger = createLedger();
@@ -126,7 +203,11 @@ test("createFixtureProfile calls deliverDirectory exactly once for the plan fixt
     { deliverToken: fakeDeliverToken },
   );
 
-  const profile = await createFixtureProfile(fakeContext(ledger), driver);
+  const profile = await createFixtureProfile(
+    fakeContext(ledger),
+    driver,
+    "two-objective",
+  );
 
   assert.deepEqual(calls, [
     ["client", "test/e2e/fixtures/two-objective/plan", "plan"],
@@ -145,7 +226,7 @@ test("createFixtureProfile on a local driver takes one directory resource for th
     { deliverToken: fakeDeliverToken },
   );
 
-  await createFixtureProfile(fakeContext(ledger), driver);
+  await createFixtureProfile(fakeContext(ledger), driver, "two-objective");
 
   const directoryHandles: readonly ResourceHandle[] = ledger
     .taken()
@@ -165,7 +246,11 @@ test("createFixtureProfile on a podman driver takes no directory resource and re
     { topology: { fixtureOrigin }, deliverToken: fakeDeliverToken },
   );
 
-  const profile = await createFixtureProfile(fakeContext(ledger), driver);
+  const profile = await createFixtureProfile(
+    fakeContext(ledger),
+    driver,
+    "two-objective",
+  );
 
   assert.equal(ledger.taken().length, 0);
   assert.equal(profile.origin, `${fixtureOrigin}/fixture.git`);
@@ -187,7 +272,7 @@ test("SECURITY: createFixtureProfile holds the fixture Basic-auth token in the s
   );
 
   try {
-    await createFixtureProfile(fakeContext(ledger), driver);
+    await createFixtureProfile(fakeContext(ledger), driver, "two-objective");
 
     assert.notEqual(deliveredToken, "");
     assert.equal(secrets.values().includes(deliveredToken), true);
@@ -234,6 +319,7 @@ test("the fixture profile and the real profile carry the same key set", async ()
         `/tmp/deliver/${name}`,
       { deliverToken: fakeDeliverToken },
     ),
+    "two-objective",
   );
 
   const ledger2 = createLedger();
@@ -282,7 +368,7 @@ test("createFixtureProfile on a podman driver probes the origin once with the de
     },
   );
 
-  await createFixtureProfile(fakeContext(ledger), driver);
+  await createFixtureProfile(fakeContext(ledger), driver, "two-objective");
 
   assert.equal(probeCalls.length, 1);
   assert.equal(probeCalls[0]?.tokenPath, "/tmp/deliver/token-podman");
@@ -312,7 +398,7 @@ test("createFixtureProfile records the three probe rows through context.assert w
     { deliverToken: fakeDeliverToken },
   );
 
-  await createFixtureProfile(context, driver);
+  await createFixtureProfile(context, driver, "two-objective");
 
   assert.deepEqual(assertions, [
     { name: "fixture-head-symref", expected: true, actual: true },
@@ -360,7 +446,7 @@ test("createFixtureProfile rejects with unavailable when a probe row fails, and 
   );
 
   await assert.rejects(
-    createFixtureProfile(context, driver),
+    createFixtureProfile(context, driver, "two-objective"),
     (error: unknown) =>
       error instanceof RunnerError &&
       error.code === "unavailable" &&
@@ -407,10 +493,35 @@ test("createFixtureProfile issues probeOrigin before any journey command, and is
     },
   );
 
-  await createFixtureProfile(fakeContext(ledger), driver);
+  await createFixtureProfile(fakeContext(ledger), driver, "two-objective");
 
   assert.equal(calls.includes("probeOrigin"), true);
   assert.equal(calls.includes("cli"), false);
 
   await ledger.releaseAll();
+});
+
+test("fixtureProfileAssertionNames equals the names createFixtureProfile actually records, in order", async () => {
+  const ledger = createLedger();
+  const recorded: string[] = [];
+  const driver = fakeDriver(
+    "local",
+    async (_role: HostRole, _source: string, name: string) =>
+      `/tmp/deliver/${name}`,
+    { deliverToken: fakeDeliverToken },
+  );
+  const context: ScenarioContext = {
+    ...fakeContext(ledger),
+    assert(name: string): void {
+      recorded.push(name);
+    },
+  };
+
+  try {
+    await createFixtureProfile(context, driver, "two-objective");
+
+    assert.deepEqual(recorded, [...fixtureProfileAssertionNames]);
+  } finally {
+    await ledger.releaseAll();
+  }
 });

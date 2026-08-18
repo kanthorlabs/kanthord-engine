@@ -133,7 +133,7 @@ const run = async (
 describe("src/cli/node/claim.test", () => {
   it("node claim sends an empty body with the id parameter", async () => {
     const h = harness();
-    await run(h.program, ["node", "claim", TASK]);
+    await run(h.program, ["node", "claim", "--id", TASK]);
 
     assert.deepEqual(h.calls()[0]?.operationId, "node.claim");
     assert.deepEqual(h.calls()[0]?.parameters, { id: TASK });
@@ -143,7 +143,7 @@ describe("src/cli/node/claim.test", () => {
 
   it("node claim prints its two lines exactly", async () => {
     const h = harness();
-    await run(h.program, ["node", "claim", TASK]);
+    await run(h.program, ["node", "claim", "--id", TASK]);
 
     assert.equal(
       h.stdoutText(),
@@ -162,7 +162,7 @@ describe("src/cli/node/claim.test", () => {
         body: claimedBody(null),
       }),
     });
-    await run(h.program, ["node", "claim", TASK]);
+    await run(h.program, ["node", "claim", "--id", TASK]);
 
     assert.equal(
       h.stdoutText(),
@@ -174,7 +174,7 @@ describe("src/cli/node/claim.test", () => {
 
   it("node claim sends an Idempotency-Key of 32 lowercase hex characters", async () => {
     const h = harness();
-    await run(h.program, ["node", "claim", TASK]);
+    await run(h.program, ["node", "claim", "--id", TASK]);
 
     const key = h.calls()[0]?.options?.idempotencyKey ?? "";
     assert.match(key, /^[0-9a-f]{32}$/);
@@ -191,7 +191,7 @@ describe("src/cli/node/claim.test", () => {
         details: undefined,
       }),
     });
-    await run(h.program, ["node", "claim", TASK]);
+    await run(h.program, ["node", "claim", "--id", TASK]);
 
     assert.equal(h.stdoutText(), "");
     assert.equal(
@@ -199,5 +199,18 @@ describe("src/cli/node/claim.test", () => {
       `kanthord: lease-held: the claim of ${TASK} conflicts with a lease held by another owner\n`,
     );
     assert.equal(h.failCalls(), 1);
+  });
+
+  it("node claim without --id writes the invalid-request line and records zero calls", async () => {
+    const h = harness();
+    await run(h.program, ["node", "claim"]);
+
+    assert.equal(h.failCalls(), 1);
+    assert.equal(h.calls().length, 0);
+    assert.equal(
+      h.stderrText(),
+      "kanthord: invalid-request: --id is required\n",
+    );
+    assert.equal(h.stdoutText(), "");
   });
 });

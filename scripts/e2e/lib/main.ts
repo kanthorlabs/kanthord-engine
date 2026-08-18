@@ -16,6 +16,7 @@ import {
   type Bundle,
 } from "./bundle.ts";
 import { scenarios } from "./scenario/index.ts";
+import type { ScenarioDeclaration } from "./scenario/index.ts";
 import type { ScenarioContext } from "./scenario/context.ts";
 import { assertPodman } from "./podman/preflight.ts";
 import {
@@ -26,6 +27,7 @@ import {
 import { runCommand, type CommandSink } from "./command.ts";
 import { redact } from "./redact.ts";
 import type { PodmanExecutor } from "./driver/podman.ts";
+import { expectedAssertions } from "./scenario/assertions.ts";
 import {
   recordVerify,
   type RecordVerifyDependencies,
@@ -41,11 +43,14 @@ import {
 } from "./record/acceptance.ts";
 import { verdict } from "./record/verdict.ts";
 
-const knownScenarioIds: readonly ScenarioId[] = [
+export const knownScenarioIds: readonly ScenarioId[] = [
   "P1-E1",
   "P1-E2",
   "P1-E4",
   "P1-E5",
+  "P1B-E1",
+  "P1B-E2",
+  "P1B-E3",
 ];
 
 function isKnownScenarioId(value: string): value is ScenarioId {
@@ -469,6 +474,42 @@ export function exitCodeFor(code: RunnerErrorCode): number {
   }
 }
 
+function assertExpectedAssertions(
+  scenarioId: ScenarioId,
+  recordedNames: readonly string[],
+): void {
+  const expectation =
+    expectedAssertions[scenarioId as keyof typeof expectedAssertions];
+  if (expectation === undefined) {
+    throw new RunnerError(
+      "assertion-failed",
+      `scenario ${scenarioId} has no expected assertion manifest`,
+    );
+  }
+
+  if (expectation === "non-empty") {
+    if (recordedNames.length === 0) {
+      throw new RunnerError(
+        "assertion-failed",
+        `scenario ${scenarioId} assertion name mismatch at position 0: expected a recorded assertion, recorded none`,
+      );
+    }
+    return;
+  }
+
+  const length = Math.max(expectation.length, recordedNames.length);
+  for (let index = 0; index < length; index += 1) {
+    const expected = expectation[index] ?? "<none>";
+    const recorded = recordedNames[index] ?? "<none>";
+    if (expected !== recorded) {
+      throw new RunnerError(
+        "assertion-failed",
+        `scenario ${scenarioId} assertion name mismatch at position ${index}: expected ${expected}, recorded ${recorded}`,
+      );
+    }
+  }
+}
+
 function createDefaultExecute(): PodmanExecutor {
   const sink: CommandSink = { print: () => undefined, record: () => undefined };
   return async (argv, stdin, cwd) =>
@@ -540,6 +581,7 @@ export async function main(
     execute?: PodmanExecutor;
     verify?: RecordVerifyDependencies;
     acceptance?: RecordAcceptanceDependencies;
+    scenarios?: readonly ScenarioDeclaration[];
   }>,
 ): Promise<number> {
   try {
@@ -598,7 +640,7 @@ export async function main(
       return report.failed.length > 0 ? 1 : 0;
     }
 
-    const scenario = scenarios.find(
+    const scenario = (dependencies?.scenarios ?? scenarios).find(
       (entry) => entry.id === invocation.scenarioId,
     );
     if (scenario === undefined) {
@@ -664,9 +706,11 @@ export async function main(
         await scenario.run(context);
       });
       cleanupFailures = result.failures;
+      assertExpectedAssertions(scenario.id, writer.assertionNames());
     } catch (error) {
       runError = error;
-      cleanupFailures = (error as WithCleanupFailures).cleanupFailures ?? [];
+      cleanupFailures =
+        (error as WithCleanupFailures).cleanupFailures ?? cleanupFailures;
     }
 
     const outcome = deriveOutcome({ runError, cleanupFailures });

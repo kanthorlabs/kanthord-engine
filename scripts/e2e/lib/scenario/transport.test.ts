@@ -5,6 +5,7 @@ import type { IncomingHttpHeaders, Server } from "node:http";
 import { connect } from "node:net";
 
 import { transportCases, runTransportCases } from "./transport.ts";
+import { transportAssertionNames } from "./assertions.ts";
 import type { HttpIssuer } from "../driver/index.ts";
 import type { ScenarioContext } from "./context.ts";
 import { RunnerError } from "../errors.ts";
@@ -359,4 +360,24 @@ test("a server answering 200 where the case expects 401 makes runTransportCases 
       error.code === "assertion-failed" &&
       error.message === "no-token-status",
   );
+});
+
+test("transportAssertionNames equals the names runTransportCases actually records, in order", async () => {
+  const echo = await startEchoServer();
+  try {
+    const { context, assertions } = buildContext();
+
+    await runTransportCases(
+      context,
+      { allowedHost, token },
+      makeIssuer(echo.port),
+    );
+
+    assert.deepEqual(
+      assertions.map((entry) => entry.name),
+      [...transportAssertionNames],
+    );
+  } finally {
+    await echo.close();
+  }
 });

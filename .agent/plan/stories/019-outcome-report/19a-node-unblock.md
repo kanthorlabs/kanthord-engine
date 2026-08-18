@@ -97,7 +97,7 @@ A new `src/http/server/node/unblock-node.ts`, in the shape of `src/http/server/n
 
 `src/main.ts` — the handler map gains `node.unblock`, so `unimplementedFor(handlers)` at `:338` holds it no longer. The binding passes `storage`, `plan`, `events` and `clock`, all of which `main.ts` already constructs.
 
-A new `src/cli/node/unblock.ts` exports `registerNodeUnblock`. The leaf is `kanthord node unblock --node <id>` and it takes no other option, because the route takes no body. It prints `kanthord: node <id> <state>`, where `<state>` is the state the response returned. A refusal prints `kanthord: <code>: <message>` with a non-zero exit through `src/cli/exit-code.ts`.
+A new `src/cli/node/unblock.ts` exports `registerNodeUnblock`. The leaf is `kanthord node unblock --id <id>` and it takes no other option, because the route takes no body. It prints `kanthord: node <id> <state>`, where `<state>` is the state the response returned. A refusal prints `kanthord: <code>: <message>` with a non-zero exit through `src/cli/exit-code.ts`.
 
 `src/cli/program.ts` calls `registerNodeUnblock` beside the three registrations of Story 19. `src/cli/inventory.ts:6` gains `["node", "unblock"]` with `["node.unblock"]`.
 

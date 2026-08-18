@@ -33,7 +33,7 @@ function fakeContext(ledger: ReturnType<typeof createLedger>): ScenarioContext {
   };
 }
 
-test("planTopology(runId) returns exactly the twelve pinned fields, and is pure", () => {
+test("planTopology(runId) returns exactly the thirteen pinned fields, and is pure", () => {
   const expected: Topology = {
     runId: "R1",
     network: "kanthord-e2e-R1",
@@ -41,6 +41,7 @@ test("planTopology(runId) returns exactly the twelve pinned fields, and is pure"
     fixtureContainer: "kanthord-e2e-fixture-R1",
     daemonContainer: "kanthord-e2e-daemon-R1",
     clientContainer: "kanthord-e2e-client-R1",
+    secondClientContainer: "kanthord-e2e-client2-R1",
     volume: "kanthord-e2e-home-R1",
     daemonAlias: "kanthord-daemon",
     daemonPort: 7421,
@@ -52,7 +53,7 @@ test("planTopology(runId) returns exactly the twelve pinned fields, and is pure"
   assert.deepEqual(planTopology("R1"), planTopology("R1"));
 });
 
-test("createTopology issues exactly eight commands, in order, each carrying the run-id label, with the two secret creates before the daemon run", async () => {
+test("createTopology issues exactly nine commands, in order, each carrying the run-id label, with the two secret creates before the daemon run", async () => {
   const topology = planTopology("R1");
   const argvCalls: (readonly string[])[] = [];
   const execute = async (argv: readonly string[]): Promise<CommandRecord> => {
@@ -69,7 +70,7 @@ test("createTopology issues exactly eight commands, in order, each carrying the 
     secretPaths,
   );
 
-  assert.equal(argvCalls.length, 8);
+  assert.equal(argvCalls.length, 9);
 
   assert.deepEqual(argvCalls[0], [
     "podman",
@@ -176,6 +177,25 @@ test("createTopology issues exactly eight commands, in order, each carrying the 
     "sleep",
     "infinity",
   ]);
+  assert.deepEqual(argvCalls[8], [
+    "podman",
+    "run",
+    "--detach",
+    "--network",
+    topology.network,
+    "--name",
+    topology.secondClientContainer,
+    "--label",
+    "kanthord-e2e-run=R1",
+    "--pull=never",
+    "--secret",
+    "kanthord-token-R1,type=mount,target=/run/secrets/kanthord-token,mode=0600",
+    "--secret",
+    "kanthord-master-R1,type=mount,target=/run/secrets/kanthord-master,mode=0600",
+    images.product,
+    "sleep",
+    "infinity",
+  ]);
 
   for (const argv of argvCalls) {
     assert.ok(argv.includes("kanthord-e2e-run=R1"));
@@ -216,8 +236,13 @@ test("no --secret argument anywhere carries mode=0400, and every --secret carrie
 
   const daemonArgv = argvCalls[6] ?? [];
   const clientArgv = argvCalls[7] ?? [];
+  const secondClientArgv = argvCalls[8] ?? [];
   assert.equal(daemonArgv.filter((token) => token === "--secret").length, 2);
   assert.equal(clientArgv.filter((token) => token === "--secret").length, 2);
+  assert.equal(
+    secondClientArgv.filter((token) => token === "--secret").length,
+    2,
+  );
 });
 
 test("no command in the whole recording carries --env or -e", async () => {
@@ -261,7 +286,7 @@ test("every podman run carries --pull=never, and none carries --network host, --
   );
 
   const runCommands = argvCalls.filter((argv) => argv[1] === "run");
-  assert.equal(runCommands.length, 3);
+  assert.equal(runCommands.length, 4);
   for (const argv of runCommands) {
     assert.ok(argv.includes("--pull=never"));
     assert.equal(argv.includes("--network host"), false);
@@ -290,11 +315,14 @@ test("the fixture and daemon commands carry --pod; the client command carries --
   const fixtureArgv = argvCalls[3] ?? [];
   const daemonArgv = argvCalls[6] ?? [];
   const clientArgv = argvCalls[7] ?? [];
+  const secondClientArgv = argvCalls[8] ?? [];
 
   assert.ok(fixtureArgv.includes("--pod"));
   assert.ok(daemonArgv.includes("--pod"));
   assert.equal(clientArgv.includes("--pod"), false);
   assert.ok(clientArgv.includes("--network"));
+  assert.equal(secondClientArgv.includes("--pod"), false);
+  assert.ok(secondClientArgv.includes("--network"));
 });
 
 test("the client command carries no --volume", async () => {
@@ -317,7 +345,31 @@ test("the client command carries no --volume", async () => {
   assert.equal((argvCalls[7] ?? []).includes("--volume"), false);
 });
 
-test("the fixture command uses images.fixture and the other two use images.product", async () => {
+test("the second client container carries no daemon volume mount", async () => {
+  const topology = planTopology("R4B");
+  const argvCalls: (readonly string[])[] = [];
+  const execute = async (argv: readonly string[]): Promise<CommandRecord> => {
+    argvCalls.push(argv);
+    return fakeRecord(argv);
+  };
+  const ledger = createLedger();
+
+  await createTopology(
+    fakeContext(ledger),
+    execute,
+    images,
+    topology,
+    secretPaths,
+  );
+
+  assert.equal(argvCalls.length, 9);
+  const secondClientArgv = argvCalls[8] ?? [];
+  assert.ok(secondClientArgv.includes("--network"));
+  assert.equal(secondClientArgv.includes("--volume"), false);
+  assert.equal(secondClientArgv.includes("-v"), false);
+});
+
+test("the fixture command uses images.fixture and the other three use images.product", async () => {
   const topology = planTopology("R5");
   const argvCalls: (readonly string[])[] = [];
   const execute = async (argv: readonly string[]): Promise<CommandRecord> => {
@@ -338,9 +390,10 @@ test("the fixture command uses images.fixture and the other two use images.produ
   assert.equal((argvCalls[3] ?? []).includes(images.product), false);
   assert.ok((argvCalls[6] ?? []).includes(images.product));
   assert.ok((argvCalls[7] ?? []).includes(images.product));
+  assert.ok((argvCalls[8] ?? []).includes(images.product));
 });
 
-test("the daemon and client commands both end in sleep infinity; neither argv contains serve", async () => {
+test("the daemon and both client commands end in sleep infinity; neither argv contains serve", async () => {
   const topology = planTopology("R6");
   const argvCalls: (readonly string[])[] = [];
   const execute = async (argv: readonly string[]): Promise<CommandRecord> => {
@@ -359,13 +412,16 @@ test("the daemon and client commands both end in sleep infinity; neither argv co
 
   const daemonArgv = argvCalls[6] ?? [];
   const clientArgv = argvCalls[7] ?? [];
+  const secondClientArgv = argvCalls[8] ?? [];
   assert.deepEqual(daemonArgv.slice(-2), ["sleep", "infinity"]);
   assert.deepEqual(clientArgv.slice(-2), ["sleep", "infinity"]);
+  assert.deepEqual(secondClientArgv.slice(-2), ["sleep", "infinity"]);
   assert.equal(daemonArgv.includes("serve"), false);
   assert.equal(clientArgv.includes("serve"), false);
+  assert.equal(secondClientArgv.includes("serve"), false);
 });
 
-test("context.taken() after createTopology deep-equals, in take order, network/volume/pod/fixture/daemon/client with their kinds", async () => {
+test("context.taken() after createTopology deep-equals, in take order, network/volume/pod/fixture/daemon/client/client2 with their kinds", async () => {
   const topology = planTopology("R7");
   const execute = async (argv: readonly string[]): Promise<CommandRecord> =>
     fakeRecord(argv);
@@ -388,6 +444,7 @@ test("context.taken() after createTopology deep-equals, in take order, network/v
     { kind: "secret", id: "kanthord-master-R7" },
     { kind: "container", id: topology.daemonContainer },
     { kind: "container", id: topology.clientContainer },
+    { kind: "container", id: topology.secondClientContainer },
   ]);
 });
 
@@ -414,7 +471,7 @@ test("a failure on command 4 (the fixture container) leaves taken() holding the 
   ]);
 });
 
-test("startDaemon then stop() then startDaemon issues two write-config-then-migrate-then-token-install-then-token-write-then-serve exec sequences, delivers the token to both containers each time, and one pkill, and no podman run or podman rm in between", async () => {
+test("startDaemon then stop() then startDaemon issues two write-config-then-migrate-then-token-install-then-token-write-then-serve exec sequences, delivers the token to all three containers each time, and one pkill, and no podman run or podman rm in between", async () => {
   const topology = planTopology("R9");
   const calls: Array<{ argv: readonly string[]; stdin?: string }> = [];
   const execute = async (
@@ -456,6 +513,7 @@ test("startDaemon then stop() then startDaemon issues two write-config-then-migr
     },
     tools: { git: "git", ssh: "ssh", sshKeyscan: "ssh-keyscan" },
     attemptLimit: 3,
+    leaseTtlMs: 300000,
   };
 
   const handle = await driver.startDaemon(config);
@@ -465,7 +523,7 @@ test("startDaemon then stop() then startDaemon issues two write-config-then-migr
   const execCommands = calls.filter(
     ({ argv }) => argv[0] === "podman" && argv[1] === "exec",
   );
-  assert.equal(execCommands.length, 17);
+  assert.equal(execCommands.length, 21);
 
   const healthCommands = execCommands.filter(({ argv }) =>
     argv.some((token) => token.includes("e2e-request.mjs")),
@@ -506,12 +564,13 @@ test("startDaemon then stop() then startDaemon issues two write-config-then-migr
     ({ argv }) =>
       argv.includes("install") && argv.includes("/run/secrets/kanthord-token"),
   );
-  assert.equal(tokenInstallCommands.length, 4);
+  assert.equal(tokenInstallCommands.length, 6);
   for (const { argv } of tokenInstallCommands) {
     const container = argv[2];
     assert.ok(
       container === topology.daemonContainer ||
-        container === topology.clientContainer,
+        container === topology.clientContainer ||
+        container === topology.secondClientContainer,
     );
     assert.deepEqual(argv, [
       "podman",
@@ -536,16 +595,23 @@ test("startDaemon then stop() then startDaemon issues two write-config-then-migr
     ).length,
     2,
   );
+  assert.equal(
+    tokenInstallCommands.filter(
+      ({ argv }) => argv[2] === topology.secondClientContainer,
+    ).length,
+    2,
+  );
 
   const tokenWriteCommands = execCommands.filter(({ argv }) =>
     argv.some((token) => token === "cat > /run/secrets/kanthord-token"),
   );
-  assert.equal(tokenWriteCommands.length, 4);
+  assert.equal(tokenWriteCommands.length, 6);
   for (const { argv, stdin } of tokenWriteCommands) {
     const container = argv[3];
     assert.ok(
       container === topology.daemonContainer ||
-        container === topology.clientContainer,
+        container === topology.clientContainer ||
+        container === topology.secondClientContainer,
     );
     assert.deepEqual(argv, [
       "podman",
@@ -567,6 +633,12 @@ test("startDaemon then stop() then startDaemon issues two write-config-then-migr
   assert.equal(
     tokenWriteCommands.filter(
       ({ argv }) => argv[3] === topology.clientContainer,
+    ).length,
+    2,
+  );
+  assert.equal(
+    tokenWriteCommands.filter(
+      ({ argv }) => argv[3] === topology.secondClientContainer,
     ).length,
     2,
   );

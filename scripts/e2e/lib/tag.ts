@@ -3,7 +3,8 @@ import { join } from "node:path";
 
 import { RunnerError } from "./errors.ts";
 
-export type ScenarioId = "P1-E1" | "P1-E2" | "P1-E4" | "P1-E5";
+export type ScenarioId =
+  "P1-E1" | "P1-E2" | "P1-E4" | "P1-E5" | "P1B-E1" | "P1B-E2" | "P1B-E3";
 
 export const runRoot = ".data";
 

@@ -29,14 +29,82 @@ const readP1E1Block = (): string => {
 };
 
 describe("src/cli/inventory.test", () => {
-  it("declares exactly thirty-two commands", () => {
-    assert.equal(declaredCommands.length, 32);
+  it("declares exactly the named commands", () => {
+    assert.deepEqual(commandPaths(), [
+      "actor list",
+      "actor register",
+      "actor revoke",
+      "actor rotate",
+      "actor show",
+      "config generate",
+      "credential register",
+      "db migrate",
+      "db status",
+      "event list",
+      "node attest",
+      "node claim",
+      "node close",
+      "node create",
+      "node delete",
+      "node heartbeat",
+      "node list",
+      "node release",
+      "node report",
+      "node show",
+      "node unblock",
+      "node update",
+      "plan export",
+      "plan import",
+      "project create",
+      "project list",
+      "project repository",
+      "project show",
+      "repository register",
+      "repository show",
+      "run",
+      "serve",
+      "status",
+    ]);
   });
 
-  it("commandPaths holds thirty-two distinct strings", () => {
+  it("commandPaths holds exactly the named distinct strings", () => {
     const paths = commandPaths();
-    assert.equal(paths.length, 32);
-    assert.equal(new Set(paths).size, 32);
+    assert.equal(new Set(paths).size, paths.length);
+    assert.deepEqual(paths, [
+      "actor list",
+      "actor register",
+      "actor revoke",
+      "actor rotate",
+      "actor show",
+      "config generate",
+      "credential register",
+      "db migrate",
+      "db status",
+      "event list",
+      "node attest",
+      "node claim",
+      "node close",
+      "node create",
+      "node delete",
+      "node heartbeat",
+      "node list",
+      "node release",
+      "node report",
+      "node show",
+      "node unblock",
+      "node update",
+      "plan export",
+      "plan import",
+      "project create",
+      "project list",
+      "project repository",
+      "project show",
+      "repository register",
+      "repository show",
+      "run",
+      "serve",
+      "status",
+    ]);
   });
 
   it("commandPaths is bytewise sorted", () => {
@@ -73,12 +141,45 @@ describe("src/cli/inventory.test", () => {
     }
   });
 
-  it("flattens to thirty-nine entries naming thirty-two distinct operation ids", () => {
+  it("flattens to the named distinct operation ids", () => {
     const flattened = declaredCommands.flatMap(
       (entry: DeclaredCommand) => entry.operationIds,
     );
-    assert.equal(flattened.length, 39);
-    assert.equal(new Set(flattened).size, 32);
+    assert.deepEqual([...new Set(flattened)].sort(bytewise), [
+      "actor.list",
+      "actor.register",
+      "actor.revoke",
+      "actor.rotate",
+      "actor.show",
+      "event.list",
+      "node.claim",
+      "node.create",
+      "node.delete",
+      "node.heartbeat",
+      "node.list",
+      "node.release",
+      "node.report",
+      "node.show",
+      "node.unblock",
+      "node.update",
+      "plan.export",
+      "plan.import",
+      "plan.revisions",
+      "plan.validate",
+      "project.create",
+      "project.list",
+      "project.repositories",
+      "project.show",
+      "provider.list",
+      "provider.register",
+      "repository.inspect",
+      "repository.list",
+      "repository.register",
+      "repository.show",
+      "run.start",
+      "system.db",
+      "system.status",
+    ]);
   });
 
   it("covers the eight commands the P1-E1 oracle runs", () => {
@@ -138,6 +239,7 @@ describe("src/cli/inventory.test", () => {
         "config generate",
         "db migrate",
         "db status",
+        "event list",
         "node attest",
         "node claim",
         "node close",

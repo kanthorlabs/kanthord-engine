@@ -100,7 +100,7 @@ describe("src/cli/node/unblock.test", () => {
     for (const state of ["ready", "pending"] as const) {
       const h = harness(state);
 
-      await run(h.program, ["node", "unblock", "--node", TASK]);
+      await run(h.program, ["node", "unblock", "--id", TASK]);
 
       assert.deepEqual(h.calls(), [
         {
@@ -124,12 +124,25 @@ describe("src/cli/node/unblock.test", () => {
       details: { refusal: "not-blocked", blockReason: null },
     });
 
-    await run(h.program, ["node", "unblock", "--node", TASK]);
+    await run(h.program, ["node", "unblock", "--id", TASK]);
 
     assert.equal(h.failCalls(), 1);
     assert.equal(
       h.stderrText(),
       `kanthord: illegal-transition: the task ${TASK} is not blocked\n`,
+    );
+    assert.equal(h.stdoutText(), "");
+  });
+
+  it("node unblock without --id writes the invalid-request line and records zero calls", async () => {
+    const h = harness("ready");
+    await run(h.program, ["node", "unblock"]);
+
+    assert.equal(h.failCalls(), 1);
+    assert.equal(h.calls().length, 0);
+    assert.equal(
+      h.stderrText(),
+      "kanthord: invalid-request: --id is required\n",
     );
     assert.equal(h.stdoutText(), "");
   });

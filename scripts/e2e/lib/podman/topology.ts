@@ -8,6 +8,7 @@ export type Topology = Readonly<{
   fixtureContainer: string;
   daemonContainer: string;
   clientContainer: string;
+  secondClientContainer: string;
   volume: string;
   daemonAlias: string;
   daemonPort: number;
@@ -32,6 +33,7 @@ export function planTopology(runId: string): Topology {
     fixtureContainer: `kanthord-e2e-fixture-${runId}`,
     daemonContainer: `kanthord-e2e-daemon-${runId}`,
     clientContainer: `kanthord-e2e-client-${runId}`,
+    secondClientContainer: `kanthord-e2e-client2-${runId}`,
     volume: `kanthord-e2e-home-${runId}`,
     daemonAlias: "kanthord-daemon",
     daemonPort: 7421,
@@ -218,6 +220,30 @@ export async function createTopology(
     id: topology.clientContainer,
     async release(): Promise<void> {
       await execute(["podman", "rm", "-f", topology.clientContainer]);
+    },
+  });
+
+  await execute([
+    "podman",
+    "run",
+    "--detach",
+    "--network",
+    topology.network,
+    "--name",
+    topology.secondClientContainer,
+    "--label",
+    label,
+    "--pull=never",
+    ...secretArguments,
+    images.product,
+    "sleep",
+    "infinity",
+  ]);
+  context.take({
+    kind: "container",
+    id: topology.secondClientContainer,
+    async release(): Promise<void> {
+      await execute(["podman", "rm", "-f", topology.secondClientContainer]);
     },
   });
 }

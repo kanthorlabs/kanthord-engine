@@ -22,6 +22,9 @@ const knownScenarioIds: readonly ScenarioId[] = [
   "P1-E2",
   "P1-E4",
   "P1-E5",
+  "P1B-E1",
+  "P1B-E2",
+  "P1B-E3",
 ];
 
 type RawBundle = Readonly<{ commit: string; outcome: string }>;

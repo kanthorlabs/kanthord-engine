@@ -8,6 +8,8 @@ import type { AppliedMigrationLine } from "./db/migrate.ts";
 import { registerDbMigrate } from "./db/migrate.ts";
 import { registerDbStatus } from "./db/status.ts";
 import { KANTHORD_VERSION } from "../domain/version.ts";
+import { eventCommand } from "./event/index.ts";
+import { registerEventList } from "./event/list.ts";
 import {
   registerClientOptions,
   requireBaseUrl,
@@ -115,6 +117,15 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
         idempotencyKey: options?.idempotencyKey,
       }),
   };
+
+  eventCommand(program);
+  registerEventList({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+  });
 
   registerDbMigrate({
     program,
