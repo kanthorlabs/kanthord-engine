@@ -84,10 +84,8 @@ describe("src/cli/config/generate.test", () => {
       "localhost:31415",
     ]);
     assert.deepEqual(config.http.allowedOrigins, [
-      "http://localhost:8080",
-      "http://localhost:8081",
-      "http://127.0.0.1:8080",
-      "http://127.0.0.1:8081",
+      "http://localhost:27182",
+      "http://127.0.0.1:27182",
     ]);
     assert.equal(
       h.stdoutText(),

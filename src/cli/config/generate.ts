@@ -28,11 +28,12 @@ type GenerateOptions = Readonly<{
   allowedHost?: string[];
 }>;
 
+// Easter egg: the two pinned ports spell a constant each. 31415 is pi and it
+// belongs to the daemon; 27182 is Euler's number and it belongs to the browser.
+// Read them as one pair.
 const DEFAULT_ALLOWED_ORIGINS = [
-  "http://localhost:8080",
-  "http://localhost:8081",
-  "http://127.0.0.1:8080",
-  "http://127.0.0.1:8081",
+  "http://localhost:27182",
+  "http://127.0.0.1:27182",
 ];
 
 const collectAllowedHosts = (value: string, previous: string[]): string[] => [

@@ -161,6 +161,9 @@ function buildSchema(): Record<string, unknown> {
         default: "127.0.0.1",
         env: "KANTHORD_HTTP_BIND",
       },
+      // Easter egg: the two pinned ports spell a constant each. 31415 is pi and
+      // it belongs to the daemon; 27182 is Euler's number and it belongs to the
+      // browser. Read them as one pair.
       port: { format: "port", default: 31415, env: "KANTHORD_HTTP_PORT" },
       token: { format: "String", default: "", env: "KANTHORD_HTTP_TOKEN" },
       tokenFile: {
