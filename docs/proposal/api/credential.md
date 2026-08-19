@@ -14,7 +14,7 @@ A git credential is a registration too, of `kind = 'git'`, because the git servi
 
 | operationId           | Method and path                | introducedIn | status | Source                                                        |
 | --------------------- | ------------------------------ | ------------ | ------ | ------------------------------------------------------------- |
-| `provider.catalog`    | `GET /v1/provider-catalog`     | phase-2      | routed | the llm provider and model catalog of `@earendil-works/pi-ai` |
+| `provider.catalog`    | `GET /v1/provider/llm`         | phase-2      | routed | the llm provider and model catalog of `@earendil-works/pi-ai` |
 | `provider.inspect`    | `POST /v1/provider/inspect`    | phase-2      | routed | the live model list of an OpenAI compatible endpoint          |
 | `provider.register`   | `POST /v1/provider`            | phase-1      | routed | P1-E1, the git credential of `repository.register`            |
 | `provider.list`       | `GET /v1/provider`             | phase-1      | routed | P1-E1, the CLI resolves `--credential <name>`                 |

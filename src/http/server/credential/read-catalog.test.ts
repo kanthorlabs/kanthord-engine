@@ -7,7 +7,7 @@ import type { ReadCatalogInput } from "../../../queries/provider/read-catalog.ts
 import { readCatalogHandler } from "./read-catalog.ts";
 
 describe("src/http/server/credential/read-catalog.test", () => {
-  it("GET /v1/provider-catalog answers 200 with the provider catalog", async () => {
+  it("GET /v1/provider/llm answers 200 with the provider catalog", async () => {
     let called: ReadCatalogInput | undefined;
     const app = await createTestApp({
       handlers: {
@@ -20,7 +20,7 @@ describe("src/http/server/credential/read-catalog.test", () => {
       },
     });
 
-    const response = await app.get("/v1/provider-catalog");
+    const response = await app.get("/v1/provider/llm");
 
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, { providers: defaultCatalogProviders });
@@ -40,7 +40,7 @@ describe("src/http/server/credential/read-catalog.test", () => {
       },
     });
 
-    const response = await app.get("/v1/provider-catalog?provider=openai");
+    const response = await app.get("/v1/provider/llm?provider=openai");
 
     assert.equal(response.status, 200);
     assert.deepEqual(called, { provider: "openai" });
@@ -57,7 +57,7 @@ describe("src/http/server/credential/read-catalog.test", () => {
       },
     });
 
-    const response = await app.get("/v1/provider-catalog?provider=");
+    const response = await app.get("/v1/provider/llm?provider=");
 
     assert.equal(response.status, 400);
     assert.equal(response.body.error.code, "invalid-request");
@@ -74,7 +74,7 @@ describe("src/http/server/credential/read-catalog.test", () => {
       },
     });
 
-    const response = await app.get("/v1/provider-catalog?kind=llm");
+    const response = await app.get("/v1/provider/llm?kind=llm");
 
     assert.equal(response.status, 400);
     assert.equal(response.body.error.code, "invalid-request");

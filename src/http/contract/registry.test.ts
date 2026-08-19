@@ -288,6 +288,20 @@ describe("src/http/contract/registry.test", () => {
     );
   });
 
+  it("resolves GET /v1/provider/llm to the catalog, not to provider.show", () => {
+    assert.equal(
+      matchRoute("GET", "/v1/provider/llm")?.operation.operationId,
+      "provider.catalog",
+    );
+  });
+
+  it("still resolves a provider id on the same GET shape", () => {
+    const id = "provider_01HZY8QF3M4N5P6R7S8T9V0W1X";
+    const match = matchRoute("GET", `/v1/provider/${id}`);
+    assert.equal(match?.operation.operationId, "provider.show");
+    assert.equal(match?.parameters.id, id);
+  });
+
   it("drops a trailing slash", () => {
     assert.equal(
       matchRoute("GET", "/v1/node/")?.operation.operationId,
@@ -372,8 +386,30 @@ describe("src/http/contract/registry.test", () => {
     );
   });
 
-  it("flags an ambiguous path", () => {
+  it("flags two paths that carry a parameter in the same position", () => {
     const faults = registryFaults([
+      {
+        operationId: "n.show",
+        method: "GET",
+        path: [resource("node"), parameter("node")],
+        introducedIn: "phase-1",
+        status: "routed",
+        allowedActors: ["human"],
+      },
+      {
+        operationId: "n.other",
+        method: "GET",
+        path: [resource("node"), parameter("deferred")],
+        introducedIn: "phase-2",
+        status: "stubbed",
+        allowedActors: ["human"],
+      },
+    ]);
+    assert.ok(faults.some((fault) => fault.reason === "path is ambiguous"));
+  });
+
+  it("admits a literal beside a parameter, because matchRoute prefers the literal", () => {
+    const entries = [
       {
         operationId: "n.show",
         method: "GET",
@@ -390,8 +426,14 @@ describe("src/http/contract/registry.test", () => {
         status: "stubbed",
         allowedActors: ["human"],
       },
-    ]);
-    assert.ok(faults.some((fault) => fault.reason === "path is ambiguous"));
+    ] as const;
+
+    const faults = registryFaults([...entries]);
+
+    assert.equal(
+      faults.some((fault) => fault.reason === "path is ambiguous"),
+      false,
+    );
   });
 
   it("flags a segment invalid in its declared kind and a plural", () => {

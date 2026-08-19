@@ -117,6 +117,10 @@ export function matchRoute(
 
 export type RegistryFault = Readonly<{ operationId: string; reason: string }>;
 
+function parameterCount(path: readonly Segment[]): number {
+  return path.filter((segment) => segment.kind === "parameter").length;
+}
+
 export function registryFaults(
   entries: readonly Operation[],
 ): readonly RegistryFault[] {
@@ -152,6 +156,7 @@ export function registryFaults(
       const b = entries[j];
       if (a === undefined || b === undefined) continue;
       if (a.method !== b.method || a.path.length !== b.path.length) continue;
+      if (parameterCount(a.path) !== parameterCount(b.path)) continue;
       let ambiguous = true;
       for (let k = 0; k < a.path.length; k += 1) {
         const sa = a.path[k];

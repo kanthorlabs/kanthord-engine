@@ -294,7 +294,7 @@ export const credential = operations([
   {
     operationId: "provider.catalog",
     method: "GET",
-    path: [resource("provider-catalog")],
+    path: [resource("provider"), sub("llm")],
     introducedIn: "phase-2",
     status: "routed",
     allowedActors: ["human"],
