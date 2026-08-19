@@ -1,6 +1,7 @@
-# EPIC 026 — Event long poll
+# EPIC 028 — Event long poll
 
-Status: **draft**. It is outside the external-drive block. It lands after EPIC 025 closes phase 1b.
+Status: **draft**. It is outside the external-drive block. It sits after EPIC 027 in the sequence, and
+it lands after EPIC 025 closes phase 1b.
 
 Source: `kanthord-apps/docs/api/blockers.md`, item E5. The client has withdrawn SSE in favour of long
 polling, and interval polling works today. This epic makes the channel good rather than merely
@@ -163,7 +164,7 @@ node --test \
   src/http/server/shutdown.test.ts \
   src/services/config/convict.test.ts \
   src/main.event-wait.test.ts \
-  && echo "PASS EPIC-026"
+  && echo "PASS EPIC-028"
 ```
 
 Hermetic coverage required beyond the Proof:
@@ -205,6 +206,8 @@ Hermetic coverage required beyond the Proof:
   through `launchDaemon`, with no injected handler map.
 
 ## Open items
+
+- **This epic inherits the merge from `026-event-tail-read.md`, which lands first.** That epic adds `before` and `order` to `cursorRequest` in `src/http/contract/cursor.ts`, so `eventListRequest` already carries four cursor members when D1 adds `wait`. Nothing in D1 changes: `wait` joins `eventListRequest` in `src/http/contract/event.ts`, not `cursorRequest`. The inherited work is mechanical — the `event.ts` line numbers D1 quotes shift, `eventListExamples.query` already carries `order: "asc"`, `src/http/contract/field-decisions.fixture.ts` is regenerated rather than merged, and the `wait` refusal tests in `src/http/contract/event.test.ts` and `src/http/server/event/list-event.test.ts` are the two this epic inverts. **`wait` with `order=desc` is already decided** in that epic's Open items: the handler runs the ordered query once, answers at once when any row matches, and waits only on an empty selection. This epic owns the assertion for it.
 
 - **Notification instead of polling.** A post-commit hook on `services/storage` would drop the
   latency from up to 250 ms to near zero and remove the idle read. It is the upgrade path if a load

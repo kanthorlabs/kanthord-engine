@@ -1,7 +1,7 @@
-# EPIC 028 — Event tail read
+# EPIC 026 — Event tail read
 
-Status: **draft**. It sits after EPIC 027 in the sequence. It shares one file with
-`026-event-long-poll.md`; see Open items.
+Status: **draft**. It sits after EPIC 025 in the sequence, outside the external-drive block.
+`028-event-long-poll.md` adds `wait` to the same operation afterwards; see Open items.
 
 Source: the `kanthord-apps` contract asks, item P3, answered at `e2ff3cf`. The answer was decided
 before this epic existed, so this file is its first record in the repository. The client holds the same
@@ -20,7 +20,7 @@ poller that restarts with no stored cursor costs one request rather than one hun
 
 ## Non-goals
 
-- **No `wait` parameter.** `026-event-long-poll.md` owns it and lands before this epic. This epic adds no held request and no wake-up path.
+- **No `wait` parameter.** `028-event-long-poll.md` owns it and lands after this epic. This epic adds no held request and no wake-up path.
 - **No tail operation.** See D3.
 - **No dense sequence and no gap detection.** `docs/proposal/api/event.md:24` refuses it, and reading a log backwards does not change that.
 - **No second index on `event`.** `migration-0004-event-indexes.ts` is unchanged. See D2's last paragraph.
@@ -58,7 +58,7 @@ the only paged route in the product**, this epic changes one route's query, and 
 gains the three parameters" was wrong. The schema stays in `cursor.ts` because it is the cursor
 vocabulary a second paged route will extend, not because a second one exists.
 
-### D2 — `asc` stays the default, and a range is half-open
+### D2 — `asc` stays the default, and both range bounds are exclusive
 
 `order` carries `.default("asc")`, so **every request a client sends today parses to the same value and
 returns the same page.** That is the whole compatibility argument, and it is checkable: `limit` already
@@ -66,9 +66,9 @@ carries a default and emits `required=false` in the published document
 (`src/http/contract/field-decisions.fixture.ts:49`), so `order` emits the same and no client that omits
 it fails to send a valid request.
 
-`after` and `before` are independent and combinable, and together they select the half-open range
-`(after, before)`. Both bounds are exclusive, in that one word, so no reader has to remember which end
-is inclusive.
+`after` and `before` are independent and combinable, and together they select the open range
+`(after, before)`. Both bounds are exclusive, so no reader has to remember which end is inclusive, and
+the parenthesis notation carries the same fact.
 
 **An empty or inverted range is `200` with an empty array, never a refusal.** `after` at or above
 `before` returns no row, and the daemon does not compare the two ids to refuse the request. A refusal
@@ -108,7 +108,7 @@ Run them in this order. Each passes the full gate on its own.
 
 - **`event.list` reads the tail** — add `before` and `order` to `src/http/contract/cursor.ts` per D1. Add `before?: string` and `order?: "asc" | "desc"` to `EventFilter` at `src/services/event/index.ts:26-33` and to `ListEventInput` at `src/queries/event/list-event.ts:12`. In `src/services/event/sqlite.ts`, push `id < ?` for `before` beside the `id > ?` of line 89, and select the `ORDER BY` direction from `order` at line 97, defaulting to `ASC`. Add `order: "asc"` to `eventListExamples.query` at `src/http/contract/event.ts:35-42`, so the published example names the parameter. Change the handler at `src/http/server/event/list-event.ts` in no way: it already forwards `parsed.data` whole. Regenerate the field-decisions fixture; two rows appear beside `event.list.query#/properties/after` at line 48, `before` with `required=false nullable=false enum=-` and `order` with `required=false nullable=false enum=asc,desc`.
 - **The CLI reaches the tail** — add `--before <event-id>` and `--order <asc|desc>` to `src/cli/event/list.ts` per D4, in the option list at lines 57-64 and in the query object at lines 66-77. Validate neither client-side.
-- **The proposal records the tail** — amend `docs/proposal/api/event.md:18`, which says paging is `after` plus `limit`. It states the half-open exclusive range, both directions, that `asc` is the default, and that the first id of an `order=desc` page is the newest id, so no tail operation exists. `docs/proposal/api/new-decisions.md` gains one row. Line 20's `wait` paragraph and line 24's gap refusal are unchanged.
+- **The proposal records the tail** — amend `docs/proposal/api/event.md:18`, which says paging is `after` plus `limit`. It states the exclusive range, both directions, that `asc` is the default, and that the first id of an `order=desc` page is the newest id, so no tail operation exists. `docs/proposal/api/new-decisions.md` gains one row. Line 20's `wait` paragraph and line 24's gap refusal are unchanged.
 
 ## Verification gate
 
@@ -125,7 +125,7 @@ node --test src/http/contract/cursor.test.ts \
   src/services/event/sqlite.test.ts \
   src/queries/event/list-event.test.ts \
   src/http/server/event/list-event.test.ts \
-  src/cli/event/list.test.ts && echo "PASS EPIC-028"
+  src/cli/event/list.test.ts && echo "PASS EPIC-026"
 ```
 
 Hermetic coverage required beyond the Proof:
@@ -151,6 +151,6 @@ node scripts/publish-contract.ts "$(mktemp -d)"
 ## Open items
 
 - **One correction is owed to the client, and it falsifies something the reply at `e2ff3cf` asserted.** The reply said the three cursor parameters reach "every paged route". D1 proves there is one paged route: only `src/http/contract/event.ts:9,11` imports `cursorRequest`. Send it before the client plans a shared pager.
-- **`026-event-long-poll.md` edits the same file, and whichever lands second inherits the merge.** Its D1 adds `wait` to `src/http/contract/cursor.ts`, and this epic adds `before` and `order` there. The two additions do not conflict semantically — a `wait` on a `desc` page is a legal request that returns the newest page immediately — but the file, the fixture rows and the `cursorRequest.parse({})` default assertion are touched by both. EPIC 026 is sequenced first, so this epic reads `wait` as present; if the order inverts, EPIC 026 inherits the same merge and neither decision changes.
-- **`wait` combined with `order=desc` is not specified by either epic.** A long poll waits for an event _after_ a cursor, which is an ascending idea. `wait` with `order=desc` and no `before` would return the newest page at once and never wait. That is defensible and it is not decided. The condition to open it: the client asks to long-poll a descending page. Until then, EPIC 026 owns `wait` and this epic owns direction, and neither claims the combination.
+- **`028-event-long-poll.md` lands after this epic and edits no file this epic edits at the schema level.** Its D1 adds optional `wait` to `eventListRequest` at `src/http/contract/event.ts:11-17`; it names `src/http/contract/cursor.ts` only to cite `limit` as the `z.coerce` precedent, and it edits `cursorRequest` in no way. It therefore does not touch the `cursorRequest.parse({})` default assertion either: `wait` is optional and carries no default, so that parse is `{ order: "asc", limit: 100 }` with and without it. The two epics overlap on four artifacts and on no contested declaration: `src/http/contract/event.ts` — this epic adds `order: "asc"` to `eventListExamples.query` and EPIC 028 adds a `wait` example to the same object — plus `src/http/contract/field-decisions.fixture.ts`, `src/http/contract/event.test.ts` and `src/http/server/event/list-event.test.ts`, where each epic owns the `wait` refusal from its own side. None of that is a decision. The fixture is regenerated by `node scripts/field-decisions-probe.mjs --write` and never merged by hand, which is the same class of mechanical overlap `027-plan-choice-values.md` already accepts with this epic. **EPIC 028 inherits the merge**, and neither decision changes.
+- **`wait` combined with `order=desc` is decided, and `028-event-long-poll.md` implements it.** It is recorded here because this epic ships `order` first and a published parameter pair with no stated behaviour is a gap rather than an open question. The composition falls out of EPIC 028's own handler story, which reads: the handler "calls the query once, and enters the waiter only when `wait` is present, non-zero and the first read is empty", and "a first read that returns events never waits". So `wait` with `order=desc` runs the descending query once and answers at once with the newest matching page whenever any row matches; it waits only when the selected range is empty, and it then polls that same descending query. `wait` with `order=desc` and no `before` therefore almost never waits, which is correct rather than surprising: an empty descending page means an empty filter, not a caught-up reader. EPIC 028 owns the assertion; this epic asserts no wait behaviour.
 - The published artifact changes shape, so `npm run contract:publish -- ../kanthord-apps/docs/api/contract` runs from a clean tree after this epic lands. Under `024-release-bound-contract-publish.md` that publish also requires the release tag.

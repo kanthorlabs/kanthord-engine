@@ -1,6 +1,9 @@
 # EPIC 027 — Plan choice values
 
-Status: **draft**. It sits after EPIC 026 in the sequence and shares no file with EPICs 014 to 026.
+Status: **draft**. It sits after EPIC 026 in the sequence. It shares no schema, command or service
+with EPICs 014 to 026. Its only overlap is with `026-event-tail-read.md`: both regenerate
+`src/http/contract/field-decisions.fixture.ts` and both add one `docs/proposal/api/new-decisions.md`
+row. Both are mechanical.
 
 Source: the `kanthord-apps` contract asks, item P2, answered at `e2ff3cf`. The answer was decided
 before this epic existed, so this file is its first record in the repository. The client holds the same
@@ -10,7 +13,7 @@ decision and builds against it.
 by one contract publish. The bundle is dropped: the two halves share no schema, no command and no
 service, and their only overlap is that both regenerate
 `src/http/contract/field-decisions.fixture.ts` and both add a row to
-`docs/proposal/api/new-decisions.md`. `028-event-tail-read.md` owns the event half. The cost of the
+`docs/proposal/api/new-decisions.md`. `026-event-tail-read.md` owns the event half. The cost of the
 split is one extra release-bound publish under `024-release-bound-contract-publish.md`, and it is
 accepted: a plan conflict screen and an audit screen are two client features, and neither waits on the
 other.
@@ -29,7 +32,7 @@ branch a `values` member carrying the field values of that side, so a `database-
 - **No change to `choiceVerdict`.** `src/domain/plan-choice.ts:36` stays a pure function of `ChoiceFacts` and returns `ChoiceVerdict` unchanged, so `src/commands/plan/import-plan.ts:320`, its second caller, is untouched. See D4.
 - **No change to `plan.import`.** The submitted-choice request stays `{ id, take }` (`src/http/contract/field-decisions.fixture.ts:287-288`). A client that reads `values` sends back the same choice it sent before.
 - **No write on `plan.validate`.** It stays a read path. See D2's refusal of storing the submitted blobs.
-- **Nothing about `event.list`.** `028-event-tail-read.md` owns `before`, `order` and the tail read. This epic touches `src/http/contract/cursor.ts` in no way.
+- **Nothing about `event.list`.** `026-event-tail-read.md` owns `before`, `order` and the tail read. This epic touches `src/http/contract/cursor.ts` in no way.
 
 ## Decisions
 
@@ -309,5 +312,5 @@ node scripts/publish-contract.ts "$(mktemp -d)"
   1. A `body` value is a pair of blob hashes, not a plain string pair. D2.
   2. `values` is driven by `presence`, not by `fields`. D1's table supersedes the rule the client holds, and it gives the client strictly more than it asked for on the single-sided entries. Send the table itself, not a summary of it.
 - **Two additions the client needs and the reply did not carry, which are new facts rather than corrections.** The three states of an absent key versus a `null` value, per D1; and D2's retrieval rule with the `path` member, including the statement that a submitted blob hash resolves through `documents` and **not** through `blob.show`. The second is the one that decides how the choice screen fetches text.
-- The published artifact changes shape, so `npm run contract:publish -- ../kanthord-apps/docs/api/contract` runs from a clean tree after this epic lands. Under `024-release-bound-contract-publish.md` that publish also requires the release tag. `028-event-tail-read.md` needs its own publish; the split accepts two.
+- The published artifact changes shape, so `npm run contract:publish -- ../kanthord-apps/docs/api/contract` runs from a clean tree after this epic lands. Under `024-release-bound-contract-publish.md` that publish also requires the release tag. `026-event-tail-read.md` needs its own publish; the split accepts two.
 - **A choice value set is not a diff, and no epic owns one.** If the client later reports that two value sets are insufficient — a long dependency list is the likely case — the answer is a rendering decision in the client, or a new epic that owns a diff format for the whole product. It is not a second member on this branch.

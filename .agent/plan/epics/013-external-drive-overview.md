@@ -153,7 +153,7 @@ after it.
 
 E5 of the same file — a daemon-side `wait` on `event.list` — is **not** in this block. Interval
 polling is already correct, the exit criterion does not need it, and it is the first route that would
-hold a connection open. `.agent/plan/epics/026-event-long-poll.md` owns it, after the block closes.
+hold a connection open. `.agent/plan/epics/028-event-long-poll.md` owns it, after the block closes.
 
 ## What this block does not do
 
