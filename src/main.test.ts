@@ -59,6 +59,15 @@ const fixtures: Readonly<Record<string, Fixture>> = {
   "system.health": { expect: 200 },
   "system.db": { expect: 200 },
   "system.status": { expect: 200 },
+  "provider.catalog": { expect: 200 },
+  "provider.inspect": {
+    body: {
+      provider: "openai",
+      baseUrl: null,
+      apiKey: "sk-test",
+    },
+    expect: 400,
+  },
   "provider.list": { expect: 200 },
   "provider.register": {
     body: {

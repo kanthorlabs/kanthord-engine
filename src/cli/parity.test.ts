@@ -224,7 +224,7 @@ describe("src/cli/parity.test", () => {
     }
   });
 
-  it("the routed operations that no command names are exactly the eight accepted ones", () => {
+  it("the routed operations that no command names are exactly the ten accepted ones", () => {
     const named = new Set(
       declaredCommands.flatMap((entry) => entry.operationIds),
     );
@@ -238,6 +238,8 @@ describe("src/cli/parity.test", () => {
       "blob.show",
       "edge.list",
       "project.status",
+      "provider.catalog",
+      "provider.inspect",
       "provider.remove",
       "provider.rename",
       "provider.setDefault",

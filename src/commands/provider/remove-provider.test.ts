@@ -15,6 +15,7 @@ import type { RegisterProviderDependencies } from "./register-provider.ts";
 import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
+import { createFakeModelCatalog } from "../../../test/helpers/model-catalog.ts";
 
 type EventRowReadback = Readonly<{
   id: string;
@@ -57,6 +58,7 @@ describe("src/commands/provider/remove-provider.test", () => {
       ids,
       clock,
       events: new SqliteEventLog({ storage, ids }),
+      catalog: createFakeModelCatalog(),
     };
   }
 

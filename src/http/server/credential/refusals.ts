@@ -4,6 +4,7 @@ import { RegisterProviderError } from "../../../commands/provider/register-provi
 import { SetDefaultProviderError } from "../../../commands/provider/set-default-provider.ts";
 import { RenameProviderError } from "../../../commands/provider/rename-provider.ts";
 import { RemoveProviderError } from "../../../commands/provider/remove-provider.ts";
+import { InspectProviderError } from "../../../queries/provider/inspect-provider.ts";
 
 export function toHttpError(error: unknown): HttpError {
   if (error instanceof PayloadError) {
@@ -37,6 +38,12 @@ export function toHttpError(error: unknown): HttpError {
     }
     return httpError("invalid-request", error.message, {
       refusal: error.refusal,
+    });
+  }
+  if (error instanceof InspectProviderError) {
+    return httpError("invalid-request", error.message, {
+      refusal: error.refusal,
+      detail: error.detail,
     });
   }
   if (error instanceof RemoveProviderError) {

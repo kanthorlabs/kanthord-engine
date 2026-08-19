@@ -34,6 +34,11 @@ import type { Transaction } from "./services/storage/index.ts";
 import { migrations } from "./services/storage/migrations.ts";
 import { AesGcmCrypto } from "./services/crypto/aes-gcm.ts";
 import { NodeCryptoSecret } from "./services/secret/node-crypto.ts";
+import { PiAiModelCatalog } from "./services/model-catalog/pi-ai.ts";
+import { readCatalog } from "./queries/provider/read-catalog.ts";
+import { inspectProvider } from "./queries/provider/inspect-provider.ts";
+import { readCatalogHandler } from "./http/server/credential/read-catalog.ts";
+import { inspectProviderHandler } from "./http/server/credential/inspect-provider.ts";
 import { SqliteEventLog } from "./services/event/sqlite.ts";
 import { SqliteExecution } from "./services/execution/sqlite.ts";
 import { SqliteLease } from "./services/lease/sqlite.ts";
@@ -323,6 +328,7 @@ async function serve(options: ServeOptions): Promise<void> {
         keyVersion: 1,
       });
       const secret = new NodeCryptoSecret();
+      const catalog = new PiAiModelCatalog();
       const handlers = {
         "system.health": healthHandler({
           readHealth: () => readHealth({ reporters }),
@@ -341,9 +347,18 @@ async function serve(options: ServeOptions): Promise<void> {
               startedAt,
             }),
         }),
+        "provider.catalog": readCatalogHandler({
+          readCatalog: () => readCatalog({ catalog }),
+        }),
+        "provider.inspect": inspectProviderHandler({
+          inspectProvider: (input) => inspectProvider({ catalog }, input),
+        }),
         "provider.register": registerProviderHandler({
           registerProvider: (input) =>
-            registerProvider({ storage, crypto, ids, clock, events }, input),
+            registerProvider(
+              { storage, crypto, ids, clock, events, catalog },
+              input,
+            ),
         }),
         "provider.rename": renameProviderHandler({
           renameProvider: (input) =>

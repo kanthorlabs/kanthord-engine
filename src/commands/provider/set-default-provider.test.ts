@@ -18,6 +18,7 @@ import {
   setDefaultProvider,
 } from "./set-default-provider.ts";
 import type { SetDefaultProviderDependencies } from "./set-default-provider.ts";
+import { createFakeModelCatalog } from "../../../test/helpers/model-catalog.ts";
 
 type ProviderRowReadback = Readonly<{
   id: string;
@@ -83,6 +84,7 @@ describe("src/commands/provider/set-default-provider.test", () => {
       ids,
       clock,
       events: new SqliteEventLog({ storage, ids }),
+      catalog: createFakeModelCatalog(),
     };
   }
 

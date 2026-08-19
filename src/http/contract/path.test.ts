@@ -35,7 +35,7 @@ describe("src/http/contract/path.test", () => {
   });
 
   it("pins the closed-array sizes", () => {
-    assert.equal(resourceSegments.length, 14);
+    assert.equal(resourceSegments.length, 15);
     assert.equal(subresourceSegments.length, 15);
     assert.equal(actionSegments.length, 23);
     assert.equal(systemSegments.length, 3);

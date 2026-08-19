@@ -30,6 +30,7 @@ import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
 import { resolveTools } from "../../../test/helpers/remote/tools.ts";
+import { createFakeModelCatalog } from "../../../test/helpers/model-catalog.ts";
 
 type ProviderRowReadback = Readonly<{
   id: string;
@@ -115,6 +116,7 @@ describe("src/commands/provider/register-provider.test", () => {
       ids,
       clock,
       events: new SqliteEventLog({ storage, ids }),
+      catalog: createFakeModelCatalog(),
     };
   }
 
@@ -461,7 +463,14 @@ describe("src/commands/provider/register-provider.test", () => {
     assert.throws(
       () =>
         registerProvider(
-          { storage: temporary.storage, crypto, ids, clock, events },
+          {
+            storage: temporary.storage,
+            crypto,
+            ids,
+            clock,
+            events,
+            catalog: createFakeModelCatalog(),
+          },
           {
             name: "anthropic-bot",
             kind: "llm",
@@ -623,5 +632,119 @@ describe("src/commands/provider/register-provider.test", () => {
     });
     assert.equal(countRows(temporary.storage, "provider"), 1);
     assert.equal(countRows(temporary.storage, "event"), 1);
+  });
+  describe("the llm provider catalog", () => {
+    it("refuses an unknown provider with provider-unknown and writes nothing", (t) => {
+      const temporary = createMigratedStorage();
+      t.after(() => temporary.dispose());
+      const ids = createMockIdGenerator({ ulids: [PROVIDER_ULID, EVENT_ULID] });
+      const clock = createMockClock({ start: 1_700_000_000_000 });
+
+      assert.throws(
+        () =>
+          registerProvider(dependencies(temporary.storage, ids, clock), {
+            name: "nonesuch-llm",
+            kind: "llm",
+            payload: { ...llmInput, provider: "nonesuch" },
+            actor: "ulrich",
+          }),
+        (error: unknown) =>
+          error instanceof RegisterProviderError &&
+          error.refusal === "provider-unknown",
+      );
+      assert.equal(countRows(temporary.storage, "provider"), 0);
+    });
+
+    it("refuses a baseUrl on a built-in provider with base-url-not-allowed", (t) => {
+      const temporary = createMigratedStorage();
+      t.after(() => temporary.dispose());
+      const ids = createMockIdGenerator({ ulids: [PROVIDER_ULID, EVENT_ULID] });
+      const clock = createMockClock({ start: 1_700_000_000_000 });
+
+      assert.throws(
+        () =>
+          registerProvider(dependencies(temporary.storage, ids, clock), {
+            name: "anthropic-bot",
+            kind: "llm",
+            payload: { ...llmInput, baseUrl: "http://localhost:11434/v1" },
+            actor: "ulrich",
+          }),
+        (error: unknown) =>
+          error instanceof RegisterProviderError &&
+          error.refusal === "base-url-not-allowed",
+      );
+      assert.equal(countRows(temporary.storage, "provider"), 0);
+    });
+
+    it("refuses a null baseUrl on openai-compatible with base-url-required", (t) => {
+      const temporary = createMigratedStorage();
+      t.after(() => temporary.dispose());
+      const ids = createMockIdGenerator({ ulids: [PROVIDER_ULID, EVENT_ULID] });
+      const clock = createMockClock({ start: 1_700_000_000_000 });
+
+      assert.throws(
+        () =>
+          registerProvider(dependencies(temporary.storage, ids, clock), {
+            name: "ollama",
+            kind: "llm",
+            payload: { ...llmInput, provider: "openai-compatible" },
+            actor: "ulrich",
+          }),
+        (error: unknown) =>
+          error instanceof RegisterProviderError &&
+          error.refusal === "base-url-required",
+      );
+      assert.equal(countRows(temporary.storage, "provider"), 0);
+    });
+
+    it("accepts openai-compatible with a baseUrl and projects it", (t) => {
+      const temporary = createMigratedStorage();
+      t.after(() => temporary.dispose());
+      const ids = createMockIdGenerator({
+        ulids: [PROVIDER_ULID, EVENT_ULID, "01HZY8QF3M4N5P6R7S8T9V0W1Z"],
+      });
+      const clock = createMockClock({ start: 1_700_000_000_000 });
+
+      const view = registerProvider(
+        dependencies(temporary.storage, ids, clock),
+        {
+          name: "ollama",
+          kind: "llm",
+          payload: {
+            ...llmInput,
+            provider: "openai-compatible",
+            baseUrl: "http://localhost:11434/v1",
+          },
+          actor: "ulrich",
+        },
+      );
+
+      assert.deepEqual(view.projection, {
+        provider: "openai-compatible",
+        defaultModel: "claude-opus-5",
+        baseUrl: "http://localhost:11434/v1",
+      });
+      assert.equal(countRows(temporary.storage, "provider"), 1);
+    });
+
+    it("applies no catalog rule to a git registration", (t) => {
+      const temporary = createMigratedStorage();
+      t.after(() => temporary.dispose());
+      const ids = createMockIdGenerator({ ulids: [PROVIDER_ULID, EVENT_ULID] });
+      const clock = createMockClock({ start: 1_700_000_000_000 });
+
+      const view = registerProvider(
+        dependencies(temporary.storage, ids, clock),
+        {
+          name: "github",
+          kind: "git",
+          payload: gitHttpBasicInput,
+          actor: "ulrich",
+        },
+      );
+
+      assert.equal(view.kind, "git");
+      assert.equal(countRows(temporary.storage, "provider"), 1);
+    });
   });
 });

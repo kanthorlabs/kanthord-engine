@@ -21,6 +21,7 @@ import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
 import { resolveTools } from "../../../test/helpers/remote/tools.ts";
+import { createFakeModelCatalog } from "../../../test/helpers/model-catalog.ts";
 
 function generateKey(file: string): string {
   execFileSync(
@@ -59,6 +60,7 @@ describe("src/queries/provider/show-provider.test", () => {
       ids,
       clock,
       events: new SqliteEventLog({ storage, ids }),
+      catalog: createFakeModelCatalog(),
     };
   }
 
@@ -194,7 +196,7 @@ describe("src/queries/provider/show-provider.test", () => {
       "anthropic-bot",
       "llm",
       {
-        provider: "anthropic",
+        provider: "openai-compatible",
         apiKey: "sk-ant-x",
         defaultModel: "claude-opus-5",
         baseUrl: "https://example.invalid/v1",
@@ -227,7 +229,7 @@ describe("src/queries/provider/show-provider.test", () => {
         id: llmId,
         keys: ["baseUrl", "defaultModel", "provider"],
         values: {
-          provider: "anthropic",
+          provider: "openai-compatible",
           defaultModel: "claude-opus-5",
           baseUrl: "https://example.invalid/v1",
         },

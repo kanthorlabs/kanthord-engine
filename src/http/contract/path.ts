@@ -11,6 +11,7 @@ export const resourceSegments = [
   "node",
   "project",
   "provider",
+  "provider-catalog",
   "repository",
   "run",
   "template",

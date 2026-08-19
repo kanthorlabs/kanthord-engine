@@ -16,6 +16,7 @@ import type { ProviderView } from "../../domain/provider-view.ts";
 import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
+import { createFakeModelCatalog } from "../../../test/helpers/model-catalog.ts";
 
 type ProviderRowReadback = Readonly<{
   id: string;
@@ -74,6 +75,7 @@ describe("src/commands/provider/rename-provider.test", () => {
       ids,
       clock,
       events: new SqliteEventLog({ storage, ids }),
+      catalog: createFakeModelCatalog(),
     };
   }
 

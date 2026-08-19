@@ -21,6 +21,7 @@ import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
 import { resolveTools } from "../../../test/helpers/remote/tools.ts";
+import { createFakeModelCatalog } from "../../../test/helpers/model-catalog.ts";
 
 function generateKey(file: string): string {
   execFileSync(
@@ -59,6 +60,7 @@ describe("src/queries/provider/list-provider.test", () => {
       ids,
       clock,
       events: new SqliteEventLog({ storage, ids }),
+      catalog: createFakeModelCatalog(),
     };
   }
 

@@ -160,7 +160,157 @@ export const providerSetDefaultExamples: OperationExamples = {
   },
 };
 
+const catalogModelCostRates = {
+  input: z.number(),
+  output: z.number(),
+  cacheRead: z.number(),
+  cacheWrite: z.number(),
+};
+
+export const catalogModelCost = z.strictObject({
+  ...catalogModelCostRates,
+  tiers: z
+    .array(
+      z.strictObject({
+        ...catalogModelCostRates,
+        inputTokensAbove: z.number(),
+      }),
+    )
+    .optional(),
+});
+
+export const catalogModel = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+  api: z.string(),
+  provider: z.string(),
+  baseUrl: z.string(),
+  reasoning: z.boolean(),
+  input: z.array(z.string()),
+  cost: catalogModelCost,
+  contextWindow: z.number(),
+  maxTokens: z.number(),
+});
+
+export const catalogProvider = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+  baseUrl: z.string().nullable(),
+  requiresBaseUrl: z.boolean(),
+  models: z.array(catalogModel),
+});
+
+export const providerCatalogResponse = z.strictObject({
+  providers: z.array(catalogProvider),
+});
+
+export const providerInspectRequest = z.strictObject({
+  provider: z.string().min(1),
+  baseUrl: z.string().min(1).nullable(),
+  apiKey: z.string().min(1),
+});
+
+export const providerInspectResponse = z.strictObject({
+  models: z.array(catalogModel),
+});
+
+const catalogModel_example = {
+  id: "gpt-4o",
+  name: "GPT-4o",
+  api: "openai-responses",
+  provider: "openai",
+  baseUrl: "https://api.openai.com/v1",
+  reasoning: false,
+  input: ["text", "image"],
+  cost: { input: 2.5, output: 10, cacheRead: 1.25, cacheWrite: 0 },
+  contextWindow: 128000,
+  maxTokens: 16384,
+};
+
+export const providerCatalogExamples: OperationExamples = {
+  success: {
+    providers: [
+      {
+        id: "openai",
+        name: "OpenAI",
+        baseUrl: "https://api.openai.com/v1",
+        requiresBaseUrl: false,
+        models: [catalogModel_example],
+      },
+      {
+        id: "openai-compatible",
+        name: "OpenAI Compatible API",
+        baseUrl: null,
+        requiresBaseUrl: true,
+        models: [],
+      },
+    ],
+  },
+  error: {
+    error: {
+      code: "service-unavailable",
+      message: "the daemon is shutting down",
+    },
+  },
+};
+
+export const providerInspectExamples: OperationExamples = {
+  request: {
+    provider: "openai-compatible",
+    baseUrl: "http://inference.internal:8080/v1",
+    apiKey: "x",
+  },
+  success: {
+    models: [
+      {
+        id: "qwen3-30b",
+        name: "qwen3-30b",
+        api: "openai-completions",
+        provider: "openai-compatible",
+        baseUrl: "http://inference.internal:8080/v1",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 0,
+        maxTokens: 0,
+      },
+    ],
+  },
+  error: {
+    error: {
+      code: "invalid-request",
+      message: "openai needs no baseUrl; read its models from provider.catalog",
+      details: { refusal: "provider-not-inspectable" },
+    },
+  },
+};
+
 export const credential = operations([
+  {
+    operationId: "provider.catalog",
+    method: "GET",
+    path: [resource("provider-catalog")],
+    introducedIn: "phase-2",
+    status: "routed",
+    allowedActors: ["human"],
+    response: providerCatalogResponse,
+    errors: { ...baselineErrors },
+    examples: providerCatalogExamples,
+  },
+  {
+    operationId: "provider.inspect",
+    method: "POST",
+    path: [resource("provider"), action("inspect")],
+    introducedIn: "phase-2",
+    status: "routed",
+    allowedActors: ["human"],
+    idempotency: "memory",
+    replayable: [200],
+    request: providerInspectRequest,
+    response: providerInspectResponse,
+    errors: { ...baselineErrors },
+    examples: providerInspectExamples,
+  },
   {
     operationId: "provider.register",
     method: "POST",

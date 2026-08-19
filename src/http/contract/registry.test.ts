@@ -44,13 +44,13 @@ export const harnessOperations = [
 ];
 
 describe("src/http/contract/registry.test", () => {
-  it("registers sixty-six operations", () => {
-    assert.equal(registry.length, 66);
+  it("registers sixty-eight operations", () => {
+    assert.equal(registry.length, 68);
   });
 
   it("sorts the registry bytewise by operationId with no duplicates", () => {
     const ids = registry.map((entry) => entry.operationId);
-    assert.equal(new Set(ids).size, 66);
+    assert.equal(new Set(ids).size, 68);
     for (let i = 0; i < ids.length - 1; i += 1) {
       assert.ok(
         Buffer.compare(Buffer.from(ids[i]!), Buffer.from(ids[i + 1]!)) < 0,
@@ -62,7 +62,7 @@ describe("src/http/contract/registry.test", () => {
   it("counts routed and stubbed entries", () => {
     assert.equal(
       registry.filter((entry) => entry.status === "routed").length,
-      40,
+      42,
     );
     assert.equal(
       registry.filter((entry) => entry.status === "stubbed").length,
@@ -77,7 +77,7 @@ describe("src/http/contract/registry.test", () => {
     );
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-2").length,
-      26,
+      28,
     );
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-3").length,
@@ -108,7 +108,7 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("attaches requests to the sixteen write routes and responses to the thirty-nine routes", () => {
+  it("attaches requests to the seventeen write routes and responses to the forty-one routes", () => {
     const withRequest = registry.filter((entry) => entry.request !== undefined);
     assert.deepEqual(withRequest.map((entry) => entry.operationId).sort(), [
       "actor.register",
@@ -123,6 +123,7 @@ describe("src/http/contract/registry.test", () => {
       "plan.validate",
       "project.create",
       "project.repositories",
+      "provider.inspect",
       "provider.register",
       "provider.rename",
       "repository.inspect",
@@ -158,6 +159,8 @@ describe("src/http/contract/registry.test", () => {
       "project.repositories",
       "project.show",
       "project.status",
+      "provider.catalog",
+      "provider.inspect",
       "provider.list",
       "provider.register",
       "provider.remove",
@@ -577,7 +580,7 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("declares exactly the twenty-nine POST policies the story names", () => {
+  it("declares exactly the thirty POST policies the story names", () => {
     const keyed = registry
       .filter((entry) => idempotencyOf(entry) !== "none")
       .map((entry) => entry.operationId)
@@ -598,6 +601,7 @@ describe("src/http/contract/registry.test", () => {
         "plan.import",
         "plan.validate",
         "project.create",
+        "provider.inspect",
         "provider.register",
         "provider.rename",
         "repository.inspect",
@@ -627,10 +631,10 @@ describe("src/http/contract/registry.test", () => {
     );
   });
 
-  it("counts twenty-eight memory-policy operations", () => {
+  it("counts twenty-nine memory-policy operations", () => {
     assert.equal(
       registry.filter((entry) => idempotencyOf(entry) === "memory").length,
-      28,
+      29,
     );
   });
 

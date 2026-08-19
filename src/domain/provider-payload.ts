@@ -6,6 +6,8 @@ export type ProviderKind = (typeof providerKinds)[number];
 export const gitForges = ["github", "gitlab", "bitbucket"] as const;
 export type GitForge = (typeof gitForges)[number];
 
+export const openAiCompatibleProvider = "openai-compatible";
+
 export const llmPayload = z.object({
   provider: z.string().min(1),
   apiKey: z.string().min(1),
@@ -52,6 +54,18 @@ export const gitProjection = z.strictObject({
 
 export const providerProjection = z.union([llmProjection, gitProjection]);
 export type ProviderProjection = z.infer<typeof providerProjection>;
+
+export type BaseUrlRefusal = "base-url-required" | "base-url-not-allowed";
+
+export function llmBaseUrlRefusal(
+  provider: string,
+  baseUrl: string | null,
+): BaseUrlRefusal | null {
+  if (provider === openAiCompatibleProvider) {
+    return baseUrl === null ? "base-url-required" : null;
+  }
+  return baseUrl === null ? null : "base-url-not-allowed";
+}
 
 export type PayloadRefusal =
   | "kind-unknown"

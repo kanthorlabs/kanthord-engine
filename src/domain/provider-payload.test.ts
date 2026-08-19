@@ -11,12 +11,14 @@ import {
   PayloadError,
   deserializePayload,
   gitProjection,
+  llmBaseUrlRefusal,
   llmProjection,
   parsePayload,
   payloadSchemaFor,
   privateKeyCipher,
   projectPayload,
   providerKinds,
+  openAiCompatibleProvider,
   providerProjection,
   serializePayload,
 } from "./provider-payload.ts";
@@ -464,6 +466,32 @@ describe("src/domain/provider-payload.test", () => {
         const projection = projectPayload(subject.kind, subject.payload);
         assert.equal(providerProjection.safeParse(projection).success, true);
       }
+    });
+  });
+  describe("llmBaseUrlRefusal", () => {
+    it("needs a baseUrl for openai-compatible", () => {
+      assert.equal(
+        llmBaseUrlRefusal(openAiCompatibleProvider, null),
+        "base-url-required",
+      );
+    });
+
+    it("accepts a baseUrl for openai-compatible", () => {
+      assert.equal(
+        llmBaseUrlRefusal(openAiCompatibleProvider, "http://localhost/v1"),
+        null,
+      );
+    });
+
+    it("takes no baseUrl for a built-in provider", () => {
+      assert.equal(
+        llmBaseUrlRefusal("openai", "http://localhost/v1"),
+        "base-url-not-allowed",
+      );
+    });
+
+    it("accepts a null baseUrl for a built-in provider", () => {
+      assert.equal(llmBaseUrlRefusal("openai", null), null);
     });
   });
 });
