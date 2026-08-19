@@ -21,24 +21,23 @@ export type SetDefaultProviderInput = Readonly<{
   actor: string;
 }>;
 
-export type SetDefaultProviderRefusal =
-  "not-found" | "kind-not-chainable" | "default-already-set";
+export type DisplacedProvider = Readonly<{
+  id: string;
+  name: string;
+}>;
+
+export type ProviderDefaultTransfer = ProviderView &
+  Readonly<{ displaced: readonly DisplacedProvider[] }>;
+
+export type SetDefaultProviderRefusal = "not-found" | "kind-not-chainable";
 
 export class SetDefaultProviderError extends Error {
   readonly refusal: SetDefaultProviderRefusal;
-  declare readonly ids: readonly string[] | undefined;
 
-  constructor(
-    refusal: SetDefaultProviderRefusal,
-    message: string,
-    ids?: readonly string[],
-  ) {
+  constructor(refusal: SetDefaultProviderRefusal, message: string) {
     super(message);
     this.name = "SetDefaultProviderError";
     this.refusal = refusal;
-    if (ids !== undefined) {
-      this.ids = ids;
-    }
   }
 }
 
@@ -54,13 +53,24 @@ type ProviderRow = Readonly<{
   updated_at: number;
 }>;
 
+type HolderRow = Readonly<{
+  id: string;
+  name: string;
+}>;
+
+function inIdOrder(holders: readonly HolderRow[]): readonly HolderRow[] {
+  return [...holders].sort((left, right) =>
+    Buffer.compare(Buffer.from(left.id, "utf8"), Buffer.from(right.id, "utf8")),
+  );
+}
+
 const columns =
   "id, name, kind, set_default_at, payload_ciphertext, payload_iv, payload_tag, key_version, updated_at";
 
 export function setDefaultProvider(
   dependencies: SetDefaultProviderDependencies,
   input: SetDefaultProviderInput,
-): ProviderView {
+): ProviderDefaultTransfer {
   const outcome = dependencies.storage.transact((transaction) => {
     const selected = transaction.get(
       `SELECT ${columns} FROM provider WHERE id = ?`,
@@ -81,21 +91,34 @@ export function setDefaultProvider(
         row: target,
         setDefaultAt: target.set_default_at,
         updatedAt: target.updated_at,
+        displaced: [] as readonly DisplacedProvider[],
       };
     }
-    const holder = transaction.get(
-      "SELECT id FROM provider WHERE kind = 'llm' AND set_default_at IS NOT NULL AND id <> ? ORDER BY id ASC LIMIT 1",
-      [input.id],
+    const holders = inIdOrder(
+      transaction.all(
+        "SELECT id, name FROM provider WHERE kind = 'llm' AND set_default_at IS NOT NULL AND id <> ?",
+        [input.id],
+      ) as readonly HolderRow[],
     );
-    if (holder !== undefined) {
-      const holderId = (holder as { id: string }).id;
-      throw new SetDefaultProviderError(
-        "default-already-set",
-        `provider ${holderId} already holds the default`,
-        [holderId],
-      );
-    }
     const stampedAt = dependencies.clock.now();
+    for (const holder of holders) {
+      transaction.run(
+        "UPDATE provider SET set_default_at = NULL, updated_at = ? WHERE id = ?",
+        [stampedAt, holder.id],
+      );
+      dependencies.events.append(transaction, {
+        subjectKind: "provider",
+        subjectId: holder.id,
+        type: "provider.defaultUnset",
+        actorKind: "human",
+        actorId: input.actor,
+        payload: {
+          name: holder.name,
+          kind: "llm",
+          unsetAt: stampedAt,
+        },
+      });
+    }
     transaction.run(
       "UPDATE provider SET set_default_at = ?, updated_at = ? WHERE id = ?",
       [stampedAt, stampedAt, input.id],
@@ -116,14 +139,21 @@ export function setDefaultProvider(
       row: target,
       setDefaultAt: stampedAt,
       updatedAt: stampedAt,
+      displaced: holders.map((holder) => ({
+        id: holder.id,
+        name: holder.name,
+      })),
     };
   });
-  return projectView(
-    dependencies,
-    outcome.row,
-    outcome.setDefaultAt,
-    outcome.updatedAt,
-  );
+  return {
+    ...projectView(
+      dependencies,
+      outcome.row,
+      outcome.setDefaultAt,
+      outcome.updatedAt,
+    ),
+    displaced: outcome.displaced,
+  };
 }
 
 function projectView(

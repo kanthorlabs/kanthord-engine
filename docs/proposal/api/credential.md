@@ -54,6 +54,6 @@ The route stamps `set_default_at` on one registration, which puts it in the glob
 
 **The route is invalid for `kind = 'git'` and returns `400`.** A git registration is bound by `repository.credential_id`, one repository at a time. One daemon serves repositories on different forges under different accounts, so a default would pick the wrong one silently, and `../database/provider.md` keeps the git chain empty by design.
 
-The chain orders by `set_default_at`, so calling this route again on a second registration appends it. The MVP refuses that second call until the ordered chain ships, and the refusal names the registration that already holds the default.
+The chain holds one `llm` registration. Calling this route on a second registration moves the default: the same transaction clears `set_default_at` on the current holder, appends `provider.defaultReleased` on it, then stamps the target and appends `provider.defaultSet`. Calling it on the current holder changes nothing and appends no event.
 
 A project-scope binding is `project.md`, and an agent-scope binding is `instruction.md`. Both are `post-mvp`.

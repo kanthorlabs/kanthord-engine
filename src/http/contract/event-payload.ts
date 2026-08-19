@@ -197,6 +197,11 @@ export const eventPayloads: Readonly<Record<EventType, ZodType>> = {
     kind: providerKind,
     setDefaultAt: z.number().int(),
   }),
+  "provider.defaultUnset": z.strictObject({
+    name: z.string(),
+    kind: providerKind,
+    unsetAt: z.number().int(),
+  }),
   "provider.registered": z.strictObject({
     name: z.string(),
     kind: providerKind,

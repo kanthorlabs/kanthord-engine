@@ -2,7 +2,11 @@ import { z } from "zod";
 
 import { action, parameter, resource, sub } from "./path.ts";
 import { baselineErrors } from "./error-baseline.ts";
-import { EXAMPLE_AT as A, EXAMPLE_ULID as U } from "./example-literal.ts";
+import {
+  EXAMPLE_AT as A,
+  EXAMPLE_ULID as U,
+  EXAMPLE_ULID_B as UB,
+} from "./example-literal.ts";
 import { operations } from "./operation.ts";
 import type { OperationExamples } from "./operation.ts";
 import {
@@ -57,7 +61,13 @@ export const providerRenameRequest = z.strictObject({
   name: z.string().min(1),
 });
 export const providerRenameResponse = providerView;
-export const providerSetDefaultResponse = providerView;
+export const displacedProvider = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+});
+export const providerSetDefaultResponse = providerView.extend({
+  displaced: z.array(displacedProvider),
+});
 export const providerRemoveResponse = z.strictObject({
   id: z.string(),
 });
@@ -150,6 +160,7 @@ export const providerSetDefaultExamples: OperationExamples = {
     projection: { provider: "openai", defaultModel: "gpt-4o", baseUrl: null },
     setDefaultAt: A,
     updatedAt: A,
+    displaced: [{ id: `provider_${UB}`, name: "anthropic" }],
   },
   error: {
     error: {

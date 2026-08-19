@@ -22,12 +22,6 @@ export function toHttpError(error: unknown): HttpError {
     if (error.refusal === "not-found") {
       return httpError("not-found", error.message);
     }
-    if (error.refusal === "default-already-set") {
-      return httpError("invalid-request", error.message, {
-        refusal: error.refusal,
-        ids: error.ids,
-      });
-    }
     return httpError("invalid-request", error.message, {
       refusal: error.refusal,
     });

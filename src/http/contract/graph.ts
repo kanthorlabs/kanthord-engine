@@ -9,6 +9,7 @@ import {
   choicesStaleDetails,
   idempotencyMismatchDetails,
   illegalTransitionDetails,
+  planImportInvalidRequestDetails,
   planInvalidDetails,
   staleRevisionDetails,
 } from "./error-details.ts";
@@ -467,6 +468,7 @@ export const graph = operations([
     response: planImportResponse,
     errors: {
       ...baselineErrors,
+      "invalid-request": planImportInvalidRequestDetails.optional(),
       "plan-invalid": planInvalidDetails,
       "choices-invalid": choicesInvalidDetails,
       "choices-stale": choicesStaleDetails,

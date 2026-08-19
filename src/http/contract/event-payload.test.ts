@@ -207,6 +207,7 @@ const recordedPayloads: Readonly<Record<string, readonly unknown[]>> = {
   "project.created": [{ name: "project-one" }],
   "project.repositoriesReplaced": [{ repositories: ["origin"] }],
   "provider.defaultSet": [{ name: "primary", kind: "git", setDefaultAt: 1234 }],
+  "provider.defaultUnset": [{ name: "primary", kind: "llm", unsetAt: 1234 }],
   "provider.registered": [{ name: "primary", kind: "git" }],
   "provider.removed": [{ name: "primary", kind: "git" }],
   "provider.renamed": [{ from: "primary", to: "secondary" }],

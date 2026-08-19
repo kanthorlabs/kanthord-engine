@@ -303,6 +303,7 @@ test("registers every schema component in bytewise order", () => {
     "provider.catalog.error",
     "provider.catalog.response",
     "provider.defaultSet",
+    "provider.defaultUnset",
     "provider.inspect.error",
     "provider.inspect.request",
     "provider.inspect.response",

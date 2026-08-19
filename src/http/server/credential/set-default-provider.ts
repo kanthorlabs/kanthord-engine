@@ -1,11 +1,15 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
-import type { ProviderView } from "../../../domain/provider-view.ts";
-import type { SetDefaultProviderInput } from "../../../commands/provider/set-default-provider.ts";
+import type {
+  ProviderDefaultTransfer,
+  SetDefaultProviderInput,
+} from "../../../commands/provider/set-default-provider.ts";
 import { toHttpError } from "./refusals.ts";
 
 export type SetDefaultProviderHandlerDependencies = Readonly<{
-  setDefaultProvider: (input: SetDefaultProviderInput) => ProviderView;
+  setDefaultProvider: (
+    input: SetDefaultProviderInput,
+  ) => ProviderDefaultTransfer;
 }>;
 
 export function setDefaultProviderHandler(

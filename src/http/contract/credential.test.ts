@@ -13,7 +13,11 @@ import {
 import { buildErrorEnvelope } from "./errors.ts";
 import { renderPath } from "./path.ts";
 import { findOperation } from "./registry.ts";
-import { EXAMPLE_AT as A, EXAMPLE_ULID as U } from "./example-literal.ts";
+import {
+  EXAMPLE_AT as A,
+  EXAMPLE_ULID as U,
+  EXAMPLE_ULID_B as UB,
+} from "./example-literal.ts";
 
 describe("src/http/contract/credential.test", () => {
   it("the three phase-2 provider routes become routed with unchanged shape", () => {
@@ -86,6 +90,7 @@ describe("src/http/contract/credential.test", () => {
       },
       setDefaultAt: A,
       updatedAt: A,
+      displaced: [{ id: `provider_${UB}`, name: "anthropic" }],
     });
     assert.deepEqual(providerSetDefaultExamples.error, {
       error: {
@@ -149,39 +154,50 @@ describe("src/http/contract/credential.test", () => {
   });
 
   it("an extra success key is rejected on rename and setDefault", () => {
-    for (const response of [
-      providerRenameResponse,
-      providerSetDefaultResponse,
-    ]) {
-      const parsed = response.parse({
-        id: `provider_${U}`,
-        name: "github-release",
-        kind: "git",
-        projection: null,
-        setDefaultAt: null,
-        updatedAt: A,
-      });
-      assert.deepEqual(Object.keys(parsed).sort(), [
-        "id",
-        "kind",
-        "name",
-        "projection",
-        "setDefaultAt",
-        "updatedAt",
-      ]);
+    const view = {
+      id: `provider_${U}`,
+      name: "github-release",
+      kind: "git",
+      projection: null,
+      setDefaultAt: null,
+      updatedAt: A,
+    };
+    for (const [response, keys] of [
+      [providerRenameResponse, Object.keys(view).sort()],
+      [providerSetDefaultResponse, ["displaced", ...Object.keys(view)].sort()],
+    ] as const) {
+      const body =
+        response === providerRenameResponse ? view : { ...view, displaced: [] };
+      const parsed = response.parse(body);
+      assert.deepEqual(Object.keys(parsed).sort(), keys);
       assert.equal(
-        response.safeParse({
-          id: `provider_${U}`,
-          name: "github-release",
-          kind: "git",
-          projection: null,
-          setDefaultAt: null,
-          updatedAt: A,
-          credential: "secret",
-        }).success,
+        response.safeParse({ ...body, credential: "secret" }).success,
         false,
       );
     }
+  });
+
+  it("the setDefault response requires displaced and rejects a missing one", () => {
+    const view = {
+      id: `provider_${U}`,
+      name: "openai",
+      kind: "llm",
+      projection: { provider: "openai", defaultModel: "gpt-4o", baseUrl: null },
+      setDefaultAt: A,
+      updatedAt: A,
+    };
+    assert.equal(providerSetDefaultResponse.safeParse(view).success, false);
+    assert.deepEqual(
+      providerSetDefaultResponse.parse({ ...view, displaced: [] }).displaced,
+      [],
+    );
+    assert.equal(
+      providerSetDefaultResponse.safeParse({
+        ...view,
+        displaced: [{ id: `provider_${UB}`, name: "anthropic", kind: "llm" }],
+      }).success,
+      false,
+    );
   });
 
   it("the remove response parses the id only and rejects any added key", () => {

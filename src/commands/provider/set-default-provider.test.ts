@@ -204,7 +204,7 @@ describe("src/commands/provider/set-default-provider.test", () => {
     assert.equal(countRows(temporary.storage, "event"), 1);
   });
 
-  it("a second llm registration while another holds the stamp refuses with default-already-set naming the holder and leaves both rows unchanged", (t) => {
+  it("a second llm registration while another holds the stamp takes the default, clears the holder, names it in displaced and appends provider.defaultUnset", (t) => {
     const temporary = createMigratedStorage();
     t.after(() => temporary.dispose());
     const ids = createMockIdGenerator({
@@ -214,6 +214,8 @@ describe("src/commands/provider/set-default-provider.test", () => {
         "01HZY8QF3M4N5P6R7S8T9V0W1Z",
         SECOND_PROVIDER_ULID,
         "01HZY8QF3M4N5P6R7S8T9V0W21",
+        "01HZY8QF3M4N5P6R7S8T9V0W22",
+        "01HZY8QF3M4N5P6R7S8T9V0W23",
       ],
     });
     const clock = createMockClock({ start: 1700000000000, step: 1000 });
@@ -236,31 +238,52 @@ describe("src/commands/provider/set-default-provider.test", () => {
       new SqliteEventLog({ storage: temporary.storage, ids }),
     );
 
-    assert.throws(
-      () =>
-        setDefaultProvider(setDefaultDeps, {
-          id: secondProviderId,
-          actor: "ulrich",
-        }),
-      (error: unknown) =>
-        error instanceof SetDefaultProviderError &&
-        error.refusal === "default-already-set" &&
-        error.message ===
-          `provider ${firstProviderId} already holds the default` &&
-        Object.keys(error).sort().join(",") === "ids,name,refusal" &&
-        (error.ids === undefined
-          ? false
-          : error.ids.join(",") === firstProviderId),
+    const view = setDefaultProvider(setDefaultDeps, {
+      id: secondProviderId,
+      actor: "ulrich",
+    });
+    assert.equal(view.setDefaultAt, 1700000002000);
+    const released = readProvider(temporary.storage, firstProviderId);
+    assert.equal(released.set_default_at, null);
+    assert.equal(released.updated_at, 1700000002000);
+    const taken = readProvider(temporary.storage, secondProviderId);
+    assert.equal(taken.set_default_at, 1700000002000);
+    assert.equal(taken.updated_at, 1700000002000);
+
+    assert.deepEqual(view.displaced, [
+      { id: firstProviderId, name: "anthropic-bot" },
+    ]);
+
+    const events = readEvents(temporary.storage);
+    const unset = events.filter(
+      (event) => event.type === "provider.defaultUnset",
     );
+    assert.equal(unset.length, 1);
+    assert.equal(unset[0]!.subject_id, firstProviderId);
+    assert.equal(unset[0]!.actor_id, "ulrich");
     assert.equal(
-      readProvider(temporary.storage, firstProviderId).set_default_at,
-      1700000000000,
+      unset[0]!.payload_json,
+      '{"name":"anthropic-bot","kind":"llm","unsetAt":1700000002000}',
     );
+    const unsetIndex = events.findIndex(
+      (event) => event.type === "provider.defaultUnset",
+    );
+    const setIndex = events.findIndex(
+      (event) =>
+        event.type === "provider.defaultSet" &&
+        event.subject_id === secondProviderId,
+    );
+    assert.ok(unsetIndex < setIndex);
+    const stamped = events.filter(
+      (event) =>
+        event.subject_id === secondProviderId &&
+        event.type === "provider.defaultSet",
+    );
+    assert.equal(stamped.length, 1);
     assert.equal(
-      readProvider(temporary.storage, secondProviderId).set_default_at,
-      null,
+      stamped[0]!.payload_json,
+      '{"name":"second-bot","kind":"llm","setDefaultAt":1700000002000}',
     );
-    assert.equal(countRows(temporary.storage, "event"), 3);
   });
 
   it("setDefault on the row that already holds the stamp returns the unchanged view with no clock call and no event", (t) => {
@@ -304,6 +327,7 @@ describe("src/commands/provider/set-default-provider.test", () => {
       projection: llmProjection,
       setDefaultAt: 1700000000000,
       updatedAt: 1700000000000,
+      displaced: [],
     });
     assert.equal(probe.calls(), 0);
     const row = readProvider(temporary.storage, firstProviderId);
@@ -358,6 +382,7 @@ describe("src/commands/provider/set-default-provider.test", () => {
     assert.equal(view.setDefaultAt, 1700000002000);
     assert.equal(view.updatedAt, 1700000002000);
     assert.deepEqual(view.projection, llmProjection);
+    assert.deepEqual(view.displaced, []);
     const row = readProvider(temporary.storage, secondProviderId);
     assert.equal(row.set_default_at, 1700000002000);
     assert.equal(row.updated_at, 1700000002000);

@@ -104,6 +104,9 @@ export const credentialRejectedDetails = z.strictObject({
 export const invalidRequestDetails = z.strictObject({
   refusal: z.string().min(1),
   detail: z.string().optional(),
+});
+
+export const planImportInvalidRequestDetails = invalidRequestDetails.extend({
   ids: z.array(z.string()).optional(),
 });
 

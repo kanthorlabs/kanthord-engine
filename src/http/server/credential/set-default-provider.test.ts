@@ -3,16 +3,18 @@ import assert from "node:assert/strict";
 
 import { createTestApp } from "../../../../test/helpers/app.ts";
 import { bootstrapActorId } from "../../../domain/actor.ts";
-import type { ProviderView } from "../../../domain/provider-view.ts";
-import type { SetDefaultProviderInput } from "../../../commands/provider/set-default-provider.ts";
+import type {
+  ProviderDefaultTransfer,
+  SetDefaultProviderInput,
+} from "../../../commands/provider/set-default-provider.ts";
 import { SetDefaultProviderError } from "../../../commands/provider/set-default-provider.ts";
 import { setDefaultProviderHandler } from "./set-default-provider.ts";
 import { providerSetDefaultResponse } from "../../contract/credential.ts";
 
-const providerId = "provider_01HZY8QF3M4N5P6R7S8T9V0W1X";
 const holderId = "provider_01HZY8QF3M4N5P6R7S8T9V0W1Y";
+const providerId = "provider_01HZY8QF3M4N5P6R7S8T9V0W1X";
 
-const view: ProviderView = {
+const view: ProviderDefaultTransfer = {
   id: providerId,
   name: "anthropic-bot",
   kind: "llm",
@@ -23,6 +25,7 @@ const view: ProviderView = {
   },
   setDefaultAt: 1700000002000,
   updatedAt: 1700000002000,
+  displaced: [{ id: holderId, name: "openai-bot" }],
 };
 
 describe("src/http/server/credential/set-default-provider.test", () => {
@@ -43,6 +46,7 @@ describe("src/http/server/credential/set-default-provider.test", () => {
     assert.deepEqual(response.body, view);
     const parsed = providerSetDefaultResponse.parse(response.body);
     assert.deepEqual(Object.keys(parsed).sort(), [
+      "displaced",
       "id",
       "kind",
       "name",
@@ -50,6 +54,7 @@ describe("src/http/server/credential/set-default-provider.test", () => {
       "setDefaultAt",
       "updatedAt",
     ]);
+    assert.deepEqual(parsed.displaced, [{ id: holderId, name: "openai-bot" }]);
     assert.throws(() =>
       providerSetDefaultResponse.parse({
         ...response.body,
@@ -95,26 +100,5 @@ describe("src/http/server/credential/set-default-provider.test", () => {
     assert.equal(response.status, 400);
     assert.equal(response.body.error.code, "invalid-request");
     assert.equal(response.body.error.details.refusal, "kind-not-chainable");
-  });
-
-  it("a holder refusal answers 400 invalid-request with the exact holder id in details.ids", async () => {
-    const app = await createTestApp({
-      handlers: {
-        "provider.setDefault": setDefaultProviderHandler({
-          setDefaultProvider: () => {
-            throw new SetDefaultProviderError(
-              "default-already-set",
-              `provider ${holderId} already holds the default`,
-              [holderId],
-            );
-          },
-        }),
-      },
-    });
-    const response = await app.put(`/v1/provider/${providerId}/default`);
-    assert.equal(response.status, 400);
-    assert.equal(response.body.error.code, "invalid-request");
-    assert.equal(response.body.error.details.refusal, "default-already-set");
-    assert.deepEqual(response.body.error.details.ids, [holderId]);
   });
 });

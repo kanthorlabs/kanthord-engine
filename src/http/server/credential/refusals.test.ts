@@ -12,7 +12,6 @@ import { RemoveProviderError } from "../../../commands/provider/remove-provider.
 import type { ProviderRemovalBlocker } from "../../../commands/provider/remove-provider.ts";
 
 const id = "provider_01HZY8QF3M4N5P6R7S8T9V0W1X";
-const holderId = "provider_01HZY8QF3M4N5P6R7S8T9V0W1Y";
 
 const blockers: readonly ProviderRemovalBlocker[] = [
   { kind: "default-chain" },
@@ -42,23 +41,6 @@ describe("src/http/server/credential/refusals.test", () => {
     assert.equal(error.code, "invalid-request");
     assert.equal(error.status, 400);
     assert.deepEqual(error.details, { refusal: "kind-not-chainable" });
-    assert.doesNotThrow(() => invalidRequestDetails.parse(error.details));
-  });
-
-  it("a SetDefaultProviderError default-already-set maps to a 400 invalid-request with the refusal and the ids", () => {
-    const error = toHttpError(
-      new SetDefaultProviderError(
-        "default-already-set",
-        `provider ${holderId} already holds the default`,
-        [holderId],
-      ),
-    );
-    assert.equal(error.code, "invalid-request");
-    assert.equal(error.status, 400);
-    assert.deepEqual(error.details, {
-      refusal: "default-already-set",
-      ids: [holderId],
-    });
     assert.doesNotThrow(() => invalidRequestDetails.parse(error.details));
   });
 

@@ -9,7 +9,7 @@ import {
   choicesInvalidDetails,
   choicesStaleDetails,
   idempotencyMismatchDetails,
-  invalidRequestDetails,
+  planImportInvalidRequestDetails,
   planInvalidDetails,
   staleRevisionDetails,
 } from "../../contract/error-details.ts";
@@ -111,7 +111,7 @@ describe("src/http/server/plan/refusals.test", () => {
     assert.doesNotThrow(() => idempotencyMismatchDetails.parse(error.details));
   });
 
-  it("documents-hash-mismatch maps to invalid-request and satisfies invalidRequestDetails", () => {
+  it("documents-hash-mismatch maps to invalid-request and satisfies planImportInvalidRequestDetails", () => {
     const error = toHttpError(
       new ImportPlanError(
         "documents-hash-mismatch",
@@ -119,10 +119,12 @@ describe("src/http/server/plan/refusals.test", () => {
       ),
     );
     assert.equal(error.code, "invalid-request");
-    assert.doesNotThrow(() => invalidRequestDetails.parse(error.details));
+    assert.doesNotThrow(() =>
+      planImportInvalidRequestDetails.parse(error.details),
+    );
   });
 
-  it("choice-duplicate, choice-missing and choice-extra map to invalid-request and satisfy invalidRequestDetails", () => {
+  it("choice-duplicate, choice-missing and choice-extra map to invalid-request and satisfy planImportInvalidRequestDetails", () => {
     for (const refusal of [
       "choice-duplicate",
       "choice-missing",
@@ -134,7 +136,9 @@ describe("src/http/server/plan/refusals.test", () => {
         }),
       );
       assert.equal(error.code, "invalid-request");
-      assert.doesNotThrow(() => invalidRequestDetails.parse(error.details));
+      assert.doesNotThrow(() =>
+        planImportInvalidRequestDetails.parse(error.details),
+      );
     }
   });
 

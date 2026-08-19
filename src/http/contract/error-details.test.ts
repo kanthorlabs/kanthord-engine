@@ -11,6 +11,7 @@ import {
   idempotencyMismatchDetails,
   illegalTransitionDetails,
   invalidRequestDetails,
+  planImportInvalidRequestDetails,
   leaseHeldDetails,
   needsReconcileDetails,
   planInvalidDetails,
@@ -535,9 +536,15 @@ describe("src/http/contract/error-details.test", () => {
       );
     });
 
-    it("parses refusal with ids", () => {
-      assert.deepEqual(
+    it("rejects ids, which only plan.import declares", () => {
+      assert.throws(() =>
         invalidRequestDetails.parse({ refusal: "choice-missing", ids: ["a"] }),
+      );
+      assert.deepEqual(
+        planImportInvalidRequestDetails.parse({
+          refusal: "choice-missing",
+          ids: ["a"],
+        }),
         { refusal: "choice-missing", ids: ["a"] },
       );
     });
