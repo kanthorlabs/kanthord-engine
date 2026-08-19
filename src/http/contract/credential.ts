@@ -12,6 +12,8 @@ import type { OperationExamples } from "./operation.ts";
 import {
   providerKinds,
   providerProjection,
+  llmPayload,
+  gitPayload,
 } from "../../domain/provider-payload.ts";
 
 const providerBindingInUseDetails = z.strictObject({
@@ -36,11 +38,18 @@ const providerBindingInUseDetails = z.strictObject({
     .min(1),
 });
 
-export const providerRegisterRequest = z.strictObject({
-  name: z.string().min(1),
-  kind: z.enum(providerKinds),
-  payload: z.unknown(),
-});
+export const providerRegisterRequest = z.discriminatedUnion("kind", [
+  z.strictObject({
+    name: z.string().min(1),
+    kind: z.literal("llm"),
+    payload: llmPayload,
+  }),
+  z.strictObject({
+    name: z.string().min(1),
+    kind: z.literal("git"),
+    payload: gitPayload,
+  }),
+]);
 
 export const providerView = z.strictObject({
   id: z.string(),
@@ -80,7 +89,7 @@ export const providerRegisterExamples: OperationExamples = {
       transport: "http-basic",
       forge: "github",
       username: "atlas",
-      password: "x",
+      token: "x",
     },
   },
   success: {

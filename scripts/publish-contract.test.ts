@@ -26,6 +26,13 @@ import { registry } from "../src/http/contract/registry.ts";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 
+type SchemaNode = {
+  oneOf?: readonly SchemaNode[];
+  properties?: Record<string, SchemaNode>;
+  enum?: readonly string[];
+  additionalProperties?: boolean;
+};
+
 function compare(a: string, b: string): number {
   return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 }
@@ -180,6 +187,36 @@ test("scripts/publish-contract", async (t) => {
       );
     }
   });
+
+  await t.test(
+    "the published provider feature carries the two request branches",
+    () => {
+      const document = YAML.parse(
+        readFileSync(join(directory, "features", "provider.yaml"), "utf8"),
+      ) as { components: { schemas: Record<string, SchemaNode> } };
+      const request = document.components.schemas["provider.register.request"]!;
+
+      const branches = request.oneOf!;
+      assert.equal(branches.length, 2);
+      assert.deepEqual(branches[0]!.properties!.kind!.enum, ["llm"]);
+      assert.deepEqual(branches[1]!.properties!.kind!.enum, ["git"]);
+      assert.equal(branches[0]!.properties!.payload!.oneOf, undefined);
+      assert.equal(
+        branches[0]!.properties!.payload!.additionalProperties,
+        false,
+      );
+
+      const transports = branches[1]!.properties!.payload!.oneOf!;
+      assert.equal(transports.length, 2);
+      assert.deepEqual(
+        transports.map((branch) => branch.properties!.transport!.enum),
+        [["http-basic"], ["ssh"]],
+      );
+      for (const transport of transports) {
+        assert.equal(transport.additionalProperties, false);
+      }
+    },
+  );
 
   await t.test("generation is byte-identical across two runs", () => {
     const first = mkdtempSync(join(tmpdir(), "kanthord-contract-a-"));

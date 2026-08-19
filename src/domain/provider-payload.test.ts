@@ -12,6 +12,7 @@ import {
   deserializePayload,
   gitProjection,
   llmBaseUrlRefusal,
+  llmPayload,
   llmProjection,
   parsePayload,
   payloadSchemaFor,
@@ -171,6 +172,31 @@ describe("src/domain/provider-payload.test", () => {
         parsePayload("llm", { ...llmInput, baseUrl: "" }),
       );
       assert.equal(error.refusal, "payload-invalid");
+    });
+
+    it("refuses an llm payload with an extra key", () => {
+      const error = capturedError(() =>
+        parsePayload("llm", { ...llmInput, extraKey: "not allowed" }),
+      );
+      assert.equal(error.refusal, "payload-invalid");
+      assert.ok(
+        error.detail.includes("extraKey"),
+        `detail ${JSON.stringify(error.detail)} does not name extraKey`,
+      );
+    });
+
+    it("llmPayload.safeParse refuses extra key with exact detail format", () => {
+      const result = llmPayload.safeParse({
+        ...llmInput,
+        extraKey: "not allowed",
+      });
+      assert.equal(result.success, false);
+      const issue = result.error.issues[0];
+      assert.ok(issue !== undefined);
+      assert.equal(issue.code, "unrecognized_keys");
+      assert.deepEqual(issue.path, []);
+      const keysIssue = issue as { keys: string[] };
+      assert.deepEqual(keysIssue.keys, ["extraKey"]);
     });
   });
 

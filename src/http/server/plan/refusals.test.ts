@@ -9,6 +9,7 @@ import {
   choicesInvalidDetails,
   choicesStaleDetails,
   idempotencyMismatchDetails,
+  invalidRequestDetails,
   planImportInvalidRequestDetails,
   planInvalidDetails,
   staleRevisionDetails,
@@ -138,6 +139,10 @@ describe("src/http/server/plan/refusals.test", () => {
       assert.equal(error.code, "invalid-request");
       assert.doesNotThrow(() =>
         planImportInvalidRequestDetails.parse(error.details),
+      );
+      assert.equal(
+        invalidRequestDetails.safeParse(error.details).success,
+        false,
       );
     }
   });

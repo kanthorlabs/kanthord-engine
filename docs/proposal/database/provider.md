@@ -80,7 +80,7 @@ A scope table that carried `('global', 'global')` in a `scope`/`scope_id` pair t
 
 Two costs are accepted with this shape:
 
-- **Reordering the chain rewrites timestamps.** An explicit `position` column would let a human swap two entries. Ordering by `set_default_at` cannot, so a reorder sets the values again. The chain is deferred past the MVP, so the first real reorder is also the first time this matters.
+- **Reordering the chain rewrites timestamps.** An explicit `position` column would let a human swap two entries. Ordering by `set_default_at` cannot, so a reorder sets the values again. A transfer already rewrites `set_default_at` on two rows, because set default clears the current holder and stamps the target in one transaction. The reorder is deferred past the MVP, and it is not the first time this matters.
 - **A per-binding model override has no column yet.** Until `project_binding` and `agent_binding` carry one, the `defaultModel` of the payload applies. See [../after-the-mvp.md](../after-the-mvp.md).
 
 A `provider remove` is refused while anything still names the registration, and the refusal lists what blocks it: a non-null `set_default_at`, a `project_binding` row, a repository that names it as its credential, or an attempt that pinned it as its provider.

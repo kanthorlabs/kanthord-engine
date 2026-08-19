@@ -44,6 +44,13 @@ describe("src/http/server/credential/refusals.test", () => {
     assert.doesNotThrow(() => invalidRequestDetails.parse(error.details));
   });
 
+  it("invalidRequestDetails no longer carries ids", () => {
+    assert.equal(
+      invalidRequestDetails.safeParse({ refusal: "x", ids: [] }).success,
+      false,
+    );
+  });
+
   it("a RenameProviderError not-found maps to a 404 not-found HttpError with no details", () => {
     const error = toHttpError(
       new RenameProviderError("not-found", `no provider ${id}`),

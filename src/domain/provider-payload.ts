@@ -8,12 +8,14 @@ export type GitForge = (typeof gitForges)[number];
 
 export const openAiCompatibleProvider = "openai-compatible";
 
-export const llmPayload = z.object({
-  provider: z.string().min(1),
-  apiKey: z.string().min(1),
-  defaultModel: z.string().min(1),
-  baseUrl: z.string().min(1).nullable(),
-});
+export const llmPayload = z
+  .object({
+    provider: z.string().min(1),
+    apiKey: z.string().min(1),
+    defaultModel: z.string().min(1),
+    baseUrl: z.string().min(1).nullable(),
+  })
+  .strict();
 export type LlmPayload = z.infer<typeof llmPayload>;
 
 export const gitHttpBasicPayload = z

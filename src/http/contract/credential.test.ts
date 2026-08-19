@@ -1,7 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { z } from "zod";
 
 import {
+  providerRegisterExamples,
+  providerRegisterRequest,
   providerRemoveExamples,
   providerRemoveResponse,
   providerRenameExamples,
@@ -9,6 +12,7 @@ import {
   providerRenameResponse,
   providerSetDefaultExamples,
   providerSetDefaultResponse,
+  providerView,
 } from "./credential.ts";
 import { buildErrorEnvelope } from "./errors.ts";
 import { renderPath } from "./path.ts";
@@ -198,6 +202,10 @@ describe("src/http/contract/credential.test", () => {
       }).success,
       false,
     );
+    assert.equal(
+      providerView.safeParse({ ...view, displaced: [] }).success,
+      false,
+    );
   });
 
   it("the remove response parses the id only and rejects any added key", () => {
@@ -210,5 +218,160 @@ describe("src/http/contract/credential.test", () => {
       }).success,
       false,
     );
+  });
+
+  it("providerRegisterRequest refuses git payload with password and accepts token", () => {
+    const withPassword = {
+      name: "github",
+      kind: "git",
+      payload: {
+        transport: "http-basic",
+        forge: "github",
+        username: "atlas",
+        password: "x",
+      },
+    };
+    const withToken = {
+      name: "github",
+      kind: "git",
+      payload: {
+        transport: "http-basic",
+        forge: "github",
+        username: "atlas",
+        token: "x",
+      },
+    };
+    assert.equal(
+      providerRegisterRequest.safeParse(withPassword).success,
+      false,
+    );
+    assert.equal(providerRegisterRequest.safeParse(withToken).success, true);
+  });
+
+  it("providerRegisterRequest refuses llm payload with extra key and reports path", () => {
+    const llmPayload = {
+      name: "openai",
+      kind: "llm",
+      payload: {
+        provider: "openai",
+        apiKey: "sk-x",
+        defaultModel: "gpt-4o",
+        baseUrl: null,
+        extraKey: "should-fail",
+      },
+    };
+    const result = providerRegisterRequest.safeParse(llmPayload);
+    assert.equal(result.success, false);
+    const firstIssue = result.error.issues[0];
+    assert.ok(firstIssue !== undefined);
+    assert.equal(firstIssue.code, "unrecognized_keys");
+    assert.deepEqual(firstIssue.path, ["payload"]);
+    assert.deepEqual(firstIssue.keys, ["extraKey"]);
+  });
+
+  it("providerRegisterRequest refuses cross-product payload kinds", () => {
+    const llmWithGitPayload = {
+      name: "openai",
+      kind: "llm",
+      payload: {
+        transport: "http-basic",
+        forge: "github",
+        username: "atlas",
+        token: "x",
+      },
+    };
+    const gitWithLlmPayload = {
+      name: "github",
+      kind: "git",
+      payload: {
+        provider: "openai",
+        apiKey: "sk-x",
+        defaultModel: "gpt-4o",
+        baseUrl: null,
+      },
+    };
+    assert.equal(
+      providerRegisterRequest.safeParse(llmWithGitPayload).success,
+      false,
+    );
+    assert.equal(
+      providerRegisterRequest.safeParse(gitWithLlmPayload).success,
+      false,
+    );
+  });
+
+  it("providerRegisterRequest emits correct JSON Schema with two branches and nested git transports", () => {
+    const schema = z.toJSONSchema(providerRegisterRequest, {
+      target: "openapi-3.0",
+      io: "input",
+    }) as Record<string, unknown>;
+
+    const oneOf = schema.oneOf as readonly Record<string, unknown>[];
+    assert.ok(Array.isArray(oneOf), "root schema has oneOf");
+    assert.equal(oneOf.length, 2, "exactly two branches for llm and git");
+
+    const llmBranch = oneOf[0];
+    assert.deepEqual(llmBranch.properties?.kind, {
+      enum: ["llm"],
+      type: "string",
+    });
+    assert.ok(
+      !llmBranch.properties?.payload?.oneOf,
+      "llm payload is not a union",
+    );
+    assert.equal(
+      llmBranch.properties?.payload?.additionalProperties,
+      false,
+      "llm payload has additionalProperties: false",
+    );
+
+    const gitBranch = oneOf[1];
+    assert.deepEqual(gitBranch.properties?.kind, {
+      enum: ["git"],
+      type: "string",
+    });
+    const gitPayloadOneOf = gitBranch.properties?.payload
+      ?.oneOf as readonly Record<string, unknown>[];
+    assert.ok(
+      Array.isArray(gitPayloadOneOf),
+      "git payload has oneOf for transports",
+    );
+    assert.equal(gitPayloadOneOf.length, 2, "exactly two transport branches");
+    const transports = gitPayloadOneOf
+      .map((b) => b.properties?.transport?.enum?.[0])
+      .sort();
+    assert.deepEqual(transports, ["http-basic", "ssh"]);
+
+    function checkAdditionalPropertiesFalse(
+      node: unknown,
+      path = "root",
+    ): void {
+      if (node && typeof node === "object") {
+        const obj = node as Record<string, unknown>;
+        if (obj.type === "object" && obj.properties) {
+          assert.equal(
+            obj.additionalProperties,
+            false,
+            `${path} missing additionalProperties: false`,
+          );
+        }
+        for (const [key, value] of Object.entries(obj)) {
+          if (
+            key !== "enum" &&
+            key !== "const" &&
+            key !== "type" &&
+            key !== "format"
+          ) {
+            checkAdditionalPropertiesFalse(value, `${path}.${key}`);
+          }
+          if (Array.isArray(value)) {
+            value.forEach((v, i) =>
+              checkAdditionalPropertiesFalse(v, `${path}.${key}[${i}]`),
+            );
+          }
+        }
+      }
+    }
+    checkAdditionalPropertiesFalse(schema);
   });
 });
