@@ -15,13 +15,18 @@ export type RunCliInput = Readonly<{
 }>;
 
 const entry = fileURLToPath(new URL("../../src/main.ts", import.meta.url));
+const nodeOptions = ["--disable-warning=ExperimentalWarning"];
 
 export function runCli(input: RunCliInput): Promise<CliResult> {
-  const child = spawn(process.execPath, [entry, ...input.args], {
-    cwd: input.cwd ?? tmpdir(),
-    env: { ...(input.env ?? {}) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawn(
+    process.execPath,
+    [...nodeOptions, entry, ...input.args],
+    {
+      cwd: input.cwd ?? tmpdir(),
+      env: { ...(input.env ?? {}) },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
 
   let stdoutData = "";
   let stderrData = "";

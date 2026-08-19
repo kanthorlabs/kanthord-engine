@@ -24,6 +24,7 @@ export type LaunchInput = Readonly<{
 }>;
 
 const entry = fileURLToPath(new URL("../../src/main.ts", import.meta.url));
+const nodeOptions = ["--disable-warning=ExperimentalWarning"];
 const running: ChildProcess[] = [];
 
 export function launchDaemon(input: LaunchInput): DaemonProcess {
@@ -36,7 +37,7 @@ export function launchDaemon(input: LaunchInput): DaemonProcess {
   }
   args.push("serve");
 
-  const child = spawn(process.execPath, [entry, ...args], {
+  const child = spawn(process.execPath, [...nodeOptions, entry, ...args], {
     cwd: input.cwd ?? tmpdir(),
     env: { ...(input.env ?? {}) },
     stdio: ["ignore", "pipe", "pipe"],
