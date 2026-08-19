@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { resolve } from "node:path";
 import type { Command } from "commander";
 
 import {
@@ -24,8 +24,16 @@ type GenerateOptions = Readonly<{
   home?: string;
   actor?: string;
   bind?: string;
+  output?: string;
   allowedHost?: string[];
 }>;
+
+const DEFAULT_ALLOWED_ORIGINS = [
+  "http://localhost:8080",
+  "http://localhost:8081",
+  "http://127.0.0.1:8080",
+  "http://127.0.0.1:8081",
+];
 
 const collectAllowedHosts = (value: string, previous: string[]): string[] => [
   ...previous,
@@ -41,6 +49,10 @@ export function registerConfigGenerate(
     .option("--home <path>", "daemon home (default: current directory)")
     .option("--actor <name>", "actor name (default: current username)")
     .option("--bind <address>", "bind address (default: 127.0.0.1)")
+    .option(
+      "--output <directory>",
+      "directory for the configuration file (default: current directory)",
+    )
     .option(
       "--allowed-host <authority>",
       "allowed Host authority (repeatable)",
@@ -60,7 +72,11 @@ export function registerConfigGenerate(
         input.fail();
         return;
       }
-      const configPath = join(input.cwd, "kanthord.config.json");
+      const configPath = resolve(
+        input.cwd,
+        options.output ?? ".",
+        "kanthord.config.json",
+      );
       const config = {
         home: options.home ?? globalOptions.home ?? input.cwd,
         actor: options.actor ?? input.username,
@@ -73,6 +89,7 @@ export function registerConfigGenerate(
             allowedHosts.length > 0
               ? allowedHosts
               : deriveAllowedHosts({ bind, port: 31415 }),
+          allowedOrigins: DEFAULT_ALLOWED_ORIGINS,
         },
       };
       input.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);

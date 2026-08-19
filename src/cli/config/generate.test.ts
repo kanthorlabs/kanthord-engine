@@ -69,6 +69,7 @@ describe("src/cli/config/generate.test", () => {
         port: number;
         token: string;
         allowedHosts: readonly string[];
+        allowedOrigins: readonly string[];
       }>;
     }>;
     assert.equal(config.home, "/tmp/kanthord-config");
@@ -81,6 +82,12 @@ describe("src/cli/config/generate.test", () => {
     assert.deepEqual(config.http.allowedHosts, [
       "127.0.0.1:31415",
       "localhost:31415",
+    ]);
+    assert.deepEqual(config.http.allowedOrigins, [
+      "http://localhost:8080",
+      "http://localhost:8081",
+      "http://127.0.0.1:8080",
+      "http://127.0.0.1:8081",
     ]);
     assert.equal(
       h.stdoutText(),
@@ -108,6 +115,30 @@ describe("src/cli/config/generate.test", () => {
     }>;
     assert.equal(config.home, "/var/lib/kanthord");
     assert.equal(config.actor, "operator");
+  });
+
+  it("--output writes the file into the given directory", async () => {
+    const h = harness();
+
+    await run(h.program, ["config", "generate", "--output", "/etc/kanthord"]);
+
+    assert.equal(h.writes.length, 1);
+    assert.equal(h.writes[0]!.path, "/etc/kanthord/kanthord.config.json");
+    assert.equal(
+      h.stdoutText(),
+      "kanthord: generated /etc/kanthord/kanthord.config.json\n",
+    );
+  });
+
+  it("--output resolves a relative directory against the current directory", async () => {
+    const h = harness();
+
+    await run(h.program, ["config", "generate", "--output", "conf"]);
+
+    assert.equal(
+      h.writes[0]!.path,
+      "/tmp/kanthord-config/conf/kanthord.config.json",
+    );
   });
 
   it("--bind 10.1.2.3 derives http.allowedHosts from the bind", async () => {
