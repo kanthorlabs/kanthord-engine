@@ -293,6 +293,12 @@ function handleRequest(
   child.stdin.on("error", (error: Error) => {
     record.streamError = error.message;
   });
+  child.stdin.on("close", () => {
+    if (record.streamError === undefined && !req.readableEnded) {
+      record.streamError =
+        "write EPIPE: the cgi closed stdin before the request body ended";
+    }
+  });
   req.on("error", (error: Error) => {
     record.streamError = error.message;
   });
