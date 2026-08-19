@@ -1,12 +1,26 @@
 import type { Handler } from "../app.ts";
-import type { ReadCatalogResult } from "../../../queries/provider/read-catalog.ts";
+import { httpError } from "../../contract/errors.ts";
+import { providerCatalogRequest } from "../../contract/credential.ts";
+import type {
+  ReadCatalogInput,
+  ReadCatalogResult,
+} from "../../../queries/provider/read-catalog.ts";
+import { singleValued } from "../single.ts";
 
 export type ReadCatalogHandlerDependencies = Readonly<{
-  readCatalog: () => ReadCatalogResult;
+  readCatalog: (input: ReadCatalogInput) => ReadCatalogResult;
 }>;
 
 export function readCatalogHandler(
   dependencies: ReadCatalogHandlerDependencies,
 ): Handler {
-  return () => ({ status: 200, body: dependencies.readCatalog() });
+  return (context) => {
+    const parsed = providerCatalogRequest.safeParse(
+      singleValued(context.query),
+    );
+    if (!parsed.success) {
+      throw httpError("invalid-request", "the provider filter is not valid");
+    }
+    return { status: 200, body: dependencies.readCatalog(parsed.data) };
+  };
 }

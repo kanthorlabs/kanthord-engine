@@ -181,12 +181,12 @@ describe("src/http/contract/registry.test", () => {
     assert.deepEqual(registryFaults(registry), []);
   });
 
-  it("event.list and node.list are the only operations with a query schema", () => {
+  it("event.list, node.list and provider.catalog are the only operations with a query schema", () => {
     assert.deepEqual(
       registry
         .filter((entry) => entry.query !== undefined)
         .map((entry) => entry.operationId),
-      ["event.list", "node.list"],
+      ["event.list", "node.list", "provider.catalog"],
     );
   });
 

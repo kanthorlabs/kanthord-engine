@@ -348,7 +348,7 @@ async function serve(options: ServeOptions): Promise<void> {
             }),
         }),
         "provider.catalog": readCatalogHandler({
-          readCatalog: () => readCatalog({ catalog }),
+          readCatalog: (input) => readCatalog({ catalog }, input),
         }),
         "provider.inspect": inspectProviderHandler({
           inspectProvider: (input) => inspectProvider({ catalog }, input),

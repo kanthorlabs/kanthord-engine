@@ -44,4 +44,32 @@ describe("src/queries/provider/read-catalog", () => {
     );
     assert.equal(openai?.baseUrl, "https://api.openai.com/v1");
   });
+  describe("the provider filter", () => {
+    it("keeps the one named provider when the filter names it", () => {
+      const result = readCatalog(
+        { catalog: createFakeModelCatalog() },
+        { provider: "openai-compatible" },
+      );
+
+      assert.deepEqual(
+        result.providers.map((provider) => provider.id),
+        ["openai-compatible"],
+      );
+    });
+
+    it("answers an empty list when the filter names nothing registered", () => {
+      const result = readCatalog(
+        { catalog: createFakeModelCatalog() },
+        { provider: "nonesuch" },
+      );
+
+      assert.deepEqual(result.providers, []);
+    });
+
+    it("answers every provider when the filter is absent", () => {
+      const result = readCatalog({ catalog: createFakeModelCatalog() }, {});
+
+      assert.deepEqual(result.providers, defaultCatalogProviders);
+    });
+  });
 });

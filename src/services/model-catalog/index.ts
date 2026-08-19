@@ -11,6 +11,11 @@ export type CatalogModelCostTier = CatalogModelCostRates &
 export type CatalogModelCost = CatalogModelCostRates &
   Readonly<{ tiers?: readonly CatalogModelCostTier[] }>;
 
+// pi-ai also carries thinkingLevelMap, samplingParams, headers and compat on a
+// model. They are open-ended records, and http/contract forbids an object node
+// that permits an unknown key, so none of the four reaches the wire. Nothing
+// displays them today, and the agent runner reads them from its own in-process
+// pi-ai catalog. Carrying them means amending that contract rule first.
 export type CatalogModel = Readonly<{
   id: string;
   name: string;

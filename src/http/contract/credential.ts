@@ -200,6 +200,10 @@ export const catalogProvider = z.strictObject({
   models: z.array(catalogModel),
 });
 
+export const providerCatalogRequest = z.strictObject({
+  provider: z.string().min(1).optional(),
+});
+
 export const providerCatalogResponse = z.strictObject({
   providers: z.array(catalogProvider),
 });
@@ -228,6 +232,7 @@ const catalogModel_example = {
 };
 
 export const providerCatalogExamples: OperationExamples = {
+  query: { provider: "openai" },
   success: {
     providers: [
       {
@@ -293,6 +298,7 @@ export const credential = operations([
     introducedIn: "phase-2",
     status: "routed",
     allowedActors: ["human"],
+    query: providerCatalogRequest,
     response: providerCatalogResponse,
     errors: { ...baselineErrors },
     examples: providerCatalogExamples,

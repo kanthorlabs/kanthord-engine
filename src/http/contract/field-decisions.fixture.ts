@@ -362,6 +362,7 @@ export const fieldDecisions: readonly string[] = [
   "project.status.response#/properties/nodes/items/properties/count required=true nullable=false enum=-",
   "project.status.response#/properties/nodes/items/properties/kind required=true nullable=false enum=initiative,objective,task",
   "project.status.response#/properties/nodes/items/properties/state required=true nullable=false enum=pending,ready,running,blocked,awaiting_approval,done,partial,discarded",
+  "provider.catalog.query#/properties/provider required=false nullable=false enum=-",
   "provider.catalog.response#/properties/providers required=true nullable=false enum=-",
   "provider.catalog.response#/properties/providers/items/properties/baseUrl required=true nullable=true enum=-",
   "provider.catalog.response#/properties/providers/items/properties/id required=true nullable=false enum=-",
