@@ -13,9 +13,15 @@ export type DependencyReporter = Readonly<{
 
 export type ReadHealthDependencies = Readonly<{
   reporters: readonly DependencyReporter[];
+  version: string;
+  capabilities: readonly string[];
 }>;
 
-export type ReadHealthResult = HealthResult;
+export type ReadHealthResult = HealthResult &
+  Readonly<{
+    version: string;
+    capabilities: readonly string[];
+  }>;
 
 export function readHealth(
   dependencies: ReadHealthDependencies,
@@ -37,5 +43,10 @@ export function readHealth(
   )
     ? "degraded"
     : "ok";
-  return { status, dependencies: lines };
+  return {
+    status,
+    version: dependencies.version,
+    capabilities: dependencies.capabilities,
+    dependencies: lines,
+  };
 }

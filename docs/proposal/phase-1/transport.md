@@ -7,6 +7,7 @@ Reviewer: architect, and whoever owns the network. This file defines how a human
 The CLI calls the HTTP API, so parity between the two surfaces is structural rather than maintained by hand.
 
 This file decides the policy. The routes that policy carries are `../api/`, one file per domain, with the conventions and the lifecycle rules in `../api/README.md`. `kanthord db migrate` is the one command that does not call HTTP, and `../api/system.md` states why.
+The version compatibility policy — what `/v1` guarantees, what a client must tolerate, and the `GET /v1/health` handshake that carries the capability list — is `../api/README.md`, section `## Versioning`.
 
 ## Bind address
 

@@ -12,6 +12,7 @@ import {
   type DaemonExit,
   type DaemonProcess,
 } from "../../../test/helpers/daemon.ts";
+import { KANTHORD_VERSION } from "../../domain/version.ts";
 import { createTemporaryHome } from "../../../test/helpers/home.ts";
 import { reservePort } from "../../../test/helpers/port.ts";
 import {
@@ -122,6 +123,8 @@ describe("src/services/home-lock/startup.test", () => {
     assert.equal(authorized.status, 200);
     assert.deepEqual(await authorized.json(), {
       status: "ok",
+      version: KANTHORD_VERSION,
+      capabilities: ["external-drive", "per-node-write", "project-graph"],
       dependencies: [{ name: "storage", status: "ok" }],
     });
   });

@@ -114,6 +114,8 @@ import {
 } from "./commands/startup/recover-expired-leases.ts";
 import { RecoveryError, renderFinding } from "./domain/recovery.ts";
 import { KANTHORD_VERSION } from "./domain/version.ts";
+import { declaredCapabilities } from "./http/contract/capability.ts";
+import { registry } from "./http/contract/registry.ts";
 import { registerProviderHandler } from "./http/server/credential/register-provider.ts";
 import { renameProviderHandler } from "./http/server/credential/rename-provider.ts";
 import { setDefaultProviderHandler } from "./http/server/credential/set-default-provider.ts";
@@ -327,6 +329,12 @@ async function serve(options: ServeOptions): Promise<void> {
           },
         },
       ];
+      const capabilities = declaredCapabilities(registry);
+      const healthDependencies = {
+        reporters,
+        version: KANTHORD_VERSION,
+        capabilities,
+      };
       const crypto = new AesGcmCrypto({
         key: settings.masterKey,
         keyVersion: 1,
@@ -335,7 +343,7 @@ async function serve(options: ServeOptions): Promise<void> {
       const catalog = new PiAiModelCatalog();
       const handlers = {
         "system.health": healthHandler({
-          readHealth: () => readHealth({ reporters }),
+          readHealth: () => readHealth(healthDependencies),
         }),
         "system.db": dbHandler({
           readMigrationStatus: () => readMigrationStatus({ storage }),
@@ -345,7 +353,7 @@ async function serve(options: ServeOptions): Promise<void> {
             readStatus({
               storage,
               clock,
-              health: () => readHealth({ reporters }),
+              health: () => readHealth(healthDependencies),
               version: KANTHORD_VERSION,
               bind: settings.http.bind,
               startedAt,

@@ -1,0 +1,81 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  capabilityName,
+  capabilityOperations,
+  declaredCapabilities,
+} from "./capability.ts";
+import { findOperation, registry } from "./registry.ts";
+
+const bytewise = (a: string, b: string): number =>
+  Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+const capabilityNames = Object.keys(capabilityOperations) as Array<
+  keyof typeof capabilityOperations
+>;
+
+describe("src/http/contract/capability.test", () => {
+  it("every capability operation id resolves in the real registry", () => {
+    for (const name of capabilityNames) {
+      for (const operationId of capabilityOperations[name]!) {
+        assert.ok(findOperation(operationId), operationId);
+      }
+    }
+  });
+
+  it("every capability operation id is routed in the real registry", () => {
+    for (const name of capabilityNames) {
+      for (const operationId of capabilityOperations[name]!) {
+        assert.equal(findOperation(operationId)!.status, "routed", operationId);
+      }
+    }
+  });
+
+  it("the map keys and the zod enum agree", () => {
+    assert.deepEqual(capabilityName.options, Object.keys(capabilityOperations));
+    assert.deepEqual(
+      [...capabilityName.options].sort(bytewise),
+      capabilityName.options,
+    );
+  });
+
+  it("the real registry declares the exact expected list", () => {
+    assert.deepEqual(declaredCapabilities(registry), [
+      "external-drive",
+      "per-node-write",
+      "project-graph",
+    ]);
+  });
+
+  it("a stubbed operation suppresses its name", () => {
+    const fixture = registry.map((entry) =>
+      entry.operationId === "node.report"
+        ? { ...entry, status: "stubbed" as const }
+        : entry,
+    );
+    assert.deepEqual(declaredCapabilities(fixture), [
+      "per-node-write",
+      "project-graph",
+    ]);
+  });
+
+  it("an absent operation suppresses its name", () => {
+    const fixture = registry.filter(
+      (entry) => entry.operationId !== "project.graph",
+    );
+    assert.deepEqual(declaredCapabilities(fixture), [
+      "external-drive",
+      "per-node-write",
+    ]);
+  });
+
+  it("the result is bytewise sorted, not insertion ordered", () => {
+    const first = declaredCapabilities(registry);
+    assert.deepEqual(first, [...first].sort(bytewise));
+    assert.deepEqual(declaredCapabilities(registry), first);
+  });
+
+  it("an empty registry declares nothing", () => {
+    assert.deepEqual(declaredCapabilities([]), []);
+  });
+});

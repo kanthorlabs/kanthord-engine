@@ -20,6 +20,8 @@ Answers whether the daemon can do its work, by asking each dependency to report 
 ```json
 {
   "status": "degraded",
+  "version": "27.8.1",
+  "capabilities": ["external-drive", "per-node-write", "project-graph"],
   "dependencies": [
     { "name": "storage", "status": "ok" },
     { "name": "git", "status": "failed" }
@@ -37,7 +39,9 @@ The token requirement means an external monitor is configured with the token. Th
 
 The browser defences apply here as they do everywhere. The `Origin` rejection and the `Host` allow list are not authentication, and a route exempt from them would reopen the DNS rebind path this daemon closes — a rebound browser page would carry the token by construction.
 
-The daemon version, the bind address and the process start time are on `system.status`, which reports what the daemon _is_ rather than whether it is well.
+`version` is the daemon build string. `capabilities` names the product abilities this daemon serves, sorted bytewise, and a name appears only when every operation it covers is routed. A client renders a feature on the presence of a name, never on a version comparison. The list is additive, so a client written against an older list ignores a newer name. It is not a route directory: a client that asks whether one route exists calls it and reads `404` or `501`.
+
+The bind address and the process start time are on `system.status`, which reports what the daemon _is_ rather than whether it is well. `capabilities` is on `system.health` only, and not on `system.status`, because `system.health` is the one of the two a `harness` actor reaches. A value in two places is a value that drifts.
 
 ## `system.db`
 

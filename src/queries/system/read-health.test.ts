@@ -7,6 +7,13 @@ import { systemHealthResponse } from "../../http/contract/system.ts";
 
 type Reporter = DependencyReporter & Readonly<{ calls: () => number }>;
 
+const VERSION = "27.8.1";
+const CAPABILITIES = [
+  "external-drive",
+  "per-node-write",
+  "project-graph",
+] as const;
+
 const reporter = (
   name: string,
   result: "ok" | "failed" | "not-implemented" | "throw",
@@ -27,24 +34,48 @@ const reporter = (
 
 describe("src/queries/system/read-health.test", () => {
   it("no reporters gives ok with an empty dependency list", () => {
-    assert.deepEqual(readHealth({ reporters: [] }), {
-      status: "ok",
-      dependencies: [],
-    });
+    assert.deepEqual(
+      readHealth({
+        reporters: [],
+        version: VERSION,
+        capabilities: CAPABILITIES,
+      }),
+      {
+        status: "ok",
+        version: VERSION,
+        capabilities: CAPABILITIES,
+        dependencies: [],
+      },
+    );
   });
 
   it("one ok reporter gives ok and one line", () => {
-    assert.deepEqual(readHealth({ reporters: [reporter("storage", "ok")] }), {
-      status: "ok",
-      dependencies: [{ name: "storage", status: "ok" }],
-    });
+    assert.deepEqual(
+      readHealth({
+        reporters: [reporter("storage", "ok")],
+        version: VERSION,
+        capabilities: CAPABILITIES,
+      }),
+      {
+        status: "ok",
+        version: VERSION,
+        capabilities: CAPABILITIES,
+        dependencies: [{ name: "storage", status: "ok" }],
+      },
+    );
   });
 
   it("one failed reporter degrades the result", () => {
     assert.deepEqual(
-      readHealth({ reporters: [reporter("storage", "failed")] }),
+      readHealth({
+        reporters: [reporter("storage", "failed")],
+        version: VERSION,
+        capabilities: CAPABILITIES,
+      }),
       {
         status: "degraded",
+        version: VERSION,
+        capabilities: CAPABILITIES,
         dependencies: [{ name: "storage", status: "failed" }],
       },
     );
@@ -52,9 +83,15 @@ describe("src/queries/system/read-health.test", () => {
 
   it("a throwing probe is recorded as failed and never rethrown", () => {
     assert.deepEqual(
-      readHealth({ reporters: [reporter("storage", "throw")] }),
+      readHealth({
+        reporters: [reporter("storage", "throw")],
+        version: VERSION,
+        capabilities: CAPABILITIES,
+      }),
       {
         status: "degraded",
+        version: VERSION,
+        capabilities: CAPABILITIES,
         dependencies: [{ name: "storage", status: "failed" }],
       },
     );
@@ -62,9 +99,15 @@ describe("src/queries/system/read-health.test", () => {
 
   it("a not-implemented reporter alone stays ok", () => {
     assert.deepEqual(
-      readHealth({ reporters: [reporter("agent", "not-implemented")] }),
+      readHealth({
+        reporters: [reporter("agent", "not-implemented")],
+        version: VERSION,
+        capabilities: CAPABILITIES,
+      }),
       {
         status: "ok",
+        version: VERSION,
+        capabilities: CAPABILITIES,
         dependencies: [{ name: "agent", status: "not-implemented" }],
       },
     );
@@ -77,9 +120,13 @@ describe("src/queries/system/read-health.test", () => {
           reporter("agent", "not-implemented"),
           reporter("storage", "failed"),
         ],
+        version: VERSION,
+        capabilities: CAPABILITIES,
       }),
       {
         status: "degraded",
+        version: VERSION,
+        capabilities: CAPABILITIES,
         dependencies: [
           { name: "agent", status: "not-implemented" },
           { name: "storage", status: "failed" },
@@ -95,6 +142,8 @@ describe("src/queries/system/read-health.test", () => {
         reporter("Alpha", "ok"),
         reporter("alpha", "ok"),
       ],
+      version: VERSION,
+      capabilities: CAPABILITIES,
     });
     assert.deepEqual(
       result.dependencies.map((line) => line.name),
@@ -105,9 +154,61 @@ describe("src/queries/system/read-health.test", () => {
   it("calls every probe exactly once, even when an earlier one throws", () => {
     const storage = reporter("storage", "throw");
     const git = reporter("git", "ok");
-    readHealth({ reporters: [storage, git] });
+    readHealth({
+      reporters: [storage, git],
+      version: VERSION,
+      capabilities: CAPABILITIES,
+    });
     assert.equal(storage.calls(), 1);
     assert.equal(git.calls(), 1);
+  });
+
+  it("returns the injected version and capability list", () => {
+    const result = readHealth({
+      reporters: [reporter("storage", "ok")],
+      version: VERSION,
+      capabilities: CAPABILITIES,
+    });
+    assert.equal(result.version, VERSION);
+    assert.deepEqual(result.capabilities, [
+      "external-drive",
+      "per-node-write",
+      "project-graph",
+    ]);
+  });
+
+  it("an empty capability list stays empty and stays ok", () => {
+    const result = readHealth({
+      reporters: [reporter("storage", "ok")],
+      version: VERSION,
+      capabilities: [],
+    });
+    assert.deepEqual(result.capabilities, []);
+    assert.equal(result.status, "ok");
+  });
+
+  it("a throwing probe leaves the version and capabilities unchanged", () => {
+    const result = readHealth({
+      reporters: [reporter("storage", "throw")],
+      version: VERSION,
+      capabilities: CAPABILITIES,
+    });
+    assert.equal(result.status, "degraded");
+    assert.equal(result.version, VERSION);
+    assert.deepEqual(result.capabilities, [
+      "external-drive",
+      "per-node-write",
+      "project-graph",
+    ]);
+  });
+
+  it("returns capabilities in injected order, not re-sorted", () => {
+    const result = readHealth({
+      reporters: [],
+      version: VERSION,
+      capabilities: ["project-graph", "external-drive"],
+    });
+    assert.deepEqual(result.capabilities, ["project-graph", "external-drive"]);
   });
 
   it("each result passes systemHealthResponse.parse", () => {
@@ -116,6 +217,8 @@ describe("src/queries/system/read-health.test", () => {
         reporter("storage", "ok"),
         reporter("agent", "not-implemented"),
       ],
+      version: VERSION,
+      capabilities: CAPABILITIES,
     });
     assert.equal(systemHealthResponse.safeParse(result).success, true);
   });

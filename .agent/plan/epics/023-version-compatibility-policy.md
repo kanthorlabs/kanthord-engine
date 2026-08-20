@@ -86,8 +86,11 @@ is a question the policy would otherwise owe an answer to:
 
 - An absent, malformed, prerelease or future-dated header changes nothing, because nothing reads it.
 - No response body varies by a request header, so no route needs a `Vary: X-Kanthord-Client`, and no
-  cache can serve one client the answer computed for another. `src/http/server/origin.ts` already
-  sets `Vary: Origin`, and this epic adds no second varying header.
+  cache can serve one client the answer computed for another. This epic adds no varying header.
+  `src/http/server/origin.ts` sets `Vary: Origin`, but only on a response to a request that carries
+  an `Origin` header; a request without one returns early and sets nothing. The body does vary by
+  `Origin` in both cases, because a value outside the allow list is a `403`, so the early return is a
+  cache defect. This epic makes `Vary: Origin` unconditional.
 - The header keeps one purpose: a diagnostic in an operator's log.
 
 ### D4 — the handshake is `GET /v1/health`, not `GET /v1/status`
@@ -178,6 +181,11 @@ whether a _feature_ is worth rendering a screen for reads `capabilities`.
 - **The composition root** — `src/main.ts` calls `declaredCapabilities()` once and binds the result
   and `KANTHORD_VERSION` into the health query, beside the existing `version` binding for
   `readStatus`.
+- **`Vary: Origin` becomes unconditional** — `src/http/server/origin.ts` sets it on every response,
+  and not only on a response to an `Origin`-bearing request. See D3. The no-`Origin` early return
+  goes, and the rest of the middleware is untouched: an absent `Origin` still sets no
+  `Access-Control-Allow-Origin`, no `Access-Control-Expose-Headers` and no `context.state.allowedOrigin`.
+  `src/http/server/origin.test.ts` asserts the new header on the no-`Origin` case.
 - **The client repository is told** — `kanthord-apps/docs/api/blockers.md` E6 is retired, and
   `conventions.md` records that the tolerant position is confirmed and that `mustUpgrade` is refused
   with its replacement named. That is a commit in the client repository, and it is an Open item here
@@ -243,9 +251,13 @@ Hermetic coverage required beyond the Proof:
 - **A capability the daemon has and the client cannot name.** The list is additive, so a client
   written against an older list ignores a newer name. That is the intended behaviour and it is
   recorded here because it is the one case the policy leaves silent.
-- **The client repository commit.** E6 retires from `kanthord-apps/docs/api/blockers.md`, and
-  `conventions.md` records the confirmation and the `mustUpgrade` refusal. This epic does not close
-  before that commit lands.
+- **The client repository commit.** Done in the working tree, and it is not committed yet.
+  `kanthord-apps/docs/api/blockers.md` retires E6 into the ledger row that points at
+  `conventions.md`. `conventions.md` replaces `## Version compatibility is undefined` with
+  `## Version compatibility is stated`, which records the two lists of D1, the confirmation of the
+  tolerant position, the `mustUpgrade` refusal with `capabilities` named as the replacement, and D3.
+  `parallel-development.md` and the two client epics that cited `blockers.md` E6 point at
+  `conventions.md` instead. This epic does not close before that commit lands.
 - **A per-operation capability for phase 2.** Phase 2 adds runs, attempts and workers, and each
   becomes a capability name under the same rule. EPIC 115 owns the list at that point; this epic
   fixes the mechanism and not the membership.

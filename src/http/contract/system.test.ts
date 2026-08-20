@@ -81,13 +81,19 @@ const propertyNamesOf = (
 describe("src/http/contract/system.test", () => {
   it("systemHealthResponse accepts an empty and a two-line dependency list", () => {
     assert.equal(
-      systemHealthResponse.safeParse({ status: "ok", dependencies: [] })
-        .success,
+      systemHealthResponse.safeParse({
+        status: "ok",
+        version: "27.8.1",
+        capabilities: [],
+        dependencies: [],
+      }).success,
       true,
     );
     assert.equal(
       systemHealthResponse.safeParse({
         status: "degraded",
+        version: "27.8.1",
+        capabilities: ["external-drive", "per-node-write"],
         dependencies: [
           { name: "storage", status: "ok" },
           { name: "git", status: "failed" },
@@ -100,12 +106,43 @@ describe("src/http/contract/system.test", () => {
   it("systemHealthResponse rejects every non-contract shape", () => {
     const rejected = [
       { status: "ok" },
-      { status: "up", dependencies: [] },
-      { status: "ok", dependencies: [], version: "27.8.1" },
-      { status: "ok", dependencies: [{ name: "", status: "ok" }] },
-      { status: "ok", dependencies: [{ name: "storage", status: "fine" }] },
+      { status: "ok", version: "27.8.1", dependencies: [] },
+      { status: "ok", capabilities: [], dependencies: [] },
+      {
+        status: "up",
+        version: "27.8.1",
+        capabilities: [],
+        dependencies: [],
+      },
       {
         status: "ok",
+        version: "27.8.1",
+        capabilities: [],
+        dependencies: [],
+        extra: 1,
+      },
+      {
+        status: "ok",
+        version: "27.8.1",
+        capabilities: ["not-a-capability"],
+        dependencies: [],
+      },
+      {
+        status: "ok",
+        version: "27.8.1",
+        capabilities: [],
+        dependencies: [{ name: "", status: "ok" }],
+      },
+      {
+        status: "ok",
+        version: "27.8.1",
+        capabilities: [],
+        dependencies: [{ name: "storage", status: "fine" }],
+      },
+      {
+        status: "ok",
+        version: "27.8.1",
+        capabilities: [],
         dependencies: [{ name: "storage", status: "ok", extra: 1 }],
       },
     ];

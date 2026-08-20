@@ -4,6 +4,7 @@ import { blockReason, nodeKind, nodeState } from "../../domain/state.ts";
 import { healthStatuses, dependencyStatuses } from "../../domain/health.ts";
 import { leaseSubjectKinds } from "../../domain/lease.ts";
 import { KANTHORD_VERSION } from "../../domain/version.ts";
+import { capabilityName } from "./capability.ts";
 import { baselineErrors } from "./error-baseline.ts";
 import {
   EXAMPLE_AT as A,
@@ -17,6 +18,8 @@ import type { OperationExamples } from "./operation.ts";
 
 export const systemHealthResponse = z.strictObject({
   status: z.enum(healthStatuses),
+  version: z.string().min(1),
+  capabilities: z.array(capabilityName),
   dependencies: z.array(
     z.strictObject({
       name: z.string().min(1),
@@ -77,6 +80,8 @@ export const systemStatusResponse = z.strictObject({
 export const systemHealthExamples: OperationExamples = {
   success: {
     status: "ok",
+    version: KANTHORD_VERSION,
+    capabilities: ["external-drive", "per-node-write", "project-graph"],
     dependencies: [{ name: "storage", status: "ok" }],
   },
   error: {

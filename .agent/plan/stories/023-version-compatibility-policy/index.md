@@ -11,9 +11,10 @@ Prereq: EPIC 022 (sequence order). EPIC 018 supplies `node.claim`, `node.heartbe
 
 - **1 and 2 are independently green.** `npm run verify` exits 0 at the close of each.
 - **3, 4 and 5 are one coupled block.** Take no `npm run verify` gate between them. The red set moves in two steps, and neither story closes it alone:
-  - After Story 3, `version` and `capabilities` are required members of `systemHealthResponse`, so the `safeParse` case of `src/queries/system/read-health.test.ts` and the `parse` case of `src/http/server/system/health.test.ts` fail.
-  - After Story 4, those two files are repaired, and `src/main.ts:245,255` fails the typecheck because `ReadHealthDependencies` now has two required members.
-  - Story 5 repairs the composition root and closes the block.
+  - After Story 3, `version` and `capabilities` are required members of `systemHealthResponse`, so the `safeParse` case of `src/queries/system/read-health.test.ts` and the `parse` case of `src/http/server/system/health.test.ts` fail. `src/http/contract/coverage.test.ts` also fails, because the reviewed fixture in `src/http/contract/field-decisions.fixture.ts` enumerates every registry field and now misses two rows.
+  - After Story 4, those files are repaired, and `src/main.ts:245,255` fails the typecheck because `ReadHealthDependencies` now has two required members.
+  - Story 5 repairs the composition root and closes the block. `src/services/home-lock/startup.test.ts` fails until that point: it deep-equals the live daemon's `/v1/health` body, so it turns red the moment the composition root supplies the two members, and not before.
+- **A response-shape change has a red set the compiler cannot see.** A body-shape consumer names no symbol from the query and no schema label, so no grep finds it reliably. `npm run verify` runs `npm test`, and that full suite at the close of the block is the only exact answer. Story 4 carries the two greps that give a head start, and records that they are not a completeness proof.
 - Story 2 precedes Story 3, because `system.ts` imports `capabilityName` from `capability.ts`.
 - Story 5 is last; it runs the whole Proof block.
 

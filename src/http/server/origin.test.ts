@@ -36,13 +36,13 @@ function refusedBody(origin: string) {
 
 describe("src/http/server/origin.test", () => {
   describe("empty allow list", () => {
-    it("no Origin header passes through untouched", async () => {
+    it("no Origin header passes through with Vary set", async () => {
       const app = buildApp(originMiddleware({ allowedOrigins: [] }));
       const response = await (await loopbackAgent(app)).get("/");
       assert.equal(response.status, 200);
       assert.deepEqual(response.body, { reached: true });
       assert.equal(response.headers["access-control-allow-origin"], undefined);
-      assert.equal(response.headers["vary"], undefined);
+      assert.equal(response.headers["vary"], "Origin");
     });
 
     it("refuses every Origin value in the table with the same 403 shape", async () => {

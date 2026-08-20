@@ -16,21 +16,19 @@ export function originMiddleware(
   const allowed = new Set(dependencies.allowedOrigins);
   return async (context, next) => {
     const origin = context.request.headers.origin;
-    if (origin === undefined) {
-      await next();
-      return;
+    if (origin !== undefined) {
+      if (!allowed.has(origin)) {
+        throw httpError(
+          "origin-forbidden",
+          `the Origin header ${origin} is outside the allow list`,
+        );
+      }
+      context.set("Access-Control-Allow-Origin", origin);
+      if (context.method !== "OPTIONS") {
+        context.set("Access-Control-Expose-Headers", EXPOSED_HEADERS);
+      }
+      context.state.allowedOrigin = origin;
     }
-    if (!allowed.has(origin)) {
-      throw httpError(
-        "origin-forbidden",
-        `the Origin header ${origin} is outside the allow list`,
-      );
-    }
-    context.set("Access-Control-Allow-Origin", origin);
-    if (context.method !== "OPTIONS") {
-      context.set("Access-Control-Expose-Headers", EXPOSED_HEADERS);
-    }
-    context.state.allowedOrigin = origin;
     try {
       await next();
     } finally {

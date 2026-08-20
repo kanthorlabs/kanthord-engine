@@ -43,7 +43,30 @@ Read [new-decisions.md](new-decisions.md) before the domain files. It lists ever
 
 ## Versioning
 
-Every path starts with `/v1`. The CLI runs on a second machine, so a client can be older than the daemon. A client sends `X-Kanthord-Client: <version>`, and the daemon reports its own version on `/v1/status`. The daemon serves one version at a time.
+Every path starts with `/v1`. The daemon serves one version at a time. **`/v1` is the compatibility contract, and the package version is not.** The package version describes a build, because one repository ships the daemon and the CLI.
+
+Inside `/v1` the daemon may:
+
+- add a response field;
+- add a member to an enum;
+- add an optional request field;
+- add an operation.
+
+Inside `/v1` the daemon may never:
+
+- remove or rename a response field;
+- change the type of a response field;
+- remove a member from an enum;
+- add a required request field;
+- change what an error code means, or the status a code maps to.
+
+The list is closed. A change outside it is a `/v2`, and this product has no `/v2`.
+
+**A client must ignore an unknown response field, and it must tolerate an unknown enum member.** A client that refuses either is a client this policy cannot serve.
+
+An older client against a newer daemon always works, so there is no minimum client version and no `mustUpgrade` field. The one real skew is a newer client against an older daemon, and the client asks about it by name: `GET /v1/health` returns `version` and `capabilities`, and a client reads `capabilities` instead of comparing two version strings.
+
+A client sends `X-Kanthord-Client: <version>`. **The daemon never reads that header.** No response body varies by it, no route declares `Vary: X-Kanthord-Client`, and an absent, malformed, prerelease or future-dated value changes nothing. The header is a diagnostic in an operator's log.
 
 ## Lifecycle of a row
 

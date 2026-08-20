@@ -89,7 +89,12 @@ describe("src/http/server/start.test", () => {
     ];
     const handlers: Readonly<Record<string, Handler>> = {
       "system.health": healthHandler({
-        readHealth: () => readHealth({ reporters }),
+        readHealth: () =>
+          readHealth({
+            reporters,
+            version: "27.8.1",
+            capabilities: [],
+          }),
       }),
       "system.db": dbHandler({
         readMigrationStatus: () => readMigrationStatus({ storage }),
