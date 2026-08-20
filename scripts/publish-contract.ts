@@ -1,5 +1,4 @@
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,11 +8,13 @@ import {
   renderOpenApiYaml,
 } from "../src/http/contract/openapi.ts";
 import { registry } from "../src/http/contract/registry.ts";
+import { readReleaseFacts } from "./release-facts.ts";
+import { cliDecision, parseArguments } from "./release-gate.ts";
 
 export type PublishInput = Readonly<{
   outputDirectory: string;
   commit: string;
-  dirty: boolean;
+  tag: string | null;
 }>;
 
 const exampleKeyOrder = ["query", "request", "success", "error"] as const;
@@ -26,15 +27,19 @@ function resolveExisting(path: string): string {
   }
 }
 
-export function publishContract(input: PublishInput): readonly string[] {
-  const outputDirectory = resolveExisting(input.outputDirectory);
+export function refusesSelfPublish(resolvedOutputDirectory: string): boolean {
   const repositoryRoot = resolveExisting(
     fileURLToPath(new URL("../", import.meta.url)),
   );
-  if (
-    outputDirectory === repositoryRoot ||
-    repositoryRoot.startsWith(`${outputDirectory}/`)
-  ) {
+  return (
+    resolvedOutputDirectory === repositoryRoot ||
+    repositoryRoot.startsWith(`${resolvedOutputDirectory}/`)
+  );
+}
+
+export function publishContract(input: PublishInput): readonly string[] {
+  const outputDirectory = resolveExisting(input.outputDirectory);
+  if (refusesSelfPublish(outputDirectory)) {
     throw new PublishRefusal(
       `refusing to publish into the repository: ${outputDirectory}`,
     );
@@ -98,7 +103,7 @@ export function publishContract(input: PublishInput): readonly string[] {
   const manifest = {
     version: KANTHORD_VERSION,
     commit: input.commit,
-    dirty: input.dirty,
+    tag: input.tag,
     features: features.map((feature) => feature.name),
     operations: publishedEntries.map((entry) => entry.operationId),
   };
@@ -115,24 +120,47 @@ export function publishContract(input: PublishInput): readonly string[] {
 class PublishRefusal extends Error {}
 
 if (import.meta.filename === process.argv[1]) {
-  const outputDirectory = process.argv[2];
-  if (outputDirectory === undefined || outputDirectory.length === 0) {
+  const usage =
+    "usage: node scripts/publish-contract.ts [--unreleased] <output-directory>\n";
+  const parsed = parseArguments(process.argv.slice(2));
+  if (parsed.kind === "usage") {
+    process.stderr.write(usage);
+    process.exit(2);
+  }
+
+  const resolvedOutputDirectory = resolveExisting(parsed.outputDirectory);
+  if (refusesSelfPublish(resolvedOutputDirectory)) {
     process.stderr.write(
-      "usage: node scripts/publish-contract.ts <output-directory>\n",
+      `refusing to publish into the repository: ${resolvedOutputDirectory}\n`,
     );
     process.exit(2);
   }
 
-  try {
-    const commit = execFileSync("git", ["rev-parse", "HEAD"], {
-      encoding: "utf8",
-    }).trim();
-    const dirty =
-      execFileSync("git", ["status", "--porcelain"], {
-        encoding: "utf8",
-      }).trim().length > 0;
+  const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+  const facts = readReleaseFacts(repositoryRoot);
+  const decision = cliDecision(process.argv.slice(2), facts, KANTHORD_VERSION);
 
-    publishContract({ outputDirectory, commit, dirty });
+  try {
+    switch (decision.kind) {
+      case "usage":
+        process.stderr.write(usage);
+        process.exit(2);
+        break;
+      case "refuse":
+        process.stderr.write(`${decision.reason}\n`);
+        process.exit(2);
+        break;
+      case "publish":
+        if (decision.notice !== null) {
+          process.stderr.write(`${decision.notice}\n`);
+        }
+        publishContract({
+          outputDirectory: decision.outputDirectory,
+          commit: facts.commit,
+          tag: decision.tag,
+        });
+        break;
+    }
   } catch (error) {
     if (error instanceof PublishRefusal) {
       process.stderr.write(`${error.message}\n`);

@@ -496,6 +496,8 @@ describe("src/domain/layout.test", () => {
         "e2e/lib/shim.test.ts",
         "e2e/lib/tag.test.ts",
         "publish-contract.test.ts",
+        "release-facts.test.ts",
+        "release-gate.test.ts",
         "verify-db-status.test.ts",
       ],
       `${offenders.join(", ")} match a default test pattern; npm test would run them`,

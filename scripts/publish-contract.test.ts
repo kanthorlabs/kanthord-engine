@@ -59,14 +59,11 @@ test("scripts/publish-contract", async (t) => {
   await t.test(
     "writes the master document, feature documents and examples",
     async () => {
-      execFileSync(
-        process.execPath,
-        ["scripts/publish-contract.ts", directory],
-        {
-          cwd: repositoryRoot,
-          encoding: "utf8",
-        },
-      );
+      publishContract({
+        outputDirectory: directory,
+        commit: "0".repeat(40),
+        tag: null,
+      });
 
       assert.deepEqual(sortedBytewise(readdirSync(directory)), [
         "examples",
@@ -124,13 +121,17 @@ test("scripts/publish-contract", async (t) => {
       assert.deepEqual(Object.keys(manifest), [
         "version",
         "commit",
-        "dirty",
+        "tag",
         "features",
         "operations",
       ]);
-      assert.equal(typeof manifest.dirty, "boolean");
+      assert.equal(manifest.tag, null);
+      assert.equal(String(manifest.commit), "0".repeat(40));
       assert.deepEqual(manifest.features, featureNames);
-      assert.match(String(manifest.commit), /^[0-9a-f]{40,64}$/);
+      assert.match(
+        raw,
+        /"version"[\s\S]*"commit"[\s\S]*"tag"[\s\S]*"features"[\s\S]*"operations"/,
+      );
     },
   );
 
@@ -139,6 +140,7 @@ test("scripts/publish-contract", async (t) => {
     assert.doesNotMatch(raw, /"[^"]*generatedAt[^"]*"\s*:/i);
     assert.doesNotMatch(raw, /"[^"]*timestamp[^"]*"\s*:/i);
     assert.doesNotMatch(raw, /"[^"]*date[^"]*"\s*:/i);
+    assert.doesNotMatch(raw, /"[^"]*dirty[^"]*"\s*:/i);
   });
 
   await t.test("each example file holds its keys in the fixed order", () => {
@@ -226,12 +228,12 @@ test("scripts/publish-contract", async (t) => {
       const firstFiles = publishContract({
         outputDirectory: first,
         commit,
-        dirty: false,
+        tag: "v27.8.1",
       });
       const secondFiles = publishContract({
         outputDirectory: second,
         commit,
-        dirty: false,
+        tag: "v27.8.1",
       });
 
       assert.deepEqual(firstFiles, secondFiles);
@@ -246,27 +248,76 @@ test("scripts/publish-contract", async (t) => {
     }
   });
 
-  await t.test("the manifest records a dirty tree", () => {
+  await t.test("the manifest records an unreleased artifact", () => {
     const clean = mkdtempSync(join(tmpdir(), "kanthord-contract-clean-"));
-    const dirty = mkdtempSync(join(tmpdir(), "kanthord-contract-dirty-"));
+    const unreleased = mkdtempSync(
+      join(tmpdir(), "kanthord-contract-unreleased-"),
+    );
     try {
       const commit = "0".repeat(40);
-      publishContract({ outputDirectory: clean, commit, dirty: false });
-      publishContract({ outputDirectory: dirty, commit, dirty: true });
+      publishContract({
+        outputDirectory: clean,
+        commit,
+        tag: "v27.8.1",
+      });
+      publishContract({ outputDirectory: unreleased, commit, tag: null });
 
-      const dirtyManifest = JSON.parse(
-        readFileSync(join(dirty, "manifest.json"), "utf8"),
+      const releasedManifest = JSON.parse(
+        readFileSync(join(clean, "manifest.json"), "utf8"),
       ) as Record<string, unknown>;
-      assert.equal(dirtyManifest.dirty, true);
+      const unreleasedManifest = JSON.parse(
+        readFileSync(join(unreleased, "manifest.json"), "utf8"),
+      ) as Record<string, unknown>;
+      assert.equal(releasedManifest.tag, "v27.8.1");
+      assert.equal(unreleasedManifest.tag, null);
 
       const cleanBytes = readFileSync(join(clean, "manifest.json"));
-      const dirtyBytes = readFileSync(join(dirty, "manifest.json"));
-      assert.notDeepEqual(cleanBytes, dirtyBytes);
+      const unreleasedBytes = readFileSync(join(unreleased, "manifest.json"));
+      assert.notDeepEqual(cleanBytes, unreleasedBytes);
     } finally {
       rmSync(clean, { recursive: true, force: true });
-      rmSync(dirty, { recursive: true, force: true });
+      rmSync(unreleased, { recursive: true, force: true });
     }
   });
+
+  await t.test(
+    "a released manifest and an unreleased manifest of the same commit differ",
+    () => {
+      const released = mkdtempSync(
+        join(tmpdir(), "kanthord-contract-released-"),
+      );
+      const unreleased = mkdtempSync(
+        join(tmpdir(), "kanthord-contract-unreleased-"),
+      );
+      try {
+        const commit = "0".repeat(40);
+        const releasedFiles = publishContract({
+          outputDirectory: released,
+          commit,
+          tag: "v27.8.1",
+        });
+        const unreleasedFiles = publishContract({
+          outputDirectory: unreleased,
+          commit,
+          tag: null,
+        });
+
+        assert.deepEqual(releasedFiles, unreleasedFiles);
+        for (const relative of releasedFiles) {
+          const releasedBytes = readFileSync(join(released, relative));
+          const unreleasedBytes = readFileSync(join(unreleased, relative));
+          if (relative === "manifest.json") {
+            assert.notDeepEqual(releasedBytes, unreleasedBytes);
+          } else {
+            assert.deepEqual(releasedBytes, unreleasedBytes);
+          }
+        }
+      } finally {
+        rmSync(released, { recursive: true, force: true });
+        rmSync(unreleased, { recursive: true, force: true });
+      }
+    },
+  );
 
   await t.test("refuses to publish into the repository", () => {
     assert.throws(
@@ -313,7 +364,7 @@ test("scripts/publish-contract", async (t) => {
     publishContract({
       outputDirectory: directory,
       commit: "0".repeat(40),
-      dirty: false,
+      tag: null,
     });
 
     assert.equal(existsSync(join(directory, "examples", "gone.json")), false);
@@ -334,6 +385,25 @@ test("scripts/publish-contract", async (t) => {
       (error: NodeJS.ErrnoException & { status?: number; stderr?: string }) => {
         assert.equal(error.status, 2);
         assert.match(String(error.stderr), /usage:/);
+        return true;
+      },
+    );
+  });
+
+  await t.test("refuses an unknown flag", () => {
+    assert.throws(
+      () =>
+        execFileSync(
+          process.execPath,
+          ["scripts/publish-contract.ts", "--tag", directory],
+          { cwd: repositoryRoot, encoding: "utf8" },
+        ),
+      (error: NodeJS.ErrnoException & { status?: number; stderr?: string }) => {
+        assert.equal(error.status, 2);
+        assert.equal(
+          String(error.stderr),
+          "usage: node scripts/publish-contract.ts [--unreleased] <output-directory>\n",
+        );
         return true;
       },
     );

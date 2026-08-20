@@ -20,6 +20,18 @@ The generated files are **not committed**, because the reviewable contract chang
 
 `npm run verify` generates the master document into a temporary directory, validates it with an independent OpenAPI validator, asserts operation parity against the registry, asserts that every reference resolves, and deletes it. `npm run contract:publish -- <output-directory>` publishes the master document, feature documents and examples. Generation is canonical: fixed path, method and component order, LF endings, one trailing newline. A release publishes the generated documents as a named artifact beside the daemon and the CLI, and a client generator consumes them. Neither the validator nor a client generator ever starts the daemon.
 
+### The release gate
+
+A release is a commit that carries the git tag `v<version>`. The `version` field of `package.json` and `KANTHORD_VERSION` in `src/domain/version.ts` hold the same version.
+
+- `npm run contract:publish -- <output-directory>` refuses a dirty working tree. It exits `2` and writes `dirty-tree` to standard error.
+- The command refuses a commit that carries no tag `v<version>`. It exits `2` and writes `untagged-commit` to standard error. A commit that carries other tags is untagged for this purpose.
+- The dirty refusal comes first. A dirty and untagged tree reports `dirty-tree`.
+- `manifest.json` holds `version`, `commit`, `tag`, `features` and `operations`, in that order. It holds no `dirty` field.
+- `--unreleased` skips the tag check and writes `tag: null`. It does not skip the dirty check.
+- A client pins an artifact whose `tag` is not `null`. An artifact whose `tag` is `null` is not pinnable.
+- The release step is manual. A human bumps `package.json`, bumps `src/domain/version.ts`, commits, writes the tag, then publishes. No workflow does this.
+
 ## Domains
 
 One file per domain. A binding route lives in the file of the scope that owns the binding, never in a shared bindings file.

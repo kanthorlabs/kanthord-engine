@@ -3,6 +3,9 @@
 Epic: `.agent/plan/epics/024-release-bound-contract-publish.md`
 Depends on: Story 4 (the text states the shipped behaviour).
 
+> **`docs/proposal/**` is a locked planning file. The human lane applies this story; the
+> software-engineer lane cannot.**
+
 ## Change
 
 **`docs/proposal/api/README.md`.** Line 21 ends with "A release publishes the generated documents as

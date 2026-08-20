@@ -3,27 +3,15 @@
 Epic: `.agent/plan/epics/024-release-bound-contract-publish.md`
 Depends on: Story 1, Story 2, Story 3. Stories 2, 3 and 4 are one dispatch unit and land together.
 
-> **BLOCKED — do not dispatch until the EPIC is amended.** This story contradicts EPIC 024 in three
-> places, and the contradictions are planning defects in the EPIC, not in the story. See B1, B2 and
-> B3 in the `/author` report. The amendments required are:
->
-> 1. **D4, last paragraph.** Delete the instruction that the invocation at
->    `publish-contract.test.ts:55-62` gains `--unreleased` and that the real working tree must be
->    clean. No test in `npm run verify` may require a clean checkout.
-> 2. **D5.** `readReleaseFacts` binds the three git reads to the source repository root resolved from
->    `import.meta.url`, not to the process working directory.
-> 3. **Hermetic coverage, "The refusal reaches the process".** Replace with a pure decision function.
->    A subprocess cannot assert a gate refusal hermetically once the git reads bind to the source
->    tree.
-
 ## Change
 
 ### `scripts/publish-contract.ts` — hoist the self-publish check
 
-- Export the path guard so the CLI can run it before the release gate:
+- Export the path guard so the CLI can run it before the release gate. It takes an already resolved
+  path, so no caller resolves the same path twice:
 
 ```ts
-export function refusesSelfPublish(outputDirectory: string): boolean;
+export function refusesSelfPublish(resolvedOutputDirectory: string): boolean;
 ```
 
 Its body is the condition currently inline at `:34-37`. `publishContract` calls it at `:34` and
@@ -34,6 +22,16 @@ keeps throwing `PublishRefusal` with the same message. The behaviour and the mes
 Add to the file Story 1 creates:
 
 ```ts
+export type CliArguments =
+  | Readonly<{ kind: "usage" }>
+  | Readonly<{
+      kind: "arguments";
+      outputDirectory: string;
+      unreleased: boolean;
+    }>;
+
+export function parseArguments(argv: readonly string[]): CliArguments;
+
 export type CliDecision =
   | Readonly<{ kind: "usage" }>
   | Readonly<{ kind: "refuse"; reason: ReleaseRefusal }>
@@ -53,6 +51,9 @@ export function cliDecision(
 
 Decision order, fixed:
 
+`parseArguments` holds steps 1 to 4 and `cliDecision` calls it, so the CLI can refuse usage before it
+reads a single release fact.
+
 1. `unreleased` is `true` when `argv` contains the exact string `--unreleased`.
 2. Any argument that starts with `--` and is not `--unreleased` returns `{ kind: "usage" }`.
 3. The first argument that is not `--unreleased` is `outputDirectory`. A missing or empty value
@@ -69,14 +70,15 @@ Decision order, fixed:
 
 Rewrite the `import.meta.filename === process.argv[1]` block to this order:
 
-1. `const decision = cliDecision(process.argv.slice(2), … )` — but the facts are read lazily, so
-   split it: parse first by calling `cliDecision` with the facts, and read the facts before the call.
-   The read is cheap and unconditional. Order inside the block:
-   - `const outputDirectory = process.argv.slice(2).find((value) => value !== "--unreleased")`
-   - if `outputDirectory !== undefined` and `refusesSelfPublish(outputDirectory)`, write
-     `` `refusing to publish into the repository: ${resolved}\n` `` to stderr and `process.exit(2)`.
-     This runs **before** the facts read and before the gate, so the existing repository-root
-     subprocess test passes on any working tree.
+1. Parse the arguments, then resolve the output path, then read the facts. Order inside the block:
+   - `const parsed = parseArguments(process.argv.slice(2))`; on `usage`, write the usage line to
+     stderr and `process.exit(2)`. This runs **before** the facts read, so a usage refusal spawns no
+     git subprocess and a tree with no `.git` reports usage rather than a stack trace.
+   - `const resolvedOutputDirectory = resolveExisting(parsed.outputDirectory)`.
+   - if `refusesSelfPublish(resolvedOutputDirectory)`, write
+     `` `refusing to publish into the repository: ${resolvedOutputDirectory}\n` `` to stderr and
+     `process.exit(2)`. This runs **before** the facts read and before the gate, so the existing
+     repository-root subprocess test passes on any working tree.
    - `const facts = readReleaseFacts(repositoryRoot)` where `repositoryRoot` is
      `fileURLToPath(new URL("../", import.meta.url))`.
    - `const decision = cliDecision(process.argv.slice(2), facts, KANTHORD_VERSION)`.
@@ -127,8 +129,12 @@ decision object. `facts` is a literal; `version` is `"27.8.1"`.
 - `["--tag", "/out"]`, clean, `tags: ["v27.8.1"]` → `{ kind: "usage" }`
 - `["/out", "/second"]`, clean, `tags: ["v27.8.1"]` → `{ kind: "usage" }`
 
-These assertions deliver the EPIC's "the refusal reaches the process" requirement at the decision
-layer. Exit code and stderr text are one `switch` over `CliDecision` with no branch of its own.
+`parseArguments` carries its own subtests, each with `assert.deepEqual` on the whole result: `["/out"]`
+and both `--unreleased` positions return the `arguments` result, and every usage case above returns
+`{ kind: "usage" }` with no fact object in the call.
+
+These assertions deliver the EPIC's "the refusal is a pure decision" requirement. Exit code and
+stderr text are one `switch` over `CliDecision` with no branch of its own.
 
 ### `scripts/publish-contract.test.ts` — edits
 

@@ -6,11 +6,6 @@ Prereq: EPIC 023 (sequence order).
 `npm run contract:publish` refuses a dirty tree and an untagged commit, and the manifest names the
 release tag instead of a `dirty` flag.
 
-**Dispatch is blocked.** Story 4 requires three amendments to EPIC 024 — D4's clean-tree
-instruction, D5's reader binding, and the "the refusal reaches the process" hermetic bullet. The
-banner at the head of `04-cli-entry-point.md` names them. Do not dispatch until the EPIC carries
-them.
-
 ## Dispatch order
 
 1. `01-release-gate-pure-function.md`

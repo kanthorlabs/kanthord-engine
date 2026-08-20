@@ -55,7 +55,7 @@ system access, and the existing test already removes the reason to reach for one
 
 - **a dirty tree** — `git status --porcelain` is non-empty. The message names the refusal and prints
   nothing else; a human runs `git status` to see the paths.
-- **an untagged commit** — `git tag --points-at HEAD` names no tag matching `v<version>`. A commit
+- **an untagged commit** — the tag set of the commit names no tag matching `v<version>`. A commit
   that carries other tags and not this one is untagged for this purpose.
 
 Exit code `2` is the code the script already uses for a refusal
@@ -94,10 +94,11 @@ Two modes, one difference. `--unreleased` is what the existing CLI test and the 
 day-to-day generation use, and a release is the default rather than the flag.
 
 **This changes an existing test.** `scripts/publish-contract.test.ts:55-62` invokes the script as a
-subprocess against the real repository, which is dirty and untagged during ordinary development. That
-invocation gains `--unreleased`, and the working tree it runs against must be clean for it to pass —
-which is already the rule `025-external-drive-acceptance-run.md:241` places on an acceptance run. The
-story states it, because a test that fails on every developer's machine is worse than no gate.
+subprocess against the real repository, which is dirty and untagged during ordinary development. The
+dirty check applies in both modes, so no subprocess invocation of the publish path passes on a
+developer tree. That invocation becomes a direct `publishContract` call with `tag: null`. **No test in
+`npm run verify` requires a clean checkout**, because a test that fails on every developer's machine
+is worse than no gate.
 
 ### D5 — the git reads move behind an injected reader, so the gate is hermetic
 
@@ -106,9 +107,18 @@ story states it, because a test that fails on every developer's machine is worse
 forty-zero commit. **That seam is the reason this epic is small, and it is preserved.**
 
 The two `execFileSync` calls at `:127-133` and the new tag read move into
-`scripts/release-facts.ts`, which exports one reader returning
-`Readonly<{ commit: string; dirty: boolean; tags: readonly string[] }>`. The decision itself is a
-pure function in `scripts/release-gate.ts`:
+`scripts/release-facts.ts`, which exports one reader
+`readReleaseFacts(repositoryRoot: string)` returning
+`Readonly<{ commit: string; dirty: boolean; tags: readonly string[] }>`. The three git reads pass
+`{ cwd: repositoryRoot, encoding: "utf8" }`, and the caller resolves `repositoryRoot` from
+`import.meta.url`, never from `process.cwd()`. **The tag read names the commit the first read
+returned, never `HEAD` a second time**, so the recorded commit and the recorded tag set are one pair
+by construction rather than by timing. **The argument parse precedes the facts read**, so a usage
+refusal spawns no subprocess and a tree with no `.git` still reports usage rather than a stack trace.
+The documents come from the source tree, so the commit and the tag come from the same tree. A reader
+bound to the process working directory lets a run from an unrelated tagged repository publish these
+documents under that repository's tag. The decision itself is a pure function in
+`scripts/release-gate.ts`:
 
 ```ts
 export function releaseVerdict(
@@ -127,23 +137,25 @@ carries no `no-restricted-imports` rule, so this file placement needs no lint ex
 ### D6 — the OpenAPI validation stays where it is
 
 `npm run verify` runs `npm test`, and `node --test` discovers `scripts/publish-contract.test.ts`,
-which validates every emitted document through `SwaggerParser.validate()` at `:71-88`. The master and
-the feature slices are therefore already emitted into a temporary directory and validated on every
-verify run. This epic adds no second validation path and moves none.
+which validates every emitted **feature slice** through `SwaggerParser.validate()` at `:71-88`. The
+master document is validated at `src/http/contract/openapi.test.ts:457-460`. Both therefore run on
+every verify run, and no story relies on `publish-contract.test.ts` for master validation. This epic
+adds no second validation path and moves none.
 
 ## Stories
 
 - **The release gate as a pure function** — `scripts/release-gate.ts` and
   `scripts/release-gate.test.ts`. Every verdict case against a fact object, no subprocess.
 - **The facts reader** — `scripts/release-facts.ts`, holding the three `execFileSync` calls, moved
-  from `publish-contract.ts:127-133` plus `git tag --points-at HEAD`. It is exercised through the CLI
-  test and not unit tested, because a unit test of it would be a test of `execFileSync`.
+  from `publish-contract.ts:127-133` plus a tag read. `scripts/release-facts.test.ts` asserts the
+  shape of one read and nothing more, because a value assertion would be a test of `execFileSync`.
 - **The manifest record** — `scripts/publish-contract.ts:13-17` takes `tag: string | null` in place
   of `dirty: boolean`, and `:98-104` writes the five keys in the D3 order.
   `scripts/publish-contract.test.ts:115-128` asserts the new list and order.
-- **The CLI entry point** — `:117-143` parses `--unreleased`, calls the reader, calls the gate,
-  refuses with exit `2` and the named reason, or calls `publishContract` with the tag. The existing
-  subprocess test at `:55-62` gains `--unreleased`.
+- **The CLI entry point** — `scripts/release-gate.ts` gains the pure `parseArguments(argv)` and
+  `cliDecision(argv, facts, version)`, `publish-contract.ts` exports the hoisted self-publish guard, and `:117-143` becomes one
+  `switch` over the decision: refuse with exit `2` and the named reason, or call `publishContract`
+  with the tag. The subprocess invocation at `:55-62` becomes a direct library call.
 - **The proposal records the release rule** — `docs/proposal/api/README.md` gains a short section
   under the artifact text stating the tag convention, the two refusals and the `tag: null` rule for a
   development artifact. `docs/proposal/api/new-decisions.md:11` gains the same statement, because it
@@ -159,6 +171,7 @@ Proof:
 node --test \
   src/domain/version.test.ts \
   scripts/release-gate.test.ts \
+  scripts/release-facts.test.ts \
   scripts/publish-contract.test.ts \
   && echo "PASS EPIC-024"
 ```
@@ -175,10 +188,17 @@ Hermetic coverage required beyond the Proof:
 - **A commit carrying several tags.** Facts with `tags: ["nightly", "v27.8.1"]` pass, and facts with
   `tags: ["v27.8.0", "nightly"]` against version `27.8.1` refuse. The tag set is searched, never
   indexed at zero.
-- **The refusal reaches the process.** The CLI subprocess test asserts exit code `2` and a stderr
-  message naming `dirty-tree`, driven by pointing the script at a temporary directory from a tree the
-  test makes dirty by writing one file into it. The file is removed in an `after` hook, following the
-  `mkdtempSync` plus `rmSync` pattern of `publish-contract.test.ts:46-49`.
+- **The refusal is a pure decision.** `parseArguments(argv)` returns the whole argument result and
+  `cliDecision(argv, facts, version)` returns the whole decision
+  object, and every case is asserted against a fact object: each refusal reason, every usage case, and
+  the released and the unreleased publish cases. Exit code and stderr text are one `switch` over the
+  decision with no branch of its own. A subprocess cannot assert a gate refusal hermetically, because
+  the git reads bind to the source tree. One subprocess test covers the argument path: an unknown flag
+  exits `2` with the usage message, and it passes on any working tree.
+- **The facts reader answers with the right shape.** `readReleaseFacts` returns a forty-character
+  lowercase hexadecimal `commit`, a boolean `dirty` and a `tags` array of non-empty strings. The
+  assertion is on the shape alone, so it passes on a dirty tree and on a clean one, and it still
+  fails on a mistyped git argument. No assertion names a commit, a tag or a tree state.
 - **The manifest key order.** The five keys are `["version","commit","tag","features","operations"]`,
   asserted on the parsed object's `Object.keys` and on the raw JSON text, so a serializer that emits
   the right values in the wrong order fails.
