@@ -60,6 +60,30 @@ function waitPastSecondBoundary(mtimeMs: number): void {
   }
 }
 
+function groupAlive(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+      return false;
+    }
+    return true;
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+      return false;
+    }
+    return true;
+  }
+}
+
 function pollEsrch(pid: number): void {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
@@ -260,10 +284,13 @@ describe("src/services/git/child.test", () => {
 
   it("stopChild escalates to SIGKILL when the child ignores SIGTERM", async () => {
     const dir = makeDirectory();
+    const trappedPath = join(dir, "trapped");
     const scriptPath = join(dir, "ignore-term.sh");
-    writeFileSync(scriptPath, '#!/bin/sh\ntrap "" TERM\nexec /bin/sleep 30\n', {
-      mode: 0o700,
-    });
+    writeFileSync(
+      scriptPath,
+      `#!/bin/sh\ntrap "" TERM\n: > '${trappedPath}'\nexec /bin/sleep 30\n`,
+      { mode: 0o700 },
+    );
     const child = spawnSupervised({
       command: scriptPath,
       args: [],
@@ -272,9 +299,28 @@ describe("src/services/git/child.test", () => {
       pidFile: join(dir, "git.pid"),
     });
     assert.ok(child.pid !== undefined, "the child must have a pid");
-    const started = Date.now();
+    await child.released;
+    await waitForFile(trappedPath);
+    assert.equal(
+      groupAlive(child.pid),
+      true,
+      "the child group must run before the signal",
+    );
+
+    process.kill(-child.pid, "SIGTERM");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(
+      groupAlive(child.pid),
+      true,
+      "the child must survive SIGTERM, otherwise the escalation is untested",
+    );
+
     assert.equal(await stopChild({ pid: child.pid, graceMs: 50 }), true);
-    assert.ok(Date.now() - started >= 50, "the SIGKILL path must run");
+    assert.equal(
+      groupAlive(child.pid),
+      false,
+      "the SIGKILL path must remove the group",
+    );
   });
 
   it("stopChild keeps polling after the leader exits while a descendant survives", async () => {
@@ -294,15 +340,21 @@ describe("src/services/git/child.test", () => {
       pidFile: join(dir, "git.pid"),
     });
     assert.ok(child.pid !== undefined, "the child must have a pid");
+    await child.released;
     await waitForFile(descPidPath);
     const descPid = Number(readFileSync(descPidPath, "utf8"));
-    const started = Date.now();
-    assert.equal(await stopChild({ pid: child.pid, graceMs: 200 }), true);
-    assert.ok(
-      Date.now() - started >= 200,
-      "the group poll must not answer early",
+    assert.equal(
+      processAlive(descPid),
+      true,
+      "the descendant must run before the signal",
     );
-    pollEsrch(descPid);
+
+    assert.equal(await stopChild({ pid: child.pid, graceMs: 200 }), true);
+    assert.equal(
+      processAlive(descPid),
+      false,
+      "the group poll must not answer while the descendant survives",
+    );
   });
 
   it("stopChild refuses a pid that cannot name a group", async () => {

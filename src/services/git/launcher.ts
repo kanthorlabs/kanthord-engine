@@ -30,6 +30,7 @@ export type SupervisedChild = Readonly<{
   stdout: Readable;
   stderr: Readable;
   exited: Promise<SupervisedExit>;
+  released: Promise<void>;
   signalGroup(signal: NodeJS.Signals): void;
 }>;
 
@@ -63,20 +64,34 @@ function requireSignallable(pid: number | undefined): number {
   return pid;
 }
 
-function releaseOnReady(child: ChildProcessWithoutNullStreams): void {
+function releaseOnReady(child: ChildProcessWithoutNullStreams): Promise<void> {
   const ready = child.stdio[READY_FD];
   if (ready === null || ready === undefined || !("on" in ready)) {
-    return;
+    return Promise.reject(
+      new Error("the launcher handshake pipe is not readable"),
+    );
   }
-  let released = false;
-  ready.on("error", () => {});
-  ready.on("data", () => {
-    if (released) {
-      return;
-    }
-    released = true;
-    child.stdin.write("go\n");
-    child.stdin.end();
+  return new Promise<void>((resolve, reject) => {
+    let released = false;
+    ready.on("error", () => {});
+    ready.on("data", () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      child.stdin.write("go\n");
+      child.stdin.end();
+      resolve();
+    });
+    ready.on("end", () => {
+      if (!released) {
+        reject(
+          new Error(
+            "the supervised child exited before its launcher handshake",
+          ),
+        );
+      }
+    });
   });
 }
 
@@ -97,13 +112,15 @@ export function spawnSupervised(input: SupervisedSpawnInput): SupervisedSpawn {
     return { pid: undefined, exited };
   }
   child.stdin.on("error", () => {});
-  releaseOnReady(child);
+  const released = releaseOnReady(child);
+  released.catch(() => {});
   const pid = requireSignallable(child.pid);
   return {
     pid,
     stdout: child.stdout,
     stderr: child.stderr,
     exited,
+    released,
     signalGroup(signal: NodeJS.Signals): void {
       requireSignallable(pid);
       process.kill(-pid, signal);
