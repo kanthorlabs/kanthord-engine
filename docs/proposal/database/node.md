@@ -29,6 +29,8 @@ CREATE TABLE node (
   CHECK (state <> 'awaiting_approval' OR kind = 'objective'),
   CHECK (state <> 'partial' OR kind <> 'task')
 ) STRICT;
+
+CREATE INDEX node_project ON node (project_id, id)
 ```
 
 The `CHECK` clauses are the normative rules of [state-machine.md](../phase-1/state-machine.md), enforced by the database rather than by a comment. A task is never `partial`. Only an objective reaches `awaiting_approval`. An objective names a repository, a task never does, and import rejects a task that names one.

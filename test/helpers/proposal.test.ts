@@ -39,10 +39,12 @@ describe("test/helpers/proposal.test", () => {
     ]);
   });
 
-  it("every table file yields exactly one statement except run, all normalized and comment-free", () => {
+  it("every table file yields exactly one statement except run, edge and node, all normalized and comment-free", () => {
     for (const table of tables) {
       const statements = proposalStatements(table);
-      assert.equal(statements.length, table === "run" ? 2 : 1, table);
+      const expected =
+        table === "run" ? 2 : table === "edge" ? 2 : table === "node" ? 2 : 1;
+      assert.equal(statements.length, expected, table);
       for (const statement of statements) {
         assert.ok(statement.length > 0, table);
         assert.equal(statement, statement.replace(/\s+/g, " ").trim(), table);

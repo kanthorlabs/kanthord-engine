@@ -18,6 +18,8 @@ Through this API, or through export, edit and re-import. No agent route exists h
 | `plan.revisions` | `GET /v1/project/:id/plan/revision`  | phase-1      | routed | plan-format.md, re-import protocol                     |
 | `node.list`      | `GET /v1/node`                       | phase-1      | routed | P1-E1, `status` lists nodes                            |
 | `node.show`      | `GET /v1/node/:id`                   | phase-1      | routed | state-machine.md                                       |
+| `project.nodes`  | `GET /v1/project/:id/node`           | phase-1      | routed | new decision, see [new-decisions.md](new-decisions.md) |
+| `project.graph`  | `GET /v1/project/:id/graph`          | phase-1      | routed | new decision, see [new-decisions.md](new-decisions.md) |
 | `edge.list`      | `GET /v1/project/:id/edge`           | phase-1      | routed | plan-format.md, `depends_on`                           |
 | `node.create`    | `POST /v1/project/:id/node`          | phase-1      | routed | 013-external-drive-overview.md:23                      |
 | `node.update`    | `POST /v1/node/:id/update`           | phase-1      | routed | 013-external-drive-overview.md:23                      |
@@ -104,7 +106,7 @@ The response holds identity, kind, title, state, block reason, discard reason, t
 
 **Phase 1 returns every node, ordered by identity, and takes no filter.** The claim that this API has no query-parameter mechanism was false, and it is corrected here. The mechanism exists: `src/http/contract/operation.ts:41` declares an optional `query` schema on every operation, and `event.list` binds `query: eventListRequest` at `src/http/contract/event.ts:69` over the schema declared at `src/http/contract/event.ts:11-17`. `node.list` takes no filter in phase 1 because no epic had declared one, not because the transport cannot carry one. EPIC 018 declares them. `repository.list` is unfiltered by choice rather than by mechanism, and a human filters it client-side.
 
-The filters this route will take are `project`, `kind`, `state`, `blockReason` and `repository`. They are recorded here so the shape is fixed when the mechanism arrives.
+The filters this route will take are `project`, `kind`, `state`, `blockReason` and `repository`. They are recorded here so the shape is fixed when the mechanism arrives. **`node.list` is the cross-project overview and it filters an unindexed full read.** **`project.nodes` is the per-project read that filters an indexed project range, so a rich filter belongs on the second.**
 
 ## `node.show`
 
@@ -120,7 +122,32 @@ Returns every dependency edge of the project: the edge id, the two node identiti
 
 A waiver is not a deletion. `../database/edge.md` keeps the row and stamps `waived_at`, so the human decision stays readable, and readiness ignores the row. A response that returned only endpoint pairs could not show a waived edge at all.
 
-Containment is not an edge here; a node carries its parent.
+Containment is not an edge here; a node carries its parent. **`project.graph` returns the same edges, with the same `from`-to-`to` direction, inside one consistent snapshot.**
+
+## `project.nodes`
+
+Returns the node list of one project, in the body shape `node.list` already returns. The response carries identity, kind, title, state, block reason, discard reason, the parent, the dependencies, and the project identity. The project identity in the path scopes the read, so a filter on this route runs over an indexed project range rather than a full-table scan.
+
+**Phase 1 returns every node of the project, ordered by identity, and takes no filter.** The filter mechanism of EPIC 018 binds to this route after it lands, and the five filter names (`project`, `kind`, `state`, `blockReason`, `repository`) minus `project` (which the path carries) become SQL predicates over the `node_project` index.
+
+The path `/v1/project/:id/node` is the same rendered path as `node.create`, but `node.create` is `POST` and `project.nodes` is `GET`, so the two operations do not collide.
+
+An unknown project is `404 not-found`. An empty project returns `200` with an empty array.
+
+## `project.graph`
+
+Returns one atomic snapshot of the project topology — every node, every edge, and the topology revision — read in one transaction. The wire shape is `{ attributes, options, nodes, edges }`:
+
+- `attributes` carries `projectId` and `revision`. `revision` is the topology revision from `plan_revision`; it advances on an import and on a node write. Node `state`, `blockReason`, `discardReason` and `waivedAt` move without a new revision, so two responses can carry one `revision` and differ.
+- `options` is fixed to `{ allowSelfLoops: false, multi: false, type: "directed" }`.
+- `nodes` is an array of `{ key, attributes }` sorted bytewise by `key`. Every node attribute record emits its keys in bytewise-sorted order. The attribute set is exactly `kind`, `title`, `state`, `blockReason`, `discardReason`, `parentId`, `repositoryId`.
+- `edges` is an array of `{ key, source, target, attributes }` sorted bytewise by `key`. Every edge attribute record emits its keys in bytewise-sorted order. The attribute set is exactly `relation` (literal `"depends-on"`) and `waivedAt`. `source` is the dependent (`fromNode`) and `target` is the dependency (`toNode`), which is the same direction `edge.list` returns. A topological order of this graph is reverse execution order.
+
+The serialization runs inside `services/graph`, which builds the value through `graphology` and therefore validates it by construction. The daemon rebuilds the exported object in the canonical key order the contract fixes, so a graphology major version that changed its export shape would be a build failure in one file, never a silent `/v1` change.
+
+An unknown project is `404 not-found`. An empty project returns `200` with empty `nodes`, empty `edges`, and `attributes.revision` of `null`.
+
+`project.graph` returns the same edges as `edge.list`, with the same `from`-to-`to` direction, inside one consistent snapshot.
 
 ## `node.create`
 

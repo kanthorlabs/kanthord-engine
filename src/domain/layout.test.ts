@@ -423,7 +423,7 @@ describe("src/domain/layout.test", () => {
     );
   });
 
-  it("the node and edge write exemption list holds exactly fifteen exact paths", () => {
+  it("the node and edge write exemption list holds exactly eighteen exact paths", () => {
     const configPath = fileURLToPath(
       new URL("../../eslint.config.js", import.meta.url),
     );
@@ -434,7 +434,7 @@ describe("src/domain/layout.test", () => {
     assert.ok(end !== -1, "nodeEdgeWriteExemptions is unterminated");
     const slice = source.slice(start, end);
     const quoted = slice.match(/"[^"]*"/g) ?? [];
-    assert.equal(quoted.length, 15);
+    assert.equal(quoted.length, 18);
     for (const entry of quoted) {
       assert.ok(!entry.includes("*"), `${entry} is a glob, not an exact path`);
     }

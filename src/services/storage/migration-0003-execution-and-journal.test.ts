@@ -23,6 +23,7 @@ import { migration0004EventIndexes } from "./migration-0004-event-indexes.ts";
 import { migration0005Actor } from "./migration-0005-actor.ts";
 import { migration0006RevisionOrigin } from "./migration-0006-revision-origin.ts";
 import { migration0007ExternalExecution } from "./migration-0007-external-execution.ts";
+import { migration0008GraphIndexes } from "./migration-0008-graph-indexes.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -498,7 +499,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     assert.ok(migrationDoc.includes("0003-execution-and-journal"));
   });
 
-  it("migrations holds exactly the seven migrations and versions map to 1, 2, 3, 4, 5, 6, 7", () => {
+  it("migrations holds exactly the eight migrations and versions map to 1, 2, 3, 4, 5, 6, 7, 8", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
@@ -507,10 +508,11 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
       migration0005Actor,
       migration0006RevisionOrigin,
       migration0007ExternalExecution,
+      migration0008GraphIndexes,
     ]);
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4, 5, 6, 7],
+      [1, 2, 3, 4, 5, 6, 7, 8],
     );
   });
 
@@ -597,7 +599,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     }
   });
 
-  it("the index inventory is exactly run_one_active plus the event indexes", () => {
+  it("the index inventory is exactly run_one_active plus the event indexes and the graph indexes", () => {
     const { storage, temporary } = buildMigrated();
     after(() => storage.close());
     after(() => temporary.dispose());
@@ -609,7 +611,14 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     ) as readonly Record<string, unknown>[];
     assert.deepEqual(
       rows.map((row) => row.name),
-      ["event_actor", "event_subject", "event_type", "run_one_active"],
+      [
+        "edge_from_node",
+        "event_actor",
+        "event_subject",
+        "event_type",
+        "node_project",
+        "run_one_active",
+      ],
     );
   });
 

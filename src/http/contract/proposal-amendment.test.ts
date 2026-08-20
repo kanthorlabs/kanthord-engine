@@ -150,10 +150,10 @@ describe("src/http/contract/proposal-amendment.test", () => {
     assert.deepEqual(proposalStatements("plan_revision"), [expected]);
   });
 
-  it("migration.md lists six migrations including 0006-revision-origin", () => {
+  it("migration.md lists eight migrations including 0007-external-execution and 0008-graph-indexes", () => {
     const fences = migration.split("```");
     const fence = fences[fences.length - 2] ?? "";
-    for (let version = 1; version <= 6; version++) {
+    for (let version = 1; version <= 8; version++) {
       assert.ok(
         new RegExp(
           `^${version}\\s+000${version}-[a-z-]+\\s+\\d+\\s*$`,
@@ -163,19 +163,24 @@ describe("src/http/contract/proposal-amendment.test", () => {
       );
     }
     assert.equal(
-      (migration.match(/0006-revision-origin/g) ?? []).length,
+      (migration.match(/0007-external-execution/g) ?? []).length,
       1,
-      "the migration list names 0006-revision-origin exactly once",
+      "the migration list names 0007-external-execution exactly once",
     );
-    assert.ok(migration.includes("Six rows appear"));
-    assert.ok(migration.includes("prints these six versions"));
+    assert.equal(
+      (migration.match(/0008-graph-indexes/g) ?? []).length,
+      1,
+      "the migration list names 0008-graph-indexes exactly once",
+    );
+    assert.ok(migration.includes("Eight rows appear"));
+    assert.ok(migration.includes("prints these eight versions"));
     assert.ok(
-      !migration.includes("Five rows appear"),
-      "the old five-row prose is gone",
+      !migration.includes("Six rows appear"),
+      "the old six-row prose is gone",
     );
     assert.ok(
-      !migration.includes("these five versions"),
-      "the old five-row prose is gone",
+      !migration.includes("these six versions"),
+      "the old six-row prose is gone",
     );
   });
 });

@@ -32,10 +32,10 @@ describe("src/services/storage/migration-0004-event-indexes.test", () => {
     );
   });
 
-  it("migrations holds seven entries, versions 1 to 7 in order", () => {
+  it("migrations holds eight entries, versions 1 to 8 in order", () => {
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4, 5, 6, 7],
+      [1, 2, 3, 4, 5, 6, 7, 8],
     );
     assert.deepEqual(
       migrations.map((migration) => migration.name),
@@ -47,6 +47,7 @@ describe("src/services/storage/migration-0004-event-indexes.test", () => {
         "0005-actor",
         "0006-revision-origin",
         "0007-external-execution",
+        "0008-graph-indexes",
       ],
     );
   });

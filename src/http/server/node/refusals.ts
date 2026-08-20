@@ -6,6 +6,7 @@ import { ReleaseNodeError } from "../../../commands/node/release-node.ts";
 import { ReportOutcomeError } from "../../../commands/outcome/report-outcome.ts";
 import { ReportObjectiveError } from "../../../commands/outcome/report-objective.ts";
 import { CloseObjectiveError } from "../../../commands/outcome/close-objective.ts";
+import { ListProjectNodeError } from "../../../queries/node/list-project-node.ts";
 
 export function toHttpError(
   error: unknown,
@@ -45,6 +46,12 @@ export function toHttpError(
   }
   if (error instanceof CloseObjectiveError) {
     return closeObjectiveRefusal(error);
+  }
+  if (error instanceof ListProjectNodeError) {
+    switch (error.refusal) {
+      case "project-not-found":
+        return httpError("not-found", error.message);
+    }
   }
   throw error;
 }

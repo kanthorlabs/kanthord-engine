@@ -22,6 +22,8 @@ version  name                       applied_at
 4        0004-event-indexes         1738396800340
 5        0005-actor                 1738396800420
 6        0006-revision-origin       1738396800500
+7        0007-external-execution    1738396800580
+8        0008-graph-indexes         1738396800660
 ```
 
-A human runs `kanthord db migrate` on a new daemon home. Six rows appear, one per migration file. `kanthord db status` then prints these six versions, and a second `migrate` inserts nothing and reports no change. `npm run verify` calls `db status`, so an empty table on a fresh file is a failed build rather than a silent default.
+A human runs `kanthord db migrate` on a new daemon home. Eight rows appear, one per migration file. `kanthord db status` then prints these eight versions, and a second `migrate` inserts nothing and reports no change. `npm run verify` calls `db status`, so an empty table on a fresh file is a failed build rather than a silent default.

@@ -22,14 +22,17 @@ const nodeEdgeWriteExemptions = [
   "src/http/server/plan/import-plan.test.ts",
   "src/queries/edge/list-edge.test.ts",
   "src/queries/node/list-node.test.ts",
+  "src/queries/node/list-project-node.test.ts",
   "src/queries/node/show-node.test.ts",
   "src/queries/plan/export-plan.test.ts",
   "src/queries/plan/validate-plan.test.ts",
   "src/queries/project/read-project-status.test.ts",
+  "src/queries/project/show-project-graph.test.ts",
   "src/queries/system/read-status.test.ts",
   "src/services/event/atomicity.test.ts",
   "src/services/plan/sqlite.test.ts",
   "src/services/storage/migration-0002-graph-and-plan.test.ts",
+  "src/services/storage/migration-0008-graph-indexes.test.ts",
 ];
 
 const vendorPackages = [

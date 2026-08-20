@@ -24,6 +24,7 @@ export const subresourceSegments = [
   "check",
   "default",
   "edge",
+  "graph",
   "landing-branch",
   "llm",
   "node",

@@ -38,19 +38,20 @@ export const harnessOperations = [
   "node.update",
   "plan.export",
   "project.list",
+  "project.nodes",
   "project.show",
   "project.status",
   "system.health",
 ];
 
 describe("src/http/contract/registry.test", () => {
-  it("registers sixty-eight operations", () => {
-    assert.equal(registry.length, 68);
+  it("registers seventy operations", () => {
+    assert.equal(registry.length, 70);
   });
 
   it("sorts the registry bytewise by operationId with no duplicates", () => {
     const ids = registry.map((entry) => entry.operationId);
-    assert.equal(new Set(ids).size, 68);
+    assert.equal(new Set(ids).size, 70);
     for (let i = 0; i < ids.length - 1; i += 1) {
       assert.ok(
         Buffer.compare(Buffer.from(ids[i]!), Buffer.from(ids[i + 1]!)) < 0,
@@ -62,7 +63,7 @@ describe("src/http/contract/registry.test", () => {
   it("counts routed and stubbed entries", () => {
     assert.equal(
       registry.filter((entry) => entry.status === "routed").length,
-      42,
+      44,
     );
     assert.equal(
       registry.filter((entry) => entry.status === "stubbed").length,
@@ -73,7 +74,7 @@ describe("src/http/contract/registry.test", () => {
   it("counts introducedIn values with no post-mvp row", () => {
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-1").length,
-      37,
+      39,
     );
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-2").length,
@@ -155,7 +156,9 @@ describe("src/http/contract/registry.test", () => {
       "plan.revisions",
       "plan.validate",
       "project.create",
+      "project.graph",
       "project.list",
+      "project.nodes",
       "project.repositories",
       "project.show",
       "project.status",
@@ -997,7 +1000,7 @@ describe("src/http/contract/registry.test", () => {
       assert.deepEqual(actual, harnessOperations);
     });
 
-    it("the harness set names the six node operations of EPIC 017 and 018", () => {
+    it("the harness set names the seven node operations of EPIC 017 018 and 022 adds project.nodes", () => {
       for (const operationId of [
         "node.claim",
         "node.create",
@@ -1005,6 +1008,7 @@ describe("src/http/contract/registry.test", () => {
         "node.heartbeat",
         "node.release",
         "node.update",
+        "project.nodes",
       ]) {
         assert.ok(
           harnessOperations.includes(operationId),

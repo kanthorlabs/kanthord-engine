@@ -105,8 +105,16 @@ export const declaredCommands: readonly DeclaredCommand[] = [
     operationIds: ["project.create"],
   },
   {
+    path: ["project", "graph"],
+    operationIds: ["project.graph"],
+  },
+  {
     path: ["project", "list"],
     operationIds: ["project.list"],
+  },
+  {
+    path: ["project", "node"],
+    operationIds: ["project.nodes"],
   },
   {
     path: ["project", "repository"],

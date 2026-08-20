@@ -17,6 +17,7 @@ import {
   EXAMPLE_AT as A,
   EXAMPLE_HASH as H,
   EXAMPLE_ULID as U,
+  EXAMPLE_ULID_B as UB,
 } from "./example-literal.ts";
 import { operations } from "./operation.ts";
 import type { OperationExamples } from "./operation.ts";
@@ -158,6 +159,49 @@ export const edgeView = z.strictObject({
 });
 
 export const edgeListResponse = z.strictObject({ edges: z.array(edgeView) });
+
+export const graphAttributes = z.strictObject({
+  projectId: z.string(),
+  revision: z.string().nullable(),
+});
+
+export const nodeAttributes = z.strictObject({
+  kind: z.enum(nodeKinds),
+  title: z.string(),
+  state: z.enum(nodeStates),
+  blockReason: z.enum(blockReasons).nullable(),
+  discardReason: z.string().nullable(),
+  parentId: z.string().nullable(),
+  repositoryId: z.string().nullable(),
+});
+
+export const edgeAttributes = z.strictObject({
+  relation: z.literal("depends-on"),
+  waivedAt: z.number().nullable(),
+});
+
+export const serializedGraphNode = z.strictObject({
+  key: z.string(),
+  attributes: nodeAttributes,
+});
+
+export const serializedGraphEdge = z.strictObject({
+  key: z.string(),
+  source: z.string(),
+  target: z.string(),
+  attributes: edgeAttributes,
+});
+
+export const projectGraphResponse = z.strictObject({
+  attributes: graphAttributes,
+  options: z.strictObject({
+    allowSelfLoops: z.literal(false),
+    multi: z.literal(false),
+    type: z.literal("directed"),
+  }),
+  nodes: z.array(serializedGraphNode),
+  edges: z.array(serializedGraphEdge),
+});
 
 const nodeInitiativeFields = z.strictObject({
   kind: z.literal("initiative"),
@@ -603,5 +647,106 @@ export const graph = operations([
       "binding-in-use": bindingInUseDetails,
     },
     examples: nodeDeleteExamples,
+  },
+  {
+    operationId: "project.nodes",
+    method: "GET",
+    path: [resource("project"), parameter("project"), sub("node")],
+    introducedIn: "phase-1",
+    status: "routed",
+    allowedActors: ["human", "harness"],
+    response: nodeListResponse,
+    errors: { ...baselineErrors },
+    examples: {
+      success: nodeListExamples.success,
+      error: nodeListExamples.error,
+    },
+  },
+  {
+    operationId: "project.graph",
+    method: "GET",
+    path: [resource("project"), parameter("project"), sub("graph")],
+    introducedIn: "phase-1",
+    status: "routed",
+    allowedActors: ["human"],
+    response: projectGraphResponse,
+    errors: { ...baselineErrors },
+    examples: {
+      success: {
+        attributes: {
+          projectId: `project_${U}`,
+          revision: `revision_${U}`,
+        },
+        options: {
+          allowSelfLoops: false,
+          multi: false,
+          type: "directed",
+        },
+        nodes: [
+          {
+            key: `initiative_${U}`,
+            attributes: {
+              kind: "initiative",
+              title: "atlas",
+              state: "ready",
+              blockReason: null,
+              discardReason: null,
+              parentId: null,
+              repositoryId: null,
+            },
+          },
+          {
+            key: `objective_${U}`,
+            attributes: {
+              kind: "objective",
+              title: "build the health route",
+              state: "ready",
+              blockReason: null,
+              discardReason: null,
+              parentId: `initiative_${U}`,
+              repositoryId: `repo_${U}`,
+            },
+          },
+          {
+            key: `task_${U}`,
+            attributes: {
+              kind: "task",
+              title: "add the health route",
+              state: "ready",
+              blockReason: null,
+              discardReason: null,
+              parentId: `objective_${U}`,
+              repositoryId: null,
+            },
+          },
+          {
+            key: `task_${UB}`,
+            attributes: {
+              kind: "task",
+              title: "add the health check",
+              state: "done",
+              blockReason: null,
+              discardReason: null,
+              parentId: `objective_${U}`,
+              repositoryId: null,
+            },
+          },
+        ],
+        edges: [
+          {
+            key: `edge_${U}`,
+            source: `task_${U}`,
+            target: `task_${UB}`,
+            attributes: {
+              relation: "depends-on",
+              waivedAt: null,
+            },
+          },
+        ],
+      },
+      error: {
+        error: { code: "not-found", message: `no project project_${U}` },
+      },
+    },
   },
 ]);

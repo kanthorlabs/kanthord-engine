@@ -22,6 +22,7 @@ import { migration0004EventIndexes } from "./migration-0004-event-indexes.ts";
 import { migration0005Actor } from "./migration-0005-actor.ts";
 import { migration0006RevisionOrigin } from "./migration-0006-revision-origin.ts";
 import { migration0007ExternalExecution } from "./migration-0007-external-execution.ts";
+import { migration0008GraphIndexes } from "./migration-0008-graph-indexes.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -47,6 +48,12 @@ const BLOCK_REASONS = [
 
 const historicalPlanRevisionStatement =
   "CREATE TABLE plan_revision ( id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES project(id), parent_id TEXT REFERENCES plan_revision(id), import_id TEXT NOT NULL, submitted_blob TEXT NOT NULL REFERENCES blob(hash), choices_blob TEXT NOT NULL REFERENCES blob(hash), accepted_blob TEXT NOT NULL REFERENCES blob(hash), UNIQUE (project_id, import_id) ) STRICT";
+
+const historicalNodeStatement =
+  "CREATE TABLE node ( id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES project(id), kind TEXT NOT NULL CHECK (kind IN ('initiative', 'objective', 'task')), parent_id TEXT REFERENCES node(id), title TEXT NOT NULL, instruction_blob TEXT NOT NULL REFERENCES blob(hash), acceptance_blob TEXT REFERENCES blob(hash), worker TEXT, repository_id TEXT REFERENCES repository(id), state TEXT NOT NULL, block_reason TEXT, discard_reason TEXT, revision TEXT NOT NULL REFERENCES plan_revision(id), updated_at INTEGER NOT NULL, CHECK ((kind = 'initiative') = (parent_id IS NULL)), CHECK ((kind = 'objective') = (repository_id IS NOT NULL)), CHECK ((kind = 'task') = (acceptance_blob IS NOT NULL)), CHECK (state IN ('pending', 'ready', 'running', 'blocked', 'awaiting_approval', 'done', 'partial', 'discarded')), CHECK ((state = 'blocked') = (block_reason IS NOT NULL)), CHECK (block_reason IS NULL OR block_reason IN ('attempt-limit', 'dependency-discarded', 'stale-base', 'dirty-recovery', 'e2e-failed', 'abandoned')), CHECK (state <> 'awaiting_approval' OR kind = 'objective'), CHECK (state <> 'partial' OR kind <> 'task') ) STRICT";
+
+const historicalEdgeStatement =
+  "CREATE TABLE edge ( id TEXT PRIMARY KEY, from_node TEXT NOT NULL REFERENCES node(id), to_node TEXT NOT NULL REFERENCES node(id), waived_at INTEGER, UNIQUE (from_node, to_node), CHECK (from_node <> to_node) ) STRICT";
 
 type Context = Readonly<{
   storage: SqliteStorage;
@@ -210,7 +217,7 @@ const insertRevision = (
 };
 
 describe("src/services/storage/migration-0002-graph-and-plan.test", () => {
-  it("parity: node and edge match the proposal, and plan_revision matches the frozen version-2 DDL", () => {
+  it("parity: node and edge match the version-2 proposal fences, and plan_revision matches the frozen version-2 DDL", () => {
     const normalize = (sql: string): readonly string[] =>
       sql
         .split(";")
@@ -219,7 +226,8 @@ describe("src/services/storage/migration-0002-graph-and-plan.test", () => {
 
     assert.deepEqual(graphAndPlan.statements.flatMap(normalize), [
       historicalPlanRevisionStatement,
-      ...["node", "edge"].flatMap(proposalStatements),
+      historicalNodeStatement,
+      historicalEdgeStatement,
     ]);
   });
 
@@ -235,7 +243,7 @@ describe("src/services/storage/migration-0002-graph-and-plan.test", () => {
     assert.ok(migrationDoc.includes("0002-graph-and-plan"));
   });
 
-  it("migrations holds exactly coreEntities, graphAndPlan, executionAndJournal, migration0004EventIndexes, migration0005Actor, migration0006RevisionOrigin and migration0007ExternalExecution", () => {
+  it("migrations holds exactly eight migrations with migration0008GraphIndexes last", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
@@ -244,6 +252,7 @@ describe("src/services/storage/migration-0002-graph-and-plan.test", () => {
       migration0005Actor,
       migration0006RevisionOrigin,
       migration0007ExternalExecution,
+      migration0008GraphIndexes,
     ]);
   });
 

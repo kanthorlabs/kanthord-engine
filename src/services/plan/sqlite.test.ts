@@ -2350,4 +2350,138 @@ describe("src/services/plan/sqlite.test", () => {
 
     assert.deepEqual(reads(), reads());
   });
+  it("readGraph issues a node statement the node_project index serves by SEARCH", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+    });
+
+    const issued = storage.transact((transaction) => {
+      const recorder = recordingTransaction(transaction);
+      const result = store.readGraph(recorder.transaction, fixtureIds.project);
+      assert.ok(result.nodes.length >= 3);
+      return recorder.statements;
+    });
+
+    const nodeStatement = issued.find((statement) =>
+      /FROM node\b/.test(statement.sql),
+    );
+    assert.ok(
+      nodeStatement,
+      `readGraph issued no node statement: ${JSON.stringify(issued)}`,
+    );
+
+    const detail = storage.transact((transaction) =>
+      queryPlan(transaction, nodeStatement.sql, nodeStatement.parameters),
+    );
+    assert.match(detail, /SEARCH/);
+    assert.match(detail, /node_project/);
+    assert.doesNotMatch(detail, /SCAN/);
+  });
+
+  it("readGraph issues an edge statement the edge_from_node index serves by SEARCH", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+    });
+
+    const issued = storage.transact((transaction) => {
+      const recorder = recordingTransaction(transaction);
+      store.readGraph(recorder.transaction, fixtureIds.project);
+      return recorder.statements;
+    });
+
+    const edgeStatement = issued.find((statement) =>
+      /FROM edge\b/.test(statement.sql),
+    );
+    assert.ok(
+      edgeStatement,
+      `readGraph issued no edge statement: ${JSON.stringify(issued)}`,
+    );
+
+    const detail = storage.transact((transaction) =>
+      queryPlan(transaction, edgeStatement.sql, edgeStatement.parameters),
+    );
+    assert.match(detail, /SEARCH/);
+    assert.match(detail, /edge_from_node/);
+    assert.doesNotMatch(detail, /SCAN TABLE edge/);
+  });
+
+  it("readAllNodes issues a node statement that stays a SCAN because it carries no predicate", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+    });
+
+    const issued = storage.transact((transaction) => {
+      const recorder = recordingTransaction(transaction);
+      const result = store.readAllNodes(recorder.transaction);
+      assert.ok(result.length >= 3);
+      return recorder.statements;
+    });
+
+    const nodeStatement = issued.find((statement) =>
+      /FROM node\b/.test(statement.sql),
+    );
+    assert.ok(
+      nodeStatement,
+      `readAllNodes issued no node statement: ${JSON.stringify(issued)}`,
+    );
+
+    const detail = storage.transact((transaction) =>
+      queryPlan(transaction, nodeStatement.sql, nodeStatement.parameters),
+    );
+    assert.match(detail, /SCAN/);
+    assert.doesNotMatch(detail, /node_project/);
+  });
 });
+
+type IssuedStatement = Readonly<{
+  sql: string;
+  parameters: readonly unknown[];
+}>;
+
+function recordingTransaction(inner: Transaction): {
+  transaction: Transaction;
+  statements: readonly IssuedStatement[];
+} {
+  const statements: IssuedStatement[] = [];
+  const record = (sql: string, parameters?: readonly unknown[]): void => {
+    statements.push({ sql, parameters: parameters ?? [] });
+  };
+  return {
+    transaction: {
+      run(sql: string, parameters?: readonly unknown[]): void {
+        record(sql, parameters);
+        inner.run(sql, parameters);
+      },
+      get(sql: string, parameters?: readonly unknown[]): unknown {
+        record(sql, parameters);
+        return inner.get(sql, parameters);
+      },
+      all(sql: string, parameters?: readonly unknown[]): readonly unknown[] {
+        record(sql, parameters);
+        return inner.all(sql, parameters);
+      },
+    },
+    statements,
+  };
+}
+
+function queryPlan(
+  transaction: Transaction,
+  sql: string,
+  parameters: readonly unknown[],
+): string {
+  const rows = transaction.all(
+    `EXPLAIN QUERY PLAN ${sql}`,
+    parameters,
+  ) as readonly Record<string, unknown>[];
+  return rows.map((row) => row["detail"]).join(" ");
+}

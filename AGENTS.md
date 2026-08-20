@@ -112,6 +112,13 @@ A query takes the same shape. `main.ts` binds the dependencies once and passes c
 - **Fake against Mock.** A **Fake** returns a generic safe default. A **Mock** returns the deterministic value the story names. A story that names a value gets a Mock.
 - Boundaries are **not** disabled for tests. A test imports its module under test, `domain/`, service interfaces, `test/helpers/` and `node:` builtins. It reaches an implementation only in the capability it covers.
 
+> **TODO — close before the next phase-2 epic.** The rule above is not true of the tree today, and `eslint.config.js` does not enforce it. Two patterns break it, both pre-existing and both repo-wide:
+>
+> - a handler test under `src/http/server/**` imports its query from `src/queries/**` — 20+ files, for example `src/http/server/edge/list-edge.test.ts:12`;
+> - a query test under `src/queries/**` imports a zod schema from `src/http/contract/**` — 10+ files, for example `src/queries/node/list-node.test.ts`.
+>
+> Neither is a defect of the epic that last touched the file, so a review must not report one as such. The fix is one epic: decide whether the rule or the convention wins, amend whichever loses, and encode the outcome in `eslint.config.js` so the answer stops depending on the reviewer. **EPIC 101 already landed under the current convention** and is not a counter-example — it is the reason this cannot slip further. Do not open another phase-2 epic before this closes.
+
 ## Determinism
 
 The same input produces the same output, the same order and the same bytes. Two product guarantees depend on it: a plan document round-trips byte-identically, and a task order is reproducible.

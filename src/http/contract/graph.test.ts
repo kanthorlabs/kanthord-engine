@@ -10,6 +10,7 @@ import {
   nodeUpdateResponse,
   planImportRequest,
   planImportResponse,
+  projectGraphResponse,
 } from "./graph.ts";
 import { findOperation } from "./registry.ts";
 
@@ -307,5 +308,77 @@ describe("src/http/contract/graph.test", () => {
         assert.ok(declared.includes(code), `${operationId} misses ${code}`);
       }
     }
+  });
+
+  it("projectGraphResponse refuses unknown attribute keys in nodes, edges, attributes, options", () => {
+    const validBase = {
+      attributes: { projectId: "project_a", revision: "revision_a" },
+      options: { allowSelfLoops: false, multi: false, type: "directed" },
+      nodes: [
+        {
+          key: "initiative_a",
+          attributes: {
+            kind: "initiative",
+            title: "Harden the verify CLI",
+            state: "pending",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+      ],
+      edges: [
+        {
+          key: "edge_a",
+          source: "task_a",
+          target: "objective_a",
+          attributes: { relation: "depends-on", waivedAt: null },
+        },
+      ],
+    };
+
+    // unknown key in top-level attributes
+    assert.equal(
+      projectGraphResponse.safeParse({
+        ...validBase,
+        attributes: { ...validBase.attributes, extra: "value" },
+      }).success,
+      false,
+    );
+    // unknown key in options
+    assert.equal(
+      projectGraphResponse.safeParse({
+        ...validBase,
+        options: { ...validBase.options, extra: "value" },
+      }).success,
+      false,
+    );
+    // unknown key in node attributes
+    assert.equal(
+      projectGraphResponse.safeParse({
+        ...validBase,
+        nodes: [
+          {
+            ...validBase.nodes[0]!,
+            attributes: { ...validBase.nodes[0]!.attributes, extra: "value" },
+          },
+        ],
+      }).success,
+      false,
+    );
+    // unknown key in edge attributes
+    assert.equal(
+      projectGraphResponse.safeParse({
+        ...validBase,
+        edges: [
+          {
+            ...validBase.edges[0]!,
+            attributes: { ...validBase.edges[0]!.attributes, extra: "value" },
+          },
+        ],
+      }).success,
+      false,
+    );
   });
 });

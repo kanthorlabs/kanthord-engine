@@ -210,6 +210,8 @@ const fixtures: Readonly<Record<string, Fixture>> = {
     expect: 404,
   },
   "edge.list": { parameters: { id: missing("project") }, expect: 404 },
+  "project.nodes": { parameters: { id: missing("project") }, expect: 404 },
+  "project.graph": { parameters: { id: missing("project") }, expect: 404 },
   "event.list": { expect: 200 },
   "blob.show": {
     parameters: { hash: `sha256:${"0".repeat(64)}` },

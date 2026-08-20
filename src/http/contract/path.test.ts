@@ -36,7 +36,7 @@ describe("src/http/contract/path.test", () => {
 
   it("pins the closed-array sizes", () => {
     assert.equal(resourceSegments.length, 14);
-    assert.equal(subresourceSegments.length, 16);
+    assert.equal(subresourceSegments.length, 17);
     assert.equal(actionSegments.length, 23);
     assert.equal(systemSegments.length, 3);
   });
@@ -146,5 +146,24 @@ describe("src/http/contract/path.test", () => {
       ["id"],
     );
     assert.deepEqual(parameterNames([resource("blob"), hash()]), ["hash"]);
+  });
+
+  it("graph is a subresource segment and renders project node path", () => {
+    assert.ok(
+      subresourceSegments.includes("graph"),
+      "graph subresource segment is missing",
+    );
+    const graphIndex = subresourceSegments.indexOf("graph");
+    const edgeIndex = subresourceSegments.indexOf("edge");
+    const landingBranchIndex = subresourceSegments.indexOf("landing-branch");
+    assert.ok(graphIndex > edgeIndex, "graph must be sorted after edge");
+    assert.ok(
+      graphIndex < landingBranchIndex,
+      "graph must be sorted before landing-branch",
+    );
+    assert.equal(
+      renderPath([resource("project"), parameter("project"), sub("graph")]),
+      "/v1/project/:id/graph",
+    );
   });
 });

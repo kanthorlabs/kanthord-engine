@@ -105,6 +105,15 @@ export function tableBytes(storage: Storage, table: TableName): Buffer {
   );
 }
 
+export function dataVersion(storage: Storage): number {
+  return storage.transact((transaction) => {
+    const row = transaction.get("PRAGMA data_version") as {
+      data_version: number;
+    };
+    return row.data_version;
+  });
+}
+
 export function databaseBytes(storage: Storage): Buffer {
   const tables = (Object.keys(rows) as readonly TableName[])
     .slice()

@@ -228,4 +228,25 @@ describe("src/cli/program.test", () => {
       assert.ok(names.includes(name), `the node group registers ${name}`);
     }
   });
+
+  it("buildProgram registers project graph and project node", () => {
+    const { dependencies } = fakeDependencies();
+    const program = buildProgram(dependencies);
+
+    const project = program.commands.find(
+      (command) => command.name() === "project",
+    );
+    assert.ok(project, "the project group exists");
+    const names = project.commands.map((command) => command.name());
+    for (const name of [
+      "create",
+      "graph",
+      "list",
+      "node",
+      "repository",
+      "show",
+    ]) {
+      assert.ok(names.includes(name), `the project group registers ${name}`);
+    }
+  });
 });

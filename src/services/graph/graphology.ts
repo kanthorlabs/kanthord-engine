@@ -1,7 +1,15 @@
 import { DirectedGraph } from "graphology";
 
 import { GraphError } from "./index.ts";
-import type { Graph, GraphInput } from "./index.ts";
+import type {
+  Graph,
+  GraphInput,
+  GraphAttributes,
+  SerializedGraph,
+  SerializedGraphNode,
+  SerializedGraphEdge,
+  GraphSerializeInput,
+} from "./index.ts";
 
 export class GraphologyGraph implements Graph {
   topologicalOrder(input: GraphInput): readonly string[] {
@@ -170,6 +178,150 @@ export class GraphologyGraph implements Graph {
     componentsOut.sort((a, b) => compareIds(a[0]!, b[0]!));
     return componentsOut;
   }
+
+  serialize(input: GraphSerializeInput): SerializedGraph {
+    const { attributes, nodes, edges } = input;
+
+    const seenNodeKeys = new Set<string>();
+    for (const node of nodes) {
+      if (seenNodeKeys.has(node.key)) {
+        throw new GraphError(
+          "graph-duplicate-node",
+          `node key ${node.key} appears twice`,
+        );
+      }
+      seenNodeKeys.add(node.key);
+    }
+
+    const nodeKeySet = new Set(seenNodeKeys);
+    const seenEdgeKeys = new Set<string>();
+    for (const edge of edges) {
+      if (seenEdgeKeys.has(edge.key)) {
+        throw new GraphError(
+          "graph-duplicate-edge",
+          `edge key ${edge.key} appears twice`,
+        );
+      }
+      seenEdgeKeys.add(edge.key);
+
+      if (!nodeKeySet.has(edge.source)) {
+        throw new GraphError(
+          "graph-unknown-node",
+          `edge source ${edge.source} is not a node of this graph`,
+        );
+      }
+      if (!nodeKeySet.has(edge.target)) {
+        throw new GraphError(
+          "graph-unknown-node",
+          `edge target ${edge.target} is not a node of this graph`,
+        );
+      }
+      if (edge.source === edge.target) {
+        throw new GraphError(
+          "graph-self-loop",
+          `edge ${edge.key} has source equal to target`,
+        );
+      }
+    }
+
+    const graph = new DirectedGraph({ allowSelfLoops: false, multi: false });
+
+    try {
+      graph.replaceAttributes(attributes);
+    } catch (error) {
+      throw new GraphError(
+        "graph-unknown-node",
+        "failed to set graph attributes",
+      );
+    }
+
+    const sortedNodes = [...nodes].sort((a, b) => compareIds(a.key, b.key));
+    for (const node of sortedNodes) {
+      try {
+        graph.addNode(node.key, sortAttributes(node.attributes));
+      } catch (error) {
+        throw new GraphError(
+          "graph-duplicate-node",
+          `failed to add node ${node.key}`,
+        );
+      }
+    }
+
+    const sortedEdges = [...edges].sort((a, b) => compareIds(a.key, b.key));
+    for (const edge of sortedEdges) {
+      try {
+        graph.addDirectedEdgeWithKey(
+          edge.key,
+          edge.source,
+          edge.target,
+          sortAttributes(edge.attributes),
+        );
+      } catch (error) {
+        throw new GraphError(
+          "graph-duplicate-edge",
+          `failed to add edge ${edge.key}`,
+        );
+      }
+    }
+
+    const exported = graph.export();
+
+    const exportedNodes = exported.nodes ?? [];
+    const exportedEdges = exported.edges ?? [];
+
+    const nodeAttributesByKey = new Map(
+      nodes.map((node) => [node.key, node.attributes]),
+    );
+    const edgeAttributesByKey = new Map(
+      edges.map((edge) => [edge.key, edge.attributes]),
+    );
+
+    const serializedNodes: SerializedGraphNode[] = exportedNodes
+      .filter(
+        (node): node is { key: string; attributes: Record<string, unknown> } =>
+          typeof node.key === "string" && node.attributes !== undefined,
+      )
+      .map((node) => ({
+        key: node.key,
+        attributes: sortAttributes(nodeAttributesByKey.get(node.key) ?? {}),
+      }));
+
+    const serializedEdges: SerializedGraphEdge[] = exportedEdges
+      .filter(
+        (
+          edge,
+        ): edge is {
+          key: string;
+          source: string;
+          target: string;
+          attributes: Record<string, unknown>;
+        } =>
+          typeof edge.key === "string" &&
+          typeof edge.source === "string" &&
+          typeof edge.target === "string" &&
+          edge.attributes !== undefined,
+      )
+      .map((edge) => ({
+        key: edge.key,
+        source: edge.source,
+        target: edge.target,
+        attributes: sortAttributes(edgeAttributesByKey.get(edge.key) ?? {}),
+      }));
+
+    serializedNodes.sort((a, b) => compareIds(a.key, b.key));
+    serializedEdges.sort((a, b) => compareIds(a.key, b.key));
+
+    return {
+      attributes: sortAttributes(attributes),
+      options: {
+        allowSelfLoops: false,
+        multi: false,
+        type: "directed" as const,
+      },
+      nodes: serializedNodes,
+      edges: serializedEdges,
+    };
+  }
 }
 
 function buildGraph(input: GraphInput): DirectedGraph {
@@ -223,7 +375,10 @@ function insertSorted(array: string[], value: string): void {
 }
 
 function compareIds(a: string, b: string): number {
-  if (a < b) return -1;
-  if (a > b) return 1;
-  return 0;
+  return Buffer.compare(Buffer.from(a), Buffer.from(b));
+}
+
+function sortAttributes(attributes: GraphAttributes): GraphAttributes {
+  const keys = Object.keys(attributes).sort(compareIds);
+  return Object.fromEntries(keys.map((key) => [key, attributes[key]!]));
 }

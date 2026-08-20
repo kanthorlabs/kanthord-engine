@@ -285,6 +285,580 @@ describe("src/services/graph/graphology.ts", () => {
       join(srcRoot, "services", "graph", "graphology.ts"),
     );
   });
+
+  it("serialize exports SerializedGraph with four top-level keys in fixed order", () => {
+    const input = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [
+        {
+          key: "node_b",
+          attributes: {
+            kind: "task",
+            title: "B",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+        {
+          key: "node_a",
+          attributes: {
+            kind: "objective",
+            title: "A",
+            state: "active",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: "repo_01",
+          },
+        },
+      ],
+      edges: [
+        {
+          key: "edge_1",
+          source: "node_b",
+          target: "node_a",
+          attributes: { relation: "depends-on", waivedAt: null },
+        },
+      ],
+    };
+    const result = graph.serialize(input);
+    assert.deepEqual(Object.keys(result), [
+      "attributes",
+      "options",
+      "nodes",
+      "edges",
+    ]);
+    assert.deepEqual(result.options, {
+      allowSelfLoops: false,
+      multi: false,
+      type: "directed",
+    });
+    assert.equal(result.attributes.projectId, "proj_01");
+    assert.equal(result.attributes.revision, "rev_01");
+    assert.equal(result.nodes.length, 2);
+    assert.equal(result.edges.length, 1);
+  });
+
+  it("serialize orders nodes bytewise by key", () => {
+    const input = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [
+        {
+          key: "node_c",
+          attributes: {
+            kind: "task",
+            title: "C",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+        {
+          key: "node_a",
+          attributes: {
+            kind: "task",
+            title: "A",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+        {
+          key: "node_b",
+          attributes: {
+            kind: "task",
+            title: "B",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+      ],
+      edges: [],
+    };
+    const result = graph.serialize(input);
+    assert.deepEqual(
+      result.nodes.map((n) => n.key),
+      ["node_a", "node_b", "node_c"],
+    );
+  });
+
+  it("serialize orders edges bytewise by key", () => {
+    const input = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [
+        {
+          key: "node_a",
+          attributes: {
+            kind: "task",
+            title: "A",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+        {
+          key: "node_b",
+          attributes: {
+            kind: "task",
+            title: "B",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+        {
+          key: "node_c",
+          attributes: {
+            kind: "task",
+            title: "C",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+      ],
+      edges: [
+        {
+          key: "edge_c",
+          source: "node_a",
+          target: "node_b",
+          attributes: { relation: "depends-on", waivedAt: null },
+        },
+        {
+          key: "edge_a",
+          source: "node_b",
+          target: "node_c",
+          attributes: { relation: "depends-on", waivedAt: null },
+        },
+        {
+          key: "edge_b",
+          source: "node_a",
+          target: "node_c",
+          attributes: { relation: "depends-on", waivedAt: null },
+        },
+      ],
+    };
+    const result = graph.serialize(input);
+    assert.deepEqual(
+      result.edges.map((e) => e.key),
+      ["edge_a", "edge_b", "edge_c"],
+    );
+  });
+
+  it("serialize attribute key order is bytewise and insertion-independent", () => {
+    const attrs1 = { z: 1, a: 2, m: 3 };
+    const attrs2 = { a: 2, m: 3, z: 1 };
+    const input1 = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [{ key: "node_a", attributes: attrs1 }],
+      edges: [],
+    };
+    const input2 = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [{ key: "node_a", attributes: attrs2 }],
+      edges: [],
+    };
+    const result1 = graph.serialize(input1);
+    const result2 = graph.serialize(input2);
+    assert.equal(
+      Buffer.compare(
+        Buffer.from(JSON.stringify(result1)),
+        Buffer.from(JSON.stringify(result2)),
+      ),
+      0,
+    );
+    const nodeAttrKeys = Object.keys(result1.nodes[0]!.attributes);
+    assert.deepEqual(nodeAttrKeys, ["a", "m", "z"]);
+  });
+
+  it("serialize throws graph-duplicate-node on repeated node key", () => {
+    const input = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [
+        {
+          key: "node_a",
+          attributes: {
+            kind: "task",
+            title: "A",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+        {
+          key: "node_a",
+          attributes: {
+            kind: "task",
+            title: "A",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+      ],
+      edges: [],
+    };
+    assert.throws(
+      () => graph.serialize(input),
+      (error: unknown) =>
+        error instanceof GraphError && error.code === "graph-duplicate-node",
+    );
+  });
+
+  it("serialize throws graph-unknown-node on edge naming absent node", () => {
+    const input = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [
+        {
+          key: "node_a",
+          attributes: {
+            kind: "task",
+            title: "A",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+      ],
+      edges: [
+        {
+          key: "edge_1",
+          source: "node_a",
+          target: "node_missing",
+          attributes: { relation: "depends-on", waivedAt: null },
+        },
+      ],
+    };
+    assert.throws(
+      () => graph.serialize(input),
+      (error: unknown) =>
+        error instanceof GraphError && error.code === "graph-unknown-node",
+    );
+  });
+
+  it("serialize throws graph-duplicate-edge on repeated edge key", () => {
+    const input = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [
+        {
+          key: "node_a",
+          attributes: {
+            kind: "task",
+            title: "A",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+        {
+          key: "node_b",
+          attributes: {
+            kind: "task",
+            title: "B",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+      ],
+      edges: [
+        {
+          key: "edge_1",
+          source: "node_a",
+          target: "node_b",
+          attributes: { relation: "depends-on", waivedAt: null },
+        },
+        {
+          key: "edge_1",
+          source: "node_b",
+          target: "node_a",
+          attributes: { relation: "depends-on", waivedAt: null },
+        },
+      ],
+    };
+    assert.throws(
+      () => graph.serialize(input),
+      (error: unknown) =>
+        error instanceof GraphError && error.code === "graph-duplicate-edge",
+    );
+  });
+
+  it("serialize throws graph-duplicate-edge on second edge between same ordered pair", () => {
+    const input = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [
+        {
+          key: "node_a",
+          attributes: {
+            kind: "task",
+            title: "A",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+        {
+          key: "node_b",
+          attributes: {
+            kind: "task",
+            title: "B",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+      ],
+      edges: [
+        {
+          key: "edge_1",
+          source: "node_a",
+          target: "node_b",
+          attributes: { relation: "depends-on", waivedAt: null },
+        },
+        {
+          key: "edge_2",
+          source: "node_a",
+          target: "node_b",
+          attributes: { relation: "depends-on", waivedAt: null },
+        },
+      ],
+    };
+    assert.throws(
+      () => graph.serialize(input),
+      (error: unknown) =>
+        error instanceof GraphError && error.code === "graph-duplicate-edge",
+    );
+  });
+
+  it("serialize throws graph-self-loop when source equals target", () => {
+    const input = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [
+        {
+          key: "node_a",
+          attributes: {
+            kind: "task",
+            title: "A",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+      ],
+      edges: [
+        {
+          key: "edge_1",
+          source: "node_a",
+          target: "node_a",
+          attributes: { relation: "depends-on", waivedAt: null },
+        },
+      ],
+    };
+    assert.throws(
+      () => graph.serialize(input),
+      (error: unknown) =>
+        error instanceof GraphError && error.code === "graph-self-loop",
+    );
+  });
+
+  it("serialize no graphology exception escapes the capability", () => {
+    const input = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [
+        {
+          key: "node_a",
+          attributes: {
+            kind: "task",
+            title: "A",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+        {
+          key: "node_b",
+          attributes: {
+            kind: "task",
+            title: "B",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+      ],
+      edges: [
+        {
+          key: "edge_1",
+          source: "node_a",
+          target: "node_b",
+          attributes: { relation: "depends-on", waivedAt: null },
+        },
+      ],
+    };
+    assert.doesNotThrow(() => graph.serialize(input));
+    const result = graph.serialize(input);
+    assert.ok(result.attributes);
+    assert.ok(result.options);
+    assert.ok(Array.isArray(result.nodes));
+    assert.ok(Array.isArray(result.edges));
+  });
+
+  it("serialize orders nodes by bytewise key order with non-ASCII keys where UTF-16 and UTF-8 differ", () => {
+    const a = "\uE000";
+    const b = "\u{10000}";
+    const bytewiseOrder =
+      Buffer.compare(Buffer.from(a), Buffer.from(b)) < 0 ? [a, b] : [b, a];
+    const input = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [
+        {
+          key: bytewiseOrder[1]!,
+          attributes: {
+            kind: "task",
+            title: "B",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+        {
+          key: bytewiseOrder[0]!,
+          attributes: {
+            kind: "task",
+            title: "A",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+      ],
+      edges: [],
+    };
+    const result = graph.serialize(input);
+    assert.deepEqual(
+      result.nodes.map((n) => n.key),
+      bytewiseOrder,
+    );
+  });
+
+  it("serialize orders edges by bytewise key order with non-ASCII keys where UTF-16 and UTF-8 differ", () => {
+    const a = "\uE000";
+    const b = "\u{10000}";
+    const bytewiseOrder =
+      Buffer.compare(Buffer.from(a), Buffer.from(b)) < 0 ? [a, b] : [b, a];
+    const input = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [
+        {
+          key: "node_1",
+          attributes: {
+            kind: "task",
+            title: "N1",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+        {
+          key: "node_2",
+          attributes: {
+            kind: "task",
+            title: "N2",
+            state: "ready",
+            blockReason: null,
+            discardReason: null,
+            parentId: null,
+            repositoryId: null,
+          },
+        },
+      ],
+      edges: [
+        {
+          key: bytewiseOrder[1]!,
+          source: "node_1",
+          target: "node_2",
+          attributes: { relation: "depends-on", waivedAt: null },
+        },
+        {
+          key: bytewiseOrder[0]!,
+          source: "node_2",
+          target: "node_1",
+          attributes: { relation: "depends-on", waivedAt: null },
+        },
+      ],
+    };
+    const result = graph.serialize(input);
+    assert.deepEqual(
+      result.edges.map((e) => e.key),
+      bytewiseOrder,
+    );
+  });
+
+  it("serialize attribute key order is bytewise with non-ASCII keys where UTF-16 and UTF-8 differ", () => {
+    const a = "\uE000";
+    const b = "\u{10000}";
+    const bytewiseOrder =
+      Buffer.compare(Buffer.from(a), Buffer.from(b)) < 0 ? [a, b] : [b, a];
+    const attrs1 = { [bytewiseOrder[1]!]: 1, [bytewiseOrder[0]!]: 2 };
+    const attrs2 = { [bytewiseOrder[0]!]: 2, [bytewiseOrder[1]!]: 1 };
+    const input1 = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [{ key: "node_a", attributes: attrs1 }],
+      edges: [],
+    };
+    const input2 = {
+      attributes: { projectId: "proj_01", revision: "rev_01" },
+      nodes: [{ key: "node_a", attributes: attrs2 }],
+      edges: [],
+    };
+    const result1 = graph.serialize(input1);
+    const result2 = graph.serialize(input2);
+    assert.deepEqual(result1, result2);
+    const nodeAttrKeys = Object.keys(result1.nodes[0]!.attributes);
+    assert.deepEqual(nodeAttrKeys, bytewiseOrder);
+  });
 });
 
 function sourceFilesUnder(directory: string): string[] {

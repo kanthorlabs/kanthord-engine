@@ -19,9 +19,11 @@ import type { PlanDirectoryDependencies } from "./plan/directory.ts";
 import { registerPlanExport } from "./plan/export.ts";
 import { registerPlanImport } from "./plan/import.ts";
 import { registerProjectCreate } from "./project/create.ts";
+import { registerProjectGraph } from "./project/graph.ts";
 import { registerProjectList } from "./project/list.ts";
-import { registerProjectShow } from "./project/show.ts";
+import { registerProjectNode } from "./project/node.ts";
 import { registerProjectRepository } from "./project/repository.ts";
+import { registerProjectShow } from "./project/show.ts";
 import { registerRepositoryRegister } from "./repository/register.ts";
 import { registerRepositoryShow } from "./repository/show.ts";
 import { registerRun } from "./run.ts";
@@ -205,6 +207,20 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     fail: dependencies.fail,
   });
   registerProjectRepository({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+  });
+  registerProjectGraph({
+    program,
+    client,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
+  });
+  registerProjectNode({
     program,
     client,
     stdout: dependencies.stdout,

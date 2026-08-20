@@ -94,6 +94,8 @@ import {
   type ReportOutcomeResult,
 } from "./commands/outcome/report-outcome.ts";
 import { listEdges } from "./queries/edge/list-edge.ts";
+import { listProjectNodes } from "./queries/node/list-project-node.ts";
+import { showProjectGraph } from "./queries/project/show-project-graph.ts";
 import { inspectRepository } from "./queries/repository/inspect-repository.ts";
 import { listRepositories } from "./queries/repository/list-repository.ts";
 import { showRepository } from "./queries/repository/show-repository.ts";
@@ -142,6 +144,8 @@ import { releaseNodeHandler } from "./http/server/node/release-node.ts";
 import { reportNodeHandler } from "./http/server/node/report-node.ts";
 import { unblockNodeHandler } from "./http/server/node/unblock-node.ts";
 import { listEdgeHandler } from "./http/server/edge/list-edge.ts";
+import { listProjectNodeHandler } from "./http/server/node/list-project-node.ts";
+import { showProjectGraphHandler } from "./http/server/project/show-project-graph.ts";
 import { listEventHandler } from "./http/server/event/list-event.ts";
 import { listEvents } from "./queries/event/list-event.ts";
 import { showBlobHandler } from "./http/server/blob/show-blob.ts";
@@ -535,6 +539,14 @@ async function serve(options: ServeOptions): Promise<void> {
         }),
         "edge.list": listEdgeHandler({
           listEdges: (input) => listEdges({ storage, plan }, input),
+        }),
+        "project.nodes": listProjectNodeHandler({
+          listProjectNodes: (input) =>
+            listProjectNodes({ storage, plan }, input),
+        }),
+        "project.graph": showProjectGraphHandler({
+          showProjectGraph: (input) =>
+            showProjectGraph({ storage, plan, graph }, input),
         }),
         "event.list": listEventHandler({
           listEvents: (input) => listEvents({ events }, input),

@@ -412,8 +412,8 @@ describe("src/http/contract/coverage.test", () => {
     }
   });
 
-  it("every one of the thirty-six phase-1 routed operations but blob.show carries a response schema", () => {
-    assert.equal(scoped.length, 36);
+  it("every one of the thirty-eight phase-1 routed operations but blob.show carries a response schema", () => {
+    assert.equal(scoped.length, 38);
     for (const entry of scoped) {
       assert.ok(
         entry.response !== undefined,

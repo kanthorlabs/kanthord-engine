@@ -11,6 +11,8 @@ CREATE TABLE edge (
   UNIQUE (from_node, to_node),
   CHECK (from_node <> to_node)
 ) STRICT;
+
+CREATE INDEX edge_from_node ON edge (from_node, to_node)
 ```
 
 `from_node` depends on `to_node`. Containment is `node.parent_id`, so this table holds dependency only. Import validates that both ends share one parent, because a dependency connects siblings.

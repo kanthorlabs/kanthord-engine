@@ -1,6 +1,7 @@
 import { HttpError, httpError } from "../../contract/errors.ts";
 import { CreateProjectError } from "../../../commands/project/create-project.ts";
 import { ReplaceProjectRepositoriesError } from "../../../commands/project/replace-project-repositories.ts";
+import { ShowProjectGraphError } from "../../../queries/project/show-project-graph.ts";
 
 export function toHttpError(error: unknown): HttpError {
   if (error instanceof CreateProjectError) {
@@ -26,6 +27,12 @@ export function toHttpError(error: unknown): HttpError {
         });
       case "binding-in-use":
         return httpError("binding-in-use", error.message, details(error));
+    }
+  }
+  if (error instanceof ShowProjectGraphError) {
+    switch (error.refusal) {
+      case "project-not-found":
+        return httpError("not-found", error.message);
     }
   }
   throw error;

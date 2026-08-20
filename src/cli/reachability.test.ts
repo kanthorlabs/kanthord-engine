@@ -151,6 +151,15 @@ const responseFor = (request: RecordedRequest): unknown => {
     case "project.repositories":
     case "project.show":
       return project;
+    case "project.nodes":
+      return { nodes: [] };
+    case "project.graph":
+      return {
+        attributes: { projectId: PROJECT_ID, revision: null },
+        options: { allowSelfLoops: false, multi: false, type: "directed" },
+        nodes: [],
+        edges: [],
+      };
     case "project.list":
       return { projects: [] };
     case "system.db":
@@ -448,9 +457,19 @@ const rows: readonly Row[] = [
     operationIds: ["project.create"],
   },
   {
+    path: ["project", "graph"],
+    argv: ["project", "graph", "--id", PROJECT_ID],
+    operationIds: ["project.graph"],
+  },
+  {
     path: ["project", "list"],
     argv: ["project", "list"],
     operationIds: ["project.list"],
+  },
+  {
+    path: ["project", "node"],
+    argv: ["project", "node", "--id", PROJECT_ID],
+    operationIds: ["project.nodes"],
   },
   {
     path: ["project", "repository"],
