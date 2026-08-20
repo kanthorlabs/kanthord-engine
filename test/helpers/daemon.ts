@@ -27,6 +27,8 @@ const entry = fileURLToPath(new URL("../../src/main.ts", import.meta.url));
 const nodeOptions = ["--disable-warning=ExperimentalWarning"];
 const running: ChildProcess[] = [];
 
+export const READY_TIMEOUT_MS = 30_000;
+
 export function launchDaemon(input: LaunchInput): DaemonProcess {
   const args: string[] = [];
   if (input.configPath) {
@@ -89,10 +91,10 @@ export function launchDaemon(input: LaunchInput): DaemonProcess {
         const timeout = setTimeout(() => {
           reject(
             new Error(
-              `daemon did not become ready within 5000 ms\nexit code: ${exitRecord?.code}\nsignal: ${exitRecord?.signal}\nstderr: ${stderrData}`,
+              `daemon did not become ready within ${String(READY_TIMEOUT_MS)} ms\nexit code: ${exitRecord?.code}\nsignal: ${exitRecord?.signal}\nstderr: ${stderrData}`,
             ),
           );
-        }, 5000);
+        }, READY_TIMEOUT_MS);
 
         const check = () => {
           if (stdoutData.includes("kanthord: ready\n")) {

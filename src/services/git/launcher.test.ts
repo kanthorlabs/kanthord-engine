@@ -429,4 +429,63 @@ describe("src/services/git/launcher.test", () => {
       (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT",
     );
   });
+  it("released resolves once the launcher handshake completes", async () => {
+    const dir = makeDirectory();
+    const child = spawnSupervised({
+      command: tools.paths.git,
+      args: ["--version"],
+      env: { ...pinnedGitEnvironment, PATH: tools.execPath },
+      cwd: dir,
+      pidFile: join(dir, "git.pid"),
+    });
+    assert.ok(child.pid !== undefined, "the child must have a pid");
+
+    await child.released;
+
+    assert.deepEqual(await child.exited, { code: 0, signal: null });
+  });
+
+  it("released rejects when the launcher stops before its handshake", async () => {
+    const dir = makeDirectory();
+    const pidFile = join(dir, "git.pid");
+    writeFileSync(pidFile, "4321");
+    const child = spawnSupervised({
+      command: tools.paths.git,
+      args: ["--version"],
+      env: { ...pinnedGitEnvironment, PATH: tools.execPath },
+      cwd: dir,
+      pidFile,
+    });
+    assert.ok(child.pid !== undefined, "the child must have a pid");
+
+    await assert.rejects(child.released, {
+      message: "the supervised child exited before its launcher handshake",
+    });
+    assert.deepEqual(await child.exited, { code: 111, signal: null });
+  });
+
+  it("an unawaited released rejection does not reach the process", async () => {
+    const dir = makeDirectory();
+    const pidFile = join(dir, "git.pid");
+    writeFileSync(pidFile, "4321");
+    const rejections: unknown[] = [];
+    const record = (reason: unknown): void => {
+      rejections.push(reason);
+    };
+    process.on("unhandledRejection", record);
+    try {
+      const child = spawnSupervised({
+        command: tools.paths.git,
+        args: ["--version"],
+        env: { ...pinnedGitEnvironment, PATH: tools.execPath },
+        cwd: dir,
+        pidFile,
+      });
+      assert.deepEqual(await child.exited, { code: 111, signal: null });
+      await new Promise((resolve) => setImmediate(resolve));
+    } finally {
+      process.off("unhandledRejection", record);
+    }
+    assert.deepEqual(rejections, []);
+  });
 });
