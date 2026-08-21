@@ -157,8 +157,10 @@ This epic therefore decides the retrieval rule rather than leaving it to the cli
   it is the text the client could not reach at all before this epic.
 - **`submitted.values.body`** — the text is already in the same response. `planValidateResponse.documents`
   is `z.array(planDocument)` (`src/http/contract/graph.ts:86`) and `planDocument` is `{ path, content }`
-  (`:38-41`), the raw document with its instruction and acceptance inside. The hashes are the integrity
-  check on that content, not a fetch key, and the epic states that in the contract.
+  (`:38-41`), carrying the instruction and the acceptance inside `content`. It is the **normalized**
+  document set, rendered by `renderDocumentSet`, not the bytes the client submitted; that is why the
+  join key below is the canonical path. The hashes are the integrity check on the submitted content,
+  not a fetch key, and the epic states that in the contract.
 
 **A join key is therefore required, and `planChoiceEntry` gains it.** The entry's `id` is the identity;
 `planDocument.path` is the path; and no member of the response maps one to the other today, so a client
@@ -168,10 +170,22 @@ holding a choice cannot find the document that carries its text. The entry gains
 path: z.string().nullable(),
 ```
 
-It is the submitted document's path for a `both` or `document-only` entry, and `null` for a
-`database-only` entry, which has no document. `ResolvedDocument` extends `ParsedDocument`
-(`src/domain/plan-identity.ts:13`), which declares `path` (`src/domain/plan-document.ts:39`), and
-`validate-plan.ts` holds `document` in scope where it pushes the entry, so the member costs no read.
+It is the **canonical path of the submitted document** for a `both` or `document-only` entry, and
+`null` for a `database-only` entry, which has no document.
+
+**It is the canonical path and not the authored path, because only the canonical path joins.**
+`planValidateResponse.documents` is `renderDocumentSet(canonicalNodes, bodies)`
+(`src/queries/plan/validate-plan.ts:278`), and `renderDocumentSet` builds every path as
+`canonicalPaths(nodes)` (`src/domain/plan-render.ts:84`). The authored path that `ResolvedDocument`
+carries — `plan/i--01/initiative.md` in the test fixtures — is not a member of that set, so a `path`
+of `document.path` would join to nothing for every document a human did not already name canonically.
+The join is the whole reason the member exists, so the member takes the value that joins.
+
+The value costs no read. `canonicalPaths` is pure domain and `validate-plan.ts:17` already imports it,
+so the query hoists its existing `canonicalNodes` construction above the choice loop and calls
+`canonicalPaths(canonicalNodes)` once more. `canonicalPaths` runs twice per request — once for the
+join map, once inside `renderDocumentSet` — and both calls are pure, deterministic and free of any
+`PlanStore` or `BlobStore` access, so the "no extra read" rule holds.
 
 Two alternatives are refused. Inlining the prose is refused above, on size. Making `plan.validate`
 write the submitted blobs so `blob.show` could serve them is refused because it turns a `GET`-shaped
@@ -260,7 +274,7 @@ tree is red between them. Run no gate between those two.
 
 - **`plan.validate` publishes the choice values** — add `ChoiceValues`, `storedValues` and `submittedValues` to `src/domain/plan-diff.ts` per D2, D3 and D4, with the `fields`-of-`null` parameter that D4 specifies. Insert keys in `differingFields` order and never in argument order.
 - **The contract declares the branch** — add `planChoiceBody`, `planChoiceValues` and `planChoiceBranch` to `src/http/contract/graph.ts` per D1, replace the two inline branch objects of `planChoiceEntry` at lines 68-76 with `planChoiceBranch`, and add `path: z.string().nullable()` to `planChoiceEntry` per D2. Import `blobHash` from `src/domain/blob.ts`, which line 23 already imports. **Populate the example.** `planValidateExamples.success.choices` at `src/http/contract/graph.ts:236` is `[]`, and `planImportExamples.request.choices` at `:262` is `[]`, so the published document carries no example of a choice entry at all and would carry no example of `values`. Add exactly one entry to `planValidateExamples.success.choices`: a `both` entry with `fields: ["title"]`, `suggested: "submitted"`, both branches `legal: true` with `reason: null`, and a one-key `values` per branch holding two different titles. That is the entry the client renders, and D6 of `021-provider-contract-and-default-transfer.md` makes the example suite parse it against this schema, so a wrong example fails the gate. Leave `planImportExamples` unchanged; its `choices` member is the request shape, which this epic does not touch. Regenerate `src/http/contract/field-decisions.fixture.ts` with `node scripts/field-decisions-probe.mjs --write`; the `submitted` and `database` rows at lines 320-321 and 328-329 gain a `values` sibling and the `planChoiceValues` leaves appear under each.
-- **The query composes the values** — in `src/queries/plan/validate-plan.ts:213-229`, keep the `choiceVerdict` call exactly as it is and build each branch as `{ ...verdict.submitted, values: … }` and `{ ...verdict.database, values: … }`, using the exact composition D4 prescribes, including the `document === undefined` and `node === undefined` guards that produce `{}`. Set `path` to `document?.path ?? null`. Add no read, no second loop and no `presence` branch beyond the one `selected` expression. `src/commands/plan/import-plan.ts` changes in no way.
+- **The query composes the values** — in `src/queries/plan/validate-plan.ts:213-229`, keep the `choiceVerdict` call exactly as it is and build each branch as `{ ...verdict.submitted, values: … }` and `{ ...verdict.database, values: … }`, using the exact composition D4 prescribes, including the `document === undefined` and `node === undefined` guards that produce `{}`. Hoist the `canonicalNodes` construction at `:269-277` above the choice loop, add `const submittedPaths = canonicalPaths(canonicalNodes);` beside it, and set `path` to `submittedPaths.get(identity) ?? null`. Add no read, no second loop and no `presence` branch beyond the one `selected` expression. `src/commands/plan/import-plan.ts` changes in no way.
 - **The proposal records the choice values** — `docs/proposal/api/graph.md` gains the `values` member in its `plan.validate` section: the six names, the `body` pair, the normalized `depends_on`, D1's presence table in one sentence per row, the three states of an absent key versus a `null` value, the `path` member, and D2's retrieval rule — the database side through `blob.show`, the submitted side through `documents` joined by `path`, and the statement that a submitted hash is not in the blob store. `docs/proposal/api/new-decisions.md` gains one row, because no proposal file names this member today. `src/http/contract/parity.test.ts` reads the route status table and no status changes, so parity is unaffected.
 
 ## Verification gate
@@ -291,19 +305,19 @@ Hermetic coverage required beyond the Proof:
 - A `both` entry differing only in acceptance text: `fields` is `["body"]`, and each `values.body` deep-equals `{ instructionBlob: <the same hash on both sides>, acceptanceBlob: <a different hash per side> }`. Asserts that `body` names both blobs, per D2.
 - A `both` entry whose stored acceptance is absent and whose document supplies one: `database.values.body.acceptanceBlob` is `null` and the submitted one is a hash.
 - A `both` entry whose dependency lists differ only in order, with a repeat on one side: `fields` does **not** contain `depends_on` and neither `values` carries it. Then the same case with a genuinely different member: both `values.depends_on` are the **normalized** lists — sorted by `comparePaths`, duplicates dropped — asserted as exact arrays. This is D3, and the first half is what makes it a rule rather than a preference.
-- A `depends_on` case with a non-ASCII identity, asserting `comparePaths` order and not `Buffer.compare` order. The two differ, and the test names which one it asserts.
+- A `depends_on` case with a non-ASCII identity, asserting `comparePaths` order and **not bare `Array.prototype.sort` order**. The test names which one it asserts. The contrast is `.sort()`, which compares UTF-16 code units and reverses `task_�` against `task_\u{1F600}`, because the leading surrogate `0xD83D` sorts below `0xFFFD`. **The contrast is not `Buffer.compare`:** UTF-8 byte order equals code-point order for every well-formed string, so `Buffer.compare` and `comparePaths` agree, and `src/domain/plan-path.test.ts:160` already asserts that agreement over the same pair. A `Buffer.compare` assertion would pass under both a correct and an incorrect implementation and would prove nothing. Two caveats: the agreement holds only for well-formed strings, because UTF-8 encoding maps a lone surrogate to U+FFFD; and neither test identity is a reachable product identity, which is ASCII kind-plus-ULID, so the case is a unit-level guard against the substitution rather than a real input.
 - `Object.keys(values)` of an entry whose `fields` is all six names deep-equals `["body", "depends_on", "parent", "repo", "title", "worker"]`, and the same call with the `fields` argument reversed returns the identical array. Two calls produce identical `JSON.stringify` bytes. This is the D4 determinism claim.
 - **A submitted hash is not in the blob store, asserted rather than assumed.** After a `plan.validate` call over a document set that differs from the stored graph, `BlobStore.get(<the submitted instructionBlob>)` returns `null`, and `BlobStore.get(<the database instructionBlob>)` returns a record. This is the fact D2's retrieval rule turns on, and a later epic that made `plan.validate` write blobs would fail this assertion and have to amend the decision.
-- `path` equals the submitted document's path for a `both` entry and for a `document-only` entry, and is `null` for a `database-only` entry. For every entry whose `path` is non-null, exactly one member of the response's `documents` array carries that path, asserted by lookup. This is the join the client performs.
+- `path` equals the **canonical** path of the submitted document for a `both` entry and for a `document-only` entry, and is `null` for a `database-only` entry. For every entry whose `path` is non-null, exactly one member of the response's `documents` array carries that path, asserted by lookup. This is the join the client performs. A test also asserts that `path` is **not** the authored submitted path whenever the two differ, because that is the defect this decision reverses.
 - `planChoiceEntry.safeParse` refuses the pre-epic entry — a branch of `{ legal, reason }` with no `values` — and refuses `values: { title: 1 }` and `values: { unknown: "x" }`. The first pins that `values` is required, the last pins `additionalProperties: false`.
 - `choiceVerdict` is byte-identical before and after: its `ChoiceFacts` input, its `ChoiceVerdict` output and every existing case of `src/domain/plan-choice.test.ts` are unchanged, and `src/commands/plan/import-plan.test.ts` passes with no edit. This is the D4 boundary, asserted as an absence of change.
 - `planValidateResponse.parse(planValidateExamples.success)` succeeds, and the parsed choice entry's `submitted.values` and `database.values` each hold exactly one `title` key with different values. The published example is the one a client copies, so it is asserted and not only present.
 - `plan.validate` through the real koa app returns a body that `planValidateResponse` parses, for a project holding one `both` conflict, one `document-only` entry and one `database-only` entry in one call.
 - The `plan.validate` call performs the same number of `PlanStore` reads as it does on the pre-epic tree, counted through a counting fake. This asserts D4's "no extra read".
-- A publish into a temporary directory carries `values` under both branches and the `path` member in `features/plan.yaml`:
+- A publish into a temporary directory carries `values` under both branches and the `path` member in `features/plan.yaml`. **It runs from a clean tree only**, so it runs after the epic's commit, or from a temporary worktree at that commit, and it passes `--unreleased` so an untagged commit is accepted. `scripts/release-gate.ts:36` returns `dirty-tree` **before** it tests `unreleased`, so this command is refused while the epic's own edits are uncommitted and `--unreleased` does not bypass that:
 
 ```bash
-node scripts/publish-contract.ts "$(mktemp -d)"
+node scripts/publish-contract.ts --unreleased "$(mktemp -d)"
 ```
 
 ## Open items
