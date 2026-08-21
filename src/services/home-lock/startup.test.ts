@@ -406,20 +406,23 @@ describe("src/services/home-lock/startup.test", () => {
     assert.match(proc.stderr(), /\/etc\/kanthord\/config\.json/);
   });
 
-  it("the daemon refuses an unmigrated database", async () => {
+  it("the daemon applies every pending migration and starts on an unmigrated home", async () => {
     const home = createTemporaryHome();
     after(async () => {
       await killAll();
       home.dispose();
     });
 
-    const configPath = home.writeConfig();
+    const port = await reservePort();
+    const configPath = home.writeConfig({ http: { port } });
     const proc = launchDaemon({ configPath, home: home.path });
-    const exit = await exitWithin(proc);
-    assert.equal(exit.code, 1);
-    assert.match(proc.stderr(), /^kanthord: db-migration-pending: [^\n]+\n$/);
-    assert.match(proc.stderr(), /kanthord db migrate/);
-    assert.ok(!proc.stdout().includes("kanthord: ready"));
+    await proc.ready();
+    assert.equal(proc.stderr(), "");
+    assert.match(proc.stdout(), /kanthord: applied 1 0001-core-entities\n/);
+    assert.ok(
+      fs.existsSync(path.join(home.path, "kanthord.db")),
+      "kanthord.db must exist after the daemon applied its migrations",
+    );
   });
 
   it("the daemon starts after db migrate on the same home", async () => {

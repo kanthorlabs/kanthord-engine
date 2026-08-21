@@ -47,7 +47,7 @@ The bind address and the process start time are on `system.status`, which report
 
 Returns every migration and whether it is applied. `npm run verify` calls `db status`, so the query ships in phase 1. That call needs a daemon, so `verify` starts one against a temporary home for the step and stops it after. See `../phase-1/domain.md`.
 
-**Migration apply is the one command that does not call HTTP.** The daemon owns the database file, and an unmigrated database stops the daemon from starting, so a route that applies migrations is unreachable exactly when it is needed. `kanthord db migrate` opens SQLite directly on the daemon machine. `kanthord db status` calls this route. The CLI refuses `db migrate` when it is configured with a non-loopback base URL, because the schema of another machine is not reachable from here.
+**Migration apply is the one command that does not call HTTP.** The daemon owns the database file, and the daemon applies every pending migration at startup. A route that applies migrations is therefore unreachable exactly when it is needed: before the first start, and on a home whose daemon does not run. `kanthord db migrate` opens SQLite directly on the daemon machine, and it needs no daemon. `kanthord db status` calls this route. The CLI refuses `db migrate` when it is configured with a non-loopback base URL, because the schema of another machine is not reachable from here.
 
 This is the single documented exception to the parity rule of `../phase-1/transport.md`, and it is named so that a reviewer sees it rather than finds it.
 

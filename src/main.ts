@@ -170,7 +170,6 @@ import { createSecretFile } from "./cli/secret-file.ts";
 import { createApp, unimplementedFor } from "./http/server/app.ts";
 import { listen } from "./http/server/start.ts";
 import { createShutdown } from "./http/server/shutdown.ts";
-import { assertMigrated, StartupError } from "./http/server/migration-gate.ts";
 import { healthHandler } from "./http/server/system/health.ts";
 import { dbHandler } from "./http/server/system/db.ts";
 import { statusHandler } from "./http/server/system/status.ts";
@@ -225,10 +224,16 @@ async function serve(options: ServeOptions): Promise<void> {
     });
     let reachedListen = false;
     try {
-      assertMigrated({
-        home: settings.home,
-        pending: storage.status().pending,
-      });
+      const migratedFrom = new Set(
+        storage.status().applied.map((entry) => entry.version),
+      );
+      for (const entry of storage.migrate().applied) {
+        if (!migratedFrom.has(entry.version)) {
+          process.stdout.write(
+            `kanthord: applied ${entry.version} ${entry.name}\n`,
+          );
+        }
+      }
       ensureBootstrapActor({ storage }, { actor: settings.actor });
       const ids = new UlidIdGenerator();
       const graph = new GraphologyGraph();
@@ -670,7 +675,6 @@ async function serve(options: ServeOptions): Promise<void> {
     if (
       error instanceof ConfigError ||
       error instanceof HomeLockError ||
-      error instanceof StartupError ||
       error instanceof RecoveryError ||
       error instanceof CliError ||
       error instanceof ToolProbeError

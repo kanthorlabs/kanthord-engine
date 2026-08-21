@@ -527,21 +527,21 @@ describe("src/main.test", () => {
     assert.equal(migrated.code, 0, migrated.stderr);
   });
 
-  it("ensureBootstrapActor runs after the migration gate and before recoverHome", () => {
+  it("ensureBootstrapActor runs after the migration apply and before recoverHome", () => {
     const source = readFileSync(
       resolve(import.meta.dirname, "./main.ts"),
       "utf8",
     );
-    const gate = source.indexOf("assertMigrated(");
+    const gate = source.indexOf("storage.migrate(");
     const ensure = source.indexOf("ensureBootstrapActor(");
     const recover = source.indexOf("recoverHome(");
 
-    assert.notEqual(gate, -1, "assertMigrated call not found");
+    assert.notEqual(gate, -1, "storage.migrate call not found");
     assert.notEqual(ensure, -1, "ensureBootstrapActor call not found");
     assert.notEqual(recover, -1, "recoverHome call not found");
     assert.ok(
       ensure > gate,
-      "ensureBootstrapActor must run after assertMigrated",
+      "ensureBootstrapActor must run after storage.migrate",
     );
     assert.ok(
       ensure < recover,
