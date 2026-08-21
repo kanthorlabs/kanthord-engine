@@ -40,6 +40,16 @@ Group them by root cause. Copy every blocker into the manifest `findings` array 
 
 A blocker opens one fix epic. A suggestion opens none.
 
+### The manifest
+
+**This story makes the one manifest write of the run.** `recordManifest` at `scripts/e2e/lib/record/manifest.ts:287-292` refuses a second write for one tag with `tag-reused`, so every field is assembled before the invocation: the seven `scenarios` rows Story 11 prepared, the six `checklist` rows Story 12 answered, the `report` object of this story, the `findings` array of this story, and the `outcome`.
+
+```sh
+node scripts/e2e/run.mjs --record-manifest --tag "$TAG" --manifest "$MANIFEST"
+```
+
+Author the report before this invocation, because the `report` object names its digest and its byte count.
+
 ### The verdict
 
 ```sh
@@ -52,6 +62,7 @@ node scripts/e2e/run.mjs --verdict "$TAG"
 ## Constraints
 
 - **This epic never repairs what it finds.** A fix inside an acceptance run destroys the evidence the run exists to produce.
+- **The manifest is recorded once, and never before the report exists.** A refused second write costs the whole tag, because `--check-manifest` and `--verdict` both read the recorded file.
 - **A bundle is immutable evidence.** Reference a bundle by path and by digest. Never merge one, never edit one and never move one.
 - **The report holds no token, no credential and no secret**, in the commands, the logs and the diagnostics. Each harness actor token is checked absent as well as the configured token.
 - Edit no file under `src/` and no file under `docs/proposal/`.
@@ -61,6 +72,8 @@ node scripts/e2e/run.mjs --verdict "$TAG"
 ## Verify
 
 - `.agent/acceptance/<tag>/report.md` exists, is non-empty, and names every one of the seven bundles by path and by digest.
+- `.data/acceptance-<tag>/manifest.json` exists, holds the seven `scenarios` rows in the declared order and the six `checklist` rows numbered 1 to 6, and names the same commit as every bundle and the verify record.
+- A second `--record-manifest` for the same tag exits `2` with `tag-reused`, and the file on disk stays byte-identical.
 - The manifest `report` object names that path, its digest and its byte count, and `--check-manifest` finds all three correct.
 - Every finding whose id starts with `B` names a `fixEpic` in the manifest, and one fix epic file exists per blocker with a `Fixes: EPIC <n>` line.
 - `node scripts/e2e/run.mjs --check-manifest "$TAG"` exits 0.

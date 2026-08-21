@@ -19,7 +19,7 @@ Every step of the drive and every checklist row is one command. `kanthord event 
 
 ### The six checklist rows
 
-Ulrich answers each row `confirmed` or `rejected`. The coding agent writes each answer into the manifest `checklist` array as `{ row, subject, answer, note }`, in row order 1 to 6.
+Ulrich answers each row `confirmed` or `rejected`. The coding agent writes each answer into the manifest **input file** as a `checklist` row `{ row, subject, answer, note }`, in row order 1 to 6. Story 13 records the manifest once, with these rows in it.
 
 | #   | Subject                              | What Ulrich confirms                                                                                                                                                                                      |
 | --- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -45,7 +45,7 @@ node scripts/e2e/run.mjs --record-acceptance --tag "$TAG" --by Ulrich \
 
 ## Constraints
 
-- **The signature is written once.** `recordAcceptance` refuses a second write at `scripts/e2e/lib/record/acceptance.ts:96-100` with `tag-reused`, because a signature is not edited. Correct the manifest checklist instead; Story 2 permits a `--record-manifest` overwrite.
+- **The signature is written once.** `recordAcceptance` refuses a second write at `scripts/e2e/lib/record/acceptance.ts:96-100` with `tag-reused`, because a signature is not edited. **The manifest is written once too**, at `manifest.ts:287-292`, so correct the checklist in the manifest input file before Story 13 records it. Sign the acceptance record only after the six answers are settled.
 - **The signed record carries one `drive`, one `judgment` and one free-form `note`** — `AcceptanceRecord` at `scripts/e2e/lib/record/acceptance.ts:21-31` holds nine fields and no per-row structure. **The manifest is the only place a row appears by itself.**
 - Ulrich drives the journey. He does not read a transcript of the rehearsal. That the human drove it is a reviewer judgment, recorded by `--drive confirmed`, per `025-external-drive-acceptance-run.md:46`.
 - The checklist answers being truthful is a reviewer judgment. No mechanism checks it.
@@ -56,7 +56,7 @@ node scripts/e2e/run.mjs --record-acceptance --tag "$TAG" --by Ulrich \
 
 - `.data/acceptance-<tag>/acceptance.json` exists and names `by`, `drive: confirmed`, `judgment: accepted`, the commit under test and the proposal revision.
 - A second `--record-acceptance` for the same tag exits `2` with `tag-reused`, and the file on disk stays byte-identical.
-- The manifest `checklist` array holds exactly six rows, numbered 1 to 6, each with an `answer` of `confirmed` or `rejected`, and each `rejected` row carries a non-empty `note`.
-- `node scripts/e2e/run.mjs --check-manifest "$TAG"` exits 0 on the checklist. This is the mechanism `025-external-drive-acceptance-run.md:41` names; the acceptance record represents no row by itself.
+- The manifest **input file** holds exactly six `checklist` rows, numbered 1 to 6, each with an `answer` of `confirmed` or `rejected`, and each `rejected` row carries a non-empty `note`.
+- `.data/acceptance-<tag>/manifest.json` still does not exist; Story 13 records it. `node scripts/e2e/run.mjs --check-manifest "$TAG"` is Story 13's check on the recorded checklist, and it is the mechanism `025-external-drive-acceptance-run.md:41` names; the acceptance record represents no row by itself.
 - The acceptance record names the same commit as every bundle and the verify record.
 - Proof: lines `212` and `213` of the run block at `025-external-drive-acceptance-run.md:200-218`.

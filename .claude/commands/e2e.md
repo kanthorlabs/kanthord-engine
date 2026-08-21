@@ -13,7 +13,8 @@ a literal `N`. The tag names the run directory `.data/acceptance-<tag>/` and the
 report `.agent/acceptance/<tag>/report.md`, and nothing else. A reused tag is
 refused, so a rerun is a new tag.
 
-This command drives EPIC 012. It executes scenarios; it never defines one.
+This command drives EPIC 012 and EPIC 025. The phase argument selects the id
+list. It executes scenarios; it never defines one.
 
 ## Two rules that decide every judgment call
 
@@ -41,7 +42,8 @@ The four things no scenario owns:
 
 Every invocation takes the same `--tag`, so one acceptance run writes one set of
 bundles. Read the phase README for the declared ids; phase 1 is `P1-E1`, `P1-E2`,
-`P1-E4` and `P1-E5`.
+`P1-E4` and `P1-E5`. Phase 1b is those four plus `P1B-E1`, `P1B-E2` and
+`P1B-E3`, run in one order.
 
 ```sh
 export TAG=$(node scripts/e2e/run.mjs --mint-tag)
@@ -53,9 +55,27 @@ node scripts/e2e/run.mjs --record-verify --tag "$TAG"   # the regression suite
 node scripts/e2e/run.mjs --verdict "$TAG" --scenarios-only   # the rehearsal is green
 ```
 
+For phase 1b:
+
+```sh
+export TAG=$(node scripts/e2e/run.mjs --mint-tag)
+node scripts/e2e/run.mjs P1-E1 --tag "$TAG"    # fixture baseline, local driver
+node scripts/e2e/run.mjs P1-E2 --tag "$TAG"    # transport policy, local driver
+node scripts/e2e/run.mjs P1B-E1 --tag "$TAG"   # single harness loop, local driver
+node scripts/e2e/run.mjs P1-E4 --tag "$TAG"    # two namespaces, podman driver
+node scripts/e2e/run.mjs P1B-E2 --tag "$TAG"   # two clients, podman driver
+node scripts/e2e/run.mjs P1B-E3 --tag "$TAG"   # the takeover, podman driver
+node scripts/e2e/run.mjs P1-E5 --tag "$TAG"    # real repository, local driver
+node scripts/e2e/run.mjs --record-verify --tag "$TAG"
+node scripts/e2e/run.mjs --record-manifest --tag "$TAG" --manifest "$MANIFEST"
+node scripts/e2e/run.mjs --verdict "$TAG" --scenarios-only
+```
+
 Order matters. The local baseline gates first, because Podman may be absent on an
-environment that must still gate. The real-profile run is last, because it is the
-bundle the phase exits by pointing at.
+environment that must still gate. The three Podman ids run as one group, because
+they share the container prerequisite, and `P1B-E1` runs on the `local` driver
+before the first container is built. The real-profile run is last, because it is
+the bundle the phase exits by pointing at.
 
 `--record-verify` runs `npm run verify` and records the command, its exit status,
 the commit under test and the proposal revision beside the bundles.
@@ -106,12 +126,21 @@ human can judge is not a scenario. So you record it apart from the oracles. It i
 not an oracle and not a scenario, and it is not advisory either: it is the
 acceptance axis, and the phase does not exit without it.
 
-For phase 1 that is the first-run message, the validation finding set a human
+**For phase 1** that is the first-run message, the validation finding set a human
 reads while authoring a plan by hand, the re-import suggestion set, and the
 `plan export` rendering. Ulrich authors a plan with three faults in one document,
 reads the findings, fixes them, then drives a re-import that needs a per-node
 choice. He drives the P1-E5 journey through the same CLI and the same API, on the
-commit under test. One invocation signs the drive and the judgment:
+commit under test.
+
+**For phase 1b** that is the six checklist rows, by subject: the graph reads as
+the plan; the work is attributed; the result is readable from the node; the
+refusal is legible; the close is a human act; the block broke nothing he uses.
+Ulrich answers each row `confirmed` or `rejected`, a `rejected` row carries a
+note, and every answer reaches the manifest at
+`.data/acceptance-<tag>/manifest.json`.
+
+One invocation signs the drive and the judgment:
 
 ```sh
 node scripts/e2e/run.mjs --record-acceptance --tag "$TAG" --by Ulrich \
@@ -135,6 +164,8 @@ Write `.agent/acceptance/<tag>/report.md`:
   record at `.data/acceptance-<tag>/acceptance.json`;
 - the product-acceptance section, labelled as judgment;
 - the `node scripts/e2e/run.mjs --verdict <tag>` command and its exit status;
+- the `node scripts/e2e/run.mjs --check-manifest <tag>` command and its exit
+  status;
 - the findings, grouped by root cause, one bullet each as
   `<B1/S1> - action:<YES/NO> - <name> - <description>`;
 - one outcome.
@@ -143,6 +174,15 @@ Write `.agent/acceptance/<tag>/report.md`:
 
 The outcome is not asserted in prose. `node scripts/e2e/run.mjs --verdict <tag>`
 checks both axes and returns the exit status.
+
+```sh
+node scripts/e2e/run.mjs --record-manifest --tag "$TAG" --manifest "$MANIFEST"
+node scripts/e2e/run.mjs --check-manifest "$TAG"
+node scripts/e2e/run.mjs --verdict "$TAG"
+```
+
+`--check-manifest` checks the run procedure, and `--verdict` checks both axes.
+The block closes on a zero exit status from both.
 
 This is the exit-code table, and it is the only place that states it. Every other
 document points here rather than restating a number. `exitCodeFor` in
