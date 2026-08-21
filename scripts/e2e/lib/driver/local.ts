@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { connect, createServer } from "node:net";
 import { request } from "node:http";
 import { arch, hostname, platform, tmpdir } from "node:os";
@@ -37,6 +38,11 @@ import type {
 let memoizedBinary: Promise<string> | undefined;
 
 async function packAndInstall(context: ScenarioContext): Promise<string> {
+  const prebuilt = process.env.KANTHORD_E2E_BINARY;
+  if (prebuilt !== undefined && prebuilt !== "" && existsSync(prebuilt)) {
+    return prebuilt;
+  }
+
   const repositoryRoot = process.cwd();
   const tmp = await mkdtemp(join(tmpdir(), "kanthord-e2e-pack-"));
   context.take({

@@ -692,16 +692,6 @@ function assertExpectedAssertions(
     );
   }
 
-  if (expectation === "non-empty") {
-    if (recordedNames.length === 0) {
-      throw new RunnerError(
-        "assertion-failed",
-        `scenario ${scenarioId} assertion name mismatch at position 0: expected a recorded assertion, recorded none`,
-      );
-    }
-    return;
-  }
-
   const length = Math.max(expectation.length, recordedNames.length);
   for (let index = 0; index < length; index += 1) {
     const expected = expectation[index] ?? "<none>";

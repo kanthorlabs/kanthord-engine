@@ -432,7 +432,7 @@ test("asserts exactly one outcome.reported record naming the second actor", asyn
 test("records its assertion names in the declared order", async () => {
   const pieces = await runScenario();
   const manifest = expectedAssertions as Readonly<
-    Record<string, readonly string[] | "non-empty">
+    Record<string, readonly string[]>
   >;
   const expected = manifest["P1B-E3"];
   assert.ok(Array.isArray(expected));

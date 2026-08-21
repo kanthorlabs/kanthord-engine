@@ -646,7 +646,7 @@ test("calls runJourney exactly once before it registers a harness", async () => 
 test("records its assertion names in the declared order", async () => {
   const result = await runScenario();
   const manifest = expectedAssertions as Readonly<
-    Record<string, readonly string[] | "non-empty">
+    Record<string, readonly string[]>
   >;
   const expected = manifest["P1B-E1"];
   assert.ok(Array.isArray(expected));

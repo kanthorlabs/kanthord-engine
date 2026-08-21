@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 
 import {
@@ -57,6 +57,17 @@ function fakeContext(): ScenarioContext & {
     },
   };
 }
+
+const warmContext = fakeContext();
+after(() => warmContext.releaseAll());
+
+before(
+  async () => {
+    const driver = await createLocalDriver(warmContext);
+    await driver.deliverBinary("client");
+  },
+  { timeout: 300000 },
+);
 
 function fakeCommandRecord(argv: readonly string[]): CommandRecord {
   return { argv, cwd: process.cwd(), exitCode: 0, stdout: "", stderr: "" };

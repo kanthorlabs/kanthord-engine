@@ -1,4 +1,4 @@
-import test, { after } from "node:test";
+import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -30,6 +30,14 @@ function fakeContext(): ScenarioContext {
     clientHost: null,
   };
 }
+
+before(
+  async () => {
+    const driver = await createLocalDriver(fakeContext());
+    await driver.deliverBinary("client");
+  },
+  { timeout: 300000 },
+);
 
 function buildConfig(home: string): DaemonConfig {
   return {

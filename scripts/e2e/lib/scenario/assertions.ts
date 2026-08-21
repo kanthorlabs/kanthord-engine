@@ -53,12 +53,32 @@ export const disclosureAssertionNames: readonly string[] = [
 ];
 
 export const expectedAssertions: Readonly<
-  Record<ScenarioId, readonly string[] | "non-empty">
+  Record<ScenarioId, readonly string[]>
 > = {
-  "P1-E1": "non-empty",
-  "P1-E2": "non-empty",
-  "P1-E4": "non-empty",
-  "P1-E5": "non-empty",
+  "P1-E1": [...fixtureProfileAssertionNames, ...journeyAssertionNames],
+  "P1-E2": [
+    ...fixtureProfileAssertionNames,
+    ...transportAssertionNames,
+    "startup-refusal-exit",
+    "startup-refusal-message",
+  ],
+  "P1-E4": [
+    "startup-refusal-exit",
+    "startup-refusal-message",
+    "alias-omitted-status",
+    "alias-omitted-code",
+    ...journeyAssertionNames,
+    ...transportAssertionNames,
+    ...disclosureAssertionNames,
+  ],
+  "P1-E5": [
+    ...journeyAssertionNames,
+    "forge-unchanged",
+    "no-disclosure-bearer-header",
+    "no-disclosure-config",
+    "no-disclosure-printed-commands",
+    "no-disclosure-daemon-logs",
+  ],
   "P1B-E1": [
     ...fixtureProfileAssertionNames,
     ...journeyAssertionNames,

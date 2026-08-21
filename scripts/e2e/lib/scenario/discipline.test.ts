@@ -124,11 +124,8 @@ test("the proposal declares exactly the known scenario ids, in order", async () 
   assert.deepEqual(declared, [...knownScenarioIds]);
 });
 
-test("no P1B entry of expectedAssertions is empty", () => {
+test("every entry of expectedAssertions pins a non-empty name list", () => {
   for (const id of knownScenarioIds) {
-    if (!id.startsWith("P1B-")) {
-      continue;
-    }
     const entry = expectedAssertions[id];
     assert.equal(
       Array.isArray(entry),

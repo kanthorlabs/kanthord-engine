@@ -654,7 +654,7 @@ test("asserts one success and one lease-held without asserting which client won"
 test("records its assertion names in the declared order", async () => {
   const result = await runScenario();
   const manifest = expectedAssertions as Readonly<
-    Record<string, readonly string[] | "non-empty">
+    Record<string, readonly string[]>
   >;
   const expected = manifest["P1B-E2"];
   assert.ok(Array.isArray(expected));
