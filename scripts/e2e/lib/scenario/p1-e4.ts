@@ -50,7 +50,7 @@ async function resolveFixtureCredentialArguments(
   credentialArguments: readonly string[],
 ): Promise<readonly string[]> {
   const usernameIndex = credentialArguments.indexOf("--username");
-  const tokenFileIndex = credentialArguments.indexOf("--token-file");
+  const tokenFileIndex = credentialArguments.indexOf("--input-token-file");
   if (
     usernameIndex === -1 ||
     tokenFileIndex === -1 ||

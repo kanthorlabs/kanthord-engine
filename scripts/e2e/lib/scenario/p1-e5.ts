@@ -165,7 +165,7 @@ export async function runP1E5(
       "github",
       "--username",
       "x-access-token",
-      "--token-file",
+      "--input-token-file",
       deliveredTokenPath,
     ],
     defaultBranch: inputs.defaultBranch,

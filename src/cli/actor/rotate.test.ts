@@ -169,7 +169,7 @@ describe("src/cli/actor/rotate.test", () => {
       "rotate",
       "--id",
       ACTOR_ID,
-      "--token-file",
+      "--output-token-file",
       path,
     ]);
 
@@ -202,7 +202,7 @@ describe("src/cli/actor/rotate.test", () => {
       "rotate",
       "--id",
       ACTOR_ID,
-      "--token-file",
+      "--output-token-file",
       path,
     ]);
 
@@ -223,7 +223,7 @@ describe("src/cli/actor/rotate.test", () => {
       "rotate",
       "--id",
       ACTOR_ID,
-      "--token-file",
+      "--output-token-file",
       path,
     ]);
 
@@ -253,7 +253,7 @@ describe("src/cli/actor/rotate.test", () => {
       "rotate",
       "--id",
       ACTOR_ID,
-      "--token-file",
+      "--output-token-file",
       path,
     ]);
 
@@ -278,7 +278,7 @@ describe("src/cli/actor/rotate.test", () => {
       "rotate",
       "--id",
       ACTOR_ID,
-      "--token-file",
+      "--output-token-file",
       "/tmp/token.txt",
     ]);
 
@@ -303,7 +303,7 @@ describe("src/cli/actor/rotate.test", () => {
       "rotate",
       "--id",
       ACTOR_ID,
-      "--token-file",
+      "--output-token-file",
       path,
     ]);
 
@@ -326,7 +326,7 @@ describe("src/cli/actor/rotate.test", () => {
       "rotate",
       "--id",
       ACTOR_ID,
-      "--token-file",
+      "--output-token-file",
       path,
     ]);
 
@@ -357,7 +357,7 @@ describe("src/cli/actor/rotate.test", () => {
       "rotate",
       "--id",
       ACTOR_ID,
-      "--token-file",
+      "--output-token-file",
       path,
     ]);
 
@@ -367,14 +367,14 @@ describe("src/cli/actor/rotate.test", () => {
     assert.equal(h.stdoutText(), "");
   });
 
-  it("omitting --token-file fails before any request and names the option", async () => {
+  it("omitting --output-token-file fails before any request and names the option", async () => {
     const h = harness();
 
     await run(h.program, ["actor", "rotate", "--id", ACTOR_ID]);
 
     assert.equal(h.calls.length, 0);
     assert.equal(h.failCalls(), 1);
-    assert.ok(h.stderrText().includes("--token-file"));
+    assert.ok(h.stderrText().includes("--output-token-file"));
     assert.equal(h.stdoutText(), "");
   });
 });

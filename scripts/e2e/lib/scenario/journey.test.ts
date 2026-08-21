@@ -153,7 +153,7 @@ function buildFixture(overrides: FixtureOverrides): Readonly<{
       "git",
       "--transport",
       "http-basic",
-      "--token-file",
+      "--input-token-file",
       join(overrides.workDir, "fixture-token"),
     ],
     defaultBranch: "main",

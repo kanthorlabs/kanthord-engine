@@ -111,7 +111,7 @@ describe("scripts/e2e/007/12-cli-commands.e2e", () => {
         "github",
         "--username",
         "x-access-token",
-        "--token-file",
+        "--input-token-file",
         tokenFile,
       ],
     });

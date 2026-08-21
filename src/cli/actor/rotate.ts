@@ -19,19 +19,21 @@ export function registerActorRotate(input: RotateActorInput): void {
     .command("rotate")
     .description("replace a harness token and disclose the new one once")
     .option("--id <id>", "actor id")
-    .option("--token-file <path>", "path to write the disclosed token")
-    .action(async (options: { id?: string; tokenFile?: string }) => {
+    .option("--output-token-file <path>", "path to write the disclosed token")
+    .action(async (options: { id?: string; outputTokenFile?: string }) => {
       if (options.id === undefined) {
         input.stderr("kanthord: invalid-request: --id is required\n");
         input.fail();
         return;
       }
-      if (options.tokenFile === undefined) {
-        input.stderr("kanthord: invalid-request: --token-file is required\n");
+      if (options.outputTokenFile === undefined) {
+        input.stderr(
+          "kanthord: invalid-request: --output-token-file is required\n",
+        );
         input.fail();
         return;
       }
-      const sink = input.createSecretFile(options.tokenFile);
+      const sink = input.createSecretFile(options.outputTokenFile);
       try {
         sink.write("");
       } catch (error) {
@@ -53,7 +55,7 @@ export function registerActorRotate(input: RotateActorInput): void {
         const view = actorRotateResponse.parse(result.body);
         sink.write(view.token);
         input.stdout(`${view.id}\n`);
-        input.stdout(`token: [redacted] -> ${options.tokenFile}\n`);
+        input.stdout(`token: [redacted] -> ${options.outputTokenFile}\n`);
       } catch (error) {
         sink.discard();
         const message = error instanceof Error ? error.message : String(error);

@@ -212,7 +212,7 @@ export async function createPodmanDriver(
       "register",
       "--name",
       name,
-      "--token-file",
+      "--output-token-file",
       tokenFile,
     ]);
     return { actorId: parseActorId(record), tokenFile };

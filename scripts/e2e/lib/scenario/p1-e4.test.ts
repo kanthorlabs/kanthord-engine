@@ -59,7 +59,7 @@ function buildProfile(workDir: string): ScenarioProfile {
       "git",
       "--transport",
       "http-basic",
-      "--token-file",
+      "--input-token-file",
       join(workDir, "fixture-token"),
     ],
     defaultBranch: "main",

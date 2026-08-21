@@ -29,6 +29,17 @@ const NODE = {
   projection: null,
 };
 
+const ATTESTED = {
+  ...NODE,
+  id: "objective_01JQ8Z7G3HZZZZZZZZZZZZZZZV",
+  kind: "objective",
+  title: "deliver the health route",
+  state: "awaiting_approval",
+  parentId: "initiative_01JQ8Z7G3HZZZZZZZZZZZZZZZS",
+  attestedObjectId: "6d0b63f256251fda4c8e3118d1bbbece73b48f8c",
+  projection: "done",
+};
+
 type CallOptions = Readonly<{
   query?: Readonly<Record<string, string | undefined>>;
   idempotencyKey?: string;
@@ -125,6 +136,30 @@ describe("src/cli/node/show.test", () => {
     );
     assert.equal(h.stderrText(), "");
     assert.equal(h.failCalls(), 0);
+  });
+
+  it("node show prints the attested object id and the projection", async () => {
+    const h = harness({
+      respond: () => ({ ok: true as const, status: 200, body: ATTESTED }),
+    });
+    await run(h.program, ["node", "show", "--id", ATTESTED.id]);
+
+    assert.equal(
+      h.stdoutText(),
+      "kanthord: node objective_01JQ8Z7G3HZZZZZZZZZZZZZZZV objective awaiting_approval deliver the health route\n" +
+        "kanthord: attested-object-id 6d0b63f256251fda4c8e3118d1bbbece73b48f8c\n" +
+        "kanthord: projection done\n",
+    );
+    assert.equal(h.stderrText(), "");
+    assert.equal(h.failCalls(), 0);
+  });
+
+  it("node show omits both lines when the node carries neither", async () => {
+    const h = harness();
+    await run(h.program, ["node", "show", "--id", NODE.id]);
+
+    assert.equal(h.stdoutText().includes("attested-object-id"), false);
+    assert.equal(h.stdoutText().includes("projection"), false);
   });
 
   it("node show prints the error code and calls fail on a refusal", async () => {

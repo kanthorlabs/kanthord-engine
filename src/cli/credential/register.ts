@@ -22,7 +22,7 @@ type CredentialOptions = Readonly<{
   transport?: string;
   forge?: string;
   username?: string;
-  tokenFile?: string;
+  inputTokenFile?: string;
   privateKeyFile?: string;
   provider?: string;
   model?: string;
@@ -49,7 +49,10 @@ export function registerCredentialRegister(
     .option("--transport <transport>", "git transport: http-basic or ssh")
     .option("--forge <forge>", "git http-basic forge")
     .option("--username <username>", "git http-basic username")
-    .option(`${optionFlag("token-file")} <path>`, "file holding the token")
+    .option(
+      `${optionFlag("input-token-file")} <path>`,
+      "file holding the token",
+    )
     .option(
       `${optionFlag("private-key-file")} <path>`,
       "file holding the private key",
@@ -76,7 +79,7 @@ export function registerCredentialRegister(
         options.transport,
         options.forge,
         options.username,
-        options.tokenFile,
+        options.inputTokenFile,
         options.privateKeyFile,
       ];
       const llmFlags = [
@@ -108,9 +111,9 @@ export function registerCredentialRegister(
       let payload: Readonly<Record<string, unknown>>;
       if (kind === "git") {
         if (options.transport === "http-basic") {
-          if (options.tokenFile === undefined) {
+          if (options.inputTokenFile === undefined) {
             input.stderr(
-              `kanthord: invalid-request: ${optionFlag("token-file")} is required for --transport http-basic\n`,
+              `kanthord: invalid-request: ${optionFlag("input-token-file")} is required for --transport http-basic\n`,
             );
             input.fail();
             return;
@@ -119,7 +122,9 @@ export function registerCredentialRegister(
             transport: "http-basic",
             forge: options.forge ?? "",
             username: options.username ?? "",
-            token: trimSingleTrailingNewline(input.readFile(options.tokenFile)),
+            token: trimSingleTrailingNewline(
+              input.readFile(options.inputTokenFile),
+            ),
           };
         } else if (options.transport === "ssh") {
           if (options.privateKeyFile === undefined) {

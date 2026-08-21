@@ -113,7 +113,7 @@ export function fixtureCredentialArguments(
     "github",
     "--username",
     username,
-    "--token-file",
+    "--input-token-file",
     tokenFile,
   ];
 }

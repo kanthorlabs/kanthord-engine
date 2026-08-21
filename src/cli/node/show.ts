@@ -42,5 +42,11 @@ export function registerNodeShow(input: NodeShowCliInput): void {
       input.stdout(
         `kanthord: node ${node.id} ${node.kind} ${node.state} ${node.title}\n`,
       );
+      if (node.attestedObjectId !== null) {
+        input.stdout(`kanthord: attested-object-id ${node.attestedObjectId}\n`);
+      }
+      if (node.projection !== null) {
+        input.stdout(`kanthord: projection ${node.projection}\n`);
+      }
     });
 }

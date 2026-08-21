@@ -110,7 +110,7 @@ describe("src/cli/credential/register.test", () => {
       "github",
       "--username",
       "x-access-token",
-      "--token-file",
+      "--input-token-file",
       tokenFile,
     ]);
 
@@ -154,7 +154,7 @@ describe("src/cli/credential/register.test", () => {
       "github",
       "--username",
       "x-access-token",
-      "--token-file",
+      "--input-token-file",
       tokenFile,
     ]);
 
@@ -181,7 +181,7 @@ describe("src/cli/credential/register.test", () => {
       "github",
       "--username",
       "x-access-token",
-      "--token-file",
+      "--input-token-file",
       tokenFile,
     ]);
 
@@ -226,7 +226,7 @@ describe("src/cli/credential/register.test", () => {
       "github",
       "--username",
       "x-access-token",
-      "--token-file",
+      "--input-token-file",
       tokenFile,
     ]);
 
@@ -344,7 +344,7 @@ describe("src/cli/credential/register.test", () => {
       "github",
       "--username",
       "x-access-token",
-      "--token-file",
+      "--input-token-file",
       tokenFile,
     ]);
 

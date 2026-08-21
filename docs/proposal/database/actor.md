@@ -44,4 +44,4 @@ revoked_at        null
 revoked_by        null
 ```
 
-A fresh home holds exactly this row. `kanthord actor register --name runner-1 --token-file /run/secrets/runner-1.token` then inserts a second row: the id is minted by the daemon, `kind` is `harness`, `name` is `runner-1`, `token_sha256` is the SHA-256 of the returned secret, `registered_by` is the bootstrap id and `created_at` is the registration instant. `kanthord actor list` prints both rows, bootstrap first, because the list orders by id ascending and the zero id sorts first.
+A fresh home holds exactly this row. `kanthord actor register --name runner-1 --output-token-file /run/secrets/runner-1.token` then inserts a second row: the id is minted by the daemon, `kind` is `harness`, `name` is `runner-1`, `token_sha256` is the SHA-256 of the returned secret, `registered_by` is the bootstrap id and `created_at` is the registration instant. `kanthord actor list` prints both rows, bootstrap first, because the list orders by id ascending and the zero id sorts first.

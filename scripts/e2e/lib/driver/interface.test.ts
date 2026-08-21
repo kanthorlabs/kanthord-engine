@@ -431,7 +431,7 @@ test("the recorded registration prints no token", async () => {
   assert.ok(registration);
   assert.equal(registration.record.stdout.includes("actor_01"), true);
   assert.equal(registration.record.stdout.includes(secret), false);
-  assert.equal(registration.argv.includes("--token-file"), true);
+  assert.equal(registration.argv.includes("--output-token-file"), true);
 });
 
 test("startDaemon carries leaseTtlMs into the daemon settings payload", async () => {
