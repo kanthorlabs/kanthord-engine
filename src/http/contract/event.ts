@@ -34,6 +34,7 @@ export const eventListResponse = z.strictObject({
 export const eventListExamples: OperationExamples = {
   query: {
     ...cursorRequestExample,
+    order: "asc",
     subjectKind: "node",
     subject: `task_${U}`,
     type: "node.state.changed",

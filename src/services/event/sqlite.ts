@@ -89,12 +89,16 @@ export class SqliteEventLog implements EventLog {
         clauses.push("id > ?");
         parameters.push(filter.after);
       }
+      if (filter.before !== undefined) {
+        clauses.push("id < ?");
+        parameters.push(filter.before);
+      }
       const where =
         clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`;
       let sql =
         "SELECT id, subject_kind, subject_id, type, actor_kind, actor_id, payload_json FROM event" +
         where +
-        " ORDER BY id ASC";
+        (filter.order === "desc" ? " ORDER BY id DESC" : " ORDER BY id ASC");
       if (filter.limit !== undefined) {
         sql += " LIMIT ?";
         parameters.push(filter.limit);

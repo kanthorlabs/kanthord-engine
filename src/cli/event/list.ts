@@ -19,7 +19,9 @@ type EventListOptions = Readonly<{
   actorKind?: string;
   actor?: string;
   after?: string;
+  before?: string;
   limit?: string;
+  order?: string;
 }>;
 
 function renderJson(value: unknown): string | undefined {
@@ -61,7 +63,9 @@ export function registerEventList(input: RegisterEventListCliInput): void {
     .option("--actor-kind <kind>", "actor kind")
     .option("--actor <id>", "actor id")
     .option("--after <event-id>", "event cursor")
+    .option("--before <event-id>", "event upper bound")
     .option("--limit <n>", "event limit")
+    .option("--order <asc|desc>", "event order")
     .action(async (options: EventListOptions) => {
       const query = Object.fromEntries(
         Object.entries({
@@ -71,7 +75,9 @@ export function registerEventList(input: RegisterEventListCliInput): void {
           actorKind: options.actorKind,
           actor: options.actor,
           after: options.after,
+          before: options.before,
           limit: options.limit,
+          order: options.order,
         }).filter((entry): entry is [string, string] => entry[1] !== undefined),
       );
       const callOptions =

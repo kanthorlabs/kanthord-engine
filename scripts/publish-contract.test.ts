@@ -30,7 +30,14 @@ type SchemaNode = {
   oneOf?: readonly SchemaNode[];
   properties?: Record<string, SchemaNode>;
   enum?: readonly string[];
+  default?: unknown;
   additionalProperties?: boolean;
+};
+
+type PublishedParameter = {
+  name: string;
+  required: boolean;
+  schema: SchemaNode;
 };
 
 function compare(a: string, b: string): number {
@@ -216,6 +223,59 @@ test("scripts/publish-contract", async (t) => {
       );
       for (const transport of transports) {
         assert.equal(transport.additionalProperties, false);
+      }
+    },
+  );
+
+  await t.test(
+    "the published event feature carries the cursor parameters",
+    () => {
+      const eventDirectory = mkdtempSync(
+        join(tmpdir(), "kanthord-event-contract-"),
+      );
+      try {
+        publishContract({
+          outputDirectory: eventDirectory,
+          commit: "0".repeat(40),
+          tag: null,
+        });
+
+        const document = YAML.parse(
+          readFileSync(join(eventDirectory, "features", "event.yaml"), "utf8"),
+        ) as {
+          paths: Record<
+            string,
+            Record<string, { parameters: readonly PublishedParameter[] }>
+          >;
+        };
+        const parameters = document.paths["/v1/event"]!.get!.parameters;
+
+        assert.deepEqual(
+          parameters.map((parameter) => parameter.name),
+          [
+            "actor",
+            "actorKind",
+            "after",
+            "before",
+            "limit",
+            "order",
+            "subject",
+            "subjectKind",
+            "type",
+          ],
+        );
+        for (const parameter of parameters) {
+          assert.equal(parameter.required, false);
+        }
+
+        const order = parameters.find(
+          (parameter) => parameter.name === "order",
+        );
+        assert.ok(order);
+        assert.deepEqual(order.schema.enum, ["asc", "desc"]);
+        assert.equal(order.schema.default, "asc");
+      } finally {
+        rmSync(eventDirectory, { recursive: true, force: true });
       }
     },
   );

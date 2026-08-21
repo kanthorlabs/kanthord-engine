@@ -54,6 +54,8 @@ describe("src/queries/event/list-event.test", () => {
       actorKind: "daemon",
       actor: "d1",
       after: "event_01HZY8QF3M4N5P6R7S8T9V0W1A",
+      before: "event_01HZY8QF3M4N5P6R7S8T9V0WB0",
+      order: "desc",
       limit: 25,
     };
 
@@ -68,6 +70,13 @@ describe("src/queries/event/list-event.test", () => {
     listEvents({ events }, { limit: 100 });
 
     assert.deepEqual(calls[0]?.filter, { limit: 100 });
+  });
+
+  it("forwards an explicit order without adding a default", () => {
+    const { events, calls } = makeMock([]);
+    listEvents({ events }, { limit: 100, order: "desc" });
+
+    assert.deepEqual(calls[0]?.filter, { limit: 100, order: "desc" });
   });
 
   it("returns the result by identity", () => {

@@ -1,7 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { eventListRequest, eventListResponse, eventView } from "./event.ts";
+import {
+  eventListExamples,
+  eventListRequest,
+  eventListResponse,
+  eventView,
+} from "./event.ts";
 
 describe("src/http/contract/event.test", () => {
   it("defaults limit to 100 and omits after on an empty request", () => {
@@ -37,8 +42,11 @@ describe("src/http/contract/event.test", () => {
     assert.throws(() => eventListRequest.parse({ after: "" }));
   });
 
-  it("carries only limit on an empty request", () => {
-    assert.deepEqual(Object.keys(eventListRequest.parse({})), ["limit"]);
+  it("carries limit and order on an empty request", () => {
+    assert.deepEqual(Object.keys(eventListRequest.parse({})).sort(), [
+      "limit",
+      "order",
+    ]);
   });
 
   it("carries every filter when every filter is sent", () => {
@@ -56,11 +64,45 @@ describe("src/http/contract/event.test", () => {
       "actorKind",
       "after",
       "limit",
+      "order",
       "subject",
       "subjectKind",
       "type",
     ]);
     assert.equal(parsed.limit, 25);
+  });
+
+  it("defaults order to asc", () => {
+    assert.equal(eventListRequest.parse({}).order, "asc");
+  });
+
+  it("parses desc order", () => {
+    assert.equal(eventListRequest.parse({ order: "desc" }).order, "desc");
+  });
+
+  it("rejects an unknown order", () => {
+    assert.throws(() => eventListRequest.parse({ order: "sideways" }));
+  });
+
+  it("rejects an empty before", () => {
+    assert.throws(() => eventListRequest.parse({ before: "" }));
+  });
+
+  it("carries both cursor bounds", () => {
+    const parsed = eventListRequest.parse({
+      after: "event_a",
+      before: "event_b",
+    });
+
+    assert.equal(parsed.after, "event_a");
+    assert.equal(parsed.before, "event_b");
+  });
+
+  it("the query example names order", () => {
+    assert.equal(
+      (eventListExamples.query as Readonly<Record<string, unknown>>).order,
+      "asc",
+    );
   });
 
   it("eventListResponse parses an empty events list", () => {

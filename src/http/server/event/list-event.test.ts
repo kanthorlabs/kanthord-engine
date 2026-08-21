@@ -87,7 +87,7 @@ describe("src/http/server/event/list-event.test", () => {
     });
     await app.get("/v1/event");
 
-    assert.deepEqual(recorded, { limit: 100 });
+    assert.deepEqual(recorded, { limit: 100, order: "asc" });
     assert.equal("after" in (recorded as object), false);
   });
 
@@ -108,8 +108,54 @@ describe("src/http/server/event/list-event.test", () => {
       actorKind: "daemon",
       actor: "d1",
       after: "event_01HZY8QF3M4N5P6R7S8T9V0W1A",
+      order: "asc",
       limit: 25,
     });
+  });
+
+  it("forwards order, before, after and limit to listEvents", async () => {
+    let recorded: ListEventInput | undefined;
+    const app = await handlerApp((input) => {
+      recorded = input;
+      return [];
+    });
+    await app.get(
+      "/v1/event?order=desc&before=event_01HZY8QF3M4N5P6R7S8T9V0WB0&after=event_01HZY8QF3M4N5P6R7S8T9V0WA1&limit=25",
+    );
+
+    assert.deepEqual(recorded, {
+      after: "event_01HZY8QF3M4N5P6R7S8T9V0WA1",
+      before: "event_01HZY8QF3M4N5P6R7S8T9V0WB0",
+      order: "desc",
+      limit: 25,
+    });
+  });
+
+  it("rejects sideways order with no error details", async () => {
+    const app = await handlerApp(() => []);
+    const response = await app.get("/v1/event?order=sideways");
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "invalid-request");
+    assert.equal(Object.hasOwn(response.body.error, "details"), false);
+  });
+
+  it("rejects an empty before", async () => {
+    const app = await handlerApp(() => []);
+    const response = await app.get("/v1/event?before=");
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "invalid-request");
+  });
+
+  it("answers an inverted range with an empty events array", async () => {
+    const app = await handlerApp(() => []);
+    const response = await app.get(
+      "/v1/event?after=event_01HZY8QF3M4N5P6R7S8T9V0WA7&before=event_01HZY8QF3M4N5P6R7S8T9V0WA3",
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { events: [] });
   });
 
   it("limit 501, 0 and abc each answer 400", async () => {

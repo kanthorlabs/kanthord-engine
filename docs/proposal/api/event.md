@@ -15,7 +15,11 @@ Every transition emits one event. Events are an audit trail, and they never reco
 
 Filters are `subjectKind`, `subject`, `type`, `actorKind` and `actor`. `subject` takes a prefixed id, so one filter serves a node, a run, a repository, a candidate and every later subject kind, and no new filter is needed each time a subject kind appears.
 
-Paging is a cursor: `after` takes the **id** of the last event read, and `limit` caps the page. An offset cannot page an append-only log that grows while a human reads it.
+Paging is a cursor: `after` takes the **id** of the last event read, `before` takes an **id** upper bound, and `limit` caps the page. **Both bounds are exclusive**, so `after` and `before` together select the open range `(after, before)`. An offset cannot page an append-only log that grows while a human reads it.
+
+`order` is `asc` or `desc`, and `asc` is the default, so a request that omits it returns the page it always returned. The limit applies after the ordering, so `order=desc` returns the newest page and nothing else. **The first id of an `order=desc` page is the newest id in the filter.** No operation returns a tail id, because `GET /v1/event?order=desc&limit=1` already answers that question.
+
+**An empty or inverted range is a normal `200` with an empty array.** An `after` at or above `before` returns no row. The daemon does not compare the two ids and does not refuse the request.
 
 `wait` is the sixth parameter, and it turns the same operation into a long poll. It is the decided progress channel for a GUI client, and `event.stream` below states why the stream is not. **`wait` is phase-2.** The cursor ships in phase 1 and answers the same question with a client-side timer; the long poll needs the daemon to hold a request open and to wake on an append, which is a transport capability rather than a parameter. A phase-1 daemon rejects `wait` with `400 invalid-request`, because the request schema declares no such field.
 

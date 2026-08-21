@@ -28,6 +28,7 @@ const harness = (
   failCalls(): number;
 } => {
   const program = new Command();
+  program.exitOverride();
   registerClientOptions(program);
   const calls: RecordedCall[] = [];
   const client: DaemonClient = {
@@ -99,8 +100,12 @@ describe("src/cli/event/list.test", () => {
       "actor_01JQ8Z7G3HZZZZZZZZZZZZZZZW",
       "--after",
       "event_01JQ8Z7G3HZZZZZZZZZZZZZZZY",
+      "--before",
+      "event_01HZY8QF3M4N5P6R7S8T9V0WB0",
       "--limit",
       "25",
+      "--order",
+      "desc",
     ]);
 
     assert.deepEqual(h.calls(), [
@@ -116,11 +121,82 @@ describe("src/cli/event/list.test", () => {
             actorKind: "harness",
             actor: "actor_01JQ8Z7G3HZZZZZZZZZZZZZZZW",
             after: "event_01JQ8Z7G3HZZZZZZZZZZZZZZZY",
+            before: "event_01HZY8QF3M4N5P6R7S8T9V0WB0",
             limit: "25",
+            order: "desc",
           },
         },
       },
     ]);
+  });
+
+  it("sends tail options without a body or path parameters", async () => {
+    const h = harness();
+    await run(h.program, [
+      "event",
+      "list",
+      "--order",
+      "desc",
+      "--before",
+      "event_01HZY8QF3M4N5P6R7S8T9V0WB0",
+    ]);
+
+    assert.deepEqual(h.calls(), [
+      {
+        operationId: "event.list",
+        body: undefined,
+        parameters: undefined,
+        options: {
+          query: {
+            before: "event_01HZY8QF3M4N5P6R7S8T9V0WB0",
+            order: "desc",
+          },
+        },
+      },
+    ]);
+  });
+
+  it("leaves call options undefined when neither tail flag is supplied", async () => {
+    const h = harness();
+    await run(h.program, ["event", "list"]);
+
+    assert.deepEqual(h.calls(), [
+      {
+        operationId: "event.list",
+        body: undefined,
+        parameters: undefined,
+        options: undefined,
+      },
+    ]);
+  });
+
+  it("passes an unvalidated order value to the daemon", async () => {
+    const h = harness();
+    await run(h.program, ["event", "list", "--order", "sideways"]);
+
+    assert.deepEqual(h.calls()[0]?.options, {
+      query: { order: "sideways" },
+    });
+  });
+
+  it("reports the daemon refusal for an invalid order", async () => {
+    const h = harness({
+      respond: () => ({
+        ok: false,
+        status: 400,
+        code: "invalid-request",
+        message: "the event filters are not valid",
+        details: undefined,
+      }),
+    });
+    await run(h.program, ["event", "list", "--order", "sideways"]);
+
+    assert.equal(
+      h.stderrText(),
+      "kanthord: invalid-request: the event filters are not valid\n",
+    );
+    assert.equal(h.failCalls(), 1);
+    assert.equal(h.stdoutText(), "");
   });
 
   it("omits an absent option from the query", async () => {

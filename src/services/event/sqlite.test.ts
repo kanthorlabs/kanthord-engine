@@ -18,7 +18,26 @@ const firstId = "event_01HZY8QF3M4N5P6R7S8T9V0W1X";
 const secondId = "event_01HZY8QF3N4N5P6R7S8T9V0W1X";
 const thirdId = "event_01HZY8QF3P4N5P6R7S8T9V0W1X";
 
-function build(): { storage: Storage; log: SqliteEventLog; dispose(): void } {
+const tailIds = {
+  a1: "event_01HZY8QF3M4N5P6R7S8T9V0WA1",
+  a2: "event_01HZY8QF3M4N5P6R7S8T9V0WA2",
+  a3: "event_01HZY8QF3M4N5P6R7S8T9V0WA3",
+  a4: "event_01HZY8QF3M4N5P6R7S8T9V0WA4",
+  a5: "event_01HZY8QF3M4N5P6R7S8T9V0WA5",
+  a6: "event_01HZY8QF3M4N5P6R7S8T9V0WA6",
+  a7: "event_01HZY8QF3M4N5P6R7S8T9V0WA7",
+  a8: "event_01HZY8QF3M4N5P6R7S8T9V0WA8",
+  a9: "event_01HZY8QF3M4N5P6R7S8T9V0WA9",
+  b0: "event_01HZY8QF3M4N5P6R7S8T9V0WB0",
+} as const;
+
+const tailUlids = Object.values(tailIds).map((id) => id.slice("event_".length));
+
+function buildFor(ids: readonly string[]): {
+  storage: Storage;
+  log: SqliteEventLog;
+  dispose(): void;
+} {
   const temporary = createMigratedStorage();
   temporary.storage.transact((t) => {
     seedRegistry(t);
@@ -28,10 +47,22 @@ function build(): { storage: Storage; log: SqliteEventLog; dispose(): void } {
     storage: temporary.storage,
     log: new SqliteEventLog({
       storage: temporary.storage,
-      ids: createMockIdGenerator({ ulids }),
+      ids: createMockIdGenerator({ ulids: ids }),
     }),
     dispose: temporary.dispose,
   };
+}
+
+function build(): { storage: Storage; log: SqliteEventLog; dispose(): void } {
+  return buildFor(ulids);
+}
+
+function buildTail(): {
+  storage: Storage;
+  log: SqliteEventLog;
+  dispose(): void;
+} {
+  return buildFor(tailUlids);
 }
 
 function appendThree(storage: Storage, log: SqliteEventLog): readonly string[] {
@@ -66,6 +97,22 @@ function appendThree(storage: Storage, log: SqliteEventLog): readonly string[] {
     }),
   );
   return [first.id, second.id, third.id];
+}
+
+function appendTen(storage: Storage, log: SqliteEventLog): readonly string[] {
+  return Object.values(tailIds).map((_, index) => {
+    const matching = index === 1 || index === 3 || index === 5 || index === 7;
+    return storage.transact((t) =>
+      log.append(t, {
+        subjectKind: matching ? "node" : "run",
+        subjectId: matching ? "task_a" : "run_a",
+        type: matching ? "task.done" : "task.started",
+        actorKind: matching ? "daemon" : "human",
+        actorId: matching ? "daemon_a" : "human_a",
+        payload: { index },
+      }),
+    ).id;
+  });
 }
 
 describe("src/services/event/sqlite.test", () => {
@@ -227,6 +274,134 @@ describe("src/services/event/sqlite.test", () => {
     assert.deepEqual(
       log.list({ limit: 2 }).map((event) => event.id),
       [firstId, secondId],
+    );
+  });
+
+  it("the default order returns the three oldest ids", () => {
+    const { storage, log, dispose } = buildTail();
+    after(() => dispose());
+
+    appendTen(storage, log);
+
+    assert.deepEqual(
+      log.list({ limit: 3 }).map((event) => event.id),
+      [tailIds.a1, tailIds.a2, tailIds.a3],
+    );
+  });
+
+  it("desc order returns the three newest ids with the newest first", () => {
+    const { storage, log, dispose } = buildTail();
+    after(() => dispose());
+
+    appendTen(storage, log);
+
+    const result = log.list({ order: "desc", limit: 3 });
+    assert.deepEqual(
+      result.map((event) => event.id),
+      [tailIds.b0, tailIds.a9, tailIds.a8],
+    );
+    assert.equal(result[0]?.id, tailIds.b0);
+  });
+
+  it("before excludes the fifth id", () => {
+    const { storage, log, dispose } = buildTail();
+    after(() => dispose());
+
+    appendTen(storage, log);
+
+    assert.deepEqual(
+      log.list({ before: tailIds.a5 }).map((event) => event.id),
+      [tailIds.a1, tailIds.a2, tailIds.a3, tailIds.a4],
+    );
+  });
+
+  it("after and before select the open range", () => {
+    const { storage, log, dispose } = buildTail();
+    after(() => dispose());
+
+    appendTen(storage, log);
+
+    assert.deepEqual(
+      log
+        .list({ after: tailIds.a3, before: tailIds.a7 })
+        .map((event) => event.id),
+      [tailIds.a4, tailIds.a5, tailIds.a6],
+    );
+  });
+
+  it("inverted and equal bounds return empty arrays", () => {
+    const { storage, log, dispose } = buildTail();
+    after(() => dispose());
+
+    appendTen(storage, log);
+
+    assert.deepEqual(
+      log
+        .list({ after: tailIds.a7, before: tailIds.a3 })
+        .map((event) => event.id),
+      [],
+    );
+    assert.deepEqual(
+      log
+        .list({ after: tailIds.a3, before: tailIds.a3 })
+        .map((event) => event.id),
+      [],
+    );
+  });
+
+  it("both directions return all ten ids in their selected order", () => {
+    const { storage, log, dispose } = buildTail();
+    after(() => dispose());
+
+    appendTen(storage, log);
+
+    assert.deepEqual(
+      log.list({ order: "asc" }).map((event) => event.id),
+      Object.values(tailIds),
+    );
+    assert.deepEqual(
+      log.list({ order: "desc" }).map((event) => event.id),
+      Object.values(tailIds).reverse(),
+    );
+  });
+
+  it("desc order composes with every event filter", () => {
+    const { storage, log, dispose } = buildTail();
+    after(() => dispose());
+
+    appendTen(storage, log);
+
+    const filter = {
+      subjectKind: "node",
+      subject: "task_a",
+      type: "task.done",
+      actorKind: "daemon" as const,
+      actor: "daemon_a",
+      order: "desc" as const,
+    };
+    assert.deepEqual(
+      log.list(filter).map((event) => event.id),
+      [tailIds.a8, tailIds.a6, tailIds.a4, tailIds.a2],
+    );
+    assert.deepEqual(
+      log.list({ ...filter, limit: 2 }).map((event) => event.id),
+      [tailIds.a8, tailIds.a6],
+    );
+  });
+
+  it("an absent order lists by id ascending when insert order differs", () => {
+    const { storage, log, dispose } = buildFor([
+      tailIds.a3.slice("event_".length),
+      tailIds.a1.slice("event_".length),
+      tailIds.a2.slice("event_".length),
+    ]);
+    after(() => dispose());
+
+    appendThree(storage, log);
+
+    assert.deepEqual(
+      log.list({}).map((event) => event.id),
+      [tailIds.a1, tailIds.a2, tailIds.a3],
     );
   });
 

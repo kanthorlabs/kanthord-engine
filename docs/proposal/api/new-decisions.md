@@ -14,6 +14,7 @@ The proposal decided the transport policy and it named most public operations. I
 - **`501` for a later phase, `404` for post-MVP.** A route the daemon will implement answers `501 not-implemented` and writes no state. A path that is post-MVP does not exist and answers `404`.
 - **One error shape, and the CLI routes on the code.** Block reasons and publish rejection classes are codes.
 - **Cursor paging on events.** An offset cannot page an append-only log.
+- **The event cursor reads both directions, and both range bounds are exclusive.** `event.list` takes `before` beside `after`, both exclusive, and `order` selects `asc` or `desc` with `asc` as the default. An audit screen therefore reads the newest events first with one request. An empty or inverted range is a normal empty `200`, never a refusal. No operation returns a tail id, because the first id of an `order=desc` page is the newest id in the filter. See [event.md](event.md).
 - **`repository.inspect` is a separate route.** Default branch detection writes nothing, and the human confirms in the client. The daemon holds no partial registration.
 - **`node.abandon` is one route for a task and an objective.** The node kind decides the behaviour.
 - **`plan.validate` exists, and it is also the suggestion route.** It runs the import validation, computes the per-node choice suggestions of `../phase-1/plan-format.md`, and writes nothing. A human edits a plan by hand and wants the finding list and the conflict set before a revision moves.

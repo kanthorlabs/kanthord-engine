@@ -399,12 +399,26 @@ test("renders event.list query parameters in bytewise name order with no request
   >;
   assert.deepEqual(
     parameters.map((parameter) => parameter.name),
-    ["actor", "actorKind", "after", "limit", "subject", "subjectKind", "type"],
+    [
+      "actor",
+      "actorKind",
+      "after",
+      "before",
+      "limit",
+      "order",
+      "subject",
+      "subjectKind",
+      "type",
+    ],
   );
   for (const parameter of parameters) {
     assert.equal(parameter.in, "query");
     assert.equal(parameter.required, false);
   }
+  const order = parameters.find((parameter) => parameter.name === "order");
+  assert.ok(order);
+  const orderSchema = order.schema as Readonly<Record<string, unknown>>;
+  assert.deepEqual(orderSchema.enum, ["asc", "desc"]);
   assert.equal(Object.hasOwn(eventGet, "requestBody"), false);
 });
 

@@ -30,6 +30,8 @@ export type EventFilter = Readonly<{
   actorKind?: ActorKind;
   actor?: string;
   after?: string;
+  before?: string;
+  order?: "asc" | "desc";
   limit?: number;
 }>;
 
