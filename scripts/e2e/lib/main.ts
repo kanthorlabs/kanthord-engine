@@ -41,6 +41,11 @@ import {
   type RecordAcceptanceDependencies,
   type RecordAcceptanceInput,
 } from "./record/acceptance.ts";
+import {
+  checkManifest,
+  recordManifest,
+  type RecordManifestInput,
+} from "./record/manifest.ts";
 import { verdict } from "./record/verdict.ts";
 
 export const knownScenarioIds: readonly ScenarioId[] = [
@@ -81,13 +86,23 @@ export type VerdictInvocation = Readonly<{
   scenariosOnly: boolean;
 }>;
 
+export type RecordManifestInvocation = Readonly<{
+  recordManifest: RecordManifestInput;
+}>;
+
+export type CheckManifestInvocation = Readonly<{
+  checkManifestTag: string;
+}>;
+
 export type Invocation =
   | RunInvocation
   | ReclaimInvocation
   | MintTagInvocation
   | RecordVerifyInvocation
   | RecordAcceptanceInvocation
-  | VerdictInvocation;
+  | VerdictInvocation
+  | RecordManifestInvocation
+  | CheckManifestInvocation;
 
 export function parseArguments(
   argv: readonly string[],
@@ -107,6 +122,9 @@ export function parseArguments(
   let noteFile: string | undefined;
   let verdictTag: string | undefined;
   let scenariosOnly = false;
+  let recordManifestRequested = false;
+  let manifestFile: string | undefined;
+  let checkManifestTag: string | undefined;
 
   let index = 0;
   while (index < argv.length) {
@@ -131,6 +149,12 @@ export function parseArguments(
         continue;
       }
 
+      if (token === "--record-manifest") {
+        recordManifestRequested = true;
+        index += 1;
+        continue;
+      }
+
       if (token === "--scenarios-only") {
         scenariosOnly = true;
         index += 1;
@@ -146,7 +170,9 @@ export function parseArguments(
         token !== "--drive" &&
         token !== "--judgment" &&
         token !== "--note-file" &&
-        token !== "--verdict"
+        token !== "--verdict" &&
+        token !== "--manifest" &&
+        token !== "--check-manifest"
       ) {
         throw new RunnerError("invalid-argument", `unknown option ${token}`);
       }
@@ -178,6 +204,16 @@ export function parseArguments(
         judgment = value;
       } else if (token === "--note-file") {
         noteFile = value;
+      } else if (token === "--manifest") {
+        manifestFile = value;
+      } else if (token === "--check-manifest") {
+        if (!tagPattern.test(value)) {
+          throw new RunnerError(
+            "invalid-argument",
+            `tag ${value} is not a valid tag`,
+          );
+        }
+        checkManifestTag = value;
       } else {
         if (!tagPattern.test(value)) {
           throw new RunnerError(
@@ -232,6 +268,24 @@ export function parseArguments(
         "--mint-tag is mutually exclusive with --reclaim",
       );
     }
+    if (recordManifestRequested) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--mint-tag is mutually exclusive with --record-manifest",
+      );
+    }
+    if (manifestFile !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--mint-tag is mutually exclusive with --manifest",
+      );
+    }
+    if (checkManifestTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--mint-tag is mutually exclusive with --check-manifest",
+      );
+    }
 
     return { mintTag: mintedTag };
   }
@@ -261,6 +315,24 @@ export function parseArguments(
         "--record-verify is mutually exclusive with --verdict",
       );
     }
+    if (recordManifestRequested) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-verify is mutually exclusive with --record-manifest",
+      );
+    }
+    if (manifestFile !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-verify is mutually exclusive with --manifest",
+      );
+    }
+    if (checkManifestTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-verify is mutually exclusive with --check-manifest",
+      );
+    }
     if (tag === undefined) {
       throw new RunnerError("invalid-argument", "--record-verify needs --tag");
     }
@@ -285,6 +357,24 @@ export function parseArguments(
       throw new RunnerError(
         "invalid-argument",
         "--record-acceptance is mutually exclusive with --verdict",
+      );
+    }
+    if (recordManifestRequested) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-acceptance is mutually exclusive with --record-manifest",
+      );
+    }
+    if (manifestFile !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-acceptance is mutually exclusive with --manifest",
+      );
+    }
+    if (checkManifestTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-acceptance is mutually exclusive with --check-manifest",
       );
     }
     if (tag === undefined) {
@@ -347,16 +437,72 @@ export function parseArguments(
     };
   }
 
+  if (recordManifestRequested) {
+    if (positionals.length > 0) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-manifest is mutually exclusive with a scenario id",
+      );
+    }
+    if (reclaimTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-manifest is mutually exclusive with --reclaim",
+      );
+    }
+    if (recordVerifyRequested) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-manifest is mutually exclusive with --record-verify",
+      );
+    }
+    if (recordAcceptanceRequested) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-manifest is mutually exclusive with --record-acceptance",
+      );
+    }
+    if (verdictTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-manifest is mutually exclusive with --verdict",
+      );
+    }
+    if (checkManifestTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-manifest is mutually exclusive with --check-manifest",
+      );
+    }
+    if (tag === undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-manifest needs --tag",
+      );
+    }
+    if (manifestFile === undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--record-manifest needs --manifest",
+      );
+    }
+
+    return { recordManifest: { tag, manifestFile } };
+  }
+
   for (const [name, value] of [
     ["--by", by],
     ["--drive", drive],
     ["--judgment", judgment],
     ["--note-file", noteFile],
+    ["--manifest", manifestFile],
   ] as const) {
     if (value !== undefined) {
       throw new RunnerError(
         "invalid-argument",
-        `${name} applies to --record-acceptance only`,
+        name === "--manifest"
+          ? "--manifest applies to --record-manifest only"
+          : `${name} applies to --record-acceptance only`,
       );
     }
   }
@@ -380,8 +526,49 @@ export function parseArguments(
         "--verdict is mutually exclusive with --reclaim",
       );
     }
+    if (recordManifestRequested) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--verdict is mutually exclusive with --record-manifest",
+      );
+    }
+    if (manifestFile !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--verdict is mutually exclusive with --manifest",
+      );
+    }
+    if (checkManifestTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--verdict is mutually exclusive with --check-manifest",
+      );
+    }
 
     return { verdictTag, scenariosOnly };
+  }
+
+  if (checkManifestTag !== undefined) {
+    if (positionals.length > 0) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--check-manifest is mutually exclusive with a scenario id",
+      );
+    }
+    if (tag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--check-manifest is mutually exclusive with --tag",
+      );
+    }
+    if (reclaimTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--check-manifest is mutually exclusive with --reclaim",
+      );
+    }
+
+    return { checkManifestTag };
   }
 
   if (scenariosOnly) {
@@ -402,6 +589,24 @@ export function parseArguments(
       throw new RunnerError(
         "invalid-argument",
         "--reclaim is mutually exclusive with --tag",
+      );
+    }
+    if (recordManifestRequested) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--reclaim is mutually exclusive with --record-manifest",
+      );
+    }
+    if (manifestFile !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--reclaim is mutually exclusive with --manifest",
+      );
+    }
+    if (checkManifestTag !== undefined) {
+      throw new RunnerError(
+        "invalid-argument",
+        "--reclaim is mutually exclusive with --check-manifest",
       );
     }
 
@@ -608,6 +813,14 @@ export async function main(
       return 0;
     }
 
+    if ("recordManifest" in invocation) {
+      await recordManifest(
+        createDefaultRecordDependencies(),
+        invocation.recordManifest,
+      );
+      return 0;
+    }
+
     if ("verdictTag" in invocation) {
       const failures = await verdict({
         tag: invocation.verdictTag,
@@ -617,6 +830,18 @@ export async function main(
         process.stderr.write(
           `e2e: verdict: ${failure.axis} axis: ${failure.reason}\n`,
         );
+      }
+      const [firstFailure] = failures;
+      if (firstFailure === undefined) {
+        return 0;
+      }
+      return exitCodeFor(firstFailure.code);
+    }
+
+    if ("checkManifestTag" in invocation) {
+      const failures = await checkManifest(invocation.checkManifestTag);
+      for (const failure of failures) {
+        process.stderr.write(`e2e: manifest: ${failure.reason}\n`);
       }
       const [firstFailure] = failures;
       if (firstFailure === undefined) {

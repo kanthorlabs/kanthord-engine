@@ -476,6 +476,7 @@ describe("src/domain/layout.test", () => {
         "e2e/lib/podman/topology.test.ts",
         "e2e/lib/profile/profile.test.ts",
         "e2e/lib/record/acceptance.test.ts",
+        "e2e/lib/record/manifest.test.ts",
         "e2e/lib/record/verdict.test.ts",
         "e2e/lib/record/verify.test.ts",
         "e2e/lib/redact.test.ts",
