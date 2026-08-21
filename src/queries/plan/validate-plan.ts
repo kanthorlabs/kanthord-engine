@@ -16,7 +16,12 @@ import { choiceVerdict } from "../../domain/plan-choice.ts";
 import { containmentMovable } from "../../domain/plan-containment.ts";
 import { canonicalPaths } from "../../domain/plan-canonical-path.ts";
 import type { StoredNode } from "../../domain/plan-graph.ts";
-import { differingFields } from "../../domain/plan-diff.ts";
+import {
+  differingFields,
+  storedValues,
+  submittedValues,
+} from "../../domain/plan-diff.ts";
+import type { ChoiceValues } from "../../domain/plan-diff.ts";
 import type { Finding } from "../../domain/plan-finding.ts";
 import { canonicalDocumentsJson } from "../../domain/plan-hash.ts";
 import { comparePaths } from "../../domain/plan-path.ts";
@@ -40,6 +45,8 @@ export type ValidatePlanInput = Readonly<{
   documents: readonly Readonly<{ path: string; content: string }>[];
 }>;
 
+export type ChoiceBranch = ChoiceLegality & Readonly<{ values: ChoiceValues }>;
+
 export type ChoiceEntry = Readonly<{
   id: string;
   kind: NodeKind;
@@ -47,8 +54,9 @@ export type ChoiceEntry = Readonly<{
   state: NodeState | null;
   suggested: Choice;
   fields: readonly DifferingField[];
-  submitted: ChoiceLegality;
-  database: ChoiceLegality;
+  path: string | null;
+  submitted: ChoiceBranch;
+  database: ChoiceBranch;
 }>;
 
 export type ValidatePlanResult = Readonly<{
@@ -159,6 +167,16 @@ export function validatePlan(
       resolved.map((document) => [document.identity, document]),
     );
     const storedByIdentity = new Map(nodes.map((node) => [node.id, node]));
+    const canonicalNodes = resolved.map((document) => ({
+      identity: document.identity,
+      kind: document.kind,
+      title: document.title,
+      parentIdentity: document.parentIdentity,
+      dependencies: document.dependencies.filter(
+        (dependency) => dependency !== document.identity,
+      ),
+    }));
+    const submittedPaths = canonicalPaths(canonicalNodes);
 
     const identities = new Set<string>([
       ...resolved.map((document) => document.identity),
@@ -218,6 +236,13 @@ export function validatePlan(
         containmentMovable: movable,
       });
       verdicts.set(identity, verdict);
+      const selected = presence === "both" ? fields : null;
+      const submittedBranchValues =
+        document === undefined
+          ? {}
+          : submittedValues(document, blobHashes.get(identity)!, selected);
+      const databaseBranchValues =
+        node === undefined ? {} : storedValues(node, selected);
       choices.push({
         id: identity,
         kind: document?.kind ?? node!.kind,
@@ -225,8 +250,9 @@ export function validatePlan(
         state,
         suggested: verdict.suggested,
         fields,
-        submitted: verdict.submitted,
-        database: verdict.database,
+        path: submittedPaths.get(identity) ?? null,
+        submitted: { ...verdict.submitted, values: submittedBranchValues },
+        database: { ...verdict.database, values: databaseBranchValues },
       });
     }
 
@@ -266,15 +292,6 @@ export function validatePlan(
         repo: document.repo,
       });
     }
-    const canonicalNodes = resolved.map((document) => ({
-      identity: document.identity,
-      kind: document.kind,
-      title: document.title,
-      parentIdentity: document.parentIdentity,
-      dependencies: document.dependencies.filter(
-        (dependency) => dependency !== document.identity,
-      ),
-    }));
     const documents = renderDocumentSet(canonicalNodes, bodies);
     const documentsHash = dependencies.blobs.hash(
       encoder.encode(canonicalDocumentsJson(documents)),

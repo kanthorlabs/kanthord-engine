@@ -61,6 +61,26 @@ export const planRevisionsResponse = z.strictObject({
   revisions: z.array(planRevisionEntry),
 });
 
+export const planChoiceBody = z.strictObject({
+  instructionBlob: blobHash,
+  acceptanceBlob: blobHash.nullable(),
+});
+
+export const planChoiceValues = z.strictObject({
+  body: planChoiceBody.optional(),
+  depends_on: z.array(z.string()).optional(),
+  parent: z.string().nullable().optional(),
+  repo: z.string().nullable().optional(),
+  title: z.string().optional(),
+  worker: z.string().nullable().optional(),
+});
+
+export const planChoiceBranch = z.strictObject({
+  legal: z.boolean(),
+  reason: z.string().nullable(),
+  values: planChoiceValues,
+});
+
 export const planChoiceEntry = z.strictObject({
   id: z.string(),
   kind: z.enum(nodeKinds),
@@ -68,14 +88,9 @@ export const planChoiceEntry = z.strictObject({
   state: z.enum(nodeStates).nullable(),
   suggested: z.enum(choices),
   fields: z.array(z.enum(differingFields)),
-  submitted: z.strictObject({
-    legal: z.boolean(),
-    reason: z.string().nullable(),
-  }),
-  database: z.strictObject({
-    legal: z.boolean(),
-    reason: z.string().nullable(),
-  }),
+  path: z.string().nullable(),
+  submitted: planChoiceBranch,
+  database: planChoiceBranch,
 });
 
 export const planValidateRequest = z.strictObject({
@@ -280,7 +295,27 @@ export const planValidateExamples: OperationExamples = {
     documents: [planDocument_example],
     documentsHash: H,
     revision: null,
-    choices: [],
+    choices: [
+      {
+        id: `task_${U}`,
+        kind: "task",
+        presence: "both",
+        state: "ready",
+        suggested: "submitted",
+        fields: ["title"],
+        path: "initiative/atlas.md",
+        submitted: {
+          legal: true,
+          reason: null,
+          values: { title: "add the health route" },
+        },
+        database: {
+          legal: true,
+          reason: null,
+          values: { title: "add the health check" },
+        },
+      },
+    ],
   },
   error: {
     error: {

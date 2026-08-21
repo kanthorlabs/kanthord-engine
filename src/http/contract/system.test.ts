@@ -27,6 +27,7 @@ const planRelativePathLocations = [
   "documents.path",
   "findings.path",
   "completeness.path",
+  "choices.path",
 ];
 
 function collectPropertyNames(

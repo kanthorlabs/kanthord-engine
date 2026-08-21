@@ -19,6 +19,7 @@ import {
 } from "../../../test/helpers/plan.ts";
 import { createPlanGraph } from "../../../test/helpers/plan.ts";
 import {
+  planFixtureBodies,
   planFixtureIdentities,
   seedPlanFixture,
 } from "../../../test/helpers/plan.ts";
@@ -37,8 +38,15 @@ const U_INITIATIVE = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const U_TASK = "01BQZ3NDEKTSV4RRFFQ69G5FAV";
 const U_OBJECTIVE = "01DRZ3NDEKTSV4RRFFQ69G5FAV";
 const U_NEW = "01EZQZ3NDEKTSV4RRFFQ69G5FA";
+const U_TASK_THREE = "01FRZ3NDEKTSV4RRFFQ69G5FAV";
 
 const low = (ulid: string): string => ulid.toLowerCase();
+
+const sha = (text: string): string =>
+  `sha256:${createHash("sha256").update(text).digest("hex")}`;
+
+const fixtureTaskPath =
+  "plan/harden-the-verify-cli--01arz3ndektsv4rrffq69g5fav/harden-the-verify-cli--01bqz3ndektsv4rrffq69g5fav/01-harden-the-verify-cli--01drz3ndektsv4rrffq69g5fav.md";
 
 const initiativePath = `plan/ship-kanthord--${low(U_INITIATIVE)}/initiative.md`;
 const objectivePath = `plan/ship-kanthord--${low(U_INITIATIVE)}/harden-the-verify-cli--${low(U_OBJECTIVE)}/objective.md`;
@@ -146,8 +154,23 @@ const expectedChoices = [
     state: null,
     suggested: "submitted",
     fields: [],
-    submitted: { legal: true, reason: null },
-    database: { legal: true, reason: "do not create it" },
+    path: initiativePath,
+    submitted: {
+      legal: true,
+      reason: null,
+      values: {
+        body: {
+          instructionBlob: sha("Bootstrap the daemon.\n"),
+          acceptanceBlob: null,
+        },
+        depends_on: [],
+        parent: null,
+        repo: null,
+        title: "Ship kanthord",
+        worker: null,
+      },
+    },
+    database: { legal: true, reason: "do not create it", values: {} },
   },
   {
     id: `objective_${U_OBJECTIVE}`,
@@ -156,8 +179,23 @@ const expectedChoices = [
     state: null,
     suggested: "submitted",
     fields: [],
-    submitted: { legal: true, reason: null },
-    database: { legal: true, reason: "do not create it" },
+    path: objectivePath,
+    submitted: {
+      legal: true,
+      reason: null,
+      values: {
+        body: {
+          instructionBlob: sha("Make it verifiable.\n"),
+          acceptanceBlob: null,
+        },
+        depends_on: [],
+        parent: `initiative_${U_INITIATIVE}`,
+        repo: "kanthord-verify",
+        title: "Harden the verify CLI",
+        worker: null,
+      },
+    },
+    database: { legal: true, reason: "do not create it", values: {} },
   },
   {
     id: `task_${U_TASK}`,
@@ -166,8 +204,23 @@ const expectedChoices = [
     state: null,
     suggested: "submitted",
     fields: [],
-    submitted: { legal: true, reason: null },
-    database: { legal: true, reason: "do not create it" },
+    path: taskPath,
+    submitted: {
+      legal: true,
+      reason: null,
+      values: {
+        body: {
+          instructionBlob: sha("Build the renderer.\n\n"),
+          acceptanceBlob: sha("## Acceptance criteria\n\n- The bytes match.\n"),
+        },
+        depends_on: [],
+        parent: `objective_${U_OBJECTIVE}`,
+        repo: null,
+        title: "Render the manifest",
+        worker: "tdd@1",
+      },
+    },
+    database: { legal: true, reason: "do not create it", values: {} },
   },
 ];
 
@@ -205,6 +258,149 @@ function countTable(storage: Storage, table: string): number {
       transaction.get(`SELECT COUNT(*) AS c FROM ${table}`),
     ) as { c: number }
   ).c;
+}
+
+function editedFixtureSet(
+  documents: readonly Readonly<{ path: string; content: string }>[],
+): (
+  | Readonly<{ path: string; content: string }>
+  | {
+      path: string;
+      content: string;
+    }
+)[] {
+  return [
+    ...documents
+      .filter(
+        (document) => !document.content.includes("Do the objective work."),
+      )
+      .map((document) =>
+        document.content.includes("Do the task work.")
+          ? {
+              ...document,
+              content: document.content.replace(
+                'title: "Harden the verify CLI"',
+                'title: "Harden the verify CLI v2"',
+              ),
+            }
+          : document,
+      ),
+    {
+      path: "plan/new-initiative/initiative.md",
+      content: `---
+id: "initiative_01FQZ3NDEKTSV4RRFFQ69G5FAV"
+kind: initiative
+title: New initiative
+---
+New work.
+`,
+    },
+  ];
+}
+
+function seedTaskDependencies(
+  storage: Storage,
+  plan: PlanStore,
+  blobs: BlobStore,
+): void {
+  storage.transact((transaction) => {
+    plan.mutateGraph(transaction, {
+      projectId: fixtureIds.project,
+      nodes: [
+        {
+          id: planFixtureIdentities.taskTwo,
+          projectId: fixtureIds.project,
+          kind: "task",
+          parentId: planFixtureIdentities.objective,
+          title: "Harden the verify CLI",
+          instructionBlob: blobs.put(
+            transaction,
+            new TextEncoder().encode("Do the second task work.\n"),
+          ),
+          acceptanceBlob: blobs.put(
+            transaction,
+            new TextEncoder().encode("## Acceptance criteria\n- it holds\n"),
+          ),
+          worker: null,
+          repositoryId: null,
+          revision: fixtureIds.planRevision,
+          updatedAt: 1,
+        },
+        {
+          id: `task_${U_TASK_THREE}`,
+          projectId: fixtureIds.project,
+          kind: "task",
+          parentId: planFixtureIdentities.objective,
+          title: "Harden the verify CLI",
+          instructionBlob: blobs.put(
+            transaction,
+            new TextEncoder().encode("Do the third task work.\n"),
+          ),
+          acceptanceBlob: blobs.put(
+            transaction,
+            new TextEncoder().encode("## Acceptance criteria\n- it holds\n"),
+          ),
+          worker: null,
+          repositoryId: null,
+          revision: fixtureIds.planRevision,
+          updatedAt: 1,
+        },
+      ],
+      insertEdges: [
+        {
+          id: "edge_01HZ3NDEKTSV4RRFFQ69G5FAV",
+          fromNode: planFixtureIdentities.task,
+          toNode: planFixtureIdentities.taskTwo,
+        },
+        {
+          id: "edge_01JZ3NDEKTSV4RRFFQ69G5FAV",
+          fromNode: planFixtureIdentities.task,
+          toNode: `task_${U_TASK_THREE}`,
+        },
+      ],
+      deleteEdgeIds: [],
+      nodeDeletes: [],
+      at: 1,
+      cause: { revision: fixtureIds.planRevision, importId: null },
+    });
+  });
+}
+
+function countingPlanStore(plan: PlanStore): Readonly<{
+  plan: PlanStore;
+  counts: Record<string, number>;
+}> {
+  const counts = {
+    readValidationContext: 0,
+    newestRevision: 0,
+    readGraph: 0,
+    readContainmentFacts: 0,
+    readSubtreeContainmentFacts: 0,
+  };
+  const wrapped: PlanStore = {
+    ...plan,
+    readValidationContext(transaction, projectId) {
+      counts.readValidationContext += 1;
+      return plan.readValidationContext(transaction, projectId);
+    },
+    newestRevision(transaction, projectId) {
+      counts.newestRevision += 1;
+      return plan.newestRevision(transaction, projectId);
+    },
+    readGraph(transaction, projectId) {
+      counts.readGraph += 1;
+      return plan.readGraph(transaction, projectId);
+    },
+    readContainmentFacts(transaction, nodeId) {
+      counts.readContainmentFacts += 1;
+      return plan.readContainmentFacts(transaction, nodeId);
+    },
+    readSubtreeContainmentFacts(transaction, nodeId) {
+      counts.readSubtreeContainmentFacts += 1;
+      return plan.readSubtreeContainmentFacts(transaction, nodeId);
+    },
+  };
+  return { plan: wrapped, counts };
 }
 
 describe("src/queries/plan/validate-plan.test", () => {
@@ -358,6 +554,9 @@ describe("src/queries/plan/validate-plan.test", () => {
     assert.equal(result.choices.length, 3);
     for (const entry of result.choices) {
       assert.deepEqual(entry.fields, [], entry.id);
+      assert.deepEqual(entry.submitted.values, {}, entry.id);
+      assert.deepEqual(entry.database.values, {}, entry.id);
+      assert.notEqual(entry.path, null, entry.id);
       assert.equal(entry.suggested, "database", entry.id);
     }
   });
@@ -402,12 +601,308 @@ describe("src/queries/plan/validate-plan.test", () => {
     assert.deepEqual(taskEntry.fields, ["body"]);
     assert.equal(taskEntry.suggested, "submitted");
     assert.equal(taskEntry.submitted.legal, true);
+    assert.deepEqual(Object.keys(taskEntry.submitted.values), ["body"]);
+    assert.deepEqual(Object.keys(taskEntry.database.values), ["body"]);
+    assert.notEqual(
+      taskEntry.submitted.values.body!.instructionBlob,
+      taskEntry.database.values.body!.instructionBlob,
+    );
+    assert.equal(
+      taskEntry.submitted.values.body!.acceptanceBlob,
+      taskEntry.database.values.body!.acceptanceBlob,
+    );
+    assert.equal(taskEntry.path, fixtureTaskPath);
+    assert.equal(
+      blobs.get(taskEntry.submitted.values.body!.instructionBlob),
+      null,
+    );
+    assert.notEqual(
+      blobs.get(taskEntry.database.values.body!.instructionBlob),
+      null,
+    );
     for (const entry of result.choices) {
       if (entry.id !== planFixtureIdentities.task) {
         assert.deepEqual(entry.fields, [], entry.id);
         assert.equal(entry.suggested, "database", entry.id);
       }
     }
+  });
+
+  it("a title edit to the pending task publishes the two titles as the only values", (t) => {
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
+    t.after(() => dispose());
+    seedPlanFixture(storage, plan, blobs);
+
+    const exported = exportPlan(
+      { storage, plan, revision },
+      { projectId: fixtureIds.project },
+    );
+    const edited = exported.documents.map((document) =>
+      document.content.includes("Do the task work.")
+        ? {
+            ...document,
+            content: document.content.replace(
+              'title: "Harden the verify CLI"',
+              'title: "Harden the verify CLI v2"',
+            ),
+          }
+        : document,
+    );
+    const result = validatePlan(
+      {
+        storage,
+        plan,
+        blobs,
+        reader,
+        graph,
+        ids: createMockIdGenerator({ ulids: [] }),
+      },
+      { projectId: fixtureIds.project, fromRevision: null, documents: edited },
+    );
+
+    const taskEntry = result.choices.find(
+      (entry) => entry.id === planFixtureIdentities.task,
+    );
+    assert.ok(taskEntry);
+    assert.equal(taskEntry.presence, "both");
+    assert.deepEqual(taskEntry.fields, ["title"]);
+    assert.deepEqual(taskEntry.submitted.values, {
+      title: "Harden the verify CLI v2",
+    });
+    assert.deepEqual(taskEntry.database.values, {
+      title: "Harden the verify CLI",
+    });
+  });
+
+  it("an acceptance-only edit names one instruction and two acceptances inside body", (t) => {
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
+    t.after(() => dispose());
+    seedPlanFixture(storage, plan, blobs);
+
+    const exported = exportPlan(
+      { storage, plan, revision },
+      { projectId: fixtureIds.project },
+    );
+    const edited = exported.documents.map((document) =>
+      document.content.includes("Do the task work.")
+        ? {
+            ...document,
+            content: document.content.replace(
+              "- it works\n",
+              "- it works well\n",
+            ),
+          }
+        : document,
+    );
+    const result = validatePlan(
+      {
+        storage,
+        plan,
+        blobs,
+        reader,
+        graph,
+        ids: createMockIdGenerator({ ulids: [] }),
+      },
+      { projectId: fixtureIds.project, fromRevision: null, documents: edited },
+    );
+
+    const taskEntry = result.choices.find(
+      (entry) => entry.id === planFixtureIdentities.task,
+    );
+    assert.ok(taskEntry);
+    assert.deepEqual(taskEntry.fields, ["body"]);
+    assert.deepEqual(taskEntry.submitted.values.body, {
+      instructionBlob: sha(planFixtureBodies.taskInstruction),
+      acceptanceBlob: sha("## Acceptance criteria\n- it works well\n"),
+    });
+    assert.deepEqual(taskEntry.database.values.body, {
+      instructionBlob: sha(planFixtureBodies.taskInstruction),
+      acceptanceBlob: sha(planFixtureBodies.taskAcceptance),
+    });
+  });
+
+  it("a both entry whose stored acceptance is absent publishes a null acceptanceBlob against the submitted hash", (t) => {
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
+    t.after(() => dispose());
+    seedPlanFixture(storage, plan, blobs);
+
+    const exported = exportPlan(
+      { storage, plan, revision },
+      { projectId: fixtureIds.project },
+    );
+    const objectiveDocument = exported.documents.find((document) =>
+      document.content.includes("Do the objective work."),
+    );
+    assert.ok(objectiveDocument);
+    const result = validatePlan(
+      {
+        storage,
+        plan,
+        blobs,
+        reader,
+        graph,
+        ids: createMockIdGenerator({ ulids: [] }),
+      },
+      {
+        projectId: fixtureIds.project,
+        fromRevision: null,
+        documents: exported.documents.map((document) =>
+          document === objectiveDocument
+            ? {
+                ...document,
+                content: `${document.content}## Acceptance criteria\n- it holds\n`,
+              }
+            : document,
+        ),
+      },
+    );
+
+    assert.deepEqual(
+      result.findings.map((finding) => finding.code),
+      ["acceptance-unexpected"],
+    );
+    const entry = result.choices.find(
+      (choice) => choice.id === planFixtureIdentities.objective,
+    );
+    assert.ok(entry);
+    assert.equal(entry.presence, "both");
+    assert.deepEqual(entry.fields, ["body"]);
+    assert.deepEqual(entry.database.values.body, {
+      instructionBlob: sha(planFixtureBodies.objective),
+      acceptanceBlob: null,
+    });
+    assert.deepEqual(entry.submitted.values.body, {
+      instructionBlob: sha(planFixtureBodies.objective),
+      acceptanceBlob: sha("## Acceptance criteria\n- it holds\n"),
+    });
+  });
+
+  it("an order-only dependency difference with a repeat names no field and carries no depends_on", (t) => {
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
+    t.after(() => dispose());
+    seedPlanFixture(storage, plan, blobs);
+    seedTaskDependencies(storage, plan, blobs);
+
+    const exported = exportPlan(
+      { storage, plan, revision },
+      { projectId: fixtureIds.project },
+    );
+    const storedDepsBlock = `depends_on:\n  - "${planFixtureIdentities.taskTwo}"\n  - "task_${U_TASK_THREE}"\n`;
+    const reordered = `depends_on:\n  - "task_${U_TASK_THREE}"\n  - "${planFixtureIdentities.taskTwo}"\n  - "${planFixtureIdentities.taskTwo}"\n`;
+    const edited = exported.documents.map((document) =>
+      document.content.includes("Do the task work.")
+        ? {
+            ...document,
+            content: document.content.replace(storedDepsBlock, reordered),
+          }
+        : document,
+    );
+    const result = validatePlan(
+      {
+        storage,
+        plan,
+        blobs,
+        reader,
+        graph,
+        ids: createMockIdGenerator({ ulids: [] }),
+      },
+      { projectId: fixtureIds.project, fromRevision: null, documents: edited },
+    );
+
+    assert.deepEqual(result.findings, []);
+    const taskEntry = result.choices.find(
+      (entry) => entry.id === planFixtureIdentities.task,
+    );
+    assert.ok(taskEntry);
+    assert.equal(taskEntry.presence, "both");
+    assert.deepEqual(taskEntry.fields, []);
+    assert.deepEqual(taskEntry.submitted.values, {});
+    assert.deepEqual(taskEntry.database.values, {});
+    assert.equal(
+      Object.hasOwn(taskEntry.submitted.values, "depends_on"),
+      false,
+    );
+    assert.equal(Object.hasOwn(taskEntry.database.values, "depends_on"), false);
+  });
+
+  it("a genuinely different dependency publishes two normalized lists sorted by comparePaths", (t) => {
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
+    t.after(() => dispose());
+    seedPlanFixture(storage, plan, blobs);
+    seedTaskDependencies(storage, plan, blobs);
+
+    const exported = exportPlan(
+      { storage, plan, revision },
+      { projectId: fixtureIds.project },
+    );
+    const storedDepsBlock = `depends_on:\n  - "${planFixtureIdentities.taskTwo}"\n  - "task_${U_TASK_THREE}"\n`;
+    const repeated = `depends_on:\n  - "task_${U_TASK_THREE}"\n  - "task_${U_TASK_THREE}"\n`;
+    const edited = exported.documents.map((document) =>
+      document.content.includes("Do the task work.")
+        ? {
+            ...document,
+            content: document.content.replace(storedDepsBlock, repeated),
+          }
+        : document,
+    );
+    const result = validatePlan(
+      {
+        storage,
+        plan,
+        blobs,
+        reader,
+        graph,
+        ids: createMockIdGenerator({ ulids: [] }),
+      },
+      { projectId: fixtureIds.project, fromRevision: null, documents: edited },
+    );
+
+    assert.deepEqual(result.findings, []);
+    const taskEntry = result.choices.find(
+      (entry) => entry.id === planFixtureIdentities.task,
+    );
+    assert.ok(taskEntry);
+    assert.equal(taskEntry.presence, "both");
+    assert.deepEqual(taskEntry.fields, ["depends_on"]);
+    assert.deepEqual(taskEntry.submitted.values, {
+      depends_on: [`task_${U_TASK_THREE}`],
+    });
+    assert.deepEqual(taskEntry.database.values, {
+      depends_on: [planFixtureIdentities.taskTwo, `task_${U_TASK_THREE}`],
+    });
+  });
+
+  it("plan.validate performs the same PlanStore reads as the pre-epic tree", (t) => {
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => seedRegistry(transaction));
+    const { plan: counted, counts } = countingPlanStore(plan);
+
+    validatePlan(
+      {
+        storage,
+        plan: counted,
+        blobs,
+        reader,
+        graph,
+        ids: createMockIdGenerator({
+          ulids: [U_INITIATIVE, U_TASK, U_OBJECTIVE],
+        }),
+      },
+      {
+        projectId: fixtureIds.project,
+        fromRevision: null,
+        documents: validSubmission,
+      },
+    );
+
+    assert.deepEqual(counts, {
+      readValidationContext: 1,
+      newestRevision: 1,
+      readGraph: 1,
+      readContainmentFacts: 0,
+      readSubtreeContainmentFacts: 0,
+    });
   });
 
   it("a structural edit to a node moved to running suggests database as illegal", (t) => {
@@ -493,6 +988,19 @@ describe("src/queries/plan/validate-plan.test", () => {
     assert.equal(taskEntry.suggested, "database");
     assert.equal(taskEntry.submitted.legal, false);
     assert.deepEqual(taskEntry.fields, []);
+    assert.deepEqual(taskEntry.submitted.values, {});
+    assert.deepEqual(taskEntry.database.values, {
+      body: {
+        instructionBlob: sha(planFixtureBodies.taskInstruction),
+        acceptanceBlob: sha(planFixtureBodies.taskAcceptance),
+      },
+      depends_on: [],
+      parent: planFixtureIdentities.objective,
+      repo: null,
+      title: "Harden the verify CLI",
+      worker: null,
+    });
+    assert.equal(taskEntry.path, null);
   });
 
   it("a kind change is an addition and a retention", (t) => {
@@ -681,6 +1189,7 @@ New objective work.
     );
 
     assert.deepEqual(second, first);
+    assert.equal(JSON.stringify(second.choices), JSON.stringify(first.choices));
   });
 
   it("documentsHash is the sha256 of the canonical documents json", (t) => {
@@ -876,6 +1385,87 @@ New objective work.
         { candidate, context },
       ),
       [],
+    );
+  });
+
+  it("every non-null choice path names exactly one returned document", (t) => {
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
+    t.after(() => dispose());
+    seedPlanFixture(storage, plan, blobs);
+
+    const exported = exportPlan(
+      { storage, plan, revision },
+      { projectId: fixtureIds.project },
+    );
+    const result = validatePlan(
+      {
+        storage,
+        plan,
+        blobs,
+        reader,
+        graph,
+        ids: createMockIdGenerator({ ulids: [] }),
+      },
+      {
+        projectId: fixtureIds.project,
+        fromRevision: null,
+        documents: editedFixtureSet(exported.documents),
+      },
+    );
+
+    const paths = new Set(result.documents.map((document) => document.path));
+    let joined = 0;
+    for (const entry of result.choices) {
+      if (entry.path === null) {
+        assert.equal(entry.presence, "database-only");
+        continue;
+      }
+      assert.equal(
+        result.documents.filter((document) => document.path === entry.path)
+          .length,
+        1,
+        `path ${entry.path} does not name exactly one document`,
+      );
+      joined += 1;
+    }
+    assert.equal(joined, paths.size);
+    assert.ok(joined > 0);
+  });
+
+  it("the choice path is the canonical path and not the authored submitted path", (t) => {
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => seedRegistry(transaction));
+
+    const result = validatePlan(
+      {
+        storage,
+        plan,
+        blobs,
+        reader,
+        graph,
+        ids: createMockIdGenerator({
+          ulids: [U_INITIATIVE, U_TASK, U_OBJECTIVE],
+        }),
+      },
+      {
+        projectId: fixtureIds.project,
+        fromRevision: null,
+        documents: validSubmission,
+      },
+    );
+
+    const entry = result.choices.find(
+      (choice) => choice.id === `initiative_${U_INITIATIVE}`,
+    );
+    assert.ok(entry);
+    assert.equal(entry.path, initiativePath);
+    assert.notEqual(entry.path, initiativeDocument.path);
+    assert.equal(
+      result.documents.some(
+        (document) => document.path === initiativeDocument.path,
+      ),
+      false,
     );
   });
 });

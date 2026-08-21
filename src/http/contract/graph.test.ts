@@ -8,8 +8,12 @@ import {
   nodeDeleteResponse,
   nodeUpdateRequest,
   nodeUpdateResponse,
+  planChoiceEntry,
+  planChoiceValues,
   planImportRequest,
   planImportResponse,
+  planValidateExamples,
+  planValidateResponse,
   projectGraphResponse,
 } from "./graph.ts";
 import { findOperation } from "./registry.ts";
@@ -37,6 +41,18 @@ Build the renderer.
   validatedRevision: "revision_a",
   documentsHash: `sha256:${"0".repeat(64)}`,
 });
+
+const choiceEntry = {
+  id: "task_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  kind: "task",
+  presence: "both",
+  state: "ready",
+  suggested: "submitted",
+  fields: ["title"],
+  path: "initiative/atlas.md",
+  submitted: { legal: true, reason: null, values: { title: "a" } },
+  database: { legal: true, reason: null, values: { title: "b" } },
+};
 
 describe("src/http/contract/graph.test", () => {
   it("planImportRequest accepts the legal importId values", () => {
@@ -379,6 +395,167 @@ describe("src/http/contract/graph.test", () => {
         ],
       }).success,
       false,
+    );
+  });
+
+  it("planChoiceEntry accepts an entry whose branches carry values and a path", () => {
+    assert.equal(planChoiceEntry.safeParse(choiceEntry).success, true);
+  });
+
+  it("planChoiceEntry refuses the pre-epic entry whose branches carry no values", () => {
+    const preEpic = {
+      ...choiceEntry,
+      submitted: { legal: true, reason: null },
+      database: { legal: true, reason: null },
+    };
+    assert.equal(planChoiceEntry.safeParse(preEpic).success, false);
+  });
+
+  it("planChoiceEntry refuses a branch that misses only its values", () => {
+    const entry = {
+      ...choiceEntry,
+      submitted: { legal: true, reason: null },
+    };
+    assert.equal(planChoiceEntry.safeParse(entry).success, false);
+  });
+
+  it("planChoiceValues accepts an empty record and the three nullable names", () => {
+    assert.equal(planChoiceValues.safeParse({}).success, true);
+    assert.equal(
+      planChoiceValues.safeParse({ parent: null, repo: null, worker: null })
+        .success,
+      true,
+    );
+  });
+
+  it("planChoiceValues refuses a numeric title, a null title and an unknown key", () => {
+    assert.equal(planChoiceValues.safeParse({ title: 1 }).success, false);
+    assert.equal(planChoiceValues.safeParse({ title: null }).success, false);
+    assert.equal(planChoiceValues.safeParse({ unknown: "x" }).success, false);
+  });
+
+  it("depends_on keeps its underscore and refuses the camelCase spelling", () => {
+    assert.equal(planChoiceValues.safeParse({ dependsOn: [] }).success, false);
+    assert.equal(
+      planChoiceValues.safeParse({ depends_on: ["task_a", "task_b"] }).success,
+      true,
+    );
+  });
+
+  it("planChoiceValues parses all six names together", () => {
+    assert.equal(
+      planChoiceValues.safeParse({
+        body: {
+          instructionBlob: `sha256:${"a".repeat(64)}`,
+          acceptanceBlob: null,
+        },
+        depends_on: ["task_01ARZ3NDEKTSV4RRFFQ69G5FAV"],
+        parent: null,
+        repo: null,
+        title: "a",
+        worker: null,
+      }).success,
+      true,
+    );
+  });
+
+  it("body carries a pair of blob hashes and accepts a null acceptanceBlob", () => {
+    assert.equal(
+      planChoiceValues.safeParse({
+        body: {
+          instructionBlob: `sha256:${"a".repeat(64)}`,
+          acceptanceBlob: `sha256:${"b".repeat(64)}`,
+        },
+      }).success,
+      true,
+    );
+    assert.equal(
+      planChoiceValues.safeParse({
+        body: {
+          instructionBlob: `sha256:${"a".repeat(64)}`,
+          acceptanceBlob: null,
+        },
+      }).success,
+      true,
+    );
+  });
+
+  it("body refuses a null instructionBlob, a non-hash, a missing hash and uppercase hex", () => {
+    assert.equal(
+      planChoiceValues.safeParse({
+        body: { instructionBlob: null, acceptanceBlob: null },
+      }).success,
+      false,
+    );
+    assert.equal(
+      planChoiceValues.safeParse({
+        body: { instructionBlob: "not-a-hash", acceptanceBlob: null },
+      }).success,
+      false,
+    );
+    assert.equal(
+      planChoiceValues.safeParse({ body: { acceptanceBlob: null } }).success,
+      false,
+    );
+    assert.equal(
+      planChoiceValues.safeParse({
+        body: {
+          instructionBlob: `sha256:${"A".repeat(64)}`,
+          acceptanceBlob: null,
+        },
+      }).success,
+      false,
+    );
+  });
+
+  it("body refuses a third key", () => {
+    assert.equal(
+      planChoiceValues.safeParse({
+        body: {
+          instructionBlob: `sha256:${"a".repeat(64)}`,
+          acceptanceBlob: null,
+          extra: "x",
+        },
+      }).success,
+      false,
+    );
+  });
+
+  it("path is required and nullable", () => {
+    assert.equal(
+      planChoiceEntry.safeParse({ ...choiceEntry, path: null }).success,
+      true,
+    );
+    const withoutPath: Record<string, unknown> = { ...choiceEntry };
+    delete withoutPath.path;
+    assert.equal(planChoiceEntry.safeParse(withoutPath).success, false);
+    assert.equal(
+      planChoiceEntry.safeParse({ ...choiceEntry, path: 1 }).success,
+      false,
+    );
+  });
+
+  it("the plan.validate example carries one both entry whose values name the two titles", () => {
+    const parsed = planValidateResponse.parse(planValidateExamples.success);
+    assert.equal(parsed.choices.length, 1);
+    const entry = parsed.choices[0]!;
+    assert.equal(entry.presence, "both");
+    assert.deepEqual(entry.fields, ["title"]);
+    assert.deepEqual(Object.keys(entry.submitted.values), ["title"]);
+    assert.deepEqual(Object.keys(entry.database.values), ["title"]);
+    assert.equal(entry.submitted.values.title, "add the health route");
+    assert.equal(entry.database.values.title, "add the health check");
+    assert.notEqual(entry.submitted.values.title, entry.database.values.title);
+  });
+
+  it("the plan.validate example joins its choice path to one document", () => {
+    const parsed = planValidateResponse.parse(planValidateExamples.success);
+    const entry = parsed.choices[0]!;
+    assert.equal(entry.path, "initiative/atlas.md");
+    assert.equal(
+      parsed.documents.filter((document) => document.path === entry.path)
+        .length,
+      1,
     );
   });
 });

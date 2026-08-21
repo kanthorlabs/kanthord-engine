@@ -35,9 +35,17 @@ The body is the body of `plan.import` without `importId` and without `choices`. 
 - the normalized documents, with provisional identities minted for new nodes, because a choice cannot name a node that has no identity;
 - the hash of those normalized documents;
 - the topology revision the validation ran against;
-- one entry per node of the required choice set: the identity, the suggested choice, the differing field names, the current state for display, and the legality of each choice with its reason.
+- one entry per node of the required choice set: the identity, the suggested choice, the differing field names, the current state for display, the canonical path of the submitted document, and the legality of each choice with its reason and the field values of that side.
 
 The identities it mints are provisional in name only: the client sends the same normalized documents to `plan.import`, and the document hash binds the mapping. The daemon stages nothing, so a validation that is never imported leaves no row.
+
+Each choice branch carries `values`, the field values of the side that branch leaves in place. The six names are `body`, `depends_on`, `parent`, `repo`, `title` and `worker`, spelled exactly as they appear in the `fields` array, so a client indexes `values` by a member of `fields` with no mapping table.
+
+**Presence decides which names appear, not `fields`.** A `both` entry carries exactly the names in `fields` on each branch, so two identical sides carry `{}` on both. A `document-only` entry carries all six names under `submitted` and `{}` under `database`. A `database-only` entry is the mirror: all six names under `database` and `{}` under `submitted`. A single-sided entry has an empty `fields` array by construction, so `{}` never means "no value" — it means "nothing to choose".
+
+**An absent key and a present `null` differ.** An absent key means the name is not represented on that branch, either because it is not in `fields` or because that branch holds no node. A key present with `null` means the branch holds a node and that node has no parent, no repository or no worker. `depends_on` is the normalized list the comparison used, sorted and deduplicated, so a client cannot draw a conflict the daemon did not find.
+
+**A `body` value is a pair of blob hashes, never prose.** It is `{ instructionBlob, acceptanceBlob }`, and `acceptanceBlob` is `null` when that side has no acceptance. The two sides resolve their text differently. The `database` hashes were written at import, so `blob.show` serves them. **A submitted hash is not in the blob store**, because `plan.validate` hashes and writes nothing, so `blob.show` cannot serve it; the submitted text is already in the same response, under `documents`. The entry's `path` member is the join key: it is the **canonical** path of the submitted document for a `both` or `document-only` entry, and `null` for a `database-only` entry, which has no document. It is the canonical path and not the authored one, because `documents` is the normalized set, so only the canonical path names a member of it.
 
 ## `plan.import`
 

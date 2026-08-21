@@ -282,8 +282,9 @@ describe("src/cli/plan/import.test", () => {
       state: "pending",
       suggested,
       fields: [],
-      submitted: { legal: true, reason: null },
-      database: { legal: true, reason: null },
+      path: "plan/i--01/01-task-a--01drz3ndektsv4rrffq69g5fav.md",
+      submitted: { legal: true, reason: null, values: {} },
+      database: { legal: true, reason: null, values: {} },
     });
     const scripted = [
       choice("task_z", "database"),
@@ -394,8 +395,9 @@ describe("src/cli/plan/import.test", () => {
       state: "pending",
       suggested,
       fields: [],
-      submitted: { legal: true, reason: null },
-      database: { legal: true, reason: null },
+      path: "plan/i--01/01-task-a--01drz3ndektsv4rrffq69g5fav.md",
+      submitted: { legal: true, reason: null, values: {} },
+      database: { legal: true, reason: null, values: {} },
     });
     const h = harness({
       script: [

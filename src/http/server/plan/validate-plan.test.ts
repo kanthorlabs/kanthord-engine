@@ -10,10 +10,14 @@ import {
   createBlobStore,
   createPlanReader,
   createPlanStore,
+  createRevision,
+  planFixtureIdentities,
+  seedPlanFixture,
 } from "../../../../test/helpers/plan.ts";
 import { createPlanGraph } from "../../../../test/helpers/plan.ts";
 import { validatePlanHandler } from "./validate-plan.ts";
 import { validatePlan } from "../../../queries/plan/validate-plan.ts";
+import { exportPlan } from "../../../queries/plan/export-plan.ts";
 import { planValidateResponse } from "../../contract/graph.ts";
 import type { Storage } from "../../../services/storage/index.ts";
 
@@ -95,8 +99,48 @@ function countTable(storage: Storage, table: string): number {
   ).c;
 }
 
+function editedFixtureSet(
+  documents: readonly Readonly<{ path: string; content: string }>[],
+): (
+  | Readonly<{ path: string; content: string }>
+  | {
+      path: string;
+      content: string;
+    }
+)[] {
+  return [
+    ...documents
+      .filter(
+        (document) => !document.content.includes("Do the objective work."),
+      )
+      .map((document) =>
+        document.content.includes("Do the task work.")
+          ? {
+              ...document,
+              content: document.content.replace(
+                'title: "Harden the verify CLI"',
+                'title: "Harden the verify CLI v2"',
+              ),
+            }
+          : document,
+      ),
+    {
+      path: "plan/new-initiative/initiative.md",
+      content: `---
+id: "initiative_01FQZ3NDEKTSV4RRFFQ69G5FAV"
+kind: initiative
+title: New initiative
+---
+New work.
+`,
+    },
+  ];
+}
+
 describe("src/http/server/plan/validate-plan.test", () => {
-  async function buildHandlerApp() {
+  async function buildHandlerApp(
+    options: Readonly<{ withPlanFixture?: boolean }> = {},
+  ) {
     const temporary = createMigratedStorage();
     const storage = temporary.storage;
     const plan = createPlanStore();
@@ -104,9 +148,14 @@ describe("src/http/server/plan/validate-plan.test", () => {
       storage,
       createMockClock({ start: 1700000000000, step: 1000 }),
     );
+    const revision = createRevision(blobs, plan);
     const reader = createPlanReader();
     const graph = createPlanGraph();
-    storage.transact((transaction) => seedRegistry(transaction));
+    if (options.withPlanFixture === true) {
+      seedPlanFixture(storage, plan, blobs);
+    } else {
+      storage.transact((transaction) => seedRegistry(transaction));
+    }
     const app = await createTestApp({
       handlers: {
         "plan.validate": validatePlanHandler({
@@ -125,7 +174,7 @@ describe("src/http/server/plan/validate-plan.test", () => {
         }),
       },
     });
-    return { temporary, app, storage };
+    return { temporary, app, storage, plan, blobs, revision };
   }
 
   it("POST /v1/project/:id/plan/validate with a valid body answers 200 and planValidateResponse parses it", async (t) => {
@@ -185,6 +234,98 @@ describe("src/http/server/plan/validate-plan.test", () => {
     assert.equal(response.body.error.code, "not-found");
   });
 
+  it("a validate over an edited fixture set answers all three presences with values and joinable paths", async (t) => {
+    const { temporary, app, storage, plan, blobs, revision } =
+      await buildHandlerApp({ withPlanFixture: true });
+    t.after(() => temporary.dispose());
+
+    const exported = exportPlan(
+      { storage, plan, revision },
+      { projectId: fixtureIds.project },
+    );
+    const response = await app
+      .post(`/v1/project/${fixtureIds.project}/plan/validate`)
+      .send({
+        fromRevision: null,
+        documents: editedFixtureSet(exported.documents),
+      });
+
+    assert.equal(response.status, 200);
+    assert.equal(planValidateResponse.safeParse(response.body).success, true);
+    const body = planValidateResponse.parse(response.body);
+    const counts = { both: 0, "document-only": 0, "database-only": 0 };
+    for (const entry of body.choices) counts[entry.presence] += 1;
+    assert.deepEqual(counts, {
+      both: 2,
+      "document-only": 1,
+      "database-only": 1,
+    });
+
+    const taskEntry = body.choices.find(
+      (entry) => entry.id === planFixtureIdentities.task,
+    );
+    assert.ok(taskEntry);
+    assert.deepEqual(taskEntry.fields, ["title"]);
+    assert.deepEqual(taskEntry.submitted.values, {
+      title: "Harden the verify CLI v2",
+    });
+    assert.deepEqual(taskEntry.database.values, {
+      title: "Harden the verify CLI",
+    });
+
+    const initiativeEntry = body.choices.find(
+      (entry) => entry.id === planFixtureIdentities.initiative,
+    );
+    assert.ok(initiativeEntry);
+    assert.deepEqual(initiativeEntry.fields, []);
+    assert.deepEqual(initiativeEntry.submitted.values, {});
+    assert.deepEqual(initiativeEntry.database.values, {});
+
+    const documentOnly = body.choices.find(
+      (entry) => entry.presence === "document-only",
+    );
+    assert.ok(documentOnly);
+    assert.deepEqual(Object.keys(documentOnly.submitted.values), [
+      "body",
+      "depends_on",
+      "parent",
+      "repo",
+      "title",
+      "worker",
+    ]);
+    assert.deepEqual(documentOnly.database.values, {});
+
+    const databaseOnly = body.choices.find(
+      (entry) => entry.presence === "database-only",
+    );
+    assert.ok(databaseOnly);
+    assert.deepEqual(databaseOnly.submitted.values, {});
+    assert.deepEqual(Object.keys(databaseOnly.database.values), [
+      "body",
+      "depends_on",
+      "parent",
+      "repo",
+      "title",
+      "worker",
+    ]);
+    assert.equal(databaseOnly.path, null);
+
+    const paths = new Set(body.documents.map((document) => document.path));
+    let joined = 0;
+    for (const entry of body.choices) {
+      if (entry.path === null) continue;
+      assert.equal(
+        body.documents.filter((document) => document.path === entry.path)
+          .length,
+        1,
+        `path ${entry.path} does not name exactly one document`,
+      );
+      joined += 1;
+    }
+    assert.equal(joined, paths.size);
+    assert.ok(joined > 0);
+  });
+
   it("leaves every row count unchanged for every request in the suite", async (t) => {
     const { temporary, app, storage } = await buildHandlerApp();
     t.after(() => temporary.dispose());
@@ -224,6 +365,33 @@ describe("src/http/server/plan/validate-plan.test", () => {
           `${table} changed`,
         );
       }
+    }
+
+    const fixture = await buildHandlerApp({ withPlanFixture: true });
+    t.after(() => fixture.temporary.dispose());
+    const exported = exportPlan(
+      {
+        storage: fixture.storage,
+        plan: fixture.plan,
+        revision: fixture.revision,
+      },
+      { projectId: fixtureIds.project },
+    );
+    const before = new Map(
+      tables.map((table) => [table, countTable(fixture.storage, table)]),
+    );
+    await fixture.app
+      .post(`/v1/project/${fixtureIds.project}/plan/validate`)
+      .send({
+        fromRevision: null,
+        documents: editedFixtureSet(exported.documents),
+      });
+    for (const table of tables) {
+      assert.equal(
+        countTable(fixture.storage, table),
+        before.get(table),
+        `${table} changed`,
+      );
     }
   });
 });
