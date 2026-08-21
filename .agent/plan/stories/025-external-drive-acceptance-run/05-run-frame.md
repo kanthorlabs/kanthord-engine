@@ -23,7 +23,8 @@ The frame these paths make, all derived from `runDirectory(tag)` at `scripts/e2e
 .data/acceptance-<tag>/<scenario-id>/   one bundle directory per id
 .data/acceptance-<tag>/verify.json      the verify record
 .data/acceptance-<tag>/acceptance.json  the acceptance record
-.data/acceptance-<tag>/manifest.json    the manifest of Story 1
+.data/acceptance-<tag>/manifest.json    the manifest, recorded once by Story 13
+.data/acceptance-<tag>/manifest-input.json  the manifest input, seeded here
 .agent/acceptance/<tag>/report.md       the report of Story 13
 ```
 
@@ -35,6 +36,16 @@ git log -1 --format=%H -- docs/proposal
 ```
 
 These are the two commands `readCommit` and `readProposalRevision` run at `scripts/e2e/lib/bundle.ts:317-335`.
+
+Seed the manifest input file now, and export its path so every later story writes into one file:
+
+```sh
+export MANIFEST=".data/acceptance-$TAG/manifest-input.json"
+```
+
+`parseManifestShape` at `scripts/e2e/lib/record/manifest.ts:136-145` rejects an input file that lacks any of nine fields: `schemaVersion`, `tag`, `commit`, `proposalRevision`, `scenarios`, `checklist`, `report`, `findings` and `outcome`. Seed all nine. `recordManifest` overwrites `tag`, `commit` and `proposalRevision` at `manifest.ts:331-334`, so their seeded values carry no meaning. Seed `scenarios`, `checklist` and `findings` as empty arrays, `report` with empty strings and zero, and `outcome` as `failed`, so a run abandoned before Story 13 leaves no `passed` input behind.
+
+**The file must survive the human gate.** Stories 7 to 12 write into it and Story 13 records it, so it lives in the run directory and never in a temporary directory.
 
 Run the verify record inside the same tag, after the seven scenarios of Story 6:
 

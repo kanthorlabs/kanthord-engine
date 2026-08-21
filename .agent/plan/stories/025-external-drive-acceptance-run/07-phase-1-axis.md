@@ -41,7 +41,7 @@ Confirm, after each line and on the failure path as well as the success path:
 
 ### record
 
-Append to the manifest `scenarios` array, in invocation order, one row per id with `bundlePath`, `sha256` and `outcome`. Append to the report the repository name and the detected default branch that the `P1-E5` bundle observed.
+Write positions 1, 2, 4 and 7 of the manifest `scenarios` array — `P1-E1`, `P1-E2`, `P1-E4` and `P1-E5` — one row per id with `bundlePath`, `sha256` and `outcome`, leaving positions 3, 5 and 6 for Stories 8, 9 and 10. The finished array matches `declaredScenarioOrder` at `scripts/e2e/lib/record/manifest.ts:17-25`. Append to the report the repository name and the detected default branch that the `P1-E5` bundle observed.
 
 ## Constraints
 

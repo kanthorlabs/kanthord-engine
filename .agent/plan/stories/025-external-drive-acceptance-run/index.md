@@ -3,7 +3,7 @@
 Epic: `.agent/plan/epics/025-external-drive-acceptance-run.md`
 Prereq: EPIC 020 (sequence order). EPIC 020 supplies the three `P1B-*` scenario files, the `three-objective` fixture, the widened `ScenarioId`, the widened verdict id set, the proposal declarations and `kanthord event list`. EPIC 016 supplies the amended `journey.ts` ready-frontier oracle. EPIC 019 supplies `attestedObjectId` and `projection` on `node.show`.
 
-A coding agent runs the seven declared scenarios under one tag and writes one machine-readable run manifest; a human then drives the two-client journey, answers six checklist rows and signs one acceptance record; and one verdict, gated by `--check-manifest`, closes the block or opens a fix epic per blocker.
+A coding agent runs the seven declared scenarios under one tag and prepares one machine-readable run manifest input file; a human then drives the two-client journey, answers six checklist rows and signs one acceptance record; and one verdict, gated by `--check-manifest`, closes the block or opens a fix epic per blocker.
 
 ## Dispatch order
 
@@ -20,7 +20,7 @@ Five ordering facts are load-bearing:
 - Story 3 precedes every run story, because Story 1 does not typecheck until EPIC 020 widens `ScenarioId` at `scripts/e2e/lib/tag.ts:6`, and `P1-E1`, `P1-E4` and `P1-E5` each fail until EPIC 016 amends `journey.ts`.
 - Story 6 fixes the order once. Stories 7 to 10 name only their own position in it and restate it nowhere.
 - Story 11 precedes Story 12, because the human gate meets a run that already works.
-- Story 13 is last. It runs `--check-manifest` and the full `--verdict`.
+- Story 13 is last. It records the manifest once, then runs `--check-manifest` and the full `--verdict`. The manifest write cannot precede the human gate, because `scripts/e2e/lib/record/manifest.ts:291-296` refuses a second write for one tag.
 
 ## Stories
 
@@ -70,6 +70,6 @@ The EPIC lists eleven Story bullets. Two differences:
 - **`parseArguments` guard blocks return early.** The `--verdict` block at `scripts/e2e/lib/main.ts:359-380` returns before any block added after it, so a new guard placed at the end is unreachable for `--verdict t --check-manifest t`. Story 2 therefore edits the five **existing** guard blocks to reject the new flags, and its parser tests assert every pair in both argument orders.
 - **`JSON.stringify` emits nested keys in construction order.** `serializeAcceptanceRecord` orders a flat record, so a root-only literal was canonical there. The manifest nests, so Story 1's serializer reconstructs `scenarios`, `checklist`, `report` and `findings` element by element. A root-only literal makes two equal manifests digest differently.
 - **`npm test` is a bare `node --test`**, so a new `*.test.ts` under `scripts/e2e/lib/` is discovered with no script change. `npm run verify` is `typecheck && test && lint && verify-db-status`.
-- **`.claude/commands/e2e.md`** — 190 lines, frontmatter at `1-5`. The EPIC 012 sentence is `:16`; the run lead-in is `:42-44`; the run `sh` block is `:46-54`; the acceptance subjects are `:109-114`; the report checklist is `:128-140`; the exit-code table is `:151-157`. The epic cites `:43-53` and `:151-157`; the exact anchors are these.
+- **`.claude/commands/e2e.md`** — **232 lines after Story 4 landed**, frontmatter at `1-5`. The EPIC 012 sentence is `:16`; the run lead-in is `:43-46`; the phase-1 `sh` block is `:48-56` and the phase-1b `sh` block is `:60-71`; the acceptance subjects are `:127-140`; the report checklist is `:156-173`; the exit-code table is `:193-198`. **Story 4 states the pre-edit anchors of the 190-line file and is not a description of the file today.** Cite these.
 - **The phase-1 report precedent** — `.agent/acceptance/20260809215956270-01kzm8ma3e53bm6p04jemtmjr1/report.md`, 67 lines, the section shape Story 13 follows.
 - **Ignored paths** — `.gitignore:146` is `.data/acceptance-*/` and `.gitignore:148` is `.agent/acceptance/`. Nothing this epic runs is committed.

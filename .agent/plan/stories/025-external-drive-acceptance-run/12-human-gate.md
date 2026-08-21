@@ -23,7 +23,7 @@ Ulrich answers each row `confirmed` or `rejected`. The coding agent writes each 
 
 | #   | Subject                              | What Ulrich confirms                                                                                                                                                                                      |
 | --- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | The graph reads as the plan          | `node list` and `node show` describe the same work the imported plan describes. A state he did not expect is a finding, not a lookup.                                                                     |
+| 1   | The graph reads as the plan          | `node list`, `project node`, `node show` and `project graph` describe the same work the imported plan describes. A state he did not expect is a finding, not a lookup.                                    |
 | 2   | The work is attributed               | `kanthord event list --type lease.claimed` and `kanthord event list --type outcome.reported`, run with the configured human token, name one actor per action. The two harness actor ids differ.           |
 | 3   | The result is readable from the node | `node show` on the finished objective returns the `attestedObjectId` its harness attested and the `projection` the daemon computed, per `019-outcome-report.md:77`. He reads no database and no log file. |
 | 4   | The refusal is legible               | The `409 lease-held` a second harness receives says which node is held, and a human reads the reason without a stack trace.                                                                               |
@@ -45,7 +45,7 @@ node scripts/e2e/run.mjs --record-acceptance --tag "$TAG" --by Ulrich \
 
 ## Constraints
 
-- **The signature is written once.** `recordAcceptance` refuses a second write at `scripts/e2e/lib/record/acceptance.ts:96-100` with `tag-reused`, because a signature is not edited. **The manifest is written once too**, at `manifest.ts:287-292`, so correct the checklist in the manifest input file before Story 13 records it. Sign the acceptance record only after the six answers are settled.
+- **The signature is written once.** `recordAcceptance` refuses a second write at `scripts/e2e/lib/record/acceptance.ts:96-100` with `tag-reused`, because a signature is not edited. **The manifest is written once too**, at `manifest.ts:291-296`, so correct the checklist in the manifest input file before Story 13 records it. Sign the acceptance record only after the six answers are settled.
 - **The signed record carries one `drive`, one `judgment` and one free-form `note`** — `AcceptanceRecord` at `scripts/e2e/lib/record/acceptance.ts:21-31` holds nine fields and no per-row structure. **The manifest is the only place a row appears by itself.**
 - Ulrich drives the journey. He does not read a transcript of the rehearsal. That the human drove it is a reviewer judgment, recorded by `--drive confirmed`, per `025-external-drive-acceptance-run.md:46`.
 - The checklist answers being truthful is a reviewer judgment. No mechanism checks it.

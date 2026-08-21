@@ -67,7 +67,6 @@ node scripts/e2e/run.mjs P1B-E2 --tag "$TAG"   # two clients, podman driver
 node scripts/e2e/run.mjs P1B-E3 --tag "$TAG"   # the takeover, podman driver
 node scripts/e2e/run.mjs P1-E5 --tag "$TAG"    # real repository, local driver
 node scripts/e2e/run.mjs --record-verify --tag "$TAG"
-node scripts/e2e/run.mjs --record-manifest --tag "$TAG" --manifest "$MANIFEST"
 node scripts/e2e/run.mjs --verdict "$TAG" --scenarios-only
 ```
 
@@ -137,8 +136,9 @@ commit under test.
 the plan; the work is attributed; the result is readable from the node; the
 refusal is legible; the close is a human act; the block broke nothing he uses.
 Ulrich answers each row `confirmed` or `rejected`, a `rejected` row carries a
-note, and every answer reaches the manifest at
-`.data/acceptance-<tag>/manifest.json`.
+note, and every answer reaches the manifest input file at
+`.data/acceptance-<tag>/manifest-input.json`, which the verdict step records
+once into `.data/acceptance-<tag>/manifest.json`.
 
 One invocation signs the drive and the judgment:
 
@@ -163,9 +163,12 @@ Write `.agent/acceptance/<tag>/report.md`:
 - the verify record at `.data/acceptance-<tag>/verify.json`, and the acceptance
   record at `.data/acceptance-<tag>/acceptance.json`;
 - the product-acceptance section, labelled as judgment;
-- the `node scripts/e2e/run.mjs --verdict <tag>` command and its exit status;
-- the `node scripts/e2e/run.mjs --check-manifest <tag>` command and its exit
-  status;
+- one outcome, and the name of the verdict record at
+  `.agent/acceptance/<tag>/verdict.md`, which holds the `--check-manifest` and
+  `--verdict` commands with their exit status. The report holds neither exit
+  status, because the manifest pins the report digest at
+  `scripts/e2e/lib/record/manifest.ts:570-586` and a file cannot record the exit
+  status of the command that verifies its own digest;
 - the findings, grouped by root cause, one bullet each as
   `<B1/S1> - action:<YES/NO> - <name> - <description>`;
 - one outcome.
