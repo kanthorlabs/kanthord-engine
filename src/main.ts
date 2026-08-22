@@ -24,7 +24,10 @@ import {
   probeTools,
   ToolProbeError,
 } from "./services/git/probe.ts";
-import { createGitRunner, systemSchedule } from "./services/git/run.ts";
+import {
+  createGitRunner,
+  systemSchedule as gitSchedule,
+} from "./services/git/run.ts";
 import { createGitJournal } from "./services/git/journal.ts";
 import { createBinaryGit } from "./services/git/binary.ts";
 import { SystemClock } from "./services/clock/system.ts";
@@ -149,6 +152,7 @@ import { listEdgeHandler } from "./http/server/edge/list-edge.ts";
 import { listProjectNodeHandler } from "./http/server/node/list-project-node.ts";
 import { showProjectGraphHandler } from "./http/server/project/show-project-graph.ts";
 import { listEventHandler } from "./http/server/event/list-event.ts";
+import { createWaitRegistry } from "./http/server/event/wait.ts";
 import { listEvents } from "./queries/event/list-event.ts";
 import { showBlobHandler } from "./http/server/blob/show-blob.ts";
 import { showBlob } from "./queries/blob/show-blob.ts";
@@ -167,9 +171,13 @@ import type { MigrateHandler } from "./cli/db/migrate.ts";
 import type { PlanDirectoryDependencies } from "./cli/plan/directory.ts";
 import { buildProgram, type ServeOptions } from "./cli/program.ts";
 import { createSecretFile } from "./cli/secret-file.ts";
-import { createApp, unimplementedFor } from "./http/server/app.ts";
+import {
+  createApp,
+  systemSchedule,
+  unimplementedFor,
+} from "./http/server/app.ts";
 import { listen } from "./http/server/start.ts";
-import { createShutdown } from "./http/server/shutdown.ts";
+import { createShutdown, createShutdownSteps } from "./http/server/shutdown.ts";
 import { healthHandler } from "./http/server/system/health.ts";
 import { dbHandler } from "./http/server/system/db.ts";
 import { statusHandler } from "./http/server/system/status.ts";
@@ -210,7 +218,7 @@ async function serve(options: ServeOptions): Promise<void> {
       runDirectory: join(settings.home, "git", "run"),
     });
     const gitPaths = buildGitPaths({ probed, home: settings.home });
-    const gitRunner = createGitRunner(gitPaths, systemSchedule);
+    const gitRunner = createGitRunner(gitPaths, gitSchedule);
     const gitJournal = createGitJournal();
     const git = createBinaryGit({
       runner: gitRunner,
@@ -245,6 +253,7 @@ async function serve(options: ServeOptions): Promise<void> {
       const plan = new SqlitePlanStore({ readiness });
       const blobs = new SqliteBlobStore({ storage, clock });
       const revision = new NodeWriteRevision({ blobs, plan });
+      const waits = createWaitRegistry({ schedule: systemSchedule });
       const boundAggregateInitiative = (
         transaction: Transaction,
         input: AggregateInitiativeInput,
@@ -563,6 +572,8 @@ async function serve(options: ServeOptions): Promise<void> {
         }),
         "event.list": listEventHandler({
           listEvents: (input) => listEvents({ events }, input),
+          waits,
+          maxWaitSeconds: settings.http.event.maxWait,
         }),
         "blob.show": showBlobHandler({
           showBlob: (input) => showBlob({ blobs }, input),
@@ -610,7 +621,7 @@ async function serve(options: ServeOptions): Promise<void> {
           { storage, secret, configuredToken: settings.http.token },
           { presented },
         );
-      const app = createApp({
+      const { app, cancelWaits } = createApp({
         settings: {
           token: settings.http.token,
           allowedHosts: settings.http.allowedHosts,
@@ -628,6 +639,7 @@ async function serve(options: ServeOptions): Promise<void> {
         now: () => clock.now(),
         onInternalError: (error) =>
           process.stderr.write(`kanthord: internal-error: ${String(error)}\n`),
+        waits,
       });
       const listening = await listen(app, {
         bind: settings.http.bind,
@@ -635,21 +647,7 @@ async function serve(options: ServeOptions): Promise<void> {
       });
       reachedListen = true;
       const shutdown = createShutdown({
-        steps: [
-          { name: "listener", run: () => listening.close() },
-          {
-            name: "storage",
-            run: () => {
-              storage.close();
-            },
-          },
-          {
-            name: "home-lock",
-            run: () => {
-              held.release();
-            },
-          },
-        ],
+        steps: createShutdownSteps({ cancelWaits, listening, storage, held }),
         write: (text) => process.stderr.write(text),
         onSettled: (code) => {
           process.exitCode = code;

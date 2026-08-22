@@ -409,6 +409,7 @@ test("renders event.list query parameters in bytewise name order with no request
       "subject",
       "subjectKind",
       "type",
+      "wait",
     ],
   );
   for (const parameter of parameters) {

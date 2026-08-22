@@ -19,8 +19,59 @@ describe("src/http/contract/event.test", () => {
     assert.throws(() => eventListRequest.parse({ limit: 501 }));
   });
 
-  it("rejects wait", () => {
-    assert.throws(() => eventListRequest.parse({ wait: 5 }));
+  it("accepts wait as a number and as a string", () => {
+    assert.equal(eventListRequest.parse({ wait: 5 }).wait, 5);
+    assert.equal(eventListRequest.parse({ wait: "5" }).wait, 5);
+  });
+
+  it("accepts wait zero as a number and as a string", () => {
+    assert.equal(eventListRequest.parse({ wait: 0 }).wait, 0);
+    assert.equal(eventListRequest.parse({ wait: "0" }).wait, 0);
+  });
+
+  it("accepts wait at the schema ceiling of 60", () => {
+    assert.equal(eventListRequest.parse({ wait: 60 }).wait, 60);
+  });
+
+  it("rejects wait above the schema ceiling as a number and as a string", () => {
+    assert.throws(() => eventListRequest.parse({ wait: 61 }));
+    assert.throws(() => eventListRequest.parse({ wait: "61" }));
+  });
+
+  it("rejects a negative wait", () => {
+    assert.throws(() => eventListRequest.parse({ wait: -1 }));
+  });
+
+  it("rejects a fractional wait", () => {
+    assert.throws(() => eventListRequest.parse({ wait: 1.5 }));
+  });
+
+  it("rejects a non-numeric wait string and an empty one", () => {
+    assert.throws(() => eventListRequest.parse({ wait: "abc" }));
+    assert.throws(() => eventListRequest.parse({ wait: "" }));
+  });
+
+  it("rejects a repeated-parameter wait array", () => {
+    assert.throws(() => eventListRequest.parse({ wait: ["1", "2"] }));
+  });
+
+  it("an absent wait stays absent from the parse result", () => {
+    assert.equal("wait" in eventListRequest.parse({}), false);
+  });
+
+  it("a sent wait joins limit and order in the parse result keys", () => {
+    assert.deepEqual(Object.keys(eventListRequest.parse({ wait: 5 })).sort(), [
+      "limit",
+      "order",
+      "wait",
+    ]);
+  });
+
+  it("the query example names wait", () => {
+    assert.equal(
+      (eventListExamples.query as Readonly<Record<string, unknown>>).wait,
+      5,
+    );
   });
 
   it("rejects an unknown actorKind", () => {

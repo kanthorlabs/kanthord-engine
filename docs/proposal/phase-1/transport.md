@@ -49,6 +49,14 @@ A browser sends a preflight before an authenticated cross-origin request, and th
 
 The daemon serves plain HTTP, so a browser page must be served over plain HTTP too, from the same private network or from loopback. A page on a public HTTPS origin cannot reach this daemon directly, and mixed content rather than this policy is what stops it. A deployment that needs an HTTPS page puts a reverse proxy in front that serves the application and forwards a same-origin path to the daemon over loopback. The daemon still ships no certificate handling in that topology.
 
+## A held request
+
+One route holds a connection open: `GET /v1/event` with `wait`, and `../api/event.md` states the parameter. Nothing else in the product holds a request.
+
+**A shutdown ends every held request at once, and the daemon does not wait for the waiters.** The signal cancels every outstanding wait before it closes the listener, and each cancelled wait answers as a normal empty `200`. So a client sees a quiet daemon and reconnects, rather than seeing a dropped socket, and a stop takes no longer than it took before the parameter existed. Closing the listener first would have made every shutdown last as long as the longest outstanding wait.
+
+**An operator behind a reverse proxy sets the proxy read timeout above `http.event.maxWait`.** Nothing enforces that. A misconfigured proxy shows up as a periodic disconnect the client cannot distinguish from a network fault.
+
 ## Every request carries its own payload
 
 The human and the daemon do not share a file system. `plan import` sends the document in the body, and `plan export` returns it in the response. No route names a path on the server file system.

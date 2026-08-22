@@ -6,6 +6,8 @@ import { bootstrapActorId } from "../../src/domain/actor.ts";
 import type { ActorRow } from "../../src/domain/actor.ts";
 import { createApp, unimplementedFor } from "../../src/http/server/app.ts";
 import type { Handler } from "../../src/http/server/app.ts";
+import { createWaitRegistry } from "./wait-registry.ts";
+import type { WaitRegistry } from "./wait-registry.ts";
 import { defaultIdempotencySettings } from "../../src/http/server/idempotency-store.ts";
 import type {
   IdempotencySettings,
@@ -52,6 +54,7 @@ export type TestAppOverrides = Readonly<{
   idempotency?: IdempotencySettings;
   now?: () => number;
   schedule?: Schedule;
+  waits?: WaitRegistry;
 }>;
 
 export type TestApp = Readonly<{
@@ -61,6 +64,7 @@ export type TestApp = Readonly<{
   put(path: string): supertest.Test;
   del(path: string): supertest.Test;
   internalErrors(): readonly unknown[];
+  cancelWaits(): void;
 }>;
 
 export function drive(
@@ -119,7 +123,8 @@ export async function createTestApp(
   const idempotency = overrides?.idempotency ?? defaultIdempotencySettings;
   const now = overrides?.now ?? (() => 0);
   const schedule = overrides?.schedule ?? (() => () => {});
-  const app = createApp({
+  const waits = overrides?.waits ?? createWaitRegistry({ schedule });
+  const created = createApp({
     settings: { token, allowedHosts, allowedOrigins },
     resolveActor,
     handlers,
@@ -128,7 +133,9 @@ export async function createTestApp(
     idempotency,
     now,
     schedule,
+    waits,
   });
+  const { app, cancelWaits } = created;
   const raw = await loopbackAgent(app);
   const host = allowedHosts[0] ?? "";
   return {
@@ -159,6 +166,9 @@ export async function createTestApp(
     },
     internalErrors() {
       return captured;
+    },
+    cancelWaits(): void {
+      cancelWaits();
     },
   };
 }

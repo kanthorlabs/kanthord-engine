@@ -5,6 +5,10 @@ export type HttpIdempotencySettings = Readonly<{
   maxBytes: number;
 }>;
 
+export type HttpEventSettings = Readonly<{
+  maxWait: number;
+}>;
+
 export type HttpSettings = Readonly<{
   bind: string;
   port: number;
@@ -12,6 +16,7 @@ export type HttpSettings = Readonly<{
   allowedHosts: readonly string[];
   allowedOrigins: readonly string[];
   idempotency: HttpIdempotencySettings;
+  event: HttpEventSettings;
 }>;
 
 export type ToolSettings = Readonly<{

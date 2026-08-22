@@ -262,6 +262,7 @@ test("scripts/publish-contract", async (t) => {
             "subject",
             "subjectKind",
             "type",
+            "wait",
           ],
         );
         for (const parameter of parameters) {

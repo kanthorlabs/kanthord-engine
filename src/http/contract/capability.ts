@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Operation } from "./operation.ts";
 
 export const capabilityOperations = {
+  "event-wait": ["event.list"],
   "external-drive": [
     "node.claim",
     "node.heartbeat",

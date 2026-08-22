@@ -122,6 +122,7 @@ describe("src/main.capability.test", () => {
       capabilities: readonly string[];
     };
     assert.deepEqual(body.capabilities, [
+      "event-wait",
       "external-drive",
       "per-node-write",
       "project-graph",

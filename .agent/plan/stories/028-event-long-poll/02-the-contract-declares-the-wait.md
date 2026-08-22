@@ -9,10 +9,16 @@ Epic: `.agent/plan/epics/028-event-long-poll.md`
 In `eventListRequest` (lines 11-17), add one member as the **last** member of the extension object, after `actor` at line 16:
 
 ```ts
-    wait: z.coerce.number().int().min(0).max(60).optional(),
+    wait: z.preprocess(
+      (value) =>
+        typeof value === "string" && value.trim() === "" ? Number.NaN : value,
+      z.coerce.number().int().min(0).max(60).optional(),
+    ),
 ```
 
 `z.coerce` because every query value arrives as a string, exactly as `limit` does in `src/http/contract/cursor.ts:9`. `.min(0)` admits `wait=0`. `.max(60)` is the schema ceiling of D6. `.optional()` with no `.default()`, so an absent `wait` stays absent from the parse result.
+
+The `z.preprocess` guard refuses an empty value. `z.coerce.number()` turns `""` into `0`, so `?wait=` would otherwise parse as "answer at once" instead of a refusal. The guard maps an empty or whitespace-only string to `NaN`, and `.int()` then refuses it. The guard changes no rendered schema: `z.toJSONSchema(eventListRequest, { target: "openapi-3.0", io: "input" })` renders `properties.wait` as `{"type":"integer","minimum":0,"maximum":60}` with or without it, so `src/http/contract/field-decisions.fixture.ts` and `src/http/contract/openapi.test.ts` see the same shape either way.
 
 Add `wait` to `eventListRequest`. Do not add it to `cursorRequest`.
 

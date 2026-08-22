@@ -1,7 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { createShutdown } from "./shutdown.ts";
+import { createShutdown, createShutdownSteps } from "./shutdown.ts";
+import type { ShutdownStep } from "./shutdown.ts";
 
 describe("src/http/server/shutdown.test", () => {
   it("runs every step in the declared order", async () => {
@@ -187,5 +188,135 @@ describe("src/http/server/shutdown.test", () => {
     });
     await shutdown();
     assert.deepEqual(order, ["a-start", "a-end", "b"]);
+  });
+
+  it("a cancel step declared first runs before the listener step", async () => {
+    const order: string[] = [];
+    const shutdown = createShutdown({
+      steps: [
+        {
+          name: "waits",
+          run: () => {
+            order.push("waits");
+          },
+        },
+        {
+          name: "listener",
+          run: () => {
+            order.push("listener");
+          },
+        },
+        {
+          name: "storage",
+          run: () => {
+            order.push("storage");
+          },
+        },
+        {
+          name: "home-lock",
+          run: () => {
+            order.push("home-lock");
+          },
+        },
+      ],
+      write: () => {},
+      onSettled: () => {},
+    });
+    await shutdown();
+    assert.deepEqual(order, ["waits", "listener", "storage", "home-lock"]);
+  });
+
+  it("a throwing cancel step does not stop the listener step", async () => {
+    const order: string[] = [];
+    const writes: string[] = [];
+    const settled: number[] = [];
+    const shutdown = createShutdown({
+      steps: [
+        {
+          name: "waits",
+          run: () => {
+            order.push("waits");
+            throw new Error("boom");
+          },
+        },
+        {
+          name: "listener",
+          run: () => {
+            order.push("listener");
+          },
+        },
+        {
+          name: "storage",
+          run: () => {
+            order.push("storage");
+          },
+        },
+        {
+          name: "home-lock",
+          run: () => {
+            order.push("home-lock");
+          },
+        },
+      ],
+      write: (text) => writes.push(text),
+      onSettled: (code) => settled.push(code),
+    });
+    await shutdown();
+    assert.deepEqual(order, ["waits", "listener", "storage", "home-lock"]);
+    assert.deepEqual(settled, [1]);
+    assert.equal(
+      writes.filter((line) => /^kanthord: shutdown: waits failed: /.test(line))
+        .length,
+      1,
+    );
+  });
+
+  it("the production steps run cancelWaits before listener close through the shared factory", async () => {
+    const order: string[] = [];
+    const steps = createShutdownSteps({
+      cancelWaits: () => {
+        order.push("cancelWaits");
+      },
+      listening: {
+        close: () => {
+          order.push("listener.close");
+          return Promise.resolve();
+        },
+      },
+      storage: {
+        close: () => {
+          order.push("storage.close");
+        },
+      },
+      held: {
+        release: () => {
+          order.push("held.release");
+        },
+      },
+    });
+    assert.deepEqual(
+      steps.map((step: ShutdownStep) => step.name),
+      ["waits", "listener", "storage", "home-lock"],
+    );
+
+    const writes: string[] = [];
+    let settledCode: number | undefined;
+    const shutdown = createShutdown({
+      steps,
+      write: (text) => writes.push(text),
+      onSettled: (code) => {
+        settledCode = code;
+      },
+    });
+    await shutdown();
+
+    assert.deepEqual(order, [
+      "cancelWaits",
+      "listener.close",
+      "storage.close",
+      "held.release",
+    ]);
+    assert.equal(settledCode, 0);
+    assert.deepEqual(writes, ["kanthord: stopped\n"]);
   });
 });

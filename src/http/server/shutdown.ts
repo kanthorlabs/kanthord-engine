@@ -41,3 +41,34 @@ export function createShutdown(
     return started;
   };
 }
+
+export function createShutdownSteps(
+  dependencies: Readonly<{
+    cancelWaits: () => void;
+    listening: { close(): Promise<void> };
+    storage: { close(): void };
+    held: { release(): void };
+  }>,
+): readonly ShutdownStep[] {
+  return [
+    {
+      name: "waits",
+      run: () => {
+        dependencies.cancelWaits();
+      },
+    },
+    { name: "listener", run: () => dependencies.listening.close() },
+    {
+      name: "storage",
+      run: () => {
+        dependencies.storage.close();
+      },
+    },
+    {
+      name: "home-lock",
+      run: () => {
+        dependencies.held.release();
+      },
+    },
+  ];
+}

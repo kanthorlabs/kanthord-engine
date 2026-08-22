@@ -549,6 +549,22 @@ describe("src/main.test", () => {
     );
   });
 
+  it("main builds the shutdown steps through the shared factory, not inline", () => {
+    const source = readFileSync(
+      resolve(import.meta.dirname, "./main.ts"),
+      "utf8",
+    );
+    assert.ok(
+      source.includes("createShutdownSteps("),
+      "main.ts must build the shutdown steps with the shared factory",
+    );
+    assert.equal(
+      source.includes('name: "waits"'),
+      false,
+      "the steps must come from the shared factory, not an inline array in main.ts",
+    );
+  });
+
   it("a daemon whose configured actor names a registered harness refuses to start", async () => {
     const refusalHome = createTemporaryHome();
     try {

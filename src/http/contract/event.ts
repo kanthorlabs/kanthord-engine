@@ -14,6 +14,11 @@ export const eventListRequest = cursorRequest.extend({
   type: z.string().min(1).optional(),
   actorKind: z.enum(eventActorKinds).optional(),
   actor: z.string().min(1).optional(),
+  wait: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? Number.NaN : value,
+    z.coerce.number().int().min(0).max(60).optional(),
+  ),
 });
 
 export const eventView = z.strictObject({
@@ -40,6 +45,7 @@ export const eventListExamples: OperationExamples = {
     type: "node.state.changed",
     actorKind: "daemon",
     actor: "kanthord",
+    wait: 5,
   },
   success: {
     events: [

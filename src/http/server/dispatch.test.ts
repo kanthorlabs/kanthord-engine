@@ -10,6 +10,7 @@ import { routeMiddleware } from "./route.ts";
 import { dispatchMiddleware } from "./dispatch.ts";
 import { createApp, BindingError } from "./app.ts";
 import type { Handler, HandlerContext, TransportSettings } from "./app.ts";
+import { noopWaits } from "../../../test/helpers/wait-registry.ts";
 import { httpError } from "../contract/errors.ts";
 import { registry } from "../contract/registry.ts";
 import { renderPath } from "../contract/path.ts";
@@ -140,6 +141,7 @@ describe("src/http/server/dispatch.test", () => {
           unimplemented: [],
           resolveActor,
           onInternalError: () => {},
+          waits: noopWaits(),
         }),
       (error: unknown) =>
         error instanceof BindingError &&
@@ -157,6 +159,7 @@ describe("src/http/server/dispatch.test", () => {
           unimplemented: [...unimplementedFor(both), "system.status"],
           resolveActor,
           onInternalError: () => {},
+          waits: noopWaits(),
         }),
       (error: unknown) =>
         error instanceof BindingError &&
@@ -174,6 +177,7 @@ describe("src/http/server/dispatch.test", () => {
           unimplemented: unimplementedFor(invented),
           resolveActor,
           onInternalError: () => {},
+          waits: noopWaits(),
         }),
       (error: unknown) =>
         error instanceof BindingError && error.message.includes("zzz.invented"),
@@ -190,6 +194,7 @@ describe("src/http/server/dispatch.test", () => {
           unimplemented: unimplementedFor(stubbed),
           resolveActor,
           onInternalError: () => {},
+          waits: noopWaits(),
         }),
       (error: unknown) =>
         error instanceof BindingError && error.message.includes("node.abandon"),
@@ -205,6 +210,7 @@ describe("src/http/server/dispatch.test", () => {
           unimplemented: ["node.abandon"],
           resolveActor,
           onInternalError: () => {},
+          waits: noopWaits(),
         }),
       (error: unknown) =>
         error instanceof BindingError && error.message.includes("node.abandon"),
@@ -222,6 +228,7 @@ describe("src/http/server/dispatch.test", () => {
         unimplemented,
         resolveActor,
         onInternalError: () => {},
+        waits: noopWaits(),
       }),
     );
   });

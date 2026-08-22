@@ -203,6 +203,13 @@ function buildSchema(): Record<string, unknown> {
           env: "KANTHORD_HTTP_IDEMPOTENCY_MAX_BYTES",
         },
       },
+      event: {
+        maxWait: {
+          format: "nonNegativeInteger",
+          default: 30,
+          env: "KANTHORD_HTTP_EVENT_MAX_WAIT",
+        },
+      },
     },
     tools: {
       git: {
@@ -346,6 +353,7 @@ export class ConvictConfig implements Config {
       ["KANTHORD_HTTP_IDEMPOTENCY_MAX_BYTES", "http.idempotency.maxBytes"],
       ["KANTHORD_ATTEMPT_LIMIT", "attemptLimit"],
       ["KANTHORD_LEASE_TTL_MS", "leaseTtlMs"],
+      ["KANTHORD_HTTP_EVENT_MAX_WAIT", "http.event.maxWait"],
     ];
     for (const [envVar, configPath] of idempotencyEnvIntegers) {
       const rawValue = input.env[envVar];
@@ -495,6 +503,9 @@ export class ConvictConfig implements Config {
             joinTimeout: config.get("http.idempotency.joinTimeout") as number,
             maxEntries: config.get("http.idempotency.maxEntries") as number,
             maxBytes: config.get("http.idempotency.maxBytes") as number,
+          },
+          event: {
+            maxWait: config.get("http.event.maxWait") as number,
           },
         },
         tools: {

@@ -10,6 +10,7 @@ import { authMiddleware } from "./auth.ts";
 import { authorizeMiddleware } from "./authorize.ts";
 import { dispatchMiddleware } from "./dispatch.ts";
 import { envelopeMiddleware } from "./envelope.ts";
+import type { WaitRegistry } from "./event/wait.ts";
 import { hostMiddleware } from "./host.ts";
 import { createIdempotency } from "./idempotency.ts";
 import { defaultIdempotencySettings } from "./idempotency-store.ts";
@@ -53,9 +54,10 @@ export type AppDependencies = Readonly<{
   idempotency?: IdempotencySettings;
   now?: () => number;
   schedule?: Schedule;
+  waits: WaitRegistry;
 }>;
 
-const systemSchedule: Schedule = (milliseconds, callback) => {
+export const systemSchedule: Schedule = (milliseconds, callback) => {
   const timer = setTimeout(callback, milliseconds);
   timer.unref();
   return () => clearTimeout(timer);
@@ -63,7 +65,12 @@ const systemSchedule: Schedule = (milliseconds, callback) => {
 
 export class BindingError extends Error {}
 
-export function createApp(dependencies: AppDependencies): Koa {
+export type App = Readonly<{
+  app: Koa;
+  cancelWaits: () => void;
+}>;
+
+export function createApp(dependencies: AppDependencies): App {
   const offenders = bindingOffenders(dependencies);
   if (offenders.length > 0) {
     throw new BindingError(
@@ -97,7 +104,12 @@ export function createApp(dependencies: AppDependencies): Koa {
     }).middleware,
   );
   app.use(dispatchMiddleware({ handlers: dependencies.handlers }));
-  return app;
+  return {
+    app,
+    cancelWaits: () => {
+      dependencies.waits.cancelAll();
+    },
+  };
 }
 
 function bodyParserForHandled(

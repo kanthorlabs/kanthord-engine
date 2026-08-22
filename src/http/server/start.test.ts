@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { createApp } from "./app.ts";
 import type { Handler } from "./app.ts";
+import { noopWaits } from "../../../test/helpers/wait-registry.ts";
 import { listen } from "./start.ts";
 import { HttpError } from "../contract/errors.ts";
 import { systemDbResponse, systemHealthResponse } from "../contract/system.ts";
@@ -22,7 +23,7 @@ import type { ClientDependencies } from "../../cli/client.ts";
 import { exitCodeForError } from "../../cli/exit-code.ts";
 
 function buildApp() {
-  return createApp({
+  const created = createApp({
     settings: {
       token: "test-token",
       allowedHosts: ["kanthord.test"],
@@ -32,7 +33,10 @@ function buildApp() {
     unimplemented: unimplementedFor({}),
     resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
     onInternalError: () => {},
+    waits: noopWaits(),
   });
+  const { app } = created;
+  return app;
 }
 
 describe("src/http/server/start.test", () => {
@@ -100,7 +104,7 @@ describe("src/http/server/start.test", () => {
         readMigrationStatus: () => readMigrationStatus({ storage }),
       }),
     };
-    const app = createApp({
+    const created = createApp({
       settings: {
         token: "test-token",
         allowedHosts: [`127.0.0.1:${port}`],
@@ -110,7 +114,9 @@ describe("src/http/server/start.test", () => {
       unimplemented: unimplementedFor(handlers),
       resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
       onInternalError: () => {},
+      waits: noopWaits(),
     });
+    const { app } = created;
     const server = await listen(app, { bind: "127.0.0.1", port });
     after(async () => {
       await server.close();

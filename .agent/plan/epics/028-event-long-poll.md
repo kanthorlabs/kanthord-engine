@@ -45,13 +45,23 @@ Stated once, here, so no later reader re-opens it.
 `eventListRequest` at `src/http/contract/event.ts:11-17` extends `cursorRequest`. It gains one member:
 
 ```ts
-wait: z.coerce.number().int().min(0).max(60).optional(),
+wait: z.preprocess(
+  (value) =>
+    typeof value === "string" && value.trim() === "" ? Number.NaN : value,
+  z.coerce.number().int().min(0).max(60).optional(),
+),
 ```
 
 `z.coerce` because every query value arrives as a string, exactly as `limit` already does in
-`src/http/contract/cursor.ts`. An absent `wait` and `wait=0` both answer immediately, so **every
-existing client keeps its exact behaviour** and this is an additive optional request field — which is
-what EPIC 023's D1 permits inside `/v1`.
+`src/http/contract/cursor.ts`. The `z.preprocess` guard refuses an empty value. `z.coerce.number()`
+turns `""` into `0`, so `?wait=` would silently mean "answer at once" and a hot-polling client bug
+would look like a correct request. The guard maps an empty or whitespace-only string to `NaN`, and
+the integer check then answers `400 invalid-request`.
+
+An absent `wait` and `wait=0` both answer immediately, so **every existing client keeps its exact
+behaviour** and this is an additive optional request field — which is what EPIC 023's D1 permits
+inside `/v1`. The guard changes no rendered schema: `z.toJSONSchema` renders `wait` as
+`{"type":"integer","minimum":0,"maximum":60}` with or without it.
 
 `singleValued` at `src/http/server/single.ts:5-23` already refuses a repeated key, and the handler at
 `src/http/server/event/list-event.ts:18` already turns a parse failure into `400 invalid-request`. A

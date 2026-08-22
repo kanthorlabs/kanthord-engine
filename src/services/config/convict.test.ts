@@ -1972,6 +1972,160 @@ describe("src/services/config/convict.test", () => {
     });
   });
 
+  describe("http.event", () => {
+    it("a config file that omits http.event yields the default maxWait of 30", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile());
+        const result = config.load(loadInput(dir, filePath));
+        assert.deepEqual(result.settings.http.event, { maxWait: 30 });
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("a config file naming event: { maxWait: 10 } yields 10", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              ...(validFile().http as object),
+              event: { maxWait: 10 },
+            },
+          }),
+        );
+        const result = config.load(loadInput(dir, filePath));
+        assert.equal(result.settings.http.event.maxWait, 10);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    for (const [key, value] of [
+      ["maxWait", -1],
+      ["maxWait", 1.5],
+    ] as const) {
+      it(`event: { ${key}: ${JSON.stringify(value)} } throws config-invalid`, () => {
+        const dir = tmpDir();
+        try {
+          const filePath = writeJson(
+            dir,
+            validFile({
+              http: {
+                ...(validFile().http as object),
+                event: { [key]: value },
+              },
+            }),
+          );
+          assert.throws(
+            () => config.load(loadInput(dir, filePath)),
+            (err: any) => {
+              assert.equal(err.code, "config-invalid");
+              return true;
+            },
+          );
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
+    }
+
+    it("an unknown key http.event.sweepInterval throws config-invalid, proving strict mode", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              ...(validFile().http as object),
+              event: { sweepInterval: 1 },
+            },
+          }),
+        );
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-invalid");
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("KANTHORD_HTTP_EVENT_MAX_WAIT=45 yields the number 45", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile());
+        const result = config.load(
+          loadInput(dir, filePath, {
+            env: { KANTHORD_HTTP_EVENT_MAX_WAIT: "45" },
+          }),
+        );
+        assert.equal(result.settings.http.event.maxWait, 45);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("KANTHORD_HTTP_EVENT_MAX_WAIT=0 yields maxWait 0", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile());
+        const result = config.load(
+          loadInput(dir, filePath, {
+            env: { KANTHORD_HTTP_EVENT_MAX_WAIT: "0" },
+          }),
+        );
+        assert.equal(result.settings.http.event.maxWait, 0);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("KANTHORD_HTTP_EVENT_MAX_WAIT=abc throws", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile());
+        assert.throws(() =>
+          config.load(
+            loadInput(dir, filePath, {
+              env: { KANTHORD_HTTP_EVENT_MAX_WAIT: "abc" },
+            }),
+          ),
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("an env value overrides a config-file value: file maxWait 10 plus env 45 yields 45", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({
+            http: {
+              ...(validFile().http as object),
+              event: { maxWait: 10 },
+            },
+          }),
+        );
+        const result = config.load(
+          loadInput(dir, filePath, {
+            env: { KANTHORD_HTTP_EVENT_MAX_WAIT: "45" },
+          }),
+        );
+        assert.equal(result.settings.http.event.maxWait, 45);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+  });
+
   describe("search-order loading", () => {
     it("config file at join(cwd, kanthord.config.json) loads with no explicitConfigPath", () => {
       const dir = tmpDir();

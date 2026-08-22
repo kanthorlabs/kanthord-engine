@@ -30,6 +30,7 @@ const nonEventLiterals = [
   "http.allowedHosts",
   "http.allowedOrigins",
   "http.bind",
+  "http.event.maxWait",
   "http.idempotency.joinTimeout",
   "http.idempotency.maxBytes",
   "http.idempotency.maxEntries",

@@ -25,6 +25,7 @@ import type { ListActorInput } from "../../../queries/actor/list-actor.ts";
 import { showActor } from "../../../queries/actor/show-actor.ts";
 import type { ShowActorInput } from "../../../queries/actor/show-actor.ts";
 import { bindingOffenders, unimplementedFor } from "../app.ts";
+import { noopWaits } from "../../../../test/helpers/wait-registry.ts";
 import type {
   AppDependencies,
   Handler,
@@ -209,6 +210,7 @@ describe("src/http/server/actor/registration.test", () => {
       unimplemented,
       onInternalError: () => {},
       resolveActor: built.resolveActorFor,
+      waits: noopWaits(),
     };
     assert.deepEqual(bindingOffenders(dependencies), []);
   });

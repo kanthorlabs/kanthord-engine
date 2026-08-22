@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { createApp } from "./app.ts";
 import type { Handler, TransportSettings } from "./app.ts";
+import { noopWaits } from "../../../test/helpers/wait-registry.ts";
 import { registry } from "../contract/registry.ts";
 import { renderPath } from "../contract/path.ts";
 import {
@@ -355,14 +356,41 @@ describe("src/http/server/app.test", () => {
       allowedHosts: ["kanthord.test"],
       allowedOrigins: [],
     };
-    const app = createApp({
+    const created = createApp({
       settings,
       handlers: {},
       unimplemented: unimplementedFor({}),
       resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
       onInternalError: () => {},
+      waits: noopWaits(),
     });
+    const { app } = created;
     assert.equal(app.proxy, false);
+  });
+
+  it("createApp returns an app and a cancel handle, and the handle reaches the registry", () => {
+    let cancelled = false;
+    const waits = {
+      wait: () => Promise.resolve([]),
+      cancelAll: () => {
+        cancelled = true;
+      },
+    };
+    const result = createApp({
+      settings: {
+        token: "test-token",
+        allowedHosts: ["kanthord.test"],
+        allowedOrigins: [],
+      },
+      handlers: {},
+      unimplemented: unimplementedFor({}),
+      resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
+      onInternalError: () => {},
+      waits,
+    });
+    assert.deepEqual(Object.keys(result).sort(), ["app", "cancelWaits"]);
+    result.cancelWaits();
+    assert.equal(cancelled, true);
   });
 
   it("binding system.health and system.db leaves forty-two unimplemented ids", () => {

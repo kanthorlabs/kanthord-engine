@@ -52,6 +52,7 @@ export const fieldDecisions: readonly string[] = [
   "event.list.query#/properties/subject required=false nullable=false enum=-",
   "event.list.query#/properties/subjectKind required=false nullable=false enum=-",
   "event.list.query#/properties/type required=false nullable=false enum=-",
+  "event.list.query#/properties/wait required=false nullable=false enum=-",
   "event.list.response#/properties/events required=true nullable=false enum=-",
   "event.list.response#/properties/events/items/properties/actorId required=true nullable=false enum=-",
   "event.list.response#/properties/events/items/properties/actorKind required=true nullable=false enum=human,daemon,harness",

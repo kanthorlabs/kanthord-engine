@@ -124,7 +124,12 @@ describe("src/services/home-lock/startup.test", () => {
     assert.deepEqual(await authorized.json(), {
       status: "ok",
       version: KANTHORD_VERSION,
-      capabilities: ["external-drive", "per-node-write", "project-graph"],
+      capabilities: [
+        "event-wait",
+        "external-drive",
+        "per-node-write",
+        "project-graph",
+      ],
       dependencies: [{ name: "storage", status: "ok" }],
     });
   });
