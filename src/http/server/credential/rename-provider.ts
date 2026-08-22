@@ -1,6 +1,7 @@
 import type { Handler } from "../app.ts";
 import { providerRenameRequest } from "../../contract/credential.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import type { ProviderView } from "../../../domain/provider-view.ts";
 import type { RenameProviderInput } from "../../../commands/provider/rename-provider.ts";
 import { toHttpError } from "./refusals.ts";
@@ -19,7 +20,11 @@ export function renameProviderHandler(
     }
     const parsed = providerRenameRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError("invalid-request", "the provider rename body is invalid");
+      throw invalidRequest(
+        "body-schema",
+        "the provider rename body is invalid",
+        parsed.error,
+      );
     }
     try {
       const view = dependencies.renameProvider({

@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { projectCreateRequest } from "../../contract/project.ts";
 import type { CreateProjectInput } from "../../../commands/project/create-project.ts";
 import type { ProjectView } from "../../../domain/project-view.ts";
@@ -15,7 +16,11 @@ export function createProjectHandler(
   return async (context) => {
     const parsed = projectCreateRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError("invalid-request", "the project create body is invalid");
+      throw invalidRequest(
+        "body-schema",
+        "the project create body is invalid",
+        parsed.error,
+      );
     }
     try {
       const view = dependencies.createProject({

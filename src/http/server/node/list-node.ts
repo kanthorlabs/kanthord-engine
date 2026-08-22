@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { nodeListQuery } from "../../contract/graph.ts";
 import { singleValued } from "../single.ts";
 import type {
@@ -17,7 +18,11 @@ export function listNodeHandler(
   return (context) => {
     const parsed = nodeListQuery.safeParse(singleValued(context.query));
     if (!parsed.success) {
-      throw httpError("invalid-request", "the node filters are not valid");
+      throw invalidRequest(
+        "query-schema",
+        "the node filters are not valid",
+        parsed.error,
+      );
     }
     const nodes = dependencies.listNodes(parsed.data);
     return { status: 200, body: { nodes } };

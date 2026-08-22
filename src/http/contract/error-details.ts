@@ -101,9 +101,16 @@ export const credentialRejectedDetails = z.strictObject({
   failure: z.enum(credentialFailures),
 });
 
+export const requestIssue = z.strictObject({
+  path: z.string(),
+  code: z.string().min(1),
+  message: z.string().min(1),
+});
+
 export const invalidRequestDetails = z.strictObject({
   refusal: z.string().min(1),
   detail: z.string().optional(),
+  issues: z.array(requestIssue).min(1).optional(),
 });
 
 export const planImportInvalidRequestDetails = invalidRequestDetails.extend({

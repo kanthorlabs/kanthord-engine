@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { providerCatalogRequest } from "../../contract/credential.ts";
 import type {
   ReadCatalogInput,
@@ -19,7 +20,11 @@ export function readCatalogHandler(
       singleValued(context.query),
     );
     if (!parsed.success) {
-      throw httpError("invalid-request", "the provider filter is not valid");
+      throw invalidRequest(
+        "query-schema",
+        "the provider filter is not valid",
+        parsed.error,
+      );
     }
     return { status: 200, body: dependencies.readCatalog(parsed.data) };
   };

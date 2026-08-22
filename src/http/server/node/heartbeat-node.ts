@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { nodeHeartbeatRequest } from "../../contract/execution.ts";
 import type { HeartbeatNodeInput } from "../../../commands/node/heartbeat-node.ts";
 import { toHttpError } from "./refusals.ts";
@@ -18,7 +19,11 @@ export function heartbeatNodeHandler(
     }
     const parsed = nodeHeartbeatRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError("invalid-request", "the heartbeat body is invalid");
+      throw invalidRequest(
+        "body-schema",
+        "the heartbeat body is invalid",
+        parsed.error,
+      );
     }
     try {
       const result = dependencies.heartbeatNode({

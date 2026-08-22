@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import type { Handler } from "../app.ts";
 import { blobHash } from "../../../domain/blob.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidPathParameter } from "../invalid-request.ts";
 import type { BlobView } from "../../../queries/blob/show-blob.ts";
 import { parseRange } from "./range.ts";
 
@@ -15,8 +16,11 @@ export function showBlobHandler(
 ): Handler {
   return (context) => {
     const hash = context.parameters["hash"];
-    if (hash === undefined || !blobHash.safeParse(hash).success) {
-      throw httpError("not-found", `no blob ${hash ?? ""}`);
+    if (hash === undefined) {
+      throw invalidPathParameter("no blob hash in the request path", "hash");
+    }
+    if (!blobHash.safeParse(hash).success) {
+      throw invalidPathParameter(`${hash} is not a blob hash`, "hash");
     }
     const record = dependencies.showBlob({ hash });
     if (record === null) {

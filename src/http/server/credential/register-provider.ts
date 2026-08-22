@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { providerRegisterRequest } from "../../contract/credential.ts";
 import type { ProviderView } from "../../../domain/provider-view.ts";
 import type { RegisterProviderInput } from "../../../commands/provider/register-provider.ts";
@@ -15,9 +16,10 @@ export function registerProviderHandler(
   return (context) => {
     const parsed = providerRegisterRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError(
-        "invalid-request",
+      throw invalidRequest(
+        "body-schema",
         "the provider registration body is invalid",
+        parsed.error,
       );
     }
     try {

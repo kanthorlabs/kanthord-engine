@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { repositoryInspectRequest } from "../../contract/repository.ts";
 import type {
   InspectRepositoryInput,
@@ -19,9 +20,10 @@ export function inspectRepositoryHandler(
   return async (context) => {
     const parsed = repositoryInspectRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError(
-        "invalid-request",
+      throw invalidRequest(
+        "body-schema",
         "the repository inspection body is invalid",
+        parsed.error,
       );
     }
     try {
