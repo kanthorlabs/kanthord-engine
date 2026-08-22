@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { repositoryRegisterRequest } from "../../contract/repository.ts";
 import type { RegisterRepositoryInput } from "../../../commands/repository/register-repository.ts";
 import type { RepositoryView } from "../../../domain/repository.ts";
@@ -17,9 +18,10 @@ export function registerRepositoryHandler(
   return async (context) => {
     const parsed = repositoryRegisterRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError(
-        "invalid-request",
+      throw invalidRequest(
+        "body-schema",
         "the repository registration body is invalid",
+        parsed.error,
       );
     }
     try {

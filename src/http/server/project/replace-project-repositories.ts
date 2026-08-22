@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { projectRepositoriesRequest } from "../../contract/project.ts";
 import type { ReplaceProjectRepositoriesInput } from "../../../commands/project/replace-project-repositories.ts";
 import type { ProjectView } from "../../../domain/project-view.ts";
@@ -21,9 +22,10 @@ export function replaceProjectRepositoriesHandler(
     }
     const parsed = projectRepositoriesRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError(
-        "invalid-request",
+      throw invalidRequest(
+        "body-schema",
         "the project repositories body is invalid",
+        parsed.error,
       );
     }
     try {

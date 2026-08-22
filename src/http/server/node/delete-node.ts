@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { nodeDeleteRequest } from "../../contract/graph.ts";
 import type { DeleteNodeInput } from "../../../commands/node/delete-node.ts";
 import type { DeleteNodeResult } from "../../../commands/node/delete-node.ts";
@@ -19,7 +20,11 @@ export function deleteNodeHandler(
     }
     const parsed = nodeDeleteRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError("invalid-request", "the node delete body is invalid");
+      throw invalidRequest(
+        "body-schema",
+        "the node delete body is invalid",
+        parsed.error,
+      );
     }
     try {
       const result = dependencies.deleteNode({

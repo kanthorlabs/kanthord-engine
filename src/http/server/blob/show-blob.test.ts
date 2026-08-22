@@ -145,7 +145,7 @@ describe("src/http/server/blob/show-blob.test", () => {
     assert.ok(String(response.body.error.message).includes(hash));
   });
 
-  it("a malformed hash answers 404 and showBlob is never called", async () => {
+  it("a malformed hash answers 400 naming the hash parameter", async () => {
     let calls = 0;
     const app = await handlerApp(() => {
       calls += 1;
@@ -153,11 +153,19 @@ describe("src/http/server/blob/show-blob.test", () => {
     });
     const response = await app.get("/v1/blob/notahash");
 
-    assert.equal(response.status, 404);
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "invalid-request");
+    assert.equal(response.body.error.details.refusal, "path-parameter");
+    assert.deepEqual(
+      response.body.error.details.issues.map(
+        (issue: Readonly<{ path: string }>) => issue.path,
+      ),
+      ["hash"],
+    );
     assert.equal(calls, 0);
   });
 
-  it("an uppercase hex hash answers 404 and showBlob is never called", async () => {
+  it("an uppercase hex hash answers 400 and showBlob is never called", async () => {
     let calls = 0;
     const app = await handlerApp(() => {
       calls += 1;
@@ -166,7 +174,7 @@ describe("src/http/server/blob/show-blob.test", () => {
     const uppercase = `sha256:${"A".repeat(64)}`;
     const response = await app.get(`/v1/blob/${uppercase}`);
 
-    assert.equal(response.status, 404);
+    assert.equal(response.status, 400);
     assert.equal(calls, 0);
   });
 

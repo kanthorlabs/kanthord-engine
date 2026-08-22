@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { actorRegisterRequest } from "../../contract/actor.ts";
 import type {
   RegisterActorInput,
@@ -18,9 +19,10 @@ export function registerActorHandler(
   return (context) => {
     const parsed = actorRegisterRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError(
-        "invalid-request",
+      throw invalidRequest(
+        "body-schema",
         "the actor registration body is invalid",
+        parsed.error,
       );
     }
     try {

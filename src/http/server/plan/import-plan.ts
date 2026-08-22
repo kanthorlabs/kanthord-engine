@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { planImportRequest } from "../../contract/graph.ts";
 import type { ImportPlanInput } from "../../../commands/plan/import-plan.ts";
 import type { ImportPlanResult } from "../../../commands/plan/import-plan.ts";
@@ -19,7 +20,11 @@ export function importPlanHandler(
     }
     const parsed = planImportRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError("invalid-request", "the plan import body is invalid");
+      throw invalidRequest(
+        "body-schema",
+        "the plan import body is invalid",
+        parsed.error,
+      );
     }
     try {
       const result = dependencies.importPlan({

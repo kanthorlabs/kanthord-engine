@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { providerInspectRequest } from "../../contract/credential.ts";
 import type {
   InspectProviderInput,
@@ -19,9 +20,10 @@ export function inspectProviderHandler(
   return async (context) => {
     const parsed = providerInspectRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError(
-        "invalid-request",
+      throw invalidRequest(
+        "body-schema",
         "the provider inspection body is invalid",
+        parsed.error,
       );
     }
     try {

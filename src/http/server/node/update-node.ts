@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { nodeUpdateRequest } from "../../contract/graph.ts";
 import type { UpdateNodeInput } from "../../../commands/node/update-node.ts";
 import type { UpdateNodeResult } from "../../../commands/node/update-node.ts";
@@ -19,7 +20,11 @@ export function updateNodeHandler(
     }
     const parsed = nodeUpdateRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError("invalid-request", "the node update body is invalid");
+      throw invalidRequest(
+        "body-schema",
+        "the node update body is invalid",
+        parsed.error,
+      );
     }
     try {
       const result = dependencies.updateNode({

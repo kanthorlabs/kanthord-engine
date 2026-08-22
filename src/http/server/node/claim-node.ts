@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { nodeClaimRequest } from "../../contract/execution.ts";
 import type { ClaimNodeInput } from "../../../commands/node/claim-node.ts";
 import { toHttpError } from "./refusals.ts";
@@ -18,7 +19,11 @@ export function claimNodeHandler(
     }
     const parsed = nodeClaimRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError("invalid-request", "the claim body is invalid");
+      throw invalidRequest(
+        "body-schema",
+        "the claim body is invalid",
+        parsed.error,
+      );
     }
     try {
       const result = dependencies.claimNode({

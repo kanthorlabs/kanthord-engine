@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { nodeCreateRequest } from "../../contract/graph.ts";
 import type { CreateNodeInput } from "../../../commands/node/create-node.ts";
 import type { CreateNodeResult } from "../../../commands/node/create-node.ts";
@@ -19,7 +20,11 @@ export function createNodeHandler(
     }
     const parsed = nodeCreateRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError("invalid-request", "the node create body is invalid");
+      throw invalidRequest(
+        "body-schema",
+        "the node create body is invalid",
+        parsed.error,
+      );
     }
     try {
       const result = dependencies.createNode({

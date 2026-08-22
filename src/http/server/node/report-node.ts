@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { nodeReportRequest } from "../../contract/outcome.ts";
 import type {
   ReportOutcomeInput,
@@ -21,7 +22,11 @@ export function reportNodeHandler(
     }
     const parsed = nodeReportRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError("invalid-request", "the report body is invalid");
+      throw invalidRequest(
+        "body-schema",
+        "the report body is invalid",
+        parsed.error,
+      );
     }
     try {
       const result = dependencies.reportOutcome({

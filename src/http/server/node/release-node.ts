@@ -1,5 +1,6 @@
 import type { Handler } from "../app.ts";
 import { httpError } from "../../contract/errors.ts";
+import { invalidRequest } from "../invalid-request.ts";
 import { nodeReleaseRequest } from "../../contract/execution.ts";
 import type { ReleaseNodeInput } from "../../../commands/node/release-node.ts";
 import { toHttpError } from "./refusals.ts";
@@ -18,7 +19,11 @@ export function releaseNodeHandler(
     }
     const parsed = nodeReleaseRequest.safeParse(context.body);
     if (!parsed.success) {
-      throw httpError("invalid-request", "the release body is invalid");
+      throw invalidRequest(
+        "body-schema",
+        "the release body is invalid",
+        parsed.error,
+      );
     }
     try {
       const result = dependencies.releaseNode({
