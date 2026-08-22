@@ -115,17 +115,70 @@ Author with `/author`. The sequence below is the dependency order; each story is
 
 ## Verification gate
 
-- `npm run verify` is clean: `typecheck`, the full `node:test` suite, `eslint .`, and
+Gates: `npm run verify`
+
+Proof:
+
+```bash
+node --test \
+  src/domain/repository.test.ts \
+  src/services/storage/migration-0009-one-branch.test.ts \
+  src/services/storage/migration-0001-core-entities.test.ts \
+  src/services/storage/sqlite.test.ts \
+  src/services/git/seed.test.ts \
+  src/services/git/preflight.test.ts \
+  src/services/git/clone.test.ts \
+  src/services/git/binary.test.ts \
+  src/queries/repository/show-repository.test.ts \
+  src/queries/repository/list-repository.test.ts \
+  src/commands/repository/register-repository.test.ts \
+  src/http/contract/registry.test.ts \
+  src/http/contract/parity.test.ts \
+  src/http/contract/coverage.test.ts \
+  src/http/contract/openapi.test.ts \
+  src/http/contract/example.test.ts \
+  src/http/contract/path.test.ts \
+  src/http/contract/event-payload.test.ts \
+  src/http/server/repository/register-repository.test.ts \
+  src/http/server/repository/list-repository.test.ts \
+  src/http/server/repository/show-repository.test.ts \
+  src/cli/repository/register.test.ts \
+  src/cli/repository/show.test.ts \
+  src/cli/confirm.test.ts \
+  src/cli/reachability.test.ts \
+  src/cli/inventory.test.ts \
+  src/main.repository-branch.test.ts \
+  && echo "PASS EPIC-029"
+```
+
+`npm run contract:publish -- "$(mktemp -d)"` exits 0, and no emitted example names a dropped field.
+It is not in the Proof command because it writes outside the repository.
+
+Hermetic coverage required beyond the Proof:
+
+- **`npm run verify` is clean**: `typecheck`, the full `node:test` suite, `eslint .`, and
   `verify-db-status`.
-- A fresh database migrates 0001 through 0009, and `repository` holds no `landing_branch` and no
-  `publish_ref`.
-- A registration against the loopback fixture of EPIC 005 seeds a bare home whose only local head is
-  `refs/heads/<branch>`, asserted through `repository.show`.
-- An objective clone reports `feature/<node id>` as its checked-out branch, and the object-file link
-  count still proves isolation.
-- The registry equals the proposal contract, and `repository.landingBranch` appears in neither.
-- `npm run contract:publish` emits a master document that validates, and no example names a dropped
-  field.
+- **A fresh database migrates 0001 through 0009**, and `PRAGMA table_info(repository)` names `branch`
+  and names neither `landing_branch` nor `publish_ref`. The column list is asserted by value, not by
+  absence alone.
+- **The migration refuses a row it cannot migrate, and names it.** A `landing_branch` differing from
+  `upstream_branch`, and a `publish_ref` differing from `refs/heads/<upstream_branch>`, are each
+  refused. The refusal names one repository, chosen by `ORDER BY name`, so two divergent rows always
+  produce the same message. A refusal leaves the schema and the `migration` table untouched and
+  leaves no temporary object behind.
+- **A registration against the loopback fixture of EPIC 005** seeds a bare home whose only local head
+  is `refs/heads/<branch>`, asserted through `repository.show` in one daemon-backed test rather than
+  across two unit tests that never meet.
+- **The three refs are derived, never stored.** `repositoryView` reports `landingRef`, `trackingRef`
+  and `publishRef` rendered from `branch`, asserted by exact string for a branch name that contains a
+  slash.
+- **An objective clone reports `feature/<node id>` as its checked-out branch**, asserted through
+  `git symbolic-ref --quiet HEAD` against the fully-qualified ref, and the object-file link count
+  still proves isolation.
+- **The registry equals the proposal contract**, and `repository.landingBranch` appears in neither the
+  registry, the proposal, nor the path grammar.
+- **No test depends on a wall clock, a shared temporary directory, or an ambient git configuration.**
+  A test that needs a remote uses the loopback fixture of EPIC 005.
 
 ## Open items
 

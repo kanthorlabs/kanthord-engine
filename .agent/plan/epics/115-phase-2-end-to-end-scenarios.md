@@ -237,7 +237,7 @@ so it is also the one component that counts the calls and refuses the call over 
   the line `src/cli/credential/register.ts` prints at line 172, and it keeps that provider id. Then
   `kanthord onboard`, with `--git-credential fixture`,
   `--git-transport http-basic`, `--git-token-file <the delivered token>`, `--repository phase2`,
-  `--url <the fixture origin>`, `--upstream main`, `--project journey`,
+  `--url <the fixture origin>`, `--branch main`, `--project journey`,
   `--provider-credential model` and `--template nodejs`. Onboard therefore finds the named `llm` row
   in its `provider.list` read, skips the `llm-credential` step and stamps it as the default, which is
   the skip rule of EPIC 114, and it needs no `--provider`, no `--model` and no `--api-key-file`. **No
