@@ -18,33 +18,33 @@ This epic produces two artifacts.
 
 The parity surface, one row per behaviour, with the test that pins it:
 
-| #   | Behaviour                                                                           | Pinned by                                                      |
-| --- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| P1  | A routed operation with a bound handler parses a malformed body as `400`            | `dispatch.test.ts:93`, `register-provider.test.ts:110` (exist) |
-| P2  | A stubbed operation with a malformed body answers `501` and parses nothing          | `dispatch.test.ts:93` (exists)                                 |
-| P3  | A routed POST with no body reaches the handler with an empty object body            | `app.parity-body.test.ts`                                      |
-| P4  | A routed POST with `text/plain` reaches the handler with an empty object body       | `app.parity-body.test.ts`                                      |
-| P5  | A routed POST with a zero-length body reaches the handler with an empty object body | `app.parity-body.test.ts`                                      |
-| P6  | A routed operation with no bound handler answers `501` and parses nothing           | `app.parity-body.test.ts`                                      |
-| P7  | CORS headers survive an authentication failure                                      | `app.test.ts:151`, `app.test.ts:248` (exist)                   |
-| P8  | CORS headers survive a routing failure                                              | `app.parity-cors.test.ts`                                      |
-| P9  | CORS headers survive an internal error                                              | `app.parity-cors.test.ts`                                      |
-| P10 | CORS headers survive a handler refusal                                              | `app.parity-cors.test.ts`                                      |
-| P11 | `Vary: Origin` is present on every answer, allowed origin or not                    | `app.parity-cors.test.ts`                                      |
-| P12 | A preflight bypasses authentication                                                 | `app.test.ts:209` (exists)                                     |
-| P13 | A preflight bypasses route matching                                                 | `app.test.ts:220` (exists)                                     |
-| P14 | The `Host` check runs before the preflight answer                                   | `app.test.ts:184` (exists)                                     |
-| P15 | An `OPTIONS` with no `Origin` is not a preflight                                    | `app.test.ts:264` (exists)                                     |
-| P16 | A path segment is never percent-decoded                                             | `app.parity-path.test.ts`                                      |
-| P17 | A malformed percent escape in a path segment reaches route matching intact          | `app.parity-path.test.ts`                                      |
-| P18 | A duplicate request header reaches the handler joined with `", "`                   | `app.parity-path.test.ts`                                      |
-| P19 | Request header names reach the handler sorted bytewise and lower-cased              | `app.parity-path.test.ts`                                      |
-| P20 | Response header names are written bytewise sorted                                   | `dispatch.test.ts:352` (exists)                                |
-| P21 | Every handler result uses a status from the frozen set `[200, 206]`                 | `app.handler-result.test.ts`                                   |
-| P22 | Exactly one handler sets response headers, and it is the blob handler               | `app.handler-result.test.ts`                                   |
-| P23 | A JSON result serializes as `application/json`                                      | `app.handler-result.test.ts`                                   |
-| P24 | A `Buffer` result serializes as bytes with an exact `Content-Length`                | `app.handler-result.test.ts`                                   |
-| P25 | The one empty-body answer in the product is the `204` preflight                     | `app.handler-result.test.ts`                                   |
+| #   | Behaviour                                                                                     | Pinned by                                                      |
+| --- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| P1  | A routed operation with a bound handler parses a malformed body as `400`                      | `dispatch.test.ts:93`, `register-provider.test.ts:110` (exist) |
+| P2  | A stubbed operation with a malformed body answers `501` and parses nothing                    | `dispatch.test.ts:93` (exists)                                 |
+| P3  | A routed POST with no body reaches the handler with an empty object body                      | `app.parity-body.test.ts`                                      |
+| P4  | A routed POST with `text/plain` reaches the handler with an empty object body                 | `app.parity-body.test.ts`                                      |
+| P5  | A routed POST with a zero-length body reaches the handler with an empty object body           | `app.parity-body.test.ts`                                      |
+| P6  | A routed operation with no bound handler answers `501` and parses nothing                     | `app.parity-body.test.ts`                                      |
+| P7  | CORS headers survive an authentication failure                                                | `app.test.ts:151`, `app.test.ts:248` (exist)                   |
+| P8  | CORS headers survive a routing failure                                                        | `app.parity-cors.test.ts`                                      |
+| P9  | CORS headers survive an internal error                                                        | `app.parity-cors.test.ts`                                      |
+| P10 | CORS headers survive a handler refusal                                                        | `app.parity-cors.test.ts`                                      |
+| P11 | `Vary: Origin` is present on every answer the chain completes, and absent on a refused origin | `app.parity-cors.test.ts`                                      |
+| P12 | A preflight bypasses authentication                                                           | `app.test.ts:209` (exists)                                     |
+| P13 | A preflight bypasses route matching                                                           | `app.test.ts:220` (exists)                                     |
+| P14 | The `Host` check runs before the preflight answer                                             | `app.test.ts:184` (exists)                                     |
+| P15 | An `OPTIONS` with no `Origin` is not a preflight                                              | `app.test.ts:264` (exists)                                     |
+| P16 | A path segment is never percent-decoded                                                       | `app.parity-path.test.ts`                                      |
+| P17 | A malformed percent escape in a path segment reaches route matching intact                    | `app.parity-path.test.ts`                                      |
+| P18 | A duplicate request header reaches the handler joined with `", "`                             | `app.parity-path.test.ts`                                      |
+| P19 | Request header names reach the handler sorted bytewise and lower-cased                        | `app.parity-path.test.ts`                                      |
+| P20 | Response header names are written bytewise sorted                                             | `dispatch.test.ts:352` (exists)                                |
+| P21 | Every handler result uses a status from the frozen set `[200, 206]`                           | `app.handler-result.test.ts`                                   |
+| P22 | Exactly one handler sets response headers, and it is the blob handler                         | `app.handler-result.test.ts`                                   |
+| P23 | A JSON result serializes as `application/json`                                                | `app.handler-result.test.ts`                                   |
+| P24 | A `Buffer` result serializes as bytes with an exact `Content-Length`                          | `app.handler-result.test.ts`                                   |
+| P25 | The one empty-body answer in the product is the `204` preflight                               | `app.handler-result.test.ts`                                   |
 
 An existing row needs no new test. This epic adds the tests for P3–P6, P8–P11, P16–P19 and P21–P25.
 
@@ -81,8 +81,11 @@ An existing row needs no new test. This epic adds the tests for P3–P6, P8–P1
   headers on a `401`, a `404`, a `409` and a `500`. The one answer with no allow-origin header is an
   `origin-forbidden` refusal, because the origin middleware itself throws before it writes.
 
-- **`Vary: Origin` is unconditional.** `originMiddleware` writes it in a `finally` block, so it is
-  present on an allowed origin, on a missing origin and on a refusal.
+- **`Vary: Origin` covers every answer the chain completes.** `originMiddleware` writes it in a
+  `finally` block at `src/http/server/origin.ts:34`, so it is present on an allowed origin and on a
+  missing origin. A refused origin throws at `src/http/server/origin.ts:21` before that `try`, so
+  the `origin-forbidden` refusal carries neither `Access-Control-Allow-Origin` nor `Vary`. That is
+  the one answer with no `Vary`, and EPIC 032 reproduces it.
 
 - **A path segment is never percent-decoded.** Route matching splits the raw path on `/` and
   compares the literal segment. A `%2F` inside a path parameter reaches the handler as the four
@@ -128,27 +131,31 @@ held request`. State P3 to P6 as the body rule, P8 to P11 as the browser-defence
    `headers` property on a result. Drive `createTestApp` three times: a JSON handler answers `200`
    with `content-type` `application/json; charset=utf-8`; the blob handler answers `200` with
    `content-type` `application/octet-stream` and an exact `content-length`; the same handler with a
-   `Range` header answers `206` with an exact `content-range`. Assert the `204` preflight carries a
-   zero-length body.
+   `Range` header answers `206` with an exact `content-range`. Assert the `204` preflight carries an
+   empty response text and no `content-length` header.
 3. **Body-parsing parity.** Add `src/http/server/app.parity-body.test.ts`. Bind one recording
    handler for `repository.register` and assert the recorded `body` is `{}` for a POST with no body
    sent, for a POST with `Content-Type: text/plain` and the payload `hello`, and for a POST with
-   `Content-Type: application/json` and a zero-length payload. Assert a routed operation with no
-   bound handler answers `501` and never records a call, with a malformed payload and with a valid
-   one.
+   `Content-Type: application/json` and a zero-length payload. Assert `POST /v1/project`, the routed
+   `project.create` with no bound handler, answers `501` `not-implemented` and records no call, with
+   a malformed payload and with a valid one.
 4. **CORS parity.** Add `src/http/server/app.parity-cors.test.ts`. Configure
    `allowedOrigins: ["http://localhost:8080"]`. Assert `Access-Control-Allow-Origin` equals that
    origin and `Access-Control-Expose-Headers` equals `etag, accept-ranges, content-range` on: a
    `401` with no token, a `404` for an unmatched path, a `500` from a handler that throws a plain
-   `Error`, and a `409` from a handler that throws an `HttpError`. Assert `Vary` contains `Origin`
-   on each of those four, on a `200`, and on the `403` `origin-forbidden` refusal. Assert the
-   `origin-forbidden` refusal carries no `Access-Control-Allow-Origin`.
+   `Error`, and a `409` from a handler that throws an `HttpError`. Assert `Vary` equals `Origin` on
+   each of those four, on a `200`, and on a request with no `Origin` header. Assert the `403`
+   `origin-forbidden` refusal carries neither `Access-Control-Allow-Origin` nor `Vary`.
 5. **Path and header parity.** Add `src/http/server/app.parity-path.test.ts`. Bind one recording
-   handler for `blob.show`. Assert a request to a path whose parameter holds `%2F` records the
-   parameter as the literal `%2F`. Assert a request to a path whose parameter holds `%zz` reaches
-   route matching and answers the handler's own refusal, not a transport error. Assert two
-   `X-Kanthord-Client` request headers reach the handler as one value joined with `", "`. Assert the
-   recorded header names are lower-case and bytewise sorted.
+   handler for `blob.show`. Assert a `GET /v1/blob/aa%2Fbb` records the `hash` parameter as the
+   literal `aa%2Fbb`. Assert a `GET /v1/blob/aa%zz` matches the route and records the `hash`
+   parameter as the literal `aa%zz`, so a malformed escape produces no transport error. Send
+   `X-Kanthord-Client` as the array `["one", "two"]`, because superagent `.set` called twice
+   overwrites the value; assert the handler records `one, two`. On that same request, assert the
+   recorded header names deep-equal the literal
+   `["accept-encoding", "authorization", "connection", "host", "x-kanthord-client"]`, and on the two
+   `%2F` and `%zz` requests assert they deep-equal the literal
+   `["accept-encoding", "authorization", "connection", "host"]`.
 
 ## Verification gate
 
@@ -192,6 +199,8 @@ Hermetic coverage required beyond the Proof:
 - **The inventory table matches the tree by exact deep equality.** A test run after a handler file
   is added fails, and the failure names the new file. Prove it with a temporary file the test
   removes, or with a scan of a fixture directory. Never with a network call.
+- **P19 asserts the header-name list as a value.** The recorded names are compared against the
+  literal array by deep equality, never against a sortedness predicate and never against a count.
 - **The inventory asserts a value, never a count alone.** The status union is compared against the
   literal `[200, 206]`, and the header-setting file is compared against the literal
   `src/http/server/blob/show-blob.ts`.
@@ -215,13 +224,18 @@ Hermetic coverage required beyond the Proof:
   decoding today. The behaviour is therefore untested rather than decided. P16 and P17 record the
   current answer so a Hono port cannot change it by accident. A decision to decode is
   separate, and no epic declares it.
+- **The P19 header-name list carries three names the test client supplies.**
+  `accept-encoding`, `connection` and `host` come from supertest, not from the product. The literal
+  is still the right oracle, because a value assertion beats a predicate and the list is
+  deterministic for the pinned client. EPIC 033 replaces the harness, so EPIC 033 updates the
+  literal.
 - **The `", "` join for a duplicate request header is incidental.** Node already collapses most
   duplicate headers, and the join in `readHeaders` covers the rest. No handler reads a header that a
   client sends twice. P18 pins the current answer.
 - **The empty-object body for an absent request body is incidental.** The body parser produces `{}`,
   and every handler's zod schema then refuses it with the handler's own `400`. A transport that
-  produces `undefined` gives the same status through a different message. P3 to P5 pin the
-  current answer, and the message text is part of the assertion.
+  produces `undefined` gives the same status through a different message. P3 to P5 pin the recorded
+  `body` by exact equality with `{}`, and assert no message text.
 - **The `charset=utf-8` suffix on a JSON response is incidental.** It comes from the framework's
   content negotiation, not from a product rule. P23 pins the current string so EPIC 032 either
   reproduces it or changes it deliberately.
