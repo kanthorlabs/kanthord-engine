@@ -1,7 +1,12 @@
 import type { ErrorCode } from "../http/contract/errors.ts";
+import { errorStatuses } from "../http/contract/errors.ts";
 
 export const LOCAL_REFUSAL = 1;
 export const TRANSPORT_FAILURE = 2;
+export const TRANSPORT_FAILURE_CODE = "transport-failure";
+export const INDETERMINATE_OUTCOME = 3;
+export const INDETERMINATE_OUTCOME_CODE = "outcome-indeterminate";
+export const ENVELOPE_UNREADABLE_CODE = "envelope-unreadable";
 export const REFUSED_BY_DAEMON = 100;
 export const DAEMON_FAULT = 200;
 
@@ -32,6 +37,12 @@ export const exitCodes: Readonly<Record<ErrorCode, number>> = {
 };
 
 export function exitCodeForError(code: string, status: number): number {
+  if (code === TRANSPORT_FAILURE_CODE) {
+    return TRANSPORT_FAILURE;
+  }
+  if (code === INDETERMINATE_OUTCOME_CODE) {
+    return INDETERMINATE_OUTCOME;
+  }
   if (Object.hasOwn(exitCodes, code)) {
     return exitCodes[code as ErrorCode];
   }
@@ -42,4 +53,11 @@ export function exitCodeForError(code: string, status: number): number {
     return DAEMON_FAULT;
   }
   return LOCAL_REFUSAL;
+}
+
+export function envelopeCodeForStatus(status: number): string {
+  const declared = (Object.keys(errorStatuses) as readonly ErrorCode[]).filter(
+    (code) => errorStatuses[code] === status,
+  );
+  return declared.length === 1 ? declared[0]! : ENVELOPE_UNREADABLE_CODE;
 }

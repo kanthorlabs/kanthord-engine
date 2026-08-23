@@ -127,6 +127,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
 
   registerDbMigrate({
@@ -153,6 +154,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerRepositoryRegister({
     program,
@@ -162,6 +164,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerRepositoryShow({
     program,
@@ -170,6 +173,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerStatus({
     program,
@@ -177,6 +181,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerRun({
     program,
@@ -191,6 +196,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerProjectList({
     program,
@@ -198,6 +204,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerProjectShow({
     program,
@@ -205,6 +212,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerProjectRepository({
     program,
@@ -212,6 +220,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerProjectGraph({
     program,
@@ -219,6 +228,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerProjectNode({
     program,
@@ -226,6 +236,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerPlanImport({
     program,
@@ -246,6 +257,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerActorRegister({
     program,
@@ -254,6 +266,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerActorList({
     program,
@@ -261,6 +274,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerActorShow({
     program,
@@ -268,6 +282,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerActorRevoke({
     program,
@@ -275,6 +290,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerActorRotate({
     program,
@@ -283,6 +299,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerNodeCreate({
     program,
@@ -316,6 +333,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerNodeShow({
     program,
@@ -323,6 +341,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerNodeClaim({
     program,
@@ -330,6 +349,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
     randomBytes: dependencies.randomBytes,
   });
   registerNodeHeartbeat({
@@ -338,6 +358,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
     randomBytes: dependencies.randomBytes,
   });
   registerNodeRelease({
@@ -346,6 +367,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerNodeReport({
     program,
@@ -353,6 +375,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerNodeAttest({
     program,
@@ -360,6 +383,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerNodeClose({
     program,
@@ -367,6 +391,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
   registerNodeUnblock({
     program,
@@ -374,6 +399,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stdout: dependencies.stdout,
     stderr: dependencies.stderr,
     fail: dependencies.fail,
+    exit: dependencies.exit,
   });
 
   return program;

@@ -318,6 +318,34 @@ describe("src/cli/node/create.test", () => {
     assert.deepEqual(h.exits(), []);
   });
 
+  it("node create refuses an unreadable instruction file without any request", async () => {
+    const h = harness({ script: [REVISIONS] });
+    await run(h.program, [
+      "node",
+      "create",
+      "--project",
+      PROJECT,
+      "--kind",
+      "task",
+      "--title",
+      "Add the health route",
+      "--parent",
+      "objective_01HZY8QF3M4N5P6R7S8T9V0W1Z",
+      "--instruction",
+      "/missing/instruction.md",
+      "--acceptance",
+      ACCEPTANCE_PATH,
+    ]);
+
+    assert.equal(h.fails(), 1);
+    assert.deepEqual(h.exits(), []);
+    assert.equal(h.calls.length, 0);
+    assert.equal(
+      h.stderr(),
+      "kanthord: invalid-request: cannot read /missing/instruction.md\n",
+    );
+  });
+
   it("node create prints a completeness finding on standard error and exits zero", async () => {
     const h = harness({
       script: [

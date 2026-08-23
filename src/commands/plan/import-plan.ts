@@ -361,6 +361,24 @@ export function importPlan(
     const absent = nodes
       .map((node) => node.id)
       .filter((id) => !resolvedByIdentity.has(id));
+
+    const foreign: Readonly<{ id: string; projectId: string }>[] = [];
+    for (const node of candidate.nodes) {
+      const row = transaction.get("SELECT project_id FROM node WHERE id = ?", [
+        node.id,
+      ]) as Readonly<{ project_id: string }> | undefined;
+      if (row !== undefined && row.project_id !== input.projectId) {
+        foreign.push({ id: node.id, projectId: row.project_id });
+      }
+    }
+    if (foreign.length > 0) {
+      throw new ImportPlanError(
+        "plan-invalid",
+        "the document identities are bound to another project",
+        { conflicts: foreign },
+      );
+    }
+
     const accepted = renderCandidate(
       candidate,
       resolvedByIdentity,

@@ -7,6 +7,7 @@ import {
 } from "../../domain/plan-candidate.ts";
 import type { Finding } from "../../domain/plan-finding.ts";
 import type { StoredNode } from "../../domain/plan-graph.ts";
+import { terminalAncestor } from "../../domain/plan-ancestry.ts";
 import { revisionGuardFor } from "../../domain/revision-guard.ts";
 import type { BlobStore } from "../../services/blob/index.ts";
 import type { Clock } from "../../services/clock/index.ts";
@@ -128,6 +129,17 @@ export function createNode(
       transaction,
       input.projectId,
     );
+
+    const terminal = terminalAncestor(
+      stored,
+      input.node.kind === "initiative" ? null : input.node.parentId,
+    );
+    if (terminal !== null) {
+      throw new NodeWriteError(
+        "illegal-transition",
+        `the ancestor ${terminal.id} is ${terminal.state}, not startable`,
+      );
+    }
 
     let repositoryId: string | null = null;
     let repositoryName: string | null = null;

@@ -377,6 +377,58 @@ describe("src/commands/node/create-node.test", () => {
     assert.equal(row.parent_id, nodeBaselineRevision);
   });
 
+  it("refuses a task whose parent objective is terminal", (t) => {
+    const fixture = build(seedPlanFixture, [U_NODE, U_REV]);
+    t.after(() => fixture.dispose());
+
+    fixture.storage.transact((transaction) => {
+      const steps = [
+        { to: "running", trigger: "worker-objective-started" },
+        { to: "awaiting_approval", trigger: "object-reported" },
+        { to: "done", trigger: "human-close" },
+      ] as const;
+      for (const step of steps) {
+        const state = fixture.plan.readNode(
+          transaction,
+          planFixtureIdentities.objective,
+        )!.state;
+        fixture.plan.setNodeState(transaction, {
+          id: planFixtureIdentities.objective,
+          from: state,
+          to: step.to,
+          trigger: step.trigger,
+          blockReason: null,
+          at: 1,
+          cause: { revision: nodeBaselineRevision, importId: null },
+        });
+      }
+    });
+
+    let caught: unknown;
+    try {
+      runCreate(
+        fixture,
+        createInput(nodeBaselineRevision, {
+          kind: "task",
+          title: "Zombie task",
+          parentId: planFixtureIdentities.objective,
+          instruction: "Do it.\n",
+          acceptance: "Done.\n",
+          worker: null,
+          dependsOn: [],
+        }),
+      );
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "illegal-transition");
+    assert.equal(
+      caught.message,
+      `the ancestor ${planFixtureIdentities.objective} is done, not startable`,
+    );
+  });
+
   it("refuses a stale project revision", (t) => {
     const fixture = build(seedPlanFixture, [U_NODE, U_REV]);
     t.after(() => fixture.dispose());

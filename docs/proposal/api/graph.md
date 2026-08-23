@@ -92,6 +92,8 @@ A choice set that builds an invalid graph is `422 choices-invalid`, and `details
 
 Topology that moved since `plan.validate` is `409 choices-stale`. A selected outcome that is no longer legal against current leases, workspaces, commits or descendants is `409 choices-changed`. Both carry a fresh conflict set, and both write nothing.
 
+A document identity that a different project already owns is `422 plan-invalid`, and `details.conflicts` names each identity with its owning project. A node identity belongs to one project for its whole life, so an import never moves it. Nothing is written.
+
 A node absent from the import set is not deleted. The response lists it as absent, and the human discards it explicitly through [outcome.md](outcome.md).
 
 ## `plan.export`
@@ -163,7 +165,7 @@ Creates one node and appends it to the project graph. The body carries `fromRevi
 
 The response holds the created node, the new project revision as `revision`, and the completeness findings as `completeness`. A completeness finding commits the write and refuses nothing.
 
-A structural finding is `422 plan-invalid`, with every finding in `details`, and the write commits nothing. A mismatch against the newest project revision is `409 stale-revision`.
+A structural finding is `422 plan-invalid`, with every finding in `details`, and the write commits nothing. A mismatch against the newest project revision is `409 stale-revision`. A parent whose ancestor chain holds a node at `done`, `partial` or `discarded` is `409 illegal-transition`, and the message names that ancestor and its state. A child under a closed parent is never startable, so the daemon refuses the child rather than create one that no actor can claim.
 
 ## `node.update`
 
@@ -173,7 +175,7 @@ The response holds the new project revision as `revision` and the completeness f
 
 `kanthord node update` fills each omitted field from `node.show`, so a human names only what changes. Two fields need an explicit clear, because an omitted option means "keep": `--no-worker` sends `worker: null`, and `--no-depends-on` sends an empty `dependsOn` list. No value string means a clear, so a worker named `none` stays reachable.
 
-A structural finding is `422 plan-invalid`. A structural edit of a node outside `pending`, `ready` and `blocked` is `409 illegal-transition`. A parent or `repo` move of a node that is not containment-movable is `409 binding-in-use`, and `details.blockers` lists what blocks it.
+A structural finding is `422 plan-invalid`. A structural edit of a node outside `pending`, `ready` and `blocked` is `409 illegal-transition`. A parent change whose new ancestor chain holds a node at `done`, `partial` or `discarded` is `409 illegal-transition`, and the message names that ancestor and its state. The guard reads the new parent only, so an edit of any other field inside a closed subtree stays legal. A parent or `repo` move of a node that is not containment-movable is `409 binding-in-use`, and `details.blockers` lists what blocks it.
 
 ## `node.delete`
 

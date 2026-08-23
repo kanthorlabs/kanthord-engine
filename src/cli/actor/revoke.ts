@@ -3,6 +3,7 @@ import type { Command } from "commander";
 import type { DaemonClient } from "../client.ts";
 import { actorShowResponse } from "../../http/contract/actor.ts";
 import { actorCommand } from "./index.ts";
+import { exitCodeForError } from "../exit-code.ts";
 
 export type RevokeActorInput = Readonly<{
   program: Command;
@@ -10,6 +11,7 @@ export type RevokeActorInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 export function registerActorRevoke(input: RevokeActorInput): void {
@@ -28,7 +30,7 @@ export function registerActorRevoke(input: RevokeActorInput): void {
       });
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-        input.fail();
+        input.exit(exitCodeForError(result.code, result.status));
         return;
       }
       const view = actorShowResponse.parse(result.body);

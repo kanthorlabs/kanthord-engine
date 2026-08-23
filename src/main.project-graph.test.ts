@@ -399,7 +399,7 @@ Do the second beta step.
       {
         path: "plan/bytewise/initiative.md",
         content: `---
-id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAV
+id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FCV
 kind: initiative
 title: Bytewise Initiative
 ---
@@ -409,7 +409,7 @@ Bootstrap.
       {
         path: "plan/bytewise/og--alpha/objective.md",
         content: `---
-id: objective_01BQZ3NDEKTSV4RRFFQ69G5FAV
+id: objective_01BQZ3NDEKTSV4RRFFQ69G5FCV
 kind: objective
 title: Bytewise Alpha
 repo: kanthord-verify
@@ -420,7 +420,7 @@ Deliver.
       {
         path: "plan/bytewise/og--alpha/01-t.md",
         content: `---
-id: task_01DRZ3NDEKTSV4RRFFQ69G5FAV
+id: task_01DRZ3NDEKTSV4RRFFQ69G5FCV
 kind: task
 title: Bytewise Task
 worker: tdd@1
@@ -446,6 +446,19 @@ Do it.
       const response = await dependencies!.fetch(url, init);
       return response.text();
     };
+
+    const graphResult = await getProjectGraph(projectId);
+    assert.equal(graphResult.status, 200);
+    assert.ok(graphResult.ok);
+    const bytewiseGraph = graphResult.body as { nodes: { key: string }[] };
+    assert.deepEqual(
+      bytewiseGraph.nodes.map((node) => node.key),
+      [
+        "initiative_01ARZ3NDEKTSV4RRFFQ69G5FCV",
+        "objective_01BQZ3NDEKTSV4RRFFQ69G5FCV",
+        "task_01DRZ3NDEKTSV4RRFFQ69G5FCV",
+      ],
+    );
 
     const firstBody = await fetchGraphRaw(projectId);
     const secondBody = await fetchGraphRaw(projectId);

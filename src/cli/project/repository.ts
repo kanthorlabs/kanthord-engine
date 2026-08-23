@@ -5,6 +5,7 @@ import { projectRepositoriesResponse } from "../../http/contract/project.ts";
 import { repositoryListResponse } from "../../http/contract/repository.ts";
 import { projectCommand } from "./index.ts";
 import { printProjectView } from "./view.ts";
+import { exitCodeForError } from "../exit-code.ts";
 
 export type ProjectRepositoryCliInput = Readonly<{
   program: Command;
@@ -12,6 +13,7 @@ export type ProjectRepositoryCliInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 const collectRepositoryNames = (
@@ -51,7 +53,7 @@ export function registerProjectRepository(
         );
         if (!listResult.ok) {
           input.stderr(`kanthord: ${listResult.code}: ${listResult.message}\n`);
-          input.fail();
+          input.exit(exitCodeForError(listResult.code, listResult.status));
           return;
         }
         const body = repositoryListResponse.parse(listResult.body);
@@ -72,7 +74,7 @@ export function registerProjectRepository(
       );
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-        input.fail();
+        input.exit(exitCodeForError(result.code, result.status));
         return;
       }
 

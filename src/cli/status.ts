@@ -3,6 +3,7 @@ import type { Command } from "commander";
 import type { DaemonClient } from "./client.ts";
 import { systemStatusResponse } from "../http/contract/system.ts";
 import { projectStatusResponse } from "../http/contract/project.ts";
+import { exitCodeForError } from "./exit-code.ts";
 
 export type StatusCliInput = Readonly<{
   program: Command;
@@ -10,6 +11,7 @@ export type StatusCliInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 function renderNodeLines(
@@ -44,7 +46,7 @@ export function registerStatus(input: StatusCliInput): void {
         });
         if (!result.ok) {
           input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-          input.fail();
+          input.exit(exitCodeForError(result.code, result.status));
           return;
         }
         const status = projectStatusResponse.parse(result.body);
@@ -55,7 +57,7 @@ export function registerStatus(input: StatusCliInput): void {
       const result = await input.client.call("system.status", undefined);
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-        input.fail();
+        input.exit(exitCodeForError(result.code, result.status));
         return;
       }
 

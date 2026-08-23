@@ -3,6 +3,7 @@ import type { Command } from "commander";
 import type { DaemonClient } from "../client.ts";
 import { nodeListResponse } from "../../http/contract/graph.ts";
 import { nodeCommand } from "./index.ts";
+import { exitCodeForError } from "../exit-code.ts";
 
 export type NodeListCliInput = Readonly<{
   program: Command;
@@ -10,6 +11,7 @@ export type NodeListCliInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 type ListOptions = Readonly<{
@@ -56,7 +58,7 @@ export function registerNodeList(input: NodeListCliInput): void {
       );
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-        input.fail();
+        input.exit(exitCodeForError(result.code, result.status));
         return;
       }
 

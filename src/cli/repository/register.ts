@@ -10,6 +10,7 @@ import {
 } from "../../http/contract/repository.ts";
 import { repositoryCommand } from "./index.ts";
 import { remoteTransport } from "./transport.ts";
+import { exitCodeForError } from "../exit-code.ts";
 
 export type RegisterRepositoryCliInput = Readonly<{
   program: Command;
@@ -19,6 +20,7 @@ export type RegisterRepositoryCliInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 type RegisterOptions = Readonly<{
@@ -56,7 +58,7 @@ export function registerRepositoryRegister(
       const listResult = await input.client.call("provider.list", undefined);
       if (!listResult.ok) {
         input.stderr(`kanthord: ${listResult.code}: ${listResult.message}\n`);
-        input.fail();
+        input.exit(exitCodeForError(listResult.code, listResult.status));
         return;
       }
       const providers = providerListResponse.parse(listResult.body).providers;
@@ -85,7 +87,7 @@ export function registerRepositoryRegister(
         input.stderr(
           `kanthord: ${inspectResult.code}: ${inspectResult.message}\n`,
         );
-        input.fail();
+        input.exit(exitCodeForError(inspectResult.code, inspectResult.status));
         return;
       }
       const inspect = repositoryInspectResponse.parse(inspectResult.body);
@@ -153,7 +155,9 @@ export function registerRepositoryRegister(
         input.stderr(
           `kanthord: ${registerResult.code}: ${registerResult.message}\n`,
         );
-        input.fail();
+        input.exit(
+          exitCodeForError(registerResult.code, registerResult.status),
+        );
         return;
       }
 

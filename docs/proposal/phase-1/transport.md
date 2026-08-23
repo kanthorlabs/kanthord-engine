@@ -9,6 +9,42 @@ The CLI calls the HTTP API, so parity between the two surfaces is structural rat
 This file decides the policy. The routes that policy carries are `../api/`, one file per domain, with the conventions and the lifecycle rules in `../api/README.md`. `kanthord db migrate` is the one command that does not call HTTP, and `../api/system.md` states why.
 The version compatibility policy — what `/v1` guarantees, what a client must tolerate, and the `GET /v1/health` handshake that carries the capability list — is `../api/README.md`, section `## Versioning`.
 
+## The CLI exit code names the refusal class
+
+The CLI exits `0` after the daemon accepts the operation. Every other exit code names one class of refusal. A script branches on the exit code, and it parses no text.
+
+| Exit    | Class                 | Condition                                                        |
+| ------- | --------------------- | ---------------------------------------------------------------- |
+| 0       | success               | the daemon accepted the operation                                |
+| 1       | local refusal         | the CLI refused the command, and the daemon wrote nothing        |
+| 2       | transport failure     | the CLI got no usable answer, and nothing changed                |
+| 3       | indeterminate outcome | the CLI got no usable answer, and a write may have committed     |
+| 110-230 | declared refusal      | the daemon answered a code of `../api/README.md`, section Errors |
+| 100     | unnamed refusal       | the daemon answered a `4xx` the CLI cannot name                  |
+| 200     | unnamed fault         | the daemon answered a `5xx` the CLI cannot name                  |
+
+A declared code takes the base of its status, plus its position in that status group. The base is 110 for `400`, 120 for `401`, 130 for `403`, 140 for `404`, 150 for `409`, 160 for `422`, 210 for `500`, 220 for `501` and 230 for `503`. The order in a group is the order of the table in `../api/README.md`. So `unauthenticated` is 120, `lease-held` is 155, and `plan-invalid` is 160. One code owns one exit code, and no two codes share one.
+
+The exit code comes from the `code` field. It never comes from the `message`, and it never comes from the status alone. One status carries more than one code, so a status cannot name the refusal.
+
+**A status names a code only when it carries exactly one.** A proxy, a truncated body or a malformed envelope can take the `code` field away. The CLI then reads the status against the table of `../api/README.md`. A `400`, a `401`, a `404`, a `500`, a `501` and a `503` each carry one code, so the CLI names it and exits on its declared exit code. A `403`, a `409` and a `422` carry more than one, so the CLI names none of them and exits 100. A status the contract never declares also exits on its band. The CLI never guesses between two codes of one status, because the two carry different advice.
+
+**A new error code appends to the end of its status group.** `../api/README.md`, section `## Versioning`, permits a new code inside `/v1`. An insertion in the middle of a group moves the exit code of every code after it, and a script that reads exit codes would break. So the position of a code inside its group is fixed for the life of `/v1`.
+
+A local refusal covers a missing option, a file the CLI cannot read, an answer of no at a prompt, and a validation finding the CLI declines to import. In each case the CLI stops the command itself, so a repeat needs a different input.
+
+**Exit 2 is not exit 1, because the two carry opposite advice.** A local refusal asks the human to change the command. A transport failure asks the human to send the same command again later. The CLI names the base url it tried, and it prints no stack.
+
+**Exit 3 exists because a client cannot always know whether the daemon ran the operation.** A request can reach the daemon, commit, and then lose its answer to a reset socket or a truncated body. The CLI sees the same failure it sees for an absent daemon, so one class for both would promise more than the client can prove.
+
+The CLI separates the two classes by two facts it does have.
+
+- **A read is always exit 2.** A `GET` changes no state, so a lost answer to a `GET` leaves nothing to be indeterminate.
+- **A connect failure is always exit 2.** `ECONNREFUSED`, `ENOTFOUND` and `EAI_AGAIN` all say the request went to no daemon, so no operation ran.
+- **Every other lost answer to a write is exit 3.** A reset socket after dispatch, and a body that ends early, both leave the outcome unknown.
+
+Exit 3 does not mean the write failed, and it does not mean the write succeeded. The human reads the state before sending the command again. A re-run is a second operation: the CLI mints a fresh `Idempotency-Key` for each invocation, so a repeat is never a replay of the lost request.
+
 ## Bind address
 
 The bind address comes from configuration, and the default is `127.0.0.1`. A human who drives the daemon from a second machine sets it to the address of a private network interface.

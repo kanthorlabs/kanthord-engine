@@ -29,7 +29,10 @@ import {
   planFixtureIdentities,
   seedPlanFixture,
 } from "../../../test/helpers/plan.ts";
-import { createMigratedStorage } from "../../../test/helpers/database.ts";
+import {
+  createMigratedStorage,
+  tableCounts,
+} from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
 import { fixtureIds, seedRegistry } from "../../../test/helpers/rows.ts";
@@ -1070,6 +1073,74 @@ function sixStateRows(
 }
 
 describe("src/commands/plan/import-plan.test", () => {
+  it("refuses identities already bound to another project and writes nothing", (t) => {
+    const fixture = build([
+      "01MZ3NDEKTSV4RRFFQ69G5FC1",
+      "01MZ3NDEKTSV4RRFFQ69G5FC2",
+      "01MZ3NDEKTSV4RRFFQ69G5FC3",
+    ]);
+    t.after(() => fixture.dispose());
+    fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+    const identity = "initiative_01JTZ3NDEKTSV4RRFFQ69G5FC1";
+    const documents = [
+      {
+        path: "plan/bound/initiative.md",
+        content: `---
+id: "${identity}"
+kind: initiative
+title: Bound initiative
+---
+Bootstrap.
+`,
+      },
+    ];
+    const input = {
+      projectId: fixtureIds.project,
+      fromRevision: null,
+      importId: "imp_bound_one",
+      documents,
+      choices: [{ id: identity, take: "submitted" as const }],
+      validatedRevision: null,
+      documentsHash: planHash(fixture, documents, []),
+      actor: "human_1",
+    };
+
+    runImport(fixture, input);
+
+    const otherProject = "project_01JTZ3NDEKTSV4RRFFQ69G5FC2";
+    fixture.storage.transact((transaction) => {
+      transaction.run(
+        "INSERT INTO project (id, name, updated_at) VALUES (?, ?, ?)",
+        [otherProject, "other-project", 1],
+      );
+    });
+
+    const before = tableCounts(fixture.storage);
+    const caught = importRefusal(fixture, {
+      ...input,
+      projectId: otherProject,
+      importId: "imp_bound_two",
+    });
+
+    assert.equal(caught.refusal, "plan-invalid");
+    assert.equal(
+      caught.message,
+      "the document identities are bound to another project",
+    );
+    assert.deepEqual(caught.details, {
+      conflicts: [{ id: identity, projectId: fixtureIds.project }],
+    });
+    assert.deepEqual(tableCounts(fixture.storage), before);
+    const rows = fixture.storage.transact((transaction) =>
+      transaction.all("SELECT DISTINCT project_id FROM node"),
+    ) as readonly Readonly<{ project_id: string }>[];
+    assert.deepEqual(
+      rows.map((row) => row.project_id),
+      [fixtureIds.project],
+    );
+  });
+
   describe("the round trip", () => {
     it("a two-objective plan imports with every node row asserted field by field", (t) => {
       const fixture = build([U_I, U_T1, U_O1, U_T2, U_T3, U_O2, U_REV, U_EDGE]);

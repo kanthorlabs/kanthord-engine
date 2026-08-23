@@ -48,6 +48,18 @@ describe("src/services/blob/sqlite.test", () => {
     assert.equal(hash, emptyHash);
   });
 
+  it("put of a TextEncoder-encoded empty string stores and reads back", () => {
+    const { storage, store, dispose } = build();
+    after(() => dispose());
+
+    const encoder = new TextEncoder();
+    const hash = storage.transact((t) => store.put(t, encoder.encode("")));
+    assert.equal(hash, emptyHash);
+    const record = storage.transact((t) => store.get(hash, t));
+    assert.notEqual(record, null);
+    assert.equal(record!.content.byteLength, 0);
+  });
+
   it("get returns the stored record with content as a Uint8Array", () => {
     const { storage, store, dispose } = build();
     after(() => dispose());

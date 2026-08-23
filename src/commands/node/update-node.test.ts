@@ -455,6 +455,80 @@ function staleRefusal(
 }
 
 describe("src/commands/node/update-node.test", () => {
+  it("refuses a reparent whose new ancestor chain holds a terminal node", (t) => {
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        seedObjective(storage, plan, blobs, objectiveTwoId);
+        storage.transact((transaction) => {
+          const steps = [
+            { to: "running", trigger: "worker-objective-started" },
+            { to: "awaiting_approval", trigger: "object-reported" },
+            { to: "partial", trigger: "human-close-partial" },
+          ] as const;
+          for (const step of steps) {
+            const state = plan.readNode(transaction, objectiveTwoId)!.state;
+            plan.setNodeState(transaction, {
+              id: objectiveTwoId,
+              from: state,
+              to: step.to,
+              trigger: step.trigger,
+              blockReason: null,
+              at: 1,
+              cause: { revision: nodeBaselineRevision, importId: null },
+            });
+          }
+        });
+      },
+      ["01MZ3NDEKTSV4RRFFQ69G5FC1", "01MZ3NDEKTSV4RRFFQ69G5FC2"],
+    );
+    t.after(() => fixture.dispose());
+
+    let caught: unknown;
+    try {
+      runUpdate(
+        fixture,
+        updateInput(
+          planFixtureIdentities.task,
+          nodeBaselineRevision,
+          taskBody({ parentId: objectiveTwoId }),
+        ),
+      );
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "illegal-transition");
+    assert.equal(
+      caught.message,
+      `the ancestor ${objectiveTwoId} is partial, not startable`,
+    );
+  });
+
+  it("refuses a reparent under a descendant of the node itself", (t) => {
+    const fixture = build(seedPlanFixture, [
+      "01MZ3NDEKTSV4RRFFQ69G5FC1",
+      "01MZ3NDEKTSV4RRFFQ69G5FC2",
+    ]);
+    t.after(() => fixture.dispose());
+
+    let caught: unknown;
+    try {
+      runUpdate(
+        fixture,
+        updateInput(
+          planFixtureIdentities.objective,
+          nodeBaselineRevision,
+          objectiveBody({ parentId: planFixtureIdentities.task }),
+        ),
+      );
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "plan-invalid");
+  });
+
   it("a title edit succeeds at every state", (t) => {
     for (const state of nodeStates) {
       const target =

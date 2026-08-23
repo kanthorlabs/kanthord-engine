@@ -4,6 +4,7 @@ import type { DaemonClient } from "../client.ts";
 import type { SecretFileSink } from "../secret-file.ts";
 import { actorRotateResponse } from "../../http/contract/actor.ts";
 import { actorCommand } from "./index.ts";
+import { exitCodeForError } from "../exit-code.ts";
 
 export type RotateActorInput = Readonly<{
   program: Command;
@@ -12,6 +13,7 @@ export type RotateActorInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 export function registerActorRotate(input: RotateActorInput): void {
@@ -49,7 +51,7 @@ export function registerActorRotate(input: RotateActorInput): void {
         if (!result.ok) {
           sink.discard();
           input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-          input.fail();
+          input.exit(exitCodeForError(result.code, result.status));
           return;
         }
         const view = actorRotateResponse.parse(result.body);

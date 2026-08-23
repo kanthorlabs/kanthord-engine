@@ -3,6 +3,7 @@ import type { Command } from "commander";
 import type { DaemonClient } from "../client.ts";
 import { nodeShowResponse } from "../../http/contract/graph.ts";
 import { nodeCommand } from "./index.ts";
+import { exitCodeForError } from "../exit-code.ts";
 
 export type NodeShowCliInput = Readonly<{
   program: Command;
@@ -10,6 +11,7 @@ export type NodeShowCliInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 type ShowOptions = Readonly<{ id?: string }>;
@@ -34,7 +36,7 @@ export function registerNodeShow(input: NodeShowCliInput): void {
       });
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-        input.fail();
+        input.exit(exitCodeForError(result.code, result.status));
         return;
       }
 

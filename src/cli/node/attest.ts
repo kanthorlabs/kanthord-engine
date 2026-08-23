@@ -3,6 +3,7 @@ import type { Command } from "commander";
 import type { DaemonClient } from "../client.ts";
 import { nodeCommand } from "./index.ts";
 import { printNodeReportView } from "./report-view.ts";
+import { exitCodeForError } from "../exit-code.ts";
 
 export type NodeAttestCliInput = Readonly<{
   program: Command;
@@ -10,6 +11,7 @@ export type NodeAttestCliInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 type AttestOptions = Readonly<{
@@ -53,7 +55,7 @@ export function registerNodeAttest(input: NodeAttestCliInput): void {
       );
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-        input.fail();
+        input.exit(exitCodeForError(result.code, result.status));
         return;
       }
       printNodeReportView(input.stdout, result.body);

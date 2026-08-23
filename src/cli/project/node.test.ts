@@ -69,6 +69,7 @@ const harness = (
   stdoutText(): string;
   stderrText(): string;
   failCalls(): number;
+  exitCodes(): readonly number[];
 } => {
   const program = new Command();
   registerClientOptions(program);
@@ -92,6 +93,7 @@ const harness = (
   let stdoutText = "";
   let stderrText = "";
   let failCalls = 0;
+  const exitCalls: number[] = [];
   registerProjectNode({
     program,
     client,
@@ -104,6 +106,9 @@ const harness = (
     fail: () => {
       failCalls += 1;
     },
+    exit: (code) => {
+      exitCalls.push(code);
+    },
   });
   return {
     program,
@@ -111,6 +116,7 @@ const harness = (
     stdoutText: () => stdoutText,
     stderrText: () => stderrText,
     failCalls: () => failCalls,
+    exitCodes: () => exitCalls,
   };
 };
 
@@ -183,7 +189,7 @@ describe("src/cli/project/node.test", () => {
     });
     await run(h.program, ["project", "node", "--id", ID]);
 
-    assert.equal(h.failCalls(), 1);
+    assert.deepEqual(h.exitCodes(), [140]);
     assert.equal(h.stderrText(), `kanthord: not-found: no project ${ID}\n`);
   });
 });

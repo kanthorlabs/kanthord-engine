@@ -34,6 +34,7 @@ const harness = (): {
   stdoutText(): string;
   stderrText(): string;
   failCalls(): number;
+  exitCodes(): readonly number[];
 } => {
   const program = new Command();
   registerClientOptions(program);
@@ -50,6 +51,7 @@ const harness = (): {
   let stdoutText = "";
   let stderrText = "";
   let failCalls = 0;
+  const exitCalls: number[] = [];
   registerActorList({
     program,
     client,
@@ -62,6 +64,9 @@ const harness = (): {
     fail: () => {
       failCalls += 1;
     },
+    exit: (code) => {
+      exitCalls.push(code);
+    },
   });
   return {
     program,
@@ -69,6 +74,7 @@ const harness = (): {
     stdoutText: () => stdoutText,
     stderrText: () => stderrText,
     failCalls: () => failCalls,
+    exitCodes: () => exitCalls,
   };
 };
 
@@ -97,6 +103,8 @@ describe("src/cli/actor/list.test", () => {
     assert.equal(lines.length, 2);
     assert.ok(lines[0]?.includes(FIRST.id));
     assert.ok(lines[1]?.includes(SECOND.id));
+    assert.equal(lines[0]?.includes(" revoked"), false);
+    assert.ok(lines[1]?.includes(" revoked"));
     assert.equal(h.stdoutText().toLowerCase().includes("token"), false);
   });
 });

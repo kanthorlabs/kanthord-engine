@@ -12,6 +12,7 @@ import type { StoredNode } from "../../domain/plan-graph.ts";
 import { nodeWriteLegality } from "../../domain/node-write-legality.ts";
 import type { ResolvedDocument } from "../../domain/plan-identity.ts";
 import { comparePaths } from "../../domain/plan-path.ts";
+import { terminalAncestor } from "../../domain/plan-ancestry.ts";
 import { revisionGuardFor } from "../../domain/revision-guard.ts";
 import type { BlobStore } from "../../services/blob/index.ts";
 import type { Clock } from "../../services/clock/index.ts";
@@ -239,6 +240,16 @@ export function updateNode(
           }
         : node,
     );
+
+    if (fields.includes("parent")) {
+      const terminal = terminalAncestor(after, parentId);
+      if (terminal !== null) {
+        throw new NodeWriteError(
+          "illegal-transition",
+          `the ancestor ${terminal.id} is ${terminal.state}, not startable`,
+        );
+      }
+    }
 
     const context = dependencies.plan.readValidationContext(
       transaction,

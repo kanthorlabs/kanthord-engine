@@ -2,6 +2,11 @@ import { KANTHORD_VERSION } from "../domain/version.ts";
 import { daemonErrorEnvelopeSchema } from "../http/contract/errors.ts";
 import { parameterNames, renderPath } from "../http/contract/path.ts";
 import { findOperation } from "../http/contract/registry.ts";
+import {
+  envelopeCodeForStatus,
+  INDETERMINATE_OUTCOME_CODE,
+  TRANSPORT_FAILURE_CODE,
+} from "./exit-code.ts";
 
 export type ClientDependencies = Readonly<{
   baseUrl: string;
@@ -108,11 +113,46 @@ export async function call(
   input: CallInput,
 ): Promise<CallResult> {
   const request = buildRequest(dependencies, input);
-  const response = await dependencies.fetch(request.url, request.init);
+  const safeMethod = request.init.method === "GET";
+  let response: Response;
+  try {
+    response = await dependencies.fetch(request.url, request.init);
+  } catch (error) {
+    if (safeMethod || preDispatch(error)) {
+      return {
+        ok: false as const,
+        status: 0,
+        code: TRANSPORT_FAILURE_CODE,
+        message: `cannot reach the daemon at ${dependencies.baseUrl}: ${transportReason(error)}`,
+        details: undefined,
+      };
+    }
+    return {
+      ok: false as const,
+      status: 0,
+      code: INDETERMINATE_OUTCOME_CODE,
+      message: `the daemon at ${dependencies.baseUrl} did not answer ${input.operationId}, so the operation may have committed: ${transportReason(error)}`,
+      details: undefined,
+    };
+  }
   const status = response.status;
 
   if (response.ok) {
-    const text: string = await response.text();
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (error) {
+      const early = `the daemon at ${dependencies.baseUrl} answered ${status} and the body ended early`;
+      return {
+        ok: false as const,
+        status,
+        code: safeMethod ? TRANSPORT_FAILURE_CODE : INDETERMINATE_OUTCOME_CODE,
+        message: safeMethod
+          ? `${early}: ${transportReason(error)}`
+          : `${early}, so ${input.operationId} may have committed: ${transportReason(error)}`,
+        details: undefined,
+      };
+    }
     const contentType = response.headers.get("content-type");
     if (contentType !== null && /application\/json/.test(contentType)) {
       try {
@@ -127,7 +167,7 @@ export async function call(
   const fallback = {
     ok: false as const,
     status,
-    code: "internal-error",
+    code: envelopeCodeForStatus(status),
     message: `the daemon answered ${status} with no error envelope`,
     details: undefined,
   };
@@ -152,4 +192,31 @@ export async function call(
   } catch {
     return fallback;
   }
+}
+
+function transportReason(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+  const cause: unknown = error.cause;
+  if (cause instanceof Error && cause.message !== "") {
+    return cause.message;
+  }
+  return error.message;
+}
+
+function preDispatch(error: unknown): boolean {
+  const code = causeCode(error);
+  return (
+    code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "EAI_AGAIN"
+  );
+}
+
+function causeCode(error: unknown): string | undefined {
+  if (!(error instanceof Error)) {
+    return undefined;
+  }
+  const carrier: unknown = error.cause instanceof Error ? error.cause : error;
+  const code = (carrier as Readonly<{ code?: unknown }>).code;
+  return typeof code === "string" ? code : undefined;
 }

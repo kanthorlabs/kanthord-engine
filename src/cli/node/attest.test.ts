@@ -38,6 +38,7 @@ const harness = (
   stdoutText(): string;
   stderrText(): string;
   failCalls(): number;
+  exitCodes(): readonly number[];
 } => {
   const program = new Command();
   registerClientOptions(program);
@@ -58,6 +59,7 @@ const harness = (
   let stdoutText = "";
   let stderrText = "";
   let failCalls = 0;
+  const exitCalls: number[] = [];
   registerNodeAttest({
     program,
     client,
@@ -70,6 +72,9 @@ const harness = (
     fail: () => {
       failCalls += 1;
     },
+    exit: (code) => {
+      exitCalls.push(code);
+    },
   });
   return {
     program,
@@ -77,6 +82,7 @@ const harness = (
     stdoutText: () => stdoutText,
     stderrText: () => stderrText,
     failCalls: () => failCalls,
+    exitCodes: () => exitCalls,
   };
 };
 
@@ -152,7 +158,7 @@ describe("src/cli/node/attest.test", () => {
     assert.equal(h.stdoutText(), "");
   });
 
-  it("node attest prints the error code and calls fail on a refusal", async () => {
+  it("node attest prints the error code and exits with the lease-held code on a refusal", async () => {
     const h = harness({
       respond: () => ({
         ok: false as const,
@@ -173,7 +179,7 @@ describe("src/cli/node/attest.test", () => {
       OBJECT_ID,
     ]);
 
-    assert.equal(h.failCalls(), 1);
+    assert.deepEqual(h.exitCodes(), [155]);
     assert.equal(
       h.stderrText(),
       `kanthord: lease-held: the attestation of ${OBJECTIVE} conflicts with a lease held by another owner\n`,

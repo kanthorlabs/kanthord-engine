@@ -3,6 +3,7 @@ import type { Command } from "commander";
 import { nodeUnblockResponse } from "../../http/contract/outcome.ts";
 import type { DaemonClient } from "../client.ts";
 import { nodeCommand } from "./index.ts";
+import { exitCodeForError } from "../exit-code.ts";
 
 export type NodeUnblockCliInput = Readonly<{
   program: Command;
@@ -10,6 +11,7 @@ export type NodeUnblockCliInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 type UnblockOptions = Readonly<{ id?: string }>;
@@ -34,7 +36,7 @@ export function registerNodeUnblock(input: NodeUnblockCliInput): void {
       });
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-        input.fail();
+        input.exit(exitCodeForError(result.code, result.status));
         return;
       }
       const body = nodeUnblockResponse.parse(result.body);

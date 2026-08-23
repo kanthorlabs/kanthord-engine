@@ -4,6 +4,7 @@ import type { DaemonClient } from "../client.ts";
 import type { ConfirmDependencies } from "../confirm.ts";
 import { providerRegisterResponse } from "../../http/contract/credential.ts";
 import { credentialCommand } from "./index.ts";
+import { exitCodeForError } from "../exit-code.ts";
 
 export type RegisterCredentialInput = Readonly<{
   program: Command;
@@ -14,6 +15,7 @@ export type RegisterCredentialInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 type CredentialOptions = Readonly<{
@@ -170,7 +172,7 @@ export function registerCredentialRegister(
       });
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-        input.fail();
+        input.exit(exitCodeForError(result.code, result.status));
         return;
       }
 

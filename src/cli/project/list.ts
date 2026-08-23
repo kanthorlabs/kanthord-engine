@@ -3,6 +3,7 @@ import type { Command } from "commander";
 import type { DaemonClient } from "../client.ts";
 import { projectListResponse } from "../../http/contract/project.ts";
 import { projectCommand } from "./index.ts";
+import { exitCodeForError } from "../exit-code.ts";
 
 export type ListProjectCliInput = Readonly<{
   program: Command;
@@ -10,6 +11,7 @@ export type ListProjectCliInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 export function registerProjectList(input: ListProjectCliInput): void {
@@ -24,7 +26,7 @@ export function registerProjectList(input: ListProjectCliInput): void {
       const result = await input.client.call("project.list", undefined);
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-        input.fail();
+        input.exit(exitCodeForError(result.code, result.status));
         return;
       }
 

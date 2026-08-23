@@ -68,14 +68,32 @@ export function registerNodeCreate(input: NodeCreateCliInput): void {
         }
         const worker = options.worker ?? null;
         const dependsOn = options.dependsOn ?? [];
-        const instruction =
-          options.instruction === undefined
-            ? ""
-            : input.readFile(options.instruction);
-        const acceptance =
-          options.acceptance === undefined
-            ? ""
-            : input.readFile(options.acceptance);
+        let instruction: string;
+        try {
+          instruction =
+            options.instruction === undefined
+              ? ""
+              : input.readFile(options.instruction);
+        } catch {
+          input.stderr(
+            `kanthord: invalid-request: cannot read ${options.instruction}\n`,
+          );
+          input.fail();
+          return;
+        }
+        let acceptance: string;
+        try {
+          acceptance =
+            options.acceptance === undefined
+              ? ""
+              : input.readFile(options.acceptance);
+        } catch {
+          input.stderr(
+            `kanthord: invalid-request: cannot read ${options.acceptance}\n`,
+          );
+          input.fail();
+          return;
+        }
         let node: NodeCreateBody;
         if (options.kind === "initiative") {
           node = {

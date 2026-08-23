@@ -3,6 +3,7 @@ import type { Command } from "commander";
 import type { DaemonClient } from "../client.ts";
 import { eventListResponse } from "../../http/contract/event.ts";
 import { eventCommand } from "./index.ts";
+import { exitCodeForError } from "../exit-code.ts";
 
 export type RegisterEventListCliInput = Readonly<{
   program: Command;
@@ -10,6 +11,7 @@ export type RegisterEventListCliInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 type EventListOptions = Readonly<{
@@ -90,7 +92,7 @@ export function registerEventList(input: RegisterEventListCliInput): void {
       );
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-        input.fail();
+        input.exit(exitCodeForError(result.code, result.status));
         return;
       }
 

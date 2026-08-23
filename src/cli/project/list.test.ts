@@ -33,6 +33,7 @@ const harness = (
   stdoutText(): string;
   stderrText(): string;
   failCalls(): number;
+  exitCodes(): readonly number[];
 } => {
   const program = new Command();
   registerClientOptions(program);
@@ -57,6 +58,7 @@ const harness = (
   let stdoutText = "";
   let stderrText = "";
   let failCalls = 0;
+  const exitCalls: number[] = [];
   registerProjectList({
     program,
     client,
@@ -69,6 +71,9 @@ const harness = (
     fail: () => {
       failCalls += 1;
     },
+    exit: (code) => {
+      exitCalls.push(code);
+    },
   });
   return {
     program,
@@ -76,6 +81,7 @@ const harness = (
     stdoutText: () => stdoutText,
     stderrText: () => stderrText,
     failCalls: () => failCalls,
+    exitCodes: () => exitCalls,
   };
 };
 

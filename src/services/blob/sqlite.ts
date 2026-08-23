@@ -23,9 +23,10 @@ export class SqliteBlobStore implements BlobStore {
 
   put(transaction: Transaction, content: Uint8Array): string {
     const hash = this.hash(content);
+    const bytes = content.byteLength === 0 ? Buffer.alloc(0) : content;
     transaction.run(
       "INSERT INTO blob (hash, size, content, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(hash) DO NOTHING",
-      [hash, content.byteLength, content, this.clock.now()],
+      [hash, bytes.byteLength, bytes, this.clock.now()],
     );
     return hash;
   }

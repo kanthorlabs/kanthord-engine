@@ -5,6 +5,7 @@ import { planExportResponse } from "../../http/contract/graph.ts";
 import type { PlanDirectoryDependencies } from "./directory.ts";
 import { writePlanDirectory } from "./directory.ts";
 import { planCommand } from "./index.ts";
+import { exitCodeForError } from "../exit-code.ts";
 
 export type PlanExportCliInput = Readonly<{
   program: Command;
@@ -14,6 +15,7 @@ export type PlanExportCliInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 export function registerPlanExport(input: PlanExportCliInput): void {
@@ -37,7 +39,7 @@ export function registerPlanExport(input: PlanExportCliInput): void {
       });
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-        input.fail();
+        input.exit(exitCodeForError(result.code, result.status));
         return;
       }
       const body = planExportResponse.parse(result.body);

@@ -22,6 +22,17 @@ const stubFetch = (
   return { fetch, calls };
 };
 
+const truncatedResponse = (): Response =>
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"id":"proj'));
+        controller.error(new Error("the body stream reset"));
+      },
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+
 const jsonResponse = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
     status,
@@ -362,11 +373,12 @@ describe("src/cli/client.test", () => {
       assert.fail("expected a refused result");
     } else {
       assert.equal(result.status, 502);
-      assert.equal(result.code, "internal-error");
+      assert.equal(result.code, "envelope-unreadable");
       assert.equal(
         result.message,
         "the daemon answered 502 with no error envelope",
       );
+      assert.equal(exitCodeForError(result.code, result.status), 200);
     }
   });
 
@@ -487,6 +499,203 @@ describe("src/cli/client.test", () => {
     } else {
       assert.equal(result.code, "not-implemented");
       assert.equal(exitCodeForError(result.code, result.status), 220);
+    }
+  });
+
+  it("an unreachable daemon pairs with exit code 2 and names the base url", async () => {
+    const failure = new TypeError("fetch failed");
+    failure.cause = new Error("connect ECONNREFUSED 127.0.0.1:7421");
+    const result = await call(
+      dependencies({
+        fetch: () => Promise.reject(failure),
+      }),
+      { operationId: "system.db" },
+    );
+
+    if (result.ok) {
+      assert.fail("expected a refused result");
+    } else {
+      assert.equal(result.code, "transport-failure");
+      assert.equal(result.status, 0);
+      assert.equal(
+        result.message,
+        "cannot reach the daemon at http://127.0.0.1:7421: connect ECONNREFUSED 127.0.0.1:7421",
+      );
+      assert.equal(result.details, undefined);
+      assert.equal(exitCodeForError(result.code, result.status), 2);
+    }
+  });
+
+  it("a socket failure after a POST is dispatched pairs with exit code 3", async () => {
+    const failure = new TypeError("fetch failed");
+    failure.cause = Object.assign(new Error("socket hang up"), {
+      code: "ECONNRESET",
+    });
+    const result = await call(
+      dependencies({ fetch: () => Promise.reject(failure) }),
+      { operationId: "project.create", body: { name: "p" } },
+    );
+
+    if (result.ok) {
+      assert.fail("expected a refused result");
+    } else {
+      assert.equal(result.code, "outcome-indeterminate");
+      assert.equal(result.status, 0);
+      assert.equal(
+        result.message,
+        "the daemon at http://127.0.0.1:7421 did not answer project.create, so the operation may have committed: socket hang up",
+      );
+      assert.equal(exitCodeForError(result.code, result.status), 3);
+    }
+  });
+
+  it("a refused connection on a POST stays exit code 2, because nothing was dispatched", async () => {
+    const failure = new TypeError("fetch failed");
+    failure.cause = Object.assign(
+      new Error("connect ECONNREFUSED 127.0.0.1:7421"),
+      { code: "ECONNREFUSED" },
+    );
+    const result = await call(
+      dependencies({ fetch: () => Promise.reject(failure) }),
+      { operationId: "project.create", body: { name: "p" } },
+    );
+
+    if (result.ok) {
+      assert.fail("expected a refused result");
+    } else {
+      assert.equal(result.code, "transport-failure");
+      assert.equal(exitCodeForError(result.code, result.status), 2);
+    }
+  });
+
+  it("a socket failure on a GET stays exit code 2, because a read changes nothing", async () => {
+    const failure = new TypeError("fetch failed");
+    failure.cause = Object.assign(new Error("socket hang up"), {
+      code: "ECONNRESET",
+    });
+    const result = await call(
+      dependencies({ fetch: () => Promise.reject(failure) }),
+      { operationId: "system.db" },
+    );
+
+    if (result.ok) {
+      assert.fail("expected a refused result");
+    } else {
+      assert.equal(result.code, "transport-failure");
+      assert.equal(exitCodeForError(result.code, result.status), 2);
+    }
+  });
+
+  it("a body that ends early after a POST answers 200 pairs with exit code 3", async () => {
+    const result = await call(
+      dependencies({ fetch: () => Promise.resolve(truncatedResponse()) }),
+      { operationId: "project.create", body: { name: "p" } },
+    );
+
+    if (result.ok) {
+      assert.fail("expected a refused result");
+    } else {
+      assert.equal(result.code, "outcome-indeterminate");
+      assert.equal(result.status, 200);
+      assert.equal(
+        result.message,
+        "the daemon at http://127.0.0.1:7421 answered 200 and the body ended early, so project.create may have committed: the body stream reset",
+      );
+      assert.equal(exitCodeForError(result.code, result.status), 3);
+    }
+  });
+
+  it("a body that ends early after a GET answers 200 stays exit code 2", async () => {
+    const result = await call(
+      dependencies({ fetch: () => Promise.resolve(truncatedResponse()) }),
+      { operationId: "system.db" },
+    );
+
+    if (result.ok) {
+      assert.fail("expected a refused result");
+    } else {
+      assert.equal(result.code, "transport-failure");
+      assert.equal(
+        result.message,
+        "the daemon at http://127.0.0.1:7421 answered 200 and the body ended early: the body stream reset",
+      );
+      assert.equal(exitCodeForError(result.code, result.status), 2);
+    }
+  });
+
+  it("an unreadable envelope on a 409 names no declared code and exits 100", async () => {
+    const { fetch } = stubFetch(
+      () =>
+        new Response("<html>proxy</html>", {
+          status: 409,
+          headers: { "Content-Type": "text/html" },
+        }),
+    );
+    const result = await call(dependencies({ fetch }), {
+      operationId: "system.db",
+    });
+
+    if (result.ok) {
+      assert.fail("expected a refused result");
+    } else {
+      assert.equal(result.code, "envelope-unreadable");
+      assert.equal(exitCodeForError(result.code, result.status), 100);
+    }
+  });
+
+  it("an unreadable envelope on a 401 still names unauthenticated, the one code that status carries", async () => {
+    const { fetch } = stubFetch(
+      () =>
+        new Response("<html>proxy</html>", {
+          status: 401,
+          headers: { "Content-Type": "text/html" },
+        }),
+    );
+    const result = await call(dependencies({ fetch }), {
+      operationId: "system.db",
+    });
+
+    if (result.ok) {
+      assert.fail("expected a refused result");
+    } else {
+      assert.equal(result.code, "unauthenticated");
+      assert.equal(exitCodeForError(result.code, result.status), 120);
+    }
+  });
+
+  it("a transport failure with no cause reports the error message itself", async () => {
+    const result = await call(
+      dependencies({
+        fetch: () => Promise.reject(new TypeError("fetch failed")),
+      }),
+      { operationId: "system.db" },
+    );
+
+    if (result.ok) {
+      assert.fail("expected a refused result");
+    } else {
+      assert.equal(
+        result.message,
+        "cannot reach the daemon at http://127.0.0.1:7421: fetch failed",
+      );
+    }
+  });
+
+  it("a transport failure of a non-error rejection renders the value", async () => {
+    const result = await call(
+      dependencies({
+        fetch: () => Promise.reject("socket gone"),
+      }),
+      { operationId: "system.db" },
+    );
+
+    if (result.ok) {
+      assert.fail("expected a refused result");
+    } else {
+      assert.equal(
+        result.message,
+        "cannot reach the daemon at http://127.0.0.1:7421: socket gone",
+      );
     }
   });
 });

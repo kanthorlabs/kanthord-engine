@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import {
   LOCAL_REFUSAL,
   TRANSPORT_FAILURE,
+  INDETERMINATE_OUTCOME,
+  ENVELOPE_UNREADABLE_CODE,
+  envelopeCodeForStatus,
   REFUSED_BY_DAEMON,
   DAEMON_FAULT,
   exitCodes,
@@ -108,6 +111,46 @@ describe("src/cli/exit-code.test", () => {
     assert.equal(new Set(Object.values(exitCodes)).size, 23);
   });
 
+  it("a transport failure is exit code 2 whatever the status", () => {
+    assert.equal(exitCodeForError("transport-failure", 0), TRANSPORT_FAILURE);
+    assert.equal(exitCodeForError("transport-failure", 503), TRANSPORT_FAILURE);
+  });
+
+  it("an indeterminate outcome is exit code 3 whatever the status", () => {
+    assert.equal(
+      exitCodeForError("outcome-indeterminate", 0),
+      INDETERMINATE_OUTCOME,
+    );
+    assert.equal(
+      exitCodeForError("outcome-indeterminate", 200),
+      INDETERMINATE_OUTCOME,
+    );
+  });
+
+  it("a status that carries one declared code names it without an envelope", () => {
+    assert.equal(envelopeCodeForStatus(400), "invalid-request");
+    assert.equal(envelopeCodeForStatus(401), "unauthenticated");
+    assert.equal(envelopeCodeForStatus(404), "not-found");
+    assert.equal(envelopeCodeForStatus(500), "internal-error");
+    assert.equal(envelopeCodeForStatus(501), "not-implemented");
+    assert.equal(envelopeCodeForStatus(503), "service-unavailable");
+  });
+
+  it("a status that carries more than one declared code names none of them", () => {
+    assert.equal(envelopeCodeForStatus(403), ENVELOPE_UNREADABLE_CODE);
+    assert.equal(envelopeCodeForStatus(409), ENVELOPE_UNREADABLE_CODE);
+    assert.equal(envelopeCodeForStatus(422), ENVELOPE_UNREADABLE_CODE);
+  });
+
+  it("a status the contract never declares names no code and falls to its band", () => {
+    assert.equal(envelopeCodeForStatus(502), ENVELOPE_UNREADABLE_CODE);
+    assert.equal(exitCodeForError(ENVELOPE_UNREADABLE_CODE, 502), DAEMON_FAULT);
+    assert.equal(
+      exitCodeForError(ENVELOPE_UNREADABLE_CODE, 409),
+      REFUSED_BY_DAEMON,
+    );
+  });
+
   it("unknown codes fall to the category floor", () => {
     assert.equal(exitCodeForError("invented-future-code", 409), 100);
     assert.equal(exitCodeForError("invented-future-code", 503), 200);
@@ -115,9 +158,10 @@ describe("src/cli/exit-code.test", () => {
     assert.equal(exitCodeForError("", 0), 1);
   });
 
-  it("the four exported constants are pinned", () => {
+  it("the five exported constants are pinned", () => {
     assert.equal(LOCAL_REFUSAL, 1);
     assert.equal(TRANSPORT_FAILURE, 2);
+    assert.equal(INDETERMINATE_OUTCOME, 3);
     assert.equal(REFUSED_BY_DAEMON, 100);
     assert.equal(DAEMON_FAULT, 200);
   });

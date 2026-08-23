@@ -4,6 +4,7 @@ import type { DaemonClient } from "../client.ts";
 import { projectCreateResponse } from "../../http/contract/project.ts";
 import { projectCommand } from "./index.ts";
 import { printProjectView } from "./view.ts";
+import { exitCodeForError } from "../exit-code.ts";
 
 export type CreateProjectCliInput = Readonly<{
   program: Command;
@@ -11,6 +12,7 @@ export type CreateProjectCliInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 export function registerProjectCreate(input: CreateProjectCliInput): void {
@@ -33,7 +35,7 @@ export function registerProjectCreate(input: CreateProjectCliInput): void {
       });
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-        input.fail();
+        input.exit(exitCodeForError(result.code, result.status));
         return;
       }
 

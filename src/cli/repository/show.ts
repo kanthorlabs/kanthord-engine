@@ -3,6 +3,7 @@ import type { Command } from "commander";
 import type { DaemonClient } from "../client.ts";
 import { repositoryShowResponse } from "../../http/contract/repository.ts";
 import { repositoryCommand } from "./index.ts";
+import { exitCodeForError } from "../exit-code.ts";
 
 export type ShowRepositoryInput = Readonly<{
   program: Command;
@@ -11,6 +12,7 @@ export type ShowRepositoryInput = Readonly<{
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   fail: () => void;
+  exit: (code: number) => void;
 }>;
 
 export function registerRepositoryShow(input: ShowRepositoryInput): void {
@@ -29,7 +31,7 @@ export function registerRepositoryShow(input: ShowRepositoryInput): void {
       });
       if (!result.ok) {
         input.stderr(`kanthord: ${result.code}: ${result.message}\n`);
-        input.fail();
+        input.exit(exitCodeForError(result.code, result.status));
         return;
       }
 

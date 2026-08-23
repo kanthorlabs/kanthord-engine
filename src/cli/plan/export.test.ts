@@ -38,6 +38,7 @@ const harness = (
   stdout(): string;
   stderr(): string;
   fails(): number;
+  exits(): readonly number[];
 } => {
   const program = new Command();
   registerClientOptions(program);
@@ -108,6 +109,7 @@ const harness = (
   let stdoutText = "";
   let stderrText = "";
   let failCalls = 0;
+  const exitCalls: number[] = [];
   registerPlanExport({
     program,
     client,
@@ -122,6 +124,9 @@ const harness = (
     fail: () => {
       failCalls += 1;
     },
+    exit: (code) => {
+      exitCalls.push(code);
+    },
   });
   return {
     program,
@@ -130,6 +135,7 @@ const harness = (
     stdout: () => stdoutText,
     stderr: () => stderrText,
     fails: () => failCalls,
+    exits: () => exitCalls,
   };
 };
 
@@ -194,7 +200,7 @@ describe("src/cli/plan/export.test", () => {
     });
     await run(h.program, ["plan", "export", "--project", ID]);
 
-    assert.equal(h.fails(), 1);
+    assert.deepEqual(h.exits(), [140]);
     assert.equal(h.stderr(), `kanthord: not-found: no project ${ID}\n`);
     assert.equal(h.stdout(), "");
     assert.deepEqual(h.fs, new Map([[`${CWD}/plan/a.md`, "unchanged"]]));

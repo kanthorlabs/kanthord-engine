@@ -89,6 +89,7 @@ const harness = (
   stdoutText(): string;
   stderrText(): string;
   failCalls(): number;
+  exitCodes(): readonly number[];
 } => {
   const program = new Command();
   registerClientOptions(program);
@@ -104,6 +105,7 @@ const harness = (
   let stdoutText = "";
   let stderrText = "";
   let failCalls = 0;
+  const exitCalls: number[] = [];
   registerRepositoryRegister({
     program,
     client,
@@ -118,6 +120,9 @@ const harness = (
     fail: () => {
       failCalls += 1;
     },
+    exit: (code) => {
+      exitCalls.push(code);
+    },
   });
   return {
     program,
@@ -125,6 +130,7 @@ const harness = (
     stdoutText: () => stdoutText,
     stderrText: () => stderrText,
     failCalls: () => failCalls,
+    exitCodes: () => exitCalls,
   };
 };
 
@@ -546,7 +552,7 @@ describe("src/cli/repository/register.test", () => {
       "--branch",
       "main",
     ]);
-    assert.equal(h409.failCalls(), 1);
+    assert.deepEqual(h409.exitCodes(), [159]);
     assert.equal(
       h409.stderrText(),
       "kanthord: host-key-mismatch: the host key does not match\n",
@@ -576,7 +582,7 @@ describe("src/cli/repository/register.test", () => {
       "--branch",
       "main",
     ]);
-    assert.equal(h422.failCalls(), 1);
+    assert.deepEqual(h422.exitCodes(), [163]);
     assert.equal(
       h422.stderrText(),
       "kanthord: credential-rejected: the credential was rejected\n",
@@ -609,7 +615,7 @@ describe("src/cli/repository/register.test", () => {
         "--branch",
         "main",
       ]);
-      assert.equal(h.failCalls(), 1);
+      assert.deepEqual(h.exitCodes(), [110]);
       assert.ok(h.stderrText().startsWith("kanthord: invalid-request:"));
       assert.ok(h.stderrText().includes(message));
     }
