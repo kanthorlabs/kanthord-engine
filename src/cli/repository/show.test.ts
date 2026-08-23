@@ -11,11 +11,10 @@ const VIEW = {
   name: "r-gh",
   remoteUrl: "https://github.com/o/r.git",
   credential: { id: "provider_gh", name: "gh" },
-  upstreamBranch: "main",
-  landingBranch: "main",
+  branch: "main",
   landingRef: "refs/heads/main",
   trackingRef: "refs/remotes/origin/main",
-  publishRef: "refs/heads/kanthord-e2e/007/cli",
+  publishRef: "refs/heads/main",
   publishOnApproval: true,
   state: "ready",
   landingOid: "a".repeat(40),
@@ -92,10 +91,10 @@ describe("src/cli/repository/show.test", () => {
     assert.equal(
       h.stdoutText(),
       "kanthord: registered r-gh repo_01HZY8QF3M4N5P6R7S8T9V0W1X\n" +
-        "kanthord: upstream main\n" +
+        "kanthord: branch main\n" +
         "kanthord: landing refs/heads/main aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" +
         "kanthord: tracking refs/remotes/origin/main aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" +
-        "kanthord: publish refs/heads/kanthord-e2e/007/cli\n" +
+        "kanthord: publish refs/heads/main\n" +
         "kanthord: state ready\n" +
         "kanthord: credential gh provider_gh\n",
     );

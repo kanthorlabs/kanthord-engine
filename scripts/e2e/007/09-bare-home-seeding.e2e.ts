@@ -63,9 +63,7 @@ describe("scripts/e2e/007/09-bare-home-seeding.e2e", () => {
     const result = await seedHome(runner, paths, {
       gitDir,
       remoteUrl: httpsUrl(env),
-      upstreamBranch: env.ghBaseBranch,
-      landingBranch: env.ghBaseBranch,
-      publishRef,
+      branch: env.ghBaseBranch,
       hostKey: null,
       credential: writer,
       pidFile: join(paths.runDirectory, "seed.pid"),
@@ -149,9 +147,7 @@ describe("scripts/e2e/007/09-bare-home-seeding.e2e", () => {
     const missingRejection = await seedHome(runner, paths, {
       gitDir: missingGitDir,
       remoteUrl: httpsUrl(env),
-      upstreamBranch: "kanthord-e2e-does-not-exist",
-      landingBranch: env.ghBaseBranch,
-      publishRef,
+      branch: "kanthord-e2e-does-not-exist",
       hostKey: null,
       credential: writer,
       pidFile: join(paths.runDirectory, "missing.pid"),
@@ -166,9 +162,7 @@ describe("scripts/e2e/007/09-bare-home-seeding.e2e", () => {
     const wrongRejection = await seedHome(runner, paths, {
       gitDir: wrongGitDir,
       remoteUrl: httpsUrl(env),
-      upstreamBranch: env.ghBaseBranch,
-      landingBranch: env.ghBaseBranch,
-      publishRef,
+      branch: env.ghBaseBranch,
       hostKey: null,
       credential: wrongCredential(env),
       pidFile: join(paths.runDirectory, "wrong.pid"),

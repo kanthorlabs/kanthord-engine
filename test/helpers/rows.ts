@@ -50,24 +50,47 @@ export function seedRegistry(transaction: Transaction): void {
     [fixtureIds.project, "kanthord-verify", "general@1", null, 1],
   );
 
+  const repositoryColumns = transaction.all(
+    "PRAGMA table_info(repository)",
+  ) as readonly Readonly<Record<string, unknown>>[];
+  const carriesLegacyBranches = repositoryColumns.some(
+    (column) => column.name === "upstream_branch",
+  );
   transaction.run(
-    "INSERT INTO repository (id, name, remote_url, credential_id, home_path, upstream_branch, landing_branch, publish_ref, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    [
-      fixtureIds.repository,
-      "kanthord-verify",
-      "https://example.invalid/r.git",
-      fixtureIds.provider,
-      "repos/r.git",
-      "main",
-      "main",
-      "refs/heads/main",
-      1,
-      "ready",
-      null,
-      null,
-      null,
-      1,
-    ],
+    carriesLegacyBranches
+      ? "INSERT INTO repository (id, name, remote_url, credential_id, home_path, upstream_branch, landing_branch, publish_ref, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      : "INSERT INTO repository (id, name, remote_url, credential_id, home_path, branch, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    carriesLegacyBranches
+      ? [
+          fixtureIds.repository,
+          "kanthord-verify",
+          "https://example.invalid/r.git",
+          fixtureIds.provider,
+          "repos/r.git",
+          "main",
+          "main",
+          "refs/heads/main",
+          1,
+          "ready",
+          null,
+          null,
+          null,
+          1,
+        ]
+      : [
+          fixtureIds.repository,
+          "kanthord-verify",
+          "https://example.invalid/r.git",
+          fixtureIds.provider,
+          "repos/r.git",
+          "main",
+          1,
+          "ready",
+          null,
+          null,
+          null,
+          1,
+        ],
   );
 
   transaction.run(
@@ -425,7 +448,7 @@ export function seedListFilterFixture(transaction: Transaction): void {
   seedRegistry(transaction);
   seedGraph(transaction);
   transaction.run(
-    "INSERT INTO repository (id, name, remote_url, credential_id, home_path, upstream_branch, landing_branch, publish_ref, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO repository (id, name, remote_url, credential_id, home_path, branch, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [
       "repo_b",
       "second",
@@ -433,8 +456,6 @@ export function seedListFilterFixture(transaction: Transaction): void {
       fixtureIds.provider,
       "repos/r2.git",
       "main",
-      "main",
-      "refs/heads/main",
       1,
       "ready",
       null,

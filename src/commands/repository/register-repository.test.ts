@@ -56,10 +56,8 @@ type ConfirmOutcome =
 type RecordedSeed = Readonly<{
   gitDir: string;
   remoteUrl: string;
-  upstreamBranch: string;
-  landingBranch: string;
+  branch: string;
   credential: GitCredential;
-  publishRef: string;
   hostKey: HostKey | null;
   pidFile: string;
 }>;
@@ -70,9 +68,7 @@ type RepositoryRowReadback = Readonly<{
   remote_url: string;
   credential_id: string;
   home_path: string;
-  upstream_branch: string;
-  landing_branch: string;
-  publish_ref: string;
+  branch: string;
   publish_on_approval: number;
   state: string;
   diverged_landing_oid: string | null;
@@ -116,8 +112,7 @@ type MockView = Readonly<{
   name: string;
   remoteUrl: string;
   credential: Readonly<{ id: string; name: string }>;
-  upstreamBranch: string;
-  landingBranch: string;
+  branch: string;
   landingRef: string;
   trackingRef: string;
   publishRef: string;
@@ -160,9 +155,7 @@ const baseInput = {
   name: "kanthord-verify",
   remoteUrl: httpsUrl,
   credentialId: providerId,
-  upstreamBranch: "main",
-  landingBranch: "main",
-  publishRef: "refs/heads/main",
+  branch: "main",
   publishOnApproval: true,
   hostFingerprint: null,
   actor: "ulrich",
@@ -255,10 +248,8 @@ function gitMock(
     async seedHome(input: {
       gitDir: string;
       remoteUrl: string;
-      upstreamBranch: string;
-      landingBranch: string;
+      branch: string;
       credential: GitCredential;
-      publishRef: string;
       hostKey: HostKey | null;
       pidFile: string;
     }): Promise<{
@@ -269,10 +260,8 @@ function gitMock(
       seedInputs.push({
         gitDir: input.gitDir,
         remoteUrl: input.remoteUrl,
-        upstreamBranch: input.upstreamBranch,
-        landingBranch: input.landingBranch,
+        branch: input.branch,
         credential: input.credential,
-        publishRef: input.publishRef,
         hostKey: input.hostKey,
         pidFile: input.pidFile,
       });
@@ -365,7 +354,7 @@ function readRepository(
 ): RepositoryRowReadback | undefined {
   return storage.transact((transaction) =>
     transaction.get(
-      "SELECT id, name, remote_url, credential_id, home_path, upstream_branch, landing_branch, publish_ref, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at FROM repository WHERE id = ?",
+      "SELECT id, name, remote_url, credential_id, home_path, branch, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at FROM repository WHERE id = ?",
       [id],
     ),
   ) as RepositoryRowReadback | undefined;
@@ -426,8 +415,7 @@ describe("src/commands/repository/register-repository.test", () => {
       name: "kanthord-verify",
       remoteUrl: httpsUrl,
       credential: { id: providerId, name: "github-bot" },
-      upstreamBranch: "main",
-      landingBranch: "main",
+      branch: "main",
       landingRef: "refs/heads/main",
       trackingRef: "refs/remotes/origin/main",
       publishRef: "refs/heads/main",
@@ -484,8 +472,7 @@ describe("src/commands/repository/register-repository.test", () => {
       name: "kanthord-verify",
       remoteUrl: httpsUrl,
       credential: { id: providerId, name: "github-bot" },
-      upstreamBranch: "main",
-      landingBranch: "main",
+      branch: "main",
       landingRef: "refs/heads/main",
       trackingRef: "refs/remotes/origin/main",
       publishRef: "refs/heads/main",
@@ -507,9 +494,7 @@ describe("src/commands/repository/register-repository.test", () => {
     assert.equal(row.remote_url, httpsUrl);
     assert.equal(row.credential_id, providerId);
     assert.equal(row.home_path, join(homeRoot, "repos", "kanthord-verify.git"));
-    assert.equal(row.upstream_branch, "main");
-    assert.equal(row.landing_branch, "main");
-    assert.equal(row.publish_ref, "refs/heads/main");
+    assert.equal(row.branch, "main");
     assert.equal(row.publish_on_approval, 1);
     assert.equal(row.state, "ready");
     assert.equal(row.diverged_landing_oid, null);
@@ -549,9 +534,7 @@ describe("src/commands/repository/register-repository.test", () => {
     const payload = JSON.parse(event.payload_json) as Record<string, unknown>;
     assert.deepEqual(payload, {
       name: "kanthord-verify",
-      upstreamBranch: "main",
-      landingBranch: "main",
-      publishRef: "refs/heads/main",
+      branch: "main",
       publishOnApproval: true,
       credentialId: providerId,
       fetchedUpstreamOid: FETCHED_OID,
@@ -564,13 +547,19 @@ describe("src/commands/repository/register-repository.test", () => {
     assert.equal(mock.seedInputs.length, 1);
     const seed = mock.seedInputs[0]!;
     assert.equal(seed.hostKey, null);
+    assert.equal(seed.branch, "main");
+    assert.equal("publishRef" in seed, false);
+    assert.equal(
+      "landingBranch" in seed,
+      false,
+      "the seed carries one branch field",
+    );
     assert.deepEqual(seed.credential, {
       transport: "http-basic",
       forge: "github",
       username: "x-access-token",
       token,
     });
-    assert.equal(seed.publishRef, "refs/heads/main");
     assert.equal(
       seed.pidFile,
       join(homeRoot, "git", "run", `seed-${repositoryId}.pid`),

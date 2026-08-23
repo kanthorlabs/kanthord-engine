@@ -162,9 +162,7 @@ describe("scripts/e2e/007/10-repository-register.e2e", () => {
         name: repoName,
         remoteUrl: httpsUrl(env),
         credentialId: writerId,
-        upstreamBranch: defaultBranch,
-        landingBranch: defaultBranch,
-        publishRef,
+        branch: defaultBranch,
         publishOnApproval: true,
       }),
     });
@@ -221,9 +219,7 @@ describe("scripts/e2e/007/10-repository-register.e2e", () => {
         name: `kanthord-mismatch-${runSuffix}`,
         remoteUrl: sshUrl,
         credentialId: sshId,
-        upstreamBranch: defaultBranch,
-        landingBranch: defaultBranch,
-        publishRef: scratchRef(env, "mismatch"),
+        branch: defaultBranch,
         publishOnApproval: true,
         hostFingerprint: otherFingerprint,
       }),
@@ -253,9 +249,7 @@ describe("scripts/e2e/007/10-repository-register.e2e", () => {
         name: `kanthord-no-fingerprint-${runSuffix}`,
         remoteUrl: sshUrl,
         credentialId: sshId,
-        upstreamBranch: defaultBranch,
-        landingBranch: defaultBranch,
-        publishRef: scratchRef(env, "no-fingerprint"),
+        branch: defaultBranch,
         publishOnApproval: true,
       }),
     });
@@ -277,9 +271,7 @@ describe("scripts/e2e/007/10-repository-register.e2e", () => {
         name: `kanthord-forbidden-${runSuffix}`,
         remoteUrl: httpsUrl(env),
         credentialId: writerId,
-        upstreamBranch: defaultBranch,
-        landingBranch: defaultBranch,
-        publishRef: scratchRef(env, "forbidden"),
+        branch: defaultBranch,
         publishOnApproval: true,
         hostFingerprint: otherFingerprint,
       }),
@@ -295,14 +287,12 @@ describe("scripts/e2e/007/10-repository-register.e2e", () => {
       "host-fingerprint-forbidden",
     );
 
-    for (const field of ["upstreamBranch", "landingBranch", "publishRef"]) {
+    for (const field of ["branch"]) {
       const body: Record<string, unknown> = {
         name: `kanthord-missing-${field}-${runSuffix}`,
         remoteUrl: httpsUrl(env),
         credentialId: writerId,
-        upstreamBranch: defaultBranch,
-        landingBranch: defaultBranch,
-        publishRef: scratchRef(env, `missing-${field}`),
+        branch: defaultBranch,
         publishOnApproval: true,
       };
       delete body[field];
@@ -340,9 +330,7 @@ describe("scripts/e2e/007/10-repository-register.e2e", () => {
         name: `kanthord-wrong-${runSuffix}`,
         remoteUrl: httpsUrl(env),
         credentialId: wrongId,
-        upstreamBranch: defaultBranch,
-        landingBranch: defaultBranch,
-        publishRef: scratchRef(env, "wrong"),
+        branch: defaultBranch,
         publishOnApproval: true,
       }),
     });

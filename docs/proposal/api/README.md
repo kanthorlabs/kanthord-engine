@@ -104,7 +104,7 @@ After `/v1`, every literal segment is exactly one of five kinds.
 | Kind        | Meaning                                    | Examples                                                     |
 | ----------- | ------------------------------------------ | ------------------------------------------------------------ |
 | resource    | an addressable resource or its collection  | `repository`, `project`, `node`, `event`, `blob`, `provider` |
-| subresource | one value belonging to the preceding scope | `plan`, `profile`, `approval`, `default`, `landing-branch`   |
+| subresource | one value belonging to the preceding scope | `plan`, `profile`, `approval`, `default`                     |
 | action      | an operation on the preceding resource     | `inspect`, `rename`, `reconcile`, `import`, `publish`        |
 | system      | a non-resource daemon segment              | `health`, `db`, `status`                                     |
 | parameter   | a locator                                  | `:id`, `:hash`                                               |

@@ -142,7 +142,7 @@ describe("src/services/git/clone.test", () => {
     assert.equal(fixtureObjectIds.commit2, c2);
   });
 
-  it("the clone carries the landing branch and returns the published path", async () => {
+  it("the clone starts at the landing branch and works on the feature branch", async () => {
     const { root, home, paths } = makeHome();
     const runner = createGitRunner(paths);
     await writeLandBranch(runner, paths);
@@ -151,18 +151,39 @@ describe("src/services/git/clone.test", () => {
       sourceGitDir: home,
       targetDir,
       ref: "land",
+      objectiveId: "objective_01JQ8Z4A2B",
     });
     assert.equal(published, targetDir);
     const head = await workspaceGit(runner, targetDir, ["rev-parse", "HEAD"]);
     assert.equal(head.code, 0, head.stderr);
     assert.equal(head.stdout.trim(), c2);
-    const branch = await workspaceGit(runner, targetDir, [
-      "rev-parse",
-      "--abbrev-ref",
+    const symbolic = await workspaceGit(runner, targetDir, [
+      "symbolic-ref",
+      "--quiet",
       "HEAD",
     ]);
-    assert.equal(branch.code, 0, branch.stderr);
-    assert.equal(branch.stdout.trim(), "land");
+    assert.equal(symbolic.code, 0, symbolic.stderr);
+    assert.equal(
+      symbolic.stdout.trim(),
+      "refs/heads/feature/objective_01JQ8Z4A2B",
+    );
+    const land = await workspaceGit(runner, targetDir, [
+      "rev-parse",
+      "--verify",
+      "refs/heads/land",
+    ]);
+    assert.equal(land.code, 0, land.stderr);
+    assert.equal(land.stdout.trim(), c2);
+    const heads = await workspaceGit(runner, targetDir, [
+      "for-each-ref",
+      "--format=%(refname)",
+      "refs/heads",
+    ]);
+    assert.equal(heads.code, 0, heads.stderr);
+    assert.deepEqual(heads.stdout.trim().split("\n"), [
+      "refs/heads/feature/objective_01JQ8Z4A2B",
+      "refs/heads/land",
+    ]);
   });
 
   it("isolation by link count", async () => {
@@ -174,6 +195,7 @@ describe("src/services/git/clone.test", () => {
       sourceGitDir: home,
       targetDir,
       ref: "land",
+      objectiveId: "objective_01JQ8Z4A2B",
     });
     const workspaceObjects = objectFiles(join(targetDir, ".git"));
     assert.ok(workspaceObjects.length > 0);
@@ -219,6 +241,7 @@ describe("src/services/git/clone.test", () => {
       sourceGitDir: home,
       targetDir,
       ref: "land",
+      objectiveId: "objective_01JQ8Z4A2B",
     });
     const remote = await workspaceGit(runner, targetDir, ["remote"]);
     assert.equal(remote.code, 0, remote.stderr);
@@ -240,6 +263,7 @@ describe("src/services/git/clone.test", () => {
       sourceGitDir: home,
       targetDir,
       ref: "land",
+      objectiveId: "objective_01JQ8Z4A2B",
     });
     assert.equal(
       existsSync(join(targetDir, ".git", "objects", "info", "alternates")),
@@ -264,6 +288,7 @@ describe("src/services/git/clone.test", () => {
       sourceGitDir: dashSource,
       targetDir,
       ref: "land",
+      objectiveId: "objective_01JQ8Z4A2B",
     });
     const head = await workspaceGit(runner, targetDir, ["rev-parse", "HEAD"]);
     assert.equal(head.code, 0, head.stderr);
@@ -281,6 +306,7 @@ describe("src/services/git/clone.test", () => {
       sourceGitDir: home,
       targetDir,
       ref: "land",
+      objectiveId: "objective_01JQ8Z4A2B",
     }).then(
       () => null,
       (error: unknown) => error,
@@ -302,6 +328,7 @@ describe("src/services/git/clone.test", () => {
       sourceGitDir: home,
       targetDir,
       ref: "missing",
+      objectiveId: "objective_01JQ8Z4A2B",
     }).then(
       () => null,
       (error: unknown) => error,
@@ -321,6 +348,7 @@ describe("src/services/git/clone.test", () => {
       sourceGitDir: home,
       targetDir,
       ref: "land",
+      objectiveId: "objective_01JQ8Z4A2B",
     }).then(
       () => null,
       (error: unknown) => error,
@@ -340,6 +368,7 @@ describe("src/services/git/clone.test", () => {
       sourceGitDir: "http://user@127.0.0.1:1/fixture.git",
       targetDir,
       ref: "land",
+      objectiveId: "objective_01JQ8Z4A2B",
     }).then(
       () => null,
       (error: unknown) => error,
@@ -347,5 +376,207 @@ describe("src/services/git/clone.test", () => {
     assert.ok(rejection instanceof GitError, String(rejection));
     assert.ok(!rejection.detail.includes("user@"), rejection.detail);
     assert.ok(rejection.detail.includes("127.0.0.1"), rejection.detail);
+  });
+
+  it("a feature name already on the source does not block the checkout", async () => {
+    const { root, home, paths } = makeHome();
+    const runner = createGitRunner(paths);
+    await writeLandBranch(runner, paths);
+    const preexisting = await runGit(runner, paths, [
+      "update-ref",
+      "refs/heads/feature/objective_01JQ8Z4A2B",
+      c1,
+      "",
+    ]);
+    assert.equal(preexisting.code, 0, preexisting.stderr);
+    const targetDir = join(root, "workspace");
+    const published = await cloneObjective(runner, {
+      sourceGitDir: home,
+      targetDir,
+      ref: "land",
+      objectiveId: "objective_01JQ8Z4A2B",
+    });
+    assert.equal(published, targetDir);
+    const symbolic = await workspaceGit(runner, targetDir, [
+      "symbolic-ref",
+      "--quiet",
+      "HEAD",
+    ]);
+    assert.equal(symbolic.code, 0, symbolic.stderr);
+    assert.equal(
+      symbolic.stdout.trim(),
+      "refs/heads/feature/objective_01JQ8Z4A2B",
+    );
+    const head = await workspaceGit(runner, targetDir, ["rev-parse", "HEAD"]);
+    assert.equal(head.code, 0, head.stderr);
+    assert.equal(head.stdout.trim(), c2);
+    const heads = await workspaceGit(runner, targetDir, [
+      "for-each-ref",
+      "--format=%(refname)",
+      "refs/heads",
+    ]);
+    assert.equal(heads.code, 0, heads.stderr);
+    assert.deepEqual(heads.stdout.trim().split("\n"), [
+      "refs/heads/feature/objective_01JQ8Z4A2B",
+      "refs/heads/land",
+    ]);
+    assert.deepEqual(stagingEntries(root), []);
+  });
+
+  it("a failed checkout refuses and leaves no staging directory", async () => {
+    const { root, home, paths } = makeHome();
+    const runner = createGitRunner(paths);
+    await writeLandBranch(runner, paths);
+    const failingCheckout: GitRunner = async (request) => {
+      if (request.args.includes("checkout")) {
+        return {
+          code: 128,
+          stdout: "",
+          stderr:
+            "fatal: a branch named 'feature/objective_01JQ8Z4A2B' already exists\n",
+          args: request.args,
+        };
+      }
+      return runner(request);
+    };
+    const targetDir = join(root, "workspace");
+    const rejection = await cloneObjective(failingCheckout, {
+      sourceGitDir: home,
+      targetDir,
+      ref: "land",
+      objectiveId: "objective_01JQ8Z4A2B",
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    assert.ok(rejection instanceof GitError, String(rejection));
+    assert.ok(
+      rejection.message.includes("git checkout -b failed with code"),
+      rejection.message,
+    );
+    assert.equal(rejection.message, "git checkout -b failed with code 128");
+    assert.equal(existsSync(targetDir), false);
+    assert.deepEqual(stagingEntries(root), []);
+  });
+
+  it("a clone on the wrong branch is refused before the rename", async () => {
+    const { root, home, paths } = makeHome();
+    const runner = createGitRunner(paths);
+    await writeLandBranch(runner, paths);
+    const answeringSymbolicRef: GitRunner = async (request) => {
+      if (request.args.includes("symbolic-ref")) {
+        return {
+          code: 0,
+          stdout: "refs/heads/land\n",
+          stderr: "",
+          args: request.args,
+        };
+      }
+      return runner(request);
+    };
+    const targetDir = join(root, "workspace");
+    const rejection = await cloneObjective(answeringSymbolicRef, {
+      sourceGitDir: home,
+      targetDir,
+      ref: "land",
+      objectiveId: "objective_01JQ8Z4A2B",
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    assert.ok(rejection instanceof GitError, String(rejection));
+    assert.equal(
+      rejection.message,
+      "the clone HEAD is refs/heads/land and not refs/heads/feature/objective_01JQ8Z4A2B",
+    );
+    assert.equal(existsSync(targetDir), false);
+  });
+
+  it("a detached HEAD is refused", async () => {
+    const { root, home, paths } = makeHome();
+    const runner = createGitRunner(paths);
+    await writeLandBranch(runner, paths);
+    const detachedRunner: GitRunner = async (request) => {
+      if (request.args.includes("symbolic-ref")) {
+        return { code: 1, stdout: "", stderr: "", args: request.args };
+      }
+      return runner(request);
+    };
+    const targetDir = join(root, "workspace");
+    const rejection = await cloneObjective(detachedRunner, {
+      sourceGitDir: home,
+      targetDir,
+      ref: "land",
+      objectiveId: "objective_01JQ8Z4A2B",
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    assert.ok(rejection instanceof GitError, String(rejection));
+    assert.ok(
+      rejection.message.includes("the clone has no symbolic HEAD"),
+      rejection.message,
+    );
+    assert.equal(existsSync(targetDir), false);
+  });
+
+  it("the feature branch carries no upstream", async () => {
+    const { root, home, paths } = makeHome();
+    const runner = createGitRunner(paths);
+    await writeLandBranch(runner, paths);
+    const targetDir = join(root, "workspace");
+    await cloneObjective(runner, {
+      sourceGitDir: home,
+      targetDir,
+      ref: "land",
+      objectiveId: "objective_01JQ8Z4A2B",
+    });
+    const exists = await workspaceGit(runner, targetDir, [
+      "rev-parse",
+      "--verify",
+      "refs/heads/feature/objective_01JQ8Z4A2B",
+    ]);
+    assert.equal(exists.code, 0, exists.stderr);
+    const upstream = await workspaceGit(runner, targetDir, [
+      "config",
+      "--get",
+      "branch.feature/objective_01JQ8Z4A2B.remote",
+    ]);
+    assert.notEqual(upstream.code, 0);
+  });
+
+  it("the checkout runs before the remote is removed", async () => {
+    const { root, home, paths } = makeHome();
+    const runner = createGitRunner(paths);
+    await writeLandBranch(runner, paths);
+    const targetDir = join(root, "workspace");
+    const recorded: string[][] = [];
+    const recording: GitRunner = async (request) => {
+      recorded.push([...request.args]);
+      return runner(request);
+    };
+    await cloneObjective(recording, {
+      sourceGitDir: home,
+      targetDir,
+      ref: "land",
+      objectiveId: "objective_01JQ8Z4A2B",
+    });
+    const subcommands = recorded.map((args) => {
+      if (args[0] === "clone") return "clone";
+      if (args.includes("checkout")) return "checkout -b";
+      if (args.includes("symbolic-ref")) return "symbolic-ref --quiet";
+      if (args.includes("--get-regexp")) return "config --get-regexp";
+      if (args.includes("remove")) return "remote remove";
+      if (args[args.length - 1] === "remote") return "remote";
+      return args.join(" ");
+    });
+    assert.deepEqual(subcommands, [
+      "clone",
+      "checkout -b",
+      "remote remove",
+      "remote",
+      "config --get-regexp",
+      "symbolic-ref --quiet",
+    ]);
   });
 });

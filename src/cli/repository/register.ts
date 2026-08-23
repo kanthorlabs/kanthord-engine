@@ -25,9 +25,7 @@ type RegisterOptions = Readonly<{
   name?: string;
   url?: string;
   credential?: string;
-  upstream?: string;
-  landing?: string;
-  publishRef?: string;
+  branch?: string;
   hostFingerprint?: string;
   publishOnApproval?: boolean;
 }>;
@@ -41,9 +39,7 @@ export function registerRepositoryRegister(
     .option("--name <name>", "repository name")
     .option("--url <url>", "repository remote url")
     .option("--credential <name>", "credential name to bind")
-    .option("--upstream <branch>", "upstream branch")
-    .option("--landing <branch>", "landing branch")
-    .option("--publish-ref <ref>", "publish ref")
+    .option("--branch <branch>", "the branch on remote origin")
     .option("--host-fingerprint <value>", "confirmed host key fingerprint")
     .option("--no-publish-on-approval", "do not publish on approval")
     .action(async (options: RegisterOptions) => {
@@ -94,12 +90,12 @@ export function registerRepositoryRegister(
       }
       const inspect = repositoryInspectResponse.parse(inspectResult.body);
 
-      let upstream: string;
+      let branch: string;
       try {
-        upstream = await confirmValue(input.confirm, {
-          flagName: "--upstream",
-          flagValue: options.upstream,
-          question: "upstream branch?",
+        branch = await confirmValue(input.confirm, {
+          flagName: "--branch",
+          flagValue: options.branch,
+          question: "branch?",
           suggestion: inspect.defaultBranch,
         });
       } catch (error) {
@@ -145,16 +141,11 @@ export function registerRepositoryRegister(
           : `kanthord: credential refused: ${inspect.credential.refusal}\n`,
       );
 
-      const landing = options.landing ?? upstream;
-      const publishRef = options.publishRef ?? `refs/heads/${upstream}`;
-
       const registerResult = await input.client.call("repository.register", {
         name: options.name,
         remoteUrl: url,
         credentialId: matched.id,
-        upstreamBranch: upstream,
-        landingBranch: landing,
-        publishRef,
+        branch,
         publishOnApproval: options.publishOnApproval !== false,
         hostFingerprint,
       });
@@ -168,7 +159,7 @@ export function registerRepositoryRegister(
 
       const view = repositoryRegisterResponse.parse(registerResult.body);
       input.stdout(`kanthord: registered ${view.name} ${view.id}\n`);
-      input.stdout(`kanthord: upstream ${view.upstreamBranch}\n`);
+      input.stdout(`kanthord: branch ${view.branch}\n`);
       input.stdout(`kanthord: landing ${view.landingRef} ${view.landingOid}\n`);
       input.stdout(
         `kanthord: tracking ${view.trackingRef} ${view.trackingOid}\n`,

@@ -68,7 +68,7 @@ The convention, the modes and the evidence format are in [../README.md](../READM
   - The daemon binary with no config file at any discovered location exits non-zero and names the search order it used. A config file at the first discovered location starts the daemon.
   - The daemon binary and the CLI binary report the same version.
   - `kanthord credential register --kind git` exits zero and reports a credential id.
-  - `kanthord repository register --url <fixture-remote> --credential <name> --upstream <branch>` exits zero, and `kanthord repository show` reports one landing branch at the fixture default and one tracking namespace.
+  - `kanthord repository register --url <fixture-remote> --credential <name> --branch <branch>` exits zero, and `kanthord repository show` reports one landing branch at the fixture default and one tracking namespace.
   - `kanthord project create` exits zero and reports a project id, and the repository binds to that project. Import refuses an objective whose repository is not bound, so the binding is a step of the journey rather than setup.
   - `kanthord plan import` of the two-objective fixture exits zero and reports a plan revision.
   - `kanthord plan export` returns documents byte-identical to the ones the import accepted.

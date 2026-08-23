@@ -173,7 +173,7 @@ function insertTask(fixture: RecoveryFixture, id: string, state: string): void {
       ],
     );
     transaction.run(
-      "INSERT INTO repository (id, name, remote_url, credential_id, home_path, upstream_branch, landing_branch, publish_ref, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO repository (id, name, remote_url, credential_id, home_path, branch, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         repositoryId,
         `repo-${ulid}`,
@@ -181,8 +181,6 @@ function insertTask(fixture: RecoveryFixture, id: string, state: string): void {
         "provider_a",
         "repos/fixture.git",
         "main",
-        "kanthord/landing",
-        "refs/heads/kanthord/publish",
         0,
         "ready",
         null,

@@ -14,8 +14,7 @@ type MockView = Readonly<{
   name: string;
   remoteUrl: string;
   credential: Readonly<{ id: string; name: string }>;
-  upstreamBranch: string;
-  landingBranch: string;
+  branch: string;
   landingRef: string;
   trackingRef: string;
   publishRef: string;
@@ -37,8 +36,7 @@ const view: MockView = {
     id: "provider_01HZY8QF3M4N5P6R7S8T9V0W1X",
     name: "github-bot",
   },
-  upstreamBranch: "main",
-  landingBranch: "main",
+  branch: "main",
   landingRef: "refs/heads/main",
   trackingRef: "refs/remotes/origin/main",
   publishRef: "refs/heads/main",
@@ -56,9 +54,7 @@ const validBody = {
   name: "kanthord-verify",
   remoteUrl: "https://github.com/kanthorlabs/kanthord-verify.git",
   credentialId: "provider_01HZY8QF3M4N5P6R7S8T9V0W1X",
-  upstreamBranch: "main",
-  landingBranch: "main",
-  publishRef: "refs/heads/main",
+  branch: "main",
   publishOnApproval: true,
   hostFingerprint: null,
 };
@@ -106,39 +102,13 @@ describe("src/http/server/repository/register-repository.test", () => {
     assertNoDaemonPath(response.body);
   });
 
-  it("a body missing upstreamBranch answers 400 and never calls the command", async () => {
+  it("a body missing branch answers 400 and never calls the command", async () => {
     let calls = 0;
     const app = await handlerApp(async () => {
       calls += 1;
       return view;
     });
-    const { upstreamBranch: _omit, ...body } = validBody;
-    const response = await app.post("/v1/repository").send(body);
-    assert.equal(response.status, 400);
-    assert.equal(response.body.error.code, "invalid-request");
-    assert.equal(calls, 0);
-  });
-
-  it("a body missing landingBranch answers 400 and never calls the command", async () => {
-    let calls = 0;
-    const app = await handlerApp(async () => {
-      calls += 1;
-      return view;
-    });
-    const { landingBranch: _omit, ...body } = validBody;
-    const response = await app.post("/v1/repository").send(body);
-    assert.equal(response.status, 400);
-    assert.equal(response.body.error.code, "invalid-request");
-    assert.equal(calls, 0);
-  });
-
-  it("a body missing publishRef answers 400 and never calls the command", async () => {
-    let calls = 0;
-    const app = await handlerApp(async () => {
-      calls += 1;
-      return view;
-    });
-    const { publishRef: _omit, ...body } = validBody;
+    const { branch: _omit, ...body } = validBody;
     const response = await app.post("/v1/repository").send(body);
     assert.equal(response.status, 400);
     assert.equal(response.body.error.code, "invalid-request");
@@ -154,38 +124,38 @@ describe("src/http/server/repository/register-repository.test", () => {
     assert.equal(response.body.error.code, "invalid-request");
   });
 
-  it("an upstreamBranch escaping the tree answers 400", async () => {
+  it("a branch escaping the tree answers 400", async () => {
     const app = await handlerApp(async () => view);
     const response = await app
       .post("/v1/repository")
-      .send({ ...validBody, upstreamBranch: "../etc" });
+      .send({ ...validBody, branch: "../etc" });
     assert.equal(response.status, 400);
     assert.equal(response.body.error.code, "invalid-request");
   });
 
-  it("an upstreamBranch with a leading dash answers 400", async () => {
+  it("a branch with a leading dash answers 400", async () => {
     const app = await handlerApp(async () => view);
     const response = await app
       .post("/v1/repository")
-      .send({ ...validBody, upstreamBranch: "-x" });
+      .send({ ...validBody, branch: "-x" });
     assert.equal(response.status, 400);
     assert.equal(response.body.error.code, "invalid-request");
   });
 
-  it("a landingBranch ending in .lock answers 400", async () => {
+  it("a branch ending in .lock answers 400", async () => {
     const app = await handlerApp(async () => view);
     const response = await app
       .post("/v1/repository")
-      .send({ ...validBody, landingBranch: "main.lock" });
+      .send({ ...validBody, branch: "main.lock" });
     assert.equal(response.status, 400);
     assert.equal(response.body.error.code, "invalid-request");
   });
 
-  it("a publishRef that is not fully qualified answers 400", async () => {
+  it("an unknown key is refused, which is what proves publishRef left the wire", async () => {
     const app = await handlerApp(async () => view);
     const response = await app
       .post("/v1/repository")
-      .send({ ...validBody, publishRef: "main" });
+      .send({ ...validBody, publishRef: "refs/heads/main" });
     assert.equal(response.status, 400);
     assert.equal(response.body.error.code, "invalid-request");
   });

@@ -164,10 +164,8 @@ describe("scripts/e2e/007/12-cli-commands.e2e", () => {
         httpsUrl(env),
         "--credential",
         credentialName,
-        "--upstream",
+        "--branch",
         env.ghBaseBranch,
-        "--publish-ref",
-        publishRef,
       ],
     });
     assert.equal(repoRegistered.code, 0, repoRegistered.stderr);
@@ -186,7 +184,7 @@ describe("scripts/e2e/007/12-cli-commands.e2e", () => {
       registeredLine,
     );
 
-    const noUpstream = await runCli({
+    const noBranch = await runCli({
       args: [
         ...clientArgs,
         "repository",
@@ -197,17 +195,15 @@ describe("scripts/e2e/007/12-cli-commands.e2e", () => {
         httpsUrl(env),
         "--credential",
         credentialName,
-        "--publish-ref",
-        scratchRef(env, "cli-no-upstream"),
       ],
     });
-    assert.equal(noUpstream.code, 1, noUpstream.stdout);
-    assert.equal(noUpstream.stdout, "");
+    assert.equal(noBranch.code, 1, noBranch.stdout);
+    assert.equal(noBranch.stdout, "");
     assert.ok(
-      noUpstream.stderr.startsWith("kanthord: confirmation-required:"),
-      noUpstream.stderr,
+      noBranch.stderr.startsWith("kanthord: confirmation-required:"),
+      noBranch.stderr,
     );
-    assert.ok(noUpstream.stderr.includes("--upstream"), noUpstream.stderr);
+    assert.ok(noBranch.stderr.includes("--branch"), noBranch.stderr);
 
     execFileSync(
       tools.paths.sshKeygen,
@@ -253,10 +249,8 @@ describe("scripts/e2e/007/12-cli-commands.e2e", () => {
         sshUrl,
         "--credential",
         sshCredentialName,
-        "--upstream",
+        "--branch",
         env.ghBaseBranch,
-        "--publish-ref",
-        scratchRef(env, "cli-ssh"),
       ],
     });
     assert.equal(noFingerprint.code, 1, noFingerprint.stdout);
@@ -276,7 +270,7 @@ describe("scripts/e2e/007/12-cli-commands.e2e", () => {
         httpsUrl(env),
         "--credential",
         "does-not-exist",
-        "--upstream",
+        "--branch",
         env.ghBaseBranch,
       ],
     });

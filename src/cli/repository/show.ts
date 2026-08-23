@@ -35,7 +35,7 @@ export function registerRepositoryShow(input: ShowRepositoryInput): void {
 
       const view = repositoryShowResponse.parse(result.body);
       input.stdout(`kanthord: registered ${view.name} ${view.id}\n`);
-      input.stdout(`kanthord: upstream ${view.upstreamBranch}\n`);
+      input.stdout(`kanthord: branch ${view.branch}\n`);
       input.stdout(`kanthord: landing ${view.landingRef} ${view.landingOid}\n`);
       input.stdout(
         `kanthord: tracking ${view.trackingRef} ${view.trackingOid}\n`,

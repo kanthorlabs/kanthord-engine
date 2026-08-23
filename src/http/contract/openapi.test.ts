@@ -1,5 +1,6 @@
 import { buildOpenApiDocument, renderOpenApiYaml } from "./openapi.ts";
 import { registry } from "./registry.ts";
+import { renderOpenApiPath } from "./path.ts";
 import { KANTHORD_VERSION } from "../../domain/version.ts";
 import SwaggerParser from "@apidevtools/swagger-parser";
 import YAML from "yaml";
@@ -71,11 +72,11 @@ test("documents openapi 3.0.3 and the product info", () => {
   });
 });
 
-test("renders sixty-two distinct paths in bytewise order", () => {
+test("renders sixty-one distinct paths in bytewise order", () => {
   const document = buildOpenApiDocument();
   const paths = document.paths as Readonly<Record<string, unknown>>;
   const keys = Object.keys(paths);
-  assert.equal(keys.length, 62);
+  assert.equal(keys.length, 61);
   assert.deepEqual(keys, sortedBytewise(keys));
 });
 
@@ -112,7 +113,7 @@ test("orders methods within a path by the fixed sequence", () => {
 test("names every operation and matches the registry set", () => {
   const document = buildOpenApiDocument();
   const ids = operationObjects(document).map((entry) => entry.operationId);
-  assert.equal(ids.length, 70);
+  assert.equal(ids.length, 69);
   assert.deepEqual(
     sortedBytewise(ids),
     sortedBytewise(registry.map((entry) => entry.operationId)),
@@ -357,7 +358,7 @@ test("registers every schema component in bytewise order", () => {
   ]);
 });
 
-test("plan.import's default response refs its own error component, and a stubbed operation's still refs Error", () => {
+test("plan.import's default response refs its own error component, and every stubbed operation's still refs Error", () => {
   const document = buildOpenApiDocument();
   const paths = document.paths as Readonly<Record<string, unknown>>;
   const planImport = (
@@ -373,20 +374,26 @@ test("plan.import's default response refs its own error component, and a stubbed
     { schema: { $ref: "#/components/schemas/plan.import.error" } },
   );
 
-  const landingBranch = (
-    paths["/v1/repository/{id}/landing-branch"] as Readonly<
+  for (const entry of registry.filter(
+    (candidate) => candidate.status === "stubbed",
+  )) {
+    const pathObject = paths[renderOpenApiPath(entry.path)] as Readonly<
       Record<string, unknown>
-    >
-  ).post as Readonly<Record<string, unknown>>;
-  const landingBranchDefault = (
-    landingBranch.responses as Readonly<Record<string, unknown>>
-  ).default as Readonly<Record<string, unknown>>;
-  assert.deepEqual(
-    (landingBranchDefault.content as Readonly<Record<string, unknown>>)[
-      "application/json"
-    ],
-    { schema: { $ref: "#/components/schemas/Error" } },
-  );
+    >;
+    const operation = pathObject[entry.method.toLowerCase()] as Readonly<
+      Record<string, unknown>
+    >;
+    const defaultResponse = (
+      operation.responses as Readonly<Record<string, unknown>>
+    ).default as Readonly<Record<string, unknown>>;
+    assert.deepEqual(
+      (defaultResponse.content as Readonly<Record<string, unknown>>)[
+        "application/json"
+      ],
+      { schema: { $ref: "#/components/schemas/Error" } },
+      entry.operationId,
+    );
+  }
 });
 
 test("renders event.list query parameters in bytewise name order with no request body", () => {

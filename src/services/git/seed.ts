@@ -23,6 +23,11 @@ import { resolveRef } from "./ref-read.ts";
 import { refUpdate } from "./ref-update.ts";
 import { remoteUrlVerdict } from "./url.ts";
 import type { GitRunner } from "./run.ts";
+import {
+  landingRefOf,
+  publishRefOf,
+  trackingRefOf,
+} from "../../domain/repository.ts";
 
 export type SeedHomeResult = Readonly<{
   homePath: string;
@@ -30,24 +35,11 @@ export type SeedHomeResult = Readonly<{
   landingOid: string;
 }>;
 
-export type SeedStep =
-  | "host-key"
-  | "init"
-  | "remote-add"
-  | "refspec"
-  | "fetch"
-  | "read-upstream"
-  | "preflight"
-  | "landing"
-  | "rename";
-
 export type SeedHomeExtended = SeedHomeInput &
   Readonly<{
-    publishRef: string;
     remoteUrl: string;
     hostKey: HostKey | null;
     pidFile: string;
-    failAfter?: SeedStep;
   }>;
 
 export function stagingPathFor(gitDir: string): string {
@@ -82,11 +74,6 @@ export async function seedHome(
       "",
     );
   }
-  const abort = (step: SeedStep): void => {
-    if (input.failAfter === step) {
-      throw new GitError("unknown", `seed aborted after ${step}`, "");
-    }
-  };
   const staging = stagingPathFor(input.gitDir);
   try {
     if (input.hostKey !== null) {
@@ -94,7 +81,6 @@ export async function seedHome(
         remoteUrl: input.remoteUrl,
         hostKey: input.hostKey,
       });
-      abort("host-key");
     }
     await runner({
       args: [
@@ -102,12 +88,11 @@ export async function seedHome(
         "--bare",
         "--template=",
         "--object-format=sha1",
-        `--initial-branch=${input.landingBranch}`,
+        `--initial-branch=${input.branch}`,
         "--",
         staging,
       ],
     });
-    abort("init");
     await runner({
       args: [
         `--git-dir=${staging}`,
@@ -118,7 +103,6 @@ export async function seedHome(
         input.remoteUrl,
       ],
     });
-    abort("remote-add");
     await runner({
       args: [
         `--git-dir=${staging}`,
@@ -127,44 +111,40 @@ export async function seedHome(
         TRACKING_REFSPEC,
       ],
     });
-    abort("refspec");
     await fetchTracking(runner, paths, {
       gitDir: staging,
       credential: input.credential,
       pidFile: input.pidFile,
     });
-    abort("fetch");
     rmSync(input.pidFile, { force: true });
     const upstreamOid = await resolveRef(runner, {
       gitDir: staging,
-      ref: `refs/remotes/origin/${input.upstreamBranch}`,
+      ref: trackingRefOf(input.branch),
     });
     if (upstreamOid === null) {
       throw new GitError(
         "unknown",
-        `the branch ${input.upstreamBranch} does not exist on the remote`,
+        `the branch ${input.branch} does not exist on the remote`,
         "",
       );
     }
-    abort("read-upstream");
     const preflight = await canPush(runner, paths, {
       gitDir: staging,
       remoteUrl: input.remoteUrl,
-      publishRef: input.publishRef,
+      publishRef: publishRefOf(input.branch),
       proposedOid: upstreamOid,
       credential: input.credential,
     });
     if (!preflight.allowed) {
       throw new GitError(
         preflight.failure,
-        `the credential may not push to ${input.publishRef}`,
+        `the credential may not push to ${publishRefOf(input.branch)}`,
         preflight.detail,
       );
     }
-    abort("preflight");
     const landing = await refUpdate(runner, {
       gitDir: staging,
-      ref: `refs/heads/${input.landingBranch}`,
+      ref: landingRefOf(input.branch),
       expectedOid: null,
       nextOid: upstreamOid,
       pidFile: input.pidFile,
@@ -172,15 +152,13 @@ export async function seedHome(
     if (!landing.updated) {
       throw new GitError(
         "unknown",
-        `refs/heads/${input.landingBranch} already exists in the new home`,
+        `${landingRefOf(input.branch)} already exists in the new home`,
         "",
       );
     }
-    abort("landing");
     syncDirectory(staging);
     renameSync(staging, input.gitDir);
     syncDirectory(dirname(input.gitDir));
-    abort("rename");
     return {
       homePath: input.gitDir,
       fetchedUpstreamOid: upstreamOid,

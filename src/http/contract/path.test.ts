@@ -36,7 +36,7 @@ describe("src/http/contract/path.test", () => {
 
   it("pins the closed-array sizes", () => {
     assert.equal(resourceSegments.length, 14);
-    assert.equal(subresourceSegments.length, 17);
+    assert.equal(subresourceSegments.length, 16);
     assert.equal(actionSegments.length, 23);
     assert.equal(systemSegments.length, 3);
   });
@@ -155,12 +155,9 @@ describe("src/http/contract/path.test", () => {
     );
     const graphIndex = subresourceSegments.indexOf("graph");
     const edgeIndex = subresourceSegments.indexOf("edge");
-    const landingBranchIndex = subresourceSegments.indexOf("landing-branch");
+    const llmIndex = subresourceSegments.indexOf("llm");
     assert.ok(graphIndex > edgeIndex, "graph must be sorted after edge");
-    assert.ok(
-      graphIndex < landingBranchIndex,
-      "graph must be sorted before landing-branch",
-    );
+    assert.ok(graphIndex < llmIndex, "graph must be sorted before llm");
     assert.equal(
       renderPath([resource("project"), parameter("project"), sub("graph")]),
       "/v1/project/:id/graph",

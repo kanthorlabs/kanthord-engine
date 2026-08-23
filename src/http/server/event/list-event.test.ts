@@ -214,13 +214,19 @@ describe("src/http/server/event/list-event.test", () => {
     });
   });
 
-  it("rejects sideways order with no error details", async () => {
+  it("rejects sideways order naming the order parameter", async () => {
     const app = await handlerApp(() => []);
     const response = await app.get("/v1/event?order=sideways");
 
     assert.equal(response.status, 400);
     assert.equal(response.body.error.code, "invalid-request");
-    assert.equal(Object.hasOwn(response.body.error, "details"), false);
+    assert.equal(response.body.error.details.refusal, "query-schema");
+    assert.deepEqual(
+      response.body.error.details.issues.map(
+        (issue: Readonly<{ path: string }>) => issue.path,
+      ),
+      ["order"],
+    );
   });
 
   it("rejects an empty before", async () => {

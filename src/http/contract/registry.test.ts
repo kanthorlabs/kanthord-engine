@@ -45,13 +45,13 @@ export const harnessOperations = [
 ];
 
 describe("src/http/contract/registry.test", () => {
-  it("registers seventy operations", () => {
-    assert.equal(registry.length, 70);
+  it("registers sixty-nine operations", () => {
+    assert.equal(registry.length, 69);
   });
 
   it("sorts the registry bytewise by operationId with no duplicates", () => {
     const ids = registry.map((entry) => entry.operationId);
-    assert.equal(new Set(ids).size, 70);
+    assert.equal(new Set(ids).size, 69);
     for (let i = 0; i < ids.length - 1; i += 1) {
       assert.ok(
         Buffer.compare(Buffer.from(ids[i]!), Buffer.from(ids[i + 1]!)) < 0,
@@ -67,7 +67,7 @@ describe("src/http/contract/registry.test", () => {
     );
     assert.equal(
       registry.filter((entry) => entry.status === "stubbed").length,
-      26,
+      25,
     );
   });
 
@@ -78,7 +78,7 @@ describe("src/http/contract/registry.test", () => {
     );
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-2").length,
-      28,
+      27,
     );
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-3").length,
@@ -625,7 +625,7 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("declares exactly the thirty POST policies the story names", () => {
+  it("declares exactly the twenty-nine POST policies the story names", () => {
     const keyed = registry
       .filter((entry) => idempotencyOf(entry) !== "none")
       .map((entry) => entry.operationId)
@@ -651,7 +651,6 @@ describe("src/http/contract/registry.test", () => {
         "provider.rename",
         "repository.inspect",
         "repository.register",
-        "repository.landingBranch",
         "repository.publish",
         "repository.reconcile",
         "run.start",
@@ -676,10 +675,10 @@ describe("src/http/contract/registry.test", () => {
     );
   });
 
-  it("counts twenty-nine memory-policy operations", () => {
+  it("counts twenty-eight memory-policy operations", () => {
     assert.equal(
       registry.filter((entry) => idempotencyOf(entry) === "memory").length,
-      29,
+      28,
     );
   });
 

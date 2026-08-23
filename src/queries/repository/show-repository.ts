@@ -1,6 +1,11 @@
 import type { Storage } from "../../services/storage/index.ts";
 import type { Git } from "../../services/git/index.ts";
-import type { RepositoryView } from "../../domain/repository.ts";
+import {
+  landingRefOf,
+  publishRefOf,
+  trackingRefOf,
+  type RepositoryView,
+} from "../../domain/repository.ts";
 
 export type { RepositoryView };
 
@@ -16,9 +21,7 @@ export type RepositoryRow = Readonly<{
   credential_id: string;
   credential_name: string;
   home_path: string;
-  upstream_branch: string;
-  landing_branch: string;
-  publish_ref: string;
+  branch: string;
   publish_on_approval: number;
   state: "ready" | "needs-reconcile";
   diverged_landing_oid: string | null;
@@ -28,7 +31,7 @@ export type RepositoryRow = Readonly<{
 }>;
 
 const SHOW_REPOSITORY_SQL = `SELECT r.id, r.name, r.remote_url, r.credential_id, p.name AS credential_name,
-       r.home_path, r.upstream_branch, r.landing_branch, r.publish_ref,
+       r.home_path, r.branch,
        r.publish_on_approval, r.state, r.diverged_landing_oid,
        r.diverged_upstream_oid, r.fetched_upstream_oid, r.updated_at
 FROM repository r JOIN provider p ON p.id = r.credential_id
@@ -51,8 +54,9 @@ export async function toRepositoryView(
   dependencies: ShowRepositoryDependencies,
   row: RepositoryRow,
 ): Promise<RepositoryView> {
-  const landingRef = `refs/heads/${row.landing_branch}`;
-  const trackingRef = `refs/remotes/origin/${row.upstream_branch}`;
+  const landingRef = landingRefOf(row.branch);
+  const trackingRef = trackingRefOf(row.branch);
+  const publishRef = publishRefOf(row.branch);
   const landingOid = await dependencies.git.resolveRef({
     gitDir: row.home_path,
     ref: landingRef,
@@ -66,11 +70,10 @@ export async function toRepositoryView(
     name: row.name,
     remoteUrl: row.remote_url,
     credential: { id: row.credential_id, name: row.credential_name },
-    upstreamBranch: row.upstream_branch,
-    landingBranch: row.landing_branch,
+    branch: row.branch,
     landingRef,
     trackingRef,
-    publishRef: row.publish_ref,
+    publishRef,
     publishOnApproval: row.publish_on_approval === 1,
     state: row.state,
     landingOid,

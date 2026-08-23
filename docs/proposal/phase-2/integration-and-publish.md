@@ -35,7 +35,7 @@ A dependent objective starts from the landing branch. Objective Y depends on obj
 
 ## Delivery is `mr@1`
 
-A completed objective integrates to the landing branch of the bare home after human confirmation.
+A completed objective integrates from its `feature/<node id>` branch to `refs/heads/<branch>` of the bare home after human confirmation.
 
 1. Freeze candidate `C`. Run the unit check against `C`. See `gates-and-approval.md`.
 2. Take the repository lock. Read the landing tip `B`.
@@ -52,14 +52,14 @@ Publish is a distinct operation with its own API. It carries the object ids it e
 
 `POST /repositories/:id/publish` with `landingOid` and `expectedRemoteOid`:
 
-1. Take the repository lock. Assert that `refs/heads/<landing>` equals `landingOid`.
-2. Push `<landingOid>` to `<publishRef>`. Never with force, so the server accepts a fast-forward and rejects anything else. `expectedRemoteOid` is advisory freshness rather than a remote compare-and-swap, and a null value means the ref must not exist yet.
+1. Take the repository lock. Assert that `refs/heads/<branch>` equals `landingOid`.
+2. Push `<landingOid>` to the remote `refs/heads/<branch>`. Never with force, so the server accepts a fast-forward and rejects anything else. `expectedRemoteOid` is advisory freshness rather than a remote compare-and-swap, and a null value means the ref must not exist yet.
 
 An approval carries `publish: true` by default, and the default is configurable per repository. Chaining keeps the landing branch equal to upstream, which keeps divergence rare, and divergence refuses new objective clones.
 
 A rejection is classified and reported. It is never resolved automatically. A non-fast-forward rejection runs the freshness classification and reports the ancestry. A policy rejection — a protected branch, a required check, a signature rule, a server hook — reports the server message, and the daemon takes no further action. "The server message" is the remote-sent payload of the push report, kept as the daemon received it, with two stated exceptions: a url userinfo is removed, and the payload is bounded, because a secret and an unbounded payload cannot cross the API. The daemon never rewrites the message to explain it, and it never matches on its text to decide a class. Fetching, merging and retrying would turn a publish into an unapproved source integration, and origin can move again immediately after any retry.
 
-Moving to a landing branch other than `main` does not by itself satisfy a branch protection rule, and it leaves work already landed on the old branch. See the branch fields in `../phase-1/git-foundation.md`.
+A branch protection rule on `<branch>` is not satisfied by landing somewhere else, because there is nowhere else to land: one field names both the landing branch and the publish destination. See the branch field in `../phase-1/git-foundation.md`.
 
 ## The integration journal
 

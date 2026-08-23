@@ -256,9 +256,7 @@ export const eventPayloads: Readonly<Record<EventType, ZodType>> = {
   }),
   "repository.registered": z.strictObject({
     name: z.string(),
-    upstreamBranch: z.string(),
-    landingBranch: z.string(),
-    publishRef: z.string(),
+    branch: z.string(),
     publishOnApproval: z.boolean(),
     credentialId: z.string(),
     fetchedUpstreamOid: objectId,

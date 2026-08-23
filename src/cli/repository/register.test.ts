@@ -38,11 +38,10 @@ const VIEW = {
   name: "r",
   remoteUrl: "https://github.com/o/r.git",
   credential: { id: "provider_gh", name: "gh" },
-  upstreamBranch: "main",
-  landingBranch: "main",
+  branch: "main",
   landingRef: "refs/heads/main",
   trackingRef: "refs/remotes/origin/main",
-  publishRef: "refs/heads/kanthord-e2e/007/cli",
+  publishRef: "refs/heads/main",
   publishOnApproval: true,
   state: "ready",
   landingOid: "a".repeat(40),
@@ -154,10 +153,8 @@ describe("src/cli/repository/register.test", () => {
       "https://github.com/o/r.git",
       "--credential",
       "gh",
-      "--upstream",
+      "--branch",
       "main",
-      "--publish-ref",
-      "refs/heads/kanthord-e2e/007/cli",
     ]);
 
     assert.deepEqual(
@@ -172,9 +169,7 @@ describe("src/cli/repository/register.test", () => {
       name: "r",
       remoteUrl: "https://github.com/o/r.git",
       credentialId: "provider_gh",
-      upstreamBranch: "main",
-      landingBranch: "main",
-      publishRef: "refs/heads/kanthord-e2e/007/cli",
+      branch: "main",
       publishOnApproval: true,
       hostFingerprint: null,
     });
@@ -192,7 +187,7 @@ describe("src/cli/repository/register.test", () => {
       "https://github.com/o/r.git",
       "--credential",
       "nope",
-      "--upstream",
+      "--branch",
       "main",
     ]);
 
@@ -216,7 +211,7 @@ describe("src/cli/repository/register.test", () => {
       "https://github.com/o/r.git",
       "--credential",
       "llm",
-      "--upstream",
+      "--branch",
       "main",
     ]);
 
@@ -232,7 +227,7 @@ describe("src/cli/repository/register.test", () => {
     assert.equal(h.stdoutText(), "");
   });
 
-  it("--upstream wins over the prompt", async () => {
+  it("--branch wins over the prompt", async () => {
     const h = harness({
       confirm: {
         isTty: true,
@@ -250,18 +245,15 @@ describe("src/cli/repository/register.test", () => {
       "https://github.com/o/r.git",
       "--credential",
       "gh",
-      "--upstream",
+      "--branch",
       "main",
     ]);
 
     assert.equal(h.failCalls(), 0);
-    assert.equal(
-      (registerCall(h)?.body as { upstreamBranch: string }).upstreamBranch,
-      "main",
-    );
+    assert.equal((registerCall(h)?.body as { branch: string }).branch, "main");
   });
 
-  it("no --upstream and no terminal refuses and names the flag without calling register", async () => {
+  it("no --branch and no terminal refuses and names the flag without calling register", async () => {
     const h = harness({ confirm: { isTty: false, prompt: async () => "" } });
     await run(h.program, [
       "repository",
@@ -272,14 +264,12 @@ describe("src/cli/repository/register.test", () => {
       "https://github.com/o/r.git",
       "--credential",
       "gh",
-      "--publish-ref",
-      "refs/heads/kanthord-e2e/007/cli",
     ]);
 
     assert.equal(h.failCalls(), 1);
     assert.equal(
       h.stderrText(),
-      "kanthord: confirmation-required: --upstream is required when there is no terminal to confirm on\n",
+      "kanthord: confirmation-required: --branch is required when there is no terminal to confirm on\n",
     );
     assert.deepEqual(
       h.calls.map((call) => call.operationId),
@@ -317,7 +307,7 @@ describe("src/cli/repository/register.test", () => {
       "ssh://git@github.com/o/r.git",
       "--credential",
       "gh",
-      "--upstream",
+      "--branch",
       "main",
     ]);
 
@@ -341,7 +331,7 @@ describe("src/cli/repository/register.test", () => {
       "https://github.com/o/r.git",
       "--credential",
       "gh",
-      "--upstream",
+      "--branch",
       "main",
     ]);
 
@@ -388,7 +378,7 @@ describe("src/cli/repository/register.test", () => {
       "ssh://git@github.com/o/r.git",
       "--credential",
       "gh",
-      "--upstream",
+      "--branch",
       "main",
       "--host-fingerprint",
       fingerprint,
@@ -437,18 +427,12 @@ describe("src/cli/repository/register.test", () => {
     ]);
 
     assert.equal(h.failCalls(), 0);
-    assert.equal(
-      (registerCall(h)?.body as { upstreamBranch: string }).upstreamBranch,
-      "trunk",
-    );
+    assert.equal((registerCall(h)?.body as { branch: string }).branch, "trunk");
     assert.equal(questions.length, 1);
-    assert.ok(
-      questions[0] !== undefined && questions[0].includes("[trunk]"),
-      questions[0],
-    );
+    assert.equal(questions[0], "branch? [trunk]");
   });
 
-  it("--landing defaults to the confirmed upstream and --publish-ref to refs/heads/ plus it", async () => {
+  it("the register body carries branch and neither landingBranch nor publishRef", async () => {
     const h = harness();
     await run(h.program, [
       "repository",
@@ -459,41 +443,18 @@ describe("src/cli/repository/register.test", () => {
       "https://github.com/o/r.git",
       "--credential",
       "gh",
-      "--upstream",
+      "--branch",
       "main",
     ]);
 
-    const body = registerCall(h)?.body as {
-      landingBranch: string;
-      publishRef: string;
-    };
-    assert.equal(body.landingBranch, "main");
-    assert.equal(body.publishRef, "refs/heads/main");
-  });
-
-  it("an explicit --landing overrides only the landing", async () => {
-    const h = harness();
-    await run(h.program, [
-      "repository",
-      "register",
-      "--name",
-      "r",
-      "--url",
-      "https://github.com/o/r.git",
-      "--credential",
-      "gh",
-      "--upstream",
-      "main",
-      "--landing",
-      "kanthord/main",
+    assert.deepEqual(Object.keys(registerCall(h)!.body as object).sort(), [
+      "branch",
+      "credentialId",
+      "hostFingerprint",
+      "name",
+      "publishOnApproval",
+      "remoteUrl",
     ]);
-
-    const body = registerCall(h)?.body as {
-      landingBranch: string;
-      publishRef: string;
-    };
-    assert.equal(body.landingBranch, "kanthord/main");
-    assert.equal(body.publishRef, "refs/heads/main");
   });
 
   it("--no-publish-on-approval records false and its absence records true", async () => {
@@ -507,7 +468,7 @@ describe("src/cli/repository/register.test", () => {
       "https://github.com/o/r.git",
       "--credential",
       "gh",
-      "--upstream",
+      "--branch",
       "main",
       "--no-publish-on-approval",
     ]);
@@ -527,7 +488,7 @@ describe("src/cli/repository/register.test", () => {
       "https://github.com/o/r.git",
       "--credential",
       "gh",
-      "--upstream",
+      "--branch",
       "main",
     ]);
     assert.equal(
@@ -548,7 +509,7 @@ describe("src/cli/repository/register.test", () => {
       "file:///tmp/r.git",
       "--credential",
       "gh",
-      "--upstream",
+      "--branch",
       "main",
     ]);
 
@@ -582,7 +543,7 @@ describe("src/cli/repository/register.test", () => {
       "https://github.com/o/r.git",
       "--credential",
       "gh",
-      "--upstream",
+      "--branch",
       "main",
     ]);
     assert.equal(h409.failCalls(), 1);
@@ -612,7 +573,7 @@ describe("src/cli/repository/register.test", () => {
       "https://github.com/o/r.git",
       "--credential",
       "gh",
-      "--upstream",
+      "--branch",
       "main",
     ]);
     assert.equal(h422.failCalls(), 1);
@@ -645,7 +606,7 @@ describe("src/cli/repository/register.test", () => {
         "https://github.com/o/r.git",
         "--credential",
         "gh",
-        "--upstream",
+        "--branch",
         "main",
       ]);
       assert.equal(h.failCalls(), 1);

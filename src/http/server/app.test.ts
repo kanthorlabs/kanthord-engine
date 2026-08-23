@@ -94,7 +94,7 @@ describe("src/http/server/app.test", () => {
     }
     requests.push({ method: "get", path: "/v1/nope" });
     requests.push({ method: "get", path: "/v1/" });
-    assert.equal(requests.length, 72);
+    assert.equal(requests.length, 71);
 
     const responses: Array<{ status: number; body: unknown }> = [];
     for (const { method, path } of requests) {

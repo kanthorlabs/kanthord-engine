@@ -124,7 +124,7 @@ describe("src/commands/provider/remove-provider.test", () => {
   ): void {
     storage.transact((transaction) => {
       transaction.run(
-        "INSERT INTO repository (id, name, remote_url, credential_id, home_path, upstream_branch, landing_branch, publish_ref, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO repository (id, name, remote_url, credential_id, home_path, branch, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
           repositoryId,
           name,
@@ -132,8 +132,6 @@ describe("src/commands/provider/remove-provider.test", () => {
           credentialId,
           `repos/${repositoryId}.git`,
           "main",
-          "main",
-          "refs/heads/main",
           1,
           "ready",
           null,
@@ -172,7 +170,7 @@ describe("src/commands/provider/remove-provider.test", () => {
         ],
       );
       transaction.run(
-        "INSERT INTO repository (id, name, remote_url, credential_id, home_path, upstream_branch, landing_branch, publish_ref, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO repository (id, name, remote_url, credential_id, home_path, branch, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
           "repository_chain",
           "repo-chain",
@@ -180,8 +178,6 @@ describe("src/commands/provider/remove-provider.test", () => {
           credentialId,
           "repos/chain.git",
           "main",
-          "main",
-          "refs/heads/main",
           1,
           "ready",
           null,

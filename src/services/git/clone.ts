@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { GitError, type CloneInput } from "./index.ts";
 import { stripUserinfo } from "./redact.ts";
 import type { GitRunner } from "./run.ts";
+import { featureBranchOf, featureRefOf } from "../../domain/repository.ts";
 
 export async function cloneObjective(
   runner: GitRunner,
@@ -17,6 +18,7 @@ export async function cloneObjective(
   mkdirSync(parent, { recursive: true });
   const staging = join(parent, `.staging-${randomUUID()}`);
   try {
+    const featureBranch = featureBranchOf(input.objectiveId);
     const cloneResult = await runner({
       args: [
         "clone",
@@ -34,6 +36,16 @@ export async function cloneObjective(
         "unknown",
         `git clone failed with code ${cloneResult.code}`,
         stripUserinfo(cloneResult.stderr),
+      );
+    }
+    const branchResult = await runner({
+      args: ["-C", staging, "checkout", "-b", featureBranch],
+    });
+    if (branchResult.code !== 0) {
+      throw new GitError(
+        "unknown",
+        `git checkout -b failed with code ${branchResult.code}`,
+        stripUserinfo(branchResult.stderr),
       );
     }
     const removeResult = await runner({
@@ -77,6 +89,24 @@ export async function cloneObjective(
       throw new GitError(
         "unknown",
         "the clone carries a partial-clone configuration",
+        "",
+      );
+    }
+    const headResult = await runner({
+      args: ["-C", staging, "symbolic-ref", "--quiet", "HEAD"],
+    });
+    const expectedRef = featureRefOf(input.objectiveId);
+    if (headResult.code !== 0) {
+      throw new GitError(
+        "unknown",
+        `the clone has no symbolic HEAD; git symbolic-ref exited ${headResult.code}`,
+        stripUserinfo(headResult.stderr),
+      );
+    }
+    if (headResult.stdout.trim() !== expectedRef) {
+      throw new GitError(
+        "unknown",
+        `the clone HEAD is ${headResult.stdout.trim()} and not ${expectedRef}`,
         "",
       );
     }

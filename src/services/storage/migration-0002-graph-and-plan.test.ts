@@ -23,6 +23,7 @@ import { migration0005Actor } from "./migration-0005-actor.ts";
 import { migration0006RevisionOrigin } from "./migration-0006-revision-origin.ts";
 import { migration0007ExternalExecution } from "./migration-0007-external-execution.ts";
 import { migration0008GraphIndexes } from "./migration-0008-graph-indexes.ts";
+import { migration0009OneBranch } from "./migration-0009-one-branch.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -243,7 +244,7 @@ describe("src/services/storage/migration-0002-graph-and-plan.test", () => {
     assert.ok(migrationDoc.includes("0002-graph-and-plan"));
   });
 
-  it("migrations holds exactly eight migrations with migration0008GraphIndexes last", () => {
+  it("migrations holds exactly nine migrations with migration0009OneBranch last", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
@@ -253,6 +254,7 @@ describe("src/services/storage/migration-0002-graph-and-plan.test", () => {
       migration0006RevisionOrigin,
       migration0007ExternalExecution,
       migration0008GraphIndexes,
+      migration0009OneBranch,
     ]);
   });
 

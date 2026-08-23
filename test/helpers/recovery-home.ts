@@ -33,7 +33,7 @@ export function seedFixtureRepository(
       );
     database
       .prepare(
-        "INSERT INTO repository (id, name, remote_url, credential_id, home_path, upstream_branch, landing_branch, publish_ref, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO repository (id, name, remote_url, credential_id, home_path, branch, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         FIXTURE_REPOSITORY_ID,
@@ -42,8 +42,6 @@ export function seedFixtureRepository(
         FIXTURE_PROVIDER_ID,
         gitDir,
         "main",
-        "kanthord/landing",
-        "refs/heads/kanthord/publish",
         0,
         "ready",
         null,

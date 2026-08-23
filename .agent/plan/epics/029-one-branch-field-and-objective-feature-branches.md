@@ -66,9 +66,8 @@ hostFingerprint }`. `landingBranch` and `publishRef` leave the wire, the databas
   `refs/heads/<branch>` instead of a stored `publish_ref`.
 
 - **`repository.landingBranch` leaves the registry.** The operation changed a configurable landing
-  branch, and no such value exists after this epic. It moves from `stubbed` to absent, which by
-  `AGENTS.md` means a `post-mvp` row with no registry entry. `docs/proposal/api/repository.md:15`
-  drops the row.
+  branch, and no such value exists after this epic. It moves from `stubbed` to absent, and
+  `docs/proposal/api/repository.md:15` drops the row.
 
 - **The repository view keeps reporting resolved refs, derived.** `repositoryView` keeps
   `landingRef`, `trackingRef` and `publishRef` as read-only derived strings, because P1-E4 and P3-E6

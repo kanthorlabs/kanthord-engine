@@ -279,9 +279,7 @@ const recordedPayloads: Readonly<Record<string, readonly unknown[]>> = {
   "repository.registered": [
     {
       name: "origin",
-      upstreamBranch: "main",
-      landingBranch: "main",
-      publishRef: "refs/heads/main",
+      branch: "main",
       publishOnApproval: true,
       credentialId: "credential_1",
       fetchedUpstreamOid: H40,

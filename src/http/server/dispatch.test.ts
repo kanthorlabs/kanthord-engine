@@ -519,7 +519,7 @@ describe("src/http/server/dispatch.test", () => {
       driven,
       registry.filter((entry) => entry.status === "stubbed").length,
     );
-    assert.equal(driven, 26);
+    assert.equal(driven, 25);
     assert.equal(writes(), 0);
     assert.deepEqual(tableCounts(temporary.storage), before);
   });

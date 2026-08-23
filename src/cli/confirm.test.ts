@@ -18,9 +18,9 @@ describe("src/cli/confirm.test", () => {
       prompt: throwingPrompt,
     };
     const value = await confirmValue(dependencies, {
-      flagName: "--upstream",
+      flagName: "--branch",
       flagValue: "main",
-      question: "upstream branch?",
+      question: "branch?",
       suggestion: "trunk",
     });
     assert.equal(value, "main");
@@ -37,15 +37,15 @@ describe("src/cli/confirm.test", () => {
     };
     try {
       await confirmValue(dependencies, {
-        flagName: "--upstream",
+        flagName: "--branch",
         flagValue: "",
-        question: "upstream branch?",
+        question: "branch?",
         suggestion: "main",
       });
       assert.fail("expected ConfirmationRequiredError");
     } catch (error) {
       assert.ok(error instanceof ConfirmationRequiredError);
-      assert.equal((error as ConfirmationRequiredError).flagName, "--upstream");
+      assert.equal((error as ConfirmationRequiredError).flagName, "--branch");
     }
     assert.equal(promptCalls, 0);
   });
@@ -88,14 +88,14 @@ describe("src/cli/confirm.test", () => {
       },
     };
     const value = await confirmValue(dependencies, {
-      flagName: "--upstream",
+      flagName: "--branch",
       flagValue: undefined,
-      question: "upstream branch?",
+      question: "branch?",
       suggestion: "trunk",
     });
     assert.equal(value, "main");
     assert.equal(questions.length, 1);
-    assert.equal(questions[0], "upstream branch? [trunk]");
+    assert.equal(questions[0], "branch? [trunk]");
   });
 
   it("the question carries no bracket when the suggestion is null", async () => {
@@ -127,9 +127,9 @@ describe("src/cli/confirm.test", () => {
       },
     };
     const value = await confirmValue(dependencies, {
-      flagName: "--upstream",
+      flagName: "--branch",
       flagValue: undefined,
-      question: "upstream branch?",
+      question: "branch?",
       suggestion: "trunk",
     });
     assert.equal(value, "trunk");
@@ -147,9 +147,9 @@ describe("src/cli/confirm.test", () => {
       },
     };
     const value = await confirmValue(dependencies, {
-      flagName: "--upstream",
+      flagName: "--branch",
       flagValue: undefined,
-      question: "upstream branch?",
+      question: "branch?",
       suggestion: null,
     });
     assert.equal(value, "main");
@@ -162,9 +162,9 @@ describe("src/cli/confirm.test", () => {
       prompt: async () => "  main  ",
     };
     const value = await confirmValue(dependencies, {
-      flagName: "--upstream",
+      flagName: "--branch",
       flagValue: undefined,
-      question: "upstream branch?",
+      question: "branch?",
       suggestion: null,
     });
     assert.equal(value, "main");

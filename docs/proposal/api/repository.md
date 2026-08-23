@@ -6,14 +6,13 @@ Registration, the branch fields, and the repair of a divergence. Publish is deli
 
 ## Routes
 
-| operationId                | Method and path                          | introducedIn | status  | Source                                      |
-| -------------------------- | ---------------------------------------- | ------------ | ------- | ------------------------------------------- |
-| `repository.inspect`       | `POST /v1/repository/inspect`            | phase-1      | routed  | git-foundation.md, default branch detection |
-| `repository.register`      | `POST /v1/repository`                    | phase-1      | routed  | P1-E1, `repository register`                |
-| `repository.list`          | `GET /v1/repository`                     | phase-1      | routed  | phase-2 onboarding CLI                      |
-| `repository.show`          | `GET /v1/repository/:id`                 | phase-1      | routed  | P1-E1 and P1-E5, `repository show`          |
-| `repository.landingBranch` | `POST /v1/repository/:id/landing-branch` | phase-2      | stubbed | git-foundation.md, "an explicit operation"  |
-| `repository.reconcile`     | `POST /v1/repository/:id/reconcile`      | phase-2      | stubbed | P2-E3, `repository reconcile`               |
+| operationId            | Method and path                     | introducedIn | status  | Source                                      |
+| ---------------------- | ----------------------------------- | ------------ | ------- | ------------------------------------------- |
+| `repository.inspect`   | `POST /v1/repository/inspect`       | phase-1      | routed  | git-foundation.md, default branch detection |
+| `repository.register`  | `POST /v1/repository`               | phase-1      | routed  | P1-E1, `repository register`                |
+| `repository.list`      | `GET /v1/repository`                | phase-1      | routed  | phase-2 onboarding CLI                      |
+| `repository.show`      | `GET /v1/repository/:id`            | phase-1      | routed  | P1-E1 and P1-E5, `repository show`          |
+| `repository.reconcile` | `POST /v1/repository/:id/reconcile` | phase-2      | stubbed | P2-E3, `repository reconcile`               |
 
 ## `repository.inspect`
 
@@ -21,7 +20,7 @@ The body holds the remote URL and a `credentialId`. The response holds the defau
 
 Detection never applies by itself, so registration is two calls. The client shows the detected branch, the human confirms, and `repository.register` carries the confirmed value. The confirmation lives in the client, and the daemon holds no wizard state, because a half-finished registration on the server is a thing a second client can find.
 
-The confirmation is explicit in an automated run as well. `kanthord repository register --upstream <branch>` supplies it without a prompt, and the CLI refuses to register when neither a prompt nor the flag answered. P1-E1 passes the flag, which is what keeps its `Human action: none` true while the product rule holds.
+The confirmation is explicit in an automated run as well. `kanthord repository register --branch <branch>` supplies it without a prompt, and the CLI refuses to register when neither a prompt nor the flag answered. P1-E1 passes the flag, which is what keeps its `Human action: none` true while the product rule holds.
 
 ### The host key is confirmed the same way
 
@@ -39,7 +38,7 @@ POST /v1/repository
 
 The re-scan is what makes the confirmation load-bearing rather than decorative. Without it, a client could echo any fingerprint back and the daemon would pin whatever the network offered at register time.
 
-`ssh-keyscan` reads the key over the same unauthenticated network as the connection it pins, so this is trust on first use with a human in the loop. The human comparing the fingerprint against the value their forge publishes is the security decision, and the daemon cannot make it for them. `--host-fingerprint <value>` supplies it without a prompt, and the CLI refuses to register an ssh url when neither a prompt nor the flag answered — the same rule as `--upstream`.
+`ssh-keyscan` reads the key over the same unauthenticated network as the connection it pins, so this is trust on first use with a human in the loop. The human comparing the fingerprint against the value their forge publishes is the security decision, and the daemon cannot make it for them. `--host-fingerprint <value>` supplies it without a prompt, and the CLI refuses to register an ssh url when neither a prompt nor the flag answered — the same rule as `--branch`.
 
 An `http-basic` url has no host key, so `hostKey` is absent from the response and `hostFingerprint` is refused in the body.
 
@@ -55,7 +54,7 @@ A host key that changes later is a failed operation, not a silent re-pin. Re-con
 
 ## `repository.register`
 
-The body holds the remote URL, a name, a `credentialId`, the three branch fields of `../phase-1/git-foundation.md` — `upstreamBranch`, `landingBranch` and `publishRef` — and, for an ssh url, the confirmed `hostFingerprint`. A missing branch field is `400`, and a missing `hostFingerprint` on an ssh url is the same `400`. The daemon never infers one here, because `repository.inspect` is where inference happens and the human already answered.
+The body holds the remote URL, a name, a `credentialId`, the one branch field of `../phase-1/git-foundation.md` — `branch` — and, for an ssh url, the confirmed `hostFingerprint`. A missing `branch` is `400`, and a missing `hostFingerprint` on an ssh url is the same `400`. The daemon never infers one here, because `repository.inspect` is where inference happens and the human already answered.
 
 **This route repeats the preflight.** `inspect` and `register` are two requests, and between them a credential can be removed or changed, the remote can move, and the client can submit a different `credentialId` than the one it inspected. A successful inspect authorizes nothing.
 
@@ -97,17 +96,13 @@ A forge that refuses the credential is `422 credential-rejected`, with the forge
 
 ## `repository.show`
 
-Returns the branch fields, the landing tip, the upstream tracking tip, the last fetched upstream object id, `publishOnApproval`, the bound credential — its id and its current name — the repository state, and the profile hash when one is bound.
+Returns `branch`, the three refs it renders, the landing tip, the upstream tracking tip, the last fetched upstream object id, `publishOnApproval`, the bound credential — its id and its current name — the repository state, and the profile hash when one is bound.
 
 `fetchedUpstreamOid` is the `U` of the last freshness pass, which is what makes the base of an objective attributable.
 
-P1-E4 and P3-E6 assert the ref layout through this route alone, because the client cannot read the daemon file system. The response therefore names the landing branch and the tracking namespace explicitly, not as a directory listing.
+P1-E4 and P3-E6 assert the ref layout through this route alone, because the client cannot read the daemon file system. The response therefore carries `landingRef`, `trackingRef` and `publishRef` as read-only strings rendered from `branch`, not as a directory listing. They are derived on read and stored nowhere.
 
 The state is `ready` or `needs-reconcile`. A `needs-reconcile` response carries both object ids, because `../phase-1/state-machine.md` requires `status` to name them.
-
-## `repository.landingBranch`
-
-The body names the new branch, the object id it starts at, and what happens to work already landed on the old branch. All three are mandatory. A configuration edit cannot do this, because a wrong landing branch sends every later merge to the wrong place and nothing notices.
 
 ## `repository.reconcile`
 

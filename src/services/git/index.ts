@@ -35,8 +35,7 @@ export type GitPaths = Readonly<{
 export type SeedHomeInput = Readonly<{
   gitDir: string;
   remoteUrl: string;
-  upstreamBranch: string;
-  landingBranch: string;
+  branch: string;
   credential: GitCredential;
 }>;
 
@@ -61,6 +60,7 @@ export type CloneInput = Readonly<{
   sourceGitDir: string;
   targetDir: string;
   ref: string;
+  objectiveId: string;
 }>;
 
 export type InspectChildInput = Readonly<{ pidFile: string }>;

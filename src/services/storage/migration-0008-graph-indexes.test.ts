@@ -21,6 +21,8 @@ import { migration0004EventIndexes } from "./migration-0004-event-indexes.ts";
 import { migration0005Actor } from "./migration-0005-actor.ts";
 import { migration0006RevisionOrigin } from "./migration-0006-revision-origin.ts";
 import { migration0007ExternalExecution } from "./migration-0007-external-execution.ts";
+import { migration0008GraphIndexes } from "./migration-0008-graph-indexes.ts";
+import { migration0009OneBranch } from "./migration-0009-one-branch.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -84,7 +86,16 @@ const buildMigratedThroughEight = (): Context => {
   const storage = new SqliteStorage({
     path: temporary.path,
     clock: createMockClock({ start: 1700000000000 }),
-    migrations,
+    migrations: [
+      coreEntities,
+      graphAndPlan,
+      executionAndJournal,
+      migration0004EventIndexes,
+      migration0005Actor,
+      migration0006RevisionOrigin,
+      migration0007ExternalExecution,
+      migration0008GraphIndexes,
+    ],
   });
   storage.migrate();
   storage.transact((t) => {
@@ -112,18 +123,14 @@ const countRows = (storage: SqliteStorage, table: string): number => {
 };
 
 describe("src/services/storage/migration-0008-graph-indexes.test", () => {
-  it("migration0008GraphIndexes carries version 8, its name, no rebuild, and two statements", async () => {
-    const { migration0008GraphIndexes } =
-      await import("./migration-0008-graph-indexes.ts");
+  it("migration0008GraphIndexes carries version 8, its name, no rebuild, and two statements", () => {
     assert.equal(migration0008GraphIndexes.version, 8);
     assert.equal(migration0008GraphIndexes.name, "0008-graph-indexes");
     assert.equal(migration0008GraphIndexes.rebuild, undefined);
     assert.equal(migration0008GraphIndexes.statements.length, 2);
   });
 
-  it("the two statements are the declared index statements in order", async () => {
-    const { migration0008GraphIndexes } =
-      await import("./migration-0008-graph-indexes.ts");
+  it("the two statements are the declared index statements in order", () => {
     assert.equal(
       migration0008GraphIndexes.statements[0],
       "CREATE INDEX node_project ON node (project_id, id)",
@@ -134,10 +141,7 @@ describe("src/services/storage/migration-0008-graph-indexes.test", () => {
     );
   });
 
-  it("parity: the two statements equal the index lines of the node and edge proposal fences", async () => {
-    const { migration0008GraphIndexes } =
-      await import("./migration-0008-graph-indexes.ts");
-
+  it("parity: the two statements equal the index lines of the node and edge proposal fences", () => {
     const nodeProposal = proposalStatements("node");
     const edgeProposal = proposalStatements("edge");
 
@@ -168,9 +172,7 @@ describe("src/services/storage/migration-0008-graph-indexes.test", () => {
     );
   });
 
-  it("migrations holds exactly eight migrations with migration0008GraphIndexes last", async () => {
-    const { migration0008GraphIndexes } =
-      await import("./migration-0008-graph-indexes.ts");
+  it("migrations holds exactly nine migrations with migration0009OneBranch last", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
@@ -180,16 +182,14 @@ describe("src/services/storage/migration-0008-graph-indexes.test", () => {
       migration0006RevisionOrigin,
       migration0007ExternalExecution,
       migration0008GraphIndexes,
+      migration0009OneBranch,
     ]);
   });
 
-  it("migration 0008 applies on a database migrated to version 7 that holds nodes and edges in two projects", async () => {
+  it("migration 0008 applies on a database migrated to version 7 that holds nodes and edges in two projects", () => {
     const { storage, temporary } = buildMigratedThroughSeven();
     after(() => storage.close());
     after(() => temporary.dispose());
-
-    const { migration0008GraphIndexes } =
-      await import("./migration-0008-graph-indexes.ts");
 
     const second = new SqliteStorage({
       path: temporary.path,
@@ -215,16 +215,13 @@ describe("src/services/storage/migration-0008-graph-indexes.test", () => {
     assert.ok(edgeRows > 0);
   });
 
-  it("every row survives migration 0008", async () => {
+  it("every row survives migration 0008", () => {
     const { storage, temporary } = buildMigratedThroughSeven();
     after(() => storage.close());
     after(() => temporary.dispose());
 
     const nodeBefore = countRows(storage, "node");
     const edgeBefore = countRows(storage, "edge");
-
-    const { migration0008GraphIndexes } =
-      await import("./migration-0008-graph-indexes.ts");
 
     const second = new SqliteStorage({
       path: temporary.path,
@@ -248,13 +245,10 @@ describe("src/services/storage/migration-0008-graph-indexes.test", () => {
     assert.equal(countRows(second, "edge"), edgeBefore);
   });
 
-  it("PRAGMA foreign_key_check returns no row after migration 0008 commits", async () => {
+  it("PRAGMA foreign_key_check returns no row after migration 0008 commits", () => {
     const { storage, temporary } = buildMigratedThroughSeven();
     after(() => storage.close());
     after(() => temporary.dispose());
-
-    const { migration0008GraphIndexes } =
-      await import("./migration-0008-graph-indexes.ts");
 
     const second = new SqliteStorage({
       path: temporary.path,
@@ -280,7 +274,7 @@ describe("src/services/storage/migration-0008-graph-indexes.test", () => {
     assert.deepEqual(violations, []);
   });
 
-  it("PRAGMA index_list on node and edge names the new index once each", async () => {
+  it("PRAGMA index_list on node and edge names the new index once each", () => {
     const { storage, temporary } = buildMigratedThroughEight();
     after(() => storage.close());
     after(() => temporary.dispose());
@@ -315,13 +309,10 @@ describe("src/services/storage/migration-0008-graph-indexes.test", () => {
     );
   });
 
-  it("migration 0008 is re-applied on an already-migrated database and the runner skips it", async () => {
+  it("migration 0008 is re-applied on an already-migrated database and the runner skips it", () => {
     const { storage, temporary } = buildMigratedThroughEight();
     after(() => storage.close());
     after(() => temporary.dispose());
-
-    const { migration0008GraphIndexes } =
-      await import("./migration-0008-graph-indexes.ts");
 
     const third = new SqliteStorage({
       path: temporary.path,

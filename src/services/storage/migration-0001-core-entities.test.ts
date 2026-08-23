@@ -19,6 +19,7 @@ import { migration0005Actor } from "./migration-0005-actor.ts";
 import { migration0006RevisionOrigin } from "./migration-0006-revision-origin.ts";
 import { migration0007ExternalExecution } from "./migration-0007-external-execution.ts";
 import { migration0008GraphIndexes } from "./migration-0008-graph-indexes.ts";
+import { migration0009OneBranch } from "./migration-0009-one-branch.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -155,24 +156,41 @@ const insertBinding = (
 };
 
 describe("src/services/storage/migration-0001-core-entities.test", () => {
-  it("parity: the six statements reproduce the six proposal tables verbatim, in order", () => {
+  it("parity: five statements reproduce their proposal tables verbatim and repository keeps its three-column pre-migration shape", () => {
     const normalize = (sql: string): readonly string[] =>
       sql
         .split(";")
         .map((part) => part.replace(/\s+/g, " ").trim())
         .filter((part) => part.length > 0);
 
-    assert.deepEqual(
-      coreEntities.statements.flatMap(normalize),
-      [
-        "blob",
-        "provider",
-        "project",
-        "project_binding",
-        "repository",
-        "profile",
-      ].flatMap(proposalStatements),
-    );
+    const legacyRepositoryDdl = normalize(`CREATE TABLE repository (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  remote_url TEXT NOT NULL,
+  credential_id TEXT NOT NULL REFERENCES provider(id),
+  home_path TEXT NOT NULL,
+  upstream_branch TEXT NOT NULL,
+  landing_branch TEXT NOT NULL,
+  publish_ref TEXT NOT NULL,
+  publish_on_approval INTEGER NOT NULL DEFAULT 1,
+  state TEXT NOT NULL CHECK (state IN ('ready', 'needs-reconcile')),
+  diverged_landing_oid TEXT,
+  diverged_upstream_oid TEXT,
+  fetched_upstream_oid TEXT,
+  updated_at INTEGER NOT NULL,
+  CHECK (
+    (state = 'needs-reconcile')
+    = (diverged_landing_oid IS NOT NULL AND diverged_upstream_oid IS NOT NULL)
+  )
+) STRICT`)[0]!;
+
+    assert.deepEqual(coreEntities.statements.flatMap(normalize), [
+      ...["blob", "provider", "project", "project_binding"].flatMap(
+        proposalStatements,
+      ),
+      legacyRepositoryDdl,
+      ...["profile"].flatMap(proposalStatements),
+    ]);
   });
 
   it("coreEntities carries version 1 and the name migration.md declares", () => {
@@ -187,7 +205,7 @@ describe("src/services/storage/migration-0001-core-entities.test", () => {
     assert.ok(migrationDoc.includes("0001-core-entities"));
   });
 
-  it("migrations holds exactly coreEntities, graphAndPlan, executionAndJournal, migration0004EventIndexes, migration0005Actor, migration0006RevisionOrigin, migration0007ExternalExecution and migration0008GraphIndexes", () => {
+  it("migrations holds exactly coreEntities, graphAndPlan, executionAndJournal, migration0004EventIndexes, migration0005Actor, migration0006RevisionOrigin, migration0007ExternalExecution, migration0008GraphIndexes and migration0009OneBranch", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
@@ -197,6 +215,7 @@ describe("src/services/storage/migration-0001-core-entities.test", () => {
       migration0006RevisionOrigin,
       migration0007ExternalExecution,
       migration0008GraphIndexes,
+      migration0009OneBranch,
     ]);
   });
 

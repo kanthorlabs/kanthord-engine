@@ -15,8 +15,7 @@ const view: RepositoryView = {
     id: "provider_01HZY8QF3M4N5P6R7S8T9V0W1X",
     name: "github-bot",
   },
-  upstreamBranch: "main",
-  landingBranch: "main",
+  branch: "main",
   landingRef: "refs/heads/main",
   trackingRef: "refs/remotes/origin/main",
   publishRef: "refs/heads/main",
@@ -76,27 +75,6 @@ describe("src/http/server/repository/list-repository.test", () => {
     assert.deepEqual(called, {});
     assert.deepEqual(response.body, { repositories: [view] });
     assertNoDaemonPath(response.body);
-  });
-
-  it("POST /v1/repository/<id>/landing-branch answers 501 ships in phase-2 and writes nothing", async () => {
-    const temporary = createMigratedStorage();
-    try {
-      const repositoryBefore = counts(temporary, "repository");
-      const eventBefore = counts(temporary, "event");
-      const app = await createTestApp({});
-      const response = await app.post(
-        `/v1/repository/${repositoryId}/landing-branch`,
-      );
-      assert.equal(response.status, 501);
-      assert.ok(
-        String(response.body.error.message).endsWith("ships in phase-2"),
-        String(response.body.error.message),
-      );
-      assert.equal(counts(temporary, "repository"), repositoryBefore);
-      assert.equal(counts(temporary, "event"), eventBefore);
-    } finally {
-      temporary.dispose();
-    }
   });
 
   it("POST /v1/repository/<id>/reconcile answers 501 ships in phase-2 and writes nothing", async () => {

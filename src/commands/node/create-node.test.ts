@@ -473,7 +473,7 @@ describe("src/commands/node/create-node.test", () => {
         seedPlanFixture(storage, plan, blobs);
         storage.transact((transaction) => {
           transaction.run(
-            "INSERT INTO repository (id, name, remote_url, credential_id, home_path, upstream_branch, landing_branch, publish_ref, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO repository (id, name, remote_url, credential_id, home_path, branch, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
               "repo_b",
               "other-repo",
@@ -481,8 +481,6 @@ describe("src/commands/node/create-node.test", () => {
               fixtureIds.provider,
               "repos/r2.git",
               "main",
-              "main",
-              "refs/heads/main",
               1,
               "ready",
               null,

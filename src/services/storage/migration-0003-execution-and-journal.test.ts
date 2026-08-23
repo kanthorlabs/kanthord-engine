@@ -24,6 +24,7 @@ import { migration0005Actor } from "./migration-0005-actor.ts";
 import { migration0006RevisionOrigin } from "./migration-0006-revision-origin.ts";
 import { migration0007ExternalExecution } from "./migration-0007-external-execution.ts";
 import { migration0008GraphIndexes } from "./migration-0008-graph-indexes.ts";
+import { migration0009OneBranch } from "./migration-0009-one-branch.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -499,7 +500,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     assert.ok(migrationDoc.includes("0003-execution-and-journal"));
   });
 
-  it("migrations holds exactly the eight migrations and versions map to 1, 2, 3, 4, 5, 6, 7, 8", () => {
+  it("migrations holds exactly the nine migrations and versions map to 1, 2, 3, 4, 5, 6, 7, 8, 9", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
@@ -509,10 +510,11 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
       migration0006RevisionOrigin,
       migration0007ExternalExecution,
       migration0008GraphIndexes,
+      migration0009OneBranch,
     ]);
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4, 5, 6, 7, 8],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9],
     );
   });
 

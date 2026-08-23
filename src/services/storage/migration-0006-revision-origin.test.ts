@@ -173,11 +173,11 @@ describe("src/services/storage/migration-0006-revision-origin.test", () => {
     }
   });
 
-  it("migrations holds eight entries, versions 1 to 8 with the eight names in order", () => {
-    assert.equal(migrations.length, 8);
+  it("migrations holds nine entries, versions 1 to 9 with the nine names in order", () => {
+    assert.equal(migrations.length, 9);
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4, 5, 6, 7, 8],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9],
     );
     assert.deepEqual(
       migrations.map((migration) => migration.name),
@@ -190,6 +190,7 @@ describe("src/services/storage/migration-0006-revision-origin.test", () => {
         "0006-revision-origin",
         "0007-external-execution",
         "0008-graph-indexes",
+        "0009-one-branch",
       ],
     );
   });

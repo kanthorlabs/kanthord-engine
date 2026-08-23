@@ -161,9 +161,7 @@ describe("scripts/e2e/007/11-repository-projection.e2e", () => {
         name: repoName,
         remoteUrl: httpsUrl(env),
         credentialId: writerId,
-        upstreamBranch: defaultBranch,
-        landingBranch: defaultBranch,
-        publishRef,
+        branch: defaultBranch,
         publishOnApproval: true,
       }),
     });
@@ -191,7 +189,7 @@ describe("scripts/e2e/007/11-repository-projection.e2e", () => {
     assert.equal(showBody.divergedLandingOid, null);
     assert.equal(showBody.divergedUpstreamOid, null);
     assert.equal(showBody.publishOnApproval, true);
-    assert.equal(showBody.publishRef, publishRef);
+    assert.equal(showBody.publishRef, `refs/heads/${env.ghBaseBranch}`);
     assert.equal((showBody.credential as { id: string }).id, writerId);
     assert.equal(
       (showBody.credential as { name: string }).name,

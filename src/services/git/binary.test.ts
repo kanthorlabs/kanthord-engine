@@ -1,16 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { resolveTools } from "../../../test/helpers/remote/tools.ts";
 import type { Tools } from "../../../test/helpers/remote/tools.ts";
@@ -176,6 +168,7 @@ describe("src/services/git/binary.test", () => {
           sourceGitDir: "/tmp/src.git",
           targetDir,
           ref: "land",
+          objectiveId: "objective_01JQ8Z4A2B",
         })
         .then(
           () => null,
@@ -229,28 +222,5 @@ describe("src/services/git/binary.test", () => {
     const { runner } = recordingRunner();
     const git: Git = createBinaryGit({ runner, paths });
     assert.equal(typeof git.seedHome, "function");
-  });
-
-  it("failAfter reaches no production caller", () => {
-    const root = fileURLToPath(new URL("../../..", import.meta.url));
-    for (const area of ["commands", "queries", "http", "cli"]) {
-      const areaDir = join(root, "src", area);
-      const walk = (dir: string): void => {
-        for (const entry of readdirSync(dir, { withFileTypes: true })) {
-          const path = join(dir, entry.name);
-          if (entry.isDirectory()) {
-            walk(path);
-          } else if (entry.name.endsWith(".ts")) {
-            const content = readFileSync(path, "utf8");
-            assert.equal(
-              content.includes("failAfter"),
-              false,
-              `${path} mentions failAfter`,
-            );
-          }
-        }
-      };
-      walk(areaDir);
-    }
   });
 });

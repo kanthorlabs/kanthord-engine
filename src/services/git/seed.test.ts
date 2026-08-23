@@ -36,7 +36,7 @@ import { createGitRunner } from "./run.ts";
 import type { GitRunRequest, GitRunner } from "./run.ts";
 import { HELPER_FILE_NAME } from "./credential.ts";
 import { seedHome, stagingPathFor } from "./seed.ts";
-import type { SeedHomeExtended, SeedStep } from "./seed.ts";
+import type { SeedHomeExtended } from "./seed.ts";
 import { confirmHostKey, knownHostsLine, scanTargetFor } from "./host-key.ts";
 import { remoteRefValue } from "./preflight.ts";
 
@@ -117,26 +117,18 @@ function seedInput(
   gitDir: string,
   overrides?: Readonly<{
     remoteUrl?: string;
-    upstreamBranch?: string;
-    landingBranch?: string;
-    publishRef?: string;
+    branch?: string;
     hostKey?: HostKey | null;
     credential?: GitCredential;
-    failAfter?: SeedStep;
   }>,
 ): SeedHomeExtended {
   return {
     gitDir,
     remoteUrl: overrides?.remoteUrl ?? httpRemote.url("fixture.git"),
-    upstreamBranch: overrides?.upstreamBranch ?? "main",
-    landingBranch: overrides?.landingBranch ?? "main",
-    publishRef: overrides?.publishRef ?? "refs/heads/kanthord/preflight",
+    branch: overrides?.branch ?? "main",
     hostKey: overrides?.hostKey === undefined ? null : overrides.hostKey,
     credential: overrides?.credential ?? writerCredential(),
     pidFile: join(paths.runDirectory, "seed.pid"),
-    ...(overrides?.failAfter === undefined
-      ? {}
-      : { failAfter: overrides.failAfter }),
   };
 }
 
@@ -191,7 +183,7 @@ const oid: string = fixtureObjectIds.commit2!;
 describe("src/services/git/seed.test", () => {
   describe("the command sequence, no process", () => {
     const remoteUrl = "https://forge.test/r.git";
-    const publishRef = "refs/heads/kanthord/preflight";
+    const publishRef = "refs/heads/main";
 
     it("records the nine-step sequence in order with TRACKING_REFSPEC and the pinned init flags", async () => {
       const paths = makePaths();
@@ -401,18 +393,19 @@ describe("src/services/git/seed.test", () => {
       assert.equal(headOid.stdout.trim(), oid);
     });
 
-    it("a branch mode writes one landing branch under another name", async () => {
+    it("a non-default branch names both the tracking ref and the only local head", async () => {
       const paths = makePaths();
       const runner = createGitRunner(paths);
       const gitDir = join(dirname(paths.home), "home.git");
-      await seedHome(
-        runner,
-        paths,
-        seedInput(paths, gitDir, { landingBranch: "kanthord/main" }),
-      );
+      await seedHome(runner, paths, seedInput(paths, gitDir));
       const heads = await forEachRef(runner, gitDir, "refs/heads");
-      assert.deepEqual(heads, ["refs/heads/kanthord/main"]);
-      const mainOid = await runner({
+      assert.deepEqual(heads, ["refs/heads/main"]);
+      const tracking = await forEachRef(runner, gitDir, "refs/remotes/origin");
+      assert.ok(
+        tracking.includes("refs/remotes/origin/main"),
+        tracking.join(","),
+      );
+      const headOid = await runner({
         args: [
           "--git-dir=" + gitDir,
           "rev-parse",
@@ -420,17 +413,8 @@ describe("src/services/git/seed.test", () => {
           "refs/heads/main",
         ],
       });
-      assert.notEqual(mainOid.code, 0, "refs/heads/main does not exist");
-      const landingOid = await runner({
-        args: [
-          "--git-dir=" + gitDir,
-          "rev-parse",
-          "--verify",
-          "refs/heads/kanthord/main",
-        ],
-      });
-      assert.equal(landingOid.code, 0, landingOid.stderr);
-      assert.equal(landingOid.stdout.trim(), oid);
+      assert.equal(headOid.code, 0, headOid.stderr);
+      assert.equal(headOid.stdout.trim(), oid);
     });
 
     it("no tag is written against a tagged fixture", async () => {
@@ -465,26 +449,42 @@ describe("src/services/git/seed.test", () => {
       }
     });
 
-    it("a failure after the fetch leaves no visible home, only a staging directory", async () => {
+    it("a failed fetch leaves no visible home and no staging directory", async () => {
       const paths = makePaths();
-      const runner = createGitRunner(paths);
+      const inner = createGitRunner(paths);
+      const runner: GitRunner = async (request) => {
+        if (request.args.includes("fetch")) {
+          return {
+            code: 128,
+            stdout: "",
+            stderr: "fatal: injected fetch failure",
+            args: request.args,
+          };
+        }
+        return inner(request);
+      };
       const gitDir = join(dirname(paths.home), "home.git");
       const rejection = await seedHome(
         runner,
         paths,
-        seedInput(paths, gitDir, { failAfter: "fetch" }),
+        seedInput(paths, gitDir),
       ).then(
         () => null,
         (error: unknown) => error,
       );
       assert.ok(rejection instanceof GitError, String(rejection));
       assert.ok(
-        rejection.message.includes("seed aborted after fetch"),
+        rejection.message.includes("git fetch failed with code 128"),
         rejection.message,
       );
       assert.equal(existsSync(gitDir), false);
       assert.deepEqual(stagingEntries(dirname(gitDir)), []);
+    });
 
+    it("a crash before cleanup leaves exactly one staging directory behind", async () => {
+      const paths = makePaths();
+      const runner = createGitRunner(paths);
+      const gitDir = join(dirname(paths.home), "home.git");
       const crashingRunner: GitRunner = async (request) => {
         if (request.args.includes("fetch")) {
           chmodSync(dirname(gitDir), 0o500);
@@ -523,7 +523,7 @@ describe("src/services/git/seed.test", () => {
       const rejection = await seedHome(
         runner,
         paths,
-        seedInput(paths, gitDir, { upstreamBranch: "does-not-exist" }),
+        seedInput(paths, gitDir, { branch: "does-not-exist" }),
       ).then(
         () => null,
         (error: unknown) => error,
@@ -580,7 +580,7 @@ describe("src/services/git/seed.test", () => {
       assert.ok(rejection instanceof GitError, String(rejection));
       assert.equal(rejection.failure, "auth-failed");
       assert.ok(
-        rejection.message.includes("refs/heads/kanthord/preflight"),
+        rejection.message.includes("refs/heads/main"),
         rejection.message,
       );
       assert.equal(existsSync(gitDir), false);
@@ -606,28 +606,6 @@ describe("src/services/git/seed.test", () => {
       await seedHome(checkingRunner, paths, seedInput(paths, gitDir));
       assert.equal(checked, true);
       assert.equal(existsSync(gitDir), true);
-    });
-
-    it("failAfter rename rejects after the home is visible", async () => {
-      const paths = makePaths();
-      const gitDir = join(dirname(paths.home), "home.git");
-      const { runner } = recordingRunner(oid);
-      const rejection = await seedHome(
-        runner,
-        paths,
-        seedInput(paths, gitDir, { failAfter: "rename" }),
-      ).then(
-        () => null,
-        (error: unknown) => error,
-      );
-      assert.ok(rejection instanceof GitError, String(rejection));
-      assert.equal(
-        rejection.message,
-        "seed aborted after rename",
-        rejection.message,
-      );
-      assert.equal(existsSync(gitDir), true);
-      assert.deepEqual(stagingEntries(dirname(gitDir)), []);
     });
 
     it("the token appears nowhere", async () => {

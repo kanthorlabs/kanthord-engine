@@ -15,11 +15,12 @@ Reviewer: git or release engineer. Phase 1. This file defines where code lives. 
 
 ## Three ref roles, never blurred
 
-| Role                | Ref                       | Written by                                 | Never written by |
-| ------------------- | ------------------------- | ------------------------------------------ | ---------------- |
-| Remote observation  | `refs/remotes/origin/*`   | `fetch`, which may force-update            | anything else    |
-| Local landing       | `refs/heads/<landing>`    | `mr@1`, reconcile, and a safe fast-forward | `fetch`          |
-| Publish destination | the remote `<publishRef>` | `publish`, against an expected object id   | —                |
+| Role                | Ref                              | Written by                                 | Never written by |
+| ------------------- | -------------------------------- | ------------------------------------------ | ---------------- |
+| Remote observation  | `refs/remotes/origin/*`          | `fetch`, which may force-update            | anything else    |
+| Local landing       | `refs/heads/<branch>`            | `mr@1`, reconcile, and a safe fast-forward | `fetch`          |
+| Objective work      | `refs/heads/feature/<node id>`   | the objective clone, which has no remote   | anything else    |
+| Publish destination | the remote `refs/heads/<branch>` | `publish`, against an expected object id   | —                |
 
 A remote branch can be force-pushed, so the force flag belongs on remote-tracking refs. It must never reach `refs/heads/*`, where unpublished integrated work lives.
 
@@ -32,8 +33,8 @@ git init --bare --template= <staging>
 git --git-dir=<staging> remote add origin <url>
 git --git-dir=<staging> config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
 git --git-dir=<staging> fetch origin --prune --no-tags
-U=$(git --git-dir=<staging> rev-parse refs/remotes/origin/<upstream>)
-git --git-dir=<staging> update-ref refs/heads/<landing> "$U" ''
+U=$(git --git-dir=<staging> rev-parse refs/remotes/origin/<branch>)
+git --git-dir=<staging> update-ref refs/heads/<branch> "$U" ''
 rename <staging> -> <home>
 ```
 
@@ -208,24 +209,29 @@ A first publication has no destination ref, so `expected_remote_oid` is null, wh
 
 The one capability genuinely lost is repairing a remote by force. That is a human operation with the `git` CLI, and it is not a daemon capability.
 
-## Three branch fields
+## One branch field
 
-A repository declares three, because one field cannot express the branch mode.
+A repository declares one, named `branch`. It is the branch on remote origin that holds the team's
+work, and one name serves every role that needs one.
 
-| Field            | Meaning                                                                                        |
-| ---------------- | ---------------------------------------------------------------------------------------------- |
-| `upstreamBranch` | the freshness source, observed at `refs/remotes/origin/<upstreamBranch>`                       |
-| `landingBranch`  | `refs/heads/<landingBranch>`, where `mr@1` accumulates approved work and objectives clone from |
-| `publishRef`     | the destination ref on remote origin                                                           |
+| Role                | Ref                            |
+| ------------------- | ------------------------------ |
+| Freshness source    | `refs/remotes/origin/<branch>` |
+| Local landing       | `refs/heads/<branch>`          |
+| Publish destination | remote `refs/heads/<branch>`   |
 
-| Mode                               | `upstreamBranch` | `landingBranch`   | `publishRef`                 |
-| ---------------------------------- | ---------------- | ----------------- | ---------------------------- |
-| Merge into `main`, push `main`     | `main`           | `main`            | `refs/heads/main`            |
-| Land on a branch, push that branch | `main`           | `kanthord/<name>` | `refs/heads/kanthord/<name>` |
+Three fields existed to express a branch mode that landed agent work on `kanthord/<name>` and left
+`upstreamBranch` at `main`. That mode is gone. Per-objective work is isolated by a branch inside the
+objective's own clone, which is where isolation belongs, so the bare home needs no second branch to
+hold it.
 
-The branch mode needs the split. `origin/kanthord/<name>` does not exist before the first publish, and objectives still need the latest `origin/main`.
+**An objective clone works on `feature/<node id>`.** The node id of the objective is a ULID, so the
+name is deterministic, collision-free across projects, and stable across a re-clone. The clone checks
+out `<branch>` and creates the feature branch from it. `mr@1` merges that branch into
+`refs/heads/<branch>` of the bare home.
 
-Changing `landingBranch` is an explicit operation, not a configuration edit. It names the object id the new branch starts at, and it states what happens to work already landed on the old branch.
+Pushing a `feature/*` branch to remote origin for a human to review is a separate capability, and no
+phase declares it. The feature branch never leaves the daemon machine.
 
 ## Clone granularity is the objective
 
@@ -234,7 +240,8 @@ All tasks of one objective share one clone. Tasks in one objective run in sequen
 The daemon clones from the bare home path, into a staging directory that it renames into place:
 
 ```
-git clone --no-hardlinks --no-local --branch <landing> <home> <staging>
+git clone --no-hardlinks --no-local --branch <branch> <home> <staging>
+git -C <staging> checkout -b feature/<node id>
 git -C <staging> remote remove origin
 assert  git -C <staging> remote            is empty
 assert  <staging>/.git/objects/info/alternates does not exist
@@ -243,6 +250,10 @@ rename  <staging> -> <workspace>
 ```
 
 None of these is a property of cloning.
+
+The `checkout -b` is no exception. It runs before the rename for the same reason every other step
+does: a visible workspace is a finished one, so the feature branch exists the first time anything can
+observe the workspace.
 
 `--no-hardlinks` is required. A local clone links object files into the workspace by default, so the objective and the bare home would share the same files on disk, and the isolation this section depends on would exist only on paper. The acceptance for it is the link count of the object files, not the contents of the work tree.
 

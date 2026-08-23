@@ -12,12 +12,12 @@ const LANDING_REF = "refs/heads/main";
 const TRACKING_REF = "refs/remotes/origin/main";
 
 const SORTED_MEMBERS = [
+  "branch",
   "credential",
   "divergedLandingOid",
   "divergedUpstreamOid",
   "fetchedUpstreamOid",
   "id",
-  "landingBranch",
   "landingOid",
   "landingRef",
   "name",
@@ -28,7 +28,6 @@ const SORTED_MEMBERS = [
   "trackingOid",
   "trackingRef",
   "updatedAt",
-  "upstreamBranch",
 ] as const;
 
 function key(gitDir: string, ref: string): string {
@@ -114,7 +113,7 @@ const landingPair = {
 };
 
 describe("src/queries/repository/show-repository.test", () => {
-  it("returns a view whose every field is asserted and whose keys are the seventeen members", async (t) => {
+  it("returns a view whose every field is asserted and whose keys are the sixteen members", async (t) => {
     const temporary = createMigratedStorage();
     t.after(() => temporary.dispose());
     temporary.storage.transact((transaction) => {
@@ -135,8 +134,7 @@ describe("src/queries/repository/show-repository.test", () => {
       id: fixtureIds.provider,
       name: "work-anthropic",
     });
-    assert.equal(view.upstreamBranch, "main");
-    assert.equal(view.landingBranch, "main");
+    assert.equal(view.branch, "main");
     assert.equal(view.landingRef, LANDING_REF);
     assert.equal(view.trackingRef, TRACKING_REF);
     assert.equal(view.publishRef, "refs/heads/main");
@@ -161,10 +159,10 @@ describe("src/queries/repository/show-repository.test", () => {
     t.after(() => temporary.dispose());
     temporary.storage.transact((transaction) => {
       seedRegistry(transaction);
-      transaction.run(
-        "UPDATE repository SET upstream_branch = ?, landing_branch = ? WHERE id = ?",
-        ["kanthord/main", "kanthord/main", fixtureIds.repository],
-      );
+      transaction.run("UPDATE repository SET branch = ? WHERE id = ?", [
+        "kanthord/main",
+        fixtureIds.repository,
+      ]);
     });
     const mock = gitMock({
       [key(HOME_PATH, "refs/heads/kanthord/main")]: "3".repeat(40),
@@ -181,6 +179,32 @@ describe("src/queries/repository/show-repository.test", () => {
     assert.equal(view.trackingRef, "refs/remotes/origin/kanthord/main");
     assert.equal(view.landingOid, "3".repeat(40));
     assert.equal(view.trackingOid, "4".repeat(40));
+  });
+
+  it("a branch of kanthord/landing reports all three derived refs by exact string", async (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    temporary.storage.transact((transaction) => {
+      seedRegistry(transaction);
+      transaction.run("UPDATE repository SET branch = ? WHERE id = ?", [
+        "kanthord/landing",
+        fixtureIds.repository,
+      ]);
+    });
+    const mock = gitMock({
+      [key(HOME_PATH, "refs/heads/kanthord/landing")]: "5".repeat(40),
+      [key(HOME_PATH, "refs/remotes/origin/kanthord/landing")]: "6".repeat(40),
+    });
+
+    const view = await showRepository(
+      { storage: temporary.storage, git: mock.git },
+      { id: fixtureIds.repository },
+    );
+
+    assert.ok(view !== null);
+    assert.equal(view.landingRef, "refs/heads/kanthord/landing");
+    assert.equal(view.trackingRef, "refs/remotes/origin/kanthord/landing");
+    assert.equal(view.publishRef, "refs/heads/kanthord/landing");
   });
 
   it("reads the provider name through the join, not a copy", async (t) => {

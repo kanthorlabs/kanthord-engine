@@ -15,7 +15,11 @@ import {
   deserializePayload,
   type GitPayload,
 } from "../../domain/provider-payload.ts";
-import type { RepositoryView } from "../../domain/repository.ts";
+import {
+  landingRefOf,
+  publishRefOf,
+  type RepositoryView,
+} from "../../domain/repository.ts";
 
 export type RegisterRepositoryDependencies = Readonly<{
   storage: Storage;
@@ -32,9 +36,7 @@ export type RegisterRepositoryInput = Readonly<{
   name: string;
   remoteUrl: string;
   credentialId: string;
-  upstreamBranch: string;
-  landingBranch: string;
-  publishRef: string;
+  branch: string;
   publishOnApproval: boolean;
   hostFingerprint: string | null;
   actor: string;
@@ -225,10 +227,8 @@ export async function registerRepository(
     seeded = await dependencies.git.seedHome({
       gitDir: homePath,
       remoteUrl: input.remoteUrl,
-      upstreamBranch: input.upstreamBranch,
-      landingBranch: input.landingBranch,
+      branch: input.branch,
       credential,
-      publishRef: input.publishRef,
       hostKey,
       pidFile,
     });
@@ -247,7 +247,7 @@ export async function registerRepository(
           payload: {
             failure: error.failure,
             name: input.name,
-            publishRef: input.publishRef,
+            publishRef: publishRefOf(input.branch),
             credentialId: input.credentialId,
           },
         }),
@@ -257,7 +257,7 @@ export async function registerRepository(
   }
   const landingOid = await dependencies.git.resolveRef({
     gitDir: homePath,
-    ref: `refs/heads/${input.landingBranch}`,
+    ref: landingRefOf(input.branch),
   });
   if (landingOid === null) {
     throw new Error("the landing branch was not observed after the seed");
@@ -276,16 +276,14 @@ export async function registerRepository(
       );
     }
     transaction.run(
-      "INSERT INTO repository (id, name, remote_url, credential_id, home_path, upstream_branch, landing_branch, publish_ref, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO repository (id, name, remote_url, credential_id, home_path, branch, publish_on_approval, state, diverged_landing_oid, diverged_upstream_oid, fetched_upstream_oid, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
       [
         repositoryId,
         input.name,
         input.remoteUrl,
         input.credentialId,
         homePath,
-        input.upstreamBranch,
-        input.landingBranch,
-        input.publishRef,
+        input.branch,
         input.publishOnApproval ? 1 : 0,
         "ready",
         null,
@@ -304,7 +302,7 @@ export async function registerRepository(
         null,
         null,
         0,
-        `refs/heads/${input.landingBranch}`,
+        landingRefOf(input.branch),
         landingOid,
         landingOid,
         landingOid,
@@ -324,9 +322,7 @@ export async function registerRepository(
       actorId: input.actor,
       payload: {
         name: input.name,
-        upstreamBranch: input.upstreamBranch,
-        landingBranch: input.landingBranch,
-        publishRef: input.publishRef,
+        branch: input.branch,
         publishOnApproval: input.publishOnApproval,
         credentialId: input.credentialId,
         fetchedUpstreamOid: seeded.fetchedUpstreamOid,

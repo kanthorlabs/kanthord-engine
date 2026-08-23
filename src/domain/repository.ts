@@ -14,9 +14,7 @@ export const repositoryRow = z
     remoteUrl: z.string(),
     credentialId: identity("provider"),
     homePath: z.string(),
-    upstreamBranch: z.string(),
-    landingBranch: z.string(),
-    publishRef: z.string(),
+    branch: z.string(),
     publishOnApproval: z.int(),
     state: z.enum(repositoryStates),
     divergedLandingOid: objectId.nullable(),
@@ -40,8 +38,7 @@ export type RepositoryView = Readonly<{
   name: string;
   remoteUrl: string;
   credential: Readonly<{ id: string; name: string }>;
-  upstreamBranch: string;
-  landingBranch: string;
+  branch: string;
   landingRef: string;
   trackingRef: string;
   publishRef: string;
@@ -54,3 +51,22 @@ export type RepositoryView = Readonly<{
   divergedUpstreamOid: string | null;
   updatedAt: number;
 }>;
+
+export function headRefOf(branch: string): string {
+  return `refs/heads/${branch}`;
+}
+
+export function trackingRefOf(branch: string): string {
+  return `refs/remotes/origin/${branch}`;
+}
+
+export const landingRefOf = headRefOf;
+export const publishRefOf = headRefOf;
+
+export function featureBranchOf(nodeId: string): string {
+  return `feature/${nodeId}`;
+}
+
+export function featureRefOf(nodeId: string): string {
+  return `refs/heads/feature/${nodeId}`;
+}
