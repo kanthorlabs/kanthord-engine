@@ -38,6 +38,9 @@ const nodeEdgeWriteExemptions = [
 const vendorPackages = [
   "koa",
   "@koa/*",
+  "hono",
+  "hono/*",
+  "@hono/*",
   "commander",
   "convict",
   ...gitLibraries,
@@ -314,6 +317,9 @@ export default [
               group: [
                 "koa",
                 "@koa/*",
+                "hono",
+                "hono/*",
+                "@hono/*",
                 "node:http",
                 "node:sqlite",
                 "node:child_process",
@@ -339,6 +345,9 @@ export default [
               group: [
                 "koa",
                 "@koa/*",
+                "hono",
+                "hono/*",
+                "@hono/*",
                 "node:sqlite",
                 "graphology",
                 "node:child_process",

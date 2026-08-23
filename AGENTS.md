@@ -4,7 +4,9 @@ kanthord is one long-running daemon on **Node.js 24+ / TypeScript**, ES modules,
 
 **The published artifact is compiled; the repository is not.** Node refuses to strip types under `node_modules`, so an installed `bin` pointing at a `.ts` file cannot run. `npm run build` emits `dist/` through `tsconfig.build.json`, `prepack` runs it, and `package.json` ships `dist` and points `bin` at `dist/main.js`. `rewriteRelativeImportExtensions` turns each `.ts` import specifier into `.js` on emit, so `src/` keeps its explicit `.ts` extensions unchanged. Development, tests and lint still run TypeScript directly. Never import from `dist/`, and never commit it.
 
-`docs/proposal/` is the source of truth for behaviour. This file is the source of truth for structure. Where a story and this file disagree about structure, this file wins.
+`docs/proposal/` is the source of truth for behaviour. This file is the source of truth for structure.
+The http framework of `src/http/server/**` moves from koa to hono across EPICs 030 to 035, and
+`src/http/server/runtime/**` becomes the only place a runtime-specific API appears. Where a story and this file disagree about structure, this file wins.
 
 ## Architecture
 
@@ -16,7 +18,7 @@ src/
   services/   a capability behind an interface.
   commands/   write paths. The business logic of one operation.
   queries/    read paths.
-  http/       the route contract, and the koa server that serves it.
+  http/       the route contract, and the http server that serves it.
   cli/        commander programs.
   main.ts     the composition root.
 ```
@@ -27,8 +29,8 @@ Two of those directories split in two, because one rule does not fit both halves
 src/services/<capability>/index.ts   the interface. No implementation, no re-export of one.
 src/services/<capability>/*.ts       an implementation of that interface.
 
-src/http/contract/**                 operation ids, methods, paths, lifecycle, zod schemas. No koa.
-src/http/server/**                   koa, the middleware, and the handlers.
+src/http/contract/**                 operation ids, methods, paths, lifecycle, zod schemas. No server framework.
+src/http/server/**                   the http framework, the middleware, and the handlers.
 ```
 
 ### The import matrix
@@ -55,7 +57,7 @@ Five rules carry that table.
 - **`domain/` is pure.** No file system, no network, no clock, no randomness. A ULID is minted by a service and passed in. Its only permitted runtime dependency is `zod`.
 - **A dependency injects through an interface, and only `main.ts` names an implementation.** A cross-capability dependency is legal through the interface — the event service reaching storage is normal. An interface reaching another interface is the same rule: `services/event` and `services/lease` name the storage transaction context in their own signatures, because the transaction rule below requires it. One capability's implementation importing another capability's implementation is not legal.
 - **`commands/` and `queries/` hold the business logic.** They import no vendor package at all. A handler parses a request, calls exactly one command or one query, and formats the response. A handler that branches on a domain rule is a defect.
-- **`http/contract/` is the transport contract, and the CLI is its second consumer.** It holds every operation id, method, path, lifecycle status and zod schema, and it imports no koa. That is what lets `cli/` be a typed client of a daemon on another machine without importing a handler.
+- **`http/contract/` is the transport contract, and the CLI is its second consumer.** It holds every operation id, method, path, lifecycle status and zod schema, and it imports no server framework. That is what lets `cli/` be a typed client of a daemon on another machine without importing a handler.
 - **`cli/` reaches the daemon over HTTP.** It imports no command and no query. `kanthord db migrate` is the single exception in the product, and it is still not an exception here: `main.ts` constructs the storage implementation and passes the migration handler into the commander program.
 
 ### Layout
@@ -102,7 +104,7 @@ A query takes the same shape. `main.ts` binds the dependencies once and passes c
 - **The transaction belongs to storage.** `services/storage` owns the transaction context. A write command opens one transaction, and every service that persists inside that write accepts the context through its interface. A state transition and its event append never sit in two transactions. `docs/proposal/phase-1/domain.md` requires them to be one.
 - **Route lifecycle is registry data, not a branch in a handler.** Every declared operation appears exactly once in `http/contract/`. A `routed` entry binds to exactly one command or query. A `stubbed` entry binds to the one shared `501` handler and names no command. A `post-mvp` row has no entry at all.
 - **A path is a typed segment tuple, never a string.** An operation declares resource, subresource, action, system and parameter segments from closed sets, and one renderer builds the path. Every resource segment is singular. `docs/proposal/api/README.md` holds the grammar. A route edit therefore cannot introduce a plural or a free-form segment.
-- **OpenAPI documents are generated and not committed.** The master and each `features/*.yaml` slice are self-contained with internal references only. `npm run verify` emits and validates the master in a temporary directory. `npm run contract:publish -- <output-directory>` emits the master, feature slices and examples for a consumer. Never commit generated documents, and never hand-edit them.
+- **OpenAPI documents are generated and not committed.** The master and each `features/*.yaml` slice are self-contained with internal references only. `npm run verify` emits and validates the master and every slice in a temporary directory. `npm run contract:publish -- <output-directory>` emits the master, feature slices and examples for a consumer. EPIC 039 adds a second, modular `source/` tree built from external `$ref`, beside the self-contained forms and never in place of them. Never commit generated documents, and never hand-edit them.
 
 ## Tests
 
