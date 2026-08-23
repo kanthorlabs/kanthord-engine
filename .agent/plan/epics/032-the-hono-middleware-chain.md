@@ -320,11 +320,19 @@ Author with `/author`. The sequence below is the dependency order. Each story is
     Decision 16.
 15. **The Koa bridge.** Add `src/http/server/koa-bridge.ts` with `koaFromHono` and
     `BRIDGE_HOSTNAME`, per Decision 12. Add `koa-bridge.test.ts`, which drives a one-route Hono app
-    through `createServer(koaFromHono(hono).callback())` on an unref'd loopback socket and asserts
-    five values: a `%2F` path and a `%zz` path each reach the route intact, a `Uint8Array` answer
-    carries the exact `content-length` and the exact bytes, a 204 answer carries neither
-    `content-length` nor `content-type`, a POST body reaches `c.req.text()` with its whitespace
-    intact, and `global.Request` is unchanged after `koaFromHono` runs.
+    through `createServer(koaFromHono(hono).callback())` on an unref'd loopback socket. It holds
+    **exactly 6 cases**, one per line below, and EPIC 034 story 3 deletes the file and asserts that
+    the pass count falls by exactly that number.
+
+    1. a `%2F` path and a `%zz` path each reach the route intact
+    2. a `Uint8Array` answer carries the exact `content-length` and the exact bytes
+    3. a 204 answer carries neither `content-length` nor `content-type`
+    4. a POST body reaches `c.req.text()` with its whitespace intact
+    5. `global.Request` and `global.Response` are the same references before and after
+       `koaFromHono` runs, asserted by identity
+    6. a request that carries no `Host` header reaches the route with the authority
+       `BRIDGE_HOSTNAME`, read through `c.req.header("host")`
+
 16. **`createApp` returns both apps.** Rewrite `src/http/server/app.ts`. `App` carries `app: Koa` and
     `hono: Hono<AppEnv>`. `createApp` keeps the `BindingError` check first, then mounts the eleven
     entries of the Goal table in that order through `app.use("*", ...)`, with `dispatchMiddleware`
@@ -430,10 +438,12 @@ Hermetic coverage required beyond the Proof:
   `content-length`.
 - **The bridge patches no global.** `global.Request` and `global.Response` are the same references
   before and after `koaFromHono` runs, asserted by identity. This is the mechanism test for
-  `overrideGlobalObjects: false`.
-- **A request with no `Host` header answers the `host-forbidden` envelope.** The bridge supplies
-  `BRIDGE_HOSTNAME` as the fallback authority, so the request reaches `hostMiddleware` and carries
-  the message `the request carried no Host header`, not a bare 400.
+  `overrideGlobalObjects: false`, and case 5 of `src/http/server/koa-bridge.test.ts` owns it.
+- **A request with no `Host` header answers the `host-forbidden` envelope.** The two halves have two
+  owners. Case 6 of `src/http/server/koa-bridge.test.ts` proves the bridge supplies
+  `BRIDGE_HOSTNAME` as the fallback authority. `src/http/server/app.test.ts` proves the request then
+  reaches `hostMiddleware` and answers the envelope whose message is
+  `the request carried no Host header`, not a bare 400.
 - **Hermetic**: no network, no shared temporary directory, no wall clock. A test that needs time
   passes a `now` function and a fake `Schedule`.
 
