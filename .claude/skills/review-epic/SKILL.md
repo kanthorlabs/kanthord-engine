@@ -1,17 +1,22 @@
 ---
+name: review-epic
 description: Human-side review of one EPIC implementation — resolves the change set in a shared tree, dispatches the canonical reviewer-engineer contract, runs the EPIC Gates plus Proof plus the sibling regression proofs, validates supplied review notes by their premise, and reports blocker/suggestion bullets. Never commits; applies action:YES fixes only on request.
-agent: build
-subtask: false
 ---
 
 # /review-epic — human-side review of one EPIC's implementation
 
-Arguments: `$ARGUMENTS` — `<epic-file-path> [--base <ref>] [--notes <file>] [--progress]`
+> **Harness note.** This skill runs under Claude Code, opencode and pi from the
+> one file. Where a step says "dispatch a subagent", use the harness's dispatch
+> tool: `Agent` under Claude Code, `Task` under opencode, the equivalent under
+> pi. Where a step names a persona file, read it from `.claude/agents/<name>.md`
+> or `.opencode/agents/<name>.md`, whichever exists.
+
+Arguments: `$ARGUMENTS` — `<epic-file-path> [--base <ref>] [--notes <file>] [--progress]`. A harness that does not substitute
+`$ARGUMENTS` passes the same text with the invocation; read it from there.
 
 You are the review **orchestrator**, not the reviewer. The deep pass belongs to
-the `reviewer-engineer` subagent, whose persona
-(`.claude/agents/reviewer-engineer.md`) is the **single canonical review
-contract** for this repo. This command does not restate its dimensions, its
+the `reviewer-engineer` subagent, whose persona file (`.claude/agents/` or
+`.opencode/agents/`) is the **single canonical review contract** for this repo. This command does not restate its dimensions, its
 finding table, or its `action:` semantics — restating them creates a second
 protocol that drifts and can PASS work the real reviewer would reject.
 
@@ -103,7 +108,7 @@ changed production **and** test file, runs the `Gates:` and the hermetic
   a weaker proxy than the spec named is a defect the name list cannot show. The
   reviewer persona already requires this — do not let a summary substitute.
 - If subagent dispatch is unavailable in this frontend, perform the review
-  yourself following `.claude/agents/reviewer-engineer.md` **in full**. There is
+  yourself following the `reviewer-engineer` persona **in full**. There is
   no lighter version.
 - Do not take the subagent's word for the gate. Confirm it pasted **real
   output**. If it skipped a non-hermetic Proof with `NEEDS-HUMAN:`, you may run

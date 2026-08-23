@@ -51,7 +51,7 @@ deny test-engineer .agent/tdd/memory/software-engineer
 
 for role in test-engineer software-engineer; do
   deny "$role" .agent/plan/stories/epic/story.md
-  deny "$role" .claude/commands/work.md
+  deny "$role" .claude/skills/work/SKILL.md
   deny "$role" .opencode/agents/software-engineer.md
   deny "$role" scripts/lane-check.sh
   deny "$role" scripts/lane-check.test.sh

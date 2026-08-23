@@ -51,4 +51,4 @@ A blocked task is diagnosed from its attempt record, not from the workspace. The
 
 ## Deferred: `tdd@1` and `git@1`
 
-`tdd@1` is a worker strategy, not an agent. It drives `te@1`, `swe@1` and `re@1`. `git@1` runs a declared git operation and needs no model; the undo node uses it. KanthorD redesigns the loop of `.claude/commands/*`: it keeps the TDD intent and the review gate, and it does not keep the role sequence.
+`tdd@1` is a worker strategy, not an agent. It drives `te@1`, `swe@1` and `re@1`. `git@1` runs a declared git operation and needs no model; the undo node uses it. KanthorD redesigns the loop of `.claude/skills/*`: it keeps the TDD intent and the review gate, and it does not keep the role sequence.

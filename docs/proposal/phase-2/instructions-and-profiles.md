@@ -8,7 +8,7 @@ Worker binding precedence is project, then graph, then node. The most specific b
 
 `tdd@1` is a worker strategy, not an agent. Worker kinds are `general@1`, `tdd@1` and `git@1`. `tdd@1` drives `te@1`, `swe@1` and `re@1`.
 
-KanthorD redesigns the loop of `.claude/commands/*`. It keeps the TDD intent and the review gate. It does not keep the role sequence.
+KanthorD redesigns the loop of `.claude/skills/*`. It keeps the TDD intent and the review gate. It does not keep the role sequence.
 
 ## Prompt compilation
 

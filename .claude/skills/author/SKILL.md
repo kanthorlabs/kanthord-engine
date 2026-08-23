@@ -1,12 +1,18 @@
 ---
-description: Expand one EPIC into deterministic, /work-ready Story/Task files under .agent/plan/stories/<epic-slug>/. Grounds every story in real file:line via read-only exploration, writes execution-only stories (exact edit, exact tests, exact pass/fail — no motivation/history/debate), and enforces the sequence-order and determinism rules from AGENTS.md. Refuses to ship a story that leaves a design decision to build time.
-argument-hint: <epic-file-path>
-allowed-tools: Bash, Read, Agent, Write
+name: author
+description: Expand one EPIC into deterministic, work-ready Story/Task files under .agent/plan/stories/<epic-slug>/. Grounds every story in real file:line via read-only exploration, writes execution-only stories (exact edit, exact tests, exact pass/fail — no motivation/history/debate), and enforces the sequence-order and determinism rules from AGENTS.md. Refuses to ship a story that leaves a design decision to build time.
 ---
 
 # /author — expand an EPIC into deterministic Story/Task files
 
-Arguments: `$ARGUMENTS`
+> **Harness note.** This skill runs under Claude Code, opencode and pi from the
+> one file. Where a step says "dispatch a subagent", use the harness's dispatch
+> tool: `Agent` under Claude Code, `Task` under opencode, the equivalent under
+> pi. Where a step names a persona file, read it from `.claude/agents/<name>.md`
+> or `.opencode/agents/<name>.md`, whichever exists.
+
+Arguments: `$ARGUMENTS` — `<epic-file-path>`. A harness that does not substitute
+`$ARGUMENTS` passes the same text with the invocation; read it from there.
 
 You are the **planner**. You turn one EPIC's `## Stories` bullet list into the
 detailed Story/Task files `/work` consumes, under
@@ -63,9 +69,10 @@ expand (AGENTS.md binding rule) — tell the human to fix the EPIC first.
 ## Step 4 — Map the code surface (read-only, parallel)
 
 Determinism requires real anchors, not guesses. For each story (or a small
-group), dispatch a **read-only `Explore` agent** to gather the exact facts the
+group), dispatch a **read-only explorer subagent** (`Explore` under Claude Code, the
+read-only agent of the harness otherwise) to gather the exact facts the
 story's `Change`/`Verify` sections need. Launch the independent explorations
-**in one message** so they run concurrently. Each Explore prompt must ask for,
+**in one message** so they run concurrently. Each explorer prompt must ask for,
 and the agent must return:
 
 - exact **file paths + line numbers** of every site the story will edit;
@@ -76,7 +83,7 @@ and the agent must return:
 - any **greenfield gap or gotcha** (a thing that does not exist yet, a contract
   that must change, a shared mechanism that behaves unexpectedly).
 
-Tell each Explore agent: **map what exists, do not propose changes.** Wait for
+Tell each explorer subagent: **map what exists, do not propose changes.** Wait for
 all findings before writing.
 
 ## Step 5 — Write the Story/Task files
@@ -177,7 +184,8 @@ Do **not** commit — the human reviews and commits.
 ## Notes for the planner (you)
 
 - Use `Bash` for path checks, `Read` for the EPIC and any file you must confirm,
-  `Agent` (Explore) for the read-only code map, `Write` for the story files.
+  the harness dispatch tool (a read-only explorer subagent) for the code map, and
+  `Write` for the story files.
 - Never edit the EPIC, production sources, tests, or config — you only create
   files under `.agent/plan/stories/<epic-slug>/`.
 - The EPIC's Proof is the contract: if no story delivers a given `PASS` line, a

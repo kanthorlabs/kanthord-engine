@@ -1,12 +1,18 @@
 ---
+name: e2e
 description: Drive one phase acceptance run — invoke every declared scenario id through scripts/e2e/run.mjs, record the product acceptance a machine cannot check, reference each evidence bundle, and write the verdict that closes the phase or opens a fix epic. Restates no oracle and invents no scenario. Use to close a phase, or to re-run acceptance after a fix epic lands.
-argument-hint: [phase e.g. 1]  (names the run dir .data/acceptance-<tag>/ and the report)
-allowed-tools: Bash, Read, Write, Edit
 ---
 
 # /e2e — the phase acceptance run
 
-Arguments: `$ARGUMENTS` — the phase number, such as `1`. The run tag comes from
+> **Harness note.** This skill runs under Claude Code, opencode and pi from the
+> one file. Where a step says "dispatch a subagent", use the harness's dispatch
+> tool: `Agent` under Claude Code, `Task` under opencode, the equivalent under
+> pi. Where a step names a persona file, read it from `.claude/agents/<name>.md`
+> or `.opencode/agents/<name>.md`, whichever exists.
+
+Arguments: `$ARGUMENTS` — the phase number, such as `1`. A harness that does not substitute
+`$ARGUMENTS` passes the same text with the invocation; read it from there.
 `node scripts/e2e/run.mjs --mint-tag`, never from you and never from a shell
 timestamp, because `date -u +%Y%m%d%H%M%S%N` is GNU coreutils and BSD `date` emits
 a literal `N`. The tag names the run directory `.data/acceptance-<tag>/` and the
