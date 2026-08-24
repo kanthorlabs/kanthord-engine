@@ -26,7 +26,7 @@ describe("src/http/contract/parity.test", () => {
     const deferred = proposalRows.filter((row) => row.status === "deferred");
     assert.deepEqual(deferred.map((row) => row.operationId).sort(), [
       "binding.e2e.project",
-      "binding.provider.agent",
+      "binding.provider.agents",
       "binding.provider.project",
       "event.stream",
     ]);

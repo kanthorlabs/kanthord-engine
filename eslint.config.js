@@ -252,7 +252,7 @@ export default [
             {
               group: ["node:child_process"],
               message:
-                "only src/services/git/launcher.ts creates a process; see .agent/plan/stories/006-git-primitives/04-supervised-spawn.md",
+                "only src/services/git/launcher.ts creates a process; see .agents/plan/stories/006-git-primitives/04-supervised-spawn.md",
             },
           ],
         },

@@ -15,7 +15,7 @@ When the work needs an edit to any other non-source file, do not fold that edit
 into an epic, a story or a task. Show the edit to Ulrich as a suggestion, in the
 bullet format of the Communication Rules, and let him apply it. Such a file
 includes a configuration file, a manifest, a pipeline definition under
-`.claude/`, and a plan file under `.agent/plan/`.
+`.claude/`, and a plan file under `.agents/plan/`.
 
 A folded edit of one of those deadlocks the cycle, because
 `scripts/lane-check.sh` denies the path to every agent lane. That deny list is

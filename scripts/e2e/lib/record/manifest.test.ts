@@ -85,7 +85,7 @@ const sampleManifest = {
     },
   ],
   report: {
-    path: ".agent/acceptance/t/report.md",
+    path: ".agents/acceptance/t/report.md",
     sha256: "c".repeat(64),
     bytes: 1234,
   },
@@ -156,7 +156,7 @@ test("serializeManifest writes the complete manifest in canonical byte order", (
     }
   ],
   "report": {
-    "path": ".agent/acceptance/t/report.md",
+    "path": ".agents/acceptance/t/report.md",
     "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "bytes": 1234
   },
@@ -364,9 +364,9 @@ async function writeCompleteRun(tag: string): Promise<CompleteRun> {
     });
   }
 
-  const reportPath = `.agent/acceptance/${tag}/report.md`;
+  const reportPath = `.agents/acceptance/${tag}/report.md`;
   const reportBytes = Buffer.from(fixtureReportText);
-  await mkdir(join(".agent", "acceptance", tag), { recursive: true });
+  await mkdir(join(".agents", "acceptance", tag), { recursive: true });
   await writeFile(reportPath, reportBytes);
 
   const manifest: Manifest = {

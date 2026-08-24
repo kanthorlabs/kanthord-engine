@@ -16,7 +16,7 @@ Arguments: `$ARGUMENTS` — the phase number, such as `1`. A harness that does n
 `node scripts/e2e/run.mjs --mint-tag`, never from you and never from a shell
 timestamp, because `date -u +%Y%m%d%H%M%S%N` is GNU coreutils and BSD `date` emits
 a literal `N`. The tag names the run directory `.data/acceptance-<tag>/` and the
-report `.agent/acceptance/<tag>/report.md`, and nothing else. A reused tag is
+report `.agents/acceptance/<tag>/report.md`, and nothing else. A reused tag is
 refused, so a rerun is a new tag.
 
 This command drives EPIC 012 and EPIC 025. The phase argument selects the id
@@ -160,7 +160,7 @@ because a signature is not edited.
 
 ## The report
 
-Write `.agent/acceptance/<tag>/report.md`:
+Write `.agents/acceptance/<tag>/report.md`:
 
 - the commit under test, the proposal revision, and the tag. The proposal revision
   is `git log -1 --format=%H -- docs/proposal`;
@@ -170,7 +170,7 @@ Write `.agent/acceptance/<tag>/report.md`:
   record at `.data/acceptance-<tag>/acceptance.json`;
 - the product-acceptance section, labelled as judgment;
 - one outcome, and the name of the verdict record at
-  `.agent/acceptance/<tag>/verdict.md`, which holds the `--check-manifest` and
+  `.agents/acceptance/<tag>/verdict.md`, which holds the `--check-manifest` and
   `--verdict` commands with their exit status. The report holds neither exit
   status, because the manifest pins the report digest at
   `scripts/e2e/lib/record/manifest.ts:570-586` and a file cannot record the exit
@@ -226,7 +226,7 @@ The phase closes on a `passed` outcome tied to a proposal revision, an
 implementation commit and the real-profile bundle.
 
 The report is evidence, not a plan file. That is why it lives under
-`.agent/acceptance/` and not under `.agent/plan/epics/`.
+`.agents/acceptance/` and not under `.agents/plan/epics/`.
 
 ## Secrets
 

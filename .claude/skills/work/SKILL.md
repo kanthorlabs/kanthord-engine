@@ -60,11 +60,11 @@ Resolve `<root>` = `$(git rev-parse --show-toplevel)` once. Every path in the st
 All path checks below resolve under `<root>`.
 
 1. The EPIC file exists and is readable.
-2. The path is under `.agent/plan/epics/` (sanity guard — refuse arbitrary paths).
+2. The path is under `.agents/plan/epics/` (sanity guard — refuse arbitrary paths).
 3. The `test-engineer` persona file exists — `.claude/agents/test-engineer.md` or `.opencode/agents/test-engineer.md`.
 4. The `software-engineer` persona file exists, under either directory.
 5. The `reviewer-engineer` persona file exists, under either directory.
-6. `.agent/tdd/history/` exists (create it with `mkdir -p` if not).
+6. `.agents/tdd/history/` exists (create it with `mkdir -p` if not).
 7. **No double review on resume.** If the discussion file (Step 3) already exists and its latest `HUMAN_REVIEW:` line is `PASS`, this cycle is already done — report `already closed` and stop without dispatching.
 
 ## Step 3 — Derive the discussion file path
@@ -72,7 +72,7 @@ All path checks below resolve under `<root>`.
 From the EPIC file path, extract the basename without `.md` as `<epic-slug>`. Compute today's date in UTC as `<YYYY-MM-DD>`. The discussion file path is:
 
 ```
-<root>/.agent/tdd/history/<YYYY-MM-DD>-<epic-slug>.md
+<root>/.agents/tdd/history/<YYYY-MM-DD>-<epic-slug>.md
 ```
 
 If the discussion file does not exist, capture the current HEAD as the cycle's base ref (`BASE_REF=$(git -C '<root>' rev-parse HEAD)`) and seed the file with a single shell write (`cat > '<discussion-file>' <<'WORK_EOF' ... WORK_EOF`). This is the **only** time the orchestrator writes the discussion file. Header content:
@@ -106,7 +106,7 @@ None needed. Tests and typecheck run in-process with no emulator, database, brow
 
 ## Step 5 — The dispatch loop
 
-Initialize `turn_count = 0`. Sweep any stale draft temps left by an aborted prior run (the orchestrator owns these — see 5e/5g.1): `rm -f '<root>'/.agent/tdd/.*-response-*.md`. Then repeat:
+Initialize `turn_count = 0`. Sweep any stale draft temps left by an aborted prior run (the orchestrator owns these — see 5e/5g.1): `rm -f '<root>'/.agents/tdd/.*-response-*.md`. Then repeat:
 
 ### 5a. Stop on max-turns
 
@@ -169,7 +169,7 @@ Mint this turn's id and the draft-file path. The orchestrator computes them **on
 ```bash
 TS=$(date -u +%Y%m%d-%H%M%S)                                       # minted once per turn by /work (UTC)
 TURN_ID=<epic-slug>-$TS-t<turn_count>                              # epic+timestamp+turn — unique across cycles and runs
-DRAFT_FILE=<root>/.agent/tdd/.<next>-response-$TURN_ID.md          # <next> = test-engineer | software-engineer
+DRAFT_FILE=<root>/.agents/tdd/.<next>-response-$TURN_ID.md          # <next> = test-engineer | software-engineer
 ```
 
 Also snapshot the **content fingerprint** of every changed file in `<root>` so Step 5g.1 can attribute this turn's edits and reject out-of-lane writes:
@@ -249,15 +249,15 @@ script**: `scripts/lane-check.sh <role> <path>` (exit 0 = in-lane).
 - **test-engineer** lane: `src/**/*.test.ts`, `src/**/*.spec.ts`; plus **every
   file under `test/helpers/**`**, test suffix or not (`test/helpers/daemon.ts`
   and `test/helpers/port.ts` are test-engineer files); plus its draft files
-  under `.agent/tdd/` and its journal under
-  `.agent/tdd/memory/test-engineer/`.
+  under `.agents/tdd/` and its journal under
+  `.agents/tdd/memory/test-engineer/`.
 - **software-engineer** lane: `src/**/*.ts` that is NOT a `*.test.ts` /
   `*.spec.ts`; plus `scripts/**` (helper/proof scripts its work needs — the
   pipeline guards below stay locked); plus its draft files and journal as
   above. **`test/helpers/**` is not in this lane** — a helper the
   software-engineer needs is an `OPEN:` to the test-engineer, never an edit.
 - **Always forbidden to BOTH** (the lane script denies these for every role):
-  the locked plan tree `.agent/plan/**`; the pipeline files `.claude/**` and
+  the locked plan tree `.agents/plan/**`; the pipeline files `.claude/**` and
   `.opencode/**`; the pipeline guards `scripts/lane-check.sh`,
   `scripts/turn-snapshot.sh`, `scripts/verify-handoff.mjs`,
   `scripts/memory-append-only.sh` and every `scripts/*.test.sh`;
@@ -266,7 +266,7 @@ script**: `scripts/lane-check.sh <role> <path>` (exit 0 = in-lane).
   `Containerfile`, `compose.yaml`, `Makefile`. The reviewer-engineer edits
   nothing at all.
 
-Both roles may also write `.agent/tdd/` and their own `.agent/tdd/memory/<role>/` journal dir (under `<root>`).
+Both roles may also write `.agents/tdd/` and their own `.agents/tdd/memory/<role>/` journal dir (under `<root>`).
 
 Pass each path to the predicate one at a time, and read a path with `read -r`, never by word splitting — a path that contains a space is legal, and splitting it produces two arguments the predicate denies for the wrong reason:
 
@@ -286,7 +286,7 @@ Two properties matter here. The flag replaces an in-loop `exit 1`, which stopped
 - `LANE: PASS` → continue to the draft cleanup below.
 - `LANE: FAIL` → **abort the cycle**. Print each denial `scripts/lane-check.sh` wrote to stderr as `"lane violation: <role> changed <path>"`, leave the tree and the draft file untouched for human review, and do not dispatch another turn. A lane violation is never a warning to note and move past — a turn that wrote outside its lane is not a turn that happened.
 
-(`<DRAFT_FILE>` itself lives under `.agent/tdd/` and so is always in-lane.)
+(`<DRAFT_FILE>` itself lives under `.agents/tdd/` and so is always in-lane.)
 
 Otherwise the turn is clean. Delete this turn's draft temp by its **exact** path — the orchestrator owns this cleanup: `rm -f '<DRAFT_FILE>'`. Then remove the two `/tmp` snapshot files.
 

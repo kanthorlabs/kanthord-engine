@@ -34,10 +34,10 @@ not write the discussion file, and does not record `HUMAN_REVIEW:`.
 ## Step 1 — Resolve inputs and review mode
 
 - **EPIC file** — the first argument. If absent, derive it from the branch
-  (`feature/epic-<NNN>` → `.agent/plan/epics/<NNN>-*.md`). If still ambiguous,
+  (`feature/epic-<NNN>` → `.agents/plan/epics/<NNN>-*.md`). If still ambiguous,
   stop and ask. Never guess.
 - **Base ref** — `--base <ref>`, else the base recorded in the EPIC's discussion
-  file under `.agent/tdd/history/`, else `git merge-base HEAD main`. State which
+  file under `.agents/tdd/history/`, else `git merge-base HEAD main`. State which
   one you used; the whole change set depends on it.
 - **Mode** —
   - **final** (default): the whole EPIC must be delivered. `Gates:` and `Proof:`
@@ -73,7 +73,7 @@ Read in this order, because later sources are interpreted through earlier ones:
 
 1. The `## Architecture` section of `AGENTS.md`, plus the gotcha files.
 2. The **EPIC**.
-3. Every expanded Story/Task file in `.agent/plan/stories/<epic-slug>/` that is
+3. Every expanded Story/Task file in `.agents/plan/stories/<epic-slug>/` that is
    in scope. Binding detail often lives there, not in the EPIC.
 
 From the EPIC extract verbatim: **Goal**, **Gates:**, **Proof:** with the exact

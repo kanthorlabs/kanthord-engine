@@ -103,7 +103,7 @@ describe("src/http/contract/registry.test", () => {
     for (const operationId of [
       "binding.provider.project",
       "binding.e2e.project",
-      "binding.provider.agent",
+      "binding.provider.agents",
       "event.stream",
     ]) {
       assert.equal(findOperation(operationId), undefined);

@@ -80,7 +80,7 @@ describe("src/http/server/route.test", () => {
       postMvp.map((row) => row.operationId),
       [
         "binding.e2e.project",
-        "binding.provider.agent",
+        "binding.provider.agents",
         "binding.provider.project",
         "event.stream",
       ],

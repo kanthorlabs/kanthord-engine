@@ -37,20 +37,20 @@ allow software-engineer docs/proposal/phase-1/state-machine.md
 deny test-engineer docs/proposal/phase-1/state-machine.md
 deny reviewer-engineer docs/proposal/phase-1/state-machine.md
 
-allow test-engineer .agent/tdd/history/2026-08-05-006-git-primitives.md
-allow test-engineer .agent/tdd/.test-engineer-response-t1.md
-allow test-engineer .agent/tdd/memory/ts-gotchas.md
-allow test-engineer .agent/tdd/memory/test-engineer/2026-08-05.md
-allow software-engineer .agent/tdd/memory/software-engineer/2026-08-05.md
-deny test-engineer .agent/tdd/memory/software-engineer/2026-08-05.md
-deny software-engineer .agent/tdd/memory/test-engineer/2026-08-05.md
-deny test-engineer .agent/tdd/memory/reviewer-engineer/2026-08-05.md
-deny test-engineer .agent/tdd/memory/unknown/2026-08-05.md
-deny test-engineer .agent/tdd/memory/software-engineer-other/2026-08-05.md
-deny test-engineer .agent/tdd/memory/software-engineer
+allow test-engineer .agents/tdd/history/2026-08-05-006-git-primitives.md
+allow test-engineer .agents/tdd/.test-engineer-response-t1.md
+allow test-engineer .agents/tdd/memory/ts-gotchas.md
+allow test-engineer .agents/tdd/memory/test-engineer/2026-08-05.md
+allow software-engineer .agents/tdd/memory/software-engineer/2026-08-05.md
+deny test-engineer .agents/tdd/memory/software-engineer/2026-08-05.md
+deny software-engineer .agents/tdd/memory/test-engineer/2026-08-05.md
+deny test-engineer .agents/tdd/memory/reviewer-engineer/2026-08-05.md
+deny test-engineer .agents/tdd/memory/unknown/2026-08-05.md
+deny test-engineer .agents/tdd/memory/software-engineer-other/2026-08-05.md
+deny test-engineer .agents/tdd/memory/software-engineer
 
 for role in test-engineer software-engineer; do
-  deny "$role" .agent/plan/stories/epic/story.md
+  deny "$role" .agents/plan/stories/epic/story.md
   deny "$role" .claude/skills/work/SKILL.md
   deny "$role" .opencode/agents/software-engineer.md
   deny "$role" scripts/lane-check.sh
@@ -80,8 +80,8 @@ done
 
 deny reviewer-engineer src/services/git/url.ts
 deny reviewer-engineer src/services/git/url.test.ts
-deny reviewer-engineer .agent/tdd/history/2026-08-05-006-git-primitives.md
-deny reviewer-engineer .agent/tdd/memory/reviewer-engineer/2026-08-05.md
+deny reviewer-engineer .agents/tdd/history/2026-08-05-006-git-primitives.md
+deny reviewer-engineer .agents/tdd/memory/reviewer-engineer/2026-08-05.md
 
 usage bogus-role src/a.ts
 usage test-engineer ""

@@ -44,9 +44,9 @@ RED is the test-engineer's. **GREEN** (the smallest correct change satisfying th
 
 ## Authority chain (read in this order)
 
-1. **Discussion file** `.agent/tdd/history/<YYYY-MM-DD>-<epic-slug>.md` — last `TEST-ENGINEER` turn selects the active work. You never pick the Task yourself.
-2. **Story file** `.agent/plan/stories/<epic-slug>/<story>.md` — Tasks are `### Task` headings. Per Task: `**Input:**` = the exact file(s) you may touch (authoritative — do not relocate); `**Action — GREEN:**` = the seam shape to conform to; `**Action — REFACTOR:**` = the cleanup.
-3. **EPIC file** `.agent/plan/epics/<NNN>-<slug>.md` — outcome, non-goals, verification gate; read when intent is unclear.
+1. **Discussion file** `.agents/tdd/history/<YYYY-MM-DD>-<epic-slug>.md` — last `TEST-ENGINEER` turn selects the active work. You never pick the Task yourself.
+2. **Story file** `.agents/plan/stories/<epic-slug>/<story>.md` — Tasks are `### Task` headings. Per Task: `**Input:**` = the exact file(s) you may touch (authoritative — do not relocate); `**Action — GREEN:**` = the seam shape to conform to; `**Action — REFACTOR:**` = the cleanup.
+3. **EPIC file** `.agents/plan/epics/<NNN>-<slug>.md` — outcome, non-goals, verification gate; read when intent is unclear.
 4. **`AGENTS.md`** (repo root) — the binding architecture conventions (layout, import direction, port naming, use-case shape).
 
 ## Project map — directory rules
@@ -92,7 +92,7 @@ RED is the test-engineer's. **GREEN** (the smallest correct change satisfying th
 
 Read the relevant file **before** touching that area — not upfront.
 
-- `.agent/tdd/memory/ts-gotchas.md` — before any TypeScript/ESM edit in
+- `.agents/tdd/memory/ts-gotchas.md` — before any TypeScript/ESM edit in
   `src/`: explicit `.ts` import extensions under type stripping,
   `verbatimModuleSyntax` `import type` rules, `node:` builtin imports,
   top-level await.
@@ -160,14 +160,14 @@ When `/work` resumes after a failed review, the discussion file holds `BLOCKER:`
 
 ## Discussion channel
 
-- **Channel file** `.agent/tdd/history/<YYYY-MM-DD>-<epic-slug>.md` — append-only; build the full turn in your draft file, append once with `cat >>`.
+- **Channel file** `.agents/tdd/history/<YYYY-MM-DD>-<epic-slug>.md` — append-only; build the full turn in your draft file, append once with `cat >>`.
 - **End marker** `END: SOFTWARE-ENGINEER`; counterpart `END: TEST-ENGINEER` (the TE opens).
-- **Draft file** `.agent/tdd/.software-engineer-response-<TURN_ID>.md` (`<TURN_ID>` from the dispatch prompt — never a `$$` name). Don't delete it; `/work` cleans it.
+- **Draft file** `.agents/tdd/.software-engineer-response-<TURN_ID>.md` (`<TURN_ID>` from the dispatch prompt — never a `$$` name). Don't delete it; `/work` cleans it.
 - Every source file the turn claims must be on disk before the append.
 
 ## Decision journal
 
-One short entry per turn — dated heading + 2-4 bullets (what you decided, why). Append-only to `.agent/tdd/memory/software-engineer/<today>.md`.
+One short entry per turn — dated heading + 2-4 bullets (what you decided, why). Append-only to `.agents/tdd/memory/software-engineer/<today>.md`.
 
 ## Per-turn workflow
 

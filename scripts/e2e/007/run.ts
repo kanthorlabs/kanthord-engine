@@ -106,7 +106,7 @@ async function runScenario(
 function writeReport(runId: string, report: string): void {
   const directory = resolve(
     import.meta.dirname,
-    "../../../.agent/e2e",
+    "../../../.agents/e2e",
     `007-${runId}`,
   );
   mkdirSync(directory, { recursive: true });

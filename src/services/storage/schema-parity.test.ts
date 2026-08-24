@@ -54,7 +54,7 @@ describe("src/services/storage/schema-parity.test", () => {
     assertClauseAgrees(storage, "node", "kind", nodeKinds);
   });
 
-  it("agent_invocation.agent CHECK agrees with the domain agentKinds", () => {
+  it("agent_invocation.agents CHECK agrees with the domain agentKinds", () => {
     const { storage, temporary } = buildMigrated();
     after(() => storage.close());
     after(() => temporary.dispose());

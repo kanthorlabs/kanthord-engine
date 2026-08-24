@@ -68,7 +68,7 @@ Capability is enforced in the agent implementation, never in profile data or pro
 
 Ambient files are a separate, untrusted channel.
 
-Host files `~/.claude/CLAUDE.md` and `~/.agent/AGENTS.md` load only when the human switches them on, and the default is off: a daemon home may not be the human's home, personal instructions bleed across projects, and such a file may hold secrets.
+Host files `~/.claude/CLAUDE.md` and `~/.agents/AGENTS.md` load only when the human switches them on, and the default is off: a daemon home may not be the human's home, personal instructions bleed across projects, and such a file may hold secrets.
 
 Repository ambient files are read once, from the objective's pinned commit, and frozen for the objective, so an agent edit takes effect only in a later objective. Only the repository root file is read, symlinks are refused, and ambient content can never set a structured field.
 

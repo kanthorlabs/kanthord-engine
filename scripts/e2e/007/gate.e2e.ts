@@ -11,7 +11,7 @@ const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const E2E_DIR = resolve(import.meta.dirname, "..");
 const STORIES_DIR = resolve(
   import.meta.dirname,
-  "../../../.agent/plan/stories/007-repository-registration",
+  "../../../.agents/plan/stories/007-repository-registration",
 );
 const GATE_FILE = "gate.e2e.ts";
 const HARNESS_FILE = "00-harness.e2e.ts";

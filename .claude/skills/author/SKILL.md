@@ -1,6 +1,6 @@
 ---
 name: author
-description: Expand one EPIC into deterministic, work-ready Story/Task files under .agent/plan/stories/<epic-slug>/. Grounds every story in real file:line via read-only exploration, writes execution-only stories (exact edit, exact tests, exact pass/fail — no motivation/history/debate), and enforces the sequence-order and determinism rules from AGENTS.md. Refuses to ship a story that leaves a design decision to build time.
+description: Expand one EPIC into deterministic, work-ready Story/Task files under .agents/plan/stories/<epic-slug>/. Grounds every story in real file:line via read-only exploration, writes execution-only stories (exact edit, exact tests, exact pass/fail — no motivation/history/debate), and enforces the sequence-order and determinism rules from AGENTS.md. Refuses to ship a story that leaves a design decision to build time.
 ---
 
 # /author — expand an EPIC into deterministic Story/Task files
@@ -16,7 +16,7 @@ Arguments: `$ARGUMENTS` — `<epic-file-path>`. A harness that does not substitu
 
 You are the **planner**. You turn one EPIC's `## Stories` bullet list into the
 detailed Story/Task files `/work` consumes, under
-`.agent/plan/stories/<epic-slug>/`. You do **not** implement, run tests, edit the
+`.agents/plan/stories/<epic-slug>/`. You do **not** implement, run tests, edit the
 EPIC, or touch production code. You do **not** commit.
 
 Two AGENTS.md rules are binding and are the whole point of this skill:
@@ -42,10 +42,10 @@ Two AGENTS.md rules are binding and are the whole point of this skill:
 
 ## Step 2 — Pre-flight (abort with a clear message on any failure)
 
-1. The EPIC file exists, is readable, and is under `.agent/plan/epics/`.
+1. The EPIC file exists, is readable, and is under `.agents/plan/epics/`.
 2. Derive `<epic-slug>` = the EPIC basename without `.md` (e.g.
    `007.12-initiative-branch-workflow`).
-3. **Already expanded?** If `.agent/plan/stories/<epic-slug>/` exists and is
+3. **Already expanded?** If `.agents/plan/stories/<epic-slug>/` exists and is
    non-empty, report `already expanded` and stop — do not clobber. (The human
    re-runs only after moving the old dir aside.)
 4. **Sequence check.** Identify the previous epic (N-1) by number. If its EPIC
@@ -88,7 +88,7 @@ all findings before writing.
 
 ## Step 5 — Write the Story/Task files
 
-Create `.agent/plan/stories/<epic-slug>/`. Write **one file per EPIC Story
+Create `.agents/plan/stories/<epic-slug>/`. Write **one file per EPIC Story
 bullet**, named `NN-<kebab-slug>.md` in the epic's story order, plus an
 `index.md`. Every file is **execution-only** — no motivation, history, or debate.
 
@@ -97,7 +97,7 @@ bullet**, named `NN-<kebab-slug>.md` in the epic's story order, plus an
 ```
 # Story <X> — <name>
 
-Epic: `.agent/plan/epics/<epic-slug>.md`
+Epic: `.agents/plan/epics/<epic-slug>.md`
 [Depends on: Story <Y> / EPIC <N-1>]   ← only if a real ordering constraint exists
 
 ## Change
@@ -135,7 +135,7 @@ Rules for each story:
 ```
 # EPIC <NNN> — <name> — stories
 
-Epic: `.agent/plan/epics/<epic-slug>.md`
+Epic: `.agents/plan/epics/<epic-slug>.md`
 Prereq: EPIC <N-1> (sequence order).
 
 <one-sentence capability restatement>
@@ -173,7 +173,7 @@ fixes the EPIC or answers the question. Ambiguity is never handed to `/work`.
 
 Print:
 
-- the created files (index + stories) under `.agent/plan/stories/<epic-slug>/`;
+- the created files (index + stories) under `.agents/plan/stories/<epic-slug>/`;
 - the dispatch order;
 - any **planning defects / open questions** as a bullet list
   (`<B/S> - action:<YES/NO> - <name> - <description>`) that block a clean
@@ -187,7 +187,7 @@ Do **not** commit — the human reviews and commits.
   the harness dispatch tool (a read-only explorer subagent) for the code map, and
   `Write` for the story files.
 - Never edit the EPIC, production sources, tests, or config — you only create
-  files under `.agent/plan/stories/<epic-slug>/`.
+  files under `.agents/plan/stories/<epic-slug>/`.
 - The EPIC's Proof is the contract: if no story delivers a given `PASS` line, a
   story is missing.
 - Prefer the path that keeps `/work`'s implementing agents mechanical: they

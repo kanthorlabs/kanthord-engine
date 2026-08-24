@@ -33,7 +33,7 @@ case $path in
 esac
 
 case $path in
-.agent/plan/*) deny "the plan tree is locked" ;;
+.agents/plan/*) deny "the plan tree is locked" ;;
 .claude/* | .opencode/*) deny "the pipeline definition is locked" ;;
 scripts/lane-check.sh | scripts/turn-snapshot.sh | scripts/verify-handoff.mjs | scripts/memory-append-only.sh | scripts/*.test.sh)
   deny "the pipeline guards are locked"
@@ -53,8 +53,8 @@ if [ "$role" = reviewer-engineer ]; then
 fi
 
 case $path in
-.agent/tdd/memory/*)
-  rest=${path#.agent/tdd/memory/}
+.agents/tdd/memory/*)
+  rest=${path#.agents/tdd/memory/}
   case $rest in
   test-engineer/* | software-engineer/* | reviewer-engineer/*)
     [ "${rest%%/*}" = "$role" ] || deny "another role's journal"
@@ -66,7 +66,7 @@ case $path in
   esac
   exit 0
   ;;
-.agent/tdd/*) exit 0 ;;
+.agents/tdd/*) exit 0 ;;
 esac
 
 is_test=no

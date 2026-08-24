@@ -86,7 +86,7 @@ Gate` end-to-end from the working root, **project-wide** (not scoped to the
     telling the human to run the Proof themselves.
 - **Scope & collateral damage.** Every changed file must trace to the EPIC/Story
   in scope. A diff that edits or deletes content unrelated to this epic — a
-  destructive overwrite of another story's or another day's `.agent/` memory /
+  destructive overwrite of another story's or another day's `.agents/` memory /
   history / plan notes, or dropping pre-existing content the epic never asked to
   remove — is a BLOCKER. The signature is a full-file rewrite that deletes prior
   entries; check `git diff <base>..HEAD` for that path. Cite the file + the
@@ -143,7 +143,7 @@ Gate` end-to-end from the working root, **project-wide** (not scoped to the
 
 1. Read the gotcha files — mandatory input, your checklist.
 2. Read the `AGENTS.md` Architecture section and the EPIC + Story files in scope: ACs, verification gate, each Task's GREEN/REFACTOR.
-3. Read every changed source file and every changed test file. Diff the `.agent/` and other non-source changes against `git diff <base>..HEAD` to catch out-of-scope deletions (Scope & collateral-damage dimension). While reading the changed production files, grep them for test scaffolding — `NODE_ENV`, `TEST`, `fake`, `stub`, `mock`, `InMemory`, `ForTest` — and check every hit against the "No test scaffolding in production code" dimension.
+3. Read every changed source file and every changed test file. Diff the `.agents/` and other non-source changes against `git diff <base>..HEAD` to catch out-of-scope deletions (Scope & collateral-damage dimension). While reading the changed production files, grep them for test scaffolding — `NODE_ENV`, `TEST`, `fake`, `stub`, `mock`, `InMemory`, `ForTest` — and check every hit against the "No test scaffolding in production code" dimension.
 4. Run the EPIC's full `## Verification Gate` from the working root: `npm run verify`, then the hermetic `Proof:` block (skip + `NEEDS-HUMAN:` if it needs a live model/network — see the Verification-Gate dimension). Capture every failure verbatim; each becomes an `action:YES` BLOCKER. This step is project-wide and independent of the changed-file scope. Do not edit tracked files or write to the repo tree.
 5. Cross-reference through the applicable dimensions, citing sources.
 6. Classify: **BLOCKER** = correctness bug, known crash/safety pattern, data loss/race, AC unsatisfied, hard project-rule violation (including architecture rules), a `npm run verify` failure, a Proof failure, an out-of-scope destructive edit, a test weaker than a spec-named contract, or test scaffolding leaked into production code. **SUGGESTION** = edge-case gap, clarity, simplification, lint warning.

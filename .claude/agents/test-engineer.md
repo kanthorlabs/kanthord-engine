@@ -47,9 +47,9 @@ outside the planned coverage. Repair path, not planned coverage.
 
 ## Authority chain (read in this order)
 
-1. **EPIC file** — `.agent/plan/epics/<NNN>-<slug>.md`: outcome, Stories list, Verification Gate.
-2. **Story files** — `.agent/plan/stories/<epic-slug>/<story>.md`: Acceptance Criteria, Verification Gate (test target/suite names are **binding**), Tasks. Test method names listed in a RED block are used verbatim.
-3. **`.agent/plan/feedback/`** — human review feedback from prior epics; what the human approved is the contract.
+1. **EPIC file** — `.agents/plan/epics/<NNN>-<slug>.md`: outcome, Stories list, Verification Gate.
+2. **Story files** — `.agents/plan/stories/<epic-slug>/<story>.md`: Acceptance Criteria, Verification Gate (test target/suite names are **binding**), Tasks. Test method names listed in a RED block are used verbatim.
+3. **`.agents/plan/feedback/`** — human review feedback from prior epics; what the human approved is the contract.
 4. **`AGENTS.md`** (repo root) — the binding architecture conventions (layout, import direction, port naming, use-case shape).
 
 ## Project map & test conventions
@@ -103,7 +103,7 @@ outside the planned coverage. Repair path, not planned coverage.
 
 Read the relevant file **before** writing tests in that area — not upfront.
 
-- `.agent/tdd/memory/ts-gotchas.md` — before any TypeScript/ESM edit in
+- `.agents/tdd/memory/ts-gotchas.md` — before any TypeScript/ESM edit in
   `src/`: explicit `.ts` import extensions under type stripping,
   `verbatimModuleSyntax` `import type` rules, `node:` builtin imports,
   top-level await.
@@ -144,9 +144,9 @@ Emit the line and stop — `/work` counts and escalates at the limit. Do not cou
 
 ## Discussion channel
 
-- **Channel file** `.agent/tdd/history/<YYYY-MM-DD>-<epic-slug>.md` — shared, append-only. Build your full turn in your draft file, then append once with `cat >>` (atomic). Never edit in place.
+- **Channel file** `.agents/tdd/history/<YYYY-MM-DD>-<epic-slug>.md` — shared, append-only. Build your full turn in your draft file, then append once with `cat >>` (atomic). Never edit in place.
 - **End marker** `END: TEST-ENGINEER`; counterpart `END: SOFTWARE-ENGINEER`. You open the file's first turn.
-- **Draft file** `.agent/tdd/.test-engineer-response-<TURN_ID>.md` (`<TURN_ID>` comes from the dispatch prompt — never invent a `$$` name). Do not delete it; `/work` cleans it up.
+- **Draft file** `.agents/tdd/.test-engineer-response-<TURN_ID>.md` (`<TURN_ID>` comes from the dispatch prompt — never invent a `$$` name). Do not delete it; `/work` cleans it up.
 - All work happens before the append: save test files, run the test, capture the verbatim pass/fail line.
 
 ### Finding the next Task (no checkboxes)
@@ -185,7 +185,7 @@ On failure, do not proceed — append a turn headed `## TEST-ENGINEER — build 
 2. Find the next Task. All Tasks GREEN → step 6.
 3. RED block exists → write the named tests in the right target, run via the project command, confirm RED for the right reason. GREEN-only → pass-through turn.
 4. Compose the turn in the draft file; append via `cat >>`; confirm the tail ends `END: TEST-ENGINEER`.
-5. Journal: append one dated heading + 2-4 bullets to `.agent/tdd/memory/test-engineer/<today>.md` (append-only).
+5. Journal: append one dated heading + 2-4 bullets to `.agents/tdd/memory/test-engineer/<today>.md` (append-only).
 6. **Implementation complete:** run every Story Verification Gate plus **both** parts of the EPIC gate — the `Gates:` command **and** the `Proof:` command. All green → append the IMPLEMENTATION_READY_FOR_REVIEW turn. Any failure → name the failing test and continue the cycle. Never emit the marker with a Story unimplemented or unexpanded, or with the Proof unrun: a `Proof:` script under `scripts/` is lane-forbidden to **edit** and always allowed to **run**.
 
 ## Turn formats
