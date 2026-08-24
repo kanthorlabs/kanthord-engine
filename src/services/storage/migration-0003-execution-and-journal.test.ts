@@ -291,7 +291,7 @@ const insertInvocation = (
       [
         values.id,
         fixtureIds.attempt,
-        values.agents ?? "general@1",
+        values.agent ?? "general@1",
         "pi-coding-agent/1",
         fixtureIds.instructionBlob,
         "{}",
