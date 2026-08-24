@@ -1,4 +1,5 @@
-import type { Storage } from "../../services/storage/index.ts";
+import type { Clock } from "../../services/clock/index.ts";
+import type { Storage, Transaction } from "../../services/storage/index.ts";
 import type { PlanStore } from "../../services/plan/index.ts";
 import { toNodeListItem, type NodeListItem } from "../../domain/node-view.ts";
 
@@ -14,8 +15,19 @@ export class ListProjectNodeError extends Error {
   }
 }
 
+export type ListProjectNodeDependencies = Readonly<{
+  storage: Storage;
+  plan: PlanStore;
+  clock: Clock;
+  instanceId: string;
+  sweepExpiredExternalLeases: (
+    transaction: Transaction,
+    input: Readonly<{ actor: string; now: number }>,
+  ) => void;
+}>;
+
 export function listProjectNodes(
-  dependencies: Readonly<{ storage: Storage; plan: PlanStore }>,
+  dependencies: ListProjectNodeDependencies,
   input: Readonly<{ projectId: string }>,
 ): readonly NodeListItem[] {
   return dependencies.storage.transact((transaction) => {
@@ -28,6 +40,10 @@ export function listProjectNodes(
         `no project ${input.projectId}`,
       );
     }
+    dependencies.sweepExpiredExternalLeases(transaction, {
+      actor: dependencies.instanceId,
+      now: dependencies.clock.now(),
+    });
     const nodes = dependencies.plan.readGraph(
       transaction,
       input.projectId,

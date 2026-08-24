@@ -110,7 +110,7 @@ An abandon over a node that is already `blocked` changes the block reason to `ab
 
 ## Task order
 
-Task order comes from the dependency graph, with a deterministic tie-break. The graph has a root, and edges express sequence and parallelism. Tasks that share one objective still run one at a time, because they share a working tree. The runner walks the topological order and breaks a tie by ULID, which sorts by creation time. No position field exists. Two tasks with no edge between them therefore run in an arbitrary but reproducible order, which is correct only if they are truly independent.
+Task order comes from the dependency graph, with a deterministic tie-break. The graph has a root, and edges express sequence and parallelism. Internal tasks that share one objective run one at a time, because they share one working tree. An external harness owns its own working trees outside the daemon, so the one-at-a-time rule does not reach it: the rule binds actors, not processes — two actors never hold sibling tasks of one objective at once, and isolating concurrent work under one actor identity is that actor's responsibility. The runner walks the topological order and breaks a tie by ULID, which sorts by creation time. No position field exists. Two tasks with no edge between them therefore run in an arbitrary but reproducible order, which is correct only if they are truly independent.
 
 ## Rules
 

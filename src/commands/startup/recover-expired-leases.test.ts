@@ -21,6 +21,7 @@ import {
   createExecutionFake,
   type ExecutionFake,
 } from "../../../test/helpers/execution.ts";
+import type { Execution } from "../../services/execution/index.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
 import {
   createLeaseFake,
@@ -36,6 +37,7 @@ import {
   recoverExpiredLeases,
   sweepExpiredExternalLeases,
   type RecoverExpiredLeasesResult,
+  type SweepExpiredExternalLeasesResult,
 } from "./recover-expired-leases.ts";
 
 const ACTOR = "daemon-startup";
@@ -538,7 +540,7 @@ async function runRecover(
   plan: PlanStore = createPlanStore(
     createReadiness(fixture.events, "daemon_test"),
   ),
-  executionFake: ExecutionFake = createExecutionFake(),
+  execution: Execution = createExecutionFake().execution,
   leaseFake: LeaseFake = createLeaseFake(),
 ): Promise<RecoverExpiredLeasesResult> {
   return recoverExpiredLeases(
@@ -547,7 +549,7 @@ async function runRecover(
       plan,
       git: mock.git,
       lease: leaseFake.lease,
-      execution: executionFake.execution,
+      execution,
       events: fixture.events,
       clock: fixture.clock,
     },
@@ -1226,7 +1228,7 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
       fixture,
       mock,
       recording.plan,
-      executionFake,
+      executionFake.execution,
       leaseFake,
     );
     assert.equal(result.returnedToReady, 1);
@@ -1287,7 +1289,13 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
   it("the external task path calls no method of the Git fake", async (t) => {
     const { fixture, executionFake, leaseFake, recording, mock } =
       seedExternalTaskClaim(t, TASK_A);
-    await runRecover(fixture, mock, recording.plan, executionFake, leaseFake);
+    await runRecover(
+      fixture,
+      mock,
+      recording.plan,
+      executionFake.execution,
+      leaseFake,
+    );
     assert.deepEqual(mock.worktreeCalls, []);
     assert.deepEqual(mock.headCalls, []);
   });
@@ -1295,7 +1303,13 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
   it("the external task path never writes dirty-recovery", async (t) => {
     const { fixture, executionFake, leaseFake, recording, mock } =
       seedExternalTaskClaim(t, TASK_A);
-    await runRecover(fixture, mock, recording.plan, executionFake, leaseFake);
+    await runRecover(
+      fixture,
+      mock,
+      recording.plan,
+      executionFake.execution,
+      leaseFake,
+    );
     assert.deepEqual(readNode(fixture, TASK_A), {
       state: "ready",
       block_reason: null,
@@ -1310,29 +1324,25 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
   });
 
   it("the external objective path ends the objective run and moves no node state", async (t) => {
-    const {
-      fixture,
-      objectiveId,
-      runId,
-      executionFake,
-      leaseFake,
-      recording,
-      mock,
-    } = seedExternalObjectiveClaim(t, TASK_A);
+    const { fixture, objectiveId, runId, leaseFake, recording, mock } =
+      seedExternalObjectiveClaim(t, TASK_A);
+    const backed = createBackedExecutionFake({
+      ids: createMockIdGenerator({ ulids: [] }),
+    });
     const result = await runRecover(
       fixture,
       mock,
       recording.plan,
-      executionFake,
+      backed.execution,
       leaseFake,
     );
     assert.equal(result.objectivesFreed, 1);
     assert.equal(result.returnedToReady, 0);
     assert.equal(result.blocked, 0);
-    assert.deepEqual(executionFake.endRunCalls, [
+    assert.deepEqual(backed.endRunCalls, [
       { runId, outcome: "expired", at: NOW },
     ]);
-    assert.deepEqual(executionFake.closeAttemptCalls, []);
+    assert.deepEqual(backed.closeAttemptCalls, []);
     assert.equal(recording.setNodeStateInputs.length, 0);
     const node = fixture.storage.transact((transaction) =>
       transaction.get("SELECT state FROM node WHERE id = ?", [objectiveId]),
@@ -1359,13 +1369,18 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
   });
 
   it("the external objective path emits no lease-expired-on-non-task finding", async (t) => {
-    const { fixture, executionFake, leaseFake, recording, mock } =
-      seedExternalObjectiveClaim(t, TASK_A);
+    const { fixture, leaseFake, recording, mock } = seedExternalObjectiveClaim(
+      t,
+      TASK_A,
+    );
+    const backed = createBackedExecutionFake({
+      ids: createMockIdGenerator({ ulids: [] }),
+    });
     const result = await runRecover(
       fixture,
       mock,
       recording.plan,
-      executionFake,
+      backed.execution,
       leaseFake,
     );
     assert.equal(result.findings.length, 0);
@@ -1383,7 +1398,7 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
       fixture,
       mock,
       recording.plan,
-      executionFake,
+      executionFake.execution,
       leaseFake,
     );
     assert.equal(result.blocked, 0);
@@ -1455,7 +1470,13 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
   it("a swept row holds a null in every column but the fence", async (t) => {
     const { fixture, executionFake, leaseFake, recording, mock } =
       seedExternalTaskClaim(t, TASK_A);
-    await runRecover(fixture, mock, recording.plan, executionFake, leaseFake);
+    await runRecover(
+      fixture,
+      mock,
+      recording.plan,
+      executionFake.execution,
+      leaseFake,
+    );
     assert.deepEqual(readLeaseRow(fixture, TASK_A), {
       subject_kind: "node",
       subject_id: TASK_A,
@@ -1471,7 +1492,13 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
   it("the recovery.leaseRecovered payload carries row.fence", async (t) => {
     const { fixture, executionFake, leaseFake, recording, mock } =
       seedExternalTaskClaim(t, TASK_A);
-    await runRecover(fixture, mock, recording.plan, executionFake, leaseFake);
+    await runRecover(
+      fixture,
+      mock,
+      recording.plan,
+      executionFake.execution,
+      leaseFake,
+    );
     const payload = fixture.listEvents()[0]!.payload as Readonly<{
       fence: number;
     }>;
@@ -1620,7 +1647,7 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
       fixture,
       mock,
       recording.plan,
-      executionFake,
+      executionFake.execution,
       leaseFake,
     );
     assert.equal(result.returnedToReady, 1);
@@ -1772,6 +1799,111 @@ describe("src/commands/startup/recover-expired-leases.test", () => {
     assert.deepEqual(backed.closeAttemptCalls, [
       { attemptId: openAttemptId, outcome: "cancelled", at: NOW },
     ]);
+  });
+
+  it("the objective path ends a released task's still-active run so no epoch dangles", async (t) => {
+    const { fixture, objectiveId, runId } = seedExternalObjectiveClaim(
+      t,
+      TASK_A,
+    );
+    const danglingTask = "task_01ARZ3NDEKTSV4RRFFQ69G5FBV";
+    const danglingRun = `run_ext_task_${danglingTask.slice("task_".length)}`;
+    fixture.storage.transact((transaction) => {
+      transaction.run(
+        "INSERT INTO node (id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, repository_id, state, block_reason, discard_reason, revision, updated_at) SELECT ?, project_id, 'task', ?, 'dangling sibling', instruction_blob, acceptance_blob, worker, repository_id, 'ready', NULL, NULL, revision, updated_at FROM node WHERE id = ?",
+        [danglingTask, objectiveId, TASK_A],
+      );
+    });
+    insertExternalRun(fixture, {
+      id: danglingRun,
+      kind: "task",
+      nodeId: danglingTask,
+      parentRunId: runId,
+      fence: 3,
+    });
+    const recording = recordingPlanStore(
+      createPlanStore(createReadiness(fixture.events, "daemon_test")),
+    );
+    const swept: SweepExpiredExternalLeasesResult[] = [];
+    fixture.storage.transact((transaction) => {
+      swept.push(
+        sweepExpiredExternalLeases(
+          {
+            plan: recording.plan,
+            lease: createLeaseFake().lease,
+            execution: createBackedExecutionFake({
+              ids: createMockIdGenerator({ ulids: [] }),
+            }).execution,
+            events: fixture.events,
+          },
+          transaction,
+          { actor: ACTOR, now: NOW },
+        ),
+      );
+    });
+    assert.equal(swept.length, 1);
+    assert.equal(swept[0]!.objectivesFreed, 1);
+    assert.equal(swept[0]!.returnedToReady, 0);
+    const taskRun = fixture.storage.transact((transaction) =>
+      transaction.get("SELECT state, outcome FROM run WHERE id = ?", [
+        danglingRun,
+      ]),
+    ) as { state: string; outcome: string | null };
+    assert.equal(taskRun.state, "ended");
+    assert.equal(taskRun.outcome, "expired");
+    const objectiveRun = fixture.storage.transact((transaction) =>
+      transaction.get("SELECT state, outcome FROM run WHERE id = ?", [runId]),
+    ) as { state: string; outcome: string | null };
+    assert.equal(objectiveRun.state, "ended");
+    assert.equal(objectiveRun.outcome, "expired");
+  });
+
+  it("the task path skips a run another writer already ended and still frees the claim", async (t) => {
+    const { fixture, runId } = seedExternalTaskClaim(t, TASK_A);
+    fixture.storage.transact((transaction) => {
+      transaction.run(
+        "UPDATE attempt SET outcome = 'cancelled', ended_at = ? WHERE id = ?",
+        [NOW - 1, attemptIdFor(TASK_A)],
+      );
+      transaction.run(
+        "UPDATE run SET state = 'ended', outcome = 'released', ended_at = ? WHERE id = ?",
+        [NOW - 1, runId],
+      );
+    });
+    const backed = createBackedExecutionFake({
+      ids: createMockIdGenerator({ ulids: [] }),
+    });
+    const recording = recordingPlanStore(
+      createPlanStore(createReadiness(fixture.events, "daemon_test")),
+    );
+    const swept: SweepExpiredExternalLeasesResult[] = [];
+    fixture.storage.transact((transaction) => {
+      swept.push(
+        sweepExpiredExternalLeases(
+          {
+            plan: recording.plan,
+            lease: createLeaseFake().lease,
+            execution: backed.execution,
+            events: fixture.events,
+          },
+          transaction,
+          { actor: ACTOR, now: NOW },
+        ),
+      );
+    });
+    assert.equal(swept.length, 1);
+    assert.equal(swept[0]!.returnedToReady, 1);
+    assert.deepEqual(backed.endRunCalls, []);
+    assert.deepEqual(backed.closeAttemptCalls, []);
+    assert.equal(readNode(fixture, TASK_A).state, "ready");
+    const lease = readLeaseRow(fixture, TASK_A);
+    assert.equal(lease.owner, null);
+    assert.equal(lease.expires_at, null);
+    const run = fixture.storage.transact((transaction) =>
+      transaction.get("SELECT state, outcome FROM run WHERE id = ?", [runId]),
+    ) as { state: string; outcome: string | null };
+    assert.equal(run.state, "ended");
+    assert.equal(run.outcome, "released");
   });
 
   it("no raw node write survives in the file", async () => {

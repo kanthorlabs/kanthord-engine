@@ -116,6 +116,8 @@ EPIC 019 must refuse every report that carries an owner or a fence other than th
 
 ## node.release
 
-Gives a claim back. The request body is `{ fence }`, the fence the claim returned. The response carries the node view. A task release frees the task lease only, closes the open attempt and returns the task to the pool; the objective lease stays held and the objective run stays active. An objective release frees the objective lease and ends the objective run, and it is refused while any task lease under it is live.
+Gives a claim back. The request body is `{ fence }`, the fence the claim returned. The response carries the node view. A task release frees the task lease only and closes the open attempt; the task run stays active, because the attempt counter is `MAX(attempt_no)` of the active task run and a release never refunds a spent try. The objective lease stays held and the objective run stays active. An objective release frees the objective lease, ends every still-active task run under it that its own release left behind, and ends the objective run; it is refused while any task lease under it is live.
+
+A release that would spend the last attempt of the active run parks the task instead of handing it back: the attempt closes, the task moves to `blocked` with reason `attempt-limit` under trigger `attempt-limit-reached`, and the run ends. A harness cannot loop a task past its budget by releasing, because at the limit the release itself is the park. A human `unblock` is the way out. The expiry sweep remains an epoch reset by design: an abandoned claim returns to the pool with a fresh run.
 
 The refusals are `404 not-found` for an unknown node, `400 invalid-request` with `refusal: "initiative-not-claimable"` for an initiative, `409 lease-held` for a stale fence or a live task lease under a released objective, and `409 illegal-transition` when the node is not in a releasable condition.

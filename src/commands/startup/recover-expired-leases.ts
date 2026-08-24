@@ -42,11 +42,16 @@ type CandidateRow = Readonly<{
 }>;
 
 const CANDIDATE_SQL = `
-SELECT l.subject_id, l.fence, n.kind, r.base_oid, r.id AS run_id, r.driver, w.path, w.repository_id, n.revision AS revision
+SELECT l.subject_id, l.fence, n.kind,
+       ra.base_oid, ra.id AS run_id, COALESCE(ra.driver, rl.driver) AS driver,
+       w.path, w.repository_id, n.revision AS revision
 FROM lease l
 JOIN node n ON n.id = l.subject_id
-LEFT JOIN run r ON r.node_id = n.id AND r.state = 'active'
-LEFT JOIN workspace w ON w.id = r.workspace_id
+LEFT JOIN run ra ON ra.node_id = n.id AND ra.state = 'active'
+LEFT JOIN run rl ON rl.id = (
+  SELECT id FROM run WHERE node_id = n.id ORDER BY id DESC LIMIT 1
+)
+LEFT JOIN workspace w ON w.id = ra.workspace_id
 WHERE l.subject_kind = 'node'
   AND l.expires_at IS NOT NULL
   AND l.expires_at <= ?
@@ -79,11 +84,22 @@ export function sweepExpiredExternalLeases(
   const rows = transaction.all(CANDIDATE_SQL, [
     input.now,
   ]) as readonly CandidateRow[];
+  const sweptTasks = new Set(
+    rows.filter((row) => row.kind === "task").map((row) => row.subject_id),
+  );
   let returnedToReady = 0;
   let objectivesFreed = 0;
   for (const row of rows) {
     if (row.driver !== "external") {
       continue;
+    }
+    if (row.kind !== "task") {
+      endActiveTaskRunsUnderObjective(dependencies, transaction, {
+        objectiveId: row.subject_id,
+        skipTaskIds: sweptTasks,
+        outcome: "expired",
+        at: input.now,
+      });
     }
     if (row.run_id !== null) {
       for (const attempt of dependencies.execution.attemptsOfRun(
@@ -141,6 +157,57 @@ export function sweepExpiredExternalLeases(
     });
   }
   return { returnedToReady, objectivesFreed };
+}
+
+function endActiveTaskRunsUnderObjective(
+  dependencies: SweepExpiredExternalLeasesDependencies,
+  transaction: Transaction,
+  input: Readonly<{
+    objectiveId: string;
+    skipTaskIds: ReadonlySet<string>;
+    outcome: string;
+    at: number;
+  }>,
+): void {
+  const children = dependencies.plan
+    .readAllNodes(transaction)
+    .filter(
+      (candidate) =>
+        candidate.parentId === input.objectiveId &&
+        !input.skipTaskIds.has(candidate.id),
+    )
+    .sort((left, right) => compareIds(left.id, right.id));
+  for (const child of children) {
+    const childRun = dependencies.execution.activeRunOfNode(
+      transaction,
+      child.id,
+    );
+    if (childRun === null) {
+      continue;
+    }
+    for (const attempt of dependencies.execution.attemptsOfRun(
+      transaction,
+      childRun.id,
+    )) {
+      if (attempt.outcome !== null) {
+        continue;
+      }
+      dependencies.execution.closeAttempt(transaction, {
+        attemptId: attempt.id,
+        outcome: "cancelled",
+        at: input.at,
+      });
+    }
+    dependencies.execution.endRun(transaction, {
+      runId: childRun.id,
+      outcome: input.outcome,
+      at: input.at,
+    });
+  }
+}
+
+function compareIds(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
 }
 
 export async function recoverExpiredLeases(

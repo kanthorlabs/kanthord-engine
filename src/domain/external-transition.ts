@@ -213,16 +213,19 @@ export function objectiveDrivePin(
 }
 
 export const externalTriggerConsumer: Readonly<
-  Record<ExternalTriggerId, string>
+  Record<ExternalTriggerId, readonly string[]>
 > = {
-  "attempt-rejected": "src/commands/outcome/report-outcome.ts",
-  "outcome-accepted": "src/commands/outcome/report-outcome.ts",
-  "attempt-limit-reached": "src/commands/outcome/report-outcome.ts",
-  "object-reported": "src/commands/outcome/report-objective.ts",
-  "human-close": "src/commands/outcome/close-objective.ts",
-  "human-close-partial": "src/commands/outcome/close-objective.ts",
-  "claim-released": "src/commands/node/release-node.ts",
-  "claim-expired": "src/commands/startup/recover-expired-leases.ts",
-  "attempt-failed": "src/commands/outcome/report-outcome.ts",
-  "report-cancelled": "src/commands/outcome/report-outcome.ts",
+  "attempt-rejected": ["src/commands/outcome/report-outcome.ts"],
+  "outcome-accepted": ["src/commands/outcome/report-outcome.ts"],
+  "attempt-limit-reached": [
+    "src/commands/outcome/report-outcome.ts",
+    "src/commands/node/release-node.ts",
+  ],
+  "object-reported": ["src/commands/outcome/report-objective.ts"],
+  "human-close": ["src/commands/outcome/close-objective.ts"],
+  "human-close-partial": ["src/commands/outcome/close-objective.ts"],
+  "claim-released": ["src/commands/node/release-node.ts"],
+  "claim-expired": ["src/commands/startup/recover-expired-leases.ts"],
+  "attempt-failed": ["src/commands/outcome/report-outcome.ts"],
+  "report-cancelled": ["src/commands/outcome/report-outcome.ts"],
 };

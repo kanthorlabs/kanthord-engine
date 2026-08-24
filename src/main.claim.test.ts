@@ -356,6 +356,20 @@ describe("src/main.claim.test", () => {
     assert.ok(initiativeId.length > 0);
   });
 
+  it("a harness token reads plan.revisions, so the per-node write flow is reachable", async () => {
+    const revisions = await call(client(harnessTokenA), {
+      operationId: "plan.revisions",
+      parameters: { id: PROJECT_ID },
+    });
+    assert.equal(revisions.status, 200, JSON.stringify(revisions));
+    const body = bodyOf(revisions) as {
+      revisions: readonly Readonly<{ id: string }>[];
+    };
+    assert.ok(Array.isArray(body.revisions));
+    assert.ok(body.revisions.length > 0);
+    assert.ok(body.revisions[0]!.id.startsWith("revision_"));
+  });
+
   it("node.claim on the first task answers 200 with external runs, attempt 1 and the full node view", async () => {
     const claimed = await call(client(harnessTokenA), {
       operationId: "node.claim",
@@ -508,6 +522,21 @@ describe("src/main.claim.test", () => {
     assert.equal(before.fence, claimFence);
 
     expireBothLeases(taskAId, objectiveId);
+
+    const listed = await call(client(harnessTokenB), {
+      operationId: "node.list",
+      query: { state: "ready", kind: "task" },
+    });
+    assert.equal(listed.status, 200, JSON.stringify(listed));
+    const ready = (
+      bodyOf(listed) as {
+        nodes: readonly Readonly<{ id: string; state: string }>[];
+      }
+    ).nodes;
+    assert.ok(
+      ready.some((node) => node.id === taskAId && node.state === "ready"),
+      `the expired task ${taskAId} must appear ready in the listing before any claim`,
+    );
 
     const claimed = await call(client(harnessTokenB), {
       operationId: "node.claim",

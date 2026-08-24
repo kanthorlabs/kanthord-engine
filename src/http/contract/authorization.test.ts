@@ -27,6 +27,7 @@ describe("src/http/contract/authorization.test", () => {
       "node.show",
       "node.update",
       "plan.export",
+      "plan.revisions",
       "project.list",
       "project.nodes",
       "project.show",
@@ -56,10 +57,16 @@ describe("src/http/contract/authorization.test", () => {
     assert.deepEqual(entry.allowedActors, ["human"]);
   });
 
-  it("the registry-wide harness set totals seventeen operations", () => {
+  it("the registry-wide harness set totals eighteen operations", () => {
     const harnessCount = registry.filter((entry) =>
       entry.allowedActors.includes("harness"),
     ).length;
-    assert.equal(harnessCount, 17);
+    assert.equal(harnessCount, 18);
+  });
+
+  it("plan.revisions is in the registry-wide harness set", () => {
+    const entry = findOperation("plan.revisions");
+    assert.ok(entry, "plan.revisions operation not found");
+    assert.deepEqual(entry.allowedActors, ["human", "harness"]);
   });
 });

@@ -11,11 +11,15 @@ import {
 import { listProjectNodeHandler } from "./list-project-node.ts";
 import { listProjectNodes } from "../../../queries/node/list-project-node.ts";
 import { nodeListResponse } from "../../contract/graph.ts";
-import type { Storage } from "../../../services/storage/index.ts";
+import type { Storage, Transaction } from "../../../services/storage/index.ts";
 import { createPlanStore } from "../../../../test/helpers/plan.ts";
+import { createMockClock } from "../../../../test/helpers/clock.ts";
 import { tableRows, dataVersion } from "../../../../test/helpers/database.ts";
 
 const daemonHome = "/var/lib/kanthord";
+
+const NOW = 1700000000000;
+const INSTANCE = "daemon_instance_a";
 
 function count(table: string): (storage: Storage) => number {
   return (storage: Storage): number =>
@@ -60,7 +64,16 @@ describe("src/http/server/node/list-project-node.test", () => {
       handlers: {
         "project.nodes": listProjectNodeHandler({
           listProjectNodes: (input: Readonly<{ projectId: string }>) =>
-            listProjectNodes({ storage, plan }, input),
+            listProjectNodes(
+              {
+                storage,
+                plan,
+                clock: createMockClock({ start: NOW }),
+                instanceId: INSTANCE,
+                sweepExpiredExternalLeases: (_transaction: Transaction) => {},
+              },
+              input,
+            ),
         }),
       },
     });

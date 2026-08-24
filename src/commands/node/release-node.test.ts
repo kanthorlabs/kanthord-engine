@@ -201,6 +201,15 @@ function nodeState(fixture: ReleaseFixture, id: string): string {
   });
 }
 
+function nodeBlockReason(fixture: ReleaseFixture, id: string): string | null {
+  return fixture.storage.transact((transaction) => {
+    const row = transaction.get("SELECT block_reason FROM node WHERE id = ?", [
+      id,
+    ]) as Readonly<{ block_reason: string | null }> | undefined;
+    return row?.block_reason ?? null;
+  });
+}
+
 function everyNodeState(fixture: ReleaseFixture): readonly string[] {
   return fixture.storage.transact((transaction) =>
     transaction
@@ -362,7 +371,7 @@ describe("src/commands/node/release-node.test", () => {
     assert.equal(raised.refusal, "lease-held");
   });
 
-  it("a task release closes the attempt cancelled and ends the run released", (t) => {
+  it("a task release closes the attempt cancelled and keeps the run active", (t) => {
     const fixture = createFixture();
     t.after(() => fixture.dispose());
     seedReadyGraph(fixture);
@@ -378,8 +387,161 @@ describe("src/commands/node/release-node.test", () => {
     const runs = runRows(fixture);
     const taskRun = runs.find((row) => row.kind === "task");
     assert.ok(taskRun !== undefined);
+    assert.equal(taskRun.state, "active");
+    assert.equal(taskRun.outcome, null);
+  });
+
+  it("a re-claim after a release continues the attempt count of the kept run", (t) => {
+    const fixture = createFixture();
+    t.after(() => fixture.dispose());
+    seedReadyGraph(fixture);
+    const clock = createMockClock({ start: NOW });
+    const first = claim(fixture, clock, ACTOR_A);
+    assert.equal(first.attemptNo, 1);
+    release(fixture, clock, {
+      nodeId: fixtureIds.task,
+      fence: first.lease.fence,
+      actorId: ACTOR_A,
+    });
+    const second = claim(fixture, clock, ACTOR_A);
+    assert.equal(second.runId, first.runId);
+    assert.equal(second.attemptNo, 2);
+    const attempts = attemptRows(fixture);
+    assert.equal(attempts.length, 2);
+    assert.deepEqual(
+      attempts.map((attempt) => attempt.outcome),
+      ["cancelled", null],
+    );
+  });
+
+  it("a release that would spend the last attempt parks the task blocked with reason attempt-limit", (t) => {
+    const fixture = createFixture();
+    t.after(() => fixture.dispose());
+    seedReadyGraph(fixture);
+    const clock = createMockClock({ start: NOW });
+    let held: ClaimNodeResult | null = null;
+    for (let round = 1; round <= ATTEMPT_LIMIT; round++) {
+      held = claim(fixture, clock, ACTOR_A);
+      if (round < ATTEMPT_LIMIT) {
+        release(fixture, clock, {
+          nodeId: fixtureIds.task,
+          fence: held.lease.fence,
+          actorId: ACTOR_A,
+        });
+      }
+    }
+    const result = release(fixture, clock, {
+      nodeId: fixtureIds.task,
+      fence: held!.lease.fence,
+      actorId: ACTOR_A,
+    });
+    assert.equal(result.node.id, fixtureIds.task);
+    assert.equal(result.node.state, "blocked");
+    assert.equal(nodeState(fixture, fixtureIds.task), "blocked");
+    assert.equal(nodeBlockReason(fixture, fixtureIds.task), "attempt-limit");
+    const runs = runRows(fixture);
+    const taskRun = runs.find((row) => row.kind === "task");
+    assert.ok(taskRun !== undefined);
+    assert.equal(taskRun.state, "ended");
+    assert.equal(taskRun.outcome, "blocked");
+    const attempts = attemptRows(fixture);
+    assert.deepEqual(
+      attempts.map((attempt) => attempt.outcome),
+      ["cancelled", "cancelled", "cancelled"],
+    );
+    const taskLease = leaseRows(fixture).find(
+      (row) => row.subject_id === fixtureIds.task,
+    );
+    assert.ok(taskLease !== undefined);
+    assert.equal(taskLease.owner, null);
+    assert.equal(taskLease.expires_at, null);
+  });
+
+  it("a blocked task under a freed objective is unclaimable, so the release loop closes at the limit", (t) => {
+    const fixture = createFixture();
+    t.after(() => fixture.dispose());
+    seedReadyGraph(fixture);
+    const clock = createMockClock({ start: NOW });
+    let lastObjectiveFence = 1;
+    for (let round = 1; round <= ATTEMPT_LIMIT; round++) {
+      const claimed = claim(fixture, clock, ACTOR_A);
+      lastObjectiveFence = claimed.objectiveLease.fence;
+      const released = release(fixture, clock, {
+        nodeId: fixtureIds.task,
+        fence: claimed.lease.fence,
+        actorId: ACTOR_A,
+      });
+      assert.equal(
+        released.node.state,
+        round < ATTEMPT_LIMIT ? "ready" : "blocked",
+      );
+    }
+    release(fixture, clock, {
+      nodeId: fixtureIds.objective,
+      fence: lastObjectiveFence,
+      actorId: ACTOR_A,
+    });
+    let raised: unknown;
+    try {
+      claim(fixture, clock, ACTOR_B);
+    } catch (error) {
+      raised = error;
+    }
+    assert.ok(raised instanceof ClaimNodeError);
+    assert.equal((raised as ClaimNodeError).refusal, "illegal-transition");
+  });
+
+  it("an objective release after a task release ends the released task's still-active run", (t) => {
+    const fixture = createFixture();
+    t.after(() => fixture.dispose());
+    seedReadyGraph(fixture);
+    const clock = createMockClock({ start: NOW });
+    const claimed = claim(fixture, clock, ACTOR_A);
+    release(fixture, clock, {
+      nodeId: fixtureIds.task,
+      fence: claimed.lease.fence,
+      actorId: ACTOR_A,
+    });
+    release(fixture, clock, {
+      nodeId: fixtureIds.objective,
+      fence: claimed.objectiveLease.fence,
+      actorId: ACTOR_A,
+    });
+    const runs = runRows(fixture);
+    const taskRun = runs.find((row) => row.kind === "task");
+    assert.ok(taskRun !== undefined);
     assert.equal(taskRun.state, "ended");
     assert.equal(taskRun.outcome, "released");
+    const objectiveRun = runs.find((row) => row.kind === "objective");
+    assert.ok(objectiveRun !== undefined);
+    assert.equal(objectiveRun.state, "ended");
+  });
+
+  it("a re-claim after an objective release opens a fresh task run under a fresh objective run", (t) => {
+    const fixture = createFixture();
+    t.after(() => fixture.dispose());
+    seedReadyGraph(fixture);
+    const clock = createMockClock({ start: NOW });
+    const first = claim(fixture, clock, ACTOR_A);
+    release(fixture, clock, {
+      nodeId: fixtureIds.task,
+      fence: first.lease.fence,
+      actorId: ACTOR_A,
+    });
+    release(fixture, clock, {
+      nodeId: fixtureIds.objective,
+      fence: first.objectiveLease.fence,
+      actorId: ACTOR_A,
+    });
+    const second = claim(fixture, clock, ACTOR_A);
+    assert.notEqual(second.runId, first.runId);
+    assert.notEqual(second.objectiveRunId, first.objectiveRunId);
+    assert.equal(second.attemptNo, 1);
+    const activeRuns = runRows(fixture).filter((row) => row.state === "active");
+    assert.equal(activeRuns.length, 2);
+    const taskRun = activeRuns.find((row) => row.kind === "task");
+    assert.ok(taskRun !== undefined);
+    assert.equal(taskRun.parent_run_id, second.objectiveRunId);
   });
 
   it("a task release records trigger claim-released", (t) => {
@@ -471,6 +633,10 @@ describe("src/commands/node/release-node.test", () => {
     assert.ok(objectiveRun !== undefined);
     assert.equal(objectiveRun.state, "ended");
     assert.equal(objectiveRun.outcome, "released");
+    const taskRun = runs.find((row) => row.kind === "task");
+    assert.ok(taskRun !== undefined);
+    assert.equal(taskRun.state, "ended");
+    assert.equal(taskRun.outcome, "released");
     assert.equal(nodeState(fixture, fixtureIds.objective), "running");
   });
 

@@ -355,6 +355,15 @@ async function serve(options: ServeOptions): Promise<void> {
       });
       const secret = new NodeCryptoSecret();
       const catalog = new PiAiModelCatalog();
+      const sweepExternalLeases = (
+        transaction: Transaction,
+        input: Readonly<{ actor: string; now: number }>,
+      ) =>
+        sweepExpiredExternalLeases(
+          { plan, lease, execution, events },
+          transaction,
+          input,
+        );
       const handlers = {
         "system.health": healthHandler({
           readHealth: () => readHealth(healthDependencies),
@@ -449,7 +458,17 @@ async function serve(options: ServeOptions): Promise<void> {
             replaceProjectRepositories({ storage, plan, clock, events }, input),
         }),
         "node.list": listNodeHandler({
-          listNodes: (input) => listNodes({ storage, plan }, input),
+          listNodes: (input) =>
+            listNodes(
+              {
+                storage,
+                plan,
+                clock,
+                instanceId,
+                sweepExpiredExternalLeases: sweepExternalLeases,
+              },
+              input,
+            ),
         }),
         "node.show": showNodeHandler({
           showNode: (input) =>
@@ -484,12 +503,7 @@ async function serve(options: ServeOptions): Promise<void> {
                 events,
                 clock,
                 ids,
-                sweepExpiredExternalLeases: (transaction, sweepInput) =>
-                  sweepExpiredExternalLeases(
-                    { plan, lease, execution, events },
-                    transaction,
-                    sweepInput,
-                  ),
+                sweepExpiredExternalLeases: sweepExternalLeases,
                 attemptLimit: settings.attemptLimit,
                 leaseTtlMs: settings.leaseTtlMs,
                 instanceId,
@@ -564,7 +578,16 @@ async function serve(options: ServeOptions): Promise<void> {
         }),
         "project.nodes": listProjectNodeHandler({
           listProjectNodes: (input) =>
-            listProjectNodes({ storage, plan }, input),
+            listProjectNodes(
+              {
+                storage,
+                plan,
+                clock,
+                instanceId,
+                sweepExpiredExternalLeases: sweepExternalLeases,
+              },
+              input,
+            ),
         }),
         "project.graph": showProjectGraphHandler({
           showProjectGraph: (input) =>

@@ -108,6 +108,8 @@ Export at a revision is therefore byte-identical to the accepted documents that 
 
 Returns the import lineage of the project: each revision, its parent, its `importId`, and the hashes of the submitted document, the choice set and the accepted document. The newest revision is the one an import must name in `fromRevision`.
 
+The route admits a `harness` actor as well as a `human`, because a harness issues the per-node writes and every write names `fromRevision`.
+
 The three are hashes, not content. `blob.show` serves them.
 
 ## `node.list`

@@ -37,6 +37,7 @@ export const harnessOperations = [
   "node.show",
   "node.update",
   "plan.export",
+  "plan.revisions",
   "project.list",
   "project.nodes",
   "project.show",

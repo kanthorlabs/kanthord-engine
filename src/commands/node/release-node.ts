@@ -1,4 +1,5 @@
 import type { StoredNode } from "../../domain/plan-graph.ts";
+import { accountAttempts } from "../../domain/attempt-accounting.ts";
 import type { NodeState } from "../../domain/state.ts";
 import type { Clock } from "../../services/clock/index.ts";
 import type { EventLog } from "../../services/event/index.ts";
@@ -109,14 +110,62 @@ function releaseTask(
       `run ${run.id} holds no open attempt`,
     );
   }
+  const projected = accountAttempts({
+    attempts: dependencies.execution
+      .attemptsOfRun(transaction, run.id)
+      .map((attempt) =>
+        attempt.id === open.id
+          ? { attemptNo: attempt.attemptNo, outcome: "cancelled" as const }
+          : { attemptNo: attempt.attemptNo, outcome: attempt.outcome },
+      ),
+    limit: run.attemptLimit,
+  });
+  if (projected.exhausted) {
+    dependencies.execution.closeAttempt(transaction, {
+      attemptId: open.id,
+      outcome: "cancelled",
+      at: now,
+    });
+    dependencies.plan.setNodeState(transaction, {
+      id: node.id,
+      from: "running",
+      to: "blocked",
+      trigger: "attempt-limit-reached",
+      blockReason: "attempt-limit",
+      at: now,
+      cause: { revision: node.revision, importId: null },
+    });
+    dependencies.execution.endRun(transaction, {
+      runId: run.id,
+      outcome: "blocked",
+      at: now,
+    });
+    dependencies.lease.release(transaction, {
+      subjectKind: "node",
+      subjectId: node.id,
+      owner: input.actorId,
+      ownerKind: "actor",
+      fence: input.fence,
+      now,
+    });
+    dependencies.events.append(transaction, {
+      subjectKind: "node",
+      subjectId: node.id,
+      type: "lease.released",
+      actorKind: input.actorKind,
+      actorId: input.actorId,
+      payload: {
+        subjectId: node.id,
+        objectiveId: objectiveScopeOf(node),
+        fence: input.fence,
+        blocked: "attempt-limit",
+      },
+    });
+    return { node: { id: node.id, state: "blocked" } };
+  }
   dependencies.execution.closeAttempt(transaction, {
     attemptId: open.id,
     outcome: "cancelled",
-    at: now,
-  });
-  dependencies.execution.endRun(transaction, {
-    runId: run.id,
-    outcome: "released",
     at: now,
   });
   dependencies.plan.setNodeState(transaction, {
@@ -194,6 +243,33 @@ function releaseObjective(
       "no-active-run",
       `no active run of node ${node.id}`,
     );
+  }
+  for (const child of children) {
+    const childRun = dependencies.execution.activeRunOfNode(
+      transaction,
+      child.id,
+    );
+    if (childRun === null) {
+      continue;
+    }
+    for (const attempt of dependencies.execution.attemptsOfRun(
+      transaction,
+      childRun.id,
+    )) {
+      if (attempt.outcome !== null) {
+        continue;
+      }
+      dependencies.execution.closeAttempt(transaction, {
+        attemptId: attempt.id,
+        outcome: "cancelled",
+        at: now,
+      });
+    }
+    dependencies.execution.endRun(transaction, {
+      runId: childRun.id,
+      outcome: "released",
+      at: now,
+    });
   }
   dependencies.execution.endRun(transaction, {
     runId: run.id,

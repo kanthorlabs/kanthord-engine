@@ -692,8 +692,8 @@ describe("src/commands/outcome/report-outcome.test", () => {
         },
       );
       const run = runRowOfNode(fixture, fixtureIds.task);
-      assert.equal(run.state, "ended");
-      assert.equal(run.outcome, "released");
+      assert.equal(run.state, "active");
+      assert.equal(run.outcome, null);
     }
   });
 

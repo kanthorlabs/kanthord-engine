@@ -37,18 +37,21 @@ function concretePath(operationId: string): string {
 }
 
 describe("src/http/server/authorize.test", () => {
-  it("GET /v1/node and GET /v1/blob/<hash> answer 200 to a harness with a bound handler", async () => {
+  it("GET /v1/node, GET /v1/blob/<hash> and GET /v1/project/<id>/plan/revision answer 200 to a harness with a bound handler", async () => {
     const app = await createTestApp({
       resolveActor: () => HARNESS_ACTOR_FIXTURE,
       handlers: {
         "node.list": () => ({ status: 200, body: { nodes: [] } }),
         "blob.show": () => ({ status: 200, body: { hash: "sha256:9f2a" } }),
+        "plan.revisions": () => ({ status: 200, body: { revisions: [] } }),
       },
     });
     const node = await app.get("/v1/node");
     assert.equal(node.status, 200);
     const blob = await app.get("/v1/blob/sha256:9f2a");
     assert.equal(blob.status, 200);
+    const revisions = await app.get(concretePath("plan.revisions"));
+    assert.equal(revisions.status, 200);
   });
 
   it("GET /v1/provider, GET /v1/status and GET /v1/event answer 403 actor-forbidden to a harness, naming the operation", async () => {

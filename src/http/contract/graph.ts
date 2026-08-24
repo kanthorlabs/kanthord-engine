@@ -584,7 +584,7 @@ export const graph = operations([
     ],
     introducedIn: "phase-1",
     status: "routed",
-    allowedActors: ["human"],
+    allowedActors: ["human", "harness"],
     response: planRevisionsResponse,
     errors: { ...baselineErrors },
     examples: planRevisionsExamples,

@@ -794,7 +794,7 @@ describe("src/commands/node/claim-node.test", () => {
     assert.equal(events[events.length - 1]!.type, "node.running");
   });
 
-  it("the same actor claims two ready sibling tasks in turn", (t) => {
+  it("the same actor holds two ready sibling task claims concurrently", (t) => {
     const fixture = createClaimFixture();
     t.after(() => fixture.dispose());
     seedReadySiblingFixture(fixture);

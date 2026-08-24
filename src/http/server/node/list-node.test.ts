@@ -10,12 +10,34 @@ import {
 } from "../../../../test/helpers/rows.ts";
 import { listNodeHandler } from "./list-node.ts";
 import { listNodes } from "../../../queries/node/list-node.ts";
+import type { NodeListFilter } from "../../../queries/node/list-node.ts";
 import { nodeListResponse } from "../../contract/graph.ts";
-import type { Storage } from "../../../services/storage/index.ts";
+import type { Storage, Transaction } from "../../../services/storage/index.ts";
 import { createPlanStore } from "../../../../test/helpers/plan.ts";
+import { createMockClock } from "../../../../test/helpers/clock.ts";
 import { seedListFilterFixture } from "../../../../test/helpers/rows.ts";
 
 const daemonHome = "/var/lib/kanthord";
+
+const NOW = 1700000000000;
+const INSTANCE = "daemon_instance_a";
+
+function boundListNodes(
+  storage: Storage,
+  plan: ReturnType<typeof createPlanStore>,
+) {
+  return (input: NodeListFilter) =>
+    listNodes(
+      {
+        storage,
+        plan,
+        clock: createMockClock({ start: NOW }),
+        instanceId: INSTANCE,
+        sweepExpiredExternalLeases: (_transaction: Transaction) => {},
+      },
+      input,
+    );
+}
 
 function count(table: string): (storage: Storage) => number {
   return (storage: Storage): number =>
@@ -38,7 +60,7 @@ describe("src/http/server/node/list-node.test", () => {
     const app = await createTestApp({
       handlers: {
         "node.list": listNodeHandler({
-          listNodes: (input) => listNodes({ storage, plan }, input),
+          listNodes: boundListNodes(storage, plan),
         }),
       },
     });
@@ -128,7 +150,7 @@ describe("src/http/server/node/list-node.test", () => {
     const app = await createTestApp({
       handlers: {
         "node.list": listNodeHandler({
-          listNodes: (input) => listNodes({ storage, plan }, input),
+          listNodes: boundListNodes(storage, plan),
         }),
       },
     });

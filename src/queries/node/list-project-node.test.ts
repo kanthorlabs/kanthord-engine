@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { listProjectNodes } from "./list-project-node.ts";
+import { listProjectNodes as listProjectNodesQuery } from "./list-project-node.ts";
 import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import {
   fixtureIds,
@@ -10,8 +10,10 @@ import {
 } from "../../../test/helpers/rows.ts";
 import { nodeListItem } from "../../http/contract/graph.ts";
 import type { Storage } from "../../services/storage/index.ts";
+import type { Transaction } from "../../services/storage/index.ts";
 import type { PlanStore } from "../../services/plan/index.ts";
 import { createPlanStore } from "../../../test/helpers/plan.ts";
+import { createMockClock } from "../../../test/helpers/clock.ts";
 
 const memberNames = [
   "blockReason",
@@ -25,8 +27,42 @@ const memberNames = [
   "title",
 ];
 
+const NOW = 1700000000000;
+const INSTANCE = "daemon_instance_a";
+
+type SweepRecord = Readonly<{
+  transaction: Transaction;
+  actor: string;
+  now: number;
+}>;
+
+type ListFixture = Readonly<{
+  storage: Storage;
+  plan: PlanStore;
+  sweeps?: SweepRecord[];
+}>;
+
+function listProjectNodes(
+  dependencies: ListFixture,
+  input: Readonly<{ projectId: string }>,
+) {
+  const sweeps: SweepRecord[] = dependencies.sweeps ?? [];
+  return listProjectNodesQuery(
+    {
+      storage: dependencies.storage,
+      plan: dependencies.plan,
+      clock: createMockClock({ start: NOW }),
+      instanceId: INSTANCE,
+      sweepExpiredExternalLeases: (transaction, sweepInput) => {
+        sweeps.push({ transaction, ...sweepInput });
+      },
+    },
+    input,
+  );
+}
+
 describe("src/queries/node/list-project-node.test", () => {
-  function build(): { storage: Storage; plan: PlanStore; dispose(): void } {
+  function build(): ListFixture & { dispose(): void } {
     const temporary = createMigratedStorage();
     return {
       storage: temporary.storage,
@@ -289,6 +325,26 @@ describe("src/queries/node/list-project-node.test", () => {
       listProjectNodes({ storage, plan }, { projectId: "empty_project" }),
       [],
     );
+  });
+
+  it("a listing sweeps the expired external leases under the instance actor at the read instant", (t) => {
+    const { storage, plan, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+    });
+    const sweeps: SweepRecord[] = [];
+
+    listProjectNodes(
+      { storage, plan, sweeps },
+      { projectId: fixtureIds.project },
+    );
+
+    assert.equal(sweeps.length, 1);
+    assert.equal(sweeps[0]!.actor, INSTANCE);
+    assert.equal(sweeps[0]!.now, NOW);
+    assert.ok(sweeps[0]!.transaction !== undefined);
   });
 
   it("every item passes nodeListItem.safeParse", (t) => {
