@@ -68,7 +68,8 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
   `loopbackServer(app: Koa)` keeps working unchanged. Level 2 therefore needs nothing from EPIC 034.
   EPIC 034 story 3 owns the swap from the bridge to the node adapter, and it runs after this epic.
   Level 2 proves the shipped node path at every point in the band, because the bridge is shipped
-  production code until EPIC 034 story 3 deletes it, in the same commit that takes its last caller.
+  production code until EPIC 034 story 4 deletes it. EPIC 034 story 3 takes its last caller and
+  deletes `koa-bridge.test.ts`; story 4 then deletes the module.
 
 - **`supertest` stays.** An earlier plan removed it. That was an error. Level 2 needs a real client
   over a real socket, and a Fetch-level harness proves nothing about the wire. `supertest` and
@@ -466,7 +467,7 @@ paths>` reports no changed file. This is the check, not the pass count.
 - S2 - status:OPEN - action:YES - the koa dev types outlive koa - `@types/koa` and `@types/koa__cors`
   serve `test/helpers/agent.ts`, `src/http/server/start.ts` and `src/http/server/koa-bridge.ts`
   through the whole of this epic - fix: remove both in EPIC 035, not before - why: removing them
-  earlier breaks `typecheck` on `loopbackServer`. EPIC 034 story 3 takes the last koa name out of
+  earlier breaks `typecheck` on `loopbackServer`. EPIC 034 story 4 takes the last koa name out of
   `src/` and `test/`, so the two packages sit unused from that point, and `package.json` is locked
   against every lane until a human removes them.
 - S3 - status:FIXED - action:YES - `node_modules` was stale - `hono` 4.13.3 and `@hono/node-server`
@@ -497,7 +498,8 @@ paths>` reports no changed file. This is the check, not the pass count.
   Verification gate named a sixth with no owner - fix: EPIC 032 story 15 now enumerates exactly 6
   cases for `src/http/server/koa-bridge.test.ts`, the gate assigns case 5 and case 6 to it and the
   envelope half of the Host row to `src/http/server/app.test.ts`, and the EPIC 034 gate reads
-  "falls by exactly 6" - why: EPIC 034 story 3 deletes that file, so its case count is the oracle for
+  "falls by exactly 6" - why: EPIC 034 story 3 deletes that file, after story 2 restates all six of
+  its cases against the node adapter, so its case count is the oracle for
   the one pass-count fall in the band, and a count left to the implementing agent is not deterministic.
 - **Phase 1b is exempt from the `AGENTS.md` phase-2 test-boundary TODO.** That clause forbids
   opening another **phase-2** epic before the TODO closes. This epic is phase 1b.
