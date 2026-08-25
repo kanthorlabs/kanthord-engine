@@ -134,6 +134,22 @@ ATTEMPT-FAILED: <task-id> — <one-line reason>
 
 Use the exact `<task-id>` from the TE's last `**Cycle.**` line. Emit and stop — `/work` counts and escalates at the limit.
 
+**One blocker never counts — it escalates.** When the fix needs a change to a path locked to **every**
+pipeline role — the plan tree, the pipeline definition, the pipeline guards, `package.json`,
+`tsconfig*.json`, `AGENTS.md`, the `Makefile`, `Containerfile`, `compose.yaml`, any `*.config.*` — no
+attempt of yours and no debate guideline can close it. Mark it with this exact line instead of a bare
+`OPEN:`, then add the `ATTEMPT-FAILED:` line as usual:
+
+```
+OPEN: OUT-OF-LANE — <repo-relative path> — <the change that path needs>
+```
+
+`/work` validates the claim with `scripts/lane-check.sh` and escalates to the human on the **first**
+occurrence. Use it only for a path locked to both engineers. A path that belongs to the **other**
+engineer's lane is a plain `OPEN:`, because that work is in lane for them. Run
+`scripts/lane-check.sh <the other role> <path>` before you use this marker: an exit of 0 means the path
+is reachable in the pipeline and this marker is wrong.
+
 **Time-box inside the turn, too.** When the same deliverable resists repeated attempts and retrying produces no new information (an unreachable state, an environment refusal, a capture that keeps coming out wrong), stop retrying — list what you completed, name the gap and why, raise `OPEN:`, and close the turn.
 
 ## Review-fix cycles
