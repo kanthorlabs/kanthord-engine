@@ -10,7 +10,7 @@ async function recordingApp() {
     handlers: {
       "blob.show": (context) => {
         calls.push(context);
-        return { status: 200, body: { ok: true } };
+        return { kind: "json", status: 200, body: { ok: true } };
       },
     },
   });

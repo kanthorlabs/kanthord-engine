@@ -41,9 +41,17 @@ describe("src/http/server/authorize.test", () => {
     const app = await createTestApp({
       resolveActor: () => HARNESS_ACTOR_FIXTURE,
       handlers: {
-        "node.list": () => ({ status: 200, body: { nodes: [] } }),
-        "blob.show": () => ({ status: 200, body: { hash: "sha256:9f2a" } }),
-        "plan.revisions": () => ({ status: 200, body: { revisions: [] } }),
+        "node.list": () => ({ kind: "json", status: 200, body: { nodes: [] } }),
+        "blob.show": () => ({
+          kind: "json",
+          status: 200,
+          body: { hash: "sha256:9f2a" },
+        }),
+        "plan.revisions": () => ({
+          kind: "json",
+          status: 200,
+          body: { revisions: [] },
+        }),
       },
     });
     const node = await app.get("/v1/node");
@@ -118,7 +126,7 @@ describe("src/http/server/authorize.test", () => {
             ["sha256:write-probe", 0, new Uint8Array(0), 0],
           );
         });
-        return { status: 200, body: { providers: [] } };
+        return { kind: "json", status: 200, body: { providers: [] } };
       };
       const app = await createTestApp({
         resolveActor: () => HARNESS_ACTOR_FIXTURE,
@@ -141,7 +149,11 @@ describe("src/http/server/authorize.test", () => {
     const app = await createTestApp({
       resolveActor: () => HARNESS_ACTOR_FIXTURE,
       handlers: {
-        "provider.register": () => ({ status: 200, body: { ok: true } }),
+        "provider.register": () => ({
+          kind: "json",
+          status: 200,
+          body: { ok: true },
+        }),
       },
     });
     const response = await app
@@ -176,7 +188,7 @@ describe("src/http/server/authorize.test", () => {
         handlers: {
           "provider.register": () => {
             calls += 1;
-            return { status: 200, body: { ok: true } };
+            return { kind: "json", status: 200, body: { ok: true } };
           },
         },
       }),

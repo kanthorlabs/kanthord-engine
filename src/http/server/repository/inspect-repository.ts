@@ -32,6 +32,7 @@ export function inspectRepositoryHandler(
         credentialId: parsed.data.credentialId,
       });
       return {
+        kind: "json",
         status: 200,
         body: {
           defaultBranch: result.defaultBranch,

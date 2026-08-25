@@ -3,11 +3,15 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
 import { createTestApp } from "../../../../test/helpers/app.ts";
+import { findOperation } from "../../contract/registry.ts";
 import { showBlobHandler } from "./show-blob.ts";
 import type { BlobView } from "../../../queries/blob/show-blob.ts";
 
-const content = Buffer.from("0123456789");
+const content = Buffer.from([
+  0x00, 0x80, 0xff, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36,
+]);
 const hash = `sha256:${createHash("sha256").update(content).digest("hex")}`;
+const mediaType = findOperation("blob.show")?.responseMedia;
 
 const record: BlobView = {
   hash,
@@ -36,10 +40,7 @@ describe("src/http/server/blob/show-blob.test", () => {
       response.headers["cache-control"],
       "private, immutable, max-age=31536000",
     );
-    assert.match(
-      response.headers["content-type"] ?? "",
-      /application\/octet-stream/,
-    );
+    assert.equal(response.headers["content-type"], mediaType);
     assert.equal(response.headers.etag, `"${hash}"`);
   });
 
@@ -65,7 +66,7 @@ describe("src/http/server/blob/show-blob.test", () => {
       .buffer();
 
     assert.equal(response.status, 206);
-    assert.deepEqual(response.body, Buffer.from("01234"));
+    assert.deepEqual(response.body, content.subarray(0, 5));
     assert.equal(
       response.headers["content-range"] ?? "",
       `bytes 0-4/${content.length}`,
@@ -75,10 +76,7 @@ describe("src/http/server/blob/show-blob.test", () => {
       response.headers["cache-control"],
       "private, immutable, max-age=31536000",
     );
-    assert.match(
-      response.headers["content-type"] ?? "",
-      /application\/octet-stream/,
-    );
+    assert.equal(response.headers["content-type"], mediaType);
     assert.equal(response.headers.etag, `"${hash}"`);
   });
 
@@ -90,7 +88,7 @@ describe("src/http/server/blob/show-blob.test", () => {
       .buffer();
 
     assert.equal(response.status, 206);
-    assert.deepEqual(response.body, Buffer.from("789"));
+    assert.deepEqual(response.body, content.subarray(7));
     assert.equal(
       response.headers["content-range"] ?? "",
       `bytes 7-9/${content.length}`,
@@ -105,7 +103,7 @@ describe("src/http/server/blob/show-blob.test", () => {
       .buffer();
 
     assert.equal(response.status, 206);
-    assert.deepEqual(response.body, Buffer.from("56789"));
+    assert.deepEqual(response.body, content.subarray(5));
     assert.equal(
       response.headers["content-range"] ?? "",
       `bytes 5-9/${content.length}`,

@@ -7,9 +7,15 @@ import { Buffer } from "node:buffer";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { createTestApp } from "../../../test/helpers/app.ts";
+import {
+  createTestApp,
+  BOOTSTRAP_ACTOR_FIXTURE,
+} from "../../../test/helpers/app.ts";
+import { findOperation } from "../contract/registry.ts";
 import { showBlobHandler } from "./blob/show-blob.ts";
 import type { BlobView } from "../../queries/blob/show-blob.ts";
+import { handlerStatuses } from "./app.ts";
+import type { HandlerContext } from "./app.ts";
 
 const HANDLERS: readonly (readonly [string, readonly number[]])[] = [
   ["src/http/server/actor/list-actor.ts", [200]],
@@ -83,7 +89,7 @@ function scanHandlers(root: string, prefix: string): readonly Scanned[] {
         `${prefix}${directory.name}/${name}`,
         statuses,
         /\bheaders\b/.test(result),
-        /\bbody\s*[,:}]/.test(result),
+        /\b(?:body|bytes)\s*[,:}]/.test(result),
       ]);
     }
   }
@@ -98,7 +104,9 @@ const scanned = scanHandlers(
   "src/http/server/",
 );
 
-const content = Buffer.from("0123456789");
+const content = Buffer.from([
+  0x00, 0x80, 0xff, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36,
+]);
 const hash = `sha256:${createHash("sha256").update(content).digest("hex")}`;
 const record: BlobView = {
   hash,
@@ -106,6 +114,7 @@ const record: BlobView = {
   content,
   createdAt: 1700000000000,
 };
+const blobMedia = findOperation("blob.show")?.responseMedia;
 
 describe("src/http/server/app.handler-result.test", () => {
   it("the handler tree equals the frozen table", () => {
@@ -115,7 +124,8 @@ describe("src/http/server/app.handler-result.test", () => {
     );
   });
 
-  it("the whole tree answers 200 and 206 and nothing else", () => {
+  it("the declared status set is the exact closed list and the tree answers 200 and 206 and nothing else", () => {
+    assert.deepEqual(handlerStatuses, [200, 204, 206, 304]);
     const union = [
       ...new Set(HANDLERS.flatMap(([, statuses]) => [...statuses])),
     ].sort((a, b) => a - b);
@@ -129,9 +139,9 @@ describe("src/http/server/app.handler-result.test", () => {
     );
   });
 
-  it("every handler returns a body value", () => {
+  it("every handler returns a payload value", () => {
     assert.deepEqual(
-      scanned.filter(([, , , body]) => !body).map(([path]) => path),
+      scanned.filter(([, , , payload]) => !payload).map(([path]) => path),
       [],
     );
   });
@@ -142,7 +152,7 @@ describe("src/http/server/app.handler-result.test", () => {
       const alpha = join(fixture, "alpha");
       mkdirSync(alpha);
       const source =
-        "export const h: Handler = () => ({ status: 200, body: {} });";
+        'export const h: Handler = () => ({ kind: "json", status: 200, body: {} });';
       writeFileSync(join(alpha, "one.ts"), source);
       assert.deepEqual(scanHandlers(fixture, ""), [
         ["alpha/one.ts", [200], false, true],
@@ -160,7 +170,11 @@ describe("src/http/server/app.handler-result.test", () => {
   it("a JSON result serializes as application/json", async () => {
     const app = await createTestApp({
       handlers: {
-        "system.health": () => ({ status: 200, body: { ok: true } }),
+        "system.health": () => ({
+          kind: "json",
+          status: 200,
+          body: { ok: true },
+        }),
       },
     });
     const response = await app.get("/v1/health");
@@ -171,17 +185,53 @@ describe("src/http/server/app.handler-result.test", () => {
     );
   });
 
-  it("a Buffer result serializes as bytes with an exact content-length", async () => {
+  it("showBlobHandler returns the bytes variant as a plain Uint8Array", async () => {
+    const operation = findOperation("blob.show");
+    assert.ok(operation !== undefined);
+    const handler = showBlobHandler({ showBlob: () => record });
+    const context: HandlerContext = {
+      operation,
+      parameters: { hash },
+      query: {},
+      headers: {},
+      body: undefined,
+      actor: BOOTSTRAP_ACTOR_FIXTURE,
+    };
+
+    const full = await handler(context);
+    if (full.kind !== "bytes") {
+      throw new Error("the full answer is not the bytes variant");
+    }
+    assert.equal(full.status, 200);
+    assert.equal(full.bytes.constructor, Uint8Array);
+    assert.equal(Buffer.isBuffer(full.bytes), false);
+    assert.deepEqual(full.bytes, Uint8Array.from(content));
+
+    const ranged = await handler({
+      ...context,
+      headers: { range: "bytes=0-4" },
+    });
+    if (ranged.kind !== "bytes") {
+      throw new Error("the range answer is not the bytes variant");
+    }
+    assert.equal(ranged.status, 206);
+    assert.equal(ranged.bytes.constructor, Uint8Array);
+    assert.equal(Buffer.isBuffer(ranged.bytes), false);
+    assert.deepEqual(ranged.bytes, Uint8Array.from(content.subarray(0, 5)));
+  });
+
+  it("a bytes result serializes byte-exact with an exact content-length and the registry media type", async () => {
     const app = await createTestApp({
       handlers: { "blob.show": showBlobHandler({ showBlob: () => record }) },
     });
     const response = await app.get(`/v1/blob/${hash}`).buffer();
     assert.equal(response.status, 200);
-    assert.equal(response.headers["content-type"], "application/octet-stream");
+    assert.equal(response.headers["content-type"], blobMedia);
     assert.equal(response.headers["content-length"], String(content.length));
+    assert.deepEqual(response.body, content);
   });
 
-  it("a Range request answers 206 with an exact content-range", async () => {
+  it("a Range request answers 206 with an exact content-range and a byte-exact slice", async () => {
     const app = await createTestApp({
       handlers: { "blob.show": showBlobHandler({ showBlob: () => record }) },
     });
@@ -209,6 +259,7 @@ describe("src/http/server/app.handler-result.test", () => {
     assert.equal(response.status, 204);
     assert.equal(response.text, "");
     assert.equal(response.headers["content-length"], undefined);
+    assert.equal(response.headers["content-type"], undefined);
     assert.equal(response.headers["vary"], "Origin");
   });
 });

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { compareBytewise } from "./bytewise.ts";
+
 export const IDEMPOTENCY_HEADER = "idempotency-key";
 export const MAX_KEY_LENGTH = 255;
 
@@ -65,9 +67,7 @@ export type RecordKeyInput = Readonly<{
 }>;
 
 export function recordKey(input: RecordKeyInput): string {
-  const names = Object.keys(input.parameters).sort((a, b) =>
-    Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8")),
-  );
+  const names = Object.keys(input.parameters).sort(compareBytewise);
   const rendered = names
     .map((name) => `${name}=${input.parameters[name] ?? ""}`)
     .join("\u0001");

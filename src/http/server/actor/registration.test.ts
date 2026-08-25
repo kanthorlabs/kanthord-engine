@@ -91,7 +91,7 @@ describe("src/http/server/actor/registration.test", () => {
       received.push(context.actor);
       enteredResolve?.();
       await gate;
-      return { status: 200, body: { nodes: [] } };
+      return { kind: "json", status: 200, body: { nodes: [] } };
     };
 
     const handlers: Readonly<Record<string, Handler>> = {

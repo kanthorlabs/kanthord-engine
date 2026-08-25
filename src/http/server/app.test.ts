@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { createApp } from "./app.ts";
+import { createApp, handlerStatuses, bodylessStatuses } from "./app.ts";
 import type { Handler, TransportSettings } from "./app.ts";
 import { noopWaits } from "../../../test/helpers/wait-registry.ts";
 import { registry } from "../contract/registry.ts";
@@ -12,8 +12,13 @@ import {
   BOOTSTRAP_ACTOR_FIXTURE,
 } from "../../../test/helpers/app.ts";
 
-const statusHandler: Handler = () => ({ status: 200, body: { ok: true } });
+const statusHandler: Handler = () => ({
+  kind: "json",
+  status: 200,
+  body: { ok: true },
+});
 const healthHandler: Handler = () => ({
+  kind: "json",
   status: 200,
   body: { status: "ok", dependencies: [] },
 });
@@ -23,6 +28,11 @@ const handlers = {
 };
 
 describe("src/http/server/app.test", () => {
+  it("the handler status set and the bodyless status set are the exact closed lists", () => {
+    assert.deepEqual(handlerStatuses, [200, 204, 206, 304]);
+    assert.deepEqual(bodylessStatuses, [204, 304]);
+  });
+
   it("the browser defences apply to system.health like every route", async () => {
     const app = await createTestApp({ handlers });
     const clean = await app.get("/v1/health");
@@ -136,7 +146,7 @@ describe("src/http/server/app.test", () => {
         ...handlers,
         "repository.register": () => {
           calls += 1;
-          return { status: 200, body: { ok: true } };
+          return { kind: "json", status: 200, body: { ok: true } };
         },
       },
     });

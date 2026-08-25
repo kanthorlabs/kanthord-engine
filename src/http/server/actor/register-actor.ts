@@ -31,7 +31,11 @@ export function registerActorHandler(
         actor: context.actor,
         configuredToken: dependencies.configuredToken,
       });
-      return { status: 200, body: { ...result.view, token: result.token } };
+      return {
+        kind: "json",
+        status: 200,
+        body: { ...result.view, token: result.token },
+      };
     } catch (error) {
       throw toHttpError(error);
     }

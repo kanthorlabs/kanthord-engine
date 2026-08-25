@@ -1,5 +1,3 @@
-import { Buffer } from "node:buffer";
-
 import type { Handler } from "../app.ts";
 import { blobHash } from "../../../domain/blob.ts";
 import { httpError } from "../../contract/errors.ts";
@@ -26,20 +24,20 @@ export function showBlobHandler(
     if (record === null) {
       throw httpError("not-found", `no blob ${hash}`);
     }
-    const content = Buffer.from(record.content);
+    const content = Uint8Array.from(record.content);
     const headers = {
       "Accept-Ranges": "bytes",
       "Cache-Control": "private, immutable, max-age=31536000",
-      "Content-Type": "application/octet-stream",
       ETag: `"${record.hash}"`,
     };
     const range = parseRange(context.headers["range"], content.length);
     if (range === null) {
-      return { status: 200, body: content, headers };
+      return { kind: "bytes", status: 200, bytes: content, headers };
     }
     return {
+      kind: "bytes",
       status: 206,
-      body: content.subarray(range.start, range.end + 1),
+      bytes: content.subarray(range.start, range.end + 1),
       headers: {
         ...headers,
         "Content-Range": `bytes ${range.start}-${range.end}/${content.length}`,

@@ -32,7 +32,7 @@ export function heartbeatNodeHandler(
         actorId: context.actor.id,
         actorKind: context.actor.kind,
       });
-      return { status: 200, body: result };
+      return { kind: "json", status: 200, body: result };
     } catch (error) {
       throw toHttpError(error, { subject: id, fence: parsed.data.fence });
     }

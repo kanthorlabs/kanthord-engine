@@ -35,11 +35,33 @@ export type HandlerContext = Readonly<{
   actor: ActorRow;
 }>;
 
-export type HandlerResult = Readonly<{
-  status: number;
+export const handlerStatuses = [200, 204, 206, 304] as const;
+export const bodylessStatuses = [204, 304] as const;
+export type HandlerStatus = (typeof handlerStatuses)[number];
+export type BodylessStatus = (typeof bodylessStatuses)[number];
+export type BodyStatus = Exclude<HandlerStatus, BodylessStatus>;
+
+export type JsonResult = Readonly<{
+  kind: "json";
+  status: BodyStatus;
   body: unknown;
   headers?: Readonly<Record<string, string>>;
 }>;
+
+export type BytesResult = Readonly<{
+  kind: "bytes";
+  status: BodyStatus;
+  bytes: Uint8Array;
+  headers?: Readonly<Record<string, string>>;
+}>;
+
+export type EmptyResult = Readonly<{
+  kind: "empty";
+  status: BodylessStatus;
+  headers?: Readonly<Record<string, string>>;
+}>;
+
+export type HandlerResult = JsonResult | BytesResult | EmptyResult;
 
 export type Handler = (
   context: HandlerContext,

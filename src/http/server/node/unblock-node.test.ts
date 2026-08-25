@@ -117,6 +117,9 @@ describe("src/http/server/node/unblock-node.test", () => {
 
     const response = await handler(context());
 
+    if (response.kind !== "json") {
+      throw new Error("the answer is not the json variant");
+    }
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, result);
     assert.deepEqual(received, [

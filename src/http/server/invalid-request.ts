@@ -1,8 +1,7 @@
-import { Buffer } from "node:buffer";
-
 import type { ZodError, ZodIssue } from "zod";
 
 import { HttpError, httpError } from "../contract/errors.ts";
+import { compareBytewise } from "./bytewise.ts";
 
 export const requestRefusals = [
   "body-schema",
@@ -35,21 +34,15 @@ function issuesOf(issue: ZodIssue): readonly RequestIssue[] {
 }
 
 function order(left: RequestIssue, right: RequestIssue): number {
-  const byPath = Buffer.compare(
-    Buffer.from(left.path),
-    Buffer.from(right.path),
-  );
+  const byPath = compareBytewise(left.path, right.path);
   if (byPath !== 0) {
     return byPath;
   }
-  const byCode = Buffer.compare(
-    Buffer.from(left.code),
-    Buffer.from(right.code),
-  );
+  const byCode = compareBytewise(left.code, right.code);
   if (byCode !== 0) {
     return byCode;
   }
-  return Buffer.compare(Buffer.from(left.message), Buffer.from(right.message));
+  return compareBytewise(left.message, right.message);
 }
 
 export function requestIssues(error: ZodError): readonly RequestIssue[] {

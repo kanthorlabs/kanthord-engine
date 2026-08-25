@@ -1,5 +1,7 @@
 import type { Context } from "koa";
 
+import { compareBytewise } from "./bytewise.ts";
+
 export type StoredAnswer = Readonly<{
   status: number;
   body: unknown;
@@ -45,9 +47,7 @@ export function captureAnswer(
       Array.isArray(value) ? value.map(String) : [String(value)],
     ]);
   }
-  pairs.sort((a, b) =>
-    Buffer.compare(Buffer.from(a[0], "utf8"), Buffer.from(b[0], "utf8")),
-  );
+  pairs.sort((a, b) => compareBytewise(a[0], b[0]));
   return { status, body, headers: pairs };
 }
 

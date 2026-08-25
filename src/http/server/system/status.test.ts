@@ -119,6 +119,10 @@ describe("src/http/server/system/status.test", () => {
       actor: BOOTSTRAP_ACTOR_FIXTURE,
     };
 
-    assert.deepEqual(handler(context), { status: 200, body: fixture });
+    assert.deepEqual(handler(context), {
+      kind: "json",
+      status: 200,
+      body: fixture,
+    });
   });
 });

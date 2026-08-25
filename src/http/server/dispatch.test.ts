@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { request as httpRequest } from "node:http";
+import type { AddressInfo } from "node:net";
 
 import Koa from "koa";
 
@@ -12,7 +14,7 @@ import { createApp, BindingError } from "./app.ts";
 import type { Handler, HandlerContext, TransportSettings } from "./app.ts";
 import { noopWaits } from "../../../test/helpers/wait-registry.ts";
 import { httpError } from "../contract/errors.ts";
-import { registry } from "../contract/registry.ts";
+import { findOperation, registry } from "../contract/registry.ts";
 import { renderPath } from "../contract/path.ts";
 import type { ActorRow } from "../../domain/actor.ts";
 import { bootstrapActorId } from "../../domain/actor.ts";
@@ -22,7 +24,7 @@ import {
   drive,
   BOOTSTRAP_ACTOR_FIXTURE,
 } from "../../../test/helpers/app.ts";
-import { loopbackAgent } from "../../../test/helpers/agent.ts";
+import { loopbackAgent, loopbackServer } from "../../../test/helpers/agent.ts";
 import {
   createMigratedStorage,
   tableCounts,
@@ -47,7 +49,56 @@ const harnessActor: ActorRow = {
   revokedBy: null,
 };
 
-const okHandler: Handler = () => ({ status: 200, body: { ok: true } });
+const okHandler: Handler = () => ({
+  kind: "json",
+  status: 200,
+  body: { ok: true },
+});
+
+type RawResponse = Readonly<{
+  status: number;
+  rawHeaders: readonly string[];
+  body: Buffer;
+}>;
+
+async function rawResponse(
+  app: Koa,
+  method: string,
+  path: string,
+): Promise<RawResponse> {
+  const server = await loopbackServer(app);
+  const address = server.address() as AddressInfo;
+  return new Promise((resolve, reject) => {
+    const outgoing = httpRequest(
+      { host: "127.0.0.1", port: address.port, method, path },
+      (incoming) => {
+        const chunks: Buffer[] = [];
+        incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+        incoming.on("end", () => {
+          resolve({
+            status: incoming.statusCode ?? 0,
+            rawHeaders: incoming.rawHeaders,
+            body: Buffer.concat(chunks),
+          });
+        });
+      },
+    );
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
+}
+
+function directDispatchApp(handlers: Readonly<Record<string, Handler>>): Koa {
+  const app = new Koa();
+  app.use(envelopeMiddleware({ onInternalError: () => {} }));
+  app.use(async (context, next) => {
+    (context.state as { actor: ActorRow }).actor = BOOTSTRAP_ACTOR_FIXTURE;
+    await next();
+  });
+  app.use(routeMiddleware());
+  app.use(dispatchMiddleware({ handlers }));
+  return app;
+}
 
 describe("src/http/server/dispatch.test", () => {
   it("a stubbed route answers 501 with its ships-in message from an empty handler map", async () => {
@@ -72,7 +123,7 @@ describe("src/http/server/dispatch.test", () => {
         handlers: {
           "node.abandon": () => {
             calls += 1;
-            return { status: 200, body: { ok: true } };
+            return { kind: "json", status: 200, body: { ok: true } };
           },
         },
       }),
@@ -236,7 +287,11 @@ describe("src/http/server/dispatch.test", () => {
   it("a routed route with a handler answers 200 with the handler body", async () => {
     const app = await createTestApp({
       handlers: {
-        "system.status": () => ({ status: 200, body: { ok: true } }),
+        "system.status": () => ({
+          kind: "json",
+          status: 200,
+          body: { ok: true },
+        }),
       },
     });
     const response = await app.get("/v1/status");
@@ -250,7 +305,7 @@ describe("src/http/server/dispatch.test", () => {
       handlers: {
         "node.show": (context) => {
           recorded = context;
-          return { status: 200, body: { ok: true } };
+          return { kind: "json", status: 200, body: { ok: true } };
         },
       },
     });
@@ -278,7 +333,7 @@ describe("src/http/server/dispatch.test", () => {
         handlers: {
           "system.health": (context) => {
             recorded = context;
-            return { status: 200, body: { ok: true } };
+            return { kind: "json", status: 200, body: { ok: true } };
           },
         },
       }),
@@ -299,7 +354,7 @@ describe("src/http/server/dispatch.test", () => {
       handlers: {
         "repository.register": (context) => {
           recordedBody = context.body;
-          return { status: 200, body: { ok: true } };
+          return { kind: "json", status: 200, body: { ok: true } };
         },
       },
     });
@@ -316,7 +371,7 @@ describe("src/http/server/dispatch.test", () => {
       handlers: {
         "system.health": (context) => {
           recorded = context;
-          return { status: 200, body: { ok: true } };
+          return { kind: "json", status: 200, body: { ok: true } };
         },
       },
     });
@@ -333,7 +388,7 @@ describe("src/http/server/dispatch.test", () => {
       handlers: {
         "system.health": (context) => {
           recorded = context;
-          return { status: 200, body: { ok: true } };
+          return { kind: "json", status: 200, body: { ok: true } };
         },
       },
     });
@@ -343,44 +398,133 @@ describe("src/http/server/dispatch.test", () => {
     assert.match(recorded?.headers["authorization"] ?? "", /^Bearer /);
   });
 
-  it("a handler's response headers are applied to the response", async () => {
+  it("a handler's response headers are applied to the response and its content type overrides the json default", async () => {
     const app = await createTestApp({
       handlers: {
         "system.health": () => ({
+          kind: "json",
           status: 200,
           body: "ok",
-          headers: { "X-B": "2", "X-A": "1" },
+          headers: {
+            "Content-Type": "application/vnd.test+json",
+            "X-B": "2",
+            "X-A": "1",
+          },
         }),
       },
     });
-    const response = await app.get("/v1/health");
+    const response = await app.get("/v1/health").parse((incoming, callback) => {
+      const chunks: Buffer[] = [];
+      incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+      incoming.on("end", () => callback(null, Buffer.concat(chunks)));
+    });
     assert.equal(response.headers["x-a"], "1");
     assert.equal(response.headers["x-b"], "2");
+    assert.equal(response.headers["content-type"], "application/vnd.test+json");
   });
 
-  it("a handler's binary body and content type cross the boundary intact", async () => {
+  it("a handler's headers are emitted in bytewise order regardless of insertion order", async () => {
+    const app = directDispatchApp({
+      "system.health": () => ({
+        kind: "json",
+        status: 200,
+        body: "ok",
+        headers: { X_c: "underscore", "X-a": "hyphen", "X-B": "capital" },
+      }),
+    });
+    const response = await rawResponse(app, "GET", "/v1/health");
+    assert.equal(response.status, 200);
+    const emitted = response.rawHeaders.filter((value) =>
+      ["X_c", "X-a", "X-B"].includes(value),
+    );
+    assert.deepEqual(emitted, ["X-B", "X-a", "X_c"]);
+  });
+
+  it("a blob.show bytes result crosses the boundary byte-exact with the registry media type", async () => {
     const app = await createTestApp({
       handlers: {
-        "system.health": () => ({
+        "blob.show": () => ({
+          kind: "bytes",
           status: 200,
-          body: Buffer.from([1, 2, 3]),
-          headers: { "Content-Type": "application/octet-stream" },
+          bytes: Uint8Array.from([1, 2, 3]),
         }),
       },
     });
-    const response = await app.get("/v1/health").buffer();
-    assert.match(
-      response.headers["content-type"] ?? "",
-      /application\/octet-stream/,
-    );
-    assert.equal((response.body as Buffer).length, 3);
+    const response = await app.get("/v1/blob/x").buffer();
+    assert.equal(response.status, 200);
     assert.deepEqual(Array.from(response.body as Buffer), [1, 2, 3]);
+    assert.equal(
+      response.headers["content-type"],
+      findOperation("blob.show")?.responseMedia,
+    );
+  });
+
+  it("a json result answers exactly application/json; charset=utf-8", async () => {
+    const app = await createTestApp({
+      handlers: { "system.health": okHandler },
+    });
+    const response = await app.get("/v1/health");
+    assert.equal(response.status, 200);
+    assert.equal(
+      response.headers["content-type"],
+      "application/json; charset=utf-8",
+    );
+  });
+
+  it("an empty result answers 204 with zero body bytes and no content-type or content-length header", async () => {
+    const app = directDispatchApp({
+      "system.status": () => ({ kind: "empty", status: 204 }),
+    });
+    const response = await rawResponse(app, "GET", "/v1/status");
+    assert.equal(response.status, 204);
+    assert.equal(response.body.length, 0);
+    const names = response.rawHeaders
+      .filter((_, index) => index % 2 === 0)
+      .map((name) => name.toLowerCase());
+    assert.equal(names.includes("content-type"), false);
+    assert.equal(names.includes("content-length"), false);
+  });
+
+  it("an empty result answers 304 with zero body bytes and no content-type or content-length header", async () => {
+    const app = directDispatchApp({
+      "system.status": () => ({ kind: "empty", status: 304 }),
+    });
+    const response = await rawResponse(app, "GET", "/v1/status");
+    assert.equal(response.status, 304);
+    assert.equal(response.body.length, 0);
+    const names = response.rawHeaders
+      .filter((_, index) => index % 2 === 0)
+      .map((name) => name.toLowerCase());
+    assert.equal(names.includes("content-type"), false);
+    assert.equal(names.includes("content-length"), false);
+  });
+
+  it("a bytes result for an operation with no responseMedia answers the internal-error envelope naming the operation id", async () => {
+    const app = directDispatchApp({
+      "system.status": () => ({
+        kind: "bytes",
+        status: 200,
+        bytes: Uint8Array.from([1, 2, 3]),
+      }),
+    });
+    const response = await rawResponse(app, "GET", "/v1/status");
+    assert.equal(response.status, 500);
+    assert.deepEqual(JSON.parse(response.body.toString("utf8")), {
+      error: {
+        code: "internal-error",
+        message: "bytes result for system.status requires responseMedia",
+      },
+    });
   });
 
   it("a handler omitting headers sets no extra header", async () => {
     const app = await createTestApp({
       handlers: {
-        "system.health": () => ({ status: 200, body: { ok: true } }),
+        "system.health": () => ({
+          kind: "json",
+          status: 200,
+          body: { ok: true },
+        }),
       },
     });
     const response = await app.get("/v1/health");
@@ -394,7 +538,7 @@ describe("src/http/server/dispatch.test", () => {
       handlers: {
         "system.health": (context) => {
           recorded = context;
-          return { status: 200, body: { ok: true } };
+          return { kind: "json", status: 200, body: { ok: true } };
         },
       },
     });
@@ -412,11 +556,15 @@ describe("src/http/server/dispatch.test", () => {
   it("an async handler is awaited", async () => {
     const app = await createTestApp({
       handlers: {
-        "system.status": async () => ({ status: 201, body: { created: true } }),
+        "system.status": async () => ({
+          kind: "json",
+          status: 200,
+          body: { created: true },
+        }),
       },
     });
     const response = await app.get("/v1/status");
-    assert.equal(response.status, 201);
+    assert.equal(response.status, 200);
     assert.deepEqual(response.body, { created: true });
   });
 
@@ -477,7 +625,7 @@ describe("src/http/server/dispatch.test", () => {
           ],
         );
       });
-      return { status: 200, body: {} };
+      return { kind: "json", status: 200, body: {} };
     };
 
     const handlers = Object.fromEntries(

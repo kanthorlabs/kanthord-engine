@@ -5,10 +5,15 @@ import { createTestApp } from "./app.ts";
 import type { Handler } from "../../src/http/server/app.ts";
 
 const healthLike: Handler = () => ({
+  kind: "json",
   status: 200,
   body: { status: "ok", dependencies: [] },
 });
-const statusLike: Handler = () => ({ status: 200, body: { ok: true } });
+const statusLike: Handler = () => ({
+  kind: "json",
+  status: 200,
+  body: { ok: true },
+});
 
 describe("test/helpers/app.test", () => {
   it("the typed helpers preset Host and the bearer token, and raw presets nothing", async () => {

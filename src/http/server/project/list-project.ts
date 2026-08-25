@@ -12,6 +12,6 @@ export function listProjectHandler(
 ): Handler {
   return async () => {
     const views = dependencies.listProjects({});
-    return { status: 200, body: { projects: views } };
+    return { kind: "json", status: 200, body: { projects: views } };
   };
 }

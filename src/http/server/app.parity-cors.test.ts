@@ -17,7 +17,11 @@ async function corsApp() {
       "system.status": () => {
         throw httpError("lease-held", "held", { holder: "actor_01" });
       },
-      "system.db": () => ({ status: 200, body: { ok: true } }),
+      "system.db": () => ({
+        kind: "json",
+        status: 200,
+        body: { ok: true },
+      }),
     },
   });
 }

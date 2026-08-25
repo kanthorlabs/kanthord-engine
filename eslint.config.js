@@ -333,6 +333,40 @@ export default [
     },
   },
   {
+    // The transport core imports no node:buffer. The global Buffer survives in
+    // idempotency-key.ts and idempotency-store.ts until EPIC 035.
+    // src/http/server/koa-body.ts is the one adapter that converts a HandlerResult
+    // to a Koa body, and EPIC 032 deletes it. This block repeats the src/**/*.ts
+    // restrictions because flat config applies the last no-restricted-imports
+    // entry per file.
+    files: ["src/http/server/**/*.ts"],
+    ignores: ["src/http/server/koa-body.ts", "src/**/*.test.ts"],
+    rules: {
+      "no-restricted-imports": [
+        2,
+        {
+          patterns: [
+            {
+              group: ["node:buffer"],
+              message:
+                "http/server/ is Fetch-native: use TextEncoder and Uint8Array; see docs/proposal/phase-1/transport.md",
+            },
+            {
+              group: gitLibraries,
+              message:
+                "the git service runs the git binary through spawn; see docs/proposal/phase-1/git-foundation.md",
+            },
+            {
+              group: ["node:child_process"],
+              message:
+                "only src/services/git/launcher.ts creates a process; see .agents/plan/stories/006-git-primitives/04-supervised-spawn.md",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // The CLI runs on a second machine. It owns no daemon capability.
     files: ["src/cli/**/*.ts"],
     ignores: ["src/**/*.test.ts"],

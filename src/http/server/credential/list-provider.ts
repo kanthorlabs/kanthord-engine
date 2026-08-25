@@ -12,6 +12,7 @@ export function listProviderHandler(
   dependencies: ListProviderHandlerDependencies,
 ): Handler {
   return () => ({
+    kind: "json",
     status: 200,
     body: { providers: dependencies.listProviders({}) },
   });

@@ -45,5 +45,9 @@ describe("src/http/server/single.test", () => {
       "a",
       "b",
     ]);
+    assert.deepEqual(
+      Object.keys(singleValued({ ["\u{1F600}"]: ["1"], ["\uE000"]: ["2"] })),
+      ["\uE000", "\u{1F600}"],
+    );
   });
 });

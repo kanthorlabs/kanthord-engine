@@ -20,6 +20,6 @@ export function showRepositoryHandler(
     if (view === null) {
       throw httpError("not-found", `no repository ${id}`);
     }
-    return { status: 200, body: view };
+    return { kind: "json", status: 200, body: view };
   };
 }
