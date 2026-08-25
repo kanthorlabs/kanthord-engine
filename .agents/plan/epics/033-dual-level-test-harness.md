@@ -142,10 +142,13 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
   Six rules complete the contract, and each one is pinned by a story-2 case.
 
   1. `headers` keys are lower-case. A duplicate header joins with `", "`, `set-cookie` included,
-     because a Fetch `Headers` cannot report two values through this shape. No level-1 file asserts
-     `set-cookie`; the level-2 case of story 6 owns it.
-  2. `body` holds the parsed object for a JSON content type, a `Buffer` for every other content
-     type, and `{}` for an empty body. `text` holds the decoded body as UTF-8.
+     because a Fetch `Headers` cannot report two values through this shape. The join is explicit
+     work: a `Headers` iterator already joins a repeated ordinary header, but it yields `set-cookie`
+     once per value, so the builder joins on a repeated key. No level-1 file asserts `set-cookie`;
+     the level-2 case of story 6 owns the two separate values on the wire.
+  2. `body` holds `{}` for an empty body, the parsed object for a JSON content type, and a `Buffer`
+     for every other content type. The empty test runs first, so a 204 carrying a JSON content type
+     never reaches `JSON.parse("")`. `text` holds the decoded body as UTF-8.
   3. `.send(value)` with an object serializes with `JSON.stringify` and sets
      `content-type: application/json` when the caller set no content type.
   4. `.send(value)` with a string sends those bytes verbatim and sets no content type.
@@ -174,8 +177,9 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
 
   The `supertest` agent satisfies `Agent` structurally: superagent exposes `get`, `post`, `put`,
   `del`, `delete` and `options`, its `Test` exposes `set`, `send`, `buffer` and `then`, and its
-  `Response` exposes `status`, `headers`, `body` and `text`. Story 3 proves that by typecheck. Where
-  a member does not line up, `createSocketTestApp` adapts that one member and nothing else.
+  `Response` exposes `status`, `headers`, `body` and `text`. `ReturnType<typeof request>` is
+  assignable to `Agent` under `--strict`, so `createSocketTestApp` assigns it directly and adapts no
+  member. Story 3 proves that by typecheck.
 
 - **Hermeticity is stronger after this epic.** The count of test files that open a listening socket
   through `test/helpers/agent.ts` falls from 57 to 5. Story 7 asserts the exact list of those 5
@@ -267,7 +271,7 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
 | A     | `test/helpers/app.test.ts`                                     | it covers `createTestApp`, which becomes level 1 |
 
 - **`src/main.claim.test.ts` is not a harness file.** It names `createTestApp` inside a string, at
-  `src/main.claim.test.ts:599`, as part of an import-shape assertion. It reaches neither helper. It
+  `src/main.claim.test.ts:628`, as part of an import-shape assertion. It reaches neither helper. It
   does open sockets, through `reservePort` at `:249` and `launchDaemon` at `:12`, so it is not
   hermetic-by-Fetch and this epic makes no claim about it. It is untouched, and story 7 must not
   count it.
@@ -288,7 +292,7 @@ story that adds a case names the exact count, because the Verification gate comp
    `test/helpers/agent.test.ts` with 14 level-1 cases, one per line below, in this order:
 
    1. a response header name is lower-case
-   2. two values of one header name join with `", "`
+   2. two values of one header name join with `", "`, `set-cookie` included
    3. a JSON content type parses into `body`
    4. a non-JSON content type puts a `Buffer` in `body`
    5. an empty body is `{}`
@@ -330,8 +334,10 @@ story that adds a case names the exact count, because the Verification gate comp
 6. **Level 2 gains the wire cases it is the only level able to prove.** Add
    `src/http/server/shutdown-socket.test.ts` with 3 cases: a graceful shutdown drains one in-flight
    request to its full body; a connection opened after the shutdown starts is refused; the listener
-   closes. Each case builds its own application, so the `WeakMap` cache holds one server per case
-   and a closed server never reaches another case. Add 1 case to `test/helpers/agent.test.ts`: an
+   closes. The drain case orders only the four events it sequences itself, and proves the listener
+   close by `server.listening`, because the close callback and the client resolution race. Each
+   case builds its own application, so the `WeakMap` cache holds one server per case and a closed
+   server never reaches another case. Add 1 case to `test/helpers/agent.test.ts`: an
    application that writes two `set-cookie` values answers with two values over the socket, read
    through `response.headers["set-cookie"]` as an array from `supertest`. Change
    `loopbackServer` not at all. **Adds exactly 4 cases.**
