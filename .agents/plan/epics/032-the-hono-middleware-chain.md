@@ -141,8 +141,10 @@ Context<AppEnv>, name: Name): Variables[Name] | undefined` returns `undefined` f
   `StoredAnswer.body` becomes `string | Uint8Array | null`. A JSON result and an error envelope store
   the exact string from `JSON.stringify`. A bytes result stores its `Uint8Array`. An empty result
   stores `null`. `render.ts` exports `MaterializedResult = Readonly<{ status: HandlerStatus; body:
-string | Uint8Array | null }>` and `materializeResult(result: HandlerResult, operation: Operation,
-headers: Headers): MaterializedResult`. The function writes the default content type when absent
+string | Uint8Array | null }>` and `materializeResult(result: HandlerResult, operation: Operation |
+undefined, headers: Headers): MaterializedResult`. `operation` is read for the `bytes` variant only,
+  and a `bytes` result that carries no operation raises the EPIC 031 `internal-error` refusal. The
+  function writes the default content type when absent
   and returns the exact status and body in that stored form. An unreserved response calls it from
   `renderMiddleware`. A reserved response calls it once from `idempotencyMiddleware`, captures the
   returned body, and writes that `StoredAnswer` into `replay`; render then uses those captured bytes
@@ -167,7 +169,10 @@ serializable")`. A `JSON.stringify` exception propagates unchanged. Both become 
   2. `optional(c, "replay")` is defined: apply the stored headers with `set`, then return a
      `Response` from its exact stored body, status and the accumulator.
   3. `optional(c, "result")` is defined: call `materializeResult`, then return a `Response` from its
-     exact body, status and the accumulator. The `json` variant serializes with `JSON.stringify` and
+     exact body, status and the accumulator. Render passes `demand(c, "match").operation` for a
+     `bytes` result, and `undefined` for a `json` result and for an `empty` result. A preflight
+     answer carries no `match`, because `preflightMiddleware` writes `result` and never calls
+     `next()`. A demand of `match` on that path answers 500 instead of 204. The `json` variant serializes with `JSON.stringify` and
      sets `application/json; charset=utf-8`. The `bytes` variant keeps its `Uint8Array` and sets the
      matched operation's `responseMedia`. The `empty` variant uses `null` and sets no content type.
      Each default applies only when the accumulator does not carry `content-type`, so a handler
@@ -300,7 +305,10 @@ serializable")`. A `JSON.stringify` exception propagates unchanged. Both become 
   `src/http/server/blob/show-blob.ts` are the only result headers in the product, and each one
   capitalizes identically, so lower-casing preserves their relative order and no answer moves. The
   EPIC 031 gate row that asserts the emitted order uses `X-B`, `X-a` and `X_c`, so story 14 restates
-  that row on lower-case names. `dispatch.test.ts` is the test of a module this epic rewrites, so the
+  that row on the source names `X_c`, `X-a`, `X-B` and `X-A`, and asserts the accumulator entries
+  `[["x-a", "upper-A, lower-a"], ["x-b", "b"], ["x_c", "underscore"]]`. Three distinct lower-case
+  names do not discriminate, because a Fetch `Headers` sorts its own iteration whatever order
+  dispatch appends in. The duplicate `X-A` and `X-a` pair makes the append order observable. `dispatch.test.ts` is the test of a module this epic rewrites, so the
   edit is in scope, and the four EPIC 030 parity files stay untouched.
 
 - **15. `bindingOffenders` and `unimplementedFor` do not change.** They read the registry only. They
@@ -404,10 +412,13 @@ create no commit between Stories 3 and 16. Story 16 runs the batch gate after ev
     of `dispatch.test.ts` on lower-case names, per Decision 16. Add table cases where a handler
     throws a string and `undefined`; each answers the generic 500 envelope, reports once, and
     reports the exact thrown value.
-15. **The Koa bridge. Dispatch this story before story 6.** `src/http/server/host.test.ts` and
-    `src/http/server/idempotency.test.ts` build their application directly and reach a real socket
-    through `loopbackAgent`, which takes a `Koa`. From story 6 onward each builds a `Hono`
-    application, so each wraps it with `loopbackAgent(koaFromHono(hono))`. That wrap is the shape
+15. **The Koa bridge. Dispatch this story before story 5.** Eight test files build their application
+    directly and reach a real socket through `loopbackAgent` or `loopbackServer`, and both take a
+    `Koa`: `origin.test.ts`, `host.test.ts`, `preflight.test.ts`, `auth.test.ts`, `route.test.ts`,
+    `authorize.test.ts`, `dispatch.test.ts` and `idempotency.test.ts`. From story 5 onward each
+    builds a `Hono` application, so each wraps it with `loopbackAgent(koaFromHono(hono))`. Stories 5
+    through 14 own those edits. No case moves to an in-process `hono.request` call; EPIC 033 owns the
+    harness change. That wrap is the shape
     EPIC 034 story 3 replaces, and it does not exist until this story lands. The story number stays
     15 because EPIC 034 and the Proof below name it; only the dispatch order moves.
 
@@ -527,9 +538,10 @@ Hermetic coverage required beyond the Proof:
 - **The bytewise order of the response headers is asserted, and every name is a valid header
   name.** A Fetch `Headers` refuses a non-ASCII name, so the emitted-order test uses valid token
   names, and it asserts the accumulator order equals the `compareBytewise` order of the lower-cased
-  names. The discriminating names are already lower-case and differ in the separator byte, for
-  example `x-a`, `x-b` and `x_c`, because `-` is `0x2D` and `_` is `0x5F`. The EPIC 031 example
-  `X-B`, `X-a`, `X_c` does not discriminate here, and Decision 16 records why. `bytewise.test.ts` of
+  names. A duplicate name is what makes the order observable, so the test appends the source names
+  `X_c`, `X-a`, `X-B` and `X-A` and asserts `[["x-a", "upper-A, lower-a"], ["x-b", "b"], ["x_c",
+"underscore"]]`. `-` is `0x2D` and `_` is `0x5F`. Three distinct lower-case names do not
+  discriminate, and Decision 16 records why. `bytewise.test.ts` of
   EPIC 031 keeps the non-ASCII ordering proof, which needs no header. The test asserts values and
   duplicate-header semantics, not raw wire order.
 - **A duplicate `Idempotency-Key` is refused with the current message**, and a single key that
@@ -568,11 +580,12 @@ Hermetic coverage required beyond the Proof:
   `start.ts` and `koa-bridge.ts` - fix:no change now; remove `@types/koa`, `@types/koa__cors`,
   `koa`, `@koa/cors` and `@koa/bodyparser` in EPIC 035 - why:removing them here breaks the listener
   and the bridge that this epic keeps.
-- S4 - status:OPEN - action:YES - expand EPIC 030 and EPIC 031 before this epic runs -
+- S4 - status:OPEN - action:YES - land EPIC 030 and EPIC 031 before this epic runs -
   `.agents/plan/stories/030-transport-inventory-and-parity-contract/` and
-  `.agents/plan/stories/031-fetch-native-response-model/` do not exist - fix:run `/author` on EPIC
-  030 and EPIC 031, and land both, before `/work` opens EPIC 032 - why:this epic consumes the EPIC
-  031 `HandlerResult` variants, `compareBytewise` and the four EPIC 030 parity files by name.
+  `.agents/plan/stories/031-fetch-native-response-model/` both exist as of 2026-08-25, and neither
+  epic is implemented - fix:land EPIC 030 and EPIC 031 before `/work` opens EPIC 032 - why:this epic
+  consumes the EPIC 031 `HandlerResult` variants, `compareBytewise` and the four EPIC 030 parity
+  files by name.
 - S5 - status:OPEN - action:YES - drop the EPIC 031 `node:buffer` exception - story 16 deletes
   `src/http/server/koa-body.ts`, and the EPIC 031 S1 eslint block names that file in its `ignores`
   array. - fix:remove `"src/http/server/koa-body.ts"` from the `ignores` array of the
