@@ -1,19 +1,27 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import Koa, { type Context, type Next } from "koa";
-import bodyParser from "@koa/bodyparser";
+import { Hono } from "hono";
+import type { Context } from "hono";
 
-import { envelopeMiddleware } from "./envelope.ts";
+import { errorResponse, errorValue, materializeError } from "./envelope.ts";
+import { headersMiddleware } from "./headers.ts";
+import { renderMiddleware } from "./render.ts";
 import { routeMiddleware } from "./route.ts";
+import { bodyMiddleware } from "./body.ts";
+import { demand, optional } from "./variables.ts";
+import type { AppEnv } from "./variables.ts";
 import { httpError } from "../contract/errors.ts";
+import type { Operation } from "../contract/operation.ts";
 import { createIdempotency } from "./idempotency.ts";
 import type { IdempotencySettings } from "./idempotency-store.ts";
 import { defaultIdempotencySettings } from "./idempotency-store.ts";
 import type { Schedule } from "./idempotency-store.ts";
 import { recordKey } from "./idempotency-key.ts";
+import { koaFromHono } from "./koa-bridge.ts";
 import { loopbackAgent, loopbackServer } from "../../../test/helpers/agent.ts";
 import {
   BOOTSTRAP_ACTOR_FIXTURE,
@@ -22,9 +30,7 @@ import {
 } from "../../../test/helpers/app.ts";
 import type { ActorRow } from "../../domain/actor.ts";
 import { bootstrapActorId } from "../../domain/actor.ts";
-import type { AuthenticatedState } from "./auth.ts";
-import { dispatchMiddleware } from "./dispatch.ts";
-import type { RoutedState } from "./route.ts";
+import type { Handler } from "./app.ts";
 import { importPlanHandler } from "./plan/import-plan.ts";
 import { importPlan } from "../../commands/plan/import-plan.ts";
 import type {
@@ -61,12 +67,44 @@ function deferred<T = void>(): {
   return { promise, resolve };
 }
 
+async function settles(
+  prompt: Promise<unknown>,
+  ticks: number,
+): Promise<boolean> {
+  let settled = false;
+  prompt.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  for (let i = 0; i < ticks && !settled; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  return settled;
+}
+
+const admit: Handler = () => ({
+  kind: "json",
+  status: 200,
+  body: { handled: true },
+});
+
+const bound: Readonly<Record<string, Handler>> = {
+  "project.create": admit,
+  "repository.inspect": admit,
+  "plan.import": admit,
+};
+
 async function buildApp(input: {
-  handler: (context: Context) => Promise<void> | void;
+  handler?: (c: Context<AppEnv>) => Promise<void> | void;
   settings?: IdempotencySettings;
   now?: () => number;
   onInternalError?: (error: unknown) => void;
   resolveActor?: (presented: string) => ActorRow | null;
+  operationOverride?: (operation: Operation) => Operation;
 }) {
   const armed: Fired[] = [];
   const schedule: Schedule = (_at, run) => {
@@ -89,28 +127,53 @@ async function buildApp(input: {
   const resolveActor = input.resolveActor ?? (() => BOOTSTRAP_ACTOR_FIXTURE);
 
   let count = 0;
-  const app = new Koa();
-  app.use(
-    envelopeMiddleware({
-      onInternalError: input.onInternalError ?? (() => {}),
-    }),
-  );
-  app.use(routeMiddleware());
-  app.use(bodyParser({ enableTypes: ["json"] }));
-  app.use(async (context: Context, next: Next) => {
-    const header = context.get("authorization");
+  const hono = new Hono<AppEnv>();
+  hono.onError((error, c) => {
+    const value = errorValue(error);
+    const materialized = materializeError(value);
+    if (materialized.internal && input.onInternalError !== undefined) {
+      input.onInternalError(value);
+    }
+    return errorResponse(materialized, demand(c, "headers"));
+  });
+  hono.use("*", headersMiddleware());
+  hono.use("*", renderMiddleware());
+  hono.use("*", routeMiddleware());
+  const override = input.operationOverride;
+  if (override !== undefined) {
+    hono.use("*", async (c, next) => {
+      const match = demand(c, "match");
+      c.set("match", {
+        operation: override(match.operation),
+        parameters: match.parameters,
+      });
+      await next();
+    });
+  }
+  hono.use("*", bodyMiddleware(bound));
+  hono.use("*", async (c, next) => {
+    const header = c.req.header("authorization") ?? "";
     const presented = header.startsWith("Bearer ")
       ? header.slice("Bearer ".length)
       : "";
-    context.state.actor = resolveActor(presented);
+    const resolved = resolveActor(presented);
+    if (resolved === null) {
+      throw httpError("unauthenticated", "the bearer token is not valid");
+    }
+    c.set("actor", resolved);
     await next();
   });
-  app.use(middleware);
-  app.use(async (context: Context) => {
+  hono.use("*", middleware);
+  hono.all("*", async (c) => {
     count += 1;
-    await input.handler(context);
+    if (input.handler !== undefined) {
+      await input.handler(c);
+      return;
+    }
+    c.set("result", { kind: "json", status: 200, body: { ok: true } });
   });
 
+  const app = koaFromHono(hono);
   const agent = await loopbackAgent(app);
   return { agent, app, store, calls: () => count, fireTimers };
 }
@@ -144,9 +207,8 @@ function rawRequest(
   });
 }
 
-const okHandler = (context: Context): void => {
-  context.status = 200;
-  context.body = { ok: true };
+const okHandler = (c: Context<AppEnv>): void => {
+  c.set("result", { kind: "json", status: 200, body: { ok: true } });
 };
 
 const encoder = new TextEncoder();
@@ -170,13 +232,17 @@ const recordingEvents: EventLog = {
   },
 };
 
+const GENERIC_ENVELOPE =
+  '{"error":{"code":"internal-error","message":"internal error"}}';
+
 describe("src/http/server/idempotency.test", () => {
   it("runs the command once for two identical keyed POSTs, and both answers are byte-identical", async () => {
-    const handler = (context: Context): void => {
-      context.set("ETag", "abc");
-      context.set("X-Multi", ["a", "b"]);
-      context.status = 200;
-      context.body = { ok: true };
+    const handler = (c: Context<AppEnv>): void => {
+      const headers = demand(c, "headers");
+      headers.set("ETag", "abc");
+      headers.append("X-Multi", "a");
+      headers.append("X-Multi", "b");
+      c.set("result", { kind: "json", status: 200, body: { ok: true } });
     };
     const { agent, calls } = await buildApp({ handler });
     const strip = (headers: Record<string, unknown>): Record<string, unknown> =>
@@ -236,6 +302,24 @@ describe("src/http/server/idempotency.test", () => {
     assert.equal(calls(), 1);
   });
 
+  it("answers 409 idempotency-mismatch when the same key repeats with equal json but different whitespace", async () => {
+    const { agent, calls } = await buildApp({ handler: okHandler });
+    const first = await agent
+      .post("/v1/project")
+      .set("Content-Type", "application/json")
+      .set("Idempotency-Key", "k1")
+      .send('{"name":"a"}');
+    const second = await agent
+      .post("/v1/project")
+      .set("Content-Type", "application/json")
+      .set("Idempotency-Key", "k1")
+      .send('{ "name" : "a" }');
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 409);
+    assert.equal(second.body.error.code, "idempotency-mismatch");
+    assert.equal(calls(), 1);
+  });
+
   it("records two entries and runs both commands when one key is sent to two different operations", async () => {
     const { agent, calls, store } = await buildApp({ handler: okHandler });
     const first = await agent
@@ -279,10 +363,13 @@ describe("src/http/server/idempotency.test", () => {
     });
 
     it("two actors with the same Idempotency-Key and different bodies each run their own execution", async () => {
-      const handler = (context: Context): void => {
-        const body = context.request.body as { name?: string } | undefined;
-        context.status = 200;
-        context.body = { echoed: body?.name ?? null };
+      const handler = (c: Context<AppEnv>): void => {
+        const body = optional(c, "body") as { name?: string } | undefined;
+        c.set("result", {
+          kind: "json",
+          status: 200,
+          body: { echoed: body?.name ?? null },
+        });
       };
       const { agent, calls, store } = await buildApp({
         handler,
@@ -310,16 +397,15 @@ describe("src/http/server/idempotency.test", () => {
     it("a slow first request does not make a second actor's request wait or answer 503", async () => {
       const arrived = deferred<void>();
       const gate = deferred<void>();
-      let gated = false;
-      const handler = async (context: Context): Promise<void> => {
+      const handler = async (c: Context<AppEnv>): Promise<void> => {
         if (!gated) {
           gated = true;
           arrived.resolve();
           await gate.promise;
         }
-        context.status = 200;
-        context.body = { ok: true };
+        c.set("result", { kind: "json", status: 200, body: { ok: true } });
       };
+      let gated = false;
       const { agent, calls, store } = await buildApp({
         handler,
         resolveActor: twoActors,
@@ -339,26 +425,13 @@ describe("src/http/server/idempotency.test", () => {
         .set("Authorization", "Bearer token-b")
         .set("Idempotency-Key", "k1")
         .send({ name: "a" });
-      second.then(
-        () => {},
-        () => {},
-      );
-      const outcome = await Promise.race([
-        second.then((response) => ({ completed: true, response })),
-        new Promise<{ completed: false; response: null }>((resolve) =>
-          setTimeout(() => resolve({ completed: false, response: null }), 2000),
-        ),
-      ]);
-      if (!outcome.completed) {
-        gate.resolve();
-        await Promise.allSettled([first, second]);
-      }
       assert.equal(
-        outcome.completed,
+        await settles(second, 5000),
         true,
         "the second request must answer from its own execution while the first is still in flight",
       );
-      assert.equal(outcome.response.status, 200);
+      const secondRes = await second;
+      assert.equal(secondRes.status, 200);
       assert.equal(calls(), 2);
       assert.equal(store.size(), 2);
       gate.resolve();
@@ -387,11 +460,10 @@ describe("src/http/server/idempotency.test", () => {
   it("runs the command once for two duplicates dispatched with no await between them", async () => {
     const arrived = deferred<void>();
     const gate = deferred<void>();
-    const handler = async (context: Context): Promise<void> => {
+    const handler = async (c: Context<AppEnv>): Promise<void> => {
       arrived.resolve();
       await gate.promise;
-      context.status = 200;
-      context.body = { ok: true };
+      c.set("result", { kind: "json", status: 200, body: { ok: true } });
     };
     const { agent, calls } = await buildApp({ handler });
     const first = agent
@@ -423,11 +495,10 @@ describe("src/http/server/idempotency.test", () => {
   it("joins rather than erroring when a duplicate arrives while the first is in flight", async () => {
     const arrived = deferred<void>();
     const gate = deferred<void>();
-    const handler = async (context: Context): Promise<void> => {
+    const handler = async (c: Context<AppEnv>): Promise<void> => {
       arrived.resolve();
       await gate.promise;
-      context.status = 200;
-      context.body = { ok: true };
+      c.set("result", { kind: "json", status: 200, body: { ok: true } });
     };
     const { agent, calls, store } = await buildApp({ handler });
     const key = recordKey({
@@ -465,11 +536,10 @@ describe("src/http/server/idempotency.test", () => {
   it("does not cancel the original when a joined duplicate disconnects", async () => {
     const arrived = deferred<void>();
     const gate = deferred<void>();
-    const handler = async (context: Context): Promise<void> => {
+    const handler = async (c: Context<AppEnv>): Promise<void> => {
       arrived.resolve();
       await gate.promise;
-      context.status = 200;
-      context.body = { ok: true };
+      c.set("result", { kind: "json", status: 200, body: { ok: true } });
     };
     const { agent, calls, store } = await buildApp({ handler });
     const key = recordKey({
@@ -531,11 +601,10 @@ describe("src/http/server/idempotency.test", () => {
   it("answers 503 on a join timeout, then replays for a request that arrives after the original completes", async () => {
     const arrived = deferred<void>();
     const gate = deferred<void>();
-    const handler = async (context: Context): Promise<void> => {
+    const handler = async (c: Context<AppEnv>): Promise<void> => {
       arrived.resolve();
       await gate.promise;
-      context.status = 200;
-      context.body = { ok: true };
+      c.set("result", { kind: "json", status: 200, body: { ok: true } });
     };
     const { agent, calls, store, fireTimers } = await buildApp({
       handler,
@@ -594,11 +663,10 @@ describe("src/http/server/idempotency.test", () => {
   it("waits for the original with a zero join timeout", async () => {
     const arrived = deferred<void>();
     const gate = deferred<void>();
-    const handler = async (context: Context): Promise<void> => {
+    const handler = async (c: Context<AppEnv>): Promise<void> => {
       arrived.resolve();
       await gate.promise;
-      context.status = 200;
-      context.body = { ok: true };
+      c.set("result", { kind: "json", status: 200, body: { ok: true } });
     };
     const { agent, calls, store, fireTimers } = await buildApp({
       handler,
@@ -682,11 +750,16 @@ describe("src/http/server/idempotency.test", () => {
 
   it("marks the key indeterminate when a handler commits and then throws", async () => {
     let committed = 0;
+    const boom = new Error("boom");
     const handler = (): void => {
       committed += 1;
-      throw new Error("boom");
+      throw boom;
     };
-    const { agent, calls, store } = await buildApp({ handler });
+    const reported: unknown[] = [];
+    const { agent, calls, store } = await buildApp({
+      handler,
+      onInternalError: (error) => reported.push(error),
+    });
     const expected = {
       error: { code: "internal-error", message: "internal error" },
     };
@@ -705,6 +778,204 @@ describe("src/http/server/idempotency.test", () => {
     assert.equal(calls(), 1);
     assert.equal(committed, 1);
     assert.equal(store.size(), 1);
+    assert.equal(reported.length, 1);
+    assert.equal(reported[0], boom);
+  });
+
+  it("keeps a keyed serialization failure indeterminate: the same generic 500 replays, the handler runs once, one callback fires, one record remains", async () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const handler = (c: Context<AppEnv>): void => {
+      c.set("result", { kind: "json", status: 200, body: circular });
+    };
+    const reported: unknown[] = [];
+    const { agent, calls, store } = await buildApp({
+      handler,
+      onInternalError: (error) => reported.push(error),
+    });
+    const first = await agent
+      .post("/v1/project")
+      .set("Idempotency-Key", "k1")
+      .send({ name: "a" });
+    const second = await agent
+      .post("/v1/project")
+      .set("Idempotency-Key", "k1")
+      .send({ name: "a" });
+    assert.equal(first.status, 500);
+    assert.equal(second.status, 500);
+    assert.equal(first.text, GENERIC_ENVELOPE);
+    assert.equal(second.text, first.text);
+    assert.equal(
+      first.headers["content-type"],
+      "application/json; charset=utf-8",
+    );
+    assert.equal(
+      second.headers["content-type"],
+      "application/json; charset=utf-8",
+    );
+    assert.equal(calls(), 1);
+    assert.equal(reported.length, 1);
+    assert.ok(reported[0] instanceof TypeError);
+    assert.equal(store.size(), 1);
+  });
+
+  it("settles and replays a stored answer for an HttpError whose status the operation declares replayable", async () => {
+    const handler = (): void => {
+      throw httpError("lease-held", "held", {});
+    };
+    const { agent, calls, store } = await buildApp({
+      handler,
+      operationOverride: (operation) => ({
+        ...operation,
+        replayable: [409],
+      }),
+    });
+    const first = await agent
+      .post("/v1/project")
+      .set("Idempotency-Key", "k1")
+      .send({ name: "a" });
+    const second = await agent
+      .post("/v1/project")
+      .set("Idempotency-Key", "k1")
+      .send({ name: "a" });
+    assert.equal(first.status, 409);
+    assert.equal(first.body.error.code, "lease-held");
+    assert.equal(second.status, 409);
+    assert.equal(second.body.error.code, "lease-held");
+    assert.equal(second.text, first.text);
+    assert.equal(calls(), 1);
+    assert.equal(store.size(), 1);
+  });
+
+  it("stores and replays the exact json text, status and content type", async () => {
+    const { agent, calls } = await buildApp({ handler: okHandler });
+    const first = await agent
+      .post("/v1/project")
+      .set("Idempotency-Key", "k1")
+      .send({ name: "a" });
+    const second = await agent
+      .post("/v1/project")
+      .set("Idempotency-Key", "k1")
+      .send({ name: "a" });
+    assert.equal(first.status, 200);
+    assert.equal(first.text, '{"ok":true}');
+    assert.equal(
+      first.headers["content-type"],
+      "application/json; charset=utf-8",
+    );
+    assert.equal(second.status, 200);
+    assert.equal(second.text, '{"ok":true}');
+    assert.equal(
+      second.headers["content-type"],
+      "application/json; charset=utf-8",
+    );
+    assert.equal(calls(), 1);
+  });
+
+  it("stores and replays a byte-exact Uint8Array body with the operation media type", async () => {
+    const bytes = Uint8Array.from([0x00, 0x80, 0xff]);
+    const handler = (c: Context<AppEnv>): void => {
+      c.set("result", { kind: "bytes", status: 200, bytes });
+    };
+    const { app, calls } = await buildApp({
+      handler,
+      operationOverride: (operation) => ({
+        ...operation,
+        responseMedia: "application/octet-stream",
+      }),
+    });
+    const server = await loopbackServer(app);
+    const port = (server.address() as AddressInfo).port;
+    const url = `http://127.0.0.1:${port}/v1/project`;
+    const first = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "k1",
+      },
+      body: '{"name":"a"}',
+    });
+    const second = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "k1",
+      },
+      body: '{"name":"a"}',
+    });
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get("content-type"), "application/octet-stream");
+    assert.deepEqual(
+      Array.from(new Uint8Array(await first.arrayBuffer())),
+      [0, 128, 255],
+    );
+    assert.equal(second.status, 200);
+    assert.equal(
+      second.headers.get("content-type"),
+      "application/octet-stream",
+    );
+    assert.deepEqual(
+      Array.from(new Uint8Array(await second.arrayBuffer())),
+      [0, 128, 255],
+    );
+    assert.equal(calls(), 1);
+  });
+
+  it("stores and replays a null body for an empty 204 answer", async () => {
+    const handler = (c: Context<AppEnv>): void => {
+      c.set("result", { kind: "empty", status: 204 });
+    };
+    const { agent, calls } = await buildApp({
+      handler,
+      operationOverride: (operation) => ({
+        ...operation,
+        replayable: [204],
+      }),
+    });
+    const first = await agent
+      .post("/v1/project")
+      .set("Idempotency-Key", "k1")
+      .send({ name: "a" });
+    const second = await agent
+      .post("/v1/project")
+      .set("Idempotency-Key", "k1")
+      .send({ name: "a" });
+    assert.equal(first.status, 204);
+    assert.equal(first.text, "");
+    assert.equal(first.headers["content-type"], undefined);
+    assert.equal(second.status, 204);
+    assert.equal(second.text, "");
+    assert.equal(second.headers["content-type"], undefined);
+    assert.equal(calls(), 1);
+  });
+
+  it("serializes a stateful toJSON result exactly once across a keyed replay", async () => {
+    let serializations = 0;
+    const handler = (c: Context<AppEnv>): void => {
+      c.set("result", {
+        kind: "json",
+        status: 200,
+        body: {
+          toJSON(): unknown {
+            serializations += 1;
+            return { ok: true };
+          },
+        },
+      });
+    };
+    const { agent, calls } = await buildApp({ handler });
+    const first = await agent
+      .post("/v1/project")
+      .set("Idempotency-Key", "k1")
+      .send({ name: "a" });
+    const second = await agent
+      .post("/v1/project")
+      .set("Idempotency-Key", "k1")
+      .send({ name: "a" });
+    assert.equal(serializations, 1);
+    assert.equal(calls(), 1);
+    assert.equal(first.text, '{"ok":true}');
+    assert.equal(second.text, first.text);
   });
 
   it("answers 400 invalid-request when the key arrives twice, and the command never runs", async () => {
@@ -807,11 +1078,10 @@ describe("src/http/server/idempotency.test", () => {
     let now = 1_000;
     const arrived = deferred<void>();
     const gate = deferred<void>();
-    const handler = async (context: Context): Promise<void> => {
+    const handler = async (c: Context<AppEnv>): Promise<void> => {
       arrived.resolve();
       await gate.promise;
-      context.status = 200;
-      context.body = { ok: true };
+      c.set("result", { kind: "json", status: 200, body: { ok: true } });
     };
     const { agent, calls } = await buildApp({
       handler,
@@ -846,11 +1116,10 @@ describe("src/http/server/idempotency.test", () => {
     let now = 1_000;
     const arrived = deferred<void>();
     const gate = deferred<void>();
-    const handler = async (context: Context): Promise<void> => {
+    const handler = async (c: Context<AppEnv>): Promise<void> => {
       arrived.resolve();
       await gate.promise;
-      context.status = 200;
-      context.body = { ok: true };
+      c.set("result", { kind: "json", status: 200, body: { ok: true } });
     };
     const { agent, calls } = await buildApp({
       handler,
@@ -900,11 +1169,10 @@ describe("src/http/server/idempotency.test", () => {
   it("answers 503 at the entry bound, with the first request untouched", async () => {
     const arrived = deferred<void>();
     const gate = deferred<void>();
-    const handler = async (context: Context): Promise<void> => {
+    const handler = async (c: Context<AppEnv>): Promise<void> => {
       arrived.resolve();
       await gate.promise;
-      context.status = 200;
-      context.body = { ok: true };
+      c.set("result", { kind: "json", status: 200, body: { ok: true } });
     };
     const { agent, calls } = await buildApp({
       handler,
@@ -939,11 +1207,10 @@ describe("src/http/server/idempotency.test", () => {
   it("a saturated request may retry once capacity frees", async () => {
     const arrived = deferred<void>();
     const gate = deferred<void>();
-    const handler = async (context: Context): Promise<void> => {
+    const handler = async (c: Context<AppEnv>): Promise<void> => {
       arrived.resolve();
       await gate.promise;
-      context.status = 200;
-      context.body = { ok: true };
+      c.set("result", { kind: "json", status: 200, body: { ok: true } });
     };
     const { agent, calls } = await buildApp({
       handler,
@@ -976,11 +1243,10 @@ describe("src/http/server/idempotency.test", () => {
   it("does not report saturation as an internal fault", async () => {
     const arrived = deferred<void>();
     const gate = deferred<void>();
-    const handler = async (context: Context): Promise<void> => {
+    const handler = async (c: Context<AppEnv>): Promise<void> => {
       arrived.resolve();
       await gate.promise;
-      context.status = 200;
-      context.body = { ok: true };
+      c.set("result", { kind: "json", status: 200, body: { ok: true } });
     };
     const reported: unknown[] = [];
     const { agent } = await buildApp({
@@ -1084,34 +1350,40 @@ describe("src/http/server/idempotency.test", () => {
         { projectId: fixtureIds.project },
       ).documents;
       const recorded: ImportPlanResult[] = [];
-      const dispatch = dispatchMiddleware({
-        handlers: {
-          "plan.import": importPlanHandler({
-            importPlan: (input: ImportPlanInput): ImportPlanResult => {
-              const outcome = importPlan(
-                {
-                  storage,
-                  plan,
-                  blobs,
-                  reader: createPlanReader(),
-                  graph: createPlanGraph(),
-                  ids: createMockIdGenerator({ ulids: [U_REV] }),
-                  clock: createMockClock({
-                    start: 1700000000000,
-                    step: 1000,
-                  }),
-                  events: recordingEvents,
-                },
-                input,
-              );
-              recorded.push(outcome);
-              return outcome;
+      const handle = importPlanHandler({
+        importPlan: (input: ImportPlanInput): ImportPlanResult => {
+          const outcome = importPlan(
+            {
+              storage,
+              plan,
+              blobs,
+              reader: createPlanReader(),
+              graph: createPlanGraph(),
+              ids: createMockIdGenerator({ ulids: [U_REV] }),
+              clock: createMockClock({
+                start: 1700000000000,
+                step: 1000,
+              }),
+              events: recordingEvents,
             },
-          }),
+            input,
+          );
+          recorded.push(outcome);
+          return outcome;
         },
       });
-      const handler = (context: Context): Promise<void> =>
-        dispatch(context, async () => {});
+      const handler = async (c: Context<AppEnv>): Promise<void> => {
+        const match = demand(c, "match");
+        const outcome = await handle({
+          operation: match.operation,
+          parameters: match.parameters,
+          query: {},
+          headers: {},
+          body: optional(c, "body"),
+          actor: demand(c, "actor"),
+        });
+        c.set("result", outcome);
+      };
       const { agent, store } = await buildApp({
         handler,
         resolveActor: (presented) =>
@@ -1288,6 +1560,42 @@ describe("src/http/server/idempotency.test", () => {
         },
       });
       assert.equal(calls(), 0);
+    });
+
+    it("the reserved success try covers only materializeResult, so a capture or settlement failure never enters the materialization catch", async () => {
+      const source = await readFile(
+        new URL("./idempotency.ts", import.meta.url),
+        "utf8",
+      );
+      const nextAt = source.indexOf("await next();");
+      assert.ok(nextAt >= 0, "the reserved branch awaits next()");
+      const entry = source.indexOf('demand(c, "result")');
+      assert.ok(
+        entry > nextAt,
+        "the success branch demands result after next()",
+      );
+      const tryAt = source.indexOf("try {", entry);
+      assert.ok(
+        tryAt > entry,
+        "the reserved success branch enters its own try",
+      );
+      const catchAt = source.indexOf("} catch", tryAt);
+      assert.ok(catchAt > tryAt, "the try closes into its catch");
+      const covered = source.slice(tryAt, catchAt);
+      assert.match(covered, /materializeResult\(/);
+      assert.doesNotMatch(covered, /captureAnswer\(/);
+      assert.doesNotMatch(covered, /\.settle\(/);
+      assert.doesNotMatch(covered, /c\.set\("replay"/);
+
+      const rethrowAt = source.indexOf("throw failure;", catchAt);
+      assert.ok(
+        rethrowAt > catchAt,
+        "the catch preserves the original failure",
+      );
+      const tail = source.slice(rethrowAt + "throw failure;".length);
+      assert.match(tail, /captureAnswer\(/);
+      assert.match(tail, /\.settle\(/);
+      assert.match(tail, /c\.set\("replay"/);
     });
   });
 });

@@ -26,33 +26,36 @@ describe("src/http/server/idempotency-key.test", () => {
   describe("readIdempotencyKey", () => {
     const cases: ReadonlyArray<{
       readonly name: string;
-      readonly rawHeaders: readonly string[];
+      readonly headers: readonly (readonly [string, string])[];
       readonly expect: ReturnType<typeof readIdempotencyKey>;
     }> = [
-      { name: "no headers", rawHeaders: [], expect: { kind: "absent" } },
+      { name: "no headers", headers: [], expect: { kind: "absent" } },
       {
         name: "unrelated header",
-        rawHeaders: ["Host", "a.test"],
+        headers: [["Host", "a.test"]],
         expect: { kind: "absent" },
       },
       {
         name: "canonical case",
-        rawHeaders: ["Idempotency-Key", "abc"],
+        headers: [["Idempotency-Key", "abc"]],
         expect: { kind: "ok", key: "abc" },
       },
       {
         name: "lower case",
-        rawHeaders: ["idempotency-key", "abc"],
+        headers: [["idempotency-key", "abc"]],
         expect: { kind: "ok", key: "abc" },
       },
       {
         name: "upper case",
-        rawHeaders: ["IDEMPOTENCY-KEY", "abc"],
+        headers: [["IDEMPOTENCY-KEY", "abc"]],
         expect: { kind: "ok", key: "abc" },
       },
       {
         name: "repeated header, same case",
-        rawHeaders: ["Idempotency-Key", "a", "Idempotency-Key", "b"],
+        headers: [
+          ["Idempotency-Key", "a"],
+          ["Idempotency-Key", "b"],
+        ],
         expect: {
           kind: "invalid",
           message: "Idempotency-Key was supplied more than once",
@@ -60,7 +63,10 @@ describe("src/http/server/idempotency-key.test", () => {
       },
       {
         name: "repeated header, different case, same value",
-        rawHeaders: ["Idempotency-Key", "a", "idempotency-key", "a"],
+        headers: [
+          ["Idempotency-Key", "a"],
+          ["idempotency-key", "a"],
+        ],
         expect: {
           kind: "invalid",
           message: "Idempotency-Key was supplied more than once",
@@ -68,7 +74,7 @@ describe("src/http/server/idempotency-key.test", () => {
       },
       {
         name: "empty value",
-        rawHeaders: ["Idempotency-Key", ""],
+        headers: [["Idempotency-Key", ""]],
         expect: {
           kind: "invalid",
           message:
@@ -77,17 +83,27 @@ describe("src/http/server/idempotency-key.test", () => {
       },
       {
         name: "interior space is legal",
-        rawHeaders: ["Idempotency-Key", "a b"],
+        headers: [["Idempotency-Key", "a b"]],
         expect: { kind: "ok", key: "a b" },
       },
       {
         name: "free-form importId with a space",
-        rawHeaders: ["Idempotency-Key", "release candidate"],
+        headers: [["Idempotency-Key", "release candidate"]],
         expect: { kind: "ok", key: "release candidate" },
       },
       {
-        name: "leading space",
-        rawHeaders: ["Idempotency-Key", " ab"],
+        name: "leading space reaches the reader trimmed to a valid key",
+        headers: [["Idempotency-Key", " ab"]],
+        expect: { kind: "ok", key: "ab" },
+      },
+      {
+        name: "trailing space reaches the reader trimmed to a valid key",
+        headers: [["Idempotency-Key", "ab "]],
+        expect: { kind: "ok", key: "ab" },
+      },
+      {
+        name: "a single space trims to an empty value",
+        headers: [["Idempotency-Key", " "]],
         expect: {
           kind: "invalid",
           message:
@@ -95,26 +111,8 @@ describe("src/http/server/idempotency-key.test", () => {
         },
       },
       {
-        name: "trailing space",
-        rawHeaders: ["Idempotency-Key", "ab "],
-        expect: {
-          kind: "invalid",
-          message:
-            "Idempotency-Key must be 1 to 255 printable ASCII characters with no leading or trailing space",
-        },
-      },
-      {
-        name: "a single space",
-        rawHeaders: ["Idempotency-Key", " "],
-        expect: {
-          kind: "invalid",
-          message:
-            "Idempotency-Key must be 1 to 255 printable ASCII characters with no leading or trailing space",
-        },
-      },
-      {
-        name: "tab character",
-        rawHeaders: ["Idempotency-Key", "a\tb"],
+        name: "interior tab character",
+        headers: [["Idempotency-Key", "a\tb"]],
         expect: {
           kind: "invalid",
           message:
@@ -123,7 +121,7 @@ describe("src/http/server/idempotency-key.test", () => {
       },
       {
         name: "non-ASCII character",
-        rawHeaders: ["Idempotency-Key", "café"],
+        headers: [["Idempotency-Key", "café"]],
         expect: {
           kind: "invalid",
           message:
@@ -132,17 +130,17 @@ describe("src/http/server/idempotency-key.test", () => {
       },
       {
         name: "single character",
-        rawHeaders: ["Idempotency-Key", "a"],
+        headers: [["Idempotency-Key", "a"]],
         expect: { kind: "ok", key: "a" },
       },
       {
         name: "255 characters",
-        rawHeaders: ["Idempotency-Key", "a".repeat(255)],
+        headers: [["Idempotency-Key", "a".repeat(255)]],
         expect: { kind: "ok", key: "a".repeat(255) },
       },
       {
         name: "256 characters",
-        rawHeaders: ["Idempotency-Key", "a".repeat(256)],
+        headers: [["Idempotency-Key", "a".repeat(256)]],
         expect: {
           kind: "invalid",
           message:
@@ -151,29 +149,43 @@ describe("src/http/server/idempotency-key.test", () => {
       },
       {
         name: "a ULID",
-        rawHeaders: ["Idempotency-Key", "01JQ8Z7G3H4K5M6N7P8Q9R0S1T"],
+        headers: [["Idempotency-Key", "01JQ8Z7G3H4K5M6N7P8Q9R0S1T"]],
         expect: { kind: "ok", key: "01JQ8Z7G3H4K5M6N7P8Q9R0S1T" },
       },
       {
-        name: "a comma inside the value",
-        rawHeaders: ["Idempotency-Key", "a,b"],
-        expect: { kind: "ok", key: "a,b" },
+        name: "a comma inside the value means the key was supplied more than once",
+        headers: [["Idempotency-Key", "a,b"]],
+        expect: {
+          kind: "invalid",
+          message: "Idempotency-Key was supplied more than once",
+        },
       },
       {
         name: "the narrowest legal single characters",
-        rawHeaders: ["Idempotency-Key", "!~"],
+        headers: [["Idempotency-Key", "!~"]],
         expect: { kind: "ok", key: "!~" },
       },
     ];
 
     for (const testCase of cases) {
       it(testCase.name, () => {
-        assert.deepEqual(
-          readIdempotencyKey({ rawHeaders: testCase.rawHeaders }),
-          testCase.expect,
-        );
+        const accumulator = new Headers();
+        for (const [name, value] of testCase.headers) {
+          accumulator.append(name, value);
+        }
+        assert.deepEqual(readIdempotencyKey(accumulator), testCase.expect);
       });
     }
+
+    it("reads the joined duplicate value the way the transport delivers it", () => {
+      const accumulator = new Headers();
+      accumulator.append("Idempotency-Key", "a");
+      accumulator.append("idempotency-key", "b");
+      assert.deepEqual(readIdempotencyKey(accumulator), {
+        kind: "invalid",
+        message: "Idempotency-Key was supplied more than once",
+      });
+    });
   });
 
   describe("fingerprint", () => {

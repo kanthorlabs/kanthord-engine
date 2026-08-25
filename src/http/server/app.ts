@@ -1,24 +1,27 @@
-import bodyParser from "@koa/bodyparser";
-import Koa from "koa";
-import type { Context, Next } from "koa";
+import { Hono } from "hono";
+import type Koa from "koa";
 
 import type { ActorRow } from "../../domain/actor.ts";
 import type { Operation } from "../contract/operation.ts";
 import { registry } from "../contract/registry.ts";
-import { httpError } from "../contract/errors.ts";
 import { authMiddleware } from "./auth.ts";
 import { authorizeMiddleware } from "./authorize.ts";
+import { bodyMiddleware } from "./body.ts";
 import { dispatchMiddleware } from "./dispatch.ts";
-import { envelopeMiddleware } from "./envelope.ts";
+import { errorResponse, errorValue, materializeError } from "./envelope.ts";
 import type { WaitRegistry } from "./event/wait.ts";
+import { headersMiddleware } from "./headers.ts";
 import { hostMiddleware } from "./host.ts";
 import { createIdempotency } from "./idempotency.ts";
 import { defaultIdempotencySettings } from "./idempotency-store.ts";
 import type { IdempotencySettings, Schedule } from "./idempotency-store.ts";
+import { koaFromHono } from "./koa-bridge.ts";
 import { originMiddleware } from "./origin.ts";
 import { preflightMiddleware } from "./preflight.ts";
+import { renderMiddleware } from "./render.ts";
 import { routeMiddleware } from "./route.ts";
-import type { RoutedState } from "./route.ts";
+import { demand } from "./variables.ts";
+import type { AppEnv } from "./variables.ts";
 
 export type TransportSettings = Readonly<{
   token: string;
@@ -89,6 +92,7 @@ export class BindingError extends Error {}
 
 export type App = Readonly<{
   app: Koa;
+  hono: Hono<AppEnv>;
   cancelWaits: () => void;
 }>;
 
@@ -100,64 +104,52 @@ export function createApp(dependencies: AppDependencies): App {
     );
   }
 
-  const app = new Koa();
-  app.use(
-    envelopeMiddleware({ onInternalError: dependencies.onInternalError }),
-  );
-  app.use(
+  const hono = new Hono<AppEnv>();
+  hono.onError((error, c) => {
+    const value = errorValue(error);
+    const materialized = materializeError(value);
+    if (materialized.internal) {
+      dependencies.onInternalError(value);
+    }
+    return errorResponse(materialized, demand(c, "headers"));
+  });
+  hono.use("*", headersMiddleware());
+  hono.use("*", renderMiddleware());
+  hono.use(
+    "*",
     originMiddleware({ allowedOrigins: dependencies.settings.allowedOrigins }),
   );
-  app.use(hostMiddleware({ allowedHosts: dependencies.settings.allowedHosts }));
-  app.use(preflightMiddleware());
-  app.use(
+  hono.use(
+    "*",
+    hostMiddleware({ allowedHosts: dependencies.settings.allowedHosts }),
+  );
+  hono.use("*", preflightMiddleware());
+  hono.use(
+    "*",
     authMiddleware({
       token: dependencies.settings.token,
       resolveActor: dependencies.resolveActor,
     }),
   );
-  app.use(routeMiddleware());
-  app.use(authorizeMiddleware());
-  app.use(bodyParserForHandled(dependencies.handlers));
-  app.use(
+  hono.use("*", routeMiddleware());
+  hono.use("*", authorizeMiddleware());
+  hono.use("*", bodyMiddleware(dependencies.handlers));
+  hono.use(
+    "*",
     createIdempotency({
       settings: dependencies.idempotency ?? defaultIdempotencySettings,
       now: dependencies.now ?? (() => Date.now()),
       schedule: dependencies.schedule ?? systemSchedule,
     }).middleware,
   );
-  app.use(dispatchMiddleware({ handlers: dependencies.handlers }));
+  hono.all("*", dispatchMiddleware({ handlers: dependencies.handlers }));
+
   return {
-    app,
+    app: koaFromHono(hono),
+    hono,
     cancelWaits: () => {
       dependencies.waits.cancelAll();
     },
-  };
-}
-
-function bodyParserForHandled(
-  handlers: Readonly<Record<string, Handler>>,
-): (context: Context, next: Next) => Promise<void> {
-  const parse = bodyParser({ enableTypes: ["json"] });
-  return async (context, next) => {
-    const match = (context.state as RoutedState).match;
-    const hasHandler =
-      match.operation.status !== "stubbed" &&
-      handlers[match.operation.operationId] !== undefined;
-    if (hasHandler) {
-      try {
-        await parse(context, next);
-      } catch (error) {
-        if (error instanceof SyntaxError) {
-          throw httpError(
-            "invalid-request",
-            "the request body is not valid json",
-          );
-        }
-        throw error;
-      }
-      return;
-    }
-    await next();
   };
 }
 

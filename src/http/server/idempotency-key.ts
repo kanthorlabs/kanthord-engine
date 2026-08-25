@@ -12,28 +12,21 @@ export type KeyRead =
   | Readonly<{ kind: "ok"; key: string }>
   | Readonly<{ kind: "invalid"; message: string }>;
 
-export type RawHeaderSource = Readonly<{ rawHeaders: readonly string[] }>;
+export function readIdempotencyKey(headers: Headers): KeyRead {
+  const value = headers.get(IDEMPOTENCY_HEADER);
 
-export function readIdempotencyKey(source: RawHeaderSource): KeyRead {
-  const values: string[] = [];
-  for (let i = 0; i < source.rawHeaders.length; i += 2) {
-    if (source.rawHeaders[i]?.toLowerCase() === IDEMPOTENCY_HEADER) {
-      values.push(source.rawHeaders[i + 1] ?? "");
-    }
-  }
-
-  if (values.length === 0) {
+  if (value === null) {
     return { kind: "absent" };
   }
 
-  if (values.length > 1) {
+  if (value.includes(",")) {
     return {
       kind: "invalid",
       message: "Idempotency-Key was supplied more than once",
     };
   }
 
-  if (!KEY_GRAMMAR.test(values[0]!)) {
+  if (!KEY_GRAMMAR.test(value)) {
     return {
       kind: "invalid",
       message:
@@ -41,7 +34,7 @@ export function readIdempotencyKey(source: RawHeaderSource): KeyRead {
     };
   }
 
-  return { kind: "ok", key: values[0]! };
+  return { kind: "ok", key: value };
 }
 
 export type FingerprintInput = Readonly<{

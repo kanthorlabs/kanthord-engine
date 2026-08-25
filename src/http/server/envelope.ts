@@ -1,10 +1,4 @@
-import type { Context, Next } from "koa";
-
 import { HttpError, errorEnvelope, httpError } from "../contract/errors.ts";
-
-export type EnvelopeDependencies = Readonly<{
-  onInternalError: (error: unknown) => void;
-}>;
 
 export type Materialized = Readonly<{
   status: number;
@@ -27,19 +21,28 @@ export function materializeError(error: unknown): Materialized {
   };
 }
 
-export function envelopeMiddleware(
-  dependencies: EnvelopeDependencies,
-): (context: Context, next: Next) => Promise<void> {
-  return async (context, next) => {
-    try {
-      await next();
-    } catch (error: unknown) {
-      const materialized = materializeError(error);
-      if (materialized.internal) {
-        dependencies.onInternalError(error);
-      }
-      context.status = materialized.status;
-      context.body = materialized.body;
-    }
-  };
+export function errorResponse(
+  materialized: Materialized,
+  headers: Headers,
+): Response {
+  if (!headers.has("content-type")) {
+    headers.set("content-type", "application/json; charset=utf-8");
+  }
+  return new Response(JSON.stringify(materialized.body), {
+    status: materialized.status,
+    headers,
+  });
+}
+
+export class ThrownValueError extends Error {
+  readonly value: unknown;
+
+  constructor(value: unknown) {
+    super("a non-Error value was thrown");
+    this.value = value;
+  }
+}
+
+export function errorValue(error: Error): unknown {
+  return error instanceof ThrownValueError ? error.value : error;
 }

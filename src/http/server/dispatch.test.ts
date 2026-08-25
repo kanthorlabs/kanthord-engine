@@ -3,13 +3,18 @@ import assert from "node:assert/strict";
 import { request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import Koa from "koa";
+import { Hono } from "hono";
+import type Koa from "koa";
 
-import { envelopeMiddleware } from "./envelope.ts";
 import { authMiddleware } from "./auth.ts";
-import type { AuthenticatedState } from "./auth.ts";
 import { routeMiddleware } from "./route.ts";
 import { dispatchMiddleware } from "./dispatch.ts";
+import { headersMiddleware } from "./headers.ts";
+import { renderMiddleware } from "./render.ts";
+import { errorValue, errorResponse, materializeError } from "./envelope.ts";
+import { demand } from "./variables.ts";
+import type { AppEnv } from "./variables.ts";
+import { koaFromHono } from "./koa-bridge.ts";
 import { createApp, BindingError } from "./app.ts";
 import type { Handler, HandlerContext, TransportSettings } from "./app.ts";
 import { noopWaits } from "../../../test/helpers/wait-registry.ts";
@@ -88,16 +93,34 @@ async function rawResponse(
   });
 }
 
-function directDispatchApp(handlers: Readonly<Record<string, Handler>>): Koa {
-  const app = new Koa();
-  app.use(envelopeMiddleware({ onInternalError: () => {} }));
-  app.use(async (context, next) => {
-    (context.state as { actor: ActorRow }).actor = BOOTSTRAP_ACTOR_FIXTURE;
+function honoDispatchApp(
+  handlers: Readonly<Record<string, Handler>>,
+  options: Readonly<{
+    onInternalError?: (value: unknown) => void;
+    observe?: (headers: Headers) => void;
+  }> = {},
+): Hono<AppEnv> {
+  const report = options.onInternalError ?? (() => {});
+  const hono = new Hono<AppEnv>();
+  hono.onError((error, c) => {
+    const value = errorValue(error);
+    const materialized = materializeError(value);
+    if (materialized.internal) report(value);
+    return errorResponse(materialized, demand(c, "headers"));
+  });
+  hono.use("*", headersMiddleware());
+  hono.use("*", renderMiddleware());
+  hono.use("*", async (c, next) => {
+    await next();
+    if (options.observe !== undefined) options.observe(demand(c, "headers"));
+  });
+  hono.use("*", async (c, next) => {
+    c.set("actor", BOOTSTRAP_ACTOR_FIXTURE);
     await next();
   });
-  app.use(routeMiddleware());
-  app.use(dispatchMiddleware({ handlers }));
-  return app;
+  hono.use("*", routeMiddleware());
+  hono.all("*", dispatchMiddleware({ handlers }));
+  return hono;
 }
 
 describe("src/http/server/dispatch.test", () => {
@@ -115,21 +138,14 @@ describe("src/http/server/dispatch.test", () => {
 
   it("a stubbed route never reaches a handler bound anyway", async () => {
     let calls = 0;
-    const app = new Koa();
-    app.use(envelopeMiddleware({ onInternalError: () => {} }));
-    app.use(routeMiddleware());
-    app.use(
-      dispatchMiddleware({
-        handlers: {
-          "node.abandon": () => {
-            calls += 1;
-            return { kind: "json", status: 200, body: { ok: true } };
-          },
-        },
-      }),
-    );
+    const hono = honoDispatchApp({
+      "node.abandon": () => {
+        calls += 1;
+        return { kind: "json", status: 200, body: { ok: true } };
+      },
+    });
     const response = await (
-      await loopbackAgent(app)
+      await loopbackAgent(koaFromHono(hono))
     ).post("/v1/node/task_01/abandon");
     assert.equal(response.status, 501);
     assert.deepEqual(response.body, {
@@ -315,20 +331,27 @@ describe("src/http/server/dispatch.test", () => {
     assert.equal(recorded?.operation.operationId, "node.show");
   });
 
-  it("a handler receives context.actor equal to the actor on context.state", async () => {
-    let stateActor: ActorRow | undefined;
+  it("a handler receives context.actor equal to the actor on the actor variable", async () => {
     let recorded: HandlerContext | undefined;
-    const app = new Koa();
-    app.use(envelopeMiddleware({ onInternalError: () => {} }));
-    app.use(
+    let variableActor: ActorRow | undefined;
+    const hono = new Hono<AppEnv>();
+    hono.onError((error, c) => {
+      const materialized = materializeError(errorValue(error));
+      return errorResponse(materialized, demand(c, "headers"));
+    });
+    hono.use("*", headersMiddleware());
+    hono.use("*", renderMiddleware());
+    hono.use(
+      "*",
       authMiddleware({ token: "test-token", resolveActor: () => harnessActor }),
     );
-    app.use(async (context, next) => {
-      stateActor = (context.state as AuthenticatedState).actor;
+    hono.use("*", async (c, next) => {
+      variableActor = demand(c, "actor");
       await next();
     });
-    app.use(routeMiddleware());
-    app.use(
+    hono.use("*", routeMiddleware());
+    hono.all(
+      "*",
       dispatchMiddleware({
         handlers: {
           "system.health": (context) => {
@@ -339,13 +362,13 @@ describe("src/http/server/dispatch.test", () => {
       }),
     );
     const response = await (
-      await loopbackAgent(app)
+      await loopbackAgent(koaFromHono(hono))
     )
       .get("/v1/health")
       .set("Authorization", "Bearer test-token");
     assert.equal(response.status, 200);
-    assert.deepEqual(stateActor, harnessActor);
-    assert.deepEqual(recorded?.actor, stateActor);
+    assert.deepEqual(variableActor, harnessActor);
+    assert.deepEqual(recorded?.actor, variableActor);
   });
 
   it("a handler receives a parsed JSON body", async () => {
@@ -423,21 +446,37 @@ describe("src/http/server/dispatch.test", () => {
     assert.equal(response.headers["content-type"], "application/vnd.test+json");
   });
 
-  it("a handler's headers are emitted in bytewise order regardless of insertion order", async () => {
-    const app = directDispatchApp({
-      "system.health": () => ({
-        kind: "json",
-        status: 200,
-        body: "ok",
-        headers: { X_c: "underscore", "X-a": "hyphen", "X-B": "capital" },
-      }),
-    });
-    const response = await rawResponse(app, "GET", "/v1/health");
-    assert.equal(response.status, 200);
-    const emitted = response.rawHeaders.filter((value) =>
-      ["X_c", "X-a", "X-B"].includes(value),
+  it("a handler's headers are accumulated in bytewise order regardless of insertion order", async () => {
+    let entries: readonly (readonly [string, string])[] = [];
+    const hono = honoDispatchApp(
+      {
+        "system.health": () => ({
+          kind: "json",
+          status: 200,
+          body: "ok",
+          headers: {
+            X_c: "underscore",
+            "X-a": "lower-a",
+            "X-B": "b",
+            "X-A": "upper-A",
+          },
+        }),
+      },
+      {
+        observe: (headers) => {
+          entries = [...headers.entries()];
+        },
+      },
     );
-    assert.deepEqual(emitted, ["X-B", "X-a", "X_c"]);
+    const response = await (
+      await loopbackAgent(koaFromHono(hono))
+    ).get("/v1/health");
+    assert.equal(response.status, 200);
+    assert.deepEqual(entries, [
+      ["x-a", "upper-A, lower-a"],
+      ["x-b", "b"],
+      ["x_c", "underscore"],
+    ]);
   });
 
   it("a blob.show bytes result crosses the boundary byte-exact with the registry media type", async () => {
@@ -472,10 +511,10 @@ describe("src/http/server/dispatch.test", () => {
   });
 
   it("an empty result answers 204 with zero body bytes and no content-type or content-length header", async () => {
-    const app = directDispatchApp({
+    const hono = honoDispatchApp({
       "system.status": () => ({ kind: "empty", status: 204 }),
     });
-    const response = await rawResponse(app, "GET", "/v1/status");
+    const response = await rawResponse(koaFromHono(hono), "GET", "/v1/status");
     assert.equal(response.status, 204);
     assert.equal(response.body.length, 0);
     const names = response.rawHeaders
@@ -486,10 +525,10 @@ describe("src/http/server/dispatch.test", () => {
   });
 
   it("an empty result answers 304 with zero body bytes and no content-type or content-length header", async () => {
-    const app = directDispatchApp({
+    const hono = honoDispatchApp({
       "system.status": () => ({ kind: "empty", status: 304 }),
     });
-    const response = await rawResponse(app, "GET", "/v1/status");
+    const response = await rawResponse(koaFromHono(hono), "GET", "/v1/status");
     assert.equal(response.status, 304);
     assert.equal(response.body.length, 0);
     const names = response.rawHeaders
@@ -500,14 +539,14 @@ describe("src/http/server/dispatch.test", () => {
   });
 
   it("a bytes result for an operation with no responseMedia answers the internal-error envelope naming the operation id", async () => {
-    const app = directDispatchApp({
+    const hono = honoDispatchApp({
       "system.status": () => ({
         kind: "bytes",
         status: 200,
         bytes: Uint8Array.from([1, 2, 3]),
       }),
     });
-    const response = await rawResponse(app, "GET", "/v1/status");
+    const response = await rawResponse(koaFromHono(hono), "GET", "/v1/status");
     assert.equal(response.status, 500);
     assert.deepEqual(JSON.parse(response.body.toString("utf8")), {
       error: {
@@ -604,6 +643,36 @@ describe("src/http/server/dispatch.test", () => {
     assert.equal(app.internalErrors().length, 1);
     assert.equal(app.internalErrors()[0], boom);
   });
+
+  for (const row of [
+    { label: "a string", thrown: "failure" as unknown },
+    { label: "undefined", thrown: undefined as unknown },
+  ]) {
+    it(`a handler that throws ${row.label} answers the generic 500 envelope and reports the exact thrown value`, async () => {
+      const reported: unknown[] = [];
+      const hono = honoDispatchApp(
+        {
+          "system.status": () => {
+            throw row.thrown;
+          },
+        },
+        {
+          onInternalError: (value) => {
+            reported.push(value);
+          },
+        },
+      );
+      const response = await (
+        await loopbackAgent(koaFromHono(hono))
+      ).get("/v1/status");
+      assert.equal(response.status, 500);
+      assert.deepEqual(response.body, {
+        error: { code: "internal-error", message: "internal error" },
+      });
+      assert.equal(reported.length, 1);
+      assert.equal(reported[0], row.thrown);
+    });
+  }
 
   async function buildWitnessApp(
     temporary: ReturnType<typeof createMigratedStorage>,

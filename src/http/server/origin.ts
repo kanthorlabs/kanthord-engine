@@ -1,6 +1,8 @@
-import type { Context, Next } from "koa";
+import type { MiddlewareHandler } from "hono";
 
 import { httpError } from "../contract/errors.ts";
+import { demand } from "./variables.ts";
+import type { AppEnv } from "./variables.ts";
 
 const EXPOSED_HEADERS = "etag, accept-ranges, content-range";
 
@@ -8,14 +10,12 @@ export type OriginDependencies = Readonly<{
   allowedOrigins: readonly string[];
 }>;
 
-export type OriginState = Readonly<{ allowedOrigin: string | undefined }>;
-
 export function originMiddleware(
   dependencies: OriginDependencies,
-): (context: Context, next: Next) => Promise<void> {
+): MiddlewareHandler<AppEnv> {
   const allowed = new Set(dependencies.allowedOrigins);
-  return async (context, next) => {
-    const origin = context.request.headers.origin;
+  return async (c, next) => {
+    const origin = c.req.header("origin");
     if (origin !== undefined) {
       if (!allowed.has(origin)) {
         throw httpError(
@@ -23,16 +23,14 @@ export function originMiddleware(
           `the Origin header ${origin} is outside the allow list`,
         );
       }
-      context.set("Access-Control-Allow-Origin", origin);
-      if (context.method !== "OPTIONS") {
-        context.set("Access-Control-Expose-Headers", EXPOSED_HEADERS);
+      const headers = demand(c, "headers");
+      headers.set("Access-Control-Allow-Origin", origin);
+      if (c.req.method !== "OPTIONS") {
+        headers.set("Access-Control-Expose-Headers", EXPOSED_HEADERS);
       }
-      context.state.allowedOrigin = origin;
+      c.set("allowedOrigin", origin);
     }
-    try {
-      await next();
-    } finally {
-      context.vary("Origin");
-    }
+    demand(c, "headers").append("vary", "Origin");
+    await next();
   };
 }

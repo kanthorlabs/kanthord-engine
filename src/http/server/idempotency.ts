@@ -1,16 +1,10 @@
-import type { Context, Next } from "koa";
+import type { Context, MiddlewareHandler, Next } from "hono";
 
 import { httpError } from "../contract/errors.ts";
 import { idempotencyOf } from "../contract/operation.ts";
-import type { AuthenticatedState } from "./auth.ts";
-import type { RoutedState } from "./route.ts";
-import { materializeError } from "./envelope.ts";
+import { errorValue, materializeError } from "./envelope.ts";
 import { classifyOutcome } from "./idempotency-record.ts";
-import {
-  captureAnswer,
-  headerSnapshot,
-  applyAnswer,
-} from "./idempotency-response.ts";
+import { captureAnswer, headerSnapshot } from "./idempotency-response.ts";
 import {
   fingerprint,
   readIdempotencyKey,
@@ -18,6 +12,10 @@ import {
 } from "./idempotency-key.ts";
 import { IdempotencyStore } from "./idempotency-store.ts";
 import type { IdempotencySettings, Schedule } from "./idempotency-store.ts";
+import { materializeResult } from "./render.ts";
+import type { MaterializedResult } from "./render.ts";
+import { demand, optional } from "./variables.ts";
+import type { AppEnv } from "./variables.ts";
 
 export type IdempotencyDependencies = Readonly<{
   settings: IdempotencySettings;
@@ -26,7 +24,7 @@ export type IdempotencyDependencies = Readonly<{
 }>;
 
 export type Idempotency = Readonly<{
-  middleware: (context: Context, next: Next) => Promise<void>;
+  middleware: MiddlewareHandler<AppEnv>;
   store: IdempotencyStore;
 }>;
 
@@ -39,9 +37,8 @@ export function createIdempotency(
     schedule: dependencies.schedule,
   });
 
-  const middleware = async (context: Context, next: Next): Promise<void> => {
-    const match = (context.state as RoutedState).match;
-    const read = readIdempotencyKey(context.req);
+  const middleware = async (c: Context<AppEnv>, next: Next): Promise<void> => {
+    const read = readIdempotencyKey(c.req.raw.headers);
 
     if (read.kind === "invalid") {
       throw httpError("invalid-request", read.message);
@@ -52,6 +49,7 @@ export function createIdempotency(
       return;
     }
 
+    const match = demand(c, "match");
     const policy = idempotencyOf(match.operation);
 
     if (policy === "none") {
@@ -60,7 +58,7 @@ export function createIdempotency(
     }
 
     if (policy === "durable") {
-      const body = context.request.body;
+      const body = optional(c, "body");
       const importId =
         typeof body === "object" && body !== null
           ? (body as Record<string, unknown>).importId
@@ -82,16 +80,17 @@ export function createIdempotency(
       return;
     }
 
+    const url = new URL(c.req.url);
     const print = fingerprint({
-      method: context.method,
-      path: context.path,
-      query: context.querystring,
-      rawBody: context.request.rawBody ?? "",
+      method: c.req.method,
+      path: url.pathname,
+      query: url.search.slice(1),
+      rawBody: optional(c, "rawBody") ?? "",
     });
     const key = recordKey({
       operationId: match.operation.operationId,
       parameters: match.parameters,
-      actorId: (context.state as AuthenticatedState).actor.id,
+      actorId: demand(c, "actor").id,
       key: read.key,
     });
     const outcome = store.reserve(key, print);
@@ -112,7 +111,7 @@ export function createIdempotency(
     }
 
     if (outcome.kind === "replay") {
-      applyAnswer(context, outcome.answer);
+      c.set("replay", outcome.answer);
       return;
     }
 
@@ -124,34 +123,21 @@ export function createIdempotency(
           "the original request under this Idempotency-Key is still running",
         );
       }
-      applyAnswer(context, joined.answer);
+      c.set("replay", joined.answer);
       return;
     }
 
-    const before = headerSnapshot(context);
-    try {
-      await next();
+    const headers = demand(c, "headers");
+    const before = headerSnapshot(headers);
+    await next();
+
+    if (c.error !== undefined) {
+      const materialized = materializeError(errorValue(c.error));
       const answer = captureAnswer(
-        context,
-        before,
-        context.status,
-        context.body,
-      );
-      outcome.settle(
-        answer,
-        classifyOutcome({
-          replayable: match.operation.replayable,
-          status: context.status,
-          internal: false,
-        }),
-      );
-    } catch (error: unknown) {
-      const materialized = materializeError(error);
-      const answer = captureAnswer(
-        context,
+        headers,
         before,
         materialized.status,
-        materialized.body,
+        JSON.stringify(materialized.body),
       );
       outcome.settle(
         answer,
@@ -161,8 +147,49 @@ export function createIdempotency(
           internal: materialized.internal,
         }),
       );
-      throw error;
+      return;
     }
+
+    const result = demand(c, "result");
+    let materialized: MaterializedResult;
+    try {
+      materialized = materializeResult(result, match.operation, headers);
+    } catch (failure: unknown) {
+      const refused = materializeError(failure);
+      if (!headers.has("content-type")) {
+        headers.set("content-type", "application/json; charset=utf-8");
+      }
+      const answer = captureAnswer(
+        headers,
+        before,
+        refused.status,
+        JSON.stringify(refused.body),
+      );
+      outcome.settle(
+        answer,
+        classifyOutcome({
+          replayable: match.operation.replayable,
+          status: refused.status,
+          internal: refused.internal,
+        }),
+      );
+      throw failure;
+    }
+    const answer = captureAnswer(
+      headers,
+      before,
+      materialized.status,
+      materialized.body,
+    );
+    outcome.settle(
+      answer,
+      classifyOutcome({
+        replayable: match.operation.replayable,
+        status: materialized.status,
+        internal: false,
+      }),
+    );
+    c.set("replay", answer);
   };
 
   return { middleware, store };
