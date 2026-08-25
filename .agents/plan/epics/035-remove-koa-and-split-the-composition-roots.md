@@ -106,9 +106,12 @@ Author with `/author`. The sequence below is the dependency order; each story is
    `src/http/server/idempotency-key.ts` replace `Buffer.byteLength` at `:55` with `byteLength`,
    `Buffer.compare` at `:69` with `compareBytewise`, and `createHash` at `:57` with
    `crypto.subtle.digest("SHA-256", …)`. `fingerprint` returns `Promise<string>`. Await it at
-   `src/http/server/idempotency.ts:85`. Delete the `node:buffer` and `node:crypto` imports from
-   `idempotency-key.ts`. EPIC 031 already removed `node:buffer` from `dispatch.ts`, `query.ts`,
-   `single.ts`, `invalid-request.ts` and `idempotency-response.ts`, so this story touches neither.
+   `src/http/server/idempotency.ts:85`. Delete the `node:crypto` import from `idempotency-key.ts`;
+   it carries no `node:buffer` import, because every `Buffer` use there is the global. Replace the
+   six global `Buffer.byteLength` calls at `src/http/server/idempotency-store.ts:61-62`, `:98-99`
+   and `:112-113` with `byteLength`. EPIC 031 already removed `node:buffer` from `dispatch.ts`,
+   `query.ts`, `single.ts`, `invalid-request.ts` and `idempotency-response.ts`, so this story
+   touches neither.
 3. **The core-purity test fails on a `node:` import.** Add `src/http/server/core-purity.test.ts`. It
    reads every `.ts` file under `src/http/server/`, skips `runtime/` and skips `*.test.ts`, and
    asserts no file matches an import from a `node:` specifier. The assertion message names the file
