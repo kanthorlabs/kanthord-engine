@@ -21,8 +21,14 @@ Today one harness serves every transport test. `test/helpers/agent.ts` opens a r
 for each application under test, and `test/helpers/app.ts` routes 48 test files through that same
 socket. 57 test files therefore open a socket through that helper to assert a JSON body.
 
-After this epic, 5 test files open a socket through that helper. The other 53 run on the hono Fetch
+After this epic, 7 test files open a socket through that helper. The other 53 run on the hono Fetch
 pipeline with no socket and no port.
+
+The before count is 57 and the after count is 60, and the difference of 3 is named.
+`src/http/server/app.parity-path.test.ts` and `src/http/server/app.handler-result.test.ts` reach the
+harness through `createTestApp` and appeared in no table of the first draft; the recompute grep of
+the Verification gate finds them, and this epic now classifies both. `src/http/server/shutdown-socket.test.ts`
+is the file story 6 creates. 57 plus those 2 plus that 1 is 60.
 
 Every count in this epic counts a file that opens a socket **through
 `test/helpers/agent.ts`**. Other test files open a socket by other means, and this epic changes
@@ -31,10 +37,10 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
 `test/helpers/cli.test.ts`, `test/helpers/daemon.test.ts`, `test/helpers/port.test.ts`,
 `test/helpers/remote/http.test.ts` and `test/helpers/remote/ssh.test.ts`.
 
-| Level | Entry point        | What it proves                                                               | Files |
-| ----- | ------------------ | ---------------------------------------------------------------------------- | ----- |
-| 1     | `hono.request()`   | middleware, routing, authentication, CORS, preflight, idempotency, envelopes | 53    |
-| 2     | a listening socket | node header handling, ephemeral ports, wire bytes, graceful shutdown         | 5     |
+| Level | Entry point        | What it proves                                                                         | Files |
+| ----- | ------------------ | -------------------------------------------------------------------------------------- | ----- |
+| 1     | `hono.request()`   | middleware, routing, authentication, CORS, preflight, idempotency, envelopes           | 53    |
+| 2     | a listening socket | node header handling, ephemeral ports, wire bytes, graceful shutdown, `content-length` | 7     |
 
 ## Non-goals
 
@@ -73,7 +79,7 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
 
 - **`supertest` stays.** An earlier plan removed it. That was an error. Level 2 needs a real client
   over a real socket, and a Fetch-level harness proves nothing about the wire. `supertest` and
-  `@types/supertest` stay dev dependencies for the 5 level-2 files.
+  `@types/supertest` stay dev dependencies for the 7 level-2 files.
 
 - **A migration moves a file, never a test.** A file whose assertions are all status, headers and
   parsed body moves to level 1. A file with one assertion about wire behaviour stays whole at level 2. Splitting a file to move three cases adds a file and buys nothing, and it puts the unchanged
@@ -101,8 +107,9 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
 - **`fetchAgent` returns the request-builder shape the tree already calls.** `test/helpers/app.ts`
   exposes `get`, `post`, `put` and `del`, each chained with `.set(name, value)` and `.send(body)`,
   and each awaited to a response. `fetchAgent` returns that same shape over `hono.request()`. That
-  is why 44 files change zero lines: `createTestApp` swaps one call, and every caller keeps its
-  syntax.
+  is why 45 of the 46 group-A files change zero lines: `createTestApp` swaps one call, and every
+  caller keeps its syntax. `src/http/server/app.parity-path.test.ts` is the one exception, and the
+  group-A bullet of the Verification gate states its exact budget.
 
   The `Agent` contract is exact. Every member below is present because a migrated file calls it, and
   the citation names the caller:
@@ -116,7 +123,7 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
   }>;
 
   export type AgentRequest = Promise<AgentResponse> & {
-    set(name: string, value: string): AgentRequest;
+    set(name: string, value: string | readonly string[]): AgentRequest;
     send(body: unknown): AgentRequest;
     buffer(): AgentRequest;
   };
@@ -139,8 +146,10 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
   | `buffer()`                   | `src/http/server/dispatch.test.ts:371` asserts a binary body at level 1                                                                                                                                                                                                       |
   | `body: any`                  | 450 level-1 reads take a property off `body`, for example `src/http/server/idempotency-key.test.ts:417` reads `response.body.raw`. `unknown` fails every one of them. `eslint.config.js` enables no typed-lint preset, so it bans no `any`, and 10 test files use `any` today |
   | `Promise`, not `PromiseLike` | `src/http/server/event/list-event.test.ts:102` and `:114` declare the parameter `pending: Promise<unknown>` and pass a request into it                                                                                                                                        |
+  | `set` takes an array         | `src/http/server/app.parity-path.test.ts:41` and `:49` send one header name twice. Supertest accepts an array, so the call site casts with `as unknown as string`. The array form is now declared, and story 3 removes both casts                                             |
 
-  Six rules complete the contract, and each one is pinned by a story-2 case.
+  Seven rules complete the contract. Rules 1 to 6 are pinned by a story-2 case, and rule 7 is pinned
+  by `src/http/server/app.parity-path.test.ts:44` in story 3.
 
   1. `headers` keys are lower-case. A duplicate header joins with `", "`, `set-cookie` included,
      because a Fetch `Headers` cannot report two values through this shape. The join is explicit
@@ -162,6 +171,12 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
      one handler call.
   6. `.buffer()` returns the same request and changes nothing. `body` already holds a `Buffer` for a
      non-JSON content type, per rule 2.
+  7. **`.set(name, value)` accepts an array, and it appends one request header value per element.**
+     A repeated `.set` on one name replaces the prior value, which is the supertest behaviour. The
+     request builder therefore holds a Fetch `Headers`, never a `Map`. `Headers.set` stringifies an
+     array to `one,two`, so the array case appends each element instead: `Headers.append` twice on
+     one name reads back as `one, two`. That join is what EPIC 030 row P18 pins, and it is the only
+     reason the array form exists.
 
   `AgentRequest` is an object literal carrying `then`, `catch`, `finally` and
   `[Symbol.toStringTag]`, which is structurally assignable to `Promise<AgentResponse>`. It is not a
@@ -169,7 +184,7 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
 
 - **`createTestApp` runs at level 1, so it needs a level-2 twin.**
   `src/http/server/blob/show-blob.test.ts` reaches the socket only through `createTestApp`, and it is
-  a level-2 file. Story 3 would therefore demote it in silence and leave the socket budget at 4.
+  a level-2 file. Story 3 would therefore demote it in silence and leave the socket budget at 5.
   `test/helpers/app.ts` exports a second factory, `createSocketTestApp(overrides?)`, that builds the
   same application from the same overrides and returns the same `TestApp`, backed by
   `loopbackAgent(app)` over the `app` half instead of `fetchAgent(hono)` over the `hono` half.
@@ -183,20 +198,30 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
   member. Story 3 proves that by typecheck.
 
 - **Hermeticity is stronger after this epic.** The count of test files that open a listening socket
-  through `test/helpers/agent.ts` falls from 57 to 5. Story 7 asserts the exact list of those 5
+  through `test/helpers/agent.ts` falls from 57 to 7. Story 7 asserts the exact list of those 7
   files, so the split cannot regress in silence.
 
-- **Four existing files stay at level 2, and one is new.**
+- **Six existing files stay at level 2, and one is new.**
 
-| File                                      | Level | Reason                                                                                                                                 |
-| ----------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/helpers/agent.test.ts`              | 2     | it covers both helpers, so it asserts the loopback bind address, the port, the `WeakMap` cache and two `set-cookie` values on the wire |
-| `src/http/server/host.test.ts`            | 2     | one case asserts the Host header `127.0.0.1:<port>` that ephemeral-port resolution produces                                            |
-| `src/http/server/idempotency.test.ts`     | 2     | one case sends `Idempotency-Key` twice over a raw socket, which the Fetch `Headers` type forbids                                       |
-| `src/http/server/blob/show-blob.test.ts`  | 2     | it asserts 206 range bodies as exact `Buffer` values on the wire, and it is the one caller of `createSocketTestApp`                    |
-| `src/http/server/shutdown-socket.test.ts` | 2     | new: graceful shutdown with an open connection                                                                                         |
+| File                                         | Level | Reason                                                                                                                                                                            |
+| -------------------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/helpers/agent.test.ts`                 | 2     | it covers both helpers, so it asserts the loopback bind address, the port, the `WeakMap` cache and two `set-cookie` values on the wire                                            |
+| `src/http/server/host.test.ts`               | 2     | one case asserts the Host header `127.0.0.1:<port>` that ephemeral-port resolution produces                                                                                       |
+| `src/http/server/idempotency.test.ts`        | 2     | one case sends `Idempotency-Key` twice over a raw socket, which the Fetch `Headers` type forbids                                                                                  |
+| `src/http/server/blob/show-blob.test.ts`     | 2     | it asserts 206 range bodies as exact `Buffer` values on the wire, and it is the one caller of `createSocketTestApp`                                                               |
+| `src/http/server/shutdown-socket.test.ts`    | 2     | new: graceful shutdown with an open connection                                                                                                                                    |
+| `src/http/server/app.handler-result.test.ts` | 2     | it asserts an exact `content-length`, which the node adapter writes on the socket and the Fetch pipeline never sets                                                               |
+| `src/http/server/app.test.ts`                | 2     | one case sends a raw HTTP/1.0 request with no Host header through `loopbackServer`, and `hono.request()` always builds an authority-carrying URL, so no level-1 expression exists |
 
-- **The level-2 allow list is the normative data, and the level-1 set is derived.** The 5 rows above
+- **`content-length` is a socket artifact, and that is why the last row exists.** `render.ts` builds
+  `new Response(body, { status, headers })`. In Node 24 that constructor sets no `content-length`,
+  so the header appears only when `@hono/node-server` writes the answer. EPIC 030 rows P21 to P25
+  bind to `src/http/server/app.handler-result.test.ts`, and P24 names an exact `Content-Length`.
+  That file therefore runs at level 2 as one file. Do not split it: a split forks one EPIC 030
+  inventory row across two paths. The cost is measured and accepted — the file holds 10 cases but
+  only 4 `createTestApp` call sites, so level 2 opens 4 servers.
+
+- **The level-2 allow list is the normative data, and the level-1 set is derived.** The 7 rows above
   are a closed set that this epic owns. Level 1 is then every other test file that reaches the
   transport through `createTestApp` or `fetchAgent`. Story 7 asserts the allow list, never the
   derived set.
@@ -211,9 +236,30 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
   the membership with the two commands of the Verification gate. A group row that no longer matches
   is not a defect of the story.
 
-- **The 53 level-1 files, in three groups.** Group A is the 44 files that reach the harness only
-  through `createTestApp`. Group B is the 6 files that call `loopbackAgent` and never call
-  `createTestApp`. Group C is the 3 files that call both.
+- **The 53 level-1 files, in three groups.** Group A is the 46 files that reach the harness only
+  through `createTestApp`. Group B is the 4 files that call the direct level-1 entry point and never
+  call `createTestApp`. Group C is the 3 files that call both. The three groups sum to 53, and 53
+  plus the 7 level-2 rows is the 60 files that reach the harness at all.
+
+- **Two group-A files carry no table row, and two group-B rows no longer reach the harness.** The
+  table below is the inventory of the first draft. `src/http/server/app.parity-body.test.ts` and
+  `src/http/server/app.parity-cors.test.ts` import `createTestApp` and appear in no row. Both are
+  group A and both change zero lines, so the group-A rule covers them without a row.
+  `src/http/server/envelope.test.ts` and `src/http/server/idempotency-response.test.ts` carry a
+  group-B row, and EPIC 032 already left both reaching no harness at all, so neither takes an edit
+  here. That is the drift the recompute rule anticipates, and it is not a defect of a story.
+
+- **`src/http/server/app.parity-path.test.ts` is the one group-A file that changes lines.** Its five
+  assertions all read the request object the handler receives, which is a level-1 concern, so the
+  file stays at level 1. Its P19 header-name literals name `accept-encoding` and `connection`, which
+  the level-2 client supplies and the level-1 client does not. EPIC 030 states the transfer: "EPIC
+  033 replaces the harness, so EPIC 033 updates the literal." Story 3 updates the three P19 arrays
+  at `src/http/server/app.parity-path.test.ts:53`, `:65` and `:74`, and each drops exactly
+  `accept-encoding` and `connection`. Two case names count the header names the case asserts, so
+  story 3 rewrites both in place: `five` becomes `three`, and `four` becomes `two`. A case name that
+  states a count the case no longer asserts is a defect, so the name follows the array. The budget
+  is 3 assertion expressions, 6 deleted expectation lines and 2 rewritten case names. Line 44 keeps
+  `one, two` and does not change.
 
 | Group | File                                                           | Reason for level 1                               |
 | ----- | -------------------------------------------------------------- | ------------------------------------------------ |
@@ -224,9 +270,9 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
 | B     | `src/http/server/origin.test.ts`                               | CORS response headers only                       |
 | B     | `src/http/server/preflight.test.ts`                            | preflight response headers only                  |
 | C     | `src/http/server/authorize.test.ts`                            | status and error envelope only                   |
-| C     | `src/http/server/dispatch.test.ts`                             | status and JSON body only                        |
+| C     | `src/http/server/dispatch.test.ts`                             | status, headers and JSON body only               |
 | C     | `src/http/server/route.test.ts`                                | status, routing and error envelope only          |
-| A     | `src/http/server/app.test.ts`                                  | status and JSON body only                        |
+| A     | `src/http/server/app.parity-path.test.ts`                      | the request object the handler receives          |
 | A     | `src/http/server/actor/list-actor.test.ts`                     | status and JSON body only                        |
 | A     | `src/http/server/actor/register-actor.test.ts`                 | status and JSON body only                        |
 | A     | `src/http/server/actor/registration.test.ts`                   | status and JSON body only                        |
@@ -314,12 +360,28 @@ story that adds a case names the exact count, because the Verification gate comp
    `TestApp.raw` to `Agent` and the four method return types to `AgentRequest`, in place of the
    `supertest` types. Update the `drive` and `driveRaw` return types to `AgentRequest`. Delete the
    `import type supertest from "supertest"` line. `TestApp.raw` must expose `options` and `delete`,
-   because `src/http/server/app.test.ts:224` calls `app.raw.options`. Group A changes zero lines.
+   because `src/http/server/app.test.ts:224` calls `app.raw.options`. Group A changes zero lines,
+   with the one named exception below.
    Update `test/helpers/app.test.ts` only where a type name appears; keep its 4 case names.
 
    Add `createSocketTestApp(overrides?)` beside it, per the Decisions. Change the two lines of
    `src/http/server/blob/show-blob.test.ts` that name `createTestApp` to name
-   `createSocketTestApp`. Change no assertion in that file, and change no other file.
+   `createSocketTestApp`. Change no assertion in that file.
+
+   Then make the two EPIC 030 parity files consistent with the split. Both reach the harness only
+   through `createTestApp`, and neither appeared in a table before this amendment.
+
+   - In `test/helpers/agent.ts`, widen `.set` to rule 7 of the Decisions: accept
+     `string | readonly string[]`, hold a Fetch `Headers`, and append one value per array element.
+   - In `src/http/server/app.parity-path.test.ts`, remove the `as unknown as string` cast at `:41`
+     and `:49`, and remove `accept-encoding` and `connection` from the three P19 arrays at `:53`,
+     `:65` and `:74`, and rewrite the two case names that count those entries: `five` becomes
+     `three`, and `four` becomes `two`. Change nothing else. Line 44 keeps `one, two`. The budget is
+     3 assertion expressions, 6 deleted expectation lines and 2 rewritten case names, and this file
+     is the group-A exception.
+   - In `src/http/server/app.handler-result.test.ts`, change its 4 `createTestApp` call sites and
+     its import to `createSocketTestApp`. Change no assertion. That file becomes level-2 row 6.
+
    **Adds exactly 0 cases.**
 
 4. **Group B moves to level 1.** In each group-B file, replace the `loopbackAgent` import with
@@ -349,7 +411,7 @@ story that adds a case names the exact count, because the Verification gate comp
    statement. All three names are needed: `show-blob.test.ts` reaches the socket through the third
    one. `test/helpers/app.ts` names two of them and is not a `*.test.ts` file, so the scan skips it.
    Case 1
-   asserts the count equals 5. Case 2 asserts the sorted list equals the 5 rows of the level-2
+   asserts the count equals 7. Case 2 asserts the sorted list equals the 7 rows of the level-2
    table, by exact path, so a new socket test names itself. The test states in its suite name that
    it counts only files that reach `test/helpers/agent.ts`. **Adds exactly 2 cases.**
 
@@ -365,6 +427,8 @@ node --test \
   test/helpers/app.test.ts \
   test/helpers/socket-budget.test.ts \
   src/http/server/app.test.ts \
+  src/http/server/app.handler-result.test.ts \
+  src/http/server/app.parity-path.test.ts \
   src/http/server/auth.test.ts \
   src/http/server/authorize.test.ts \
   src/http/server/dispatch.test.ts \
@@ -400,24 +464,48 @@ Hermetic coverage required beyond the Proof:
 - **`npm run verify` is clean**: `typecheck`, the full `node:test` suite, `eslint .`, and
   `verify-db-status`.
 
-- **The pass count rises by exactly 21.** Record the baseline at the base commit of this epic with
-  `node --test 2>&1 | grep -m1 '^# pass'`, and record the same value after story 7. The second value
-  equals the first plus 21: 1 from story 1, 14 from story 2, 4 from story 6 and 2 from story 7.
-  Stories 3, 4 and 5 add 0 and drop 0. Any other delta is a blocker, and the failing story is the
-  one whose named count does not match.
+- **The pass count rises by exactly 24.** Record the baseline at the base commit of this epic with
+  `node --test 2>&1 | grep -m1 'ℹ pass'`, and record the same value after story 7.
+  `scripts/run-tests.mjs` selects the spec reporter, which writes `ℹ pass <n>` and never writes
+  `# pass`, so the TAP form of that grep matches nothing here. The second value
+  equals the first plus 24: 1 from story 1, 14 from story 2, 4 from story 6, 2 from story 7 and 3
+  from the review addendum below. Stories 3, 4 and 5 add 0 and drop 0. Any other delta is a blocker,
+  and the failing story is the one whose named count does not match.
 
-- **Group A changes zero lines.** After story 3, `git diff --stat <base>..HEAD -- <the 44 group-A
-paths>` reports no changed file. This is the check, not the pass count.
+- **The review addendum adds exactly 3 cases, and it restores the two wire properties the migration
+  cost.** Level 1 cannot express either one, so each lands in a level-2 file that already owns the
+  subject. The addendum opens no new socket file, so the story-7 budget stays at 7.
+
+  - `src/http/server/app.handler-result.test.ts` gains 2 cases: a 204 handler result and a 304
+    handler result each carry no `content-length` and no `content-type` on the socket. That file
+    already asserts an exact `content-length` of `5` for a 200, so the paired positive proves the
+    absence assertion can fail. **Adds exactly 2 cases.**
+  - `src/http/server/app.test.ts` gains 1 case: a GET whose request carries a body reaches the
+    route, and the handler reads no body. It asserts the exact `content-length` of `16` the socket
+    carried, then asserts `context.body` is `undefined`. The first assertion is what stops the case
+    from going vacuous the way its level-1 ancestor did. **Adds exactly 1 case.**
+
+- **Group A changes zero lines, except one named file.** After story 3, `git diff --stat
+
+<base>..HEAD -- <the 46 group-A paths>` reports exactly one changed file, and that file is
+  `src/http/server/app.parity-path.test.ts`. `git diff --numstat` reports exactly `4` added and `10`
+  deleted for it: 6 deleted expectation lines across the three P19 arrays, the two
+  `as unknown as string` cast lines rewritten in place, and the two case names of story 3 rewritten
+  in place. Every other group-A path reports no change. This is the check, not the pass count.
 
 - **The group membership is recomputed, not assumed.** Before story 4, run
   `grep -rlE 'loopback(Agent|Server)' --include='*.test.ts' src test` and
   `grep -rl createTestApp --include='*.test.ts' src test`. The two lists define groups A, B and C,
-  less the 5 rows of the level-2 table. `src/http/server/blob/show-blob.test.ts` matches the second
-  grep and is level 2, so it joins no group.
-  `src/main.claim.test.ts` matches the second grep on a string literal and belongs to no group.
+  less the 7 rows of the level-2 table. `src/http/server/blob/show-blob.test.ts`,
+  `src/http/server/app.handler-result.test.ts` and `src/http/server/app.test.ts` match a grep and
+  are level 2, so they join no group. `src/main.claim.test.ts` matches the second grep on a string
+  literal and belongs to no group. The recompute yields 60 files: 46 in group A, 4 in group B, 3 in
+  group C, and the 7 level-2 rows.
 
-- **Every EPIC 030 parity test still passes**, at the same level EPIC 030 declares, with the same
-  expected values.
+- **Every EPIC 030 parity test still passes**, at the level EPIC 033 declares. EPIC 030's open item
+  transfers the P19 header-name literal to this epic, so the level-1 client's list is the new
+  expected value at `src/http/server/app.parity-path.test.ts:53`, `:65` and `:74`. Every other
+  expected value is unchanged, P18's `", "` join and P24's exact `content-length` included.
 
 - **Ephemeral-port resolution is proved, and `test/helpers/agent.test.ts` owns it.** The existing
   case `binds the loopback address and never the wildcard` asserts `address.address === "127.0.0.1"`.
@@ -508,3 +596,37 @@ paths>` reports no changed file. This is the check, not the pass count.
   `src/queries/**` that import a schema from `src/http/contract/**`. This epic edits the harness
   import in those handler tests and edits nothing else in them. It adds no such import, removes no
   such import, and touches no file under `src/queries/**`. The TODO is unchanged.
+- S10 - status:FIXED - action:YES - the `content-length` half of two dispatch cases is now
+  unfalsifiable - `src/http/server/dispatch.test.ts` holds the 204 case and the 304 case that story
+  5 migrates under the authorized `rawHeaders` exception. Both assert that `content-length` is
+  absent. No production module sets a response `content-length`: `src/http/server/body.ts:47` reads
+  it as a request header and `src/http/server/idempotency-response.ts:11` names it in a strip list.
+  The header therefore appears only when `@hono/node-server` writes the answer, which is the very
+  reason `src/http/server/app.handler-result.test.ts` stays at level 2. At level 1 the assertion
+  cannot fail - fix: keep the assertion, and give the wire property an owner in EPIC 034, where the
+  node adapter lands and a level-2 case can assert that a 204 and a 304 carry no `content-length` on
+  the socket - why: the human took the thorough option instead of deferring. The review addendum
+  above adds those two cases to `src/http/server/app.handler-result.test.ts`, which already owns
+  `content-length` at level 2, and the gate now reads +24. The level-1 `content-type` half keeps its
+  teeth and stays where it is.
+- S11 - status:FIXED - action:YES - one group-A case lost its stimulus to the GET/HEAD clause -
+  `src/http/server/event/list-event.test.ts:722`, in the case `the handler reads neither
+context.body nor context.parameters`, sends `.send({ ignored: true })` on a GET. The story-2
+  GET/HEAD clause drops the payload for those two methods, so the request now carries a JSON
+  content type and no body, and the case no longer exercises a body the handler must ignore - fix:
+  give the lost property an owner at level 2, where a GET can still carry a body on the wire - why:
+  the human took the thorough option. `src/http/server/event/list-event.test.ts` keeps its case and
+  its zero group-A lines, and the review addendum above adds one case to
+  `src/http/server/app.test.ts` that sends a GET body over a real socket and asserts the handler
+  reads none of it. That file is already level-2 row 7, so the socket budget stays at 7.
+- S9 - status:FIXED - action:YES - reviewer flagged framework imports in three test files -
+  `test/helpers/agent.test.ts`, `src/http/server/shutdown-socket.test.ts` and
+  `src/http/server/idempotency-key.test.ts` import `hono`, `koa` or sibling production modules,
+  outside the strict test boundary of `AGENTS.md` - fix: record the convention and change no code:
+  transport tests construct framework applications directly, so direct vendor imports in test
+  files are accepted for this epic; 15 pre-existing untouched tests under `src/http/server/**`
+  already do exactly that, the strict matrix cannot express a wire-level harness, and
+  `AGENTS.md` already defers the whole rule-versus-convention question to one reconciliation
+  epic that owns the final answer and its `eslint.config.js` encoding - why: relocating fixtures
+  in three files while 15 siblings keep the pattern settles nothing, and the boundary decision is
+  a single architecture call that belongs to that epic, not to a review fix.

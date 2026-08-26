@@ -1,8 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import bodyParser from "@koa/bodyparser";
-import Koa from "koa";
+import { Hono } from "hono";
 
 import {
   IDEMPOTENCY_HEADER,
@@ -11,7 +10,12 @@ import {
   readIdempotencyKey,
   recordKey,
 } from "./idempotency-key.ts";
-import { loopbackAgent } from "../../../test/helpers/agent.ts";
+import { bodyMiddleware } from "./body.ts";
+import { optional } from "./variables.ts";
+import type { AppEnv } from "./variables.ts";
+import type { Handler } from "./app.ts";
+import type { Operation } from "../contract/operation.ts";
+import { fetchAgent } from "../../../test/helpers/agent.ts";
 import {
   HARNESS_ACTOR_FIXTURE,
   HARNESS_ACTOR_FIXTURE_B,
@@ -409,19 +413,34 @@ describe("src/http/server/idempotency-key.test", () => {
     });
   });
 
-  describe("raw body preservation (vendor probe)", () => {
-    function probeApp(): Koa {
-      const app = new Koa();
-      app.use(bodyParser({ enableTypes: ["json"] }));
-      app.use((context) => {
-        context.body = { raw: context.request.rawBody ?? null };
+  describe("raw body preservation (body middleware probe)", () => {
+    function probeApp(): Hono<AppEnv> {
+      const operation: Operation = {
+        operationId: "node.create",
+        method: "POST",
+        path: [],
+        introducedIn: "phase-1",
+        status: "routed",
+        allowedActors: ["human", "harness"],
+      };
+      const handlers: Readonly<Record<string, Handler>> = {
+        "node.create": () => ({ kind: "json", status: 200, body: {} }),
+      };
+      const app = new Hono<AppEnv>();
+      app.use("*", async (c, next) => {
+        c.set("match", { operation, parameters: {} });
+        await next();
+      });
+      app.use("*", bodyMiddleware(handlers));
+      app.all("*", (c) => {
+        return c.json({ raw: optional(c, "rawBody") ?? null });
       });
       return app;
     }
 
     it("preserves the exact request bytes for a json body", async () => {
       const app = probeApp();
-      const agent = await loopbackAgent(app);
+      const agent = fetchAgent(app);
       const response = await agent
         .post("/")
         .set("Content-Type", "application/json")
@@ -431,7 +450,7 @@ describe("src/http/server/idempotency-key.test", () => {
 
     it("is null when the content type is not json", async () => {
       const app = probeApp();
-      const agent = await loopbackAgent(app);
+      const agent = fetchAgent(app);
       const response = await agent
         .post("/")
         .set("Content-Type", "text/plain")
@@ -441,7 +460,7 @@ describe("src/http/server/idempotency-key.test", () => {
 
     it("is null for a GET with no body", async () => {
       const app = probeApp();
-      const agent = await loopbackAgent(app);
+      const agent = fetchAgent(app);
       const response = await agent.get("/");
       assert.equal(response.body.raw, null);
     });

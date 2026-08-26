@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  createTestApp,
+  createSocketTestApp,
   BOOTSTRAP_ACTOR_FIXTURE,
 } from "../../../test/helpers/app.ts";
 import { findOperation } from "../contract/registry.ts";
@@ -168,7 +168,7 @@ describe("src/http/server/app.handler-result.test", () => {
   });
 
   it("a JSON result serializes as application/json", async () => {
-    const app = await createTestApp({
+    const app = await createSocketTestApp({
       handlers: {
         "system.health": () => ({
           kind: "json",
@@ -221,7 +221,7 @@ describe("src/http/server/app.handler-result.test", () => {
   });
 
   it("a bytes result serializes byte-exact with an exact content-length and the registry media type", async () => {
-    const app = await createTestApp({
+    const app = await createSocketTestApp({
       handlers: { "blob.show": showBlobHandler({ showBlob: () => record }) },
     });
     const response = await app.get(`/v1/blob/${hash}`).buffer();
@@ -232,7 +232,7 @@ describe("src/http/server/app.handler-result.test", () => {
   });
 
   it("a Range request answers 206 with an exact content-range and a byte-exact slice", async () => {
-    const app = await createTestApp({
+    const app = await createSocketTestApp({
       handlers: { "blob.show": showBlobHandler({ showBlob: () => record }) },
     });
     const response = await app
@@ -248,8 +248,30 @@ describe("src/http/server/app.handler-result.test", () => {
     assert.deepEqual(response.body, content.subarray(0, 5));
   });
 
+  it("a 204 handler result carries no content-length on the socket", async () => {
+    const app = await createSocketTestApp({
+      handlers: { "system.status": () => ({ kind: "empty", status: 204 }) },
+    });
+    const response = await app.get("/v1/status");
+    assert.equal(response.status, 204);
+    assert.equal(response.text, "");
+    assert.equal(response.headers["content-length"], undefined);
+    assert.equal(response.headers["content-type"], undefined);
+  });
+
+  it("a 304 handler result carries no content-length on the socket", async () => {
+    const app = await createSocketTestApp({
+      handlers: { "system.status": () => ({ kind: "empty", status: 304 }) },
+    });
+    const response = await app.get("/v1/status");
+    assert.equal(response.status, 304);
+    assert.equal(response.text, "");
+    assert.equal(response.headers["content-length"], undefined);
+    assert.equal(response.headers["content-type"], undefined);
+  });
+
   it("the preflight is the one empty-body answer", async () => {
-    const app = await createTestApp({
+    const app = await createSocketTestApp({
       allowedOrigins: ["http://localhost:8080"],
     });
     const response = await app.raw

@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
-import { createTestApp } from "../../../../test/helpers/app.ts";
+import { createSocketTestApp } from "../../../../test/helpers/app.ts";
 import { findOperation } from "../../contract/registry.ts";
 import { showBlobHandler } from "./show-blob.ts";
 import type { BlobView } from "../../../queries/blob/show-blob.ts";
@@ -23,7 +23,7 @@ const record: BlobView = {
 async function handlerApp(
   showBlob: (input: { hash: string }) => BlobView | null,
 ) {
-  return createTestApp({
+  return createSocketTestApp({
     handlers: { "blob.show": showBlobHandler({ showBlob }) },
   });
 }

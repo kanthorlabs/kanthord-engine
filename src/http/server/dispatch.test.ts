@@ -1,10 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { request as httpRequest } from "node:http";
-import type { AddressInfo } from "node:net";
 
 import { Hono } from "hono";
-import type Koa from "koa";
 
 import { authMiddleware } from "./auth.ts";
 import { routeMiddleware } from "./route.ts";
@@ -14,7 +11,6 @@ import { renderMiddleware } from "./render.ts";
 import { errorValue, errorResponse, materializeError } from "./envelope.ts";
 import { demand } from "./variables.ts";
 import type { AppEnv } from "./variables.ts";
-import { koaFromHono } from "./koa-bridge.ts";
 import { createApp, BindingError } from "./app.ts";
 import type { Handler, HandlerContext, TransportSettings } from "./app.ts";
 import { noopWaits } from "../../../test/helpers/wait-registry.ts";
@@ -29,7 +25,7 @@ import {
   drive,
   BOOTSTRAP_ACTOR_FIXTURE,
 } from "../../../test/helpers/app.ts";
-import { loopbackAgent, loopbackServer } from "../../../test/helpers/agent.ts";
+import { fetchAgent } from "../../../test/helpers/agent.ts";
 import {
   createMigratedStorage,
   tableCounts,
@@ -59,39 +55,6 @@ const okHandler: Handler = () => ({
   status: 200,
   body: { ok: true },
 });
-
-type RawResponse = Readonly<{
-  status: number;
-  rawHeaders: readonly string[];
-  body: Buffer;
-}>;
-
-async function rawResponse(
-  app: Koa,
-  method: string,
-  path: string,
-): Promise<RawResponse> {
-  const server = await loopbackServer(app);
-  const address = server.address() as AddressInfo;
-  return new Promise((resolve, reject) => {
-    const outgoing = httpRequest(
-      { host: "127.0.0.1", port: address.port, method, path },
-      (incoming) => {
-        const chunks: Buffer[] = [];
-        incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
-        incoming.on("end", () => {
-          resolve({
-            status: incoming.statusCode ?? 0,
-            rawHeaders: incoming.rawHeaders,
-            body: Buffer.concat(chunks),
-          });
-        });
-      },
-    );
-    outgoing.on("error", reject);
-    outgoing.end();
-  });
-}
 
 function honoDispatchApp(
   handlers: Readonly<Record<string, Handler>>,
@@ -144,9 +107,7 @@ describe("src/http/server/dispatch.test", () => {
         return { kind: "json", status: 200, body: { ok: true } };
       },
     });
-    const response = await (
-      await loopbackAgent(koaFromHono(hono))
-    ).post("/v1/node/task_01/abandon");
+    const response = await fetchAgent(hono).post("/v1/node/task_01/abandon");
     assert.equal(response.status, 501);
     assert.deepEqual(response.body, {
       error: {
@@ -361,9 +322,7 @@ describe("src/http/server/dispatch.test", () => {
         },
       }),
     );
-    const response = await (
-      await loopbackAgent(koaFromHono(hono))
-    )
+    const response = await fetchAgent(hono)
       .get("/v1/health")
       .set("Authorization", "Bearer test-token");
     assert.equal(response.status, 200);
@@ -436,11 +395,7 @@ describe("src/http/server/dispatch.test", () => {
         }),
       },
     });
-    const response = await app.get("/v1/health").parse((incoming, callback) => {
-      const chunks: Buffer[] = [];
-      incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
-      incoming.on("end", () => callback(null, Buffer.concat(chunks)));
-    });
+    const response = await app.get("/v1/health");
     assert.equal(response.headers["x-a"], "1");
     assert.equal(response.headers["x-b"], "2");
     assert.equal(response.headers["content-type"], "application/vnd.test+json");
@@ -468,9 +423,7 @@ describe("src/http/server/dispatch.test", () => {
         },
       },
     );
-    const response = await (
-      await loopbackAgent(koaFromHono(hono))
-    ).get("/v1/health");
+    const response = await fetchAgent(hono).get("/v1/health");
     assert.equal(response.status, 200);
     assert.deepEqual(entries, [
       ["x-a", "upper-A, lower-a"],
@@ -514,12 +467,12 @@ describe("src/http/server/dispatch.test", () => {
     const hono = honoDispatchApp({
       "system.status": () => ({ kind: "empty", status: 204 }),
     });
-    const response = await rawResponse(koaFromHono(hono), "GET", "/v1/status");
+    const response = await fetchAgent(hono).get("/v1/status");
     assert.equal(response.status, 204);
-    assert.equal(response.body.length, 0);
-    const names = response.rawHeaders
-      .filter((_, index) => index % 2 === 0)
-      .map((name) => name.toLowerCase());
+    assert.equal(response.text, "");
+    const names = Object.keys(response.headers).map((name) =>
+      name.toLowerCase(),
+    );
     assert.equal(names.includes("content-type"), false);
     assert.equal(names.includes("content-length"), false);
   });
@@ -528,12 +481,12 @@ describe("src/http/server/dispatch.test", () => {
     const hono = honoDispatchApp({
       "system.status": () => ({ kind: "empty", status: 304 }),
     });
-    const response = await rawResponse(koaFromHono(hono), "GET", "/v1/status");
+    const response = await fetchAgent(hono).get("/v1/status");
     assert.equal(response.status, 304);
-    assert.equal(response.body.length, 0);
-    const names = response.rawHeaders
-      .filter((_, index) => index % 2 === 0)
-      .map((name) => name.toLowerCase());
+    assert.equal(response.text, "");
+    const names = Object.keys(response.headers).map((name) =>
+      name.toLowerCase(),
+    );
     assert.equal(names.includes("content-type"), false);
     assert.equal(names.includes("content-length"), false);
   });
@@ -546,9 +499,9 @@ describe("src/http/server/dispatch.test", () => {
         bytes: Uint8Array.from([1, 2, 3]),
       }),
     });
-    const response = await rawResponse(koaFromHono(hono), "GET", "/v1/status");
+    const response = await fetchAgent(hono).get("/v1/status");
     assert.equal(response.status, 500);
-    assert.deepEqual(JSON.parse(response.body.toString("utf8")), {
+    assert.deepEqual(response.body, {
       error: {
         code: "internal-error",
         message: "bytes result for system.status requires responseMedia",
@@ -662,9 +615,7 @@ describe("src/http/server/dispatch.test", () => {
           },
         },
       );
-      const response = await (
-        await loopbackAgent(koaFromHono(hono))
-      ).get("/v1/status");
+      const response = await fetchAgent(hono).get("/v1/status");
       assert.equal(response.status, 500);
       assert.deepEqual(response.body, {
         error: { code: "internal-error", message: "internal error" },

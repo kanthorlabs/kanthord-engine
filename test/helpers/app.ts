@@ -1,11 +1,10 @@
-import type supertest from "supertest";
-
-import { loopbackAgent } from "./agent.ts";
+import { fetchAgent, loopbackAgent } from "./agent.ts";
+import type { Agent, AgentRequest } from "./agent.ts";
 
 import { bootstrapActorId } from "../../src/domain/actor.ts";
 import type { ActorRow } from "../../src/domain/actor.ts";
 import { createApp, unimplementedFor } from "../../src/http/server/app.ts";
-import type { Handler } from "../../src/http/server/app.ts";
+import type { App, Handler } from "../../src/http/server/app.ts";
 import { createWaitRegistry } from "./wait-registry.ts";
 import type { WaitRegistry } from "./wait-registry.ts";
 import { defaultIdempotencySettings } from "../../src/http/server/idempotency-store.ts";
@@ -58,11 +57,11 @@ export type TestAppOverrides = Readonly<{
 }>;
 
 export type TestApp = Readonly<{
-  raw: ReturnType<typeof supertest>;
-  get(path: string): supertest.Test;
-  post(path: string): supertest.Test;
-  put(path: string): supertest.Test;
-  del(path: string): supertest.Test;
+  raw: Agent;
+  get(path: string): AgentRequest;
+  post(path: string): AgentRequest;
+  put(path: string): AgentRequest;
+  del(path: string): AgentRequest;
   internalErrors(): readonly unknown[];
   cancelWaits(): void;
 }>;
@@ -71,7 +70,7 @@ export function drive(
   app: TestApp,
   method: string,
   path: string,
-): supertest.Test {
+): AgentRequest {
   switch (method) {
     case "DELETE":
       return app.del(path);
@@ -90,7 +89,7 @@ export function driveRaw(
   app: TestApp,
   method: string,
   path: string,
-): supertest.Test {
+): AgentRequest {
   switch (method) {
     case "DELETE":
       return app.raw.del(path);
@@ -105,8 +104,9 @@ export function driveRaw(
   }
 }
 
-export async function createTestApp(
-  overrides?: TestAppOverrides,
+async function createTestAppWithAgent(
+  overrides: TestAppOverrides | undefined,
+  createAgent: (created: App) => Agent | Promise<Agent>,
 ): Promise<TestApp> {
   const token = overrides?.token ?? "test-token";
   const allowedHosts = overrides?.allowedHosts ?? ["kanthord.test"];
@@ -135,8 +135,8 @@ export async function createTestApp(
     schedule,
     waits,
   });
-  const { app, cancelWaits } = created;
-  const raw = await loopbackAgent(app);
+  const { cancelWaits } = created;
+  const raw = await createAgent(created);
   const host = allowedHosts[0] ?? "";
   return {
     raw,
@@ -171,4 +171,20 @@ export async function createTestApp(
       cancelWaits();
     },
   };
+}
+
+export async function createTestApp(
+  overrides?: TestAppOverrides,
+): Promise<TestApp> {
+  return createTestAppWithAgent(overrides, (created) =>
+    fetchAgent(created.hono),
+  );
+}
+
+export async function createSocketTestApp(
+  overrides?: TestAppOverrides,
+): Promise<TestApp> {
+  return createTestAppWithAgent(overrides, (created) =>
+    loopbackAgent(created.app),
+  );
 }

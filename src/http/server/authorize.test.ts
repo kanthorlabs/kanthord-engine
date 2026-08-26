@@ -15,10 +15,9 @@ import { dispatchMiddleware } from "./dispatch.ts";
 import { createIdempotency } from "./idempotency.ts";
 import { defaultIdempotencySettings } from "./idempotency-store.ts";
 import type { Handler } from "./app.ts";
-import { koaFromHono } from "./koa-bridge.ts";
 import { demand } from "./variables.ts";
 import type { AppEnv } from "./variables.ts";
-import { loopbackAgent } from "../../../test/helpers/agent.ts";
+import { fetchAgent } from "../../../test/helpers/agent.ts";
 import {
   createTestApp,
   HARNESS_ACTOR_FIXTURE,
@@ -208,7 +207,7 @@ describe("src/http/server/authorize.test", () => {
       },
     }) as unknown as MiddlewareHandler<AppEnv>;
     hono.use("*", dispatchStage);
-    const agent = await loopbackAgent(koaFromHono(hono));
+    const agent = fetchAgent(hono);
     const response = await agent
       .post("/v1/provider")
       .set("Host", "kanthord.test")

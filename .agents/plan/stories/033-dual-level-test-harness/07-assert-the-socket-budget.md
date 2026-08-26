@@ -21,11 +21,13 @@ Depends on: Story 6.
 - Sort paths bytewise with `Buffer.compare(Buffer.from(left), Buffer.from(right))`.
 - Name the suite `test/helpers/socket-budget.test counts files that reach test/helpers/agent.ts`.
 - Add exactly two cases.
-- Case 1 is `keeps the socket file count at five`; assert the collected length equals 5.
+- Case 1 is `keeps the socket file count at seven`; assert the collected length equals 7.
 - Case 2 is `keeps the exact level-2 allow list`; deep-equal the sorted list below.
 
 ```ts
 [
+  "src/http/server/app.handler-result.test.ts",
+  "src/http/server/app.test.ts",
   "src/http/server/blob/show-blob.test.ts",
   "src/http/server/host.test.ts",
   "src/http/server/idempotency.test.ts",
@@ -42,19 +44,21 @@ Depends on: Story 6.
 ## Constraints
 
 - Add exactly two cases and no production file.
-- Treat the five paths as a closed allow list. Derive level 1 as every other harness-backed test.
+- Treat the seven paths as a closed allow list. Derive level 1 as every other harness-backed test.
 - Do not scan non-test files. `test/helpers/app.ts` must remain outside the result.
 - Do not depend on directory enumeration order or the current working directory.
-- Do not add an exclusion that hides a sixth socket-backed test.
+- Do not add an exclusion that hides an eighth socket-backed test.
 - Add no special case for `src/main.claim.test.ts`. It names `createTestApp` in a string at
   `src/main.claim.test.ts:628`, and the scan searches neither that name nor a string literal.
 
 ## Verify
 
 - Run `node --test test/helpers/socket-budget.test.ts`.
-- The command passes exactly two cases and reports the exact five paths.
-- Record the final `node --test 2>&1 | grep -m1 '^# pass'` value.
-- The final value equals the base-commit value plus 21.
+- The command passes exactly two cases and reports the exact seven paths.
+- Record the final `node --test 2>&1 | grep -m1 'ℹ pass'` value. `scripts/run-tests.mjs` selects
+  the spec reporter, which writes `ℹ pass <n>` and never `# pass`.
+- The final value equals the base-commit value plus 21. The review addendum of the EPIC adds 3
+  more after this story, so the closing value is the base-commit value plus 24.
 - Run `npm run verify`; it exits 0.
 - Run the EPIC Proof block verbatim:
 
@@ -64,6 +68,8 @@ node --test \
   test/helpers/app.test.ts \
   test/helpers/socket-budget.test.ts \
   src/http/server/app.test.ts \
+  src/http/server/app.handler-result.test.ts \
+  src/http/server/app.parity-path.test.ts \
   src/http/server/auth.test.ts \
   src/http/server/authorize.test.ts \
   src/http/server/dispatch.test.ts \

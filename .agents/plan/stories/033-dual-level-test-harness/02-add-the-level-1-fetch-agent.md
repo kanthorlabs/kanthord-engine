@@ -12,6 +12,7 @@ Depends on: Story 1.
 - Export `AgentResponse` with `status`, lower-case `headers`, `body`, and UTF-8 `text`.
 - Type `body` as `any`. Type headers as `Readonly<Record<string, string>>`.
 - Export `AgentRequest` as `Promise<AgentResponse>` plus chainable `set`, `send`, and `buffer` methods.
+- Type the `.set` value as `string | readonly string[]`. Story 3 owns the array behaviour.
 - Export `Agent` with `get`, `post`, `put`, `del`, `delete`, and `options` methods.
 - Export `fetchAgent<E extends Env>(app: Hono<E>): Agent`.
 - Map `del` and `delete` to `DELETE`. Map every other member to its uppercase HTTP method.
@@ -27,13 +28,21 @@ Depends on: Story 1.
 - Add `[Symbol.toStringTag]: "Promise"` and delegate `then`, `catch`, and `finally` to the cached promise.
 - Call `app.request(path, { method, headers, body })` during dispatch.
 - Omit the request body when `.send` was never called.
+- A GET or HEAD dispatch carries no body: the Fetch `Request` constructor forbids one, so
+  dispatch drops any stored payload for those two methods. `.send` still stores it; only
+  dispatch discards it. This clause is the human resolution of reviewer finding S1 of this
+  cycle, and it matches shipped behavior. EPIC open item S11 names the one case this costs, and the
+  EPIC review addendum gives the lost property a level-2 owner in `src/http/server/app.test.ts`.
 - Read the response once as bytes. Decode those bytes as UTF-8 into `text`.
 - Build response headers by iterating `response.headers`; retain lower-case keys.
 - A `Headers` iterator joins a repeated ordinary header, but it yields `set-cookie` once per value.
 - When iteration yields a key already present, join the prior value and the new value with `", "`.
 - Resolve `body` in this exact order. Test the empty case first.
 - For zero response bytes, set `body` to `{}` and `text` to `""`. Parse nothing.
-- Otherwise treat `application/json`, ignoring parameters and case, as JSON.
+- Otherwise treat a media type whose subtype ends in `json`, ignoring parameters and case, as JSON.
+  That covers `application/json`, `text/json` and every structured suffix such as
+  `application/problem+json` and `application/vnd.test+json`. It is the rule superagent already
+  applies, and it is what lets a group-A file migrate at zero lines.
 - For JSON, parse `text` into `body`. For every other content type, set `body` to `Buffer` bytes.
 
 The exported contracts are exact:
@@ -47,7 +56,7 @@ export type AgentResponse = Readonly<{
 }>;
 
 export type AgentRequest = Promise<AgentResponse> & {
-  set(name: string, value: string): AgentRequest;
+  set(name: string, value: string | readonly string[]): AgentRequest;
   send(body: unknown): AgentRequest;
   buffer(): AgentRequest;
 };

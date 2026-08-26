@@ -2,16 +2,14 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { Hono } from "hono";
-import type Koa from "koa";
 
 import { errorResponse, errorValue, materializeError } from "./envelope.ts";
 import { headersMiddleware } from "./headers.ts";
-import { koaFromHono } from "./koa-bridge.ts";
 import { renderMiddleware } from "./render.ts";
 import { routeMiddleware } from "./route.ts";
 import { demand } from "./variables.ts";
 import type { AppEnv } from "./variables.ts";
-import { loopbackAgent } from "../../../test/helpers/agent.ts";
+import { fetchAgent } from "../../../test/helpers/agent.ts";
 import { createTestApp, drive, driveRaw } from "../../../test/helpers/app.ts";
 import { readRouteMatrix } from "../../../test/helpers/proposal.ts";
 import { findOperation } from "../contract/registry.ts";
@@ -24,7 +22,7 @@ const postMvp = readRouteMatrix()
 
 type OnInternalError = (error: unknown) => void;
 
-function buildApp(onInternalError: OnInternalError = () => {}): Koa {
+function buildApp(onInternalError: OnInternalError = () => {}): Hono<AppEnv> {
   const hono = new Hono<AppEnv>();
   hono.onError((error, c) => {
     const value = errorValue(error);
@@ -49,26 +47,26 @@ function buildApp(onInternalError: OnInternalError = () => {}): Koa {
       },
     });
   });
-  return koaFromHono(hono);
+  return hono;
 }
 
 describe("src/http/server/route.test", () => {
   it("GET /v1/health leaves the match variable's operation.operationId equal to system.health", async () => {
-    const response = await (await loopbackAgent(buildApp())).get("/v1/health");
+    const response = await fetchAgent(buildApp()).get("/v1/health");
     assert.equal(response.status, 200);
     assert.equal(response.body.operation.operationId, "system.health");
   });
 
   it("GET /v1/node/task_01JQ8ZAN9P leaves the match variable's parameters deep-equal to the id", async () => {
-    const response = await (
-      await loopbackAgent(buildApp())
-    ).get("/v1/node/task_01JQ8ZAN9P");
+    const response = await fetchAgent(buildApp()).get(
+      "/v1/node/task_01JQ8ZAN9P",
+    );
     assert.equal(response.status, 200);
     assert.deepEqual(response.body.parameters, { id: "task_01JQ8ZAN9P" });
   });
 
   it("GET /v1/nope answers 404 with the no-operation envelope and never reaches the inspector", async () => {
-    const response = await (await loopbackAgent(buildApp())).get("/v1/nope");
+    const response = await fetchAgent(buildApp()).get("/v1/nope");
     assert.equal(response.status, 404);
     assert.deepEqual(response.body, {
       error: { code: "not-found", message: "no operation for GET /v1/nope" },
@@ -76,17 +74,15 @@ describe("src/http/server/route.test", () => {
   });
 
   it("a query string does not reach matchRoute: GET /v1/health?x=1 resolves to system.health", async () => {
-    const response = await (
-      await loopbackAgent(buildApp())
-    ).get("/v1/health?x=1");
+    const response = await fetchAgent(buildApp()).get("/v1/health?x=1");
     assert.equal(response.status, 200);
     assert.equal(response.body.operation.operationId, "system.health");
   });
 
   it("on every reached request the match variable holds an operation and its parameters", async () => {
     const reached = [
-      await (await loopbackAgent(buildApp())).get("/v1/health"),
-      await (await loopbackAgent(buildApp())).get("/v1/node/task_01JQ8ZAN9P"),
+      await fetchAgent(buildApp()).get("/v1/health"),
+      await fetchAgent(buildApp()).get("/v1/node/task_01JQ8ZAN9P"),
     ];
     for (const response of reached) {
       assert.equal(response.status, 200);

@@ -18,6 +18,7 @@ import { registry } from "../contract/registry.ts";
 import { renderPath } from "../contract/path.ts";
 import {
   createTestApp,
+  createSocketTestApp,
   unimplementedFor,
   BOOTSTRAP_ACTOR_FIXTURE,
 } from "../../../test/helpers/app.ts";
@@ -71,6 +72,27 @@ describe("src/http/server/app.test", () => {
   it("the handler status set and the bodyless status set are the exact closed lists", () => {
     assert.deepEqual(handlerStatuses, [200, 204, 206, 304]);
     assert.deepEqual(bodylessStatuses, [204, 304]);
+  });
+
+  it("a GET carrying a body reaches the route, and the handler reads no body", async () => {
+    let seen: unknown = "unread";
+    let carried = "";
+    const app = await createSocketTestApp({
+      handlers: {
+        "system.health": (context) => {
+          seen = context.body;
+          carried = context.headers["content-length"] ?? "";
+          return { kind: "json", status: 200, body: { status: "ok" } };
+        },
+      },
+    });
+
+    const response = await app.get("/v1/health").send({ ignored: true });
+
+    assert.equal(carried, "16");
+    assert.equal(seen, undefined);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { status: "ok" });
   });
 
   it("the browser defences apply to system.health like every route", async () => {

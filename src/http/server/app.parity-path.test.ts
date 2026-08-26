@@ -38,43 +38,37 @@ describe("src/http/server/app.parity-path.test", () => {
     const { app, calls } = await recordingApp();
     const response = await app
       .get("/v1/blob/aa")
-      .set("X-Kanthord-Client", ["one", "two"] as unknown as string);
+      .set("X-Kanthord-Client", ["one", "two"]);
     assert.equal(response.status, 200);
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.headers["x-kanthord-client"], "one, two");
   });
 
-  it("a request carrying a client header records five sorted lower-cased header names", async () => {
+  it("a request carrying a client header records three sorted lower-cased header names", async () => {
     const { app, calls } = await recordingApp();
     const response = await app
       .get("/v1/blob/aa")
-      .set("X-Kanthord-Client", ["one", "two"] as unknown as string);
+      .set("X-Kanthord-Client", ["one", "two"]);
     assert.equal(response.status, 200);
     assert.deepEqual(Object.keys(calls[0]?.headers ?? {}), [
-      "accept-encoding",
       "authorization",
-      "connection",
       "host",
       "x-kanthord-client",
     ]);
   });
 
-  it("a plain GET records four sorted lower-cased header names", async () => {
+  it("a plain GET records two sorted lower-cased header names", async () => {
     const first = await recordingApp();
     await first.app.get("/v1/blob/aa%2Fbb");
     assert.deepEqual(Object.keys(first.calls[0]?.headers ?? {}), [
-      "accept-encoding",
       "authorization",
-      "connection",
       "host",
     ]);
 
     const second = await recordingApp();
     await second.app.get("/v1/blob/aa%zz");
     assert.deepEqual(Object.keys(second.calls[0]?.headers ?? {}), [
-      "accept-encoding",
       "authorization",
-      "connection",
       "host",
     ]);
   });

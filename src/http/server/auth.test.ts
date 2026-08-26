@@ -5,18 +5,16 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { Hono } from "hono";
-import type Koa from "koa";
 
 import { errorResponse, errorValue, materializeError } from "./envelope.ts";
 import { authMiddleware, bearerToken } from "./auth.ts";
 import { headersMiddleware } from "./headers.ts";
-import { koaFromHono } from "./koa-bridge.ts";
 import { renderMiddleware } from "./render.ts";
 import { demand } from "./variables.ts";
 import type { AppEnv } from "./variables.ts";
 import type { ActorRow } from "../../domain/actor.ts";
 import { bootstrapActorId } from "../../domain/actor.ts";
-import { loopbackAgent } from "../../../test/helpers/agent.ts";
+import { fetchAgent } from "../../../test/helpers/agent.ts";
 import { BOOTSTRAP_ACTOR_FIXTURE } from "../../../test/helpers/app.ts";
 
 function defaultResolveActor(presented: string): ActorRow | null {
@@ -57,16 +55,16 @@ function buildApp(
   token: string,
   resolveActor: (presented: string) => ActorRow | null = defaultResolveActor,
   onInternalError?: OnInternalError,
-): Koa {
-  return koaFromHono(buildFixture(token, resolveActor, onInternalError).hono);
+): Hono<AppEnv> {
+  return buildFixture(token, resolveActor, onInternalError).hono;
 }
 
 function buildRecordingApp(
   token: string,
   resolveActor: (presented: string) => ActorRow | null,
-): { app: Koa; recorded: () => ActorRow | undefined } {
+): { app: Hono<AppEnv>; recorded: () => ActorRow | undefined } {
   const fixture = buildFixture(token, resolveActor);
-  return { app: koaFromHono(fixture.hono), recorded: fixture.recorded };
+  return { app: fixture.hono, recorded: fixture.recorded };
 }
 
 function sourceText(): string {
@@ -119,9 +117,7 @@ describe("src/http/server/auth.test", () => {
   });
 
   it("answers 401 unauthenticated when no token is presented", async () => {
-    const response = await (
-      await loopbackAgent(buildApp("test-token"))
-    ).get("/v1/health");
+    const response = await fetchAgent(buildApp("test-token")).get("/v1/health");
     assert.equal(response.body.reached, undefined);
     assert.equal(response.status, 401);
     assert.deepEqual(response.body, {
@@ -130,9 +126,7 @@ describe("src/http/server/auth.test", () => {
   });
 
   it("answers 401 with the not-valid message when the token is wrong", async () => {
-    const response = await (
-      await loopbackAgent(buildApp("test-token"))
-    )
+    const response = await fetchAgent(buildApp("test-token"))
       .get("/v1/health")
       .set("Authorization", "Bearer wrong");
     assert.equal(response.status, 401);
@@ -164,9 +158,7 @@ describe("src/http/server/auth.test", () => {
     ];
     const bodies: unknown[] = [];
     for (const { name, resolve } of resolvers) {
-      const response = await (
-        await loopbackAgent(buildApp("test-token", resolve))
-      )
+      const response = await fetchAgent(buildApp("test-token", resolve))
         .get("/v1/health")
         .set("Authorization", "Bearer whatever");
       assert.equal(response.status, 401, name);
@@ -184,9 +176,7 @@ describe("src/http/server/auth.test", () => {
   });
 
   it("treats a wrong scheme as a missing token", async () => {
-    const response = await (
-      await loopbackAgent(buildApp("test-token"))
-    )
+    const response = await fetchAgent(buildApp("test-token"))
       .get("/v1/health")
       .set("Authorization", "Basic test-token");
     assert.equal(response.status, 401);
@@ -196,9 +186,7 @@ describe("src/http/server/auth.test", () => {
   });
 
   it("answers 200 when the bearer token matches", async () => {
-    const response = await (
-      await loopbackAgent(buildApp("test-token"))
-    )
+    const response = await fetchAgent(buildApp("test-token"))
       .get("/v1/health")
       .set("Authorization", "Bearer test-token");
     assert.equal(response.status, 200);
@@ -207,10 +195,10 @@ describe("src/http/server/auth.test", () => {
 
   it("refuses every path and method with the same 401", async () => {
     const requests = [
-      (await loopbackAgent(buildApp("test-token"))).get("/v1/health"),
-      (await loopbackAgent(buildApp("test-token"))).get("/v1/anything"),
-      (await loopbackAgent(buildApp("test-token"))).post("/v1/repository"),
-      (await loopbackAgent(buildApp("test-token"))).delete("/v1/provider/x"),
+      fetchAgent(buildApp("test-token")).get("/v1/health"),
+      fetchAgent(buildApp("test-token")).get("/v1/anything"),
+      fetchAgent(buildApp("test-token")).post("/v1/repository"),
+      fetchAgent(buildApp("test-token")).delete("/v1/provider/x"),
     ];
     for (const pending of requests) {
       const response = await pending;
@@ -227,9 +215,7 @@ describe("src/http/server/auth.test", () => {
         ? harnessRow
         : null,
     );
-    const response = await (
-      await loopbackAgent(app)
-    )
+    const response = await fetchAgent(app)
       .get("/v1/health")
       .set("Authorization", "Bearer actor_01JQ8ZAN9P0ABCDEFGHJKMNPQR.s3cr3t");
     assert.equal(response.status, 200);
@@ -242,7 +228,7 @@ describe("src/http/server/auth.test", () => {
       calls.push(presented);
       return BOOTSTRAP_ACTOR_FIXTURE;
     });
-    const response = await (await loopbackAgent(app)).get("/v1/health");
+    const response = await fetchAgent(app).get("/v1/health");
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, { reached: true });
     assert.equal(recorded(), BOOTSTRAP_ACTOR_FIXTURE);
@@ -255,9 +241,7 @@ describe("src/http/server/auth.test", () => {
       calls.push(presented);
       return BOOTSTRAP_ACTOR_FIXTURE;
     });
-    const response = await (
-      await loopbackAgent(app)
-    )
+    const response = await fetchAgent(app)
       .get("/v1/health")
       .set("Authorization", "Bearer anything");
     assert.equal(response.status, 200);
@@ -273,9 +257,7 @@ describe("src/http/server/auth.test", () => {
       calls.push(value);
       return value === presented ? BOOTSTRAP_ACTOR_FIXTURE : null;
     });
-    const response = await (
-      await loopbackAgent(app)
-    )
+    const response = await fetchAgent(app)
       .get("/v1/health")
       .set("Authorization", `Bearer ${presented}`);
     assert.equal(response.status, 200);
