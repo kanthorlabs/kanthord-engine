@@ -1,0 +1,7 @@
+# Local environment files.
+.env
+.env.*
+!.env.example
+
+# OpenCode model configuration, loaded through .envrc.
+.data/opencode-*
