@@ -17,7 +17,7 @@ export function listEdgeHandler(
     }
     try {
       const edges = dependencies.listEdges({ projectId: id });
-      return { status: 200, body: { edges } };
+      return { kind: "json", status: 200, body: { edges } };
     } catch (error) {
       throw toHttpError(error);
     }

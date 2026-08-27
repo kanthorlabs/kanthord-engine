@@ -10,6 +10,7 @@ export function listActorHandler(
   dependencies: ListActorHandlerDependencies,
 ): Handler {
   return () => ({
+    kind: "json",
     status: 200,
     body: { actors: dependencies.listActors({}) },
   });

@@ -26,6 +26,10 @@ export function readCatalogHandler(
         parsed.error,
       );
     }
-    return { status: 200, body: dependencies.readCatalog(parsed.data) };
+    return {
+      kind: "json",
+      status: 200,
+      body: dependencies.readCatalog(parsed.data),
+    };
   };
 }

@@ -1,6 +1,7 @@
-import type { Context, Next } from "koa";
+import type { MiddlewareHandler } from "hono";
 
 import { httpError } from "../contract/errors.ts";
+import type { AppEnv } from "./variables.ts";
 
 export type HostDependencies = Readonly<{
   allowedHosts: readonly string[];
@@ -8,12 +9,12 @@ export type HostDependencies = Readonly<{
 
 export function hostMiddleware(
   dependencies: HostDependencies,
-): (context: Context, next: Next) => Promise<void> {
+): MiddlewareHandler<AppEnv> {
   const allowed = new Set(
     dependencies.allowedHosts.map((entry) => entry.toLowerCase()),
   );
-  return async (context, next) => {
-    const host = context.request.headers.host;
+  return async (c, next) => {
+    const host = c.req.header("host");
     if (host === undefined) {
       throw httpError("host-forbidden", "the request carried no Host header");
     }

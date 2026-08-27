@@ -18,7 +18,7 @@ export function revokeActorHandler(
     }
     try {
       const view = dependencies.revokeActor({ id, actor: context.actor });
-      return { status: 200, body: view };
+      return { kind: "json", status: 200, body: view };
     } catch (error) {
       throw toHttpError(error);
     }

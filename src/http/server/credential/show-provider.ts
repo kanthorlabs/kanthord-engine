@@ -21,6 +21,6 @@ export function showProviderHandler(
     if (item === null) {
       throw httpError("not-found", `no provider ${id}`);
     }
-    return { status: 200, body: item };
+    return { kind: "json", status: 200, body: item };
   };
 }

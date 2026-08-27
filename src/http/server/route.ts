@@ -1,24 +1,20 @@
-import type { Context, Next } from "koa";
+import type { MiddlewareHandler } from "hono";
 
 import { httpError } from "../contract/errors.ts";
 import { matchRoute } from "../contract/registry.ts";
-import type { RouteMatch } from "../contract/registry.ts";
+import type { AppEnv } from "./variables.ts";
 
-export type RoutedState = Readonly<{ match: RouteMatch }>;
-
-export function routeMiddleware(): (
-  context: Context,
-  next: Next,
-) => Promise<void> {
-  return async (context, next) => {
-    const match = matchRoute(context.method, context.path);
+export function routeMiddleware(): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    const pathname = new URL(c.req.url).pathname;
+    const match = matchRoute(c.req.method, pathname);
     if (match === null) {
       throw httpError(
         "not-found",
-        `no operation for ${context.method} ${context.path}`,
+        `no operation for ${c.req.method} ${pathname}`,
       );
     }
-    context.state.match = match;
+    c.set("match", match);
     await next();
   };
 }

@@ -64,7 +64,7 @@ An existing row needs no new test. This epic adds the tests for P3–P6, P8–P1
 
 - **The parity contract is product behaviour, and it lives in the proposal.** A rule that lives only
   in a test file is a rule the next transport loses. `docs/proposal/phase-1/transport.md` describes
-  behaviour and names no framework in its 62 lines today. The contract keeps that property.
+  behaviour and names no framework today. The contract keeps that property.
 
 - **The empty request body is an empty object.** A routed POST with no body, with a non-JSON content
   type, or with a zero-length body reaches the handler with `body` equal to `{}`. Each handler

@@ -1,13 +1,11 @@
-import { Buffer } from "node:buffer";
+import { compareBytewise } from "./bytewise.ts";
 
 import { httpError } from "../contract/errors.ts";
 
 export function singleValued(
   query: Readonly<Record<string, readonly string[]>>,
 ): Readonly<Record<string, string>> {
-  const keys = Object.keys(query).sort((a, b) =>
-    Buffer.compare(Buffer.from(a), Buffer.from(b)),
-  );
+  const keys = Object.keys(query).sort(compareBytewise);
   const result: Record<string, string> = {};
   for (const key of keys) {
     const values = query[key] as readonly string[];

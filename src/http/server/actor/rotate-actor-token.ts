@@ -23,7 +23,11 @@ export function rotateActorTokenHandler(
         id,
         actor: context.actor,
       });
-      return { status: 200, body: { ...result.view, token: result.token } };
+      return {
+        kind: "json",
+        status: 200,
+        body: { ...result.view, token: result.token },
+      };
     } catch (error) {
       throw toHttpError(error);
     }

@@ -19,7 +19,7 @@ export function listProjectNodeHandler(
     }
     try {
       const nodes = dependencies.listProjectNodes({ projectId: id });
-      return { status: 200, body: { nodes } };
+      return { kind: "json", status: 200, body: { nodes } };
     } catch (error) {
       throw toHttpError(error);
     }

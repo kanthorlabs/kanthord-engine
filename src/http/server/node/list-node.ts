@@ -25,6 +25,6 @@ export function listNodeHandler(
       );
     }
     const nodes = dependencies.listNodes(parsed.data);
-    return { status: 200, body: { nodes } };
+    return { kind: "json", status: 200, body: { nodes } };
   };
 }

@@ -8,5 +8,5 @@ export type HealthHandlerDependencies = Readonly<{
 export function healthHandler(
   dependencies: HealthHandlerDependencies,
 ): Handler {
-  return () => ({ status: 200, body: dependencies.readHealth() });
+  return () => ({ kind: "json", status: 200, body: dependencies.readHealth() });
 }

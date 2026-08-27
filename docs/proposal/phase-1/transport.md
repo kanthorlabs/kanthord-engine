@@ -85,6 +85,53 @@ A browser sends a preflight before an authenticated cross-origin request, and th
 
 The daemon serves plain HTTP, so a browser page must be served over plain HTTP too, from the same private network or from loopback. A page on a public HTTPS origin cannot reach this daemon directly, and mixed content rather than this policy is what stops it. A deployment that needs an HTTPS page puts a reverse proxy in front that serves the application and forwards a same-origin path to the daemon over loopback. The daemon still ships no certificate handling in that topology.
 
+## The request and response contract
+
+This section states what a client observes at the boundary. It names no library, and a replacement
+transport reproduces every rule below without changing a single observable byte.
+
+**An absent request body is an empty object.** A write reaches its operation with an empty body in
+three cases: the client sends no body, the content type is not JSON, and the body has zero length.
+The transport refuses none of the three on its own. Each operation validates its own body, so a
+missing field is that operation's own `400`, carrying that operation's own message.
+
+**A body is read only for an operation this build implements.** An operation of `../api/README.md`
+that ships in a later phase, and an operation this build declares unimplemented, both answer `501`
+with the body unread. A malformed payload therefore never turns a `501` into a `400`, and the answer
+to an unimplemented operation does not depend on what the client sent.
+
+**The browser headers survive every refusal.** The allow-origin header and the expose-headers header
+are written before the operation runs, so they are present on the answer whatever it turns out to be:
+an unauthenticated refusal, an unmatched path, a precondition refusal, and an internal fault each
+carry them. One answer carries neither, and it is the refusal of an origin outside the allow list.
+That refusal is decided before any header is written.
+
+**`Vary: Origin` covers every answer the daemon completes.** It is present when the request carries
+an allowed origin, when the request carries no origin at all, and on the preflight answer. The single
+answer without it is the refusal of an origin outside the allow list.
+
+**A path segment is never decoded.** Route matching compares the literal characters between two
+slashes. An escape inside a path parameter reaches the operation as the characters the client wrote,
+and a malformed escape reaches route matching intact rather than producing a transport refusal.
+
+**A request header reaches the operation once, under a lower-case name.** A name the client sends
+twice arrives as one value, with the two values joined by a comma and a space. The operation reads
+one string per name, and the names arrive in byte order.
+
+**An answer carries one of two success statuses.** Every operation answers `200`, and the one
+operation that serves a byte range answers `206` as well. No other success status exists in the
+product.
+
+**One operation writes response headers, and it is the one that serves bytes.** Every other operation
+answers with a status and a body alone. A structured answer is JSON. A byte answer carries its exact
+length, and a range answer carries its exact range.
+
+**One answer in the product has an empty body, and it is the preflight.** An empty body is an absent
+body value: the daemon writes no body at all, not even zero bytes. Every operation returns a body
+value, so the one empty-body answer comes from the transport itself. A byte answer of zero length is
+not an empty body: it carries an explicit value of zero bytes, and its length header states `0`. Any
+other status comes from a refusal, and a refusal carries the error envelope of `../api/README.md`.
+
 ## A held request
 
 One route holds a connection open: `GET /v1/event` with `wait`, and `../api/event.md` states the parameter. Nothing else in the product holds a request.

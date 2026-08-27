@@ -1,11 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import Koa from "koa";
-import bodyParser from "@koa/bodyparser";
+import { Hono } from "hono";
+import type { MiddlewareHandler } from "hono";
 
 import { registry } from "../contract/registry.ts";
-import { envelopeMiddleware } from "./envelope.ts";
+import { errorResponse, errorValue, materializeError } from "./envelope.ts";
+import { headersMiddleware } from "./headers.ts";
+import { renderMiddleware } from "./render.ts";
 import { authMiddleware } from "./auth.ts";
 import { routeMiddleware } from "./route.ts";
 import { authorizeMiddleware } from "./authorize.ts";
@@ -13,7 +15,9 @@ import { dispatchMiddleware } from "./dispatch.ts";
 import { createIdempotency } from "./idempotency.ts";
 import { defaultIdempotencySettings } from "./idempotency-store.ts";
 import type { Handler } from "./app.ts";
-import { loopbackAgent } from "../../../test/helpers/agent.ts";
+import { demand } from "./variables.ts";
+import type { AppEnv } from "./variables.ts";
+import { fetchAgent } from "../../../test/helpers/agent.ts";
 import {
   createTestApp,
   HARNESS_ACTOR_FIXTURE,
@@ -41,9 +45,17 @@ describe("src/http/server/authorize.test", () => {
     const app = await createTestApp({
       resolveActor: () => HARNESS_ACTOR_FIXTURE,
       handlers: {
-        "node.list": () => ({ status: 200, body: { nodes: [] } }),
-        "blob.show": () => ({ status: 200, body: { hash: "sha256:9f2a" } }),
-        "plan.revisions": () => ({ status: 200, body: { revisions: [] } }),
+        "node.list": () => ({ kind: "json", status: 200, body: { nodes: [] } }),
+        "blob.show": () => ({
+          kind: "json",
+          status: 200,
+          body: { hash: "sha256:9f2a" },
+        }),
+        "plan.revisions": () => ({
+          kind: "json",
+          status: 200,
+          body: { revisions: [] },
+        }),
       },
     });
     const node = await app.get("/v1/node");
@@ -118,7 +130,7 @@ describe("src/http/server/authorize.test", () => {
             ["sha256:write-probe", 0, new Uint8Array(0), 0],
           );
         });
-        return { status: 200, body: { providers: [] } };
+        return { kind: "json", status: 200, body: { providers: [] } };
       };
       const app = await createTestApp({
         resolveActor: () => HARNESS_ACTOR_FIXTURE,
@@ -141,7 +153,11 @@ describe("src/http/server/authorize.test", () => {
     const app = await createTestApp({
       resolveActor: () => HARNESS_ACTOR_FIXTURE,
       handlers: {
-        "provider.register": () => ({ status: 200, body: { ok: true } }),
+        "provider.register": () => ({
+          kind: "json",
+          status: 200,
+          body: { ok: true },
+        }),
       },
     });
     const response = await app
@@ -159,29 +175,39 @@ describe("src/http/server/authorize.test", () => {
       schedule: () => () => {},
     });
     let calls = 0;
-    const app = new Koa();
-    app.use(envelopeMiddleware({ onInternalError: () => {} }));
-    app.use(
+    const onInternalError: (error: unknown) => void = () => {};
+    const hono = new Hono<AppEnv>();
+    hono.onError((error, c) => {
+      const value = errorValue(error);
+      const materialized = materializeError(value);
+      if (materialized.internal) {
+        onInternalError(value);
+      }
+      return errorResponse(materialized, demand(c, "headers"));
+    });
+    hono.use("*", headersMiddleware());
+    hono.use("*", renderMiddleware());
+    hono.use("*", routeMiddleware());
+    hono.use(
+      "*",
       authMiddleware({
         token: "test-token",
         resolveActor: () => HARNESS_ACTOR_FIXTURE,
       }),
     );
-    app.use(routeMiddleware());
-    app.use(authorizeMiddleware());
-    app.use(bodyParser({ enableTypes: ["json"] }));
-    app.use(middleware);
-    app.use(
-      dispatchMiddleware({
-        handlers: {
-          "provider.register": () => {
-            calls += 1;
-            return { status: 200, body: { ok: true } };
-          },
+    hono.use("*", authorizeMiddleware());
+    const reservedStage = middleware as unknown as MiddlewareHandler<AppEnv>;
+    hono.use("*", reservedStage);
+    const dispatchStage = dispatchMiddleware({
+      handlers: {
+        "provider.register": () => {
+          calls += 1;
+          return { kind: "json", status: 200, body: { ok: true } };
         },
-      }),
-    );
-    const agent = await loopbackAgent(app);
+      },
+    }) as unknown as MiddlewareHandler<AppEnv>;
+    hono.use("*", dispatchStage);
+    const agent = fetchAgent(hono);
     const response = await agent
       .post("/v1/provider")
       .set("Host", "kanthord.test")

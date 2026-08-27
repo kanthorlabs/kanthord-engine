@@ -50,15 +50,15 @@ type Record_ = {
   settled: boolean;
 };
 
+function storedBodyBytes(body: StoredAnswer["body"]): number {
+  if (typeof body === "string") return Buffer.byteLength(body, "utf8");
+  if (body === null) return 0;
+  return body.byteLength;
+}
+
 function answerBytes(answer: StoredAnswer): number {
-  let body: string;
-  try {
-    body = JSON.stringify(answer.body ?? null) ?? "null";
-  } catch {
-    body = "";
-  }
   return (
-    Buffer.byteLength(body, "utf8") +
+    storedBodyBytes(answer.body) +
     Buffer.byteLength(JSON.stringify(answer.headers), "utf8")
   );
 }

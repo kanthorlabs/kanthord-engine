@@ -19,7 +19,7 @@ export function listRevisionHandler(
     }
     try {
       const revisions = dependencies.listRevisions({ projectId: id });
-      return { status: 200, body: { revisions } };
+      return { kind: "json", status: 200, body: { revisions } };
     } catch (error) {
       if (error instanceof ListRevisionError) {
         switch (error.refusal) {

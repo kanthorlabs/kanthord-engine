@@ -1,12 +1,12 @@
-import { Buffer } from "node:buffer";
-
-import type { Context, Next } from "koa";
+import type { MiddlewareHandler } from "hono";
 
 import { httpError } from "../contract/errors.ts";
-import type { Handler } from "./app.ts";
-import type { AuthenticatedState } from "./auth.ts";
+import type { Handler, HandlerContext } from "./app.ts";
+import { compareBytewise } from "./bytewise.ts";
+import { ThrownValueError } from "./envelope.ts";
 import { readQuery } from "./query.ts";
-import type { RoutedState } from "./route.ts";
+import { demand, optional } from "./variables.ts";
+import type { AppEnv } from "./variables.ts";
 
 export type DispatchDependencies = Readonly<{
   handlers: Readonly<Record<string, Handler>>;
@@ -14,9 +14,9 @@ export type DispatchDependencies = Readonly<{
 
 export function dispatchMiddleware(
   dependencies: DispatchDependencies,
-): (context: Context, next: Next) => Promise<void> {
-  return async (context) => {
-    const match = (context.state as RoutedState).match;
+): MiddlewareHandler<AppEnv> {
+  return async (c) => {
+    const match = demand(c, "match");
     if (match.operation.status === "stubbed") {
       throw httpError(
         "not-implemented",
@@ -30,34 +30,43 @@ export function dispatchMiddleware(
         `${match.operation.operationId} is not implemented yet`,
       );
     }
-    const result = await handler({
+    const context: HandlerContext = {
       operation: match.operation,
       parameters: match.parameters,
-      query: readQuery(context.querystring),
-      headers: readHeaders(context.headers),
-      body: context.request.body,
-      actor: (context.state as AuthenticatedState).actor,
-    });
-    context.status = result.status;
-    for (const name of Object.keys(result.headers ?? {}).sort((a, b) =>
-      Buffer.compare(Buffer.from(a), Buffer.from(b)),
-    )) {
-      context.set(name, (result.headers ?? {})[name] as string);
+      query: readQuery(new URL(c.req.url).search.slice(1)),
+      headers: readHeaders(c.req.raw.headers),
+      body: optional(c, "body"),
+      actor: demand(c, "actor"),
+    };
+    let result: Awaited<ReturnType<Handler>>;
+    try {
+      result = await handler(context);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new ThrownValueError(error);
     }
-    context.body = result.body;
+    const headers = demand(c, "headers");
+    const resultHeaders = result.headers ?? {};
+    for (const name of Object.keys(resultHeaders).sort(compareBytewise)) {
+      headers.append(name, resultHeaders[name] as string);
+    }
+    c.set("result", result);
   };
 }
 
-function readHeaders(
-  headers: Readonly<Record<string, string | string[] | undefined>>,
-): Readonly<Record<string, string>> {
+function readHeaders(headers: Headers): Readonly<Record<string, string>> {
+  const collected: Record<string, string> = {};
+  for (const [name, value] of headers.entries()) {
+    collected[name] = value;
+  }
   const result: Record<string, string> = {};
-  for (const name of Object.keys(headers).sort((a, b) =>
-    Buffer.compare(Buffer.from(a), Buffer.from(b)),
-  )) {
-    const value = headers[name];
-    if (value === undefined) continue;
-    result[name] = Array.isArray(value) ? value.join(", ") : value;
+  for (const name of Object.keys(collected).sort(compareBytewise)) {
+    const value = collected[name];
+    if (value !== undefined) {
+      result[name] = value;
+    }
   }
   return result;
 }

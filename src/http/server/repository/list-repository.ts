@@ -12,6 +12,6 @@ export function listRepositoryHandler(
 ): Handler {
   return async () => {
     const views = await dependencies.listRepositories({});
-    return { status: 200, body: { repositories: views } };
+    return { kind: "json", status: 200, body: { repositories: views } };
   };
 }
