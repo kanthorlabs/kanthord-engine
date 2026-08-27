@@ -28,7 +28,17 @@ const fireAll = (): void => {
 };
 
 function makeAnswer(status: number, tag: string): StoredAnswer {
-  return { status, body: { tag }, headers: [] };
+  return { status, body: JSON.stringify({ tag }), headers: [] };
+}
+
+function storedBodyBytes(body: StoredAnswer["body"]): number {
+  if (typeof body === "string") return Buffer.byteLength(body, "utf8");
+  if (body === null) return 0;
+  return body.byteLength;
+}
+
+function serializedHeadersBytes(headers: StoredAnswer["headers"]): number {
+  return Buffer.byteLength(JSON.stringify(headers), "utf8");
 }
 
 function newStore(overrides?: Partial<typeof defaultIdempotencySettings>) {
@@ -287,20 +297,38 @@ describe("src/http/server/idempotency-store.test", () => {
     );
   });
 
-  it("settle survives an unmeasurable body", () => {
-    const store = newStore();
-    const first = store.reserve("k1", "f1");
-    const settle = reservedSettle(first);
-    const cyclic: { self?: unknown } = {};
-    cyclic.self = cyclic;
-    const answer: StoredAnswer = { status: 200, body: cyclic, headers: [] };
-    assert.doesNotThrow(() => settle(answer, "replayable"));
-    const replay = store.reserve("k1", "f1");
-    assert.equal(replay.kind, "replay");
-    assert.deepEqual(
-      (replay as { kind: "replay"; answer: StoredAnswer }).answer,
-      answer,
-    );
+  describe("settlement byte deltas", () => {
+    const cases: ReadonlyArray<{
+      readonly name: string;
+      readonly body: StoredAnswer["body"];
+      readonly expectDelta: number;
+    }> = [
+      {
+        name: "settling a UTF-8 two-byte string body adds exactly 4 bytes",
+        body: "é",
+        expectDelta: 4,
+      },
+      {
+        name: "settling a three-byte Uint8Array body adds exactly 5 bytes",
+        body: Uint8Array.from([0x00, 0x80, 0xff]),
+        expectDelta: 5,
+      },
+      {
+        name: "settling a null body adds exactly 2 bytes",
+        body: null,
+        expectDelta: 2,
+      },
+    ];
+
+    for (const testCase of cases) {
+      it(testCase.name, () => {
+        const store = newStore();
+        const settle = reservedSettle(store.reserve("k1", "f1"));
+        const before = store.bytes();
+        settle({ status: 200, body: testCase.body, headers: [] }, "replayable");
+        assert.equal(store.bytes() - before, testCase.expectDelta);
+      });
+    }
   });
 
   it("after a completed settle with a different fingerprint, the reserve is mismatch", () => {
@@ -353,8 +381,7 @@ describe("src/http/server/idempotency-store.test", () => {
     settle(answer, "replayable");
     const afterSettle = store.bytes();
     const expectedDelta =
-      Buffer.byteLength(JSON.stringify(answer.body), "utf8") +
-      Buffer.byteLength(JSON.stringify(answer.headers), "utf8");
+      storedBodyBytes(answer.body) + serializedHeadersBytes(answer.headers);
     assert.ok(afterSettle > afterReserve);
     assert.ok(afterReserve >= before);
     assert.equal(afterSettle - afterReserve, expectedDelta);
@@ -474,8 +501,7 @@ describe("src/http/server/idempotency-store.test", () => {
   it("the byte bound evicts a completed record too", () => {
     const answer = makeAnswer(200, "1");
     const answerCost =
-      Buffer.byteLength(JSON.stringify(answer.body), "utf8") +
-      Buffer.byteLength(JSON.stringify(answer.headers), "utf8");
+      storedBodyBytes(answer.body) + serializedHeadersBytes(answer.headers);
     const recordOverhead =
       Buffer.byteLength("k1", "utf8") + Buffer.byteLength("f1", "utf8");
     const store = new IdempotencyStore({
@@ -522,7 +548,7 @@ describe("src/http/server/idempotency-store.test", () => {
     const outcome = joinedOutcome(store.reserve("k1", "f1"));
     const answer: StoredAnswer = {
       status: 200,
-      body: { blob: "x".repeat(4096) },
+      body: "x".repeat(4096),
       headers: [],
     };
     settle(answer, "replayable");
@@ -540,7 +566,7 @@ describe("src/http/server/idempotency-store.test", () => {
     for (let i = 0; i < 10; i += 1) {
       const result = store.reserve(`k${i}`, "f1");
       reservedSettle(result)(
-        { status: 200, body: { blob: "x".repeat(2048) }, headers: [] },
+        { status: 200, body: "x".repeat(2048), headers: [] },
         "replayable",
       );
       assert.ok(store.bytes() <= 1024);

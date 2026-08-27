@@ -6,5 +6,9 @@ export type DbHandlerDependencies = Readonly<{
 }>;
 
 export function dbHandler(dependencies: DbHandlerDependencies): Handler {
-  return () => ({ status: 200, body: dependencies.readMigrationStatus() });
+  return () => ({
+    kind: "json",
+    status: 200,
+    body: dependencies.readMigrationStatus(),
+  });
 }

@@ -33,7 +33,7 @@ export function createNodeHandler(
         node: parsed.data.node,
         actor: context.actor,
       });
-      return { status: 200, body: result };
+      return { kind: "json", status: 200, body: result };
     } catch (error) {
       throw toHttpError(error);
     }

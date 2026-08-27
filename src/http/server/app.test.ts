@@ -1,19 +1,36 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import type { Server } from "node:http";
+import { connect } from "node:net";
+import type { AddressInfo } from "node:net";
+import { readdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
-import { createApp } from "./app.ts";
+import {
+  BindingError,
+  createApp,
+  handlerStatuses,
+  bodylessStatuses,
+} from "./app.ts";
 import type { Handler, TransportSettings } from "./app.ts";
 import { noopWaits } from "../../../test/helpers/wait-registry.ts";
+import { loopbackServer } from "../../../test/helpers/agent.ts";
 import { registry } from "../contract/registry.ts";
 import { renderPath } from "../contract/path.ts";
 import {
   createTestApp,
+  createSocketTestApp,
   unimplementedFor,
   BOOTSTRAP_ACTOR_FIXTURE,
 } from "../../../test/helpers/app.ts";
 
-const statusHandler: Handler = () => ({ status: 200, body: { ok: true } });
+const statusHandler: Handler = () => ({
+  kind: "json",
+  status: 200,
+  body: { ok: true },
+});
 const healthHandler: Handler = () => ({
+  kind: "json",
   status: 200,
   body: { status: "ok", dependencies: [] },
 });
@@ -22,7 +39,63 @@ const handlers = {
   "system.health": healthHandler,
 };
 
+const GENERIC_500 = {
+  error: { code: "internal-error", message: "internal error" },
+};
+
+function port(server: Server): number {
+  return (server.address() as AddressInfo).port;
+}
+
+type RawReply = Readonly<{ status: number; body: Buffer }>;
+
+function rawHttp10(target: number, path: string): Promise<RawReply> {
+  return new Promise((resolve, reject) => {
+    const socket = connect({ host: "127.0.0.1", port: target }, () => {
+      socket.write(`GET ${path} HTTP/1.0\r\n\r\n`);
+    });
+    const chunks: Buffer[] = [];
+    socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+    socket.on("error", reject);
+    socket.on("close", () => {
+      const raw = Buffer.concat(chunks);
+      const separator = raw.indexOf("\r\n\r\n");
+      const head = raw.subarray(0, separator).toString("utf8");
+      const body = raw.subarray(separator + 4);
+      const statusLine = head.split("\r\n")[0] ?? "";
+      const status = Number(statusLine.split(" ")[1]);
+      resolve({ status, body });
+    });
+  });
+}
+
 describe("src/http/server/app.test", () => {
+  it("the handler status set and the bodyless status set are the exact closed lists", () => {
+    assert.deepEqual(handlerStatuses, [200, 204, 206, 304]);
+    assert.deepEqual(bodylessStatuses, [204, 304]);
+  });
+
+  it("a GET carrying a body reaches the route, and the handler reads no body", async () => {
+    let seen: unknown = "unread";
+    let carried = "";
+    const app = await createSocketTestApp({
+      handlers: {
+        "system.health": (context) => {
+          seen = context.body;
+          carried = context.headers["content-length"] ?? "";
+          return { kind: "json", status: 200, body: { status: "ok" } };
+        },
+      },
+    });
+
+    const response = await app.get("/v1/health").send({ ignored: true });
+
+    assert.equal(carried, "16");
+    assert.equal(seen, undefined);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { status: "ok" });
+  });
+
   it("the browser defences apply to system.health like every route", async () => {
     const app = await createTestApp({ handlers });
     const clean = await app.get("/v1/health");
@@ -136,7 +209,7 @@ describe("src/http/server/app.test", () => {
         ...handlers,
         "repository.register": () => {
           calls += 1;
-          return { status: 200, body: { ok: true } };
+          return { kind: "json", status: 200, body: { ok: true } };
         },
       },
     });
@@ -206,20 +279,31 @@ describe("src/http/server/app.test", () => {
     assert.equal(response.headers["access-control-allow-origin"], undefined);
   });
 
-  it("preflight beats auth: an OPTIONS with an allowed origin and host, no Authorization, answers 204", async () => {
+  it("preflight beats auth: an OPTIONS with an allowed origin and host, no Authorization, answers 204 without resolving an actor", async () => {
+    let resolutions = 0;
     const app = await createTestApp({
       allowedOrigins: ["http://localhost:8080"],
+      resolveActor: (presented) => {
+        resolutions += 1;
+        return BOOTSTRAP_ACTOR_FIXTURE;
+      },
     });
     const response = await app.raw
       .options("/v1/status")
       .set("Host", "kanthord.test")
       .set("Origin", "http://localhost:8080");
     assert.equal(response.status, 204);
+    assert.equal(resolutions, 0);
   });
 
-  it("preflight beats route: an OPTIONS to a non-existent path answers the identical 204 headers as an OPTIONS to a real path", async () => {
+  it("preflight beats route: an OPTIONS to a non-existent path answers the identical 204 headers as an OPTIONS to a real path, without resolving an actor", async () => {
+    let resolutions = 0;
     const app = await createTestApp({
       allowedOrigins: ["http://localhost:8080"],
+      resolveActor: (presented) => {
+        resolutions += 1;
+        return BOOTSTRAP_ACTOR_FIXTURE;
+      },
     });
     const statusResponse = await app.raw
       .options("/v1/status")
@@ -243,6 +327,7 @@ describe("src/http/server/app.test", () => {
         statusResponse.headers[name],
       );
     }
+    assert.equal(resolutions, 0);
   });
 
   it("auth still beats route for a non-preflight: a GET with an allowed origin and host, no token, answers 401 and carries the origin header", async () => {
@@ -350,25 +435,168 @@ describe("src/http/server/app.test", () => {
     assert.equal(response.headers["access-control-expose-headers"], undefined);
   });
 
-  it("app.proxy stays false on the app createApp returns", () => {
-    const settings: TransportSettings = {
-      token: "test-token",
-      allowedHosts: ["kanthord.test"],
-      allowedOrigins: [],
-    };
+  it("a full-chain authentication failure carries access-control-allow-origin and exactly vary: origin", async () => {
+    const app = await createTestApp({
+      handlers,
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const response = await app.raw
+      .get("/v1/status")
+      .set("Host", "kanthord.test")
+      .set("Origin", "http://localhost:8080");
+    assert.equal(response.status, 401);
+    assert.equal(response.body.error.code, "unauthenticated");
+    assert.equal(
+      response.headers["access-control-allow-origin"],
+      "http://localhost:8080",
+    );
+    assert.equal(response.headers.vary, "Origin");
+  });
+
+  it("a full-chain routing failure carries access-control-allow-origin and exactly vary: origin", async () => {
+    const app = await createTestApp({
+      handlers,
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const response = await app.raw
+      .get("/v1/nope")
+      .set("Host", "kanthord.test")
+      .set("Authorization", "Bearer test-token")
+      .set("Origin", "http://localhost:8080");
+    assert.equal(response.status, 404);
+    assert.equal(response.body.error.code, "not-found");
+    assert.equal(
+      response.headers["access-control-allow-origin"],
+      "http://localhost:8080",
+    );
+    assert.equal(response.headers.vary, "Origin");
+  });
+
+  it("a full-chain handler Error carries the cors headers, answers the exact generic 500 envelope and reports once", async () => {
+    const boom = new Error("boom");
+    const app = await createTestApp({
+      handlers: {
+        "system.status": () => {
+          throw boom;
+        },
+      },
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const response = await app.raw
+      .get("/v1/status")
+      .set("Host", "kanthord.test")
+      .set("Authorization", "Bearer test-token")
+      .set("Origin", "http://localhost:8080");
+    assert.equal(response.status, 500);
+    assert.deepEqual(response.body, GENERIC_500);
+    assert.equal(
+      response.headers["access-control-allow-origin"],
+      "http://localhost:8080",
+    );
+    assert.equal(response.headers.vary, "Origin");
+    assert.equal(app.internalErrors().length, 1);
+    assert.strictEqual(app.internalErrors()[0], boom);
+  });
+
+  it("a keyed full-chain handler Error still reports exactly once", async () => {
+    const boom = new Error("boom");
+    const app = await createTestApp({
+      handlers: {
+        "project.create": () => {
+          throw boom;
+        },
+      },
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const response = await app
+      .post("/v1/project")
+      .set("Origin", "http://localhost:8080")
+      .set("Idempotency-Key", "01JQ8ZAN9P0ABCDEFGHJKMNPQR")
+      .send({ name: "a" });
+    assert.equal(response.status, 500);
+    assert.deepEqual(response.body, GENERIC_500);
+    assert.equal(
+      response.headers["access-control-allow-origin"],
+      "http://localhost:8080",
+    );
+    assert.equal(app.internalErrors().length, 1);
+    assert.strictEqual(app.internalErrors()[0], boom);
+  });
+
+  it("a full-chain handler that throws a string answers the generic 500 envelope and reports the exact value", async () => {
+    const app = await createTestApp({
+      handlers: {
+        "system.status": () => {
+          throw "failure";
+        },
+      },
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const response = await app.raw
+      .get("/v1/status")
+      .set("Host", "kanthord.test")
+      .set("Authorization", "Bearer test-token")
+      .set("Origin", "http://localhost:8080");
+    assert.equal(response.status, 500);
+    assert.deepEqual(response.body, GENERIC_500);
+    assert.equal(
+      response.headers["access-control-allow-origin"],
+      "http://localhost:8080",
+    );
+    assert.equal(app.internalErrors().length, 1);
+    assert.strictEqual(app.internalErrors()[0], "failure");
+  });
+
+  it("a full-chain handler that throws undefined answers the generic 500 envelope and reports the exact value", async () => {
+    const app = await createTestApp({
+      handlers: {
+        "system.status": () => {
+          throw undefined;
+        },
+      },
+      allowedOrigins: ["http://localhost:8080"],
+    });
+    const response = await app.raw
+      .get("/v1/status")
+      .set("Host", "kanthord.test")
+      .set("Authorization", "Bearer test-token")
+      .set("Origin", "http://localhost:8080");
+    assert.equal(response.status, 500);
+    assert.deepEqual(response.body, GENERIC_500);
+    assert.equal(app.internalErrors().length, 1);
+    assert.strictEqual(app.internalErrors()[0], undefined);
+  });
+
+  it("an http/1.0 request with no Host header answers the exact host-forbidden message through the bridge, not a bare 400", async (t) => {
     const created = createApp({
-      settings,
+      settings: {
+        token: "test-token",
+        allowedHosts: ["kanthord.test"],
+        allowedOrigins: [],
+      },
       handlers: {},
       unimplemented: unimplementedFor({}),
       resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
       onInternalError: () => {},
       waits: noopWaits(),
     });
-    const { app } = created;
-    assert.equal(app.proxy, false);
+    const server = await loopbackServer(created.hono);
+    t.after(() => {
+      server.close();
+    });
+
+    const reply = await rawHttp10(port(server), "/v1/status");
+
+    assert.equal(reply.status, 403);
+    assert.deepEqual(JSON.parse(reply.body.toString("utf8")), {
+      error: {
+        code: "host-forbidden",
+        message: "the request carried no Host header",
+      },
+    });
   });
 
-  it("createApp returns an app and a cancel handle, and the handle reaches the registry", () => {
+  it("createApp returns the hono application and a cancel handle, and the handle reaches the registry", () => {
     let cancelled = false;
     const waits = {
       wait: () => Promise.resolve([]),
@@ -388,7 +616,7 @@ describe("src/http/server/app.test", () => {
       onInternalError: () => {},
       waits,
     });
-    assert.deepEqual(Object.keys(result).sort(), ["app", "cancelWaits"]);
+    assert.deepEqual(Object.keys(result).sort(), ["cancelWaits", "hono"]);
     result.cancelWaits();
     assert.equal(cancelled, true);
   });
@@ -399,5 +627,119 @@ describe("src/http/server/app.test", () => {
       "system.db": statusHandler,
     };
     assert.equal(unimplementedFor(bound).length, 42);
+  });
+
+  it("createApp throws the exact binding error before reading settings, idempotency, now or schedule", () => {
+    const reads = { settings: 0, idempotency: 0, now: 0, schedule: 0 };
+    const dependencies = {
+      get settings(): TransportSettings {
+        reads.settings += 1;
+        throw new Error("settings was read");
+      },
+      handlers: {},
+      unimplemented: [],
+      get idempotency(): NonNullable<
+        Parameters<typeof createApp>[0]["idempotency"]
+      > {
+        reads.idempotency += 1;
+        throw new Error("idempotency was read");
+      },
+      get now(): () => number {
+        reads.now += 1;
+        throw new Error("now was read");
+      },
+      get schedule(): NonNullable<Parameters<typeof createApp>[0]["schedule"]> {
+        reads.schedule += 1;
+        throw new Error("schedule was read");
+      },
+      resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
+      onInternalError: () => {},
+      waits: noopWaits(),
+    };
+    const routedIds = registry
+      .filter((entry) => entry.status === "routed")
+      .map((entry) => entry.operationId);
+    assert.throws(
+      () => createApp(dependencies),
+      (error: unknown) => {
+        assert.ok(error instanceof BindingError);
+        assert.equal(
+          error.message,
+          `incomplete transport binding: ${routedIds.join(", ")}`,
+        );
+        return true;
+      },
+    );
+    assert.deepEqual(reads, {
+      settings: 0,
+      idempotency: 0,
+      now: 0,
+      schedule: 0,
+    });
+  });
+
+  it("createApp called with no schedule builds an app, and the module source contains neither runtime/ nor unref", () => {
+    const source = readFileSync(resolve(import.meta.dirname, "app.ts"), "utf8");
+    assert.equal(source.includes("runtime/"), false);
+    assert.equal(source.includes("unref"), false);
+    const result = createApp({
+      settings: {
+        token: "test-token",
+        allowedHosts: ["kanthord.test"],
+        allowedOrigins: [],
+      },
+      handlers: {},
+      unimplemented: unimplementedFor({}),
+      resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
+      onInternalError: () => {},
+      waits: noopWaits(),
+    });
+    assert.ok(result.hono);
+  });
+
+  it("defaultSchedule runs and cancels under mock timers, through a createApp built with no schedule", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const source = readFileSync(resolve(import.meta.dirname, "app.ts"), "utf8");
+    assert.equal(source.includes("setTimeout"), true);
+    assert.equal(source.includes("clearTimeout"), true);
+    const result = createApp({
+      settings: {
+        token: "test-token",
+        allowedHosts: ["kanthord.test"],
+        allowedOrigins: [],
+      },
+      handlers: {},
+      unimplemented: unimplementedFor({}),
+      resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
+      onInternalError: () => {},
+      waits: noopWaits(),
+    });
+    assert.ok(result.hono);
+  });
+
+  it("production sources keep header writes in the accumulator", () => {
+    const directory = new URL("./", import.meta.url);
+    const listing = readdirSync(directory, { recursive: true }).map(String);
+    const sources = listing
+      .filter((entry) => entry.endsWith(".ts") && !entry.endsWith(".test.ts"))
+      .sort();
+    const text = (entry: string) =>
+      readFileSync(new URL(entry, directory), "utf8");
+    const repoPath = (entry: string) => `src/http/server/${entry}`;
+
+    const bareContextGet = sources
+      .filter(
+        (entry) => entry !== "variables.ts" && /\bc\.get\(/.test(text(entry)),
+      )
+      .map(repoPath);
+    const contextHeaderWrites = sources
+      .filter((entry) => /\bc\.header\(/.test(text(entry)))
+      .map(repoPath);
+    const contextResponseWrites = sources
+      .filter((entry) => /\bc\.res\s*=/.test(text(entry)))
+      .map(repoPath);
+    assert.deepEqual(bareContextGet, []);
+    assert.deepEqual(contextHeaderWrites, []);
+    assert.deepEqual(contextResponseWrites, []);
   });
 });

@@ -46,6 +46,10 @@ export function listEventHandler(
       read: () => dependencies.listEvents(filters),
       waitSeconds: wait ?? 0,
     });
-    return { status: 200, body: { events: formatEvents(waited) } };
+    return {
+      kind: "json",
+      status: 200,
+      body: { events: formatEvents(waited) },
+    };
   };
 }

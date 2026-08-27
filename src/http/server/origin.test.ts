@@ -1,28 +1,44 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import Koa, { type Middleware } from "koa";
+import { Hono } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 
-import { envelopeMiddleware } from "./envelope.ts";
+import { errorResponse, errorValue, materializeError } from "./envelope.ts";
+import { headersMiddleware } from "./headers.ts";
+import { renderMiddleware } from "./render.ts";
 import { originMiddleware } from "./origin.ts";
 import { httpError } from "../contract/errors.ts";
-import { loopbackAgent } from "../../../test/helpers/agent.ts";
+import { demand } from "./variables.ts";
+import type { AppEnv } from "./variables.ts";
+import { fetchAgent } from "../../../test/helpers/agent.ts";
+
+type Downstream = (c: Context<AppEnv>) => void;
 
 function buildApp(
-  middleware: Middleware,
-  downstream?: (context: import("koa").Context) => void,
-): Koa {
-  const app = new Koa();
-  app.use(envelopeMiddleware({ onInternalError: () => {} }));
-  app.use(middleware);
-  app.use((context) => {
-    if (downstream) {
-      downstream(context);
-      return;
+  middleware: MiddlewareHandler<AppEnv>,
+  downstream?: Downstream,
+  onInternalError: (error: unknown) => void = () => {},
+): Hono<AppEnv> {
+  const hono = new Hono<AppEnv>();
+  hono.onError((error, c) => {
+    const value = errorValue(error);
+    const materialized = materializeError(value);
+    if (materialized.internal) {
+      onInternalError(value);
     }
-    context.body = { reached: true };
+    return errorResponse(materialized, demand(c, "headers"));
   });
-  return app;
+  hono.use("*", headersMiddleware());
+  hono.use("*", renderMiddleware());
+  hono.use("*", middleware);
+  hono.all("*", async (c) => {
+    if (downstream !== undefined) {
+      downstream(c);
+    }
+    c.set("result", { kind: "json", status: 200, body: { reached: true } });
+  });
+  return hono;
 }
 
 function refusedBody(origin: string) {
@@ -38,7 +54,7 @@ describe("src/http/server/origin.test", () => {
   describe("empty allow list", () => {
     it("no Origin header passes through with Vary set", async () => {
       const app = buildApp(originMiddleware({ allowedOrigins: [] }));
-      const response = await (await loopbackAgent(app)).get("/");
+      const response = await fetchAgent(app).get("/");
       assert.equal(response.status, 200);
       assert.deepEqual(response.body, { reached: true });
       assert.equal(response.headers["access-control-allow-origin"], undefined);
@@ -56,11 +72,7 @@ describe("src/http/server/origin.test", () => {
         "https://kanthord.test",
       ];
       for (const value of values) {
-        const response = await (
-          await loopbackAgent(app)
-        )
-          .get("/")
-          .set("Origin", value);
+        const response = await fetchAgent(app).get("/").set("Origin", value);
         assert.equal(response.status, 403, `Origin ${JSON.stringify(value)}`);
         assert.deepEqual(
           response.body,
@@ -72,14 +84,17 @@ describe("src/http/server/origin.test", () => {
           undefined,
           `Origin ${JSON.stringify(value)}`,
         );
+        assert.equal(
+          response.headers["vary"],
+          undefined,
+          `Origin ${JSON.stringify(value)}`,
+        );
       }
     });
 
     it("a Referer header alone does not trigger the check", async () => {
       const app = buildApp(originMiddleware({ allowedOrigins: [] }));
-      const response = await (
-        await loopbackAgent(app)
-      )
+      const response = await fetchAgent(app)
         .get("/")
         .set("Referer", "http://evil.example");
       assert.equal(response.status, 200);
@@ -89,9 +104,7 @@ describe("src/http/server/origin.test", () => {
     it("refuses a disallowed Origin on every method", async () => {
       const app = buildApp(originMiddleware({ allowedOrigins: [] }));
       for (const method of ["get", "post", "put", "delete"] as const) {
-        const response = await (
-          await loopbackAgent(app)
-        )
+        const response = await fetchAgent(app)
           [method]("/")
           .set("Origin", "http://evil.example");
         assert.equal(response.status, 403, method);
@@ -100,6 +113,12 @@ describe("src/http/server/origin.test", () => {
           refusedBody("http://evil.example"),
           method,
         );
+        assert.equal(
+          response.headers["access-control-allow-origin"],
+          undefined,
+          method,
+        );
+        assert.equal(response.headers["vary"], undefined, method);
       }
     });
   });
@@ -109,9 +128,7 @@ describe("src/http/server/origin.test", () => {
 
     it("the exact allowed origin passes with the header and Vary set", async () => {
       const app = buildApp(originMiddleware({ allowedOrigins }));
-      const response = await (
-        await loopbackAgent(app)
-      )
+      const response = await fetchAgent(app)
         .get("/")
         .set("Origin", "http://localhost:8080");
       assert.equal(response.status, 200);
@@ -132,11 +149,7 @@ describe("src/http/server/origin.test", () => {
         "null",
       ];
       for (const value of values) {
-        const response = await (
-          await loopbackAgent(app)
-        )
-          .get("/")
-          .set("Origin", value);
+        const response = await fetchAgent(app).get("/").set("Origin", value);
         assert.equal(response.status, 403, value);
         assert.deepEqual(response.body, refusedBody(value), value);
         assert.equal(
@@ -144,6 +157,7 @@ describe("src/http/server/origin.test", () => {
           undefined,
           value,
         );
+        assert.equal(response.headers["vary"], undefined, value);
       }
     });
   });
@@ -153,9 +167,7 @@ describe("src/http/server/origin.test", () => {
       const app = buildApp(
         originMiddleware({ allowedOrigins: ["http://localhost"] }),
       );
-      const response = await (
-        await loopbackAgent(app)
-      )
+      const response = await fetchAgent(app)
         .get("/")
         .set("Origin", "http://localhost");
       assert.equal(response.status, 200);
@@ -170,56 +182,99 @@ describe("src/http/server/origin.test", () => {
     it("appends Origin to an existing Vary value set downstream", async () => {
       const app = buildApp(
         originMiddleware({ allowedOrigins: ["http://localhost:8080"] }),
-        (context) => {
-          context.vary("Accept");
-          context.body = { reached: true };
+        (c) => {
+          demand(c, "headers").append("vary", "Accept");
         },
       );
-      const response = await (
-        await loopbackAgent(app)
-      )
+      const response = await fetchAgent(app)
         .get("/")
         .set("Origin", "http://localhost:8080");
       assert.equal(response.status, 200);
-      assert.equal(response.headers["vary"], "Accept, Origin");
+      assert.equal(response.headers["vary"], "Origin, Accept");
     });
 
-    it("a downstream throw still carries Vary and Access-Control-Allow-Origin", async () => {
+    it("a downstream not-found throw still carries Vary and Access-Control-Allow-Origin", async () => {
       const app = buildApp(
         originMiddleware({ allowedOrigins: ["http://localhost:8080"] }),
         () => {
           throw httpError("not-found", "nope");
         },
       );
-      const response = await (
-        await loopbackAgent(app)
-      )
+      const response = await fetchAgent(app)
         .get("/")
         .set("Origin", "http://localhost:8080");
       assert.equal(response.status, 404);
+      assert.deepEqual(response.body, {
+        error: { code: "not-found", message: "nope" },
+      });
       assert.equal(
         response.headers["access-control-allow-origin"],
         "http://localhost:8080",
       );
-      assert.ok(response.headers["vary"]?.includes("Origin"));
+      assert.equal(response.headers["vary"], "Origin");
+    });
+
+    it("a downstream unauthenticated failure keeps the status, the header and Vary", async () => {
+      const app = buildApp(
+        originMiddleware({ allowedOrigins: ["http://localhost:8080"] }),
+        () => {
+          throw httpError("unauthenticated", "no credentials");
+        },
+      );
+      const response = await fetchAgent(app)
+        .get("/")
+        .set("Origin", "http://localhost:8080");
+      assert.equal(response.status, 401);
+      assert.deepEqual(response.body, {
+        error: { code: "unauthenticated", message: "no credentials" },
+      });
+      assert.equal(
+        response.headers["access-control-allow-origin"],
+        "http://localhost:8080",
+      );
+      assert.equal(response.headers["vary"], "Origin");
+    });
+
+    it("a downstream internal failure answers the generic envelope once with CORS intact", async () => {
+      const failures: unknown[] = [];
+      const thrown = new Error("boom");
+      const app = buildApp(
+        originMiddleware({ allowedOrigins: ["http://localhost:8080"] }),
+        () => {
+          throw thrown;
+        },
+        (error) => {
+          failures.push(error);
+        },
+      );
+      const response = await fetchAgent(app)
+        .get("/")
+        .set("Origin", "http://localhost:8080");
+      assert.equal(response.status, 500);
+      assert.deepEqual(response.body, {
+        error: { code: "internal-error", message: "internal error" },
+      });
+      assert.equal(failures.length, 1);
+      assert.strictEqual(failures[0], thrown);
+      assert.equal(
+        response.headers["access-control-allow-origin"],
+        "http://localhost:8080",
+      );
+      assert.equal(response.headers["vary"], "Origin");
     });
 
     it("Access-Control-Allow-Credentials is absent on every response, allowed and refused alike", async () => {
       const app = buildApp(
         originMiddleware({ allowedOrigins: ["http://localhost:8080"] }),
       );
-      const allowed = await (
-        await loopbackAgent(app)
-      )
+      const allowed = await fetchAgent(app)
         .get("/")
         .set("Origin", "http://localhost:8080");
       assert.equal(
         allowed.headers["access-control-allow-credentials"],
         undefined,
       );
-      const refused = await (
-        await loopbackAgent(app)
-      )
+      const refused = await fetchAgent(app)
         .get("/")
         .set("Origin", "http://evil.example");
       assert.equal(
@@ -235,9 +290,7 @@ describe("src/http/server/origin.test", () => {
 
     it("a GET from the allowed origin carries the exact expose-headers value", async () => {
       const app = buildApp(originMiddleware({ allowedOrigins }));
-      const response = await (
-        await loopbackAgent(app)
-      )
+      const response = await fetchAgent(app)
         .get("/")
         .set("Origin", "http://localhost:8080");
       assert.equal(response.status, 200);
@@ -247,9 +300,7 @@ describe("src/http/server/origin.test", () => {
     it("post, put and delete from the allowed origin carry the same exact value", async () => {
       const app = buildApp(originMiddleware({ allowedOrigins }));
       for (const method of ["post", "put", "delete"] as const) {
-        const response = await (
-          await loopbackAgent(app)
-        )
+        const response = await fetchAgent(app)
           [method]("/")
           .set("Origin", "http://localhost:8080");
         assert.equal(
@@ -262,9 +313,7 @@ describe("src/http/server/origin.test", () => {
 
     it("an OPTIONS from the allowed origin carries no expose-headers value", async () => {
       const app = buildApp(originMiddleware({ allowedOrigins }));
-      const response = await (
-        await loopbackAgent(app)
-      )
+      const response = await fetchAgent(app)
         .options("/")
         .set("Origin", "http://localhost:8080");
       assert.equal(
@@ -275,7 +324,7 @@ describe("src/http/server/origin.test", () => {
 
     it("no Origin header means no expose-headers value", async () => {
       const app = buildApp(originMiddleware({ allowedOrigins }));
-      const response = await (await loopbackAgent(app)).get("/");
+      const response = await fetchAgent(app).get("/");
       assert.equal(
         response.headers["access-control-expose-headers"],
         undefined,
@@ -284,9 +333,7 @@ describe("src/http/server/origin.test", () => {
 
     it("a refused Origin carries no expose-headers value", async () => {
       const app = buildApp(originMiddleware({ allowedOrigins }));
-      const response = await (
-        await loopbackAgent(app)
-      )
+      const response = await fetchAgent(app)
         .get("/")
         .set("Origin", "http://evil.test");
       assert.equal(response.status, 403);
@@ -294,15 +341,14 @@ describe("src/http/server/origin.test", () => {
         response.headers["access-control-expose-headers"],
         undefined,
       );
+      assert.equal(response.headers["vary"], undefined);
     });
 
     it("a downstream throw still carries the exact expose-headers value", async () => {
       const app = buildApp(originMiddleware({ allowedOrigins }), () => {
         throw httpError("not-found", "nope");
       });
-      const response = await (
-        await loopbackAgent(app)
-      )
+      const response = await fetchAgent(app)
         .get("/")
         .set("Origin", "http://localhost:8080");
       assert.equal(response.status, 404);
@@ -311,9 +357,7 @@ describe("src/http/server/origin.test", () => {
 
     it("Access-Control-Allow-Credentials stays absent on every response above", async () => {
       const app = buildApp(originMiddleware({ allowedOrigins }));
-      const allowed = await (
-        await loopbackAgent(app)
-      )
+      const allowed = await fetchAgent(app)
         .get("/")
         .set("Origin", "http://localhost:8080");
       assert.equal(

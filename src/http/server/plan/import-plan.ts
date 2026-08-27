@@ -39,7 +39,7 @@ export function importPlanHandler(
       });
       const { retried, ...body } = result;
       void retried;
-      return { status: 200, body };
+      return { kind: "json", status: 200, body };
     } catch (error) {
       throw toHttpError(error);
     }

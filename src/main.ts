@@ -171,12 +171,9 @@ import type { MigrateHandler } from "./cli/db/migrate.ts";
 import type { PlanDirectoryDependencies } from "./cli/plan/directory.ts";
 import { buildProgram, type ServeOptions } from "./cli/program.ts";
 import { createSecretFile } from "./cli/secret-file.ts";
-import {
-  createApp,
-  systemSchedule,
-  unimplementedFor,
-} from "./http/server/app.ts";
-import { listen } from "./http/server/start.ts";
+import { createApp, unimplementedFor } from "./http/server/app.ts";
+import { listen } from "./http/server/runtime/node/listen.ts";
+import { systemSchedule } from "./http/server/runtime/node/schedule.ts";
 import { createShutdown, createShutdownSteps } from "./http/server/shutdown.ts";
 import { healthHandler } from "./http/server/system/health.ts";
 import { dbHandler } from "./http/server/system/db.ts";
@@ -644,7 +641,7 @@ async function serve(options: ServeOptions): Promise<void> {
           { storage, secret, configuredToken: settings.http.token },
           { presented },
         );
-      const { app, cancelWaits } = createApp({
+      const { hono, cancelWaits } = createApp({
         settings: {
           token: settings.http.token,
           allowedHosts: settings.http.allowedHosts,
@@ -660,11 +657,12 @@ async function serve(options: ServeOptions): Promise<void> {
           maxBytes: settings.http.idempotency.maxBytes,
         },
         now: () => clock.now(),
+        schedule: systemSchedule,
         onInternalError: (error) =>
           process.stderr.write(`kanthord: internal-error: ${String(error)}\n`),
         waits,
       });
-      const listening = await listen(app, {
+      const listening = await listen(hono, {
         bind: settings.http.bind,
         port: settings.http.port,
       });

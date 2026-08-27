@@ -18,6 +18,8 @@ describe("src/http/server/query.test", () => {
   it("orders keys bytewise regardless of wire order", () => {
     assert.deepEqual(Object.keys(readQuery("b=2&a=1")), ["a", "b"]);
     assert.deepEqual(Object.keys(readQuery("a=1&b=2")), ["a", "b"]);
+    const wire = `${encodeURIComponent("\u{1F600}")}=2&${encodeURIComponent("\uE000")}=1`;
+    assert.deepEqual(Object.keys(readQuery(wire)), ["\uE000", "\u{1F600}"]);
   });
 
   it("maps an empty value to a single empty string", () => {

@@ -18,6 +18,6 @@ export function showProjectHandler(
     if (view === null) {
       throw httpError("not-found", `no project ${id}`);
     }
-    return { status: 200, body: view };
+    return { kind: "json", status: 200, body: view };
   };
 }

@@ -132,6 +132,10 @@ describe("src/http/server/system/health.test", () => {
       actor: BOOTSTRAP_ACTOR_FIXTURE,
     };
 
-    assert.deepEqual(handler(context), { status: 200, body: okResult });
+    assert.deepEqual(handler(context), {
+      kind: "json",
+      status: 200,
+      body: okResult,
+    });
   });
 });

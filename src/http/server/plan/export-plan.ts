@@ -17,7 +17,7 @@ export function exportPlanHandler(
     }
     try {
       const result = dependencies.exportPlan({ projectId: id });
-      return { status: 200, body: result };
+      return { kind: "json", status: 200, body: result };
     } catch (error) {
       if (error instanceof ExportPlanError) {
         switch (error.refusal) {

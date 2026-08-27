@@ -1,4 +1,6 @@
-import { createHash } from "node:crypto";
+import { byteLength, compareBytewise } from "./bytewise.ts";
+
+const encoder = new TextEncoder();
 
 export const IDEMPOTENCY_HEADER = "idempotency-key";
 export const MAX_KEY_LENGTH = 255;
@@ -10,28 +12,21 @@ export type KeyRead =
   | Readonly<{ kind: "ok"; key: string }>
   | Readonly<{ kind: "invalid"; message: string }>;
 
-export type RawHeaderSource = Readonly<{ rawHeaders: readonly string[] }>;
+export function readIdempotencyKey(headers: Headers): KeyRead {
+  const value = headers.get(IDEMPOTENCY_HEADER);
 
-export function readIdempotencyKey(source: RawHeaderSource): KeyRead {
-  const values: string[] = [];
-  for (let i = 0; i < source.rawHeaders.length; i += 2) {
-    if (source.rawHeaders[i]?.toLowerCase() === IDEMPOTENCY_HEADER) {
-      values.push(source.rawHeaders[i + 1] ?? "");
-    }
-  }
-
-  if (values.length === 0) {
+  if (value === null) {
     return { kind: "absent" };
   }
 
-  if (values.length > 1) {
+  if (value.includes(",")) {
     return {
       kind: "invalid",
       message: "Idempotency-Key was supplied more than once",
     };
   }
 
-  if (!KEY_GRAMMAR.test(values[0]!)) {
+  if (!KEY_GRAMMAR.test(value)) {
     return {
       kind: "invalid",
       message:
@@ -39,7 +34,7 @@ export function readIdempotencyKey(source: RawHeaderSource): KeyRead {
     };
   }
 
-  return { kind: "ok", key: values[0]! };
+  return { kind: "ok", key: value };
 }
 
 export type FingerprintInput = Readonly<{
@@ -49,12 +44,16 @@ export type FingerprintInput = Readonly<{
   rawBody: string;
 }>;
 
-export function fingerprint(input: FingerprintInput): string {
+export async function fingerprint(input: FingerprintInput): Promise<string> {
   const parts = [input.method, input.path, input.query, input.rawBody];
   const joined = parts
-    .map((part) => `${Buffer.byteLength(part, "utf8")}:${part}`)
+    .map((part) => `${byteLength(part)}:${part}`)
     .join("\u0001");
-  return createHash("sha256").update(Buffer.from(joined, "utf8")).digest("hex");
+  const data = encoder.encode(joined);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 export type RecordKeyInput = Readonly<{
@@ -65,9 +64,7 @@ export type RecordKeyInput = Readonly<{
 }>;
 
 export function recordKey(input: RecordKeyInput): string {
-  const names = Object.keys(input.parameters).sort((a, b) =>
-    Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8")),
-  );
+  const names = Object.keys(input.parameters).sort(compareBytewise);
   const rendered = names
     .map((name) => `${name}=${input.parameters[name] ?? ""}`)
     .join("\u0001");

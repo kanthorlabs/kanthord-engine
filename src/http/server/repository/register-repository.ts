@@ -34,7 +34,7 @@ export function registerRepositoryHandler(
         hostFingerprint: parsed.data.hostFingerprint,
         actor: context.actor.id,
       });
-      return { status: 200, body: view };
+      return { kind: "json", status: 200, body: view };
     } catch (error) {
       throw toHttpError(error);
     }

@@ -1,16 +1,13 @@
-import type { Context, Next } from "koa";
+import type { MiddlewareHandler } from "hono";
 
 import { httpError } from "../contract/errors.ts";
-import type { AuthenticatedState } from "./auth.ts";
-import type { RoutedState } from "./route.ts";
+import { demand } from "./variables.ts";
+import type { AppEnv } from "./variables.ts";
 
-export function authorizeMiddleware(): (
-  context: Context,
-  next: Next,
-) => Promise<void> {
-  return async (context, next) => {
-    const match = (context.state as RoutedState).match;
-    const actor = (context.state as AuthenticatedState).actor;
+export function authorizeMiddleware(): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    const match = demand(c, "match");
+    const actor = demand(c, "actor");
     if (!match.operation.allowedActors.includes(actor.kind)) {
       throw httpError(
         "actor-forbidden",

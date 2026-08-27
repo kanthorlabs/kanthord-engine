@@ -20,7 +20,7 @@ export function removeProviderHandler(
         id,
         actor: context.actor.id,
       });
-      return { status: 200, body: removed };
+      return { kind: "json", status: 200, body: removed };
     } catch (error) {
       throw toHttpError(error);
     }

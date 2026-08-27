@@ -28,6 +28,7 @@ export function inspectProviderHandler(
     }
     try {
       return {
+        kind: "json",
         status: 200,
         body: await dependencies.inspectProvider({
           provider: parsed.data.provider,

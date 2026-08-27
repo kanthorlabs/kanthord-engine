@@ -35,7 +35,7 @@ export function reportNodeHandler(
         actorKind: context.actor.kind,
         body: parsed.data,
       });
-      return { status: 200, body: result };
+      return { kind: "json", status: 200, body: result };
     } catch (error) {
       const body = parsed.data;
       throw toHttpError(

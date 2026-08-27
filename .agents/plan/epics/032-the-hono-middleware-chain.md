@@ -78,8 +78,8 @@ this epic.
     error.
 
   `envelopeMiddleware` is deleted. `materializeError` stays in `src/http/server/envelope.ts` as a
-  pure function. `app.onError` calls it, calls `onInternalError` when `materialized.internal` is
-  true, and returns the envelope `Response`.
+  pure function. `app.onError` calls `errorValue`, materializes that value, calls `onInternalError`
+  with that value when `materialized.internal` is true, and returns the envelope `Response`.
 
 - **3. Every response header is written before `next()`.** `app.onError` builds the error `Response`
   at the frame that threw, so a header written after `next()` returns never reaches an error answer.
@@ -87,12 +87,15 @@ this epic.
   `next()` returns.
 
 - **4. `context.state` becomes Hono `Variables`, and every read goes through an accessor.** Hono
-  types every variable as optional across the whole chain, so chain order is no longer implicit in
-  the type. `src/http/server/variables.ts` declares one `Variables` type and two accessors.
-  `demand(c, name)` throws `VariableError` when the variable is absent. `optional(c, name)` returns
-  `undefined`. `optional` is permitted for `allowedOrigin`, `rawBody`, `body`, `result` and `replay`
-  only, because each is absent by design. A bare `c.get(...)` under `src/http/server/**` is a
-  defect.
+  types a declared variable as present, but its runtime getter returns `undefined` before a writer
+  runs. Chain order is therefore not enforced by the type. `src/http/server/variables.ts` declares
+  one `Variables` type and two accessors.
+
+  `demand<Name extends keyof Variables>(c: Context<AppEnv>, name: Name): Variables[Name]` throws
+  `VariableError` when the variable is absent. `optional<Name extends OptionalVariable>(c:
+Context<AppEnv>, name: Name): Variables[Name] | undefined` returns `undefined` for an absent value.
+  `OptionalVariable` is the private union `"allowedOrigin" | "rawBody" | "body" | "result" |
+"replay"`. A bare `c.get(...)` under `src/http/server/**` is a defect.
 
 - **5. One header accumulator owns every response header.** `headersMiddleware` seeds a `Headers`
   instance into the `headers` variable. Every middleware writes into that instance. `render.ts` and
@@ -129,25 +132,51 @@ this epic.
 
   `bodyParserForHandled` and the `@koa/bodyparser` import leave `src/http/server/app.ts`.
 
-- **7. A replay is not a `HandlerResult`.** `HandlerResult` of EPIC 031 admits 200, 204, 206 and 304
-  only, and a replay carries the stored status, which includes 400, 409 and 500. `variables.ts`
-  therefore declares a second variable, `replay: StoredAnswer`. `idempotency.ts` writes `replay`,
-  never `result`. `render.ts` reads `replay` first.
+- **7. A replay is not a `HandlerResult`, and its body holds exact response bytes.** `HandlerResult`
+  of EPIC 031 admits 200, 204, 206 and 304 only, and a replay carries the stored status, which
+  includes 400, 409 and 500. `variables.ts` therefore declares a second variable,
+  `replay: StoredAnswer`. `idempotency.ts` writes `replay`, never `result`. `render.ts` reads
+  `replay` first.
+
+  `StoredAnswer.body` becomes `string | Uint8Array | null`. A JSON result and an error envelope store
+  the exact string from `JSON.stringify`. A bytes result stores its `Uint8Array`. An empty result
+  stores `null`. `render.ts` exports `MaterializedResult = Readonly<{ status: HandlerStatus; body:
+string | Uint8Array | null }>` and `materializeResult(result: HandlerResult, operation: Operation |
+undefined, headers: Headers): MaterializedResult`. `operation` is read for the `bytes` variant only,
+  and a `bytes` result that carries no operation raises the EPIC 031 `internal-error` refusal. The
+  function writes the default content type when absent
+  and returns the exact status and body in that stored form. An unreserved response calls it from
+  `renderMiddleware`. A reserved response calls it once from `idempotencyMiddleware`, captures the
+  returned body, and writes that `StoredAnswer` into `replay`; render then uses those captured bytes
+  instead of serializing the `HandlerResult` again. A replay writes each stored header into the
+  accumulator with `set`, then constructs `new Response(answer.body, { status: answer.status,
+headers })`.
+
+  `JSON.stringify` returning `undefined` throws `TypeError("the handler result is not json
+serializable")`. A `JSON.stringify` exception propagates unchanged. Both become the generic 500
+  envelope through `app.onError`.
 
   A Fetch `Headers` cannot hold two values for one name, so `StoredAnswer.headers` becomes
-  `readonly (readonly [string, string])[]`, one joined value per name. `applyAnswer` is deleted; the
-  write of the `replay` variable replaces it.
+  `readonly (readonly [string, string])[]`, one joined value per name. `captureAnswer` takes the
+  exact stored body type. `answerBytes` counts a string by its UTF-8 byte length, a `Uint8Array` by
+  `byteLength`, and `null` as zero bytes. It then adds the UTF-8 byte length of the serialized header
+  tuples. `applyAnswer` is deleted; the write of the `replay` variable replaces it.
 
 - **8. `renderMiddleware` builds every non-error response, and it never throws over an error.** It
   calls `next`, then applies four rules in order.
 
   1. `c.error !== undefined`: return nothing. `app.onError` already owns the answer.
-  2. `optional(c, "replay")` is defined: return a `Response` from the stored status, the stored body
-     and the accumulator, with each stored header written into the accumulator first.
-  3. `optional(c, "result")` is defined: return a `Response` from the `HandlerResult` variant and
-     the accumulator. The `json` variant, the `bytes` variant and the `empty` variant each set the
-     content type of the EPIC 031 table, and only when the accumulator does not already carry
-     `content-type`, so a handler header still wins. The `empty` variant carries no body.
+  2. `optional(c, "replay")` is defined: apply the stored headers with `set`, then return a
+     `Response` from its exact stored body, status and the accumulator.
+  3. `optional(c, "result")` is defined: call `materializeResult`, then return a `Response` from its
+     exact body, status and the accumulator. Render passes `demand(c, "match").operation` for a
+     `bytes` result, and `undefined` for a `json` result and for an `empty` result. A preflight
+     answer carries no `match`, because `preflightMiddleware` writes `result` and never calls
+     `next()`. A demand of `match` on that path answers 500 instead of 204. The `json` variant serializes with `JSON.stringify` and
+     sets `application/json; charset=utf-8`. The `bytes` variant keeps its `Uint8Array` and sets the
+     matched operation's `responseMedia`. The `empty` variant uses `null` and sets no content type.
+     Each default applies only when the accumulator does not carry `content-type`, so a handler
+     header still wins.
   4. Neither is defined: throw
      `httpError("internal-error", "the transport produced no result")`. The shipped chain never
      reaches this rule, because `preflightMiddleware` and `dispatchMiddleware` each write `result`
@@ -163,11 +192,20 @@ this epic.
 - **10. `idempotency.ts` observes `c.error`, and it produces no envelope.** After `next()` returns
   the middleware branches once.
 
-  - `c.error` is defined: build the stored answer from `materializeError(c.error)`, settle the
-    reservation with `classifyOutcome` over the materialized status and the materialized `internal`
-    flag, and return. It re-throws nothing, because `app.onError` already produced the answer.
-  - `c.error` is absent: build the stored answer from `optional(c, "result")` and settle with
-    `classifyOutcome` over the result status and `internal: false`.
+  - `c.error` is defined: unwrap it through `errorValue`, build the stored answer from
+    `materializeError`, serialize the envelope body with `JSON.stringify`, settle the reservation
+    with `classifyOutcome` over the materialized status and the materialized `internal` flag, and
+    return. It re-throws nothing, because `app.onError` already produced the answer.
+  - `c.error` is absent: demand `result`. In a `try` that covers only `materializeResult`, call it
+    once. Capture that exact stored body, settle with `classifyOutcome` over the result status and
+    `internal: false`, then write the captured `StoredAnswer` into `replay` for render.
+  - `materializeResult` throws: catch that local failure, call `materializeError`, set
+    `content-type` to `application/json; charset=utf-8` when absent, serialize the envelope once for
+    storage, settle with its status and internal flag, and rethrow the original failure. This catch
+    does not wrap `await next()`. `app.onError` emits the same deterministic envelope.
+
+  `indeterminate` remains retained. A second identical request replays its stored 500 and does not
+  run the handler again. This is the existing `IdempotencyStore` rule; this epic does not change it.
 
   The `try/catch` of `src/http/server/idempotency.ts:132-165` is deleted, because Decision 2 makes it
   dead.
@@ -215,20 +253,44 @@ this epic.
 
   Two options are mandatory. `overrideGlobalObjects: false` stops the package from replacing
   `global.Request` and `global.Response`, which is a process-wide effect that no hermetic suite may
-  carry. `hostname` names the fallback authority the listener uses when the request carries no `Host`
-  header, so such a request still reaches `hostMiddleware` and answers the `host-forbidden` envelope
-  instead of a bare 400. `BRIDGE_HOSTNAME` is `kanthord.invalid`, and no allow list holds it, so it
-  can only fail the host check.
+  carry. `hostname` names the fallback URL authority the listener uses when the request carries no
+  `Host` header, so such a request reaches Hono instead of receiving a bare 400. It does not
+  synthesize a `Host` request header. Therefore `new URL(c.req.url).host` is `BRIDGE_HOSTNAME`, while
+  `c.req.header("host")` remains `undefined`. `hostMiddleware` answers the existing
+  `host-forbidden` envelope with `the request carried no Host header`. `BRIDGE_HOSTNAME` is
+  `kanthord.invalid`.
 
   After this epic, `koa-bridge.ts` is the one file under `src/http/server/**` that imports a `koa`
   value. `start.ts` and `app.ts` import the `Koa` type only. Every other file under the tree imports
   `koa` no more. EPIC 034 replaces both callers with `serve` and `getRequestListener` directly, and
   the file then has no caller.
 
-- **13. The 1 MiB request body limit does not survive the port.** `@koa/bodyparser` caps a JSON body
-  at 1 MiB through `co-body`, and the overflow answers 500 with the internal-error envelope. No test
-  in the tree names that limit and no EPIC 030 parity row covers it. `bodyMiddleware` applies no cap,
-  and EPIC 034 owns the request limit with the rest of the runtime settings.
+- **13. The 1 MiB request body limit moves into `bodyMiddleware`.** `@koa/bodyparser` caps a JSON
+  body at 1 MiB through `co-body`, and the overflow answers 500 with the internal-error envelope. No
+  test in the tree names that limit and no EPIC 030 parity row covers it. The cap cannot move to the
+  listener: `@hono/node-server` caps no body and `node:http` exposes no body-size option, so EPIC 034
+  has no site for it. `bodyMiddleware` is the one place the product reads a request body, so it
+  carries the cap as an eighth rule. `BODY_LIMIT_BYTES = 1_048_576`, and the exact contract is:
+
+  1. Read `content-length` from `c.req.raw.headers` and parse it with `Number`. When it parses to a
+     finite integer above `BODY_LIMIT_BYTES`, refuse before reading one byte. A header that is
+     absent, non-numeric, negative or duplicated is not a refusal on its own, because rule 2 still
+     applies and a lying header therefore cannot bypass the cap.
+  2. Read the body through `c.req.raw.body`, a `ReadableStream<Uint8Array>`, with `getReader()`.
+     Accumulate the chunks and sum `chunk.byteLength`. Refuse at the first chunk whose running sum
+     exceeds `BODY_LIMIT_BYTES`. Count bytes, never `String.length`, because one character is up to
+     four bytes.
+  3. On refusal, stop pulling and throw `new Error("request body exceeds the limit")`. Do **not**
+     call `reader.cancel()`. `@hono/node-server` sets `autoCleanupIncoming` to `true` by default
+     (`dist/index.mjs:995`) and drains the unread remainder on response close for every method except
+     GET and HEAD (`:1011`, `:852`) — exactly the methods this middleware reads — so the socket does
+     not stall. The thrown value is not an `HttpError`, so `materializeError` maps it to the generic
+     500 internal-error envelope and `onInternalError` reports it once. That is the answer `co-body`
+     produces today.
+  4. Decode the concatenated bytes once, with `new TextDecoder().decode(...)`. That string is
+     `rawBody`, and `JSON.parse` runs on it. The middleware reads the stream exactly once, so no
+     later reader meets a consumed body.
+  5. A body of exactly `BODY_LIMIT_BYTES` is accepted. The refusal is strictly above the cap.
 
 - **14. `systemSchedule` stays in `src/http/server/app.ts`, and EPIC 035 moves it.**
   `setTimeout(...).unref()` is the one Node-only call in the chain. EPIC 035 splits the composition
@@ -243,15 +305,31 @@ this epic.
   `src/http/server/blob/show-blob.ts` are the only result headers in the product, and each one
   capitalizes identically, so lower-casing preserves their relative order and no answer moves. The
   EPIC 031 gate row that asserts the emitted order uses `X-B`, `X-a` and `X_c`, so story 14 restates
-  that row on lower-case names. `dispatch.test.ts` is the test of a module this epic rewrites, so the
+  that row on the source names `X_c`, `X-a`, `X-B` and `X-A`, and asserts the accumulator entries
+  `[["x-a", "upper-A, lower-a"], ["x-b", "b"], ["x_c", "underscore"]]`. Three distinct lower-case
+  names do not discriminate, because a Fetch `Headers` sorts its own iteration whatever order
+  dispatch appends in. The duplicate `X-A` and `X-a` pair makes the append order observable. `dispatch.test.ts` is the test of a module this epic rewrites, so the
   edit is in scope, and the four EPIC 030 parity files stay untouched.
 
 - **15. `bindingOffenders` and `unimplementedFor` do not change.** They read the registry only. They
   stay in `src/http/server/app.ts` at their current shape.
 
+- **17. Non-`Error` handler failures keep their Koa behavior.** Hono calls `app.onError` only for an
+  `Error`. `envelope.ts` therefore exports `ThrownValueError`, which extends `Error` and carries the
+  original `readonly value: unknown`, and `errorValue(error: Error): unknown`, which returns that
+  value or the input error. Its constructor is `constructor(value: unknown)` and its message is
+  `a non-Error value was thrown`.
+  `dispatchMiddleware` catches only the handler invocation and throws the original `Error` or a new
+  `ThrownValueError` for any other value. `app.onError` and `idempotencyMiddleware` call
+  `errorValue` before `materializeError`. `onInternalError` receives the original value. A string
+  and `undefined` therefore produce the generic 500 envelope and one callback with the exact thrown
+  value, as they do before the port.
+
 ## Stories
 
-Author with `/author`. The sequence below is the dependency order. Each story is one commit.
+Author with `/author`. The sequence below is the dependency order. Stories 1 and 2 are standalone
+commits. Stories 3 through 16 are one coupled implementation batch and one commit. Run no gate and
+create no commit between Stories 3 and 16. Story 16 runs the batch gate after every edit lands.
 
 1. **The typed variables and the accessors.** Add `src/http/server/variables.ts`. Import
    `RouteMatch` from `src/http/contract/registry.ts` and `StoredAnswer` from
@@ -266,13 +344,17 @@ Author with `/author`. The sequence below is the dependency order. Each story is
    a new `Headers` into the `headers` variable, then calls `next`. Add `headers.test.ts`.
 3. **`app.onError` owns the envelope.** Edit `src/http/server/envelope.ts`. Delete
    `envelopeMiddleware` and `EnvelopeDependencies`. Keep `materializeError` and `Materialized`
-   unchanged. Add `errorResponse(materialized, headers)`, which returns a JSON `Response` carrying
-   the materialized status, the materialized body and every accumulator header. Rewrite
-   `envelope.test.ts` for the two exported functions.
+   unchanged. Add `errorResponse(materialized: Materialized, headers: Headers): Response`. It sets
+   `application/json; charset=utf-8` only when `content-type` is absent, serializes the body with
+   `JSON.stringify`, and returns a `Response` with the materialized status and accumulator. Add
+   `ThrownValueError` and `errorValue` with Decision 17's exact contracts. Rewrite
+   `envelope.test.ts` for `materializeError`, `errorResponse`, `ThrownValueError` and `errorValue`.
 4. **The render middleware.** Add `src/http/server/render.ts` with `renderMiddleware()`. It
-   implements the four rules of Decision 8. It reads the `HandlerResult` variants of EPIC 031, where
-   a `bytes` variant carries a `Uint8Array`. Add `render.test.ts`, which covers the four rules,
-   including a set `c.error` that render leaves alone.
+   implements the four rules of Decision 8. Export `materializeResult` with Decision 7's exact
+   status, body, content-type and serialization rules. It reads the `HandlerResult` variants of
+   EPIC 031, where a `bytes` variant carries a `Uint8Array`. Add `render.test.ts`, which covers the
+   four rules, all three result variants, replayed JSON and bytes, handler content-type precedence,
+   unserializable JSON, and a set `c.error` that render leaves alone.
 5. **`origin.ts` on Hono.** Rewrite `originMiddleware` against `Context<AppEnv>`. Read the origin
    through `c.req.header("origin")`. Keep the `origin-forbidden` refusal and its message. Write
    `Access-Control-Allow-Origin` into the accumulator. Write `Access-Control-Expose-Headers` when
@@ -296,32 +378,54 @@ Author with `/author`. The sequence below is the dependency order. Each story is
 10. **`authorize.ts` on Hono.** Rewrite `authorizeMiddleware`. Read `match` and `actor` through
     `demand`. Keep the `actor-forbidden` refusal and its message.
 11. **The gated body parse.** Add `src/http/server/body.ts` with `bodyMiddleware(handlers)`. It
-    implements the seven rules of Decision 6. Delete `bodyParserForHandled` from
-    `src/http/server/app.ts`, and delete the `@koa/bodyparser` import there. Add `body.test.ts`,
-    which covers each of the seven rules by exact status and exact message.
+    implements the seven rules of Decision 6, and the 1 MiB cap of Decision 13 as the eighth. Export
+    `BODY_LIMIT_BYTES = 1_048_576`. Delete `bodyParserForHandled` from `src/http/server/app.ts`, and
+    delete the `@koa/bodyparser` import there. Add `body.test.ts`, which covers each of the eight
+    rules by exact status and exact message. The cap adds three cases: a `content-length` one
+    byte above the cap is refused before the body is read; a chunked body with no `content-length`
+    that crosses the cap is refused at the crossing; and a body of exactly `BODY_LIMIT_BYTES` is
+    accepted and parses. The two refusals answer the 500 internal-error envelope and report once.
 12. **The idempotency helpers on Fetch types.** Edit `src/http/server/idempotency-key.ts` so that
     `readIdempotencyKey` takes a `Headers` and applies Decision 11. Delete `RawHeaderSource`. Edit
-    `src/http/server/idempotency-response.ts`: narrow `StoredAnswer.headers` to
+    `src/http/server/idempotency-response.ts`: set `StoredAnswer.body` to
+    `string | Uint8Array | null`, narrow `StoredAnswer.headers` to
     `readonly (readonly [string, string])[]`, take the `Headers` accumulator in `headerSnapshot` and
     `captureAnswer` instead of a Koa `Context`, and delete `applyAnswer`. Keep `VOLATILE_HEADERS` and
-    the `compareBytewise` sort. Update `idempotency-key.test.ts` and `idempotency-response.test.ts`
-    to build a `Headers`.
+    the `compareBytewise` sort. Edit `answerBytes` in `src/http/server/idempotency-store.ts` to apply
+    Decision 7's exact body-byte rules. Update `idempotency-key.test.ts`,
+    `idempotency-response.test.ts` and `idempotency-store.test.ts` for these exact shapes.
 13. **`idempotency.ts` on Hono.** Rewrite the middleware against `Context<AppEnv>`. Read the key from
     `c.req.raw.headers`. Build the fingerprint from `c.req.method`, `new URL(c.req.url).pathname`,
     the search string without the leading `?`, and `optional(c, "rawBody") ?? ""`. Read the durable
-    `importId` from the `body` variable. Settle through the `c.error` branch of Decision 10. Write
-    the `replay` variable for a replay and for a joined answer. Keep every refusal code and message.
+    `importId` from the `body` variable. Settle through the `c.error` branch of Decision 10. Apply
+    Decision 10's local materialization `try/catch`. Write the `replay` variable for a replay, a
+    joined answer and the captured original answer. Keep every refusal code and message. Add a
+    keyed unserializable JSON case: both requests answer the same generic 500, the handler runs
+    once, and one indeterminate record remains.
 14. **`dispatch.ts` on Hono.** Rewrite `dispatchMiddleware` as the terminal handler. Keep both
     `not-implemented` refusals and their messages. Build the `HandlerContext` from `c.req`, the
     `body` variable and the `actor` variable. Keep `readHeaders` and its `compareBytewise` sort,
-    sourced from `c.req.raw.headers`. Write every result header into the accumulator, sorted with
-    `compareBytewise`, so `captureAnswer` sees it. Write the `result` variable. Delete the Koa status
-    and body writes. Restate the emitted-order row of `dispatch.test.ts` on lower-case names, per
-    Decision 16.
-15. **The Koa bridge.** Add `src/http/server/koa-bridge.ts` with `koaFromHono` and
-    `BRIDGE_HOSTNAME`, per Decision 12. Add `koa-bridge.test.ts`, which drives a one-route Hono app
-    through `createServer(koaFromHono(hono).callback())` on an unref'd loopback socket. It holds
-    **exactly 6 cases**, one per line below, and EPIC 034 story 3 deletes the file and asserts that
+    sourced from `c.req.raw.headers`. Append every result header into the accumulator, sorted with
+    `compareBytewise`, so case-different duplicate names join in that source order and
+    `captureAnswer` sees the joined value. Write the `result` variable. Delete the Koa status
+    and body writes. Apply Decision 17 around the handler invocation. Restate the emitted-order row
+    of `dispatch.test.ts` on lower-case names, per Decision 16. Add table cases where a handler
+    throws a string and `undefined`; each answers the generic 500 envelope, reports once, and
+    reports the exact thrown value.
+15. **The Koa bridge. Dispatch this story before story 5.** Eight test files build their application
+    directly and reach a real socket through `loopbackAgent` or `loopbackServer`, and both take a
+    `Koa`: `origin.test.ts`, `host.test.ts`, `preflight.test.ts`, `auth.test.ts`, `route.test.ts`,
+    `authorize.test.ts`, `dispatch.test.ts` and `idempotency.test.ts`. From story 5 onward each
+    builds a `Hono` application, so each wraps it with `loopbackAgent(koaFromHono(hono))`. Stories 5
+    through 14 own those edits. No case moves to an in-process `hono.request` call; EPIC 033 owns the
+    harness change. That wrap is the shape
+    EPIC 034 story 3 replaces, and it does not exist until this story lands. The story number stays
+    15 because EPIC 034 and the Proof below name it; only the dispatch order moves.
+
+    Add `src/http/server/koa-bridge.ts` with `koaFromHono` and `BRIDGE_HOSTNAME`, per Decision 12.
+    Add `koa-bridge.test.ts`, which drives a one-route Hono app through
+    `createServer(koaFromHono(hono).callback())` on an unref'd loopback socket. It holds
+    **exactly 6 cases**, one per line below, and EPIC 034 story 4 deletes the file and asserts that
     the pass count falls by exactly that number.
 
     1. a `%2F` path and a `%zz` path each reach the route intact
@@ -330,13 +434,15 @@ Author with `/author`. The sequence below is the dependency order. Each story is
     4. a POST body reaches `c.req.text()` with its whitespace intact
     5. `global.Request` and `global.Response` are the same references before and after
        `koaFromHono` runs, asserted by identity
-    6. a request that carries no `Host` header reaches the route with the authority
-       `BRIDGE_HOSTNAME`, read through `c.req.header("host")`
+    6. an HTTP/1.0 request that carries no `Host` header reaches the route; assert
+       `new URL(c.req.url).host === BRIDGE_HOSTNAME` and `c.req.header("host") === undefined`
 
 16. **`createApp` returns both apps.** Rewrite `src/http/server/app.ts`. `App` carries `app: Koa` and
     `hono: Hono<AppEnv>`. `createApp` keeps the `BindingError` check first, then mounts the eleven
     entries of the Goal table in that order through `app.use("*", ...)`, with `dispatchMiddleware`
-    as the handler of `app.all("*", ...)`. Set `app.onError`. Build `app` with `koaFromHono`. Keep
+    as the handler of `app.all("*", ...)`. Set `app.onError`: call `errorValue`, materialize that
+    value, call `onInternalError` once with that value only when `internal` is true, then return
+    `errorResponse`. Build `app` with `koaFromHono`. Keep
     `cancelWaits`, `HandlerContext`, `Handler`, `AppDependencies`, `TransportSettings`,
     `BindingError`, `unimplementedFor` and `bindingOffenders`. Delete
     `src/http/server/koa-body.ts`, which this change orphans, because `render.ts` builds the
@@ -405,15 +511,26 @@ Hermetic coverage required beyond the Proof:
   row P11 of EPIC 030.
 - **A preflight request bypasses authentication and route matching.** An OPTIONS request with an
   allowed Origin, no `Authorization` header and an unknown path answers 204. The test asserts that
-  `resolveActor` and `matchRoute` are not called.
+  `resolveActor` is not called. The unknown path is the route oracle: if `routeMiddleware` runs, it
+  throws `not-found`, so the exact 204 response proves that route matching did not run.
 - **`onInternalError` fires exactly once for one internal error.** A handler that throws a plain
   `Error` produces one call, asserted by a counter. The same holds when the request carries an
   `Idempotency-Key`.
+- **Non-`Error` handler failures keep the same envelope and report value.** Table cases throw a
+  string and `undefined`. Each answers the generic 500 envelope, calls `onInternalError` once, and
+  passes the exact thrown value to that callback.
 - **`idempotency.ts` stores a failed answer.** A handler that throws an `HttpError` with a
   replayable status under an `Idempotency-Key` settles the reservation, and the second request with
   the same key replays the stored status and the stored body. A handler that throws a plain `Error`
-  settles as internal and the second request runs the handler again. This is the mechanism test for
-  Decision 10: a `try/catch` around `next()` would fail it.
+  settles as indeterminate, and the second request replays the stored 500. The test asserts one
+  handler call and one retained record. This is the mechanism test for Decision 10: a `try/catch`
+  around `next()` would fail it.
+- **Stored bodies are exact response bodies.** A JSON result stores its `JSON.stringify` string, a
+  bytes result stores an equal `Uint8Array`, and an empty result stores `null`. Replay tests assert
+  the exact body bytes and exact content type for all three. `answerBytes` is asserted for a UTF-8
+  string, a byte array, and `null`. A stateful `toJSON` case asserts one serialization and exact
+  first-response versus replay bytes. A keyed serialization failure settles as indeterminate;
+  its second request replays the same generic 500 and does not run the handler again.
 - **`render.ts` leaves an error answer alone.** A request that fails downstream answers with the
   error envelope, not with a 404 and not with a rendered result.
 - **An accessor throws when a variable is absent.** `demand` is called directly with an empty
@@ -421,9 +538,10 @@ Hermetic coverage required beyond the Proof:
 - **The bytewise order of the response headers is asserted, and every name is a valid header
   name.** A Fetch `Headers` refuses a non-ASCII name, so the emitted-order test uses valid token
   names, and it asserts the accumulator order equals the `compareBytewise` order of the lower-cased
-  names. The discriminating names are already lower-case and differ in the separator byte, for
-  example `x-a`, `x-b` and `x_c`, because `-` is `0x2D` and `_` is `0x5F`. The EPIC 031 example
-  `X-B`, `X-a`, `X_c` does not discriminate here, and Decision 16 records why. `bytewise.test.ts` of
+  names. A duplicate name is what makes the order observable, so the test appends the source names
+  `X_c`, `X-a`, `X-B` and `X-A` and asserts `[["x-a", "upper-A, lower-a"], ["x-b", "b"], ["x_c",
+"underscore"]]`. `-` is `0x2D` and `_` is `0x5F`. Three distinct lower-case names do not
+  discriminate, and Decision 16 records why. `bytewise.test.ts` of
   EPIC 031 keeps the non-ASCII ordering proof, which needs no header. The test asserts values and
   duplicate-header semantics, not raw wire order.
 - **A duplicate `Idempotency-Key` is refused with the current message**, and a single key that
@@ -440,9 +558,9 @@ Hermetic coverage required beyond the Proof:
   before and after `koaFromHono` runs, asserted by identity. This is the mechanism test for
   `overrideGlobalObjects: false`, and case 5 of `src/http/server/koa-bridge.test.ts` owns it.
 - **A request with no `Host` header answers the `host-forbidden` envelope.** The two halves have two
-  owners. Case 6 of `src/http/server/koa-bridge.test.ts` proves the bridge supplies
-  `BRIDGE_HOSTNAME` as the fallback authority. `src/http/server/app.test.ts` proves the request then
-  reaches `hostMiddleware` and answers the envelope whose message is
+  owners. Case 6 of `src/http/server/koa-bridge.test.ts` proves the URL authority is
+  `BRIDGE_HOSTNAME` and the request header remains absent. `src/http/server/app.test.ts` proves the
+  request then reaches `hostMiddleware` and answers the envelope whose message is
   `the request carried no Host header`, not a bare 400.
 - **Hermetic**: no network, no shared temporary directory, no wall clock. A test that needs time
   passes a `now` function and a fake `Schedule`.
@@ -462,11 +580,12 @@ Hermetic coverage required beyond the Proof:
   `start.ts` and `koa-bridge.ts` - fix:no change now; remove `@types/koa`, `@types/koa__cors`,
   `koa`, `@koa/cors` and `@koa/bodyparser` in EPIC 035 - why:removing them here breaks the listener
   and the bridge that this epic keeps.
-- S4 - status:OPEN - action:YES - expand EPIC 030 and EPIC 031 before this epic runs -
+- S4 - status:OPEN - action:YES - land EPIC 030 and EPIC 031 before this epic runs -
   `.agents/plan/stories/030-transport-inventory-and-parity-contract/` and
-  `.agents/plan/stories/031-fetch-native-response-model/` do not exist - fix:run `/author` on EPIC
-  030 and EPIC 031, and land both, before `/work` opens EPIC 032 - why:this epic consumes the EPIC
-  031 `HandlerResult` variants, `compareBytewise` and the four EPIC 030 parity files by name.
+  `.agents/plan/stories/031-fetch-native-response-model/` both exist as of 2026-08-25, and neither
+  epic is implemented - fix:land EPIC 030 and EPIC 031 before `/work` opens EPIC 032 - why:this epic
+  consumes the EPIC 031 `HandlerResult` variants, `compareBytewise` and the four EPIC 030 parity
+  files by name.
 - S5 - status:OPEN - action:YES - drop the EPIC 031 `node:buffer` exception - story 16 deletes
   `src/http/server/koa-body.ts`, and the EPIC 031 S1 eslint block names that file in its `ignores`
   array. - fix:remove `"src/http/server/koa-body.ts"` from the `ignores` array of the
@@ -475,16 +594,17 @@ Hermetic coverage required beyond the Proof:
   an exception that outlives its file bans nothing.
 - S6 - status:FIXED - action:YES - no epic deleted `koa-bridge.ts` - EPIC 034 story 1 and story 3
   replace both callers with `serve` and `getRequestListener`, and neither EPIC 034 nor EPIC 035 named
-  the file for deletion - fix:EPIC 034 story 3 now deletes the file and its test, drops `app: Koa`
+  the file for deletion - fix:EPIC 034 story 4 now deletes the file and its test, drops `app: Koa`
   from `App`, and updates the three call sites - why:the file exists for the Koa listener alone, and
   EPIC 035 story 4 asserts that no file under `src/` names koa.
 - **The `Idempotency-Key` narrowing is deliberate.** A single key that contains a comma is refused
   after this epic. Decision 11 records it and a test pins it. EPIC 030 records it in the parity
   contract.
-- **The 1 MiB body limit and the prototype-poisoning refusal do not survive the port.** `co-body`
-  caps a JSON body at 1 MiB, and `@hapi/bourne` refuses a `__proto__` key with a 400. `JSON.parse`
-  creates an own `__proto__` property and pollutes no prototype, so the second loss carries no risk.
-  Decision 13 covers the first, and EPIC 034 owns the request limit.
+- **The prototype-poisoning refusal does not survive the port, and the 1 MiB body limit does.**
+  `co-body` caps a JSON body at 1 MiB, and `@hapi/bourne` refuses a `__proto__` key with a 400.
+  `JSON.parse` creates an own `__proto__` property and pollutes no prototype, so that loss carries no
+  risk. Decision 13 keeps the body limit, in `bodyMiddleware` and not in the listener, because the
+  listener has no site for it. EPIC 034 records the same handoff under its own Open items.
 - **A request target with a dot segment is resolved, and a percent escape is not.**
   `@hono/node-server` passes a target that holds `%`, `..` or `.` through `new URL`, which resolves
   the dot segment and leaves every percent escape alone. Koa's `context.path` resolves neither. No

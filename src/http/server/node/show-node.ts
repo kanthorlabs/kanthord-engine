@@ -18,6 +18,6 @@ export function showNodeHandler(
     if (view === null) {
       throw httpError("not-found", `no node ${id}`);
     }
-    return { status: 200, body: view };
+    return { kind: "json", status: 200, body: view };
   };
 }

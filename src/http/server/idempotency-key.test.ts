@@ -1,8 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import bodyParser from "@koa/bodyparser";
-import Koa from "koa";
+import { Hono } from "hono";
 
 import {
   IDEMPOTENCY_HEADER,
@@ -11,7 +10,12 @@ import {
   readIdempotencyKey,
   recordKey,
 } from "./idempotency-key.ts";
-import { loopbackAgent } from "../../../test/helpers/agent.ts";
+import { bodyMiddleware } from "./body.ts";
+import { optional } from "./variables.ts";
+import type { AppEnv } from "./variables.ts";
+import type { Handler } from "./app.ts";
+import type { Operation } from "../contract/operation.ts";
+import { fetchAgent } from "../../../test/helpers/agent.ts";
 import {
   HARNESS_ACTOR_FIXTURE,
   HARNESS_ACTOR_FIXTURE_B,
@@ -26,33 +30,36 @@ describe("src/http/server/idempotency-key.test", () => {
   describe("readIdempotencyKey", () => {
     const cases: ReadonlyArray<{
       readonly name: string;
-      readonly rawHeaders: readonly string[];
+      readonly headers: readonly (readonly [string, string])[];
       readonly expect: ReturnType<typeof readIdempotencyKey>;
     }> = [
-      { name: "no headers", rawHeaders: [], expect: { kind: "absent" } },
+      { name: "no headers", headers: [], expect: { kind: "absent" } },
       {
         name: "unrelated header",
-        rawHeaders: ["Host", "a.test"],
+        headers: [["Host", "a.test"]],
         expect: { kind: "absent" },
       },
       {
         name: "canonical case",
-        rawHeaders: ["Idempotency-Key", "abc"],
+        headers: [["Idempotency-Key", "abc"]],
         expect: { kind: "ok", key: "abc" },
       },
       {
         name: "lower case",
-        rawHeaders: ["idempotency-key", "abc"],
+        headers: [["idempotency-key", "abc"]],
         expect: { kind: "ok", key: "abc" },
       },
       {
         name: "upper case",
-        rawHeaders: ["IDEMPOTENCY-KEY", "abc"],
+        headers: [["IDEMPOTENCY-KEY", "abc"]],
         expect: { kind: "ok", key: "abc" },
       },
       {
         name: "repeated header, same case",
-        rawHeaders: ["Idempotency-Key", "a", "Idempotency-Key", "b"],
+        headers: [
+          ["Idempotency-Key", "a"],
+          ["Idempotency-Key", "b"],
+        ],
         expect: {
           kind: "invalid",
           message: "Idempotency-Key was supplied more than once",
@@ -60,7 +67,10 @@ describe("src/http/server/idempotency-key.test", () => {
       },
       {
         name: "repeated header, different case, same value",
-        rawHeaders: ["Idempotency-Key", "a", "idempotency-key", "a"],
+        headers: [
+          ["Idempotency-Key", "a"],
+          ["idempotency-key", "a"],
+        ],
         expect: {
           kind: "invalid",
           message: "Idempotency-Key was supplied more than once",
@@ -68,7 +78,7 @@ describe("src/http/server/idempotency-key.test", () => {
       },
       {
         name: "empty value",
-        rawHeaders: ["Idempotency-Key", ""],
+        headers: [["Idempotency-Key", ""]],
         expect: {
           kind: "invalid",
           message:
@@ -77,17 +87,27 @@ describe("src/http/server/idempotency-key.test", () => {
       },
       {
         name: "interior space is legal",
-        rawHeaders: ["Idempotency-Key", "a b"],
+        headers: [["Idempotency-Key", "a b"]],
         expect: { kind: "ok", key: "a b" },
       },
       {
         name: "free-form importId with a space",
-        rawHeaders: ["Idempotency-Key", "release candidate"],
+        headers: [["Idempotency-Key", "release candidate"]],
         expect: { kind: "ok", key: "release candidate" },
       },
       {
-        name: "leading space",
-        rawHeaders: ["Idempotency-Key", " ab"],
+        name: "leading space reaches the reader trimmed to a valid key",
+        headers: [["Idempotency-Key", " ab"]],
+        expect: { kind: "ok", key: "ab" },
+      },
+      {
+        name: "trailing space reaches the reader trimmed to a valid key",
+        headers: [["Idempotency-Key", "ab "]],
+        expect: { kind: "ok", key: "ab" },
+      },
+      {
+        name: "a single space trims to an empty value",
+        headers: [["Idempotency-Key", " "]],
         expect: {
           kind: "invalid",
           message:
@@ -95,26 +115,8 @@ describe("src/http/server/idempotency-key.test", () => {
         },
       },
       {
-        name: "trailing space",
-        rawHeaders: ["Idempotency-Key", "ab "],
-        expect: {
-          kind: "invalid",
-          message:
-            "Idempotency-Key must be 1 to 255 printable ASCII characters with no leading or trailing space",
-        },
-      },
-      {
-        name: "a single space",
-        rawHeaders: ["Idempotency-Key", " "],
-        expect: {
-          kind: "invalid",
-          message:
-            "Idempotency-Key must be 1 to 255 printable ASCII characters with no leading or trailing space",
-        },
-      },
-      {
-        name: "tab character",
-        rawHeaders: ["Idempotency-Key", "a\tb"],
+        name: "interior tab character",
+        headers: [["Idempotency-Key", "a\tb"]],
         expect: {
           kind: "invalid",
           message:
@@ -123,7 +125,7 @@ describe("src/http/server/idempotency-key.test", () => {
       },
       {
         name: "non-ASCII character",
-        rawHeaders: ["Idempotency-Key", "café"],
+        headers: [["Idempotency-Key", "café"]],
         expect: {
           kind: "invalid",
           message:
@@ -132,17 +134,17 @@ describe("src/http/server/idempotency-key.test", () => {
       },
       {
         name: "single character",
-        rawHeaders: ["Idempotency-Key", "a"],
+        headers: [["Idempotency-Key", "a"]],
         expect: { kind: "ok", key: "a" },
       },
       {
         name: "255 characters",
-        rawHeaders: ["Idempotency-Key", "a".repeat(255)],
+        headers: [["Idempotency-Key", "a".repeat(255)]],
         expect: { kind: "ok", key: "a".repeat(255) },
       },
       {
         name: "256 characters",
-        rawHeaders: ["Idempotency-Key", "a".repeat(256)],
+        headers: [["Idempotency-Key", "a".repeat(256)]],
         expect: {
           kind: "invalid",
           message:
@@ -151,34 +153,48 @@ describe("src/http/server/idempotency-key.test", () => {
       },
       {
         name: "a ULID",
-        rawHeaders: ["Idempotency-Key", "01JQ8Z7G3H4K5M6N7P8Q9R0S1T"],
+        headers: [["Idempotency-Key", "01JQ8Z7G3H4K5M6N7P8Q9R0S1T"]],
         expect: { kind: "ok", key: "01JQ8Z7G3H4K5M6N7P8Q9R0S1T" },
       },
       {
-        name: "a comma inside the value",
-        rawHeaders: ["Idempotency-Key", "a,b"],
-        expect: { kind: "ok", key: "a,b" },
+        name: "a comma inside the value means the key was supplied more than once",
+        headers: [["Idempotency-Key", "a,b"]],
+        expect: {
+          kind: "invalid",
+          message: "Idempotency-Key was supplied more than once",
+        },
       },
       {
         name: "the narrowest legal single characters",
-        rawHeaders: ["Idempotency-Key", "!~"],
+        headers: [["Idempotency-Key", "!~"]],
         expect: { kind: "ok", key: "!~" },
       },
     ];
 
     for (const testCase of cases) {
       it(testCase.name, () => {
-        assert.deepEqual(
-          readIdempotencyKey({ rawHeaders: testCase.rawHeaders }),
-          testCase.expect,
-        );
+        const accumulator = new Headers();
+        for (const [name, value] of testCase.headers) {
+          accumulator.append(name, value);
+        }
+        assert.deepEqual(readIdempotencyKey(accumulator), testCase.expect);
       });
     }
+
+    it("reads the joined duplicate value the way the transport delivers it", () => {
+      const accumulator = new Headers();
+      accumulator.append("Idempotency-Key", "a");
+      accumulator.append("idempotency-key", "b");
+      assert.deepEqual(readIdempotencyKey(accumulator), {
+        kind: "invalid",
+        message: "Idempotency-Key was supplied more than once",
+      });
+    });
   });
 
   describe("fingerprint", () => {
-    it("returns 64 lowercase hex characters", () => {
-      const result = fingerprint({
+    it("returns 64 lowercase hex characters", async () => {
+      const result = await fingerprint({
         method: "POST",
         path: "/v1/project",
         query: "",
@@ -187,77 +203,93 @@ describe("src/http/server/idempotency-key.test", () => {
       assert.match(result, /^[0-9a-f]{64}$/);
     });
 
-    it("is deterministic for identical input", () => {
+    it("is deterministic for identical input", async () => {
       const input = {
         method: "POST",
         path: "/v1/project",
         query: "",
         rawBody: "{}",
       };
-      assert.equal(fingerprint(input), fingerprint(input));
+      assert.equal(await fingerprint(input), await fingerprint(input));
     });
 
-    it("changes with a different raw body", () => {
+    it("changes with a different raw body", async () => {
       const base = { method: "POST", path: "/v1/project", query: "" };
       assert.notEqual(
-        fingerprint({ ...base, rawBody: '{"a":1}' }),
-        fingerprint({ ...base, rawBody: '{"a":2}' }),
+        await fingerprint({ ...base, rawBody: '{"a":1}' }),
+        await fingerprint({ ...base, rawBody: '{"a":2}' }),
       );
     });
 
-    it("treats whitespace as significant (raw-byte property)", () => {
+    it("treats whitespace as significant (raw-byte property)", async () => {
       const base = { method: "POST", path: "/v1/project", query: "" };
       assert.notEqual(
-        fingerprint({ ...base, rawBody: '{"a":1}' }),
-        fingerprint({ ...base, rawBody: '{ "a": 1 }' }),
+        await fingerprint({ ...base, rawBody: '{"a":1}' }),
+        await fingerprint({ ...base, rawBody: '{ "a": 1 }' }),
       );
     });
 
-    it("treats key order as significant", () => {
+    it("treats key order as significant", async () => {
       const base = { method: "POST", path: "/v1/project", query: "" };
       assert.notEqual(
-        fingerprint({ ...base, rawBody: '{"a":1,"b":2}' }),
-        fingerprint({ ...base, rawBody: '{"b":2,"a":1}' }),
+        await fingerprint({ ...base, rawBody: '{"a":1,"b":2}' }),
+        await fingerprint({ ...base, rawBody: '{"b":2,"a":1}' }),
       );
     });
 
-    it("changes with a different query string", () => {
+    it("changes with a different query string", async () => {
       const base = { method: "POST", path: "/v1/project", rawBody: "{}" };
       assert.notEqual(
-        fingerprint({ ...base, query: "" }),
-        fingerprint({ ...base, query: "force=1" }),
+        await fingerprint({ ...base, query: "" }),
+        await fingerprint({ ...base, query: "force=1" }),
       );
     });
 
-    it("changes with a different path", () => {
+    it("changes with a different path", async () => {
       const base = { method: "POST", query: "", rawBody: "{}" };
       assert.notEqual(
-        fingerprint({ ...base, path: "/v1/project" }),
-        fingerprint({ ...base, path: "/v1/project/p_1" }),
+        await fingerprint({ ...base, path: "/v1/project" }),
+        await fingerprint({ ...base, path: "/v1/project/p_1" }),
       );
     });
 
-    it("changes with a different method", () => {
+    it("changes with a different method", async () => {
       const base = { path: "/v1/project", query: "", rawBody: "{}" };
       assert.notEqual(
-        fingerprint({ ...base, method: "POST" }),
-        fingerprint({ ...base, method: "PUT" }),
+        await fingerprint({ ...base, method: "POST" }),
+        await fingerprint({ ...base, method: "PUT" }),
       );
     });
 
-    it("non-ASCII bytes survive the length prefix", () => {
+    it("non-ASCII bytes survive the length prefix", async () => {
       const base = { method: "POST", path: "/v1/project", query: "" };
-      const withAccent = fingerprint({ ...base, rawBody: '{"n":"é"}' });
-      const withoutAccent = fingerprint({ ...base, rawBody: '{"n":"e"}' });
+      const withAccent = await fingerprint({ ...base, rawBody: '{"n":"é"}' });
+      const withoutAccent = await fingerprint({
+        ...base,
+        rawBody: '{"n":"e"}',
+      });
       assert.notEqual(withAccent, withoutAccent);
       assert.match(withAccent, /^[0-9a-f]{64}$/);
       assert.match(withoutAccent, /^[0-9a-f]{64}$/);
     });
 
-    it("the length prefix prevents repartitioning across fields", () => {
+    it("the length prefix prevents repartitioning across fields", async () => {
       assert.notEqual(
-        fingerprint({ method: "AB", path: "C", query: "", rawBody: "" }),
-        fingerprint({ method: "A", path: "BC", query: "", rawBody: "" }),
+        await fingerprint({ method: "AB", path: "C", query: "", rawBody: "" }),
+        await fingerprint({ method: "A", path: "BC", query: "", rawBody: "" }),
+      );
+    });
+
+    it("pins the fingerprint for a known input", async () => {
+      const result = await fingerprint({
+        method: "POST",
+        path: "/v1/project",
+        query: "",
+        rawBody: '{"name":"alpha"}',
+      });
+      assert.equal(
+        result,
+        "66b93b3eabfa98df5795caabe974cdea65919a17be5586c784d59570c2e435e3",
       );
     });
   });
@@ -395,21 +427,56 @@ describe("src/http/server/idempotency-key.test", () => {
       };
       assert.equal(recordKey(input), recordKey(input));
     });
+
+    it("sorts parameter names bytewise with non-ASCII names", () => {
+      const first = recordKey({
+        operationId: "x",
+        parameters: { "\u{1F600}": "2", "\uE000": "1" },
+        actorId: "actor_A",
+        key: "k",
+      });
+      const second = recordKey({
+        operationId: "x",
+        parameters: { "\uE000": "1", "\u{1F600}": "2" },
+        actorId: "actor_A",
+        key: "k",
+      });
+      assert.equal(first, second);
+      assert.equal(
+        first,
+        "x\uFFFD\uE000=1\u0001\u{1F600}=2\uFFFDactor_A\uFFFDk",
+      );
+    });
   });
 
-  describe("raw body preservation (vendor probe)", () => {
-    function probeApp(): Koa {
-      const app = new Koa();
-      app.use(bodyParser({ enableTypes: ["json"] }));
-      app.use((context) => {
-        context.body = { raw: context.request.rawBody ?? null };
+  describe("raw body preservation (body middleware probe)", () => {
+    function probeApp(): Hono<AppEnv> {
+      const operation: Operation = {
+        operationId: "node.create",
+        method: "POST",
+        path: [],
+        introducedIn: "phase-1",
+        status: "routed",
+        allowedActors: ["human", "harness"],
+      };
+      const handlers: Readonly<Record<string, Handler>> = {
+        "node.create": () => ({ kind: "json", status: 200, body: {} }),
+      };
+      const app = new Hono<AppEnv>();
+      app.use("*", async (c, next) => {
+        c.set("match", { operation, parameters: {} });
+        await next();
+      });
+      app.use("*", bodyMiddleware(handlers));
+      app.all("*", (c) => {
+        return c.json({ raw: optional(c, "rawBody") ?? null });
       });
       return app;
     }
 
     it("preserves the exact request bytes for a json body", async () => {
       const app = probeApp();
-      const agent = await loopbackAgent(app);
+      const agent = fetchAgent(app);
       const response = await agent
         .post("/")
         .set("Content-Type", "application/json")
@@ -419,7 +486,7 @@ describe("src/http/server/idempotency-key.test", () => {
 
     it("is null when the content type is not json", async () => {
       const app = probeApp();
-      const agent = await loopbackAgent(app);
+      const agent = fetchAgent(app);
       const response = await agent
         .post("/")
         .set("Content-Type", "text/plain")
@@ -429,7 +496,7 @@ describe("src/http/server/idempotency-key.test", () => {
 
     it("is null for a GET with no body", async () => {
       const app = probeApp();
-      const agent = await loopbackAgent(app);
+      const agent = fetchAgent(app);
       const response = await agent.get("/");
       assert.equal(response.body.raw, null);
     });

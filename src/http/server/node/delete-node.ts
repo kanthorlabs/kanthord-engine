@@ -32,7 +32,7 @@ export function deleteNodeHandler(
         fromRevision: parsed.data.fromRevision,
         actor: context.actor,
       });
-      return { status: 200, body: result };
+      return { kind: "json", status: 200, body: result };
     } catch (error) {
       throw toHttpError(error);
     }

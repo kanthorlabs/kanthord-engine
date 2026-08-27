@@ -17,7 +17,7 @@ export function showProjectGraphHandler(
     }
     try {
       const graph = dependencies.showProjectGraph({ projectId: id });
-      return { status: 200, body: graph };
+      return { kind: "json", status: 200, body: graph };
     } catch (error) {
       throw toHttpError(error);
     }

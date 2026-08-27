@@ -4,14 +4,17 @@ import { resolve } from "node:path";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import Koa from "koa";
+import { Hono } from "hono";
 
-import { envelopeMiddleware } from "./envelope.ts";
+import { errorResponse, errorValue, materializeError } from "./envelope.ts";
 import { authMiddleware, bearerToken } from "./auth.ts";
-import type { AuthenticatedState } from "./auth.ts";
+import { headersMiddleware } from "./headers.ts";
+import { renderMiddleware } from "./render.ts";
+import { demand } from "./variables.ts";
+import type { AppEnv } from "./variables.ts";
 import type { ActorRow } from "../../domain/actor.ts";
 import { bootstrapActorId } from "../../domain/actor.ts";
-import { loopbackAgent } from "../../../test/helpers/agent.ts";
+import { fetchAgent } from "../../../test/helpers/agent.ts";
 import { BOOTSTRAP_ACTOR_FIXTURE } from "../../../test/helpers/app.ts";
 
 function defaultResolveActor(presented: string): ActorRow | null {
@@ -21,32 +24,47 @@ function defaultResolveActor(presented: string): ActorRow | null {
   return null;
 }
 
+type OnInternalError = (error: unknown) => void;
+
+function buildFixture(
+  token: string,
+  resolveActor: (presented: string) => ActorRow | null,
+  onInternalError: OnInternalError = () => {},
+): { hono: Hono<AppEnv>; recorded: () => ActorRow | undefined } {
+  let recorded: ActorRow | undefined;
+  const hono = new Hono<AppEnv>();
+  hono.onError((error, c) => {
+    const value = errorValue(error);
+    const materialized = materializeError(value);
+    if (materialized.internal) {
+      onInternalError(value);
+    }
+    return errorResponse(materialized, demand(c, "headers"));
+  });
+  hono.use("*", headersMiddleware());
+  hono.use("*", renderMiddleware());
+  hono.use("*", authMiddleware({ token, resolveActor }));
+  hono.all("*", async (c) => {
+    recorded = demand(c, "actor");
+    c.set("result", { kind: "json", status: 200, body: { reached: true } });
+  });
+  return { hono, recorded: () => recorded };
+}
+
 function buildApp(
   token: string,
   resolveActor: (presented: string) => ActorRow | null = defaultResolveActor,
-): Koa {
-  const app = new Koa();
-  app.use(envelopeMiddleware({ onInternalError: () => {} }));
-  app.use(authMiddleware({ token, resolveActor }));
-  app.use((context) => {
-    context.body = { reached: true };
-  });
-  return app;
+  onInternalError?: OnInternalError,
+): Hono<AppEnv> {
+  return buildFixture(token, resolveActor, onInternalError).hono;
 }
 
 function buildRecordingApp(
   token: string,
   resolveActor: (presented: string) => ActorRow | null,
-): { app: Koa; recorded: () => ActorRow | undefined } {
-  let recorded: ActorRow | undefined;
-  const app = new Koa();
-  app.use(envelopeMiddleware({ onInternalError: () => {} }));
-  app.use(authMiddleware({ token, resolveActor }));
-  app.use((context) => {
-    recorded = (context.state as AuthenticatedState).actor;
-    context.body = { reached: true };
-  });
-  return { app, recorded: () => recorded };
+): { app: Hono<AppEnv>; recorded: () => ActorRow | undefined } {
+  const fixture = buildFixture(token, resolveActor);
+  return { app: fixture.hono, recorded: fixture.recorded };
 }
 
 function sourceText(): string {
@@ -85,7 +103,7 @@ describe("src/http/server/auth.test", () => {
 
   it("stays route-independent by construction", () => {
     const source = sourceText();
-    assert.equal(source.includes("context.state.match"), false);
+    assert.equal(source.includes("match"), false);
     assert.equal(source.includes("registry"), false);
     assert.equal(source.includes("operationId"), false);
   });
@@ -99,9 +117,7 @@ describe("src/http/server/auth.test", () => {
   });
 
   it("answers 401 unauthenticated when no token is presented", async () => {
-    const response = await (
-      await loopbackAgent(buildApp("test-token"))
-    ).get("/v1/health");
+    const response = await fetchAgent(buildApp("test-token")).get("/v1/health");
     assert.equal(response.body.reached, undefined);
     assert.equal(response.status, 401);
     assert.deepEqual(response.body, {
@@ -110,9 +126,7 @@ describe("src/http/server/auth.test", () => {
   });
 
   it("answers 401 with the not-valid message when the token is wrong", async () => {
-    const response = await (
-      await loopbackAgent(buildApp("test-token"))
-    )
+    const response = await fetchAgent(buildApp("test-token"))
       .get("/v1/health")
       .set("Authorization", "Bearer wrong");
     assert.equal(response.status, 401);
@@ -144,9 +158,7 @@ describe("src/http/server/auth.test", () => {
     ];
     const bodies: unknown[] = [];
     for (const { name, resolve } of resolvers) {
-      const response = await (
-        await loopbackAgent(buildApp("test-token", resolve))
-      )
+      const response = await fetchAgent(buildApp("test-token", resolve))
         .get("/v1/health")
         .set("Authorization", "Bearer whatever");
       assert.equal(response.status, 401, name);
@@ -164,9 +176,7 @@ describe("src/http/server/auth.test", () => {
   });
 
   it("treats a wrong scheme as a missing token", async () => {
-    const response = await (
-      await loopbackAgent(buildApp("test-token"))
-    )
+    const response = await fetchAgent(buildApp("test-token"))
       .get("/v1/health")
       .set("Authorization", "Basic test-token");
     assert.equal(response.status, 401);
@@ -176,9 +186,7 @@ describe("src/http/server/auth.test", () => {
   });
 
   it("answers 200 when the bearer token matches", async () => {
-    const response = await (
-      await loopbackAgent(buildApp("test-token"))
-    )
+    const response = await fetchAgent(buildApp("test-token"))
       .get("/v1/health")
       .set("Authorization", "Bearer test-token");
     assert.equal(response.status, 200);
@@ -187,10 +195,10 @@ describe("src/http/server/auth.test", () => {
 
   it("refuses every path and method with the same 401", async () => {
     const requests = [
-      (await loopbackAgent(buildApp("test-token"))).get("/v1/health"),
-      (await loopbackAgent(buildApp("test-token"))).get("/v1/anything"),
-      (await loopbackAgent(buildApp("test-token"))).post("/v1/repository"),
-      (await loopbackAgent(buildApp("test-token"))).delete("/v1/provider/x"),
+      fetchAgent(buildApp("test-token")).get("/v1/health"),
+      fetchAgent(buildApp("test-token")).get("/v1/anything"),
+      fetchAgent(buildApp("test-token")).post("/v1/repository"),
+      fetchAgent(buildApp("test-token")).delete("/v1/provider/x"),
     ];
     for (const pending of requests) {
       const response = await pending;
@@ -201,19 +209,17 @@ describe("src/http/server/auth.test", () => {
     }
   });
 
-  it("a header the resolver accepts reaches the terminal handler and the resolved actor lands on context.state", async () => {
+  it("a header the resolver accepts reaches the terminal handler and the resolved actor lands on the actor variable", async () => {
     const { app, recorded } = buildRecordingApp("test-token", (presented) =>
       presented === "actor_01JQ8ZAN9P0ABCDEFGHJKMNPQR.s3cr3t"
         ? harnessRow
         : null,
     );
-    const response = await (
-      await loopbackAgent(app)
-    )
+    const response = await fetchAgent(app)
       .get("/v1/health")
       .set("Authorization", "Bearer actor_01JQ8ZAN9P0ABCDEFGHJKMNPQR.s3cr3t");
     assert.equal(response.status, 200);
-    assert.deepEqual(recorded(), harnessRow);
+    assert.equal(recorded(), harnessRow);
   });
 
   it("with an empty configured token, a request with no Authorization header reaches the terminal handler with the bootstrap actor, and the resolver is called exactly once with an empty string", async () => {
@@ -222,10 +228,10 @@ describe("src/http/server/auth.test", () => {
       calls.push(presented);
       return BOOTSTRAP_ACTOR_FIXTURE;
     });
-    const response = await (await loopbackAgent(app)).get("/v1/health");
+    const response = await fetchAgent(app).get("/v1/health");
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, { reached: true });
-    assert.deepEqual(recorded(), BOOTSTRAP_ACTOR_FIXTURE);
+    assert.equal(recorded(), BOOTSTRAP_ACTOR_FIXTURE);
     assert.deepEqual(calls, [""]);
   });
 
@@ -235,14 +241,12 @@ describe("src/http/server/auth.test", () => {
       calls.push(presented);
       return BOOTSTRAP_ACTOR_FIXTURE;
     });
-    const response = await (
-      await loopbackAgent(app)
-    )
+    const response = await fetchAgent(app)
       .get("/v1/health")
       .set("Authorization", "Bearer anything");
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, { reached: true });
-    assert.deepEqual(recorded(), BOOTSTRAP_ACTOR_FIXTURE);
+    assert.equal(recorded(), BOOTSTRAP_ACTOR_FIXTURE);
     assert.deepEqual(calls, [""]);
   });
 
@@ -253,9 +257,7 @@ describe("src/http/server/auth.test", () => {
       calls.push(value);
       return value === presented ? BOOTSTRAP_ACTOR_FIXTURE : null;
     });
-    const response = await (
-      await loopbackAgent(app)
-    )
+    const response = await fetchAgent(app)
       .get("/v1/health")
       .set("Authorization", `Bearer ${presented}`);
     assert.equal(response.status, 200);

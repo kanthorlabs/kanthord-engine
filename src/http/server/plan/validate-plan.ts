@@ -34,7 +34,7 @@ export function validatePlanHandler(
         fromRevision: parsed.data.fromRevision,
         documents: parsed.data.documents,
       });
-      return { status: 200, body: result };
+      return { kind: "json", status: 200, body: result };
     } catch (error) {
       if (error instanceof ValidatePlanError) {
         switch (error.refusal) {

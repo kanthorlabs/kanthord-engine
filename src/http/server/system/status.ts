@@ -8,5 +8,5 @@ export type StatusHandlerDependencies = Readonly<{
 export function statusHandler(
   dependencies: StatusHandlerDependencies,
 ): Handler {
-  return () => ({ status: 200, body: dependencies.readStatus() });
+  return () => ({ kind: "json", status: 200, body: dependencies.readStatus() });
 }

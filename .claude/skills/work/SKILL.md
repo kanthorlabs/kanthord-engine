@@ -17,7 +17,7 @@ Arguments: `$ARGUMENTS` — `<epic-file-path> [--max-turns N]`. A harness that d
 You are the **orchestrator**. You own everything the test-engineer / software-engineer cannot do on their own:
 
 - **TDD dispatch** — alternating `test-engineer` and `software-engineer` turns until `IMPLEMENTATION_READY_FOR_REVIEW:` lands in the discussion file or the turn cap fires.
-- **Escalation** — counting `ATTEMPT-FAILED:` lines per Task; when one Task has failed **3** attempts, asking the debate engine for an unblock guideline through `/debate`, and handing the Task to the human only when that guideline also fails.
+- **Escalation** — counting `ATTEMPT-FAILED:` lines per Task; when one Task has failed **3** attempts, asking the debate engine for an unblock guideline through `/debate`, and handing the Task to the human only when that guideline also fails. **One blocker skips both counters: a fix that needs a path locked to every role goes to the human on its first appearance**, because no engineer and no guideline can close it.
 - **Reviewer auto-fix routing** — after the reviewer-engineer gate, auto-routing every `action:YES` finding back through the TDD loop **once** per review cycle; only `action:NO` findings reach the human.
 - **Final review handoff** — after implementation and the reviewer auto-fix pass, pausing for the **human operator's** review (`HUMAN_REVIEW: PASS|FAIL`). If the human fails it, routing their `BLOCKER:` lines back through the TDD loop.
 - **Discussion-file seed** — the one-time header write.
@@ -45,6 +45,8 @@ A marker missing any of the three is premature: the orchestrator must **reject i
 After the TDD loop completes (`IMPLEMENTATION_READY_FOR_REVIEW:` detected), the orchestrator runs the **reviewer-engineer gate** and auto-routes its `action:YES` findings back through the TDD loop (once per cycle), leaving only `action:NO` findings for the human. It then **pauses for the human operator's review**. The human reviews the implementation and records the verdict in the discussion file as `HUMAN_REVIEW: PASS` or `HUMAN_REVIEW: FAIL` (with `BLOCKER:` lines). On `PASS`, the EPIC is done. On `FAIL`, the orchestrator routes the `BLOCKER:` lines back through the TDD loop until the next `IMPLEMENTATION_READY_FOR_REVIEW:`.
 
 Separately, while the TDD loop runs, the orchestrator counts `ATTEMPT-FAILED: <task-id>` lines emitted by the engineers. When any single Task accumulates **3** failed attempts, the loop cannot self-resolve it — but the human is not the first stop. The orchestrator asks the **debate engine** for an unblock guideline through the `/debate` skill, records that guideline in the discussion file, and gives the Task 3 more attempts under it. The human is reached only when the debate engine cannot be used, its run fails, or the Task fails its 3 attempts under the guideline as well. Each Task gets at most one guideline per review cycle.
+
+The count answers "can the loop still resolve this?". It is the wrong question for a blocker whose fix needs a file locked to every pipeline role — the plan tree, the pipeline definition, the pipeline guards, `package.json`, `tsconfig*.json`, `AGENTS.md`, the `Makefile`, `Containerfile` or `compose.yaml`. No number of attempts closes such a blocker, and a debate guideline cannot either, because the guideline would have to be executed by a role that may not write the file. The engineers mark it `OPEN: OUT-OF-LANE — <path> — <change>`, and Step 5h escalates it to the human on the **first** occurrence, after validating the claimed lock with `scripts/lane-check.sh`.
 
 ## Step 1 — Parse arguments
 
@@ -237,10 +239,10 @@ Lane boundaries are stated in the personas but nothing enforces them. Compute th
 
 ```bash
 scripts/turn-snapshot.sh '<root>' > '/tmp/work-<epic-slug>-after-<turn>'
-TURN_FILES=$(comm -3 '/tmp/work-<epic-slug>-before-<turn>' '/tmp/work-<epic-slug>-after-<turn>' | sed 's/^\t//' | cut -f2- | LC_ALL=C sort -u)
+TURN_FILES=$(LC_ALL=C comm -3 '/tmp/work-<epic-slug>-before-<turn>' '/tmp/work-<epic-slug>-after-<turn>' | sed 's/^\t//' | cut -f2- | LC_ALL=C sort -u)
 ```
 
-`comm -3` is required, not `comm -13`: a fingerprint line changes when the turn edits a file, deletes it, or reverts it to `HEAD`, and only the two-sided difference reports all three. `sed 's/^\t//'` strips the tab `comm` prefixes to its second column, and `cut -f2-` drops the hash to leave the path.
+`LC_ALL=C comm -3` is required, not `comm -13`: a fingerprint line changes when the turn edits a file, deletes it, or reverts it to `HEAD`, and only the two-sided difference reports all three. The locale must match the snapshot sort locale, or unchanged lines can appear as differences. `sed 's/^\t//'` strips the tab `comm` prefixes to its second column, and `cut -f2-` drops the hash to leave the path.
 
 Tests are **co-located** with source (`bar.ts` + `bar.test.ts` in one dir), so a
 prefix table cannot separate the lanes — this project uses a **predicate
@@ -290,7 +292,7 @@ Two properties matter here. The flag replaces an in-loop `exit 1`, which stopped
 
 Otherwise the turn is clean. Delete this turn's draft temp by its **exact** path — the orchestrator owns this cleanup: `rm -f '<DRAFT_FILE>'`. Then remove the two `/tmp` snapshot files.
 
-### 5h. Escalation — one Task fails its attempt limit → debate, then Human
+### 5h. Escalation — an out-of-lane blocker → Human at once; a Task at its attempt limit → debate, then Human
 
 After verifying the subagent wrote, check whether this turn was a **failed attempt** at the active Task. Engineers mark a failed attempt with a greppable line `ATTEMPT-FAILED: <task-id> — <reason>`.
 
@@ -315,6 +317,27 @@ GUIDE_LINE=$(grep -nF "DEBATE_GUIDELINE: $TASK_ID —" '<discussion-file>' | tai
 START=$(printf '%s\n%s\n' "${FAIL_LINE:-0}" "${GUIDE_LINE:-0}" | sort -n | tail -1)
 FAIL_COUNT=$(awk -v s="$START" 'NR>s' '<discussion-file>' | grep -F "ATTEMPT-FAILED: $TASK_ID —" | wc -l | tr -d ' ')
 ```
+
+**Check the out-of-lane marker before the count.** An engineer whose blocker needs a path locked to **every** role marks it `OPEN: OUT-OF-LANE — <repo-relative path> — <the change it needs>`. That is not a stuck implementation, and neither the attempt budget nor a debate guideline can move it:
+
+```bash
+OOL_LINE=$(grep -n '^OPEN: OUT-OF-LANE —' '<discussion-file>' | tail -1 | cut -d: -f1)
+if [ -n "$OOL_LINE" ] && [ "$OOL_LINE" -gt "${START:-0}" ]; then
+  OOL_PATH=$(sed -n "${OOL_LINE}p" '<discussion-file>' | sed -E 's/^OPEN: OUT-OF-LANE —[[:space:]]*//; s/[[:space:]]*—.*$//')
+  scripts/lane-check.sh test-engineer "$OOL_PATH" >/dev/null 2>&1 && TE_MAY=yes || TE_MAY=no
+  scripts/lane-check.sh software-engineer "$OOL_PATH" >/dev/null 2>&1 && SE_MAY=yes || SE_MAY=no
+  echo "OUT-OF-LANE: $OOL_PATH te=$TE_MAY se=$SE_MAY"
+fi
+```
+
+Splitting on the em-dash only is load-bearing here for the same reason it is for `TASK_ID`: a path contains hyphens.
+
+- **`te=no` and `se=no`** → the path is locked to both engineers. **Stop the loop and escalate to the human operator now**, whatever `FAIL_COUNT` says. Print the `OPEN: OUT-OF-LANE` line, the denial reason `scripts/lane-check.sh` writes to stderr for that path, the discussion file path, and instructions to make the change — or amend the Story that needs it — and re-run the skill. Jump to Step 8 with `reason=human-escalation-out-of-lane`. Do **not** run 5h.1: a debate cannot author a locked file, so its guideline would name a change no role may execute.
+- **Either one `yes`** → the claim is wrong. The path is one engineer's lane, so the work is in lane for that role. Log `out-of-lane claim rejected: <path> is the <role> lane`, and fall through to the count below, which treats the turn as an ordinary failed attempt. The rejected claim reaches the human through the review, not through an escalation.
+
+The `scripts/lane-check.sh` validation is what stops this marker becoming an exit hatch from a hard Task: a role cannot escalate by asserting a lock the script does not agree with.
+
+Then the count:
 
 - If `FAIL_COUNT < 3` → log `attempt <FAIL_COUNT>/3 failed for task <TASK_ID>` and continue to 5i.
 - If `FAIL_COUNT >= 3` and the Task has **no** guideline in the current review cycle (`GUIDE_LINE` empty, or `GUIDE_LINE` not greater than `${FAIL_LINE:-0}`) → the Task is stuck. Run the debate escalation of **5h.1**, then continue to 5i.
@@ -431,7 +454,7 @@ Extract the base ref and compute the changed files:
 
 ```bash
 BASE_REF=$(grep '^base-ref:' '<discussion-file>' | head -1 | sed 's/^base-ref:[[:space:]]*//')
-CHANGED_FILES=$(git -C '<root>' diff --name-only "$BASE_REF"..HEAD)
+CHANGED_FILES=$( { git -C '<root>' diff --name-only "$BASE_REF"; git -C '<root>' ls-files --others --exclude-standard; } | LC_ALL=C sort -u)
 ```
 
 Dispatch one `reviewer-engineer` agent (substituting `<root>`, `<EPIC_FILE>`, `<DISCUSSION_FILE>`, `<BASE_REF>`, and `<CHANGED_FILES>`):

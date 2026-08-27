@@ -15,10 +15,12 @@ block repeats the `gitLibraries` and `node:child_process` groups instead of addi
 
 ```js
   {
-    // The transport core is Fetch-native: no node:buffer. src/http/server/koa-body.ts
-    // is the one adapter that converts a HandlerResult to a Koa body, and EPIC 032
-    // deletes it. This block repeats the src/**/*.ts restrictions because flat config
-    // applies the last no-restricted-imports entry per file.
+    // The transport core imports no node:buffer. The global Buffer survives in
+    // idempotency-key.ts and idempotency-store.ts until EPIC 035.
+    // src/http/server/koa-body.ts is the one adapter that converts a HandlerResult
+    // to a Koa body, and EPIC 032 deletes it. This block repeats the src/**/*.ts
+    // restrictions because flat config applies the last no-restricted-imports
+    // entry per file.
     files: ["src/http/server/**/*.ts"],
     ignores: ["src/http/server/koa-body.ts", "src/**/*.test.ts"],
     rules: {

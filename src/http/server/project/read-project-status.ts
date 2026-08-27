@@ -20,6 +20,6 @@ export function readProjectStatusHandler(
     if (result === null) {
       throw httpError("not-found", `no project ${id}`);
     }
-    return { status: 200, body: result };
+    return { kind: "json", status: 200, body: result };
   };
 }

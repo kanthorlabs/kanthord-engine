@@ -1,4 +1,4 @@
-import { Buffer } from "node:buffer";
+import { compareBytewise } from "./bytewise.ts";
 
 export function readQuery(
   querystring: string,
@@ -9,9 +9,7 @@ export function readQuery(
     (result[key] ??= []).push(value);
   }
   const sorted: Record<string, readonly string[]> = {};
-  for (const key of Object.keys(result).sort((a, b) =>
-    Buffer.compare(Buffer.from(a), Buffer.from(b)),
-  )) {
+  for (const key of Object.keys(result).sort(compareBytewise)) {
     sorted[key] = result[key] as string[];
   }
   return sorted;
