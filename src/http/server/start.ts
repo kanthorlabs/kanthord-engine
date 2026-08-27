@@ -1,5 +1,9 @@
-import type Koa from "koa";
 import type { Server } from "node:http";
+import { createServer } from "node:http";
+import { getRequestListener } from "@hono/node-server";
+import type { Env, Hono } from "hono";
+
+import { bindAuthority } from "../../domain/host-authority.ts";
 
 export type ListenInput = Readonly<{ bind: string; port: number }>;
 
@@ -8,9 +12,18 @@ export type ListeningServer = Readonly<{
   close(): Promise<void>;
 }>;
 
-export function listen(app: Koa, input: ListenInput): Promise<ListeningServer> {
+export function listen<E extends Env>(
+  app: Hono<E>,
+  input: ListenInput,
+): Promise<ListeningServer> {
   return new Promise((resolve, reject) => {
-    const server: Server = app.listen(input.port, input.bind);
+    const server: Server = createServer(
+      getRequestListener(app.fetch, {
+        hostname: bindAuthority(input.bind),
+        overrideGlobalObjects: false,
+      }),
+    );
+    server.listen(input.port, input.bind);
     let closed = false;
     server.once("error", (error) => {
       reject(error);

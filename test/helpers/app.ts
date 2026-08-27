@@ -185,6 +185,6 @@ export async function createSocketTestApp(
   overrides?: TestAppOverrides,
 ): Promise<TestApp> {
   return createTestAppWithAgent(overrides, (created) =>
-    loopbackAgent(created.app),
+    loopbackAgent(created.hono),
   );
 }

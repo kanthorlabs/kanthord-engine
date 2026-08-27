@@ -2,13 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { Hono } from "hono";
-import type Koa from "koa";
 
 import { errorResponse, errorValue, materializeError } from "./envelope.ts";
 import { headersMiddleware } from "./headers.ts";
 import { hostMiddleware } from "./host.ts";
 import type { HostDependencies } from "./host.ts";
-import { koaFromHono } from "./koa-bridge.ts";
 import { renderMiddleware } from "./render.ts";
 import { demand } from "./variables.ts";
 import type { AppEnv } from "./variables.ts";
@@ -17,7 +15,7 @@ import { loopbackAgent } from "../../../test/helpers/agent.ts";
 function buildApp(
   dependencies: HostDependencies,
   onInternalError: (error: unknown) => void = () => {},
-): Koa {
+): Hono<AppEnv> {
   const hono = new Hono<AppEnv>();
   hono.onError((error, c) => {
     const value = errorValue(error);
@@ -33,7 +31,7 @@ function buildApp(
   hono.all("*", async (c) => {
     c.set("result", { kind: "json", status: 200, body: { reached: true } });
   });
-  return koaFromHono(hono);
+  return hono;
 }
 
 describe("src/http/server/host.test", () => {

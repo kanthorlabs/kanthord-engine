@@ -4,7 +4,6 @@ import type { Server } from "node:http";
 
 import { Hono } from "hono";
 
-import { koaFromHono } from "./koa-bridge.ts";
 import type { AppEnv } from "./variables.ts";
 import { loopbackAgent, loopbackServer } from "../../../test/helpers/agent.ts";
 
@@ -54,9 +53,8 @@ describe("src/http/server/shutdown-socket.test", () => {
       await release.promise;
       return c.text("complete-body");
     });
-    const bridged = koaFromHono(application);
-    const server = await loopbackServer(bridged);
-    const agent = await loopbackAgent(bridged);
+    const server = await loopbackServer(application);
+    const agent = await loopbackAgent(application);
 
     const answer = agent.get("/drain").then((response) => {
       order.push("response-complete");
@@ -86,8 +84,7 @@ describe("src/http/server/shutdown-socket.test", () => {
   it("a connection opened after shutdown starts is refused", async () => {
     const application = new Hono<AppEnv>();
     application.get("/", (c) => c.text("ok"));
-    const bridged = koaFromHono(application);
-    const server = await loopbackServer(bridged);
+    const server = await loopbackServer(application);
     const port = portOf(server);
 
     const closing = closeServer(server);
@@ -106,8 +103,7 @@ describe("src/http/server/shutdown-socket.test", () => {
   it("the listener closes", async () => {
     const application = new Hono<AppEnv>();
     application.get("/", (c) => c.text("ok"));
-    const bridged = koaFromHono(application);
-    const server = await loopbackServer(bridged);
+    const server = await loopbackServer(application);
 
     assert.equal(server.listening, true);
 

@@ -36,7 +36,7 @@ createServer(
 - Do not import or call `listen` from `src/http/server/start.ts`. `listen` returns `ListeningServer`,
   which carries `port` and `close` only, and this helper needs the `Server` object.
 
-### The `koaFromHono` callers — five files, roughly eight call sites
+### The socket callers — six files, roughly nine call sites
 
 Story 4 deletes `koaFromHono` and `src/http/server/koa-bridge.test.ts`, so every caller changes here.
 An unedited caller breaks `npm run typecheck` in story 4. Count call sites, not files: the grep gate
@@ -75,6 +75,10 @@ below is the authority, not this list.
    must receive the _same_ hono reference in case 1, exactly as they receive the same bridge
    reference today.
 
+6. `src/http/server/app.test.ts` — the HTTP/1.0 no-Host case reaches the socket through the
+   application returned by `createApp`. Change `loopbackServer(created.app)` to
+   `loopbackServer(created.hono)`. Change no case name or assertion.
+
 ### `src/http/server/koa-bridge.test.ts` — delete
 
 Delete the file, and its 6 cases with it. Story 2 restated all six against the node adapter, so no
@@ -88,14 +92,14 @@ takes no edit at all.
 
 - Add exactly 0 cases. Remove exactly the 6 cases of `src/http/server/koa-bridge.test.ts`, which
   EPIC 032 story 15 enumerates and story 2 restated.
-- Change no case name and no assertion in any of the five files, including the two `set-cookie`
+- Change no case name and no assertion in any of the six files, including the two `set-cookie`
   values and the three `src/http/server/shutdown-socket.test.ts` case names.
 - Keep the three exported names of `test/helpers/agent.ts` — `loopbackServer`, `loopbackAgent`,
   `fetchAgent` — and the two factory names of `test/helpers/app.ts` — `createTestApp`,
   `createSocketTestApp`. `test/helpers/socket-budget.test.ts` counts files that reach
   `test/helpers/agent.ts`, and a renamed export changes that count.
 - Edit no production module. Under `src/http/server/**` this story touches test files only:
-  `host.test.ts`, `idempotency.test.ts`, `shutdown-socket.test.ts`, and the deleted
+  `app.test.ts`, `host.test.ts`, `idempotency.test.ts`, `shutdown-socket.test.ts`, and the deleted
   `koa-bridge.test.ts`.
 - Do not delete `src/http/server/koa-bridge.ts`. Story 4 owns the production half.
 

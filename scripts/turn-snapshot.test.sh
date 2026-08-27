@@ -24,7 +24,7 @@ git -C "$work" add -A
 git -C "$work" commit -qm base
 
 turn_files() {
-  comm -3 "$tmp/before" "$tmp/after" | sed 's/^\t//' | cut -f2- | LC_ALL=C sort -u
+  LC_ALL=C comm -3 "$tmp/before" "$tmp/after" | sed 's/^\t//' | cut -f2- | LC_ALL=C sort -u
 }
 
 printf 'committed\ndirty before the turn\n' >"$work/src/tracked.ts"

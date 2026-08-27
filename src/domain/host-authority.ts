@@ -9,6 +9,10 @@ export function isWildcardBind(bind: string): boolean {
   return wildcardBinds.some((candidate) => candidate === bind);
 }
 
+export function bindAuthority(bind: string): string {
+  return bind.includes(":") ? `[${bind}]` : bind;
+}
+
 export function deriveAllowedHosts(
   input: Readonly<{ bind: string; port: number }>,
 ): readonly string[] {
@@ -22,6 +26,6 @@ export function deriveAllowedHosts(
     }
     return entries;
   }
-  const authority = input.bind.includes(":") ? `[${input.bind}]` : input.bind;
+  const authority = bindAuthority(input.bind);
   return [`${authority}:${input.port}`];
 }

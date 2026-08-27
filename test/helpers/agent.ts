@@ -1,18 +1,23 @@
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import request from "supertest";
-import type Koa from "koa";
+import { getRequestListener } from "@hono/node-server";
 import type { Env, Hono } from "hono";
 
-const servers = new WeakMap<Koa, Promise<Server>>();
+const servers = new WeakMap<object, Promise<Server>>();
 
-export function loopbackServer(app: Koa): Promise<Server> {
+export function loopbackServer<E extends Env>(app: Hono<E>): Promise<Server> {
   const existing = servers.get(app);
   if (existing !== undefined) {
     return existing;
   }
   const listening = new Promise<Server>((resolve, reject) => {
-    const server = createServer(app.callback());
+    const server = createServer(
+      getRequestListener(app.fetch, {
+        hostname: "127.0.0.1",
+        overrideGlobalObjects: false,
+      }),
+    );
     server.unref();
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
@@ -23,8 +28,8 @@ export function loopbackServer(app: Koa): Promise<Server> {
   return listening;
 }
 
-export async function loopbackAgent(
-  app: Koa,
+export async function loopbackAgent<E extends Env>(
+  app: Hono<E>,
 ): Promise<ReturnType<typeof request>> {
   return request(await loopbackServer(app));
 }

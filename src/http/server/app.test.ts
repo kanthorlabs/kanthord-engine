@@ -579,7 +579,7 @@ describe("src/http/server/app.test", () => {
       onInternalError: () => {},
       waits: noopWaits(),
     });
-    const server = await loopbackServer(created.app);
+    const server = await loopbackServer(created.hono);
     t.after(() => {
       server.close();
     });
@@ -595,25 +595,7 @@ describe("src/http/server/app.test", () => {
     });
   });
 
-  it("app.proxy stays false on the app createApp returns", () => {
-    const settings: TransportSettings = {
-      token: "test-token",
-      allowedHosts: ["kanthord.test"],
-      allowedOrigins: [],
-    };
-    const created = createApp({
-      settings,
-      handlers: {},
-      unimplemented: unimplementedFor({}),
-      resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
-      onInternalError: () => {},
-      waits: noopWaits(),
-    });
-    const { app } = created;
-    assert.equal(app.proxy, false);
-  });
-
-  it("createApp returns both applications and a cancel handle, and the handle reaches the registry", () => {
+  it("createApp returns the hono application and a cancel handle, and the handle reaches the registry", () => {
     let cancelled = false;
     const waits = {
       wait: () => Promise.resolve([]),
@@ -633,11 +615,7 @@ describe("src/http/server/app.test", () => {
       onInternalError: () => {},
       waits,
     });
-    assert.deepEqual(Object.keys(result).sort(), [
-      "app",
-      "cancelWaits",
-      "hono",
-    ]);
+    assert.deepEqual(Object.keys(result).sort(), ["cancelWaits", "hono"]);
     result.cancelWaits();
     assert.equal(cancelled, true);
   });
@@ -699,7 +677,7 @@ describe("src/http/server/app.test", () => {
     });
   });
 
-  it("production sources keep header writes in the accumulator and koa values only in the bridge", () => {
+  it("production sources keep header writes in the accumulator", () => {
     const directory = new URL("./", import.meta.url);
     const listing = readdirSync(directory, { recursive: true }).map(String);
     const sources = listing
@@ -720,18 +698,8 @@ describe("src/http/server/app.test", () => {
     const contextResponseWrites = sources
       .filter((entry) => /\bc\.res\s*=/.test(text(entry)))
       .map(repoPath);
-    const koaValueImports = sources
-      .filter((entry) =>
-        [...text(entry).matchAll(/import[^;]*?from\s*"koa";/g)].some(
-          (match) => !/^import\s+type\s/.test(match[0]),
-        ),
-      )
-      .map(repoPath)
-      .sort();
-
     assert.deepEqual(bareContextGet, []);
     assert.deepEqual(contextHeaderWrites, []);
     assert.deepEqual(contextResponseWrites, []);
-    assert.deepEqual(koaValueImports, ["src/http/server/koa-bridge.ts"]);
   });
 });

@@ -79,6 +79,7 @@ overrideGlobalObjects?, autoCleanupIncoming? }) => (incoming, outgoing) => Promi
   file. Case 5 is the `global.Request` / `global.Response` identity, and case 6 is the no-Host
   authority case.
 - Case counts: story 1 adds 1 (in `src/domain/host-authority.test.ts`), story 2 adds 7, story 3
-  removes 6, story 4 moves nothing. Net +2. `src/http/server/start.test.ts` goes from 4 cases to 11.
+  removes 6, story 4 removes 1 obsolete `app.proxy` case. Net +1. `src/http/server/start.test.ts`
+  goes from 4 cases to 11.
 - The 1 MiB request body limit is **not** in this epic. EPIC 032 Decision 13 places it in
   `src/http/server/body.ts`.

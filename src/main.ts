@@ -644,7 +644,7 @@ async function serve(options: ServeOptions): Promise<void> {
           { storage, secret, configuredToken: settings.http.token },
           { presented },
         );
-      const { app, cancelWaits } = createApp({
+      const { hono, cancelWaits } = createApp({
         settings: {
           token: settings.http.token,
           allowedHosts: settings.http.allowedHosts,
@@ -664,7 +664,7 @@ async function serve(options: ServeOptions): Promise<void> {
           process.stderr.write(`kanthord: internal-error: ${String(error)}\n`),
         waits,
       });
-      const listening = await listen(app, {
+      const listening = await listen(hono, {
         bind: settings.http.bind,
         port: settings.http.port,
       });

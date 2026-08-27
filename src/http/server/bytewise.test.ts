@@ -73,13 +73,11 @@ describe("src/http/server/bytewise.test", () => {
     assert.deepEqual(offenders, []);
   });
 
-  it("imports node:buffer in no production file under src/http/server except koa-body", () => {
+  it("imports node:buffer in no production file under src/http/server", () => {
     const root = new URL("../../../", import.meta.url).pathname;
-    const offenders = productionTypeScriptFiles(root)
-      .filter((path) => path !== "src/http/server/koa-body.ts")
-      .filter((path) =>
-        readFileSync(join(root, path), "utf8").includes("node:buffer"),
-      );
+    const offenders = productionTypeScriptFiles(root).filter((path) =>
+      readFileSync(join(root, path), "utf8").includes("node:buffer"),
+    );
     assert.deepEqual(offenders, []);
   });
 });

@@ -1,5 +1,7 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
+import { connect } from "node:net";
+import { Hono } from "hono";
 
 import { createApp } from "./app.ts";
 import type { Handler } from "./app.ts";
@@ -22,6 +24,41 @@ import { call } from "../../cli/client.ts";
 import type { ClientDependencies } from "../../cli/client.ts";
 import { exitCodeForError } from "../../cli/exit-code.ts";
 
+const nativeRequest = globalThis.Request;
+const nativeResponse = globalThis.Response;
+
+function rawSocketRequest(
+  port: number,
+  requestLine: string,
+): Promise<{ status: number; headers: Record<string, string>; body: string }> {
+  return new Promise((resolve, reject) => {
+    const socket = connect({ host: "127.0.0.1", port }, () => {
+      socket.write(requestLine);
+    });
+    const chunks: Buffer[] = [];
+    socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+    socket.on("error", reject);
+    socket.on("close", () => {
+      const raw = Buffer.concat(chunks);
+      const separator = raw.indexOf("\r\n\r\n");
+      const head = raw.subarray(0, separator).toString("utf8");
+      const body = raw.subarray(separator + 4).toString("latin1");
+      const lines = head.split("\r\n");
+      const status = Number(lines[0]?.split(" ")[1]);
+      const headers: Record<string, string> = {};
+      for (const line of lines.slice(1)) {
+        const colonAt = line.indexOf(":");
+        if (colonAt >= 0) {
+          headers[line.slice(0, colonAt).trim().toLowerCase()] = line
+            .slice(colonAt + 1)
+            .trim();
+        }
+      }
+      resolve({ status, headers, body });
+    });
+  });
+}
+
 function buildApp() {
   const created = createApp({
     settings: {
@@ -35,8 +72,8 @@ function buildApp() {
     onInternalError: () => {},
     waits: noopWaits(),
   });
-  const { app } = created;
-  return app;
+  const { hono } = created;
+  return hono;
 }
 
 describe("src/http/server/start.test", () => {
@@ -116,8 +153,8 @@ describe("src/http/server/start.test", () => {
       onInternalError: () => {},
       waits: noopWaits(),
     });
-    const { app } = created;
-    const server = await listen(app, { bind: "127.0.0.1", port });
+    const { hono } = created;
+    const server = await listen(hono, { bind: "127.0.0.1", port });
     after(async () => {
       await server.close();
       temporary.dispose();
@@ -199,5 +236,173 @@ describe("src/http/server/start.test", () => {
         { name: "storage", status: "failed" },
       ]);
     }
+  });
+
+  it("a %2F path and a %zz path each reach the route intact", async () => {
+    const seen: string[] = [];
+    const app = new Hono();
+    app.all("*", (c) => {
+      seen.push(c.req.path);
+      return c.text("reached");
+    });
+    const server = await listen(app, { bind: "127.0.0.1", port: 0 });
+    after(async () => {
+      await server.close();
+    });
+
+    await rawSocketRequest(
+      server.port,
+      "GET /v1/a%2Fb HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+    );
+    await rawSocketRequest(
+      server.port,
+      "GET /v1/a%zzb HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+    );
+
+    assert.deepEqual(seen, ["/v1/a%2Fb", "/v1/a%zzb"]);
+  });
+
+  it("a Uint8Array answer carries the exact content-length and the exact bytes", async () => {
+    const bytes = Uint8Array.from([
+      0x00, 0x01, 0x7f, 0x80, 0xfe, 0xff, 0x20, 0x2a, 0x0a, 0x0d,
+    ]);
+    const app = new Hono();
+    app.all("*", () => new Response(bytes));
+    const server = await listen(app, { bind: "127.0.0.1", port: 0 });
+    after(async () => {
+      await server.close();
+    });
+
+    const reply = await rawSocketRequest(
+      server.port,
+      "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+    );
+
+    assert.equal(reply.status, 200);
+    assert.equal(reply.headers["content-length"], "10");
+    assert.deepEqual(Buffer.from(reply.body, "latin1"), Buffer.from(bytes));
+  });
+
+  it("a 204 answer carries neither content-length nor content-type", async () => {
+    const app = new Hono();
+    app.all("*", () => new Response(null, { status: 204 }));
+    const server = await listen(app, { bind: "127.0.0.1", port: 0 });
+    after(async () => {
+      await server.close();
+    });
+
+    const reply = await rawSocketRequest(
+      server.port,
+      "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+    );
+
+    assert.equal(reply.status, 204);
+    assert.equal(reply.headers["content-length"], undefined);
+    assert.equal(reply.headers["content-type"], undefined);
+  });
+
+  it("a POST body reaches the route with its whitespace intact", async () => {
+    const body = '{ "a" :  1 }\n';
+    let received: string | undefined;
+    const app = new Hono();
+    app.all("*", async (c) => {
+      received = await c.req.text();
+      return c.text(received);
+    });
+    const server = await listen(app, { bind: "127.0.0.1", port: 0 });
+    after(async () => {
+      await server.close();
+    });
+
+    const reply = await rawSocketRequest(
+      server.port,
+      `POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
+    );
+
+    assert.equal(reply.status, 200);
+    assert.equal(received, body);
+    assert.equal(reply.body, body);
+  });
+
+  it("listen leaves the global Request and Response untouched", async () => {
+    const server = await listen(new Hono(), {
+      bind: "127.0.0.1",
+      port: 0,
+    });
+    after(async () => {
+      await server.close();
+    });
+
+    assert.equal(globalThis.Request, nativeRequest);
+    assert.equal(globalThis.Response, nativeResponse);
+  });
+
+  it("a request with no Host header answers 403 host-forbidden", async () => {
+    const server = await listen(buildApp(), {
+      bind: "127.0.0.1",
+      port: 0,
+    });
+    after(async () => {
+      await server.close();
+    });
+
+    const reply = await rawSocketRequest(
+      server.port,
+      "GET /v1/health HTTP/1.0\r\n\r\n",
+    );
+    const error = JSON.parse(reply.body) as {
+      error: { code: string; message: string };
+    };
+
+    assert.equal(reply.status, 403);
+    assert.equal(error.error.code, "host-forbidden");
+    assert.equal(error.error.message, "the request carried no Host header");
+  });
+
+  it("an in-flight request drains before close resolves", async () => {
+    function deferred<T>() {
+      let resolve!: (value: T | PromiseLike<T>) => void;
+      const promise = new Promise<T>((resolvePromise) => {
+        resolve = resolvePromise;
+      });
+      return { promise, resolve };
+    }
+
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    const order: string[] = [];
+    const app = new Hono();
+    app.all("*", async (c) => {
+      order.push("handler-entered");
+      entered.resolve();
+      await release.promise;
+      order.push("handler-released");
+      return c.text("complete-body");
+    });
+    const server = await listen(app, { bind: "127.0.0.1", port: 0 });
+    after(async () => {
+      release.resolve();
+      await server.close();
+    });
+
+    const responsePromise = fetch(`http://127.0.0.1:${server.port}/`, {
+      headers: { connection: "close" },
+    });
+    await entered.promise;
+    order.push("shutdown-started");
+    const closePromise = server.close().then(() => {
+      order.push("close-resolved");
+    });
+    release.resolve();
+
+    const response = await responsePromise;
+    const responseBody = await response.text();
+    await closePromise;
+
+    assert.equal(response.status, 200);
+    assert.equal(responseBody, "complete-body");
+    assert.ok(
+      order.indexOf("close-resolved") > order.indexOf("handler-released"),
+    );
   });
 });

@@ -266,7 +266,8 @@ detailed files sit under `.agents/plan/stories/034-the-node-adapter/`.
    not call `listen` from `src/http/server/start.ts`, per the Decisions.
 
    Then drop the bridge from **every** remaining `koaFromHono` caller, because story 4 deletes the
-   function and an unedited caller breaks `npm run typecheck`. Five files, roughly eight call sites:
+   function and an unedited caller breaks `npm run typecheck`. Six socket-caller files, roughly nine
+   call sites:
 
    1. `test/helpers/agent.test.ts` — `new Koa()` becomes `new Hono()`. The
       `drives the app over that server` case sets `context.status` and `context.body`, which no
@@ -282,6 +283,10 @@ detailed files sit under `.agents/plan/stories/034-the-node-adapter/`.
       three cases wraps a fresh hono application before it reaches `loopbackServer` and
       `loopbackAgent`. Delete the import and all three wraps. The cache key becomes the hono
       application itself, so both helpers must receive the same reference in case 1.
+
+   6. `src/http/server/app.test.ts` — change the HTTP/1.0 no-Host case from
+      `loopbackServer(created.app)` to `loopbackServer(created.hono)`. Change no case name or
+      assertion. This direct socket caller must move before Story 4 removes `App.app`.
 
    `src/http/server/blob/show-blob.test.ts` reaches the socket only through `createSocketTestApp`, so
    it takes no edit at all.
@@ -301,9 +306,11 @@ detailed files sit under `.agents/plan/stories/034-the-node-adapter/`.
    `src/http/server/app.ts`, drop the `app: Koa` field from `App`, so `App` carries
    `hono: Hono<AppEnv>` and `cancelWaits` only, and delete the `Koa` type import and the
    `koaFromHono` import. `src/main.ts` already reads the `hono` half from story 1 and takes no
-   further edit. This story edits production modules only, and it writes and deletes no test.
+   further edit. This story also edits `src/http/server/app.test.ts` and
+   `src/http/server/bytewise.test.ts` as specified below.
 
-   **Adds 0 cases and removes 0.** After this story no file under `src/`, `test/` or `scripts/` names
+   **Adds 0 cases and removes 1.** Story 4 deletes the obsolete `app.proxy` case from
+   `src/http/server/app.test.ts`. After this story no file under `src/`, `test/` or `scripts/` names
    koa, which is the precondition of EPIC 035 story 4.
 
 ## Verification gate
@@ -385,11 +392,11 @@ src/main.report.test.ts src/main.repository-branch.test.ts` reports no changed f
   changes how the server is built and what type the two functions take. It changes no assertion, and
   it adds no case. `test/helpers/socket-budget.test.ts` still reports the same 5 files, because the
   two exported helper names do not change.
-- **The pass count falls by exactly 6 in story 3, and by nothing else.** Record
+- **The pass count falls by exactly 6 in story 3 and by exactly 1 in story 4.** Record
   `node --test --test-reporter=tap 2>&1 | grep -m1 '^# pass'` before and after each story. Story 1
   raises it by 1. Story 2 raises it by 7. Story 3 lowers it by 6, which is the 6 cases EPIC 032 story
   15 enumerates for `src/http/server/koa-bridge.test.ts`, and story 2 restated all six first. Story 4
-  moves it by 0. Story 3 is the only fall in this epic, and the net across the epic is +2.
+  lowers it by 1 when it deletes the obsolete `app.proxy` case. The net across the epic is +1.
   `src/http/server/start.test.ts` goes from 4 cases to 11.
 - **No file names koa after story 4.** `grep -rni koa src test scripts` returns nothing at all. The
   search is case-insensitive, so a leftover `Koa` type import is caught. Every

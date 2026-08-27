@@ -28,17 +28,38 @@ export type App = Readonly<{
 - Delete the `Build app with koaFromHono` line of `createApp` and the `app` property of its returned
   object. `createApp` returns `{ hono, cancelWaits }`.
 
+### `src/http/server/app.test.ts`
+
+- Delete the `app.proxy stays false on the app createApp returns` case.
+- Rename `createApp returns both applications and a cancel handle, and the handle reaches the registry`
+  to `createApp returns the hono application and a cancel handle, and the handle reaches the registry`.
+  Change its exact key expectation from `["app", "cancelWaits", "hono"]` to
+  `["cancelWaits", "hono"]`.
+- Rename `production sources keep header writes in the accumulator and koa values only in the bridge`
+  to `production sources keep header writes in the accumulator`. Delete the `koaValueImports` scan and
+  its assertion. Keep the three header-write assertions unchanged.
+
+### `src/http/server/bytewise.test.ts`
+
+- Rename `imports node:buffer in no production file under src/http/server except koa-body` to
+  `imports node:buffer in no production file under src/http/server`.
+- Delete the filter that excludes `src/http/server/koa-body.ts`. Keep the remaining production-file
+  scan and assertion unchanged.
+
 ### Nothing else
 
 - `src/main.ts` already reads the `hono` half from Story 1 and takes no further edit.
 - `src/http/server/shutdown.ts` takes no edit.
-- No test file takes an edit. Story 3 left every caller on the hono half.
+- No test file other than `src/http/server/app.test.ts` and `src/http/server/bytewise.test.ts` takes an
+  edit. Story 3 left every caller on the hono half.
 
 ## Constraints
 
-- Add 0 cases and remove 0 cases. Story 3 removed the 6 cases of
+- Add 0 cases and remove 1 case. Story 3 removed the 6 cases of
   `src/http/server/koa-bridge.test.ts`, and story 2 restated all six against the node adapter.
-- This story writes no test and deletes no test. It edits production modules only.
+- This story edits `src/http/server/app.test.ts` and `src/http/server/bytewise.test.ts` as specified
+  above, and edits the production modules only in `src/http/server/koa-bridge.ts` and
+  `src/http/server/app.ts`.
 - Do not move `systemSchedule` out of `src/http/server/app.ts:60-64`. `app.ts:62` calls `.unref()`
   and `app.ts:103` uses `systemSchedule` as the default of the optional `schedule` dependency. EPIC
   035 owns that move.
@@ -49,8 +70,8 @@ export type App = Readonly<{
 
 ## Verify
 
-- `node --test --test-reporter=tap 2>&1 | grep -m1 '^# pass'` reports the same number as after
-  Story 3. This story changes no case count.
+- `node --test --test-reporter=tap 2>&1 | grep -m1 '^# pass'` reports one fewer case than after
+  Story 3 because the obsolete `app.proxy` case is deleted.
 - `grep -rni koa src test scripts` returns nothing at all. The search is case-insensitive, so a
   leftover `Koa` type import is caught. Every match on the tree today is an import
   that EPIC 032, EPIC 033 or this epic replaces, and no file names koa in a string or a comment.

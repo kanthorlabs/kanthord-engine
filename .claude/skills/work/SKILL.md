@@ -239,10 +239,10 @@ Lane boundaries are stated in the personas but nothing enforces them. Compute th
 
 ```bash
 scripts/turn-snapshot.sh '<root>' > '/tmp/work-<epic-slug>-after-<turn>'
-TURN_FILES=$(comm -3 '/tmp/work-<epic-slug>-before-<turn>' '/tmp/work-<epic-slug>-after-<turn>' | sed 's/^\t//' | cut -f2- | LC_ALL=C sort -u)
+TURN_FILES=$(LC_ALL=C comm -3 '/tmp/work-<epic-slug>-before-<turn>' '/tmp/work-<epic-slug>-after-<turn>' | sed 's/^\t//' | cut -f2- | LC_ALL=C sort -u)
 ```
 
-`comm -3` is required, not `comm -13`: a fingerprint line changes when the turn edits a file, deletes it, or reverts it to `HEAD`, and only the two-sided difference reports all three. `sed 's/^\t//'` strips the tab `comm` prefixes to its second column, and `cut -f2-` drops the hash to leave the path.
+`LC_ALL=C comm -3` is required, not `comm -13`: a fingerprint line changes when the turn edits a file, deletes it, or reverts it to `HEAD`, and only the two-sided difference reports all three. The locale must match the snapshot sort locale, or unchanged lines can appear as differences. `sed 's/^\t//'` strips the tab `comm` prefixes to its second column, and `cut -f2-` drops the hash to leave the path.
 
 Tests are **co-located** with source (`bar.ts` + `bar.test.ts` in one dir), so a
 prefix table cannot separate the lanes — this project uses a **predicate
@@ -454,7 +454,7 @@ Extract the base ref and compute the changed files:
 
 ```bash
 BASE_REF=$(grep '^base-ref:' '<discussion-file>' | head -1 | sed 's/^base-ref:[[:space:]]*//')
-CHANGED_FILES=$(git -C '<root>' diff --name-only "$BASE_REF"..HEAD)
+CHANGED_FILES=$( { git -C '<root>' diff --name-only "$BASE_REF"; git -C '<root>' ls-files --others --exclude-standard; } | LC_ALL=C sort -u)
 ```
 
 Dispatch one `reviewer-engineer` agent (substituting `<root>`, `<EPIC_FILE>`, `<DISCUSSION_FILE>`, `<BASE_REF>`, and `<CHANGED_FILES>`):

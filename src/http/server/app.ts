@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import type Koa from "koa";
 
 import type { ActorRow } from "../../domain/actor.ts";
 import type { Operation } from "../contract/operation.ts";
@@ -15,7 +14,6 @@ import { hostMiddleware } from "./host.ts";
 import { createIdempotency } from "./idempotency.ts";
 import { defaultIdempotencySettings } from "./idempotency-store.ts";
 import type { IdempotencySettings, Schedule } from "./idempotency-store.ts";
-import { koaFromHono } from "./koa-bridge.ts";
 import { originMiddleware } from "./origin.ts";
 import { preflightMiddleware } from "./preflight.ts";
 import { renderMiddleware } from "./render.ts";
@@ -91,7 +89,6 @@ export const systemSchedule: Schedule = (milliseconds, callback) => {
 export class BindingError extends Error {}
 
 export type App = Readonly<{
-  app: Koa;
   hono: Hono<AppEnv>;
   cancelWaits: () => void;
 }>;
@@ -145,7 +142,6 @@ export function createApp(dependencies: AppDependencies): App {
   hono.all("*", dispatchMiddleware({ handlers: dependencies.handlers }));
 
   return {
-    app: koaFromHono(hono),
     hono,
     cancelWaits: () => {
       dependencies.waits.cancelAll();

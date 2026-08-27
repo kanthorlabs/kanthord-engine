@@ -2,15 +2,13 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import { Hono } from "hono";
-import Koa from "koa";
 
-import { koaFromHono } from "../../src/http/server/koa-bridge.ts";
 import type { AppEnv } from "../../src/http/server/variables.ts";
 import { fetchAgent, loopbackAgent, loopbackServer } from "./agent.ts";
 
 describe("test/helpers/agent.test", () => {
   it("binds the loopback address and never the wildcard", async () => {
-    const address = (await loopbackServer(new Koa())).address();
+    const address = (await loopbackServer(new Hono())).address();
 
     assert.equal(typeof address, "object");
     assert.notEqual(address, null);
@@ -18,24 +16,21 @@ describe("test/helpers/agent.test", () => {
   });
 
   it("reuses one server per app", async () => {
-    const app = new Koa();
+    const app = new Hono();
 
     assert.equal(await loopbackServer(app), await loopbackServer(app));
   });
 
   it("gives each app its own server", async () => {
     assert.notEqual(
-      await loopbackServer(new Koa()),
-      await loopbackServer(new Koa()),
+      await loopbackServer(new Hono()),
+      await loopbackServer(new Hono()),
     );
   });
 
   it("drives the app over that server", async () => {
-    const app = new Koa();
-    app.use((context) => {
-      context.status = 200;
-      context.body = { reached: true };
-    });
+    const app = new Hono();
+    app.all("*", (c) => c.json({ reached: true }));
 
     const response = await (await loopbackAgent(app)).get("/");
 
@@ -44,7 +39,7 @@ describe("test/helpers/agent.test", () => {
   });
 
   it("reports an assigned ephemeral port", async () => {
-    const address = (await loopbackServer(new Koa())).address();
+    const address = (await loopbackServer(new Hono())).address();
 
     assert.equal(typeof address, "object");
     assert.notEqual(address, null);
@@ -294,9 +289,7 @@ describe("test/helpers/agent.test", () => {
       response.headers.append("Set-Cookie", "b=2");
       return response;
     });
-    const bridge = koaFromHono(app);
-
-    const response = await (await loopbackAgent(bridge)).get("/cookies");
+    const response = await (await loopbackAgent(app)).get("/cookies");
 
     assert.deepEqual(response.headers["set-cookie"], ["a=1", "b=2"]);
   });

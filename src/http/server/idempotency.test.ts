@@ -21,7 +21,6 @@ import type { IdempotencySettings } from "./idempotency-store.ts";
 import { defaultIdempotencySettings } from "./idempotency-store.ts";
 import type { Schedule } from "./idempotency-store.ts";
 import { recordKey } from "./idempotency-key.ts";
-import { koaFromHono } from "./koa-bridge.ts";
 import { loopbackAgent, loopbackServer } from "../../../test/helpers/agent.ts";
 import {
   BOOTSTRAP_ACTOR_FIXTURE,
@@ -173,7 +172,7 @@ async function buildApp(input: {
     c.set("result", { kind: "json", status: 200, body: { ok: true } });
   });
 
-  const app = koaFromHono(hono);
+  const app = hono;
   const agent = await loopbackAgent(app);
   return { agent, app, store, calls: () => count, fireTimers };
 }

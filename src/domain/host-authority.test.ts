@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   wildcardBinds,
   isWildcardBind,
+  bindAuthority,
   deriveAllowedHosts,
 } from "./host-authority.ts";
 
@@ -24,6 +25,19 @@ describe("src/domain/host-authority.test", () => {
     it("returns false for loopback binds, a concrete address and the empty string", () => {
       for (const bind of ["127.0.0.1", "localhost", "::1", "10.1.2.3", ""]) {
         assert.equal(isWildcardBind(bind), false);
+      }
+    });
+  });
+
+  describe("bindAuthority", () => {
+    it("brackets an IPv6 bind and leaves every other bind alone", () => {
+      for (const [bind, expected] of [
+        ["0.0.0.0", "0.0.0.0"],
+        ["127.0.0.1", "127.0.0.1"],
+        ["::", "[::]"],
+        ["::1", "[::1]"],
+      ] as const) {
+        assert.equal(bindAuthority(bind), expected);
       }
     });
   });
