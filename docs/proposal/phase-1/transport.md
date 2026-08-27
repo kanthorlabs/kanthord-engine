@@ -9,6 +9,8 @@ The CLI calls the HTTP API, so parity between the two surfaces is structural rat
 This file decides the policy. The routes that policy carries are `../api/`, one file per domain, with the conventions and the lifecycle rules in `../api/README.md`. `kanthord db migrate` is the one command that does not call HTTP, and `../api/system.md` states why.
 The version compatibility policy — what `/v1` guarantees, what a client must tolerate, and the `GET /v1/health` handshake that carries the capability list — is `../api/README.md`, section `## Versioning`.
 
+Which operation runs on which runtime is `runtime-capability-matrix.md`, not this file. It holds one row per routed operation, with a verdict for the Node daemon, for AWS Lambda and for Cloudflare Workers, and it is the source of truth for that question.
+
 ## The transport core and its runtime roots
 
 The transport splits in two. `src/http/server/**`, except `src/http/server/runtime/**`, is the Fetch-native core. No file in the core imports a `node:` builtin. The core uses Web APIs only: `Request`, `Response`, `Headers`, `TextEncoder`, `Uint8Array` and `crypto.subtle`.

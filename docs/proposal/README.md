@@ -126,6 +126,7 @@ Read a phase directory in the order its README lists.
 | [phase-1/domain.md](phase-1/domain.md)                                       | entities, service layering, storage tables, dependencies      | architect or tech lead                  |
 | [database/README.md](database/README.md)                                     | every table at column level, one file per table               | architect and whoever owns the database |
 | [phase-1/transport.md](phase-1/transport.md)                                 | bind address, bearer token, browser defences, CLI parity      | architect and whoever owns the network  |
+| [phase-1/runtime-capability-matrix.md](phase-1/runtime-capability-matrix.md) | per-operation runtime verdicts, deployment shapes             | architect and whoever owns the network  |
 | [api/README.md](api/README.md)                                               | every route, one file per domain, and the API conventions     | architect and every domain owner        |
 | [phase-1/plan-format.md](phase-1/plan-format.md)                             | the markdown a human authors, import, export, re-import       | developer experience                    |
 | [phase-1/git-foundation.md](phase-1/git-foundation.md)                       | three repositories, ref roles, seeding, branch fields, clones | git or release engineer                 |
