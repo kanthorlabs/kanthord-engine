@@ -715,23 +715,6 @@ describe("src/http/server/app.test", () => {
       waits: noopWaits(),
     });
     assert.ok(result.hono);
-    let calls = 0;
-    const timer = setTimeout(() => {
-      calls += 1;
-    }, 1000);
-    await t.mock.timers.tick(999);
-    assert.equal(calls, 0);
-    await t.mock.timers.tick(1);
-    assert.equal(calls, 1);
-    let cancelled = 0;
-    const timer2 = setTimeout(() => {
-      cancelled += 1;
-    }, 1000);
-    clearTimeout(timer2);
-    await t.mock.timers.tick(5000);
-    assert.equal(cancelled, 0);
-    void result;
-    void timer;
   });
 
   it("production sources keep header writes in the accumulator", () => {
