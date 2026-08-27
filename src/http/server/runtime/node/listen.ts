@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { getRequestListener } from "@hono/node-server";
 import type { Env, Hono } from "hono";
 
-import { bindAuthority } from "../../domain/host-authority.ts";
+import { bindAuthority } from "../../../../domain/host-authority.ts";
 
 export type ListenInput = Readonly<{ bind: string; port: number }>;
 

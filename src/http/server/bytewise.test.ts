@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Buffer } from "node:buffer";
 
-import { compareBytewise } from "./bytewise.ts";
+import { byteLength, compareBytewise } from "./bytewise.ts";
 
 const FIXTURES = ["a", "aa", "\u00e9", "\uE000", "\u{1F600}"] as const;
 
@@ -37,6 +37,23 @@ function productionTypeScriptFiles(root: string): readonly string[] {
 }
 
 describe("src/http/server/bytewise.test", () => {
+  it("returns zero for an empty string", () => {
+    assert.equal(byteLength(""), 0);
+  });
+
+  it("returns one byte for each ASCII character", () => {
+    assert.equal(byteLength("abc"), 3);
+  });
+
+  it("returns UTF-8 byte lengths for accented and euro characters", () => {
+    assert.equal(byteLength("é"), 2);
+    assert.equal(byteLength("€"), 3);
+  });
+
+  it("returns four bytes for a supplementary character", () => {
+    assert.equal(byteLength("\u{1D11E}"), 4);
+  });
+
   it("sorts the fixture set into the exact bytewise order", () => {
     assert.deepEqual([...FIXTURES].reverse().sort(compareBytewise), [
       ...BYTEWISE_ORDER,

@@ -4,6 +4,7 @@ import type { Server } from "node:http";
 import { connect } from "node:net";
 import type { AddressInfo } from "node:net";
 import { readdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import {
   BindingError,
@@ -618,6 +619,163 @@ describe("src/http/server/app.test", () => {
     assert.deepEqual(Object.keys(result).sort(), ["cancelWaits", "hono"]);
     result.cancelWaits();
     assert.equal(cancelled, true);
+  });
+
+  it("createApp without a schedule builds an app whose core names no runtime or unref", () => {
+    const result = createApp({
+      settings: {
+        token: "test-token",
+        allowedHosts: ["kanthord.test"],
+        allowedOrigins: [],
+      },
+      handlers: {},
+      unimplemented: unimplementedFor({}),
+      resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
+      onInternalError: () => {},
+      waits: noopWaits(),
+    });
+    const source = readFileSync(resolve(import.meta.dirname, "app.ts"), "utf8");
+
+    assert.ok(result.hono);
+    assert.equal(source.includes("runtime/"), false);
+    assert.equal(source.includes("unref"), false);
+  });
+
+  it("the default schedule runs and cancels through an app built without a schedule", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let firstEnteredResolve!: () => void;
+    const firstEntered = new Promise<void>((resolveEntered) => {
+      firstEnteredResolve = resolveEntered;
+    });
+    let secondEnteredResolve!: () => void;
+    const secondEntered = new Promise<void>((resolveEntered) => {
+      secondEnteredResolve = resolveEntered;
+    });
+    let firstReleaseResolve!: () => void;
+    const firstRelease = new Promise<void>((resolveRelease) => {
+      firstReleaseResolve = resolveRelease;
+    });
+    let secondReleaseResolve!: () => void;
+    const secondRelease = new Promise<void>((resolveRelease) => {
+      secondReleaseResolve = resolveRelease;
+    });
+    let calls = 0;
+    const handlers: Readonly<Record<string, Handler>> = {
+      "project.create": async () => {
+        calls += 1;
+        if (calls === 1) {
+          firstEnteredResolve();
+          await firstRelease;
+        } else {
+          secondEnteredResolve();
+          await secondRelease;
+        }
+        return { kind: "json", status: 200, body: { ok: true } };
+      },
+    };
+    let clockPhase: "first" | "timeout" = "first";
+    let clockCalls = 0;
+    let joinedReachedResolve!: () => void;
+    const joinedReached = new Promise<void>((resolveReached) => {
+      joinedReachedResolve = resolveReached;
+    });
+    let timeoutDuplicateReachedResolve!: () => void;
+    const timeoutDuplicateReached = new Promise<void>((resolveReached) => {
+      timeoutDuplicateReachedResolve = resolveReached;
+    });
+    const now = (): number => {
+      clockCalls += 1;
+      if (clockCalls === 2) {
+        if (clockPhase === "first") {
+          joinedReachedResolve();
+        } else {
+          timeoutDuplicateReachedResolve();
+        }
+      }
+      return 0;
+    };
+    const created = createApp({
+      settings: {
+        token: "test-token",
+        allowedHosts: ["kanthord.test"],
+        allowedOrigins: [],
+      },
+      handlers,
+      unimplemented: unimplementedFor(handlers),
+      resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
+      onInternalError: () => {},
+      idempotency: {
+        ttlSeconds: 300,
+        joinTimeoutSeconds: 1,
+        maxEntries: 256,
+        maxBytes: 8_388_608,
+      },
+      now,
+      waits: noopWaits(),
+    });
+    assert.ok(created.hono);
+    const request = (key: string): Promise<Response> =>
+      Promise.resolve(
+        created.hono.fetch(
+          new Request("http://kanthord.test/v1/project", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer test-token",
+              "Idempotency-Key": key,
+              Host: "kanthord.test",
+            },
+            body: JSON.stringify({ name: "atlas" }),
+          }),
+        ),
+      );
+
+    const first = request("01JQ8ZAN9P0ABCDEFGHJKMNPQR");
+    await firstEntered;
+    let joinedSettled = false;
+    const joined = request("01JQ8ZAN9P0ABCDEFGHJKMNPQR").then((response) => {
+      joinedSettled = true;
+      return response;
+    });
+    await joinedReached;
+    assert.equal(calls, 1);
+    assert.equal(joinedSettled, false);
+
+    firstReleaseResolve();
+    const completed = await first;
+    assert.equal(completed.status, 200);
+    const replay = await joined;
+    assert.equal(replay.status, 200);
+    t.mock.timers.tick(5000);
+    assert.equal(joinedSettled, true);
+
+    clockPhase = "timeout";
+    clockCalls = 0;
+    const timedOutFirst = request("01JQ8ZAN9P0ABCDEFGHJKMNPQS");
+    await secondEntered;
+    let timedOutSettled = false;
+    const timedOutSecond = request("01JQ8ZAN9P0ABCDEFGHJKMNPQS").then(
+      (response) => {
+        timedOutSettled = true;
+        return response;
+      },
+    );
+    await timeoutDuplicateReached;
+    assert.equal(calls, 2);
+    assert.equal(timedOutSettled, false);
+    t.mock.timers.tick(999);
+    assert.equal(timedOutSettled, false);
+    t.mock.timers.tick(1);
+    const timedOut = await timedOutSecond;
+    assert.equal(timedOut.status, 503);
+
+    secondReleaseResolve();
+    const timedOutCompleted = await timedOutFirst;
+    assert.equal(timedOutCompleted.status, 200);
+
+    const source = readFileSync(resolve(import.meta.dirname, "app.ts"), "utf8");
+    assert.equal(source.includes("setTimeout"), true);
+    assert.equal(source.includes("clearTimeout"), true);
   });
 
   it("binding system.health and system.db leaves forty-two unimplemented ids", () => {

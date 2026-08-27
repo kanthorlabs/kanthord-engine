@@ -13,3 +13,7 @@ export function compareBytewise(left: string, right: string): number {
   }
   return leftBytes.length - rightBytes.length;
 }
+
+export function byteLength(value: string): number {
+  return encoder.encode(value).byteLength;
+}

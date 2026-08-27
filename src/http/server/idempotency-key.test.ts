@@ -193,87 +193,118 @@ describe("src/http/server/idempotency-key.test", () => {
   });
 
   describe("fingerprint", () => {
-    it("returns 64 lowercase hex characters", () => {
+    it("returns 64 lowercase hex characters", async () => {
       const result = fingerprint({
         method: "POST",
         path: "/v1/project",
         query: "",
         rawBody: "{}",
       });
-      assert.match(result, /^[0-9a-f]{64}$/);
+      assert.match(await result, /^[0-9a-f]{64}$/);
     });
 
-    it("is deterministic for identical input", () => {
+    it("is deterministic for identical input", async () => {
       const input = {
         method: "POST",
         path: "/v1/project",
         query: "",
         rawBody: "{}",
       };
-      assert.equal(fingerprint(input), fingerprint(input));
+      assert.equal(await fingerprint(input), await fingerprint(input));
     });
 
-    it("changes with a different raw body", () => {
+    it("changes with a different raw body", async () => {
       const base = { method: "POST", path: "/v1/project", query: "" };
       assert.notEqual(
-        fingerprint({ ...base, rawBody: '{"a":1}' }),
-        fingerprint({ ...base, rawBody: '{"a":2}' }),
+        await fingerprint({ ...base, rawBody: '{"a":1}' }),
+        await fingerprint({ ...base, rawBody: '{"a":2}' }),
       );
     });
 
-    it("treats whitespace as significant (raw-byte property)", () => {
+    it("treats whitespace as significant (raw-byte property)", async () => {
       const base = { method: "POST", path: "/v1/project", query: "" };
       assert.notEqual(
-        fingerprint({ ...base, rawBody: '{"a":1}' }),
-        fingerprint({ ...base, rawBody: '{ "a": 1 }' }),
+        await fingerprint({ ...base, rawBody: '{"a":1}' }),
+        await fingerprint({ ...base, rawBody: '{ "a": 1 }' }),
       );
     });
 
-    it("treats key order as significant", () => {
+    it("treats key order as significant", async () => {
       const base = { method: "POST", path: "/v1/project", query: "" };
       assert.notEqual(
-        fingerprint({ ...base, rawBody: '{"a":1,"b":2}' }),
-        fingerprint({ ...base, rawBody: '{"b":2,"a":1}' }),
+        await fingerprint({ ...base, rawBody: '{"a":1,"b":2}' }),
+        await fingerprint({ ...base, rawBody: '{"b":2,"a":1}' }),
       );
     });
 
-    it("changes with a different query string", () => {
+    it("changes with a different query string", async () => {
       const base = { method: "POST", path: "/v1/project", rawBody: "{}" };
       assert.notEqual(
-        fingerprint({ ...base, query: "" }),
-        fingerprint({ ...base, query: "force=1" }),
+        await fingerprint({ ...base, query: "" }),
+        await fingerprint({ ...base, query: "force=1" }),
       );
     });
 
-    it("changes with a different path", () => {
+    it("changes with a different path", async () => {
       const base = { method: "POST", query: "", rawBody: "{}" };
       assert.notEqual(
-        fingerprint({ ...base, path: "/v1/project" }),
-        fingerprint({ ...base, path: "/v1/project/p_1" }),
+        await fingerprint({ ...base, path: "/v1/project" }),
+        await fingerprint({ ...base, path: "/v1/project/p_1" }),
       );
     });
 
-    it("changes with a different method", () => {
+    it("changes with a different method", async () => {
       const base = { path: "/v1/project", query: "", rawBody: "{}" };
       assert.notEqual(
-        fingerprint({ ...base, method: "POST" }),
-        fingerprint({ ...base, method: "PUT" }),
+        await fingerprint({ ...base, method: "POST" }),
+        await fingerprint({ ...base, method: "PUT" }),
       );
     });
 
-    it("non-ASCII bytes survive the length prefix", () => {
+    it("non-ASCII bytes survive the length prefix", async () => {
       const base = { method: "POST", path: "/v1/project", query: "" };
-      const withAccent = fingerprint({ ...base, rawBody: '{"n":"é"}' });
-      const withoutAccent = fingerprint({ ...base, rawBody: '{"n":"e"}' });
+      const withAccent = await fingerprint({
+        ...base,
+        rawBody: '{"n":"é"}',
+      });
+      const withoutAccent = await fingerprint({
+        ...base,
+        rawBody: '{"n":"e"}',
+      });
       assert.notEqual(withAccent, withoutAccent);
       assert.match(withAccent, /^[0-9a-f]{64}$/);
       assert.match(withoutAccent, /^[0-9a-f]{64}$/);
     });
 
-    it("the length prefix prevents repartitioning across fields", () => {
+    it("the length prefix prevents repartitioning across fields", async () => {
       assert.notEqual(
-        fingerprint({ method: "AB", path: "C", query: "", rawBody: "" }),
-        fingerprint({ method: "A", path: "BC", query: "", rawBody: "" }),
+        await fingerprint({
+          method: "AB",
+          path: "C",
+          query: "",
+          rawBody: "",
+        }),
+        await fingerprint({
+          method: "A",
+          path: "BC",
+          query: "",
+          rawBody: "",
+        }),
+      );
+    });
+
+    it("returns the pinned fingerprint for a named request", async () => {
+      const input = {
+        method: "POST",
+        path: "/v1/project",
+        query: "",
+        rawBody: '{"name":"alpha"}',
+      };
+      const result: unknown = fingerprint(input);
+      assert.ok(result instanceof Promise);
+      assert.equal(
+        await result,
+        "66b93b3eabfa98df5795caabe974cdea65919a17be5586c784d59570c2e435e3",
       );
     });
   });
@@ -352,6 +383,22 @@ describe("src/http/server/idempotency-key.test", () => {
       });
       assert.equal(first, second);
       assert.equal(first, "x\uFFFDhash=2\u0001id=1\uFFFDactor_A\uFFFDk");
+    });
+
+    it("sorts non-ASCII parameter names by UTF-8 bytes", () => {
+      assert.equal(
+        recordKey({
+          operationId: "x",
+          parameters: {
+            "\u{1F600}": "emoji",
+            "\uE000": "private",
+            a: "letter",
+          },
+          actorId: "actor_A",
+          key: "k",
+        }),
+        "x\uFFFDa=letter\u0001\uE000=private\u0001\u{1F600}=emoji\uFFFDactor_A\uFFFDk",
+      );
     });
 
     it("two actors whose ids differ by one character render different keys", () => {

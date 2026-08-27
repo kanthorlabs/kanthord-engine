@@ -80,9 +80,8 @@ export type AppDependencies = Readonly<{
   waits: WaitRegistry;
 }>;
 
-export const systemSchedule: Schedule = (milliseconds, callback) => {
+const defaultSchedule: Schedule = (milliseconds, callback) => {
   const timer = setTimeout(callback, milliseconds);
-  timer.unref();
   return () => clearTimeout(timer);
 };
 
@@ -136,7 +135,7 @@ export function createApp(dependencies: AppDependencies): App {
     createIdempotency({
       settings: dependencies.idempotency ?? defaultIdempotencySettings,
       now: dependencies.now ?? (() => Date.now()),
-      schedule: dependencies.schedule ?? systemSchedule,
+      schedule: dependencies.schedule ?? defaultSchedule,
     }).middleware,
   );
   hono.all("*", dispatchMiddleware({ handlers: dependencies.handlers }));

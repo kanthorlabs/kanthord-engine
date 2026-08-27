@@ -1,5 +1,6 @@
 import type { OutcomeState } from "./idempotency-record.ts";
 import type { StoredAnswer } from "./idempotency-response.ts";
+import { byteLength } from "./bytewise.ts";
 
 export type IdempotencySettings = Readonly<{
   ttlSeconds: number;
@@ -51,15 +52,14 @@ type Record_ = {
 };
 
 function storedBodyBytes(body: StoredAnswer["body"]): number {
-  if (typeof body === "string") return Buffer.byteLength(body, "utf8");
+  if (typeof body === "string") return byteLength(body);
   if (body === null) return 0;
   return body.byteLength;
 }
 
 function answerBytes(answer: StoredAnswer): number {
   return (
-    storedBodyBytes(answer.body) +
-    Buffer.byteLength(JSON.stringify(answer.headers), "utf8")
+    storedBodyBytes(answer.body) + byteLength(JSON.stringify(answer.headers))
   );
 }
 
@@ -94,9 +94,7 @@ export class IdempotencyStore {
       return { kind: "replay", answer: record.answer as StoredAnswer };
     }
 
-    const incoming =
-      Buffer.byteLength(recordKey, "utf8") +
-      Buffer.byteLength(fingerprint, "utf8");
+    const incoming = byteLength(recordKey) + byteLength(fingerprint);
     if (!this.makeRoom(incoming)) {
       return { kind: "saturated" };
     }
@@ -108,9 +106,7 @@ export class IdempotencyStore {
       answer: null,
       waiters: [],
       settled: false,
-      bytes:
-        Buffer.byteLength(recordKey, "utf8") +
-        Buffer.byteLength(fingerprint, "utf8"),
+      bytes: byteLength(recordKey) + byteLength(fingerprint),
     };
     this.records.set(recordKey, created);
     this.totalBytes += created.bytes;

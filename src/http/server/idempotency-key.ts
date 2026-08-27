@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
+import { byteLength, compareBytewise } from "./bytewise.ts";
 
-import { compareBytewise } from "./bytewise.ts";
+const encoder = new TextEncoder();
 
 export const IDEMPOTENCY_HEADER = "idempotency-key";
 export const MAX_KEY_LENGTH = 255;
@@ -44,12 +44,15 @@ export type FingerprintInput = Readonly<{
   rawBody: string;
 }>;
 
-export function fingerprint(input: FingerprintInput): string {
+export async function fingerprint(input: FingerprintInput): Promise<string> {
   const parts = [input.method, input.path, input.query, input.rawBody];
   const joined = parts
-    .map((part) => `${Buffer.byteLength(part, "utf8")}:${part}`)
+    .map((part) => `${byteLength(part)}:${part}`)
     .join("\u0001");
-  return createHash("sha256").update(Buffer.from(joined, "utf8")).digest("hex");
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(joined));
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 export type RecordKeyInput = Readonly<{
