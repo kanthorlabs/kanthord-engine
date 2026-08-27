@@ -1,12 +1,27 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 
 import { compareBytewise } from "./bytewise.ts";
 
 function isExempt(relativeDirectoryPath: string): boolean {
   return relativeDirectoryPath === "runtime";
+}
+
+function resolvesToRuntime(
+  importerRelativePath: string,
+  specifier: string,
+): boolean {
+  if (specifier.startsWith(".")) {
+    const importerDir = posix.dirname(importerRelativePath);
+    const resolved = posix.normalize(posix.join(importerDir, specifier));
+    return (
+      resolved === "http/server/runtime" ||
+      resolved.startsWith("http/server/runtime/")
+    );
+  }
+  return specifier.includes("http/server/runtime/");
 }
 
 function stripComments(source: string): string {
@@ -139,7 +154,7 @@ function srcRuntimeOffenders(): string[] {
     const content = readFileSync(absolutePath, "utf8");
     const specifiers = extractSpecifiers(content);
     for (const specifier of specifiers) {
-      if (specifier.includes("runtime/")) {
+      if (resolvesToRuntime(relativePath, specifier)) {
         offenders.push(`${relativePath}: ${specifier}`);
       }
     }
