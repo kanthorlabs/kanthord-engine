@@ -3,26 +3,29 @@ import assert from "node:assert/strict";
 import { connect } from "node:net";
 import { Hono } from "hono";
 
-import { createApp } from "./app.ts";
-import type { Handler } from "./app.ts";
-import { noopWaits } from "../../../test/helpers/wait-registry.ts";
-import { listen } from "./start.ts";
-import { HttpError } from "../contract/errors.ts";
-import { systemDbResponse, systemHealthResponse } from "../contract/system.ts";
+import { createApp } from "../../app.ts";
+import type { Handler } from "../../app.ts";
+import { noopWaits } from "../../../../../test/helpers/wait-registry.ts";
+import { listen } from "./listen.ts";
+import { HttpError } from "../../../contract/errors.ts";
+import {
+  systemDbResponse,
+  systemHealthResponse,
+} from "../../../contract/system.ts";
 import {
   unimplementedFor,
   BOOTSTRAP_ACTOR_FIXTURE,
-} from "../../../test/helpers/app.ts";
-import { createMigratedStorage } from "../../../test/helpers/database.ts";
-import { reservePort } from "../../../test/helpers/port.ts";
-import { healthHandler } from "./system/health.ts";
-import { dbHandler } from "./system/db.ts";
-import { readHealth } from "../../queries/system/read-health.ts";
-import type { DependencyStatus } from "../../queries/system/read-health.ts";
-import { readMigrationStatus } from "../../queries/system/read-migration-status.ts";
-import { call } from "../../cli/client.ts";
-import type { ClientDependencies } from "../../cli/client.ts";
-import { exitCodeForError } from "../../cli/exit-code.ts";
+} from "../../../../../test/helpers/app.ts";
+import { createMigratedStorage } from "../../../../../test/helpers/database.ts";
+import { reservePort } from "../../../../../test/helpers/port.ts";
+import { healthHandler } from "../../system/health.ts";
+import { dbHandler } from "../../system/db.ts";
+import { readHealth } from "../../../../queries/system/read-health.ts";
+import type { DependencyStatus } from "../../../../queries/system/read-health.ts";
+import { readMigrationStatus } from "../../../../queries/system/read-migration-status.ts";
+import { call } from "../../../../cli/client.ts";
+import type { ClientDependencies } from "../../../../cli/client.ts";
+import { exitCodeForError } from "../../../../cli/exit-code.ts";
 
 const nativeRequest = globalThis.Request;
 const nativeResponse = globalThis.Response;
@@ -76,7 +79,7 @@ function buildApp() {
   return hono;
 }
 
-describe("src/http/server/start.test", () => {
+describe("src/http/server/runtime/node/listen.test", () => {
   it("listen on port 0 resolves a real port and the middleware runs over a real socket", async () => {
     const app = buildApp();
     const server = await listen(app, { bind: "127.0.0.1", port: 0 });

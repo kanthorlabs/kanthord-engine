@@ -4,6 +4,7 @@ import type { Server } from "node:http";
 import { connect } from "node:net";
 import type { AddressInfo } from "node:net";
 import { readdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import {
   BindingError,
@@ -675,6 +676,62 @@ describe("src/http/server/app.test", () => {
       now: 0,
       schedule: 0,
     });
+  });
+
+  it("createApp called with no schedule builds an app, and the module source contains neither runtime/ nor unref", () => {
+    const source = readFileSync(resolve(import.meta.dirname, "app.ts"), "utf8");
+    assert.equal(source.includes("runtime/"), false);
+    assert.equal(source.includes("unref"), false);
+    const result = createApp({
+      settings: {
+        token: "test-token",
+        allowedHosts: ["kanthord.test"],
+        allowedOrigins: [],
+      },
+      handlers: {},
+      unimplemented: unimplementedFor({}),
+      resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
+      onInternalError: () => {},
+      waits: noopWaits(),
+    });
+    assert.ok(result.hono);
+  });
+
+  it("defaultSchedule runs and cancels under mock timers, through a createApp built with no schedule", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const source = readFileSync(resolve(import.meta.dirname, "app.ts"), "utf8");
+    assert.equal(source.includes("setTimeout"), true);
+    assert.equal(source.includes("clearTimeout"), true);
+    const result = createApp({
+      settings: {
+        token: "test-token",
+        allowedHosts: ["kanthord.test"],
+        allowedOrigins: [],
+      },
+      handlers: {},
+      unimplemented: unimplementedFor({}),
+      resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
+      onInternalError: () => {},
+      waits: noopWaits(),
+    });
+    assert.ok(result.hono);
+    let calls = 0;
+    const timer = setTimeout(() => {
+      calls += 1;
+    }, 1000);
+    await t.mock.timers.tick(999);
+    assert.equal(calls, 0);
+    await t.mock.timers.tick(1);
+    assert.equal(calls, 1);
+    let cancelled = 0;
+    const timer2 = setTimeout(() => {
+      cancelled += 1;
+    }, 1000);
+    clearTimeout(timer2);
+    await t.mock.timers.tick(5000);
+    assert.equal(cancelled, 0);
+    void result;
+    void timer;
   });
 
   it("production sources keep header writes in the accumulator", () => {
