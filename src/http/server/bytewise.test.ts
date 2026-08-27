@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Buffer } from "node:buffer";
 
-import { compareBytewise } from "./bytewise.ts";
+import { byteLength, compareBytewise } from "./bytewise.ts";
 
 const FIXTURES = ["a", "aa", "\u00e9", "\uE000", "\u{1F600}"] as const;
 
@@ -79,5 +79,22 @@ describe("src/http/server/bytewise.test", () => {
       readFileSync(join(root, path), "utf8").includes("node:buffer"),
     );
     assert.deepEqual(offenders, []);
+  });
+
+  it('byteLength("") equals 0', () => {
+    assert.equal(byteLength(""), 0);
+  });
+
+  it('byteLength("abc") equals 3', () => {
+    assert.equal(byteLength("abc"), 3);
+  });
+
+  it('byteLength("é") equals 2 and byteLength("€") equals 3', () => {
+    assert.equal(byteLength("é"), 2);
+    assert.equal(byteLength("€"), 3);
+  });
+
+  it('byteLength("\\u{1D11E}") equals 4', () => {
+    assert.equal(byteLength("\u{1D11E}"), 4);
   });
 });

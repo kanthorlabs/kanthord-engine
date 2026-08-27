@@ -81,7 +81,7 @@ export function createIdempotency(
     }
 
     const url = new URL(c.req.url);
-    const print = fingerprint({
+    const print = await fingerprint({
       method: c.req.method,
       path: url.pathname,
       query: url.search.slice(1),
