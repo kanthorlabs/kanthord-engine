@@ -65,6 +65,17 @@ The shape the tree ships:
   service; this epic applies the same rule to the transport. `Schedule` is the example: the core
   declares the type, and the Node root supplies `systemSchedule`.
 
+- **The `Schedule` default is Web-native, and it stays in the core.** `createApp` keeps
+  `dependencies.schedule ?? defaultSchedule`, where `defaultSchedule` is a module-local,
+  non-exported const of `src/http/server/app.ts` over `setTimeout` and `clearTimeout`. Those two are
+  Web APIs, so the rule above holds: the core imports no Node-only implementation, and the Node root
+  supplies `systemSchedule`. `defaultSchedule` does not call `unref`, because `unref` is Node-only.
+  `src/main.ts` therefore passes `schedule: systemSchedule` to `createApp`, so the daemon keeps the
+  `unref` behaviour it has today. `AppDependencies.schedule` stays optional, so the eleven other
+  `createApp` call sites take no edit. Only a caller that passes no schedule reaches
+  `defaultSchedule`, and the one timer `Schedule` creates is the join timeout of
+  `src/http/server/idempotency-store.ts:219`, which every such caller cancels or never opens.
+
 - **A test enforces the invariant, not a reviewer.** `AGENTS.md` holds an enforcement table, and each
   rule in it names one mechanism. The mechanism here is `src/http/server/core-purity.test.ts`. It
   walks the core tree and fails on a `node:` import, and the failure names the offending file. S2
@@ -95,25 +106,41 @@ The shape the tree ships:
 
 Author with `/author`. The sequence below is the dependency order; each story is one commit.
 
+**Every line number in this epic is a locator against the tree of 2026-08-27.** EPIC 031, 032, 033
+and 034 rewrite `app.ts`, `start.ts`, `idempotency-key.ts`, `idempotency.ts` and `main.ts` first, so
+anchor each edit on the named symbol and read the line number as a hint.
+
 1. **The Node-only modules move to the Node root.** Move `src/http/server/start.ts` to
    `src/http/server/runtime/node/listen.ts`, and move its test to
    `src/http/server/runtime/node/listen.test.ts`. Move `systemSchedule` out of
    `src/http/server/app.ts:60-64` into `src/http/server/runtime/node/schedule.ts`. `app.ts` keeps the
-   `Schedule` type and exports no implementation. Update `src/main.ts:175-179`, `:256` and `:644` to
-   import from the new paths. After this story `node:http` appears in no core file.
-2. **The core drops `node:buffer` and `node:crypto`.** Add `byteLength(value: string): number` to
-   `src/http/server/bytewise.ts`, over the module-level `TextEncoder` that EPIC 031 added there. In
-   `src/http/server/idempotency-key.ts` replace `Buffer.byteLength` at `:55` with `byteLength`,
-   `Buffer.compare` at `:69` with `compareBytewise`, and `createHash` at `:57` with
-   `crypto.subtle.digest("SHA-256", …)`. `fingerprint` returns `Promise<string>`. Await it at
-   `src/http/server/idempotency.ts:85`. Delete the `node:buffer` and `node:crypto` imports from
-   `idempotency-key.ts`. EPIC 031 already removed `node:buffer` from `dispatch.ts`, `query.ts`,
-   `single.ts`, `invalid-request.ts` and `idempotency-response.ts`, so this story touches neither.
+   `Schedule` type and exports no implementation: its fallback becomes the module-local
+   `defaultSchedule` of the Decision above. Update `src/main.ts:175-179`, `:256` and `:644` to import
+   from the new paths, and add `schedule: systemSchedule` to the `createApp` call there. After this
+   story `node:http` appears in no core file.
+2. **The core drops `node:crypto` and the global `Buffer`.** Add `byteLength(value: string): number`
+   to `src/http/server/bytewise.ts`, over the module-level `TextEncoder` that EPIC 031 added there. In
+   `src/http/server/idempotency-key.ts` replace `Buffer.byteLength` at `:55` with `byteLength`, and
+   `createHash` at `:57` with `crypto.subtle.digest("SHA-256", …)`. `fingerprint` returns
+   `Promise<string>`. Await it at `src/http/server/idempotency.ts:85`. Delete the `node:crypto` import
+   from `idempotency-key.ts`; that file has no `node:buffer` import, because it reads the global
+   `Buffer`. Do not touch `Buffer.compare` at `idempotency-key.ts:69`: EPIC 031 story 1 already
+   replaced it with `compareBytewise` and added the `./bytewise.ts` import to the file. Then replace
+   `Buffer.byteLength` with `byteLength` at the six sites of `src/http/server/idempotency-store.ts`,
+   `:61`, `:62`, `:98`, `:99`, `:112` and `:113`, which closes S3 of EPIC 031. EPIC 031 already
+   removed `node:buffer` from `dispatch.ts`, `query.ts`, `single.ts`, `invalid-request.ts` and
+   `idempotency-response.ts`, so this story touches none of the five.
 3. **The core-purity test fails on a `node:` import.** Add `src/http/server/core-purity.test.ts`. It
    reads every `.ts` file under `src/http/server/`, skips `runtime/` and skips `*.test.ts`, and
-   asserts no file matches an import from a `node:` specifier. The assertion message names the file
-   and the specifier. The test reads the tree from disk, so a new core file is covered on the day it
-   lands.
+   asserts three empty offender lists: no import from a `node:` specifier, no import of a specifier
+   that contains `runtime/`, and no import of `@hono/node-server`. The second and the third carry the
+   bundler rule, because a core file that imports `./runtime/node/listen.ts` names no `node:`
+   specifier and a bundler still traverses it. A fourth assertion walks `src/` and proves
+   `src/main.ts` is the only production importer of the Node root, which is the gate row below. The
+   test matches import and export grammar, never the bare text `node:`, because
+   `src/http/server/node/create-node.ts:33` holds the object property `node:`. The assertion message
+   names the file and the specifier. The test reads the tree from disk, so a new core file is covered
+   on the day it lands.
 4. **The Koa-absence test fails on a `koa` import.** Add `src/koa-absence.test.ts`. It reads every
    file under `src/`, `test/` and `scripts/`, and asserts none contains the string `koa`. The
    assertion message names the file and the line number. The test excludes itself by path.
@@ -163,8 +190,10 @@ Hermetic coverage required beyond the Proof:
 
 - **`npm run verify` is clean**: `typecheck`, the full `node:test` suite, `eslint .`, and
   `verify-db-status`.
-- **`grep -rn "koa" src/ test/ scripts/` returns nothing**, asserted by `src/koa-absence.test.ts`
-  rather than by hand. The test names the offending file and line on failure.
+- **`grep -rn --exclude=koa-absence.test.ts "koa" src/ test/ scripts/` returns nothing**, asserted by
+  `src/koa-absence.test.ts` rather than by hand. The exclusion is required: that test names koa in its
+  own path, its suite name and its fixtures, and it excludes itself by path. The test names the
+  offending file and line on failure.
 - **No file in the Fetch-native core imports a `node:` builtin**, asserted by
   `src/http/server/core-purity.test.ts`. The failure names the offending file and the specifier. A
   file added under `src/http/server/runtime/` does not trigger it, and a file added anywhere else
@@ -179,7 +208,8 @@ Hermetic coverage required beyond the Proof:
   method, path, query and body, and the value equals the value the `node:crypto` implementation
   produced.
 - **The Node root is the only Node-only place.** `src/http/server/runtime/node/` holds the listener
-  and the schedule, and `src/main.ts` is the only importer of both.
+  and the schedule, and `src/main.ts` is the only production importer of both, asserted by
+  `src/http/server/core-purity.test.ts`.
 - **No test depends on a wall clock, a shared temporary directory, or an ambient git configuration.**
   A test that needs a home uses its own `mktemp` directory and removes it.
 
