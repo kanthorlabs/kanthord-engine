@@ -58,8 +58,8 @@ OpenAPI extension that names every event type and references its component.
 
   ```yaml
   x-kanthord-event-payloads:
-    node.state.changed:
-      $ref: "#/components/schemas/node.state.changed"
+    node.created:
+      $ref: "#/components/schemas/node.created"
   ```
 
   The key set equals `eventTypes`. The keys sort bytewise, as `components.schemas` does.
@@ -83,14 +83,18 @@ OpenAPI extension that names every event type and references its component.
   twice.
 
 - **The master's `paths` and `components.schemas` do not change, and its bytes do.** The extension is
-  a new root key, so the byte-identical gate is void. The precise gate replaces it: the parsed
-  document, with `x-kanthord-event-payloads` removed, deep-equals the pre-epic output. Pruning removes
-  nothing from the master, because the 37 unreached schemas are exactly the catalogue and the
-  extension reaches all 37.
+  a new root key, so the byte-identical gate is void. A stored pre-epic output does not replace it: a
+  captured document is a generated document, and `AGENTS.md` never commits one. The replacement is the
+  existing contract suite, which must pass unmodified, plus two new assertions: the root key list is
+  exactly the five pre-epic keys followed by `x-kanthord-event-payloads`, and the pruning filter is the
+  identity on the master. Pruning removes nothing from the master, because the 37 unreached schemas are
+  exactly the catalogue and the extension reaches all 37. The Verification gate states what the suite
+  pins.
 
-- **A slice drops `Error` when its paths do not reach it.** Eleven slices declare an error envelope on
-  every operation, so `#/components/schemas/Error` is unreferenced there. The closure rule removes it.
-  That is the rule working, not a regression.
+- **A slice drops `Error` when its paths do not reach it.** Eight slices declare an error envelope on
+  every operation, so `#/components/schemas/Error` is unreferenced there and the closure rule removes
+  it. The eight are `actor`, `blob`, `edge`, `event`, `plan`, `project`, `provider` and `system`. The
+  other eleven slices keep `Error`. That is the rule working, not a regression.
 
 - **The gate asserts reachability, not mention.** A test that greps a document for a schema name
   passes on a name that appears in prose. The Verification gate asserts that a document holds the
@@ -175,10 +179,19 @@ Hermetic coverage required beyond the Proof:
 
 - **`npm run verify` is clean**: `typecheck`, the full `node:test` suite, `eslint .`, and
   `verify-db-status`.
-- **The master changes by exactly one root key.** The test captures the pre-epic
-  `buildOpenApiDocument()` output as a fixture, deletes `x-kanthord-event-payloads` from the new
-  output, and asserts deep equality with that fixture. `paths` and `components.schemas` are therefore
-  unchanged, and the added key is the only difference.
+- **The master changes by exactly one root key, and no committed fixture proves it.** A stored
+  pre-epic `buildOpenApiDocument()` output is refused: it is a generated document, and `AGENTS.md`
+  never commits one. The existing contract suite is the baseline instead, and it must pass unmodified.
+  It pins `openapi` and `info`, the `security` root, `components.securitySchemes.bearerAuth`, the path
+  count and bytewise path order, the method order inside every path, every `operationId`, every
+  parameter, every response and success status, and the exact ordered list of all 142
+  `components.schemas` keys. `parity.test.ts` pins the path set itself against the committed table in
+  `docs/proposal/api/`, which is authored and not generated. On top of that baseline the epic asserts
+  two new things: the root key list is exactly the five pre-epic keys followed by
+  `x-kanthord-event-payloads`, and the pruning filter is the identity on the master, because
+  `reachableSchemaNames` over the master equals the full 142-key set. Together those two make the
+  added key the only difference. A test that asserts `components.securitySchemes` holds the single
+  key `bearerAuth` closes the last gap in the baseline.
 - **The catalogue key set equals `eventTypes`.** `Object.keys(document["x-kanthord-event-payloads"])`
   deep-equals the bytewise sort of `Object.keys(eventPayloads)`, asserted by value. The count is 37.
 - **Every catalogue entry resolves.** Each entry holds exactly one key `$ref`, and the referenced name
@@ -206,14 +219,15 @@ Hermetic coverage required beyond the Proof:
 
 ## Open items
 
-- S1 - status:OPEN - action:YES - AGENTS.md OpenAPI rule - `AGENTS.md:105` states that the master and
+- S1 - status:FIXED - action:YES - AGENTS.md OpenAPI rule - `AGENTS.md:105` states that the master and
   each `features/*.yaml` slice are self-contained with internal references only, and it states nothing
   about what a slice holds. - fix:Append three sentences to that bullet: "Every emitted document holds
   the transitive closure of its own references, and nothing else. The root extension
   `x-kanthord-event-payloads` maps each event type to its component, so the event payload catalogue is
   reachable by construction. The master and `features/event.yaml` carry that extension, because both
   hold the operation `event.list`." - why:`AGENTS.md` is locked by `scripts/lane-check.sh:43`, so no
-  story edits it, and a reviewer needs the rule in the structure contract.
+  story edits it, and a reviewer needs the rule in the structure contract. Ulrich applied the three
+  sentences directly; they are at `AGENTS.md:107`.
 - S2 - status:FIXED - action:YES - the event payload union has no consumer - Ulrich settled this after
   an adversarial debate. The decision is staged: this epic deletes `eventPayload`, keeps
   `eventView.payload` as `z.unknown()`, and replaces the by-name slice exception with the

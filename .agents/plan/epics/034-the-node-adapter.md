@@ -86,7 +86,7 @@ The shape the product ships:
 
 - **`src/http/server/start.test.ts` and the daemon tests are the oracle, not the level-2 harness.**
   Story 3 edits the harness, so the harness cannot be the oracle for a change to itself. The oracle
-  is the set of tests this epic does not edit: the five cases of
+  is the set of tests this epic does not edit: the six cases of
   `src/http/server/start.test.ts` after story 2, and the nine `src/main.*.test.ts` tests, which boot
   the real daemon over a real socket through `src/main.ts`. Each one passes unedited.
   `src/main.test.ts:264` answers every routed operation, and it is the strongest single row.

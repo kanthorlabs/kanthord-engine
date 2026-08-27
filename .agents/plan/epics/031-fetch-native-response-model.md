@@ -261,5 +261,6 @@ Hermetic coverage required beyond the Proof:
 - S3 - status:OPEN - action:NO - the global `Buffer` outlives this epic - `idempotency-key.ts` and
   `idempotency-store.ts` still measure a UTF-8 length through the global `Buffer`, which a Worker
   runtime does not have. - fix:replace `Buffer.byteLength(value, "utf8")` with a
-  `TextEncoder().encode(value).byteLength` helper in EPIC 034. - why:a size budget is not an ordering
-  rule, and EPIC 034 owns the runtime split; folding it here widens the epic for no gain.
+  `TextEncoder().encode(value).byteLength` helper in EPIC 035 story 2, which takes both files. -
+  why:a size budget is not an ordering rule, and EPIC 035 owns the runtime split; folding it here
+  widens the epic for no gain.
