@@ -19,9 +19,12 @@ import { publishContract } from "./publish-contract.ts";
 import { KANTHORD_VERSION } from "../src/domain/version.ts";
 import { buildErrorEnvelope } from "../src/http/contract/errors.ts";
 import {
+  eventPayloadCatalogueKey,
   openApiFeatures,
   renderOpenApiYaml,
 } from "../src/http/contract/openapi.ts";
+import { eventPayloads } from "../src/http/contract/event-payload.ts";
+import { reachableSchemaNames } from "../src/http/contract/schema-reachability.ts";
 import { registry } from "../src/http/contract/registry.ts";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -281,6 +284,110 @@ test("scripts/publish-contract", async (t) => {
     },
   );
 
+  await t.test(
+    "every emitted document holds the closure of its own refs",
+    () => {
+      const paths = [
+        "openapi.yaml",
+        ...featureNames.map((n) => join("features", `${n}.yaml`)),
+      ];
+      assert.equal(paths.length, 20);
+      for (const relative of paths) {
+        const document = YAML.parse(
+          readFileSync(join(directory, relative), "utf8"),
+        );
+        const schemas = document.components.schemas as Record<string, unknown>;
+        assert.deepEqual(
+          sortedBytewise([...reachableSchemaNames(document)]),
+          sortedBytewise(Object.keys(schemas)),
+          `${relative} is not its own closure`,
+        );
+      }
+    },
+  );
+
+  await t.test(
+    "only the master and the event slice carry the catalogue",
+    () => {
+      const master = YAML.parse(
+        readFileSync(join(directory, "openapi.yaml"), "utf8"),
+      );
+      assert.deepEqual(
+        Object.keys(master[eventPayloadCatalogueKey]),
+        sortedBytewise(Object.keys(eventPayloads)),
+      );
+
+      for (const name of featureNames) {
+        const document = YAML.parse(
+          readFileSync(join(directory, "features", `${name}.yaml`), "utf8"),
+        );
+        const carries = Object.hasOwn(document, eventPayloadCatalogueKey);
+        assert.equal(
+          carries,
+          name === "event",
+          `${name} carries the wrong catalogue state`,
+        );
+      }
+    },
+  );
+
+  await t.test("the node slice drops every event payload schema", () => {
+    const node = YAML.parse(
+      readFileSync(join(directory, "features", "node.yaml"), "utf8"),
+    );
+    const nodeSchemas = node.components.schemas as Record<string, unknown>;
+    for (const type of Object.keys(eventPayloads)) {
+      assert.equal(
+        Object.hasOwn(nodeSchemas, type),
+        false,
+        `node.yaml holds ${type}`,
+      );
+    }
+
+    const event = YAML.parse(
+      readFileSync(join(directory, "features", "event.yaml"), "utf8"),
+    );
+    const eventSchemas = event.components.schemas as Record<string, unknown>;
+    for (const type of Object.keys(eventPayloads)) {
+      assert.equal(
+        Object.hasOwn(eventSchemas, type),
+        true,
+        `event.yaml lost ${type}`,
+      );
+    }
+  });
+
+  await t.test(
+    "no emitted document holds a $ref outside its own components",
+    () => {
+      const paths = [
+        "openapi.yaml",
+        ...featureNames.map((n) => join("features", `${n}.yaml`)),
+      ];
+      for (const relative of paths) {
+        const text = readFileSync(join(directory, relative), "utf8");
+        const document = YAML.parse(text);
+        const refs: string[] = [];
+        const walk = (value: unknown): void => {
+          if (Array.isArray(value)) return value.forEach(walk);
+          if (value === null || typeof value !== "object") return;
+          for (const [key, nested] of Object.entries(value)) {
+            if (key === "$ref" && typeof nested === "string") refs.push(nested);
+            else walk(nested);
+          }
+        };
+        walk(document);
+        assert.ok(refs.length > 0, `${relative} carries no $ref`);
+        for (const ref of refs) {
+          assert.ok(
+            ref.startsWith("#/components/schemas/"),
+            `${relative} holds external or malformed $ref ${ref}`,
+          );
+        }
+      }
+    },
+  );
+
   await t.test("generation is byte-identical across two runs", () => {
     const first = mkdtempSync(join(tmpdir(), "kanthord-contract-a-"));
     const second = mkdtempSync(join(tmpdir(), "kanthord-contract-b-"));
@@ -301,7 +408,11 @@ test("scripts/publish-contract", async (t) => {
       for (const relative of firstFiles) {
         const a = readFileSync(join(first, relative));
         const b = readFileSync(join(second, relative));
-        assert.deepEqual(a, b);
+        assert.equal(
+          Buffer.compare(a, b),
+          0,
+          `${relative} differs between runs`,
+        );
       }
     } finally {
       rmSync(first, { recursive: true, force: true });

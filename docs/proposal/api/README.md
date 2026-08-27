@@ -16,7 +16,23 @@ One self-contained OpenAPI 3.0.3 document, with internal `#/components/…` refe
 
 The publication also writes one self-contained document under `features/<namespace>.yaml` for each operation namespace. Each feature document carries its own schemas and references, so a UI client can generate one feature without bundling other files. The master document remains the complete API contract.
 
+Every emitted document holds the transitive closure of its own references, and nothing else. The closure seeds from every root key except `components`, follows a `$ref` that starts with `#/components/schemas/`, follows a nested `$ref` inside a schema body, and follows every value of a `discriminator.mapping` object. A component that no root key reaches is not emitted. A slice therefore drops `#/components/schemas/Error` when every operation of that slice declares its own error envelope.
+
 The generated files are **not committed**, because the reviewable contract change is already the zod module and the table in this directory. A generated diff of expanded schemas is redundant evidence that hides the authored change, and a committed artifact needs a regenerate-and-compare gate that mutates the working tree to check itself.
+
+The root extension `x-kanthord-event-payloads` carries the event payload catalogue. It maps each event type to the component of that type, as one internal `$ref` per entry, and its keys sort bytewise as `components.schemas` does. The extension makes all 37 payload schemas reachable by construction, so the closure rule keeps them.
+
+```yaml
+x-kanthord-event-payloads:
+  node.created:
+    $ref: "#/components/schemas/node.created"
+```
+
+A document carries the extension when it holds the operation `event.list`, which is the only route that delivers an event payload. The master carries it and `features/event.yaml` carries it. No other slice carries it, and no other slice holds a payload schema.
+
+`event.list` returns an **unconstrained** payload. The response schema declares the payload as unknown, so the catalogue is advisory to a consumer: it names the shape a consumer can expect per event type, and no emitted document guarantees that shape. A consumer generates its event handlers from the 37 named schemas at its own risk until append-time validation lands.
+
+OpenAPI 3.0.3 is a decision, not an accident. Every contract test pins the `openapi-3.0` mapping of `z.toJSONSchema`. A move to 3.1 changes `nullable`, `exclusiveMinimum` and `examples`, so it costs a fresh parity pass. The version, the artifact topology and the self-contained rule are three independent decisions.
 
 `npm run verify` generates the master document into a temporary directory, validates it with an independent OpenAPI validator, asserts operation parity against the registry, asserts that every reference resolves, and deletes it. `npm run contract:publish -- <output-directory>` publishes the master document, feature documents and examples. Generation is canonical: fixed path, method and component order, LF endings, one trailing newline. A release publishes the generated documents as a named artifact beside the daemon and the CLI, and a client generator consumes them. Neither the validator nor a client generator ever starts the daemon.
 

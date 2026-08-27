@@ -1,6 +1,13 @@
-import { buildOpenApiDocument, renderOpenApiYaml } from "./openapi.ts";
+import {
+  buildOpenApiDocument,
+  eventPayloadCatalogueKey,
+  renderOpenApiYaml,
+} from "./openapi.ts";
+import { reachableSchemaNames } from "./schema-reachability.ts";
+import { eventPayloads } from "./event-payload.ts";
 import { registry } from "./registry.ts";
 import { renderOpenApiPath } from "./path.ts";
+import { eventTypes } from "../../domain/event-type.ts";
 import { KANTHORD_VERSION } from "../../domain/version.ts";
 import SwaggerParser from "@apidevtools/swagger-parser";
 import YAML from "yaml";
@@ -356,6 +363,98 @@ test("registers every schema component in bytewise order", () => {
     "system.status.error",
     "system.status.response",
   ]);
+});
+
+test("carries the event payload catalogue in bytewise key order", () => {
+  const document = buildOpenApiDocument();
+  const catalogue = document[eventPayloadCatalogueKey] as Readonly<
+    Record<string, unknown>
+  >;
+  assert.deepEqual(
+    Object.keys(catalogue),
+    sortedBytewise(Object.keys(eventPayloads)),
+  );
+  assert.deepEqual(Object.keys(catalogue), sortedBytewise([...eventTypes]));
+  assert.equal(Object.keys(catalogue).length, 37);
+});
+
+test("resolves every catalogue entry to a component of the same document", () => {
+  const document = buildOpenApiDocument();
+  const catalogue = document[eventPayloadCatalogueKey] as Readonly<
+    Record<string, { $ref: string }>
+  >;
+  const components = document.components as Readonly<Record<string, unknown>>;
+  const schemas = components.schemas as Readonly<Record<string, unknown>>;
+  for (const [type, entry] of Object.entries(catalogue)) {
+    assert.deepEqual(Object.keys(entry), ["$ref"]);
+    assert.equal(entry.$ref, `#/components/schemas/${type}`);
+    assert.equal(
+      Object.hasOwn(schemas, type),
+      true,
+      `${type} is not a component`,
+    );
+  }
+});
+
+test("omits the event payload catalogue from a document without event.list", () => {
+  const nodeOperations = registry.filter((entry) =>
+    entry.operationId.startsWith("node."),
+  );
+  assert.ok(nodeOperations.length > 0);
+  assert.equal(
+    nodeOperations.some((entry) => entry.operationId === "event.list"),
+    false,
+  );
+  const document = buildOpenApiDocument(nodeOperations);
+  assert.equal(Object.hasOwn(document, eventPayloadCatalogueKey), false);
+});
+
+test("adds the catalogue as the only root key beyond the document core", () => {
+  const document = buildOpenApiDocument();
+  assert.deepEqual(Object.keys(document), [
+    "openapi",
+    "info",
+    "security",
+    "paths",
+    "components",
+    eventPayloadCatalogueKey,
+  ]);
+
+  const components = document.components as Readonly<Record<string, unknown>>;
+  assert.deepEqual(Object.keys(components), ["securitySchemes", "schemas"]);
+  assert.deepEqual(components.securitySchemes, {
+    bearerAuth: { type: "http", scheme: "bearer" },
+  });
+});
+
+test("the master holds exactly the transitive closure of its own references", () => {
+  const document = buildOpenApiDocument();
+  const components = document.components as Readonly<Record<string, unknown>>;
+  const schemas = components.schemas as Readonly<Record<string, unknown>>;
+  assert.deepEqual(
+    sortedBytewise([...reachableSchemaNames(document)]),
+    sortedBytewise(Object.keys(schemas)),
+  );
+  assert.equal(Object.keys(schemas).length, 142);
+  for (const type of Object.keys(eventPayloads)) {
+    assert.equal(Object.hasOwn(schemas, type), true, `${type} was pruned`);
+  }
+});
+
+test("a slice holds exactly the transitive closure of its own references", () => {
+  const nodeOperations = registry.filter((entry) =>
+    entry.operationId.startsWith("node."),
+  );
+  const document = buildOpenApiDocument(nodeOperations);
+  const components = document.components as Readonly<Record<string, unknown>>;
+  const schemas = components.schemas as Readonly<Record<string, unknown>>;
+  assert.deepEqual(
+    sortedBytewise([...reachableSchemaNames(document)]),
+    sortedBytewise(Object.keys(schemas)),
+  );
+  for (const type of Object.keys(eventPayloads)) {
+    assert.equal(Object.hasOwn(schemas, type), false, `${type} still seeded`);
+  }
 });
 
 test("plan.import's default response refs its own error component, and every stubbed operation's still refs Error", () => {
