@@ -12,13 +12,19 @@ KanthorD redesigns the loop of `.claude/skills/*`. It keeps the TDD intent and t
 
 ## Prompt compilation
 
-Instruction is compiled into typed channels, not concatenated. Precedence is decided before rendering. A model does not reliably read "later text" as "higher priority", so the resolver never delegates precedence to prompt position. The channels are: daemon invariants, role contract, repository profile, project policy, task contract, ambient context, runtime evidence.
+Instruction is compiled into typed channels, not concatenated. Precedence is decided before rendering. A model does not reliably read "later text" as "higher priority", so the resolver never delegates precedence to prompt position. The channels are: daemon invariants, role contract, repository profile, project policy, task contract, recalled memory, ambient context, runtime evidence.
+
+`recalled memory` sits below every contract channel, because memory is advisory prose with a citation and a fact that could override the task contract would let last week's work redefine this week's. `../memory/read-path.md` owns it.
 
 Prose appends, lists append, scalars override. A scope adds guidance on top of the scope above it, and nothing is ever deleted. Override applies only where append has no meaning: a single-valued field such as the verification command or a timeout. Two prose fragments that contradict each other are reported by a lint at import. The resolver never silently reconciles them.
 
-`re@1` renders from a reduced prompt. It receives the acceptance criteria of the task, the diff and the verification output, plus the daemon invariants and its own role contract, which define its verdict format. It never receives implementation guidance. A reviewer that reads the same instruction as the implementer makes correlated mistakes, and the review stops being independent.
+`re@1` renders from a reduced prompt. It receives the acceptance criteria of the task, the diff and the verification output, plus the daemon invariants and its own role contract, which define its verdict format. It never receives implementation guidance, and it never receives the recalled memory channel. A reviewer that reads the same instruction as the implementer makes correlated mistakes, and the review stops being independent. Every recalled fact is implementation guidance by the definition of that channel; anything that governs rather than advises belongs in the repository profile or the project policy, so the exclusion is whole and it is not split by fact kind.
 
 Budget is enforced per channel, and the failure is a refusal. The resolver refuses an attempt that exceeds the cap and names the channel. It never truncates, because truncated instruction produces work that looks valid and is not. Ambient context is the only channel the resolver may drop, and a drop writes an event.
+
+**Recalled memory is a bounded-set channel**, and it is the one channel that is neither refused nor dropped. The resolver renders facts in rank order and **skips** any fact whose rendered block would exceed the remaining budget, continuing with the next one until the list is exhausted. It never truncates a block, and it never refuses the attempt. The count considered, the count rendered and the ids skipped are recorded on the attempt. A single fact can never exceed the whole channel budget, because `../memory/write-path.md` refuses a body over the cap at write time. The budget is measured on the **rendered** block — the fact body, its path, its id, its citation and the block framing — not on the canonical body. A compiled channel that still exceeds its budget is a defect, and it refuses the attempt like any other channel.
+
+Skip rather than stop, because stopping at the first fact that does not fit discards every smaller fact behind it for no reason. A shorter list is a smaller answer; a cut sentence is a wrong one.
 
 ## The repository profile
 

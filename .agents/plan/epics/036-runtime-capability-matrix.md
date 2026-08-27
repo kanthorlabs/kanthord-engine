@@ -56,7 +56,8 @@ This epic is a gate. It unblocks four later epics, and it opens none of them.
   `defaultIdempotencySettings` is `ttlSeconds: 300`, `joinTimeoutSeconds: 30`, `maxEntries: 256`,
   `maxBytes: 8388608`. Lambda runs many containers, and Workers runs many isolates. A replay that
   reaches a second container or a second isolate misses the record, and the operation runs twice.
-  `16` routed operations declare `idempotency: "memory"`, and `plan.import` declares `durable`.
+  `18` routed operations declare `idempotency: "memory"`, and `plan.import` declares `durable`.
+  `28` operations declare `memory` in total; the other `10` are `stubbed` and enter no row.
 
   `src/http/server/event/wait.ts` holds the long-poll registry in the process, and it polls at
   `POLL_INTERVAL_MS = 250`. One routed operation uses it: `event.list`. A held connection outlives no
@@ -74,14 +75,28 @@ This epic is a gate. It unblocks four later epics, and it opens none of them.
 
 - **Four deployment shapes, ranked.** The document names them in this order.
 
-  1. **The Node daemon on a long-lived host.** The shipped shape. Every routed operation is `yes`.
-  2. **A container on AWS Lambda, with reserved concurrency `1` and a durable mounted home.** The one
-     serverless shape that carries the whole surface. The Hono chain of EPIC 032 carries over with no
-     edit, because the shape changes the packaging and not the request handling.
-  3. **A Worker with a remote storage driver and git as a remote capability.** It carries the read
-     surface and the catalog surface. It carries no repository operation.
-  4. **A Worker on the tree as it stands today.** It carries one operation. The document reports the
-     count and states that the shape is not a product shape.
+  1. **The Node daemon on a long-lived host.** The shipped shape. It carries `44` of `44`, and
+     every routed operation is `yes`.
+  2. **A container on AWS Lambda, with reserved concurrency `1` and a durable mounted home.** It
+     carries `42` of `44`, and it is the serverless shape that carries the most. A container image
+     ships the `git` binary and starts a subprocess, and the mounted home supplies both the SQLite
+     file and the bare home. It does not carry `event.list`, which holds a connection open, or
+     `plan.import`, which has no durable store. Reserved concurrency `1` narrows the memory
+     idempotency defect and does not remove it, because a cold start discards the records. The Hono
+     chain of EPIC 032 carries over with no edit, because the shape changes the packaging and not
+     the request handling.
+  3. **A Worker with a remote storage driver, and no git.** It carries `38` of `44`. The driver lifts
+     every row whose only obstacle is `sqlite`. It carries no repository operation, because an
+     isolate starts no subprocess, and it carries neither `event.list` nor `plan.import`. Adding git
+     as a remote capability would carry the four repository operations too; that capability is gate
+     item 3 and it is not built, so it is not part of this shape.
+  4. **A Worker on the tree as it stands today.** It carries `1` of `44`, and the one is
+     `provider.catalog`. The document reports the count and states that the shape is not a product
+     shape.
+
+  A shape **carries** an operation when that operation answers correctly under the shape. A
+  `degraded` row is not carried: it answers, and it answers with the defect its cell names. The
+  document states that definition before the first shape uses it.
 
   Hono stays useful in shape 2 and shape 3. The document states that, and it states it as the reason
   the band keeps Hono after this gate.
@@ -119,8 +134,12 @@ Author with `/author`. The sequence below is the dependency order; each story is
    - `blob`, `crypto` and `secret` import `node:crypto` and nothing else.
    - The other 13 import no Node built-in.
 
-   State that `node:crypto` alone is portable, because both targets expose Web Crypto. State that
-   `node:child_process` and `node:sqlite` are not portable. No code.
+   State that `node:crypto` is portable, because both targets expose Web Crypto, and that
+   `node:path` and `node:stream` are portable for the same reason. State that `node:sqlite` is
+   portable to neither target. State that `node:child_process` and `node:fs` divide the two targets:
+   a Lambda container image starts a subprocess and carries a file system, and an isolate does
+   neither. A column answers one question — does the shipped implementation run on the bare target,
+   with no deployment support added. No code.
 
 2. **The document states the operation matrix.** Add one table with the columns `Operation`,
    `Storage`, `Git`, `Durable wait`, `Idempotency`, `Filesystem`, `Node daemon`, `Lambda` and
@@ -129,21 +148,21 @@ Author with `/author`. The sequence below is the dependency order; each story is
    capability name or `-`. The eight classes below cover all 44 rows, and each class fixes every cell
    of its rows.
 
-   | Class                                    | Operations                                                                                                                                                                                                                                                                                                                | Node  | Lambda                                                       | Workers                                                      |
-   | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-   | catalog only, no storage, no idempotency | `provider.catalog`                                                                                                                                                                                                                                                                                                        | `yes` | `yes`                                                        | `yes`                                                        |
-   | catalog only, memory idempotency         | `provider.inspect`                                                                                                                                                                                                                                                                                                        | `yes` | `degraded — the replay record dies with the container`       | `degraded — the replay record dies with the isolate`         |
-   | health, injected reporters               | `system.health`                                                                                                                                                                                                                                                                                                           | `yes` | `degraded — no home lock reporter and no bare home reporter` | `degraded — no home lock reporter and no bare home reporter` |
-   | git                                      | `repository.inspect`, `repository.list`, `repository.register`, `repository.show`                                                                                                                                                                                                                                         | `yes` | `no`                                                         | `no`                                                         |
-   | durable wait                             | `event.list`                                                                                                                                                                                                                                                                                                              | `yes` | `no`                                                         | `no`                                                         |
-   | durable idempotency                      | `plan.import`                                                                                                                                                                                                                                                                                                             | `yes` | `no`                                                         | `no`                                                         |
-   | storage read, no idempotency             | `actor.list`, `actor.show`, `blob.show`, `edge.list`, `node.list`, `node.show`, `plan.export`, `plan.revisions`, `project.graph`, `project.list`, `project.nodes`, `project.show`, `project.status`, `provider.list`, `provider.show`, `system.db`, `system.status`                                                       | `yes` | `no`                                                         | `no`                                                         |
-   | storage, non-GET method                  | `actor.register`, `actor.revoke`, `actor.rotate`, `node.claim`, `node.create`, `node.delete`, `node.heartbeat`, `node.release`, `node.report`, `node.unblock`, `node.update`, `plan.validate`, `project.create`, `project.repositories`, `provider.register`, `provider.remove`, `provider.rename`, `provider.setDefault` | `yes` | `no`                                                         | `no`                                                         |
+   | Class                                    | Operations                                                                                                                                                                                                                                                                                                                | Node  | Lambda                                                 | Workers                                              |
+   | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------------------------------------------------------ | ---------------------------------------------------- |
+   | catalog only, no storage, no idempotency | `provider.catalog`                                                                                                                                                                                                                                                                                                        | `yes` | `yes`                                                  | `yes`                                                |
+   | catalog only, memory idempotency         | `provider.inspect`                                                                                                                                                                                                                                                                                                        | `yes` | `degraded — the replay record dies with the container` | `degraded — the replay record dies with the isolate` |
+   | health, injected reporters               | `system.health`                                                                                                                                                                                                                                                                                                           | `yes` | `degraded — the one storage reporter has no driver`    | `degraded — the one storage reporter has no driver`  |
+   | git                                      | `repository.inspect`, `repository.list`, `repository.register`, `repository.show`                                                                                                                                                                                                                                         | `yes` | `no`                                                   | `no`                                                 |
+   | durable wait                             | `event.list`                                                                                                                                                                                                                                                                                                              | `yes` | `no`                                                   | `no`                                                 |
+   | durable idempotency                      | `plan.import`                                                                                                                                                                                                                                                                                                             | `yes` | `no`                                                   | `no`                                                 |
+   | storage read, no idempotency             | `actor.list`, `actor.show`, `blob.show`, `edge.list`, `node.list`, `node.show`, `plan.export`, `plan.revisions`, `project.graph`, `project.list`, `project.nodes`, `project.show`, `project.status`, `provider.list`, `provider.show`, `system.db`, `system.status`                                                       | `yes` | `no`                                                   | `no`                                                 |
+   | storage, non-GET method                  | `actor.register`, `actor.revoke`, `actor.rotate`, `node.claim`, `node.create`, `node.delete`, `node.heartbeat`, `node.release`, `node.report`, `node.unblock`, `node.update`, `plan.validate`, `project.create`, `project.repositories`, `provider.register`, `provider.remove`, `provider.rename`, `provider.setDefault` | `yes` | `no`                                                   | `no`                                                 |
 
    The `Git` cell holds `git` for the four git rows and `-` elsewhere. The `Filesystem` cell holds
    `bare home` for the four git rows and `-` elsewhere. The `Durable wait` cell holds `wait` for
    `event.list` and `-` elsewhere. The `Idempotency` cell holds `durable` for `plan.import`, `memory`
-   for the 16 operations that declare `idempotency: "memory"`, and `-` for the rest. The `Storage`
+   for the 18 operations that declare `idempotency: "memory"`, and `-` for the rest. The `Storage`
    cell holds `sqlite` for every row that reaches `services/storage` or `services/blob`, and `-` for
    `provider.catalog`, `provider.inspect` and `system.health`.
 
@@ -206,10 +225,13 @@ Hermetic coverage required beyond the Proof:
 
 - **The `AGENTS.md` test-boundary TODO is not a blocker here.** That clause forbids opening another
   **phase-2** epic before it closes. This epic is phase 1b.
-- **`system.health` carries the only verdict the tree does not settle.** `src/main.ts` composes the
-  reporter set, and a non-Node root composes a different set. The verdict `degraded` assumes the home
-  lock reporter and the bare home reporter disappear. Ulrich decides whether a serverless deployment
-  reports a shorter dependency list, or refuses the route.
+- **`system.health` is settled: `degraded`, and the cell names the one storage reporter.** Resolved
+  by Ulrich on 2026-08-27. `src/main.ts:337-345` composes exactly one reporter, named `storage`,
+  whose probe calls `storage.ping()`. Without a driver that probe throws, `readHealth` records the
+  line as `failed`, and the route answers `200` with the aggregate status `degraded`. The earlier
+  wording of this item named a home lock reporter and a bare home reporter; neither exists. A
+  non-Node root that composes a different reporter set is a later decision, and it moves this cell
+  and the aggregate together.
 - **`blob.show` reads a SQLite-backed blob store.** `src/services/blob/sqlite.ts` is the only
   implementation. Whether blobs move to an object store, or follow the storage driver, is a decision
   for the storage epic. The matrix records `no` for the tree as it stands.

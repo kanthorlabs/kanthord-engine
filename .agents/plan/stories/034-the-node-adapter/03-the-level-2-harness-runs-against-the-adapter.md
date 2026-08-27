@@ -124,4 +124,5 @@ takes no edit at all.
 - `node --test src/http/server/app.test.ts src/http/server/dispatch.test.ts src/http/server/route.test.ts`
   passes.
 - Proof: contributes `src/http/server/app.test.ts`, `src/http/server/dispatch.test.ts` and
-  `src/http/server/route.test.ts` of the EPIC Proof block, run by the command above.
+  `src/http/server/route.test.ts` of the EPIC Proof block, and the global-object identity guarantee
+  of EPIC 032 Decision 12 that case 5 of `src/http/server/koa-bridge.test.ts` carried.

@@ -221,8 +221,15 @@ Hermetic coverage required beyond the Proof:
 
 - **`npm run verify` is clean**: `typecheck`, the full `node:test` suite, `eslint .`, and
   `verify-db-status`.
-- **`openapi.yaml` is byte-identical to its output before this epic.** The test holds the exact bytes
-  and compares them with `Buffer.compare`. A `features/*.yaml` slice is asserted the same way.
+- **`openapi.yaml` is byte-identical to its output before this epic.** The test compares the published
+  `openapi.yaml` against `renderOpenApiYaml()` with `Buffer.compare`, and each `features/*.yaml` slice
+  against `renderOpenApiYaml(feature.operations)` the same way. A held literal is refused: the master
+  is a 142-schema document, and `docs/proposal/api/README.md` forbids a committed generated document,
+  so an inline copy would be that same artifact under another name. What closes the remaining gap is
+  the change set: **no story of this epic edits `src/http/contract/openapi.ts`, any module it reads,
+  or `src/domain/version.ts`**, and each story asserts that with
+  `git diff --quiet HEAD -- src/domain $(git ls-files 'src/http/contract/*.ts' | grep -v '\.test\.ts$')`
+  over its own change set. The renderer cannot move, so its output cannot move.
 - **`SwaggerParser.validate` passes on `source/openapi.yaml`** with every external reference
   resolved from disk.
 - **`SwaggerParser.bundle` on `source/openapi.yaml` agrees with the canonical master** under the
@@ -248,15 +255,14 @@ Hermetic coverage required beyond the Proof:
 
 ## Open items
 
-- S1 - status:OPEN - action:YES - `AGENTS.md:105` names one publication form - The line states that
-  the master and each `features/*.yaml` slice are self-contained with internal references only, and
-  that `npm run contract:publish -- <output-directory>` emits the master, feature slices and
-  examples. The sentence stays true after this epic and becomes incomplete, because a second form
-  appears. This epic cannot edit the file: `scripts/lane-check.sh:44` denies `AGENTS.md` to every
-  lane. - fix:Append to the bullet: "The publication also emits a modular `source/` tree, built from
-  external `$ref`, whose bundle reproduces the master. Every reference in it stays inside the
-  publication directory." - why:A reviewer reads `AGENTS.md` as the structural contract, and an
-  incomplete bullet makes the `source/` tree look like a violation of it.
+- S1 - status:FIXED - action:YES - `AGENTS.md` named one publication form - The bullet is at `:107`,
+  not `:105`, and it already named the `source/` tree. It did not state the two properties a reviewer
+  needs to read the tree as conforming. Ulrich applied the amendment on 2026-08-27, because
+  `scripts/lane-check.sh:43` denies `AGENTS.md` to every agent lane and no story may carry the edit.
+  - fix:The bullet now reads "… beside the self-contained forms and never in place of them; its
+    bundle reproduces the master, and every reference in it stays inside the publication directory."
+  - why:A reviewer reads `AGENTS.md` as the structural contract, and an incomplete bullet made the
+    `source/` tree look like a violation of it.
 
 - **The `AGENTS.md` test-boundary TODO is not a blocker here.** That clause forbids the opening of
   another **phase-2** epic before it closes. This epic is phase 1b, and the whole 030-039 band is
