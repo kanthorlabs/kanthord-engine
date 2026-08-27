@@ -20,21 +20,34 @@ Edit `src/http/contract/openapi.test.ts`. Three edits, in this order.
 
 ### Edit 1 — add `openApiFeatures` and `mkdirSync` to the imports
 
-Line 1 today:
-
-```ts
-import { buildOpenApiDocument, renderOpenApiYaml } from "./openapi.ts";
-```
-
-Becomes:
+EPIC 037 story 2 already rewrote the `./openapi.ts` import into a multi-line
+block and added `eventPayloadCatalogueKey` to it. Read the block before editing:
+it is at line 1 and it reads
 
 ```ts
 import {
   buildOpenApiDocument,
+  eventPayloadCatalogueKey,
+  renderOpenApiYaml,
+} from "./openapi.ts";
+```
+
+Add `openApiFeatures` in alphabetical position, between
+`eventPayloadCatalogueKey` and `renderOpenApiYaml`:
+
+```ts
+import {
+  buildOpenApiDocument,
+  eventPayloadCatalogueKey,
   openApiFeatures,
   renderOpenApiYaml,
 } from "./openapi.ts";
 ```
+
+Do not add a second import block from `./openapi.ts`. If the block instead reads
+`import { buildOpenApiDocument, renderOpenApiYaml } from "./openapi.ts";` on one
+line, then EPIC 037 did not land; stop and report that, because this epic depends
+on it.
 
 `openApiFeatures` is exported at `src/http/contract/openapi.ts:18`. Its signature is
 `openApiFeatures(entries: readonly Operation[] = registry): readonly OpenApiFeature[]`, and
