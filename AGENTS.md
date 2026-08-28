@@ -123,6 +123,33 @@ The same input produces the same output, the same order and the same bytes. Two 
 - A test asserts a value, never "some value". A timestamp in a snapshot is a defect.
 - **A story that cannot be made deterministic is a planning defect.** Fix the story. Never push the decision onto the implementing agent.
 
+## HANDOFF.md
+
+`HANDOFF.md` is a register of open requests, not a record of answers. `engine/HANDOFF.md` holds what
+the engine needs from the dashboard team, and `apps/HANDOFF.md` holds what the dashboard needs from
+the engine. Each side writes its own file and reads the other's.
+
+Four rules govern a write.
+
+- **An entry is a request, and nothing else is an entry.** A request names something the writer cannot
+  do without the other team: a decision that is theirs, an obligation they must take on, or a
+  confirmation the writer's design depends on. An answer, a delivered contract, a status report and a
+  reply to a resolved entry are all not entries.
+- **Validate every entry before writing, and delete each resolved one completely.** Read the other
+  side's `HANDOFF.md`, then check the repository for each request it makes and each request this file
+  still carries. A request the code, an epic or a merged decision now satisfies is deleted — not
+  struck through, not marked resolved, not moved to a history section. The reader must never re-read a
+  settled question.
+- **The answer lives where behaviour lives.** A resolved request leaves the register and survives as
+  the epic that carries it, `docs/proposal/`, and the published OpenAPI document. Never keep a copy of
+  the answer in `HANDOFF.md` so the other team can find it.
+- **A request survives until the work lands, not until it is answered.** A specified but unmerged epic
+  does not resolve the request that asked for it. Delete the entry when the epic merges.
+
+An entry carries the schema `apps/HANDOFF.md` defines: priority, status, the operation or decision it
+concerns, the shape it needs, the reason, and what the writer does in the meantime. Every claim about
+the other repository cites a file and a line.
+
 ## What is enforced, and by what
 
 A rule with no mechanism is a rule a reviewer applies inconsistently. Each of these has one.
