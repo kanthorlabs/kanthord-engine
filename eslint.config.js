@@ -435,8 +435,10 @@ export default [
     },
   },
   {
-    // A test reaches the implementation it covers, so dependency direction is
-    // relaxed. It still never imports the composition root.
+    // A test is inside the boundary it covers. AGENTS.md admits a test to
+    // everything except the composition root, so a handler test asserts the
+    // handler over its real query and a query test asserts the query against
+    // the contract schema. This block is that rule; it is not a gap in it.
     files: ["src/**/*.test.ts", "test/**/*.ts"],
     rules: {
       "boundaries/dependencies": [
