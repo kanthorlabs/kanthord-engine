@@ -37,18 +37,18 @@ src/http/server/**                   the runtime roots, the middleware, and the 
 
 This table is normative. `eslint.config.js` encodes it, so a violation fails `npm run lint`.
 
-| From                     | May import                                                                              |
-| ------------------------ | --------------------------------------------------------------------------------------- |
-| `domain/`                | `domain/`                                                                               |
-| a service **interface**  | `domain/`, any service interface                                                        |
-| a service implementation | `domain/`, any service interface, an implementation in the **same** capability          |
-| `commands/`              | `domain/`, any service interface                                                        |
-| `queries/`               | `domain/`, any service interface                                                        |
-| `http/contract/`         | `domain/`, `http/contract/`                                                             |
-| `http/server/`           | `domain/`, `commands/`, `queries/`, `http/contract/`, `http/server/`                    |
-| `cli/`                   | `domain/`, `http/contract/`, `cli/`                                                     |
-| `main.ts`                | everything                                                                              |
-| a test                   | its module under test, `domain/`, service interfaces, `test/helpers/`, `node:` builtins |
+| From                     | May import                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------ |
+| `domain/`                | `domain/`                                                                      |
+| a service **interface**  | `domain/`, any service interface                                               |
+| a service implementation | `domain/`, any service interface, an implementation in the **same** capability |
+| `commands/`              | `domain/`, any service interface                                               |
+| `queries/`               | `domain/`, any service interface                                               |
+| `http/contract/`         | `domain/`, `http/contract/`                                                    |
+| `http/server/`           | `domain/`, `commands/`, `queries/`, `http/contract/`, `http/server/`           |
+| `cli/`                   | `domain/`, `http/contract/`, `cli/`                                            |
+| `main.ts`                | everything                                                                     |
+| a test                   | everything except `main.ts`                                                    |
 
 Nothing imports `main.ts`. No production file imports a test or a test helper.
 
@@ -112,14 +112,7 @@ A query takes the same shape. `main.ts` binds the dependencies once and passes c
 - **Hermetic.** No network, no shared temporary directory, no ambient `git` configuration, no wall-clock dependency. A test that needs a remote uses the loopback fixture of EPIC 005. A test that needs a home uses its own `mktemp` directory and removes it.
 - **Real SQLite, faked everything else.** `node:sqlite` on a temporary file is fast, and it is the thing under test for much of phase 1. A fake for git, agent and clock is a small hand-written object implementing the interface.
 - **Fake against Mock.** A **Fake** returns a generic safe default. A **Mock** returns the deterministic value the story names. A story that names a value gets a Mock.
-- Boundaries are **not** disabled for tests. A test imports its module under test, `domain/`, service interfaces, `test/helpers/` and `node:` builtins. It reaches an implementation only in the capability it covers.
-
-> **TODO — close before the next phase-2 epic.** The rule above is not true of the tree today, and `eslint.config.js` does not enforce it. Two patterns break it, both pre-existing and both repo-wide:
->
-> - a handler test under `src/http/server/**` imports its query from `src/queries/**` — 20+ files, for example `src/http/server/edge/list-edge.test.ts:12`;
-> - a query test under `src/queries/**` imports a zod schema from `src/http/contract/**` — 10+ files, for example `src/queries/node/list-node.test.ts`.
->
-> Neither is a defect of the epic that last touched the file, so a review must not report one as such. The fix is one epic: decide whether the rule or the convention wins, amend whichever loses, and encode the outcome in `eslint.config.js` so the answer stops depending on the reviewer. **EPIC 101 already landed under the current convention** and is not a counter-example — it is the reason this cannot slip further. Do not open another phase-2 epic before this closes.
+- **A test is inside the boundary it covers, not outside the matrix.** A test imports any module under `src/`, `test/helpers/` and `node:` builtins. It never imports `src/main.ts`. The relaxation is deliberate: a handler test asserts the handler over its real query, and a query test asserts the query against the contract schema its response must satisfy. A fake substituted for either would assert the fake. `eslint.config.js` encodes exactly this — `default: "allow"` for a test, with the composition root disallowed — so the rule and the tree agree, and a reviewer does not decide it per file.
 
 ## Determinism
 
@@ -137,6 +130,7 @@ A rule with no mechanism is a rule a reviewer applies inconsistently. Each of th
 | Rule                                             | Mechanism                                                                |
 | ------------------------------------------------ | ------------------------------------------------------------------------ |
 | the import matrix                                | `eslint-plugin-boundaries`                                               |
+| a test admitted to everything but `main.ts`      | the `src/**/*.test.ts` block of `eslint.config.js`                       |
 | `domain/` purity, and vendor packages by layer   | `no-restricted-imports` per glob                                         |
 | an unclassified `src/` file                      | an eslint file-pattern rule                                              |
 | a node or edge write outside the plan store      | `no-restricted-syntax`, with an enumerated exemption list                |
