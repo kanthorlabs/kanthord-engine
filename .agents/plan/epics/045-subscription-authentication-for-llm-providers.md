@@ -213,8 +213,10 @@ defaultModel }`, and answers the existing `ProviderView`.
 
 - **A restart loses the live flow, and the row says so.** The daemon holds an exclusive home lock
   (`src/services/home-lock/sqlite.ts`) and refuses a home on a network filesystem, so two instances
-  cannot share one database and a `complete` can never reach a different live instance. The real loss
-  is a restart: the row survives and the closure does not. The row stores the `instanceId` of
+  cannot share one database and a `complete` can never reach a different live instance. The dashboard
+  team confirmed the deployment: a single host, and no load-balanced pool. So this is a stated
+  constraint and not an assumption, and the epic designs no sticky routing and no resumable flow. The
+  real loss is a restart: the row survives and the closure does not. The row stores the `instanceId` of
   `HomeIdentity`, and a `complete` on a `pending` row whose instance is not the running one refuses
   `login-lost` and deletes the row. A `completed` row has no live flow, so it is instance-independent
   and `provider.register` never refuses for this reason.
@@ -230,6 +232,12 @@ defaultModel }`, and answers the existing `ProviderView`.
   and an oauth variant holding the `pi-ai` `OAuthCredential` plus `provider` and `defaultModel`. The
   projection is `{ transport, provider, defaultModel, baseUrl }` for api-key and
   `{ transport: "oauth", provider, defaultModel }` for oauth. No token field exists on either.
+
+- **`openai-compatible` stays the only self-configuration escape hatch.** The dashboard team
+  confirmed it needs nothing more, so registration keeps its `catalog.has(payload.provider)` gate
+  (`src/commands/provider/register-provider.ts:53`) and no epic widens it. Subscription OAuth cannot
+  reach a self-configured endpoint in any case: it carries no `pi-ai` `oauth` member, so there is no
+  flow to drive.
 
 - **The models list prefers what the login returned.** `complete` stores the `availableModelIds` the
   login result carries, and the catalogue model ids of the authenticated vendor otherwise.
@@ -297,7 +305,10 @@ defaultModel }`, and answers the existing `ProviderView`.
     set, the preference rule, the two challenge arms, the three login states, the completed replay,
     the two expiry rules, the cancel and what it tears down, the poll interval and that the
     dashboard's cadence reaches no vendor, the transport discriminator, the projection, and the
-    statement that `pi-ai` owns the OAuth protocol and the refresh.
+    statement that `pi-ai` owns the OAuth protocol and the refresh. Record the two deployment
+    decisions the same file needs: the daemon runs on a single host with no load-balanced pool, which
+    is why a pending login is process-local and needs no sticky routing; and `openai-compatible` is
+    the only self-configuration escape hatch, which is why registration keeps its catalogue gate.
 
 ## Verification gate
 
