@@ -101,6 +101,50 @@ test("leaves no internal component pointer in a component file", () => {
   }
 });
 
+test("rewrites nested component pointers from a component file", () => {
+  const entries = [
+    {
+      operationId: "a.one",
+      method: "GET",
+      path: [{ kind: "resource", value: "a" }],
+      introducedIn: "phase-1",
+      status: "routed",
+      allowedActors: ["human"],
+      response: z.object({
+        value: z.string().meta({
+          $ref: "#/components/schemas/b.one.response/properties/value",
+        }),
+      }),
+    },
+    {
+      operationId: "b.one",
+      method: "GET",
+      path: [{ kind: "resource", value: "b" }],
+      introducedIn: "phase-1",
+      status: "routed",
+      allowedActors: ["human"],
+      response: z.object({ value: z.string() }),
+    },
+  ] as unknown as Operation[];
+
+  const tree = buildOpenApiSourceTree(entries);
+  const text = tree.get("components/a.yaml");
+  assert.notEqual(text, undefined);
+  if (text === undefined) return;
+  const document = YAML.parse(text) as {
+    schemas: {
+      "a.one.response": {
+        properties: { value: { $ref: string } };
+      };
+    };
+  };
+
+  assert.equal(
+    document.schemas["a.one.response"].properties.value.$ref,
+    "./b.yaml#/schemas/b.one.response/properties/value",
+  );
+});
+
 test("refuses two component file names that differ only by letter case", () => {
   const colliding = [
     {

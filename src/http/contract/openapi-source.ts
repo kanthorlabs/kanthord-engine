@@ -77,7 +77,7 @@ export function buildOpenApiSourceTree(
           `operation not found in OpenAPI document: ${entry.operationId}`,
         );
       }
-      operations[entry.operationId] = rewriteRefs(operation, "../");
+      operations[entry.operationId] = rewriteRefs(operation, "../components/");
     }
     files.set(
       `features/${feature.name}.yaml`,
@@ -115,7 +115,7 @@ function rootValueFor(
     case "components":
       return modularComponents(document[key]);
     case "x-kanthord-event-payloads":
-      return rewriteRefs(document[key], "./");
+      return rewriteRefs(document[key], "./components/");
     default:
       throw new Error(`unknown root key in the master document: ${key}`);
   }
@@ -161,9 +161,9 @@ function modularComponents(value: unknown): Record<string, unknown> {
   return { securitySchemes, schemas };
 }
 
-function rewriteRefs(value: unknown, base: string): unknown {
+function rewriteRefs(value: unknown, componentBase: string): unknown {
   if (Array.isArray(value)) {
-    return value.map((item) => rewriteRefs(item, base));
+    return value.map((item) => rewriteRefs(item, componentBase));
   }
   if (value === null || typeof value !== "object") {
     return value;
@@ -176,14 +176,23 @@ function rewriteRefs(value: unknown, base: string): unknown {
       typeof child === "string" &&
       child.startsWith("#/components/schemas/")
     ) {
-      const name = child.slice("#/components/schemas/".length);
+      const pointer = child.slice("#/components/schemas/".length);
+      const separator = pointer.indexOf("/");
+      const encodedName =
+        separator === -1 ? pointer : pointer.slice(0, separator);
+      const name = decodePointer(encodedName);
+      const suffix = separator === -1 ? "" : pointer.slice(separator);
       rewritten[key] =
-        `${base}components/${prefixOf(name)}.yaml#/schemas/${name}`;
+        `${componentBase}${prefixOf(name)}.yaml#/schemas/${encodedName}${suffix}`;
     } else {
-      rewritten[key] = rewriteRefs(child, base);
+      rewritten[key] = rewriteRefs(child, componentBase);
     }
   }
   return rewritten;
+}
+
+function decodePointer(segment: string): string {
+  return segment.replaceAll("~1", "/").replaceAll("~0", "~");
 }
 
 function compareBytewise(a: string, b: string): number {

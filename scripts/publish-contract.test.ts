@@ -654,9 +654,15 @@ test("scripts/publish-contract", async (t) => {
     assert.equal(existsSync(join(repositoryRoot, "openapi.yaml")), false);
   });
 
-  await t.test("refuses to publish into a repository descendant", () => {
+  await t.test("refuses to publish into a repository descendant", (t) => {
     const existing = join(repositoryRoot, "src");
-    const missing = join(repositoryRoot, ".kanthord-contract-child");
+    const child = mkdtempSync(
+      join(repositoryRoot, ".kanthord-contract-child-"),
+    );
+    t.after(() => {
+      rmSync(child, { recursive: true, force: true });
+    });
+    const missing = join(child, "new-output");
     const sentinel = join(existing, "main.ts");
     const before = readFileSync(sentinel);
 

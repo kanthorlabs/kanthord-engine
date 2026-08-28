@@ -52,7 +52,7 @@ function extractSpecifiers(source: string): string[] {
     } else if (
       ts.isCallExpression(node) &&
       node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-      node.arguments.length === 1
+      node.arguments.length > 0
     ) {
       add(node.arguments[0]);
     } else if (
@@ -236,6 +236,13 @@ describe("src/http/server/core-purity.test", () => {
 
   it("a node: dynamic import is detected", () => {
     const specifiers = extractSpecifiers(`await import("node:http")`);
+    assert.deepEqual(specifiers, ["node:http"]);
+  });
+
+  it("a node: dynamic import with options is detected", () => {
+    const specifiers = extractSpecifiers(
+      `await import("node:http", { with: { type: "json" } })`,
+    );
     assert.deepEqual(specifiers, ["node:http"]);
   });
 
