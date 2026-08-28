@@ -22,9 +22,10 @@ run on the built-in **`node:test`** runner with `node:assert/strict` — no
 test framework dependency.
 
 The `## Architecture` section of **`AGENTS.md`** (repo root) is the binding
-architecture contract: hexagonal layout (`domain/` pure, `app/<aggregate>/`
-use cases, capability directories with `port.ts` + adapters, thin `apps/`,
-`composition.ts` composition root), import-direction rules, port naming (no `I`
+architecture contract: six directories under `src/` (`domain/` pure, `services/<capability>/index.ts`
+the interface with its implementations beside it, `commands/` and `queries/`
+holding business logic, `http/contract/` + `http/server/`, `cli/`, and
+`src/main.ts` as the composition root), import-direction rules, naming (no `I`
 prefix), one use case per file. It is a citable source for findings.
 
 ## HARD RULE — Never mutate the repo (violating this is a blocking error)
@@ -59,7 +60,7 @@ BLOCKER vs SUGGESTION with an `action:` tag.
   surfaced or wrapped with context. Cite the construct + why the property fails.
 - **Architecture conformance.** The `AGENTS.md` rules hold: import direction
   (no use case importing an adapter, no port importing its adapters, no
-  business logic in `apps/`, only the composition root wires concrete adapters),
+  business logic in `http/server/`, only `src/main.ts` wires an implementation),
   port naming, one-use-case-per-file. Each violation is a BLOCKER citing the rule.
 - **API/seam design.** A seam the tests/import depend on is shaped for its
   consumer; name the consumer hurt by a bad shape.
@@ -119,7 +120,7 @@ Gate` end-to-end from the working root, **project-wide** (not scoped to the
      `NODE_TEST_CONTEXT`, `if (isTest)`, an `options.fake` / `--fake-*` flag whose
      only caller is a test.
   2. **Fakes reachable from production** — a fake / stub / mock / `InMemory*`
-     implementation imported by `composition.ts`, a use case, an adapter, or any
+     implementation imported by `src/main.ts`, a command, a query, a service, or any
      non-test module. Fakes belong in test files or a test-only directory that
      production never imports.
   3. **Test-only seams on production types** — `resetForTest()`, `__setClock()`,

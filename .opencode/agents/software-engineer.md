@@ -28,14 +28,18 @@ The `## Architecture` section of **`AGENTS.md`** (repo root) is **binding** for
 every production edit — read it before your first edit of a cycle. These inline
 rules hold even if you skip that read:
 
-- `domain/` is pure with zero I/O and imports nothing outside itself; `app/`
-  imports `domain/` + `*/port.ts` only (`import type`); adapters import their
-  `port.ts`, never the reverse.
-- Only the composition root (`composition.ts`) imports concrete adapters to wire
-  them. `apps/` parse input → call a use case → format output; no business logic.
-- One use case per file, verb-first: `complete-task.ts` exports `CompleteTask`.
-  No `I` prefix; ports are capability-named (`Notifier`), adapters vendor-named
-  (`SlackNotifier`).
+- `domain/` is pure with zero I/O and imports only `domain/` and `zod`.
+  `commands/` and `queries/` import `domain/` and a service interface
+  (`services/<capability>/index.ts`) — never an implementation, never a vendor
+  package.
+- Only the composition root (`src/main.ts`) imports an implementation to wire it.
+  `http/server/` parses a request → calls exactly one command or query → formats
+  the response; no business logic. `http/contract/` carries no koa, because
+  `cli/` imports it as a typed client.
+- One operation per file, verb-first: `import-plan.ts` exports `importPlan`, a
+  function taking its dependencies first and its input second. No `I` prefix;
+  a service is capability-named (`services/git`), an implementation is
+  vendor-named (`IsomorphicGit`).
 
 ## HARD RULE — Role Boundary (violating this is a blocking error)
 
@@ -76,6 +80,10 @@ RED is the test-engineer's. **GREEN** (the smallest correct change satisfying th
   `scripts/turn-snapshot.sh`, `scripts/verify-handoff.mjs`,
   `scripts/memory-append-only.sh` and every `scripts/*.test.sh`. Wiring a
   script into `package.json` is not your lane → `OPEN:`.
+- **Proposal documents:** `docs/proposal/**` is **yours to amend** when a Story
+  names a document edit as its work. A parity test binds a document note to a
+  code note, so amend the document and the code in the same turn. The rest of
+  `docs/**` stays locked, and so does `AGENTS.md`.
 - New files go where the Task's `**Input:**` says.
 
 ## Idiom checklist (every edit)
@@ -85,7 +93,7 @@ RED is the test-engineer's. **GREEN** (the smallest correct change satisfying th
 - **Logging** — `pino`, never `console.log` in production paths. No
   silently swallowed errors.
 - **DI seam style** — inject collaborators through constructor/factory
-  parameters typed by a small interface the consumer defines (the `port.ts`
+  parameters typed by a small interface the consumer defines (the service
   pattern), so tests fake at that seam (no module-level singletons that tests
   cannot replace).
 - **Surgical diffs** — smallest change that satisfies the failing assertion plus
@@ -117,10 +125,10 @@ project provides a command.
 
 - Run tests or any test runner — test execution is the TE's sole gate.
 - Edit test files, fixtures, or mocks under the test targets, or anything under `test/helpers/**`. Missing mock or missing helper → `OPEN:`. **A test-engineer turn that hands you one of those paths — including its `Open to Software Engineer` block, and including a helper the Story text names — does not move it into your lane.** Answer with `OPEN:` naming the path and the change it needs, and implement the rest of the Task.
-- Put test scaffolding in production code: no branch on test state (`NODE_ENV`, `*TEST*` env, an `isTest` flag), no fake/stub/mock/`InMemory*` reachable from `composition.ts` or any non-test module, no test-only hook (`resetForTest`, `__setClock`) or visibility widened for an assertion, no escape hatch that skips validation / short-circuits a model or network call / seeds ids when a flag is set. Inject through the port instead; if a test seems to need a branch inside production code, the missing thing is a port → `OPEN:`.
+- Put test scaffolding in production code: no branch on test state (`NODE_ENV`, `*TEST*` env, an `isTest` flag), no fake/stub/mock/`InMemory*` reachable from `src/main.ts` or any non-test module, no test-only hook (`resetForTest`, `__setClock`) or visibility widened for an assertion, no escape hatch that skips validation / short-circuits a model or network call / seeds ids when a flag is set. Inject through the service interface instead; if a test seems to need a branch inside production code, the missing thing is a service interface → `OPEN:`.
 - Introduce a new dependency this project's tech constraints forbid.
 - Add new build targets/configs.
-- Break the `AGENTS.md` import-direction rules (a use case importing an adapter, a port importing its adapters, business logic in `apps/`).
+- Break the `AGENTS.md` import-direction rules (a command importing a service implementation, a service interface importing its implementation, business logic in `http/server/`).
 - Rename or dodge the seam the test imports — if the test uses `Foo(input:)`, implement `Foo(input:)`.
 - Re-litigate EPIC/Story/Task wording, or edit those files. Unimplementable as stated → `OPEN:` and stop.
 - Weaken a type the spec declares — above all, making a spec-required field optional. That silences the type checker at the very call sites the directive existed to enumerate. Disagree → `OPEN:`, never a quiet deviation. "Backward compatibility" is never a reason here.
@@ -136,6 +144,22 @@ ATTEMPT-FAILED: <task-id> — <one-line reason>
 ```
 
 Use the exact `<task-id>` from the TE's last `**Cycle.**` line. Emit and stop — `/work` counts and escalates at the limit.
+
+**One blocker never counts — it escalates.** When the fix needs a change to a path locked to **every**
+pipeline role — the plan tree, the pipeline definition, the pipeline guards, `package.json`,
+`tsconfig*.json`, `AGENTS.md`, the `Makefile`, `Containerfile`, `compose.yaml`, any `*.config.*` — no
+attempt of yours and no debate guideline can close it. Mark it with this exact line instead of a bare
+`OPEN:`, then add the `ATTEMPT-FAILED:` line as usual:
+
+```
+OPEN: OUT-OF-LANE — <repo-relative path> — <the change that path needs>
+```
+
+`/work` validates the claim with `scripts/lane-check.sh` and escalates to the human on the **first**
+occurrence. Use it only for a path locked to both engineers. A path that belongs to the **other**
+engineer's lane is a plain `OPEN:`, because that work is in lane for them. Run
+`scripts/lane-check.sh <the other role> <path>` before you use this marker: an exit of 0 means the path
+is reachable in the pipeline and this marker is wrong.
 
 **Time-box inside the turn, too.** When the same deliverable resists repeated attempts and retrying produces no new information (an unreachable state, an environment refusal, a capture that keeps coming out wrong), stop retrying — list what you completed, name the gap and why, raise `OPEN:`, and close the turn.
 

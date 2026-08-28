@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+# A git hook exports GIT_DIR, GIT_INDEX_FILE and friends. Those variables
+# override "git -C", so every git call below would resolve to the caller's
+# repository instead of the temporary one, and would corrupt it. Clear them
+# before the first git call.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_QUARANTINE_PATH \
+  GIT_PREFIX GIT_CONFIG GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
+
 here=$(cd "$(dirname "$0")" && pwd)
 guard="$here/memory-append-only.sh"
 failures=0
@@ -14,15 +22,13 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 git -C "$work" init -q
-git -C "$work" config user.email guard@test
-git -C "$work" config user.name guard
 mkdir -p "$work/.agents/tdd/history" "$work/.agents/tdd/memory/test-engineer"
 journal="$work/.agents/tdd/memory/test-engineer/2026-08-05.md"
 channel="$work/.agents/tdd/history/2026-08-05-006-git-primitives.md"
 printf '# journal\nfirst entry\n' >"$journal"
 printf '# channel\nEND: TEST-ENGINEER\n' >"$channel"
 git -C "$work" add -A
-git -C "$work" commit -qm base
+git -C "$work" -c user.email=guard@test -c user.name=guard commit -qm base
 
 expect() {
   local want=$1 what=$2

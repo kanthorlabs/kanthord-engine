@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=24",
+    "node": ">=24.15.0",
     "npm": ">=11.18.0"
   },
   "packageManager": "npm@11.18.0",
@@ -25,9 +25,9 @@
     "format": "prettier --write src test scripts docs eslint.config.js",
     "lint": "eslint .",
     "start": "node src/main.ts",
-    "verify": "npm run format && npm run typecheck && npm test && npm run lint && node scripts/verify-db-status.ts",
+    "verify": "npm run format && npm run typecheck && npm test && npm run lint && node scripts/verify-db-status.ts && npm run verify:guards",
     "verify:handoff": "node scripts/verify-handoff.mjs",
-    "verify:guards": "scripts/lane-check.test.sh && scripts/turn-snapshot.test.sh && scripts/memory-append-only.test.sh",
+    "verify:guards": "scripts/lane-check.test.sh && scripts/turn-snapshot.test.sh && scripts/memory-append-only.test.sh && scripts/persona-sync.test.sh",
     "contract:publish": "node scripts/publish-contract.ts",
     "prepare": "husky"
   },
