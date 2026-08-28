@@ -118,13 +118,14 @@ submission on an empty field then strands the human on a login that already succ
 
 The engine's side is handled: an absent `code` succeeds when the flow already resolved, and refuses
 `code-required` only while it is still waiting. The engine cannot make the browser miss the callback,
-so the recovery has to be in the UI.
+so the property the engine needs is that a human who has no code can still reach `complete`. How the
+screen offers that is yours.
 
 **What the engine does in the meantime**: ships the operation accepting an absent `code`. Nothing on
 the engine side blocks.
 
 **Cost of a late answer**: none to the engine, and a broken login for every same-machine human until
-the dashboard ships the submit.
+the dashboard can submit without a code.
 
 ---
 
@@ -178,9 +179,10 @@ credential-rejected          model-unavailable         quota-exceeded
 endpoint-rejected            empty-remote
 ```
 
-Two of them need distinct messages rather than a generic failure. `quota-exceeded` and
-`model-unavailable` both arrive with `authentication: "accepted"`, so a human must be told the key is
-fine and something else is wrong. `empty-remote` means push a first commit, not fix the credential.
+Three of them carry a cause a human acts on differently from a generic failure. `quota-exceeded` and
+`model-unavailable` both arrive with `authentication: "accepted"`, so the credential is good and
+something else is wrong. `empty-remote` means the remote has no commit, so the credential is not the
+problem. The engine needs those three distinguishable to the human; the wording is yours.
 
 **What the engine does in the meantime**: keeps `details.refusal` an open string, as you asked, so a
 new cause is never a breaking change.

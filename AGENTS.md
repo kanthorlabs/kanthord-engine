@@ -123,32 +123,41 @@ The same input produces the same output, the same order and the same bytes. Two 
 - A test asserts a value, never "some value". A timestamp in a snapshot is a defect.
 - **A story that cannot be made deterministic is a planning defect.** Fix the story. Never push the decision onto the implementing agent.
 
-## HANDOFF.md
+## Handoff
 
-`HANDOFF.md` is a register of open requests, not a record of answers. `engine/HANDOFF.md` holds what
-the engine needs from the dashboard team, and `apps/HANDOFF.md` holds what the dashboard needs from
-the engine. Each side writes its own file and reads the other's.
+`HANDOFF.md` addresses the dashboard team. It is a request document, not a record. `apps/HANDOFF.md`
+is their document, in the other direction, and the engine reads it.
 
-Four rules govern a write.
-
-- **An entry is a request, and nothing else is an entry.** A request names something the writer cannot
-  do without the other team: a decision that is theirs, an obligation they must take on, or a
-  confirmation the writer's design depends on. An answer, a delivered contract, a status report and a
-  reply to a resolved entry are all not entries.
-- **Validate every entry before writing, and delete each resolved one completely.** Read the other
-  side's `HANDOFF.md`, then check the repository for each request it makes and each request this file
-  still carries. A request the code, an epic or a merged decision now satisfies is deleted — not
-  struck through, not marked resolved, not moved to a history section. The reader must never re-read a
-  settled question.
-- **The answer lives where behaviour lives.** A resolved request leaves the register and survives as
-  the epic that carries it, `docs/proposal/`, and the published OpenAPI document. Never keep a copy of
-  the answer in `HANDOFF.md` so the other team can find it.
-- **A request survives until the work lands, not until it is answered.** A specified but unmerged epic
-  does not resolve the request that asked for it. Delete the entry when the epic merges.
-
-An entry carries the schema `apps/HANDOFF.md` defines: priority, status, the operation or decision it
-concerns, the shape it needs, the reason, and what the writer does in the meantime. Every claim about
-the other repository cites a file and a line.
+- **It carries only pending requests.** Write an entry for something the engine still needs from the
+  dashboard: a decision that is theirs, an obligation they must take on, or a confirmation an engine
+  design depends on. Write nothing else.
+- **An answer to `apps/HANDOFF.md` is never an entry.** When the engine resolves one of their gaps,
+  the epic carries the contract and `docs/proposal/` carries the behaviour. Do not write a reply
+  document, and do not restate a delivered contract here. A register of answers makes them read
+  settled questions to find the open one.
+- **Delete a resolved entry completely.** When the dashboard answers an entry, and the engine accepts
+  the answer, remove the entry. Do not keep it as history, do not mark it answered, and do not
+  summarise it. The epic, `docs/proposal/` and the published OpenAPI document are the record.
+- **A request lives until it is answered, not until an epic merges.** These entries ask a person to
+  decide or to commit. Shipping the epic that assumes the answer does not resolve the request, and no
+  script can see the reply. A reviewer deletes the entry at the next write.
+- **State the property, not the screen.** Name the behaviour the engine needs and the reason. Let the
+  dashboard choose the component, the copy and the flow. A stated screen invites a screen argument,
+  and the dashboard knows its own domain better.
+- **Read their document as prose, never as a spec.** A shape drafted in `apps/HANDOFF.md` is a
+  request, not a contract. The engine designs the operation id, the path segments, the schemas and the
+  refusals in `http/contract/` and `docs/proposal/`. Adopting a drafted shape verbatim ships a
+  contract nobody designed, and a drafted shape often cannot express the states the domain has.
+- **Verify every claim before you write it.** Cite the engine file and line for a constraint, and the
+  `apps/` file and line for a claim about the dashboard. A stale claim makes the dashboard build
+  around a limit that does not exist.
+- **One entry per request.** Each entry states its priority, what the engine needs, why the engine
+  cannot settle it, the default the engine proceeds on if no answer arrives, and what has to change if
+  the answer arrives late. State what is deliberately not requested when a wider change is the obvious
+  wrong answer.
+- **Engine-owned work never goes in it.** A defect in this repository belongs in
+  `.agents/plan/epics/` or `.agents/plan/pending/`. The dashboard team cannot act on it, and it makes
+  the requests harder to find.
 
 ## What is enforced, and by what
 
