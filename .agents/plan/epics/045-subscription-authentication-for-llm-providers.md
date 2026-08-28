@@ -86,7 +86,8 @@ answers it. Three facts fix the shape.
      discriminated challenge;
   2. `provider.loginComplete` — `POST /v1/provider/login/complete`, takes `{ loginId, code? }`,
      answers `{ loginId, models }`;
-  3. `provider.register` — gains an `oauth` arm taking `{ transport: "oauth", loginId, name,
+  3. `provider.loginCancel` — `POST /v1/provider/login/cancel`, takes `{ loginId }`, answers `204`;
+  4. `provider.register` — gains an `oauth` arm taking `{ transport: "oauth", loginId, name,
 defaultModel }`, and answers the existing `ProviderView`.
 
   `provider.register` stays the one place a provider row is created. A pending login is not a
@@ -94,7 +95,8 @@ defaultModel }`, and answers the existing `ProviderView`.
 
 - **The paths are the segment tuples the grammar admits, and the ids carry one dot.**
   `provider.loginStart` is `[resource("provider"), subresource("login")]`. `provider.loginComplete`
-  is `[resource("provider"), subresource("login"), action("complete")]`. `isLegalPath`
+  is `[resource("provider"), subresource("login"), action("complete")]`, and `provider.loginCancel`
+  is the same tuple with `action("cancel")`, which `actionSegments` already carries. `isLegalPath`
   (`src/http/contract/registry.ts:319-365`) forbids a `parameter` after a `subresource`, so the login
   id travels in the body and never in the path. The two ids follow `provider.setDefault`, which is
   the existing spelling for a two-word action.
@@ -126,7 +128,15 @@ defaultModel }`, and answers the existing `ProviderView`.
 - **The challenge is a two-arm discriminated response, fixed per login at `start`.**
 
   - `{ loginId, method: "manual-code", authUrl, instructions, expiresAt }`
-  - `{ loginId, method: "device-code", userCode, verificationUri, expiresAt }`
+  - `{ loginId, method: "device-code", userCode, verificationUri, expiresAt, pollIntervalMs }`
+
+- **The device arm reports the vendor's poll interval, and the dashboard's cadence never reaches the
+  vendor.** `pi-ai` polls the vendor inside the daemon on the vendor's own schedule, and
+  `provider.loginComplete` only reads the state of that in-process flow. So a dashboard that polls
+  faster than the interval costs one local request and no outbound call, and the engine applies no
+  rate limit of its own. The interval is guidance, not a gate: `pollIntervalMs` carries the
+  `intervalSeconds` of the `device_code` event in milliseconds, and it falls back to five seconds when
+  the vendor omits it.
 
 - **`provider.catalog` reports the capability, and reports only what is static.** Each catalogue
   provider gains one member, `oauth`, which is `null` for a vendor with no flow and otherwise
@@ -162,9 +172,28 @@ defaultModel }`, and answers the existing `ProviderView`.
   when the flow already resolved: the operation transitions to `completed` and answers the models. An
   absent `code` on a flow that is still suspended refuses `code-required`.
 
-- **A `completed` row is single-use, and a replay is a `404`.** `provider.register` deletes the row.
-  A second `complete` on a `completed` row refuses `login-already-complete`. A `loginId` that names no
-  row answers `not-found`.
+- **`provider.loginComplete` replays a completed login, so a lost response is recoverable.** The
+  `completed` row holds the credential and the exact model ids, so a second `complete` for the same
+  `loginId` answers the same `{ loginId, models }` rather than refusing. It makes no vendor call and it
+  changes no row. A `code` supplied to a `completed` row is ignored, because the credential already
+  exists. The row is the idempotency record, so the replay needs no `Idempotency-Key` and no stored
+  response, and the operation declares `idempotency: "memory"` only to join a concurrent duplicate.
+  Without this a dropped `200` strands the human: the engine holds a credential, the human holds no
+  model list, `provider.register` needs a `defaultModel` from that list, and a second `start` refuses
+  `login-in-progress` until the login expires.
+
+- **A consumed login is a `404`.** `provider.register` deletes the row, so a `loginId` replayed after
+  a successful registration answers `not-found`, as does one that never existed. The replay above is
+  bounded by the row's life.
+
+- **A human cancels a pending login, and the cancel states what it tears down.**
+  `provider.loginCancel` takes a `loginId`, aborts the live flow through its `AbortSignal`, lets
+  `pi-ai` close its callback server or stop its poll, and deletes the row in the same transaction. It
+  answers `204` and it is the only way to release a vendor before `expiresAt`. It is deliberately
+  explicit rather than a `start` that supersedes: an abandoned flow may still hold a live callback
+  that resolves later, so a silent supersede would race two flows for one vendor and could complete
+  the one the human abandoned. A cancel of a `completed` row deletes it and discards the credential,
+  because the human declined the registration. A `loginId` that names no row answers `not-found`.
 
 - **An expiry is a transition, and the transition happens once.** The first request that observes an
   expired row refuses `login-expired`, aborts the live flow through its `AbortSignal`, closes
@@ -244,28 +273,31 @@ defaultModel }`, and answers the existing `ProviderView`.
 6. **The store adapter writes a refreshed credential.** Extend the EPIC 044 `CredentialStore`
    adapter's `modify` path to re-encrypt and persist, inside one transaction, and append its event.
    Add the event type and payload. Extend its test.
-7. **Two commands drive the login.** Add `src/commands/provider/start-provider-login.ts` and
-   `src/commands/provider/complete-provider-login.ts` with their tests, covering the state
-   transitions, the two expiry rules, the expiry-deletes-and-aborts path, `login-in-progress`,
-   `login-lost`, `login-already-complete` and the per-arm code rules.
+7. **Three commands drive the login.** Add `src/commands/provider/start-provider-login.ts`,
+   `src/commands/provider/complete-provider-login.ts` and
+   `src/commands/provider/cancel-provider-login.ts` with their tests, covering the state transitions,
+   the completed replay, the two expiry rules, the shared abort-and-delete path that expiry and cancel
+   both use, `login-in-progress`, `login-lost` and the per-arm code rules.
 8. **`provider.register` gains the oauth arm.** Extend the command and its test to consume a
    `completed` login, re-encrypt the credential into the provider row and delete the login row in the
    same transaction.
 9. **`provider.catalog` reports the oauth capability.** Extend `services/model-catalog`, the
    `CatalogProvider` type and `src/queries/provider/read-catalog.ts` with the `oauth` member and the
    `loginLabel ?? name` fallback. Extend their tests.
-10. **The contract declares the two operations and the widened arm.** Extend
-    `src/http/contract/credential.ts` with `provider.loginStart`, `provider.loginComplete`, the
-    two-arm challenge, the `oauth` catalogue member, the `transport` field on both arms and the oauth
-    projection, plus examples. Extend the contract and registry tests.
-11. **The handlers route the two operations.** Add the two handlers and their tests, extend
+10. **The contract declares the three operations and the widened arm.** Extend
+    `src/http/contract/credential.ts` with `provider.loginStart`, `provider.loginComplete`,
+    `provider.loginCancel`, the two-arm challenge with `pollIntervalMs`, the `oauth` catalogue member,
+    the `transport` field on both arms and the oauth projection, plus examples. Extend the contract and
+    registry tests.
+11. **The handlers route the three operations.** Add the three handlers and their tests, extend
     `src/http/server/credential/refusals.ts` with the new refusals over the existing error codes, and
     bind the commands in `src/main.ts`.
 12. **The proposal records the flow.** Amend `docs/proposal/api/credential.md` and
     `docs/proposal/phase-2/providers-and-credentials.md` with the three-step flow, the derived vendor
-    set, the preference rule, the two challenge arms, the three login states, the two expiry rules,
-    the transport discriminator, the projection, and the statement that `pi-ai` owns the OAuth
-    protocol and the refresh.
+    set, the preference rule, the two challenge arms, the three login states, the completed replay,
+    the two expiry rules, the cancel and what it tears down, the poll interval and that the
+    dashboard's cadence reaches no vendor, the transport discriminator, the projection, and the
+    statement that `pi-ai` owns the OAuth protocol and the refresh.
 
 ## Verification gate
 
@@ -281,12 +313,14 @@ node --test \
   src/services/provider-auth/pi-ai.test.ts \
   src/commands/provider/start-provider-login.test.ts \
   src/commands/provider/complete-provider-login.test.ts \
+  src/commands/provider/cancel-provider-login.test.ts \
   src/commands/provider/register-provider.test.ts \
   src/queries/provider/read-catalog.test.ts \
   src/http/contract/credential.test.ts \
   src/http/contract/registry.test.ts \
   src/http/server/credential/start-provider-login.test.ts \
   src/http/server/credential/complete-provider-login.test.ts \
+  src/http/server/credential/cancel-provider-login.test.ts \
   src/main.test.ts \
   && echo "PASS EPIC-045"
 ```
@@ -325,7 +359,15 @@ Hermetic coverage required beyond the Proof:
   `completed`.
 - A successful `complete` leaves exactly one row, in state `completed`, holding a payload. A
   successful `register` leaves zero rows. Each is asserted by a row count.
-- A second `complete` on a `completed` row refuses `login-already-complete`, and the row is unchanged.
+- A second `complete` on a `completed` row answers a result deep-equal to the first, makes zero
+  outbound calls and leaves every column byte-identical. A third call answers the same again. A `code`
+  supplied on that replay changes nothing.
+- The device challenge carries `pollIntervalMs` equal to the event's `intervalSeconds` times one
+  thousand, asserted by value, and five thousand when the event omits it.
+- `provider.loginCancel` on a `pending` row aborts the double through its `AbortSignal`, answers `204`
+  and leaves zero rows. On a `completed` row it leaves zero rows and no provider row is written. On an
+  unknown `loginId` it answers `not-found`. A `start` for the same vendor immediately after a cancel
+  succeeds, which is the case `login-in-progress` otherwise refuses.
 - Replaying a `loginId` after a successful register answers `not-found`, and no second provider row
   exists.
 - A second `start` for a vendor with a `pending` row refuses `login-in-progress`, and no second row
