@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 
 import type { DaemonClient } from "../client.ts";
+import { comparePaths } from "../../domain/plan-path.ts";
 import { projectRepositoriesResponse } from "../../http/contract/project.ts";
 import { repositoryListResponse } from "../../http/contract/repository.ts";
 import { projectCommand } from "./index.ts";
@@ -57,10 +58,16 @@ export function registerProjectRepository(
           return;
         }
         const body = repositoryListResponse.parse(listResult.body);
+        const knownNames =
+          [...new Set(body.repositories.map((repository) => repository.name))]
+            .sort(comparePaths)
+            .join(",") || "<none>";
         for (const name of repositoryNames) {
           const matched = body.repositories.find((item) => item.name === name);
           if (matched === undefined) {
-            input.stderr(`kanthord: not-found: no repository named ${name}\n`);
+            input.stderr(
+              `kanthord: not-found: no repository named ${name}; known repositories: ${knownNames}\n`,
+            );
             input.fail();
             return;
           }

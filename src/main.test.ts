@@ -48,6 +48,7 @@ type Fixture = Readonly<{
 let home: TemporaryHome | undefined;
 let daemon: DaemonProcess | undefined;
 let port = 0;
+let configPath = "";
 let statusBeforeRun = "";
 
 const fixtures: Readonly<Record<string, Fixture>> = {
@@ -235,7 +236,7 @@ describe("src/main.test", () => {
     home = createTemporaryHome();
     try {
       port = await reservePort();
-      const configPath = home.writeConfig({
+      configPath = home.writeConfig({
         http: { port, allowedHosts: [`127.0.0.1:${port}`] },
       });
       const migrated = await runCli({
@@ -331,6 +332,39 @@ describe("src/main.test", () => {
     assert.match(result.stdout, /^kanthord: bind /m);
     assert.match(result.stdout, /^kanthord: health (ok|degraded)$/m);
     statusBeforeRun = result.stdout;
+  });
+
+  it("kanthord status uses discovered and explicit config for client fallback", async () => {
+    const discovered = await runCli({
+      args: ["status"],
+      cwd: home!.path,
+      env: {},
+    });
+
+    assert.equal(discovered.code, 0, discovered.stderr);
+    assert.equal(discovered.stderr, "");
+    assert.equal(
+      stripStarted(discovered.stdout),
+      stripStarted(statusBeforeRun),
+    );
+
+    const otherCwd = createTemporaryHome();
+    try {
+      const explicit = await runCli({
+        args: ["--config", configPath, "status"],
+        cwd: otherCwd.path,
+        env: {},
+      });
+
+      assert.equal(explicit.code, 0, explicit.stderr);
+      assert.equal(explicit.stderr, "");
+      assert.equal(
+        stripStarted(explicit.stdout),
+        stripStarted(statusBeforeRun),
+      );
+    } finally {
+      otherCwd.dispose();
+    }
   });
 
   it("kanthord run exits 220 with not-implemented and writes no stdout", async () => {

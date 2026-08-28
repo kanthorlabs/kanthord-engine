@@ -21,6 +21,7 @@ export type CommandRecorder = Readonly<{
   migrateCalls(): number;
   serveCalls(): number;
   writeFileCalls(): readonly Readonly<{ path: string; content: string }>[];
+  planWriteFileCalls(): readonly Readonly<{ path: string; content: string }>[];
   stdout(): string;
   stderr(): string;
   failures(): number;
@@ -88,6 +89,7 @@ export function createCommandRecorder(
 ): CommandRecorder {
   const requests: RecordedRequest[] = [];
   const writes: Array<Readonly<{ path: string; content: string }>> = [];
+  const planWrites: Array<Readonly<{ path: string; content: string }>> = [];
   let migrations = 0;
   let serves = 0;
   let output = "";
@@ -125,6 +127,33 @@ export function createCommandRecorder(
     discard: () => undefined,
   });
 
+  const planFs =
+    options.fs ??
+    ({
+      readDirectory: () => {
+        throw new Error("the command recorder fs must never be called");
+      },
+      readFile: () => {
+        throw new Error("the command recorder fs must never be called");
+      },
+      writeFile: () => {
+        throw new Error("the command recorder fs must never be called");
+      },
+      makeDirectory: () => {
+        throw new Error("the command recorder fs must never be called");
+      },
+      removeFile: () => {
+        throw new Error("the command recorder fs must never be called");
+      },
+    } satisfies PlanDirectoryDependencies);
+  const recordedPlanFs: PlanDirectoryDependencies = {
+    ...planFs,
+    writeFile: (path, content) => {
+      planWrites.push({ path, content });
+      planFs.writeFile(path, content);
+    },
+  };
+
   const dependencies: ProgramDependencies = {
     env: {},
     fetch,
@@ -156,23 +185,7 @@ export function createCommandRecorder(
       (() => {
         throw new Error("the command recorder readFile must never be called");
       }),
-    fs: options.fs ?? {
-      readDirectory: () => {
-        throw new Error("the command recorder fs must never be called");
-      },
-      readFile: () => {
-        throw new Error("the command recorder fs must never be called");
-      },
-      writeFile: () => {
-        throw new Error("the command recorder fs must never be called");
-      },
-      makeDirectory: () => {
-        throw new Error("the command recorder fs must never be called");
-      },
-      removeFile: () => {
-        throw new Error("the command recorder fs must never be called");
-      },
-    },
+    fs: recordedPlanFs,
     migrate: () => {
       migrations += 1;
       return [];
@@ -180,6 +193,7 @@ export function createCommandRecorder(
     serve: async () => {
       serves += 1;
     },
+    loadClientConfig: () => undefined,
   };
 
   return {
@@ -201,6 +215,7 @@ export function createCommandRecorder(
     migrateCalls: () => migrations,
     serveCalls: () => serves,
     writeFileCalls: () => [...writes],
+    planWriteFileCalls: () => [...planWrites],
     stdout: () => output,
     stderr: () => errors,
     failures: () => failures,

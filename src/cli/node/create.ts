@@ -9,6 +9,7 @@ import {
 } from "../../http/contract/graph.ts";
 import { exitCodeForError } from "../exit-code.ts";
 import { nodeCommand } from "./index.ts";
+import { printNodeWriteRefusal } from "./write-refusal.ts";
 
 export type NodeCreateCliInput = Readonly<{
   program: Command;
@@ -169,9 +170,7 @@ export function registerNodeCreate(input: NodeCreateCliInput): void {
           { id: options.project },
         );
         if (!createResult.ok) {
-          input.stderr(
-            `kanthord: ${createResult.code}: ${createResult.message}\n`,
-          );
+          printNodeWriteRefusal(createResult, input.stderr);
           input.exit(exitCodeForError(createResult.code, createResult.status));
           return;
         }

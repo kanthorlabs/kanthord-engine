@@ -47,6 +47,18 @@ Each choice branch carries `values`, the field values of the side that branch le
 
 **A `body` value is a pair of blob hashes, never prose.** It is `{ instructionBlob, acceptanceBlob }`, and `acceptanceBlob` is `null` when that side has no acceptance. The two sides resolve their text differently. The `database` hashes were written at import, so `blob.show` serves them. **A submitted hash is not in the blob store**, because `plan.validate` hashes and writes nothing, so `blob.show` cannot serve it; the submitted text is already in the same response, under `documents`. The entry's `path` member is the join key: it is the **canonical** path of the submitted document for a `both` or `document-only` entry, and `null` for a `database-only` entry, which has no document. It is the canonical path and not the authored one, because `documents` is the normalized set, so only the canonical path names a member of it.
 
+## Local plan conversion
+
+`kanthord plan convert --from <epic-file> --repo <repository-name> --to <directory>` converts one expanded EPIC into local plan-format Markdown. It reads no daemon state, makes no network request, performs no import and mints no identity.
+
+The EPIC basename supplies the `epicSlug`. The converter emits one initiative at `plan/<epicSlug>/initiative.md`, one objective per expanded Story, and one `01-implement.md` task below each objective. Story files match `NN-*.md`, and their path order is the Story order. Each objective names the supplied repository. Each objective after the first depends on the preceding objective. Tasks use `worker: "tdd@1"` and carry no repository or dependency.
+
+The initiative title is the EPIC heading and its instruction is the `## Goal` body. An objective title is its Story heading title, and its instruction names the source Story path. A task title is `Implement Story <N> — <title>`. Its instruction contains the Story `## Change` and `## Constraints` sections. Its acceptance criteria contain the `## Verify` body. Frontmatter uses canonical key order, double-quoted scalars, no `id`, LF and one final newline.
+
+The converter refuses a non-Markdown EPIC path, an invalid EPIC heading, an empty repository, a missing or empty `## Goal`, an empty or non-contiguous EPIC Stories list, a Story count mismatch, a duplicate, skipped or displaced Story prefix, a mismatched Story heading, and a missing or empty required Story section. It builds and validates every document before it writes. Existing output is not replaced; that refusal belongs to `plan convert`.
+
+The same source and repository produce the same paths, order and bytes. Existing output is Story 5's command concern. Conversion writes local files only and does not invoke `plan.import`.
+
 ## `plan.import`
 
 The body holds every plan document as a path-and-content pair, plus `fromRevision`, `importId` and `choices`. The human and the daemon share no file system, so the documents travel in the body and no field names a server path. The relative path stays in the body because `depends_on` resolves against it before identities exist.
@@ -120,6 +132,8 @@ The response holds identity, kind, title, state, block reason, discard reason, t
 
 The filters this route will take are `project`, `kind`, `state`, `blockReason` and `repository`. They are recorded here so the shape is fixed when the mechanism arrives. **`node.list` is the cross-project overview and it filters an unindexed full read.** **`project.nodes` is the per-project read that filters an indexed project range, so a rich filter belongs on the second.**
 
+CLI help lists the closed state vocabulary. A `ready` task is claimable, and `running` can describe an active ancestor after task recovery. `work` is not a state.
+
 ## `node.show`
 
 Adds the instruction and the acceptance criteria as blob hashes, the bound worker, the repository on an objective, and the revision that last wrote the node. A task always carries an acceptance hash, because `re@1` judges against it; an initiative and an objective never do.
@@ -184,5 +198,7 @@ A structural finding is `422 plan-invalid`. A structural edit of a node outside 
 Deletes one node and its containment subtree, together with every edge touching the subtree. The body carries `fromRevision`, the project revision the guard compares. The response holds the new project revision as `revision`, the deleted identities as `deleted`, and the completeness findings as `completeness`.
 
 A structural finding is `422 plan-invalid`. A subtree node outside `pending`, `ready` and `blocked` is `409 illegal-transition`, and `details.nodes` names each one. A subtree node that an execution row references, or a subtree edge holding `waived_at`, is `409 binding-in-use`, and `details.blockers` lists what blocks it.
+
+The structural-finding behavior applies to `node.create`, `node.update` and `node.delete`. The CLI prints the generic `plan-invalid` line followed by every `details.findings` member in response order.
 
 Two concurrency classes exist. A field-only update carries the node revision. A create, a topology change and a delete carry the project revision. A mismatch is `409 stale-revision`, and `details.guard` names the class. A structural finding refuses the write with `422 plan-invalid`. It refuses at `plan.import` and at every per-node write. A completeness finding refuses nothing. It travels in the success body under `completeness`. The two completeness codes are `initiative-without-objective` and `objective-without-task`.

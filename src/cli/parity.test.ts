@@ -63,6 +63,7 @@ const fakeDependencies = (): ProgramDependencies => ({
   serve: async () => {
     throw new Error("the fake serve must never be called");
   },
+  loadClientConfig: () => undefined,
 });
 
 describe("src/cli/parity.test", () => {
@@ -102,6 +103,7 @@ describe("src/cli/parity.test", () => {
       "node show",
       "node unblock",
       "node update",
+      "plan convert",
       "plan export",
       "plan import",
       "project create",
@@ -156,7 +158,7 @@ describe("src/cli/parity.test", () => {
         .filter((entry) => entry.operationIds.length === 0)
         .map((entry) => entry.path.join(" "))
         .sort(),
-      ["config generate", "db migrate", "serve"],
+      ["config generate", "db migrate", "plan convert", "serve"],
     );
   });
 

@@ -87,6 +87,32 @@ describe("test/helpers/command-recorder.test", () => {
     assert.equal(recorder.migrateCalls(), 1);
   });
 
+  it("records plan document writes separately from config writes", async () => {
+    const recorder = createCommandRecorder({
+      respond: (request) =>
+        request.operationId === "plan.export"
+          ? { revision: null, documents: [{ path: "plan/a.md", content: "a" }] }
+          : {},
+      fs: {
+        readDirectory: () => [],
+        readFile: () => "",
+        writeFile: () => undefined,
+        makeDirectory: () => undefined,
+        removeFile: () => undefined,
+      },
+    });
+
+    await recorder.run(["plan", "export", "--project", "project_test"]);
+
+    assert.deepEqual(recorder.writeFileCalls(), []);
+    assert.deepEqual(recorder.planWriteFileCalls(), [
+      {
+        path: "/tmp/kanthord-command-recorder/plan/a.md",
+        content: "a",
+      },
+    ]);
+  });
+
   it("issues no network request", async () => {
     const recorder = createCommandRecorder({ respond });
 

@@ -2,11 +2,17 @@ import fs from "node:fs";
 
 import type { Command } from "commander";
 
-import { isLoopbackUrl } from "../domain/loopback.ts";
+import { isLoopbackUrl, LOOPBACK_IPV4 } from "../domain/loopback.ts";
 
 export type ClientOptions = Readonly<{
   baseUrl: string | undefined;
   token: string | undefined;
+}>;
+
+export type ClientConfigDefaults = Readonly<{
+  bind: string;
+  port: number;
+  token: string;
 }>;
 
 export type CliErrorCode =
@@ -29,7 +35,22 @@ export class CliError extends Error {
 export type ResolveInput = Readonly<{
   program: Command;
   env: Readonly<Record<string, string | undefined>>;
+  loadConfig?: () => ClientConfigDefaults | undefined;
 }>;
+
+export function clientBaseUrl(defaults: ClientConfigDefaults): string {
+  const host =
+    defaults.bind === "0.0.0.0"
+      ? LOOPBACK_IPV4
+      : defaults.bind === "::"
+        ? "[::1]"
+        : defaults.bind.startsWith("[") && defaults.bind.endsWith("]")
+          ? defaults.bind
+          : defaults.bind.includes(":")
+            ? `[${defaults.bind}]`
+            : defaults.bind;
+  return `http://${host}:${defaults.port}`;
+}
 
 export function registerClientOptions(program: Command): void {
   program
@@ -38,11 +59,19 @@ export function registerClientOptions(program: Command): void {
     .option(
       "--api-token-file <path>",
       "file containing the bearer token for the daemon",
+    )
+    .addHelpText(
+      "after",
+      "\nClient environment variables: KANTHORD_BASE_URL, KANTHORD_TOKEN, KANTHORD_API_TOKEN_FILE.\nClient connection precedence: flags > environment > discovered config.\n",
     );
 }
 
 function trimSingleTrailingNewline(value: string): string {
   return value.endsWith("\n") ? value.slice(0, -1) : value;
+}
+
+function nonEmpty(value: string | undefined): string | undefined {
+  return value === undefined || value.length === 0 ? undefined : value;
 }
 
 export function resolveClientOptions(input: ResolveInput): ClientOptions {
@@ -51,12 +80,14 @@ export function resolveClientOptions(input: ResolveInput): ClientOptions {
     token?: string;
     apiTokenFile?: string;
   }>;
-  const baseUrl = opts.baseUrl ?? input.env.KANTHORD_BASE_URL;
-  const token = opts.token ?? input.env.KANTHORD_TOKEN;
-  const tokenFile = opts.apiTokenFile ?? input.env.KANTHORD_API_TOKEN_FILE;
+  const baseUrl =
+    nonEmpty(opts.baseUrl) ?? nonEmpty(input.env.KANTHORD_BASE_URL);
+  const token = nonEmpty(opts.token) ?? nonEmpty(input.env.KANTHORD_TOKEN);
+  const tokenFile =
+    nonEmpty(opts.apiTokenFile) ?? nonEmpty(input.env.KANTHORD_API_TOKEN_FILE);
 
   let tokenFromFile: string | undefined;
-  if (tokenFile !== undefined && tokenFile.length > 0) {
+  if (tokenFile !== undefined) {
     let stat: fs.Stats;
     try {
       stat = fs.statSync(tokenFile);
@@ -77,17 +108,12 @@ export function resolveClientOptions(input: ResolveInput): ClientOptions {
         `--api-token-file must have mode 0600; found 0${octal}`,
       );
     }
-    tokenFromFile = trimSingleTrailingNewline(
-      fs.readFileSync(tokenFile, "utf-8"),
+    tokenFromFile = nonEmpty(
+      trimSingleTrailingNewline(fs.readFileSync(tokenFile, "utf-8")),
     );
   }
 
-  if (
-    token !== undefined &&
-    token.length > 0 &&
-    tokenFromFile !== undefined &&
-    tokenFromFile.length > 0
-  ) {
+  if (token !== undefined && tokenFromFile !== undefined) {
     throw new CliError(
       "cli-token-conflict",
       "--token and --api-token-file are both set; configure exactly one",
@@ -95,13 +121,16 @@ export function resolveClientOptions(input: ResolveInput): ClientOptions {
   }
 
   const resolvedToken = token ?? tokenFromFile;
+  const config =
+    baseUrl === undefined || resolvedToken === undefined
+      ? input.loadConfig?.()
+      : undefined;
+  const configToken = config === undefined ? undefined : nonEmpty(config.token);
+
   return {
     baseUrl:
-      baseUrl === undefined || baseUrl.length === 0 ? undefined : baseUrl,
-    token:
-      resolvedToken === undefined || resolvedToken.length === 0
-        ? undefined
-        : resolvedToken,
+      baseUrl ?? (config === undefined ? undefined : clientBaseUrl(config)),
+    token: resolvedToken ?? configToken,
   };
 }
 
@@ -111,7 +140,7 @@ export function requireBaseUrl(options: ClientOptions): string {
   }
   throw new CliError(
     "cli-base-url-missing",
-    "no daemon base url; set --base-url or KANTHORD_BASE_URL",
+    "no daemon base url; set --base-url, KANTHORD_BASE_URL or a discovered config",
   );
 }
 

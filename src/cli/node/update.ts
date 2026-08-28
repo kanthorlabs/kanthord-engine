@@ -11,6 +11,7 @@ import {
 import { comparePaths } from "../../domain/plan-path.ts";
 import { exitCodeForError } from "../exit-code.ts";
 import { nodeCommand } from "./index.ts";
+import { printNodeWriteRefusal } from "./write-refusal.ts";
 
 export type NodeUpdateCliInput = Readonly<{
   program: Command;
@@ -200,9 +201,7 @@ export function registerNodeUpdate(input: NodeUpdateCliInput): void {
           { id: options.id },
         );
         if (!updateResult.ok) {
-          input.stderr(
-            `kanthord: ${updateResult.code}: ${updateResult.message}\n`,
-          );
+          printNodeWriteRefusal(updateResult, input.stderr);
           input.exit(exitCodeForError(updateResult.code, updateResult.status));
           return;
         }

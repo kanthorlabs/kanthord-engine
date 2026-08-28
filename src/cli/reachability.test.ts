@@ -6,13 +6,14 @@ import {
   createCommandRecorder,
   type RecordedRequest,
 } from "../../test/helpers/command-recorder.ts";
+import type { PlanDirectoryDependencies } from "./plan/directory.ts";
 import { commandPaths, declaredCommands } from "./inventory.ts";
 
 type Row = Readonly<{
   path: readonly string[];
   argv: readonly string[];
   operationIds: readonly string[];
-  effect?: "migrate" | "serve" | "writeFile";
+  effect?: "migrate" | "planWrite" | "serve" | "writeFile";
 }>;
 
 const ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -118,6 +119,97 @@ const objectiveLease = {
 };
 
 const document = { path: "initiative.md", content: "# initiative\n" };
+
+const CONVERT_EPIC = `# EPIC 040 — Recorder conversion
+
+## Goal
+
+Record a local conversion.
+
+## Stories
+
+1. First recorder story
+2. Second recorder story
+`;
+
+const CONVERT_FIRST_STORY = `# Story 1 — First recorder story
+
+## Change
+
+Create the first recorder node.
+
+## Constraints
+
+Use the first recorder constraint.
+
+## Verify
+
+Check the first recorder result.
+`;
+
+const CONVERT_SECOND_STORY = `# Story 2 — Second recorder story
+
+## Change
+
+Create the second recorder node.
+
+## Constraints
+
+Use the second recorder constraint.
+
+## Verify
+
+Check the second recorder result.
+`;
+
+const CONVERT_EPIC_RELATIVE = "fixtures/epics/040-recorder.md";
+const CONVERT_EPIC_PATH = `/tmp/kanthord-command-recorder/${CONVERT_EPIC_RELATIVE}`;
+const CONVERT_STORY_ROOT =
+  "/tmp/kanthord-command-recorder/fixtures/stories/040-recorder";
+
+const convertFileSystem = (): PlanDirectoryDependencies => {
+  const files = new Map<string, string>([
+    [CONVERT_EPIC_PATH, CONVERT_EPIC],
+    [`${CONVERT_STORY_ROOT}/01-first.md`, CONVERT_FIRST_STORY],
+    [`${CONVERT_STORY_ROOT}/02-second.md`, CONVERT_SECOND_STORY],
+  ]);
+  const absent = (path: string): Error & { code: string } =>
+    Object.assign(new Error(`ENOENT: ${path}`), { code: "ENOENT" });
+  const readDirectory = (path: string): readonly string[] => {
+    if (path === CONVERT_STORY_ROOT) {
+      return ["02-second.md", "index.md", "01-first.md"];
+    }
+    const prefix = `${path}/`;
+    const names = new Map<string, boolean>();
+    for (const filePath of files.keys()) {
+      if (!filePath.startsWith(prefix)) continue;
+      const rest = filePath.slice(prefix.length);
+      if (rest.length === 0) continue;
+      const slash = rest.indexOf("/");
+      const name = slash === -1 ? rest : rest.slice(0, slash);
+      names.set(name, slash !== -1 || (names.get(name) ?? false));
+    }
+    if (names.size === 0) throw absent(path);
+    return [...names.entries()].map(([name, directory]) =>
+      directory ? `${name}/` : name,
+    );
+  };
+  return {
+    readDirectory,
+    readFile: (path) => {
+      const content = files.get(path);
+      if (content === undefined) throw absent(path);
+      return content;
+    },
+    writeFile: (path, content) => {
+      files.set(path, content);
+    },
+    makeDirectory: () => undefined,
+    removeFile: (path) => {
+      files.delete(path);
+    },
+  };
+};
 
 const responseFor = (request: RecordedRequest): unknown => {
   switch (request.operationId) {
@@ -433,6 +525,21 @@ const rows: readonly Row[] = [
     operationIds: ["node.show", "plan.revisions", "node.update"],
   },
   {
+    path: ["plan", "convert"],
+    argv: [
+      "plan",
+      "convert",
+      "--from",
+      CONVERT_EPIC_RELATIVE,
+      "--repo",
+      "atlas",
+      "--to",
+      "converted",
+    ],
+    operationIds: [],
+    effect: "planWrite",
+  },
+  {
     path: ["plan", "export"],
     argv: ["plan", "export", "--project", PROJECT_ID],
     operationIds: ["plan.export"],
@@ -550,7 +657,11 @@ describe("src/cli/reachability.test", () => {
         declared.operationIds,
         `row differs from inventory for ${rowName(row)}`,
       );
-      const recorder = createCommandRecorder(recorderOptions);
+      const recorder = createCommandRecorder(
+        row.effect === "planWrite"
+          ? { ...recorderOptions, fs: convertFileSystem() }
+          : recorderOptions,
+      );
       await recorder.run(row.argv);
       assertReachable(row, recorder.operationIds());
     }
@@ -602,22 +713,35 @@ describe("src/cli/reachability.test", () => {
     assert.deepEqual(recorder.operationIds(), ["event.list"]);
   });
 
-  it("config generate, db migrate and serve issue no request and record their own effect once", async () => {
-    for (const effect of ["writeFile", "migrate", "serve"] as const) {
+  it("local commands issue no request and record their own effect once", async () => {
+    for (const effect of [
+      "writeFile",
+      "migrate",
+      "serve",
+      "planWrite",
+    ] as const) {
       const row = rows.find((candidate) => candidate.effect === effect);
       assert.ok(row);
-      const recorder = createCommandRecorder(recorderOptions);
+      const recorder = createCommandRecorder(
+        effect === "planWrite"
+          ? { ...recorderOptions, fs: convertFileSystem() }
+          : recorderOptions,
+      );
       await recorder.run(row.argv);
       assert.deepEqual(recorder.operationIds(), [], rowName(row));
-      assert.equal(
-        effect === "writeFile"
-          ? recorder.writeFileCalls().length
-          : effect === "migrate"
-            ? recorder.migrateCalls()
-            : recorder.serveCalls(),
-        1,
-        rowName(row),
-      );
+      if (effect === "planWrite") {
+        assert.equal(recorder.planWriteFileCalls().length, 5, rowName(row));
+      } else {
+        assert.equal(
+          effect === "writeFile"
+            ? recorder.writeFileCalls().length
+            : effect === "migrate"
+              ? recorder.migrateCalls()
+              : recorder.serveCalls(),
+          1,
+          rowName(row),
+        );
+      }
     }
   });
 

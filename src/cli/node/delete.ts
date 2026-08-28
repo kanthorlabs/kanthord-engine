@@ -8,6 +8,7 @@ import {
 } from "../../http/contract/graph.ts";
 import { exitCodeForError } from "../exit-code.ts";
 import { nodeCommand } from "./index.ts";
+import { printNodeWriteRefusal } from "./write-refusal.ts";
 
 export type NodeDeleteCliInput = Readonly<{
   program: Command;
@@ -65,9 +66,7 @@ export function registerNodeDelete(input: NodeDeleteCliInput): void {
         { id: options.id },
       );
       if (!deleteResult.ok) {
-        input.stderr(
-          `kanthord: ${deleteResult.code}: ${deleteResult.message}\n`,
-        );
+        printNodeWriteRefusal(deleteResult, input.stderr);
         input.exit(exitCodeForError(deleteResult.code, deleteResult.status));
         return;
       }

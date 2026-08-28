@@ -10,7 +10,15 @@ import {
   type ServeOptions,
 } from "./program.ts";
 
-const fakeDependencies = (): {
+type FakeOverrides = Readonly<{
+  fetch?: typeof globalThis.fetch;
+  loadClientConfig?: () =>
+    Readonly<{ bind: string; port: number; token: string }> | undefined;
+}>;
+
+const fakeDependencies = (
+  overrides: FakeOverrides = {},
+): {
   dependencies: ProgramDependencies;
   serveCalls: readonly ServeOptions[];
   migrateCalls: readonly Readonly<{
@@ -35,10 +43,12 @@ const fakeDependencies = (): {
   const exitCodes: number[] = [];
   const dependencies: ProgramDependencies = {
     env: {},
-    fetch: async () => {
-      fetchCalls += 1;
-      throw new Error("the fake fetch must never be called");
-    },
+    fetch:
+      overrides.fetch ??
+      (async () => {
+        fetchCalls += 1;
+        throw new Error("the fake fetch must never be called");
+      }),
     cwd: "/tmp",
     username: "test-user",
     randomBytes,
@@ -93,6 +103,7 @@ const fakeDependencies = (): {
     serve: async (options) => {
       serveCalls.push(options);
     },
+    loadClientConfig: overrides.loadClientConfig ?? (() => undefined),
   };
   return {
     dependencies,
@@ -120,6 +131,18 @@ describe("src/cli/program.test", () => {
 
     assert.equal(program.name(), "kanthord");
     assert.equal(program.version(), KANTHORD_VERSION);
+  });
+
+  it("buildProgram registers plan convert, import and export once", () => {
+    const { dependencies } = fakeDependencies();
+    const program = buildProgram(dependencies);
+    const plan = program.commands.find((command) => command.name() === "plan");
+    assert.ok(plan, "the plan group exists");
+
+    assert.deepEqual(
+      plan.commands.map((command) => command.name()),
+      ["convert", "import", "export"],
+    );
   });
 
   it("registers the twelve declared top-level commands, sorted bytewise", () => {
@@ -187,6 +210,67 @@ describe("src/cli/program.test", () => {
     assert.equal(fetchCalls(), 0);
     assert.ok(stderrText().startsWith("kanthord: cli-base-url-missing: "));
     assert.deepEqual(exitCodes, [1]);
+  });
+
+  it("status uses the injected client configuration callback for base url and token", async () => {
+    let loadCalls = 0;
+    const requests: Array<Readonly<{ url: string; init: RequestInit }>> = [];
+    const fake = fakeDependencies({
+      loadClientConfig: () => {
+        loadCalls += 1;
+        return { bind: "daemon.test", port: 9123, token: "callback-token" };
+      },
+      fetch: async (input, init) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input.url;
+        requests.push({ url, init: init ?? {} });
+        return new Response(
+          JSON.stringify({
+            version: KANTHORD_VERSION,
+            bind: "daemon.test:9123",
+            startedAt: "2026-08-28T00:00:00.000Z",
+            status: "ok",
+            dependencies: [],
+            nodes: [],
+            repositories: [],
+            leases: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+    const program = buildProgram(fake.dependencies);
+
+    await run(program, ["status"]);
+
+    assert.equal(loadCalls, 1);
+    assert.equal(requests.length, 1);
+    const request = requests[0];
+    assert.ok(request);
+    assert.equal(request.url, "http://daemon.test:9123/v1/status");
+    const headers = request.init.headers as Readonly<Record<string, string>>;
+    assert.equal(headers.Authorization, "Bearer callback-token");
+  });
+
+  it("help does not load client configuration", async () => {
+    let loadCalls = 0;
+    const fake = fakeDependencies({
+      loadClientConfig: () => {
+        loadCalls += 1;
+        return { bind: "daemon.test", port: 9123, token: "callback-token" };
+      },
+    });
+    const program = buildProgram(fake.dependencies);
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    program.exitOverride();
+
+    await assert.rejects(() => run(program, ["--help"]));
+
+    assert.equal(loadCalls, 0);
   });
 
   it("two buildProgram calls return two distinct programs", () => {

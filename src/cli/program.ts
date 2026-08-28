@@ -15,7 +15,9 @@ import {
   requireBaseUrl,
   resolveClientOptions,
 } from "./options.ts";
+import type { ClientConfigDefaults } from "./options.ts";
 import type { PlanDirectoryDependencies } from "./plan/directory.ts";
+import { registerPlanConvert } from "./plan/convert.ts";
 import { registerPlanExport } from "./plan/export.ts";
 import { registerPlanImport } from "./plan/import.ts";
 import { registerProjectCreate } from "./project/create.ts";
@@ -71,6 +73,7 @@ export type ProgramDependencies = Readonly<{
     input: Readonly<{ home: string | undefined; config: string | undefined }>,
   ) => readonly AppliedMigrationLine[];
   serve: (options: ServeOptions) => Promise<void>;
+  loadClientConfig: (options: ServeOptions) => ClientConfigDefaults | undefined;
 }>;
 
 export function buildProgram(dependencies: ProgramDependencies): Command {
@@ -102,7 +105,19 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     });
 
   const clientFactory = (): ClientDependencies => {
-    const options = resolveClientOptions({ program, env: dependencies.env });
+    const globalOptions = program.opts() as Readonly<{
+      config?: string;
+      home?: string;
+    }>;
+    const options = resolveClientOptions({
+      program,
+      env: dependencies.env,
+      loadConfig: () =>
+        dependencies.loadClientConfig({
+          config: globalOptions.config,
+          home: globalOptions.home,
+        }),
+    });
     return {
       baseUrl: requireBaseUrl(options),
       token: options.token,
@@ -237,6 +252,14 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     stderr: dependencies.stderr,
     fail: dependencies.fail,
     exit: dependencies.exit,
+  });
+  registerPlanConvert({
+    program,
+    cwd: dependencies.cwd,
+    fs: dependencies.fs,
+    stdout: dependencies.stdout,
+    stderr: dependencies.stderr,
+    fail: dependencies.fail,
   });
   registerPlanImport({
     program,

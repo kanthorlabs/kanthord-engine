@@ -190,7 +190,7 @@ describe("src/cli/db/status.test", () => {
 
     assert.equal(
       h.stderrText(),
-      "kanthord: cli-base-url-missing: no daemon base url; set --base-url or KANTHORD_BASE_URL\n",
+      "kanthord: cli-base-url-missing: no daemon base url; set --base-url, KANTHORD_BASE_URL or a discovered config\n",
     );
     assert.deepEqual(h.exitCodes(), [1]);
     assert.deepEqual(h.fetchCalls, []);

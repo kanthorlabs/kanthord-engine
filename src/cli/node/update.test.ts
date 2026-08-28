@@ -114,6 +114,23 @@ const STALE: CallResult = {
   details: { guard: "node", expected: REVISION_C, actual: REVISION_B },
 };
 
+const PLAN_INVALID: CallResult = {
+  ok: false,
+  status: 422,
+  code: "plan-invalid",
+  message: "the plan is invalid",
+  details: {
+    findings: [
+      {
+        code: "path-invalid",
+        path: "plan/epic.md",
+        id: TASK,
+        message: "the path is invalid",
+      },
+    ],
+  },
+};
+
 const harness = (
   options: { script?: readonly CallResult[] } = {},
 ): {
@@ -480,5 +497,24 @@ describe("src/cli/node/update.test", () => {
       h.stderr(),
       "kanthord: stale-revision: the write names an older revision\n",
     );
+  });
+
+  it("node update prints plan-invalid findings and exits 160", async () => {
+    const h = harness({ script: [SHOW, PLAN_INVALID] });
+    await run(h.program, [
+      "node",
+      "update",
+      "--id",
+      TASK,
+      "--title",
+      "the new title",
+    ]);
+
+    assert.equal(
+      h.stderr(),
+      "kanthord: plan-invalid: the plan is invalid\n" +
+        "kanthord: plan-invalid: path-invalid plan/epic.md the path is invalid\n",
+    );
+    assert.deepEqual(h.exits(), [160]);
   });
 });

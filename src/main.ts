@@ -167,6 +167,7 @@ import { showActorHandler } from "./http/server/actor/show-actor.ts";
 import { revokeActorHandler } from "./http/server/actor/revoke-actor.ts";
 import { rotateActorTokenHandler } from "./http/server/actor/rotate-actor-token.ts";
 import { CliError } from "./cli/options.ts";
+import type { ClientConfigDefaults } from "./cli/options.ts";
 import type { MigrateHandler } from "./cli/db/migrate.ts";
 import type { PlanDirectoryDependencies } from "./cli/plan/directory.ts";
 import { buildProgram, type ServeOptions } from "./cli/program.ts";
@@ -706,6 +707,37 @@ async function serve(options: ServeOptions): Promise<void> {
   }
 }
 
+function loadClientConfig(
+  options: ServeOptions,
+): ClientConfigDefaults | undefined {
+  try {
+    const { settings } = new ConvictConfig().load({
+      explicitConfigPath: options.config,
+      homeOverride: options.home,
+      env: process.env,
+      cwd: process.cwd(),
+      homeDir: homedir(),
+      etcDir: "/etc",
+    });
+    return {
+      bind: settings.http.bind,
+      port: settings.http.port,
+      token: settings.http.token,
+    };
+  } catch (error) {
+    if (
+      error instanceof ConfigError &&
+      error.code === "config-not-found" &&
+      (options.config === undefined || options.config.length === 0) &&
+      (process.env.KANTHORD_CONFIG === undefined ||
+        process.env.KANTHORD_CONFIG.length === 0)
+    ) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 const migrate: MigrateHandler = (input) => {
   const home =
     input.home ??
@@ -813,6 +845,7 @@ try {
     readFile: (path) => readFileSync(path, "utf8"),
     migrate,
     serve,
+    loadClientConfig,
   });
   await program.parseAsync(process.argv);
 } catch (error) {

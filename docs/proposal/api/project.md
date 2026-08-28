@@ -33,6 +33,8 @@ A repository registers globally and a project binds it, so two projects can shar
 
 The MVP binds one repository per project. Multi-repository projects are deferred, so the daemon refuses a list longer than one entry. The route already carries the list, because the entity model does.
 
+The CLI resolves repository names from `repository.list`. An unknown exact name prints all known names deduplicated and bytewise-sorted before it writes nothing.
+
 ## `binding.worker.project`
 
 Worker binding precedence is project, then graph, then node. The most specific binding wins. This route sets the project level, which `../database/project.md` stores as the `worker` column. A binding operation may persist to a column; three levels of precedence need two columns and no extra table.

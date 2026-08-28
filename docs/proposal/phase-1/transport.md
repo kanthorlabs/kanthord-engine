@@ -11,6 +11,18 @@ The version compatibility policy — what `/v1` guarantees, what a client must t
 
 Which operation runs on which runtime is `runtime-capability-matrix.md`, not this file. It holds one row per routed operation, with a verdict for the Node daemon, for AWS Lambda and for Cloudflare Workers, and it is the source of truth for that question.
 
+## CLI connection resolution
+
+A client resolves the base URL and bearer token independently. Each value uses flags first, environment variables second, and discovered configuration last.
+
+The base URL uses `--base-url`, `KANTHORD_BASE_URL` and then the discovered configuration. The token uses `--token`, `KANTHORD_TOKEN`, `--api-token-file`, `KANTHORD_API_TOKEN_FILE` and then the discovered configuration. A direct token and a token file remain mutually exclusive when both contain a value.
+
+The client loads discovered configuration at most once, and only when the normalized base URL or token is absent. Help, version and a complete flag or environment configuration do not load it.
+
+The client renders the configured bind as local HTTP: `0.0.0.0` becomes `127.0.0.1`, `::` becomes `[::1]`, and other IPv6 binds use brackets. The result is `http://<host>:<port>`.
+
+The environment variables are `KANTHORD_BASE_URL`, `KANTHORD_TOKEN` and `KANTHORD_API_TOKEN_FILE`. Configuration fallback is local HTTP discovery only. It does not infer HTTPS or discover a remote daemon.
+
 ## The transport core and its runtime roots
 
 The transport splits in two. `src/http/server/**`, except `src/http/server/runtime/**`, is the Fetch-native core. No file in the core imports a `node:` builtin. The core uses Web APIs only: `Request`, `Response`, `Headers`, `TextEncoder`, `Uint8Array` and `crypto.subtle`.

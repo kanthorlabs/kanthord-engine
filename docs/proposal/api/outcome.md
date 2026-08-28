@@ -27,6 +27,8 @@ One route, and the node kind decides the behaviour. It repeats the one-path rule
 - A report on an initiative is `400 invalid-request`.
 - A task report admits a `harness` actor, an attestation admits a `harness` actor, and a close admits a `human` actor.
 
+The `node report` task CLI admits exactly these `--outcome` values, in this order: `accepted`, `rejected`, `failed` and `cancelled`. `accepted` requires `--object-id` and refuses `--reason`; `rejected` and `failed` require a non-empty `--reason` and refuse `--object-id`; `cancelled` admits an optional non-empty reason and refuses `--object-id`.
+
 ## One path for abandon
 
 `abandon task` and `abandon objective` are one route. The node kind decides the behaviour, and the client cannot pick the wrong one for the node it names.

@@ -144,8 +144,23 @@ describe("src/cli/project/repository.test", () => {
     assert.equal(h.failCalls(), 0);
   });
 
-  it("a name matching no repository writes the not-found line and records one call", async () => {
-    const h = harness();
+  it("a name matching no repository lists distinct known names once and records one list call", async () => {
+    const h = harness({
+      respond: (operationId) =>
+        operationId === "repository.list"
+          ? {
+              ok: true as const,
+              status: 200,
+              body: {
+                repositories: [
+                  repo("repo_zeta", "zeta"),
+                  repo("repo_alpha", "alpha"),
+                  repo("repo_zeta_again", "zeta"),
+                ],
+              },
+            }
+          : defaultRespond(operationId),
+    });
     await run(h.program, [
       "project",
       "repository",
@@ -156,10 +171,45 @@ describe("src/cli/project/repository.test", () => {
     ]);
 
     assert.equal(h.failCalls(), 1);
-    assert.equal(h.calls.length, 1);
+    assert.deepEqual(
+      h.calls.map((call) => call.operationId),
+      ["repository.list"],
+    );
     assert.equal(
       h.stderrText(),
-      "kanthord: not-found: no repository named nope\n",
+      "kanthord: not-found: no repository named nope; known repositories: alpha,zeta\n",
+    );
+    assert.equal(h.stdoutText(), "");
+  });
+
+  it("an unknown name with no repositories prints none and skips the write", async () => {
+    const h = harness({
+      respond: (operationId) =>
+        operationId === "repository.list"
+          ? {
+              ok: true as const,
+              status: 200,
+              body: { repositories: [] },
+            }
+          : defaultRespond(operationId),
+    });
+    await run(h.program, [
+      "project",
+      "repository",
+      "--id",
+      ID,
+      "--repository",
+      "nope",
+    ]);
+
+    assert.equal(h.failCalls(), 1);
+    assert.deepEqual(
+      h.calls.map((call) => call.operationId),
+      ["repository.list"],
+    );
+    assert.equal(
+      h.stderrText(),
+      "kanthord: not-found: no repository named nope; known repositories: <none>\n",
     );
     assert.equal(h.stdoutText(), "");
   });
@@ -232,7 +282,7 @@ describe("src/cli/project/repository.test", () => {
     assert.equal(h.calls.length, 1);
     assert.equal(
       h.stderrText(),
-      "kanthord: not-found: no repository named kanthord\n",
+      "kanthord: not-found: no repository named kanthord; known repositories: Kanthord\n",
     );
   });
 

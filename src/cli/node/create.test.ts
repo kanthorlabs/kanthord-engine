@@ -68,6 +68,23 @@ const STALE: CallResult = {
   details: { guard: "project", expected: REVISION_C, actual: REVISION_B },
 };
 
+const PLAN_INVALID: CallResult = {
+  ok: false,
+  status: 422,
+  code: "plan-invalid",
+  message: "the plan is invalid",
+  details: {
+    findings: [
+      {
+        code: "parent-missing",
+        path: null,
+        id: TASK,
+        message: "the parent node is missing",
+      },
+    ],
+  },
+};
+
 const harness = (
   options: { script?: readonly CallResult[] } = {},
 ): {
@@ -413,5 +430,32 @@ describe("src/cli/node/create.test", () => {
       h.stderr(),
       "kanthord: stale-revision: the write names an older revision\n",
     );
+  });
+
+  it("node create prints plan-invalid findings and exits 160", async () => {
+    const h = harness({ script: [REVISIONS, PLAN_INVALID] });
+    await run(h.program, [
+      "node",
+      "create",
+      "--project",
+      PROJECT,
+      "--kind",
+      "task",
+      "--title",
+      "Add the health route",
+      "--parent",
+      "objective_01HZY8QF3M4N5P6R7S8T9V0W1Z",
+      "--instruction",
+      INSTRUCTION_PATH,
+      "--acceptance",
+      ACCEPTANCE_PATH,
+    ]);
+
+    assert.equal(
+      h.stderr(),
+      "kanthord: plan-invalid: the plan is invalid\n" +
+        "kanthord: plan-invalid: parent-missing - the parent node is missing\n",
+    );
+    assert.deepEqual(h.exits(), [160]);
   });
 });

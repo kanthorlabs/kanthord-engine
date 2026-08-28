@@ -12,7 +12,9 @@ describe("src/cli/config/index.test", () => {
     command.outputHelp();
 
     assert.ok(
-      help.includes("Configuration search order at daemon start:"),
+      help.includes(
+        "Configuration search order for daemon start and client fallback:",
+      ),
       help,
     );
     assert.ok(help.includes("1. the --config <path> file"), help);
@@ -21,7 +23,9 @@ describe("src/cli/config/index.test", () => {
     assert.ok(help.includes("4. $XDG_CONFIG_HOME/kanthord/config.json"), help);
     assert.ok(help.includes("5. /etc/kanthord/config.json"), help);
     assert.ok(
-      help.includes("The daemon loads the first candidate that exists."),
+      help.includes(
+        "The daemon and a local client fallback load the first candidate that exists.",
+      ),
       help,
     );
   });

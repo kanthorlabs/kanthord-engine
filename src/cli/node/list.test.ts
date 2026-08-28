@@ -107,6 +107,65 @@ const run = async (
 };
 
 describe("src/cli/node/list.test", () => {
+  it("node list help names the closed vocabularies and recovery distinction", () => {
+    const h = harness();
+    const node = h.program.commands.find(
+      (command) => command.name() === "node",
+    );
+    assert.ok(node);
+    const list = node.commands.find((command) => command.name() === "list");
+    assert.ok(list);
+
+    const help = list.helpInformation();
+    let outputHelp = "";
+    list.configureOutput({
+      writeOut: (text) => {
+        outputHelp += text;
+      },
+    });
+    list.outputHelp();
+    const values = [
+      "initiative",
+      "objective",
+      "task",
+      "pending",
+      "ready",
+      "running",
+      "blocked",
+      "awaiting_approval",
+      "done",
+      "partial",
+      "discarded",
+      "attempt-limit",
+      "dependency-discarded",
+      "stale-base",
+      "dirty-recovery",
+      "e2e-failed",
+      "abandoned",
+    ];
+    let previous = -1;
+    for (const value of values) {
+      const position = help.indexOf(value);
+      assert.notEqual(position, -1, `missing help value ${value}`);
+      assert.ok(position > previous, `help value ${value} is out of order`);
+      previous = position;
+    }
+    assert.match(help, /node kind: initiative, objective, or task/);
+    assert.match(
+      help,
+      /node state: pending, ready, running, blocked,\s+awaiting_approval, done, partial, or discarded/,
+    );
+    assert.match(
+      help,
+      /block reason: attempt-limit, dependency-discarded,\s+stale-base, dirty-recovery, e2e-failed, or abandoned/,
+    );
+    assert.match(
+      outputHelp,
+      /ready task = claimable; running = active node or ancestor/,
+    );
+    assert.doesNotMatch(help, /\bwork\b/);
+  });
+
   it("node list calls node.list with no body, no parameters and no options", async () => {
     const h = harness();
     await run(h.program, ["node", "list"]);

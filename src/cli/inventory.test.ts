@@ -53,6 +53,7 @@ describe("src/cli/inventory.test", () => {
       "node show",
       "node unblock",
       "node update",
+      "plan convert",
       "plan export",
       "plan import",
       "project create",
@@ -95,6 +96,7 @@ describe("src/cli/inventory.test", () => {
       "node show",
       "node unblock",
       "node update",
+      "plan convert",
       "plan export",
       "plan import",
       "project create",
@@ -131,7 +133,7 @@ describe("src/cli/inventory.test", () => {
     );
     assert.deepEqual(
       empty.map((entry) => entry.path.join(" ")),
-      ["config generate", "db migrate", "serve"],
+      ["config generate", "db migrate", "plan convert", "serve"],
     );
   });
 
@@ -258,6 +260,7 @@ describe("src/cli/inventory.test", () => {
         "node show",
         "node unblock",
         "node update",
+        "plan convert",
         "project graph",
         "project list",
         "project node",

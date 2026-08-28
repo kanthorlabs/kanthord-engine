@@ -78,6 +78,23 @@ const STALE: CallResult = {
   details: { guard: "project", expected: REVISION_C, actual: REVISION_B },
 };
 
+const PLAN_INVALID: CallResult = {
+  ok: false,
+  status: 422,
+  code: "plan-invalid",
+  message: "the plan is invalid",
+  details: {
+    findings: [
+      {
+        code: "dependency-cycle",
+        path: "plan/epic/task.md",
+        id: TASK,
+        message: "the plan has a dependency cycle",
+      },
+    ],
+  },
+};
+
 const harness = (
   options: { script?: readonly CallResult[] } = {},
 ): {
@@ -224,5 +241,17 @@ describe("src/cli/node/delete.test", () => {
       h.stderr(),
       "kanthord: stale-revision: the write names an older revision\n",
     );
+  });
+
+  it("node delete prints plan-invalid findings and exits 160", async () => {
+    const h = harness({ script: [SHOW, REVISIONS, PLAN_INVALID] });
+    await run(h.program, ["node", "delete", "--id", TASK]);
+
+    assert.equal(
+      h.stderr(),
+      "kanthord: plan-invalid: the plan is invalid\n" +
+        "kanthord: plan-invalid: dependency-cycle plan/epic/task.md the plan has a dependency cycle\n",
+    );
+    assert.deepEqual(h.exits(), [160]);
   });
 });
