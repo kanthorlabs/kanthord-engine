@@ -97,4 +97,21 @@ describe("src/http/server/bytewise.test", () => {
     );
     assert.deepEqual(offenders, []);
   });
+
+  it('byteLength("") equals 0', () => {
+    assert.equal(byteLength(""), 0);
+  });
+
+  it('byteLength("abc") equals 3', () => {
+    assert.equal(byteLength("abc"), 3);
+  });
+
+  it('byteLength("é") equals 2 and byteLength("€") equals 3', () => {
+    assert.equal(byteLength("é"), 2);
+    assert.equal(byteLength("€"), 3);
+  });
+
+  it('byteLength("\\u{1D11E}") equals 4', () => {
+    assert.equal(byteLength("\u{1D11E}"), 4);
+  });
 });

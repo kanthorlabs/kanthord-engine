@@ -1,87 +1,94 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 import { compareBytewise } from "./http/server/bytewise.ts";
 
-const repositoryRoot = resolve(import.meta.dirname, "..");
-const walkedRoots = ["src", "test", "scripts"] as const;
-const ownPath = relative(
-  repositoryRoot,
-  resolve(import.meta.dirname, "koa-absence.test.ts"),
-).replaceAll("\\", "/");
-
-function repositoryFiles(): readonly string[] {
-  const files: string[] = [];
-  const walk = (relativeDirectoryPath: string): void => {
-    const directory = resolve(repositoryRoot, relativeDirectoryPath);
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const relativePath = `${relativeDirectoryPath}/${entry.name}`;
-      if (entry.isDirectory()) {
-        walk(relativePath);
-      } else if (entry.isFile() && relativePath !== ownPath) {
-        files.push(relativePath);
+function collectRepoRelativePaths(): string[] {
+  const repoRoot = resolve(import.meta.dirname, "..");
+  const roots = ["src", "test", "scripts"] as const;
+  const collected: string[] = [];
+  for (const root of roots) {
+    const absoluteRoot = join(repoRoot, root);
+    function recurse(absoluteDir: string, relativeDir: string): void {
+      for (const entry of readdirSync(absoluteDir, { withFileTypes: true })) {
+        const absolutePath = join(absoluteDir, entry.name);
+        const relativePath = `${relativeDir}/${entry.name}`;
+        if (entry.isDirectory()) {
+          recurse(absolutePath, relativePath);
+        } else if (entry.isFile()) {
+          collected.push(relativePath);
+        }
       }
     }
-  };
-
-  for (const root of walkedRoots) {
-    walk(root);
+    recurse(absoluteRoot, root);
   }
-  return files.sort(compareBytewise);
-}
-
-function offendersFor(relativePath: string, source: string): readonly string[] {
-  return source
-    .split("\n")
-    .flatMap((line, index) =>
-      /koa/i.test(line) ? [`${relativePath}:${index + 1}`] : [],
-    );
-}
-
-function repositoryOffenders(): readonly string[] {
-  return repositoryFiles().flatMap((relativePath) =>
-    offendersFor(
-      relativePath,
-      readFileSync(resolve(repositoryRoot, relativePath), "utf8"),
-    ),
+  const filtered = collected.filter(
+    (path) => path !== "src/koa-absence.test.ts",
   );
+  filtered.sort(compareBytewise);
+  return filtered;
+}
+
+function collectOffenders(): string[] {
+  const repoRoot = resolve(import.meta.dirname, "..");
+  const paths = collectRepoRelativePaths();
+  const offenders: string[] = [];
+  for (const relativePath of paths) {
+    const absolutePath = join(repoRoot, relativePath);
+    const content = readFileSync(absolutePath, "utf8");
+    const lines = content.split("\n");
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index] as string;
+      if (/koa/i.test(line)) {
+        offenders.push(`${relativePath}:${index + 1}`);
+      }
+    }
+  }
+  return offenders;
+}
+
+function koaLineNumbers(content: string): number[] {
+  const lines = content.split("\n");
+  const result: number[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] as string;
+    if (/koa/i.test(line)) {
+      result.push(index + 1);
+    }
+  }
+  return result;
 }
 
 describe("src/koa-absence.test", () => {
   it("no file under src, test or scripts names koa", () => {
-    assert.deepEqual(repositoryOffenders(), []);
+    const offenders = collectOffenders();
+    assert.deepEqual(offenders, []);
   });
 
   it("a koa import is detected", () => {
-    assert.deepEqual(offendersFor("fixture.ts", 'import Koa from "koa";'), [
-      "fixture.ts:1",
-    ]);
+    const content = `import Koa from "koa";`;
+    const lines = koaLineNumbers(content);
+    assert.deepEqual(lines, [1]);
   });
 
   it("the case-insensitive form is detected", () => {
-    assert.deepEqual(
-      offendersFor(
-        "fixture.ts",
-        ["const app = createApp();", "const bridge = koaFromHono(app);"].join(
-          "\n",
-        ),
-      ),
-      ["fixture.ts:2"],
-    );
+    const content = `import { Hono } from "hono";\nconst bridge = koaFromHono(app);`;
+    const lines = koaLineNumbers(content);
+    assert.deepEqual(lines, [2]);
   });
 
   it("the test excludes itself", () => {
-    const files = repositoryFiles();
-    assert.equal(files.includes("src/koa-absence.test.ts"), false);
-    assert.equal(files.includes("src/main.ts"), true);
+    const paths = collectRepoRelativePaths();
+    assert.equal(paths.includes("src/koa-absence.test.ts"), false);
+    assert.equal(paths.includes("src/main.ts"), true);
   });
 
   it("the three roots are walked", () => {
-    const files = repositoryFiles();
-    assert.equal(files.includes("src/main.ts"), true);
-    assert.equal(files.includes("test/helpers/agent.ts"), true);
-    assert.equal(files.includes("scripts/lane-check.sh"), true);
+    const paths = collectRepoRelativePaths();
+    assert.equal(paths.includes("src/main.ts"), true);
+    assert.equal(paths.includes("test/helpers/agent.ts"), true);
+    assert.equal(paths.includes("scripts/lane-check.sh"), true);
   });
 });

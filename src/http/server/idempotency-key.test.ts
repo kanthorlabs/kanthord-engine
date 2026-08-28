@@ -194,13 +194,13 @@ describe("src/http/server/idempotency-key.test", () => {
 
   describe("fingerprint", () => {
     it("returns 64 lowercase hex characters", async () => {
-      const result = fingerprint({
+      const result = await fingerprint({
         method: "POST",
         path: "/v1/project",
         query: "",
         rawBody: "{}",
       });
-      assert.match(await result, /^[0-9a-f]{64}$/);
+      assert.match(result, /^[0-9a-f]{64}$/);
     });
 
     it("is deterministic for identical input", async () => {
@@ -263,10 +263,7 @@ describe("src/http/server/idempotency-key.test", () => {
 
     it("non-ASCII bytes survive the length prefix", async () => {
       const base = { method: "POST", path: "/v1/project", query: "" };
-      const withAccent = await fingerprint({
-        ...base,
-        rawBody: '{"n":"é"}',
-      });
+      const withAccent = await fingerprint({ ...base, rawBody: '{"n":"é"}' });
       const withoutAccent = await fingerprint({
         ...base,
         rawBody: '{"n":"e"}',
@@ -278,32 +275,20 @@ describe("src/http/server/idempotency-key.test", () => {
 
     it("the length prefix prevents repartitioning across fields", async () => {
       assert.notEqual(
-        await fingerprint({
-          method: "AB",
-          path: "C",
-          query: "",
-          rawBody: "",
-        }),
-        await fingerprint({
-          method: "A",
-          path: "BC",
-          query: "",
-          rawBody: "",
-        }),
+        await fingerprint({ method: "AB", path: "C", query: "", rawBody: "" }),
+        await fingerprint({ method: "A", path: "BC", query: "", rawBody: "" }),
       );
     });
 
-    it("returns the pinned fingerprint for a named request", async () => {
-      const input = {
+    it("pins the fingerprint for a known input", async () => {
+      const result = await fingerprint({
         method: "POST",
         path: "/v1/project",
         query: "",
         rawBody: '{"name":"alpha"}',
-      };
-      const result: unknown = fingerprint(input);
-      assert.ok(result instanceof Promise);
+      });
       assert.equal(
-        await result,
+        result,
         "66b93b3eabfa98df5795caabe974cdea65919a17be5586c784d59570c2e435e3",
       );
     });
@@ -457,6 +442,26 @@ describe("src/http/server/idempotency-key.test", () => {
         key: "k",
       };
       assert.equal(recordKey(input), recordKey(input));
+    });
+
+    it("sorts parameter names bytewise with non-ASCII names", () => {
+      const first = recordKey({
+        operationId: "x",
+        parameters: { "\u{1F600}": "2", "\uE000": "1" },
+        actorId: "actor_A",
+        key: "k",
+      });
+      const second = recordKey({
+        operationId: "x",
+        parameters: { "\uE000": "1", "\u{1F600}": "2" },
+        actorId: "actor_A",
+        key: "k",
+      });
+      assert.equal(first, second);
+      assert.equal(
+        first,
+        "x\uFFFD\uE000=1\u0001\u{1F600}=2\uFFFDactor_A\uFFFDk",
+      );
     });
   });
 

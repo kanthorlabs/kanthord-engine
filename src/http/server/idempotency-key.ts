@@ -49,10 +49,11 @@ export async function fingerprint(input: FingerprintInput): Promise<string> {
   const joined = parts
     .map((part) => `${byteLength(part)}:${part}`)
     .join("\u0001");
-  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(joined));
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
+  const data = encoder.encode(joined);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 export type RecordKeyInput = Readonly<{

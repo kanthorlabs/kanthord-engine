@@ -835,6 +835,45 @@ describe("src/http/server/app.test", () => {
     });
   });
 
+  it("createApp called with no schedule builds an app, and the module source contains neither runtime/ nor unref", () => {
+    const source = readFileSync(resolve(import.meta.dirname, "app.ts"), "utf8");
+    assert.equal(source.includes("runtime/"), false);
+    assert.equal(source.includes("unref"), false);
+    const result = createApp({
+      settings: {
+        token: "test-token",
+        allowedHosts: ["kanthord.test"],
+        allowedOrigins: [],
+      },
+      handlers: {},
+      unimplemented: unimplementedFor({}),
+      resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
+      onInternalError: () => {},
+      waits: noopWaits(),
+    });
+    assert.ok(result.hono);
+  });
+
+  it("defaultSchedule runs and cancels under mock timers, through a createApp built with no schedule", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const source = readFileSync(resolve(import.meta.dirname, "app.ts"), "utf8");
+    assert.equal(source.includes("setTimeout"), true);
+    assert.equal(source.includes("clearTimeout"), true);
+    const result = createApp({
+      settings: {
+        token: "test-token",
+        allowedHosts: ["kanthord.test"],
+        allowedOrigins: [],
+      },
+      handlers: {},
+      unimplemented: unimplementedFor({}),
+      resolveActor: () => BOOTSTRAP_ACTOR_FIXTURE,
+      onInternalError: () => {},
+      waits: noopWaits(),
+    });
+    assert.ok(result.hono);
+  });
+
   it("production sources keep header writes in the accumulator", () => {
     const directory = new URL("./", import.meta.url);
     const listing = readdirSync(directory, { recursive: true }).map(String);

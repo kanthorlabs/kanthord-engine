@@ -1,254 +1,269 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 
 import { compareBytewise } from "./bytewise.ts";
-
-type OffenderLists = Readonly<{
-  nodeBuiltins: readonly string[];
-  runtimeRoots: readonly string[];
-  runtimeVendors: readonly string[];
-}>;
-
-const coreRoot = resolve(import.meta.dirname);
-const sourceRoot = resolve(import.meta.dirname, "../..");
 
 function isExempt(relativeDirectoryPath: string): boolean {
   return relativeDirectoryPath === "runtime";
 }
 
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\r\n]*/g, "");
+function resolvesToRuntime(
+  importerRelativePath: string,
+  specifier: string,
+): boolean {
+  if (specifier.startsWith(".")) {
+    const importerDir = posix.dirname(importerRelativePath);
+    const resolved = posix.normalize(posix.join(importerDir, specifier));
+    return (
+      resolved === "http/server/runtime" ||
+      resolved.startsWith("http/server/runtime/")
+    );
+  }
+  return specifier.includes("http/server/runtime/");
 }
 
-function extractSpecifiers(source: string): readonly string[] {
+function stripComments(source: string): string {
+  const withoutBlock = source.replace(/\/\*[\s\S]*?\*\//g, "");
+  const withoutLine = withoutBlock.replace(/\/\/.*$/gm, "");
+  return withoutLine;
+}
+
+function extractSpecifiers(source: string): string[] {
   const stripped = stripComments(source);
-  const patterns = [
-    /\b(?:import|export)\b[\s\S]*?\bfrom\s*["']([^"']+)["']/g,
-    /\bimport\s*["']([^"']+)["']/g,
-    /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
-  ];
   const specifiers: string[] = [];
-  for (const pattern of patterns) {
-    for (const match of stripped.matchAll(pattern)) {
-      const specifier = match[1];
-      if (specifier !== undefined) {
-        specifiers.push(specifier);
-      }
-    }
+  const staticRe = /\b(?:import|export)\b[\s\S]*?\bfrom\s*["']([^"']+)["']/g;
+  const sideEffectRe = /\bimport\s*["']([^"']+)["']/g;
+  const dynamicRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = staticRe.exec(stripped)) !== null) {
+    specifiers.push(match[1] as string);
+  }
+  while ((match = sideEffectRe.exec(stripped)) !== null) {
+    specifiers.push(match[1] as string);
+  }
+  while ((match = dynamicRe.exec(stripped)) !== null) {
+    specifiers.push(match[1] as string);
   }
   return specifiers;
 }
 
-function coreTypeScriptFiles(root: string): readonly string[] {
-  const files: string[] = [];
-  const walk = (relativeDirectoryPath: string): void => {
-    const directory = resolve(root, relativeDirectoryPath);
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const relativePath = relativeDirectoryPath
-        ? `${relativeDirectoryPath}/${entry.name}`
-        : entry.name;
+function collectCoreRelativePaths(): string[] {
+  const coreRoot = resolve(import.meta.dirname);
+  const collected: string[] = [];
+  function recurse(absoluteDir: string, relativeDir: string): void {
+    for (const entry of readdirSync(absoluteDir, { withFileTypes: true })) {
       if (entry.isDirectory()) {
-        if (!isExempt(relativePath)) {
-          walk(relativePath);
+        const nextRelative = relativeDir
+          ? `${relativeDir}/${entry.name}`
+          : entry.name;
+        if (isExempt(nextRelative)) {
+          continue;
         }
+        recurse(join(absoluteDir, entry.name), nextRelative);
       } else if (
         entry.isFile() &&
         entry.name.endsWith(".ts") &&
         !entry.name.endsWith(".test.ts")
       ) {
-        files.push(relativePath);
+        const fileRelative = relativeDir
+          ? `${relativeDir}/${entry.name}`
+          : entry.name;
+        collected.push(fileRelative);
       }
     }
-  };
-  walk("");
-  return files.sort(compareBytewise);
-}
-
-function sourceTypeScriptFiles(root: string): readonly string[] {
-  const files: string[] = [];
-  const walk = (relativeDirectoryPath: string): void => {
-    const directory = resolve(root, relativeDirectoryPath);
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const relativePath = relativeDirectoryPath
-        ? `${relativeDirectoryPath}/${entry.name}`
-        : entry.name;
-      if (entry.isDirectory()) {
-        walk(relativePath);
-      } else if (
-        entry.isFile() &&
-        entry.name.endsWith(".ts") &&
-        !entry.name.endsWith(".test.ts")
-      ) {
-        files.push(relativePath);
-      }
-    }
-  };
-  walk("");
-  return files.sort(compareBytewise);
-}
-
-function offendersFor(relativePath: string, source: string): OffenderLists {
-  const specifiers = extractSpecifiers(source);
-  return {
-    nodeBuiltins: specifiers
-      .filter((specifier) => specifier.startsWith("node:"))
-      .map((specifier) => `${relativePath}: ${specifier}`),
-    runtimeRoots: specifiers
-      .filter((specifier) => specifier.includes("runtime/"))
-      .map((specifier) => `${relativePath}: ${specifier}`),
-    runtimeVendors: specifiers
-      .filter(
-        (specifier) =>
-          specifier === "@hono/node-server" ||
-          specifier.startsWith("@hono/node-server/"),
-      )
-      .map((specifier) => `${relativePath}: ${specifier}`),
-  };
-}
-
-function coreOffenders(): OffenderLists {
-  const lists = {
-    nodeBuiltins: [] as string[],
-    runtimeRoots: [] as string[],
-    runtimeVendors: [] as string[],
-  };
-  for (const relativePath of coreTypeScriptFiles(coreRoot)) {
-    const current = offendersFor(
-      relativePath,
-      readFileSync(resolve(coreRoot, relativePath), "utf8"),
-    );
-    lists.nodeBuiltins.push(...current.nodeBuiltins);
-    lists.runtimeRoots.push(...current.runtimeRoots);
-    lists.runtimeVendors.push(...current.runtimeVendors);
   }
-  return lists;
+  recurse(coreRoot, "");
+  collected.sort(compareBytewise);
+  return collected;
 }
 
-function nodeRootImporterOffenders(): readonly string[] {
+function collectSrcRelativePaths(): {
+  relativePath: string;
+  absolutePath: string;
+}[] {
+  const srcRoot = resolve(import.meta.dirname, "../..");
+  const collected: { relativePath: string; absolutePath: string }[] = [];
+  function recurse(absoluteDir: string, relativeDir: string): void {
+    for (const entry of readdirSync(absoluteDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        const nextRelative = relativeDir
+          ? `${relativeDir}/${entry.name}`
+          : entry.name;
+        recurse(join(absoluteDir, entry.name), nextRelative);
+      } else if (
+        entry.isFile() &&
+        entry.name.endsWith(".ts") &&
+        !entry.name.endsWith(".test.ts")
+      ) {
+        const fileRelative = relativeDir
+          ? `${relativeDir}/${entry.name}`
+          : entry.name;
+        collected.push({
+          relativePath: fileRelative,
+          absolutePath: join(absoluteDir, entry.name),
+        });
+      }
+    }
+  }
+  recurse(srcRoot, "");
+  collected.sort((a, b) => compareBytewise(a.relativePath, b.relativePath));
+  return collected;
+}
+
+function coreOffenders(): {
+  node: string[];
+  runtime: string[];
+  vendor: string[];
+} {
+  const coreRoot = resolve(import.meta.dirname);
+  const files = collectCoreRelativePaths();
+  const node: string[] = [];
+  const runtime: string[] = [];
+  const vendor: string[] = [];
+  for (const relativePath of files) {
+    const absolute = join(coreRoot, relativePath);
+    const content = readFileSync(absolute, "utf8");
+    const specifiers = extractSpecifiers(content);
+    for (const specifier of specifiers) {
+      if (specifier.startsWith("node:")) {
+        node.push(`${relativePath}: ${specifier}`);
+      }
+      if (specifier.includes("runtime/")) {
+        runtime.push(`${relativePath}: ${specifier}`);
+      }
+      if (
+        specifier === "@hono/node-server" ||
+        specifier.startsWith("@hono/node-server/")
+      ) {
+        vendor.push(`${relativePath}: ${specifier}`);
+      }
+    }
+  }
+  return { node, runtime, vendor };
+}
+
+function srcRuntimeOffenders(): string[] {
+  const files = collectSrcRelativePaths();
   const offenders: string[] = [];
-  for (const relativePath of sourceTypeScriptFiles(sourceRoot)) {
+  for (const { relativePath, absolutePath } of files) {
     if (relativePath === "main.ts") {
       continue;
     }
-    const file = resolve(sourceRoot, relativePath);
-    for (const specifier of extractSpecifiers(readFileSync(file, "utf8"))) {
-      if (!specifier.startsWith(".")) {
-        continue;
-      }
-      const target = relative(
-        sourceRoot,
-        resolve(dirname(file), specifier),
-      ).replaceAll("\\", "/");
-      if (target.startsWith("http/server/runtime/")) {
+    const content = readFileSync(absolutePath, "utf8");
+    const specifiers = extractSpecifiers(content);
+    for (const specifier of specifiers) {
+      if (resolvesToRuntime(relativePath, specifier)) {
         offenders.push(`${relativePath}: ${specifier}`);
       }
     }
   }
-  return offenders.sort(compareBytewise);
+  return offenders;
 }
 
 describe("src/http/server/core-purity.test", () => {
-  it("the core imports no node builtin", () => {
-    assert.deepEqual(coreOffenders().nodeBuiltins, []);
+  it("the core imports no node: builtin", () => {
+    const { node } = coreOffenders();
+    assert.deepEqual(node, []);
   });
 
   it("the core reaches into no runtime root", () => {
-    assert.deepEqual(coreOffenders().runtimeRoots, []);
+    const { runtime } = coreOffenders();
+    assert.deepEqual(runtime, []);
   });
 
   it("the core imports no runtime-only vendor package", () => {
-    assert.deepEqual(coreOffenders().runtimeVendors, []);
+    const { vendor } = coreOffenders();
+    assert.deepEqual(vendor, []);
   });
 
   it("src/main.ts is the only production importer of the Node root", () => {
-    assert.deepEqual(nodeRootImporterOffenders(), []);
+    const offenders = srcRuntimeOffenders();
+    assert.deepEqual(offenders, []);
   });
 
-  it("a single-line node import is detected", () => {
-    assert.deepEqual(
-      extractSpecifiers('import { createServer } from "node:http";'),
-      ["node:http"],
+  it("a single-line node: import is detected", () => {
+    const specifiers = extractSpecifiers(
+      `import { createServer } from "node:http";`,
     );
+    assert.deepEqual(specifiers, ["node:http"]);
   });
 
-  it("a multiline node import is detected", () => {
-    assert.deepEqual(
-      extractSpecifiers(
-        ["import {", "  createServer,", '} from "node:http";'].join("\n"),
-      ),
-      ["node:http"],
+  it("a multiline node: import is detected", () => {
+    const specifiers = extractSpecifiers(
+      `import {\n  createServer,\n} from "node:http";`,
     );
+    assert.deepEqual(specifiers, ["node:http"]);
   });
 
-  it("a node re-export is detected", () => {
-    assert.deepEqual(
-      extractSpecifiers('export { createServer } from "node:http";'),
-      ["node:http"],
+  it("a node: re-export is detected", () => {
+    const specifiers = extractSpecifiers(
+      `export { createServer } from "node:http";`,
     );
+    assert.deepEqual(specifiers, ["node:http"]);
   });
 
-  it("a node type import is detected", () => {
-    assert.deepEqual(
-      extractSpecifiers('import type { Server } from "node:http";'),
-      ["node:http"],
+  it("a node: type import is detected", () => {
+    const specifiers = extractSpecifiers(
+      `import type { Server } from "node:http";`,
     );
+    assert.deepEqual(specifiers, ["node:http"]);
   });
 
-  it("a node side-effect import is detected", () => {
-    assert.deepEqual(extractSpecifiers('import "node:http";'), ["node:http"]);
+  it("a node: side-effect import is detected", () => {
+    const specifiers = extractSpecifiers(`import "node:http";`);
+    assert.deepEqual(specifiers, ["node:http"]);
   });
 
-  it("a node dynamic import is detected", () => {
-    assert.deepEqual(extractSpecifiers('await import("node:http")'), [
-      "node:http",
-    ]);
+  it("a node: dynamic import is detected", () => {
+    const specifiers = extractSpecifiers(`await import("node:http")`);
+    assert.deepEqual(specifiers, ["node:http"]);
   });
 
   it("a single-quoted specifier is detected", () => {
-    assert.deepEqual(
-      extractSpecifiers("import { createServer } from 'node:http';"),
-      ["node:http"],
+    const specifiers = extractSpecifiers(
+      `import { createServer } from 'node:http';`,
     );
+    assert.deepEqual(specifiers, ["node:http"]);
   });
 
   it("a commented import is not detected", () => {
-    assert.deepEqual(
-      extractSpecifiers(
-        [
-          '// import { createServer } from "node:http";',
-          '/* import { createServer } from "node:http"; */',
-        ].join("\n"),
-      ),
-      [],
+    const lineComment = extractSpecifiers(
+      `// import { createServer } from "node:http";`,
     );
+    assert.deepEqual(lineComment, []);
+    const blockComment = extractSpecifiers(
+      `/* import { createServer } from "node:http"; */`,
+    );
+    assert.deepEqual(blockComment, []);
   });
 
-  it("an object property named node is not detected", () => {
-    assert.deepEqual(
-      extractSpecifiers("const row = { node: parsed.data.node };"),
-      [],
+  it("an object property named node: is not detected", () => {
+    const specifiers = extractSpecifiers(
+      `const row = { node: parsed.data.node };`,
     );
+    assert.deepEqual(specifiers, []);
   });
 
-  it("a runtime reach is detected in the runtime list only", () => {
-    const offenders = offendersFor(
-      "app.ts",
-      'import { listen } from "./runtime/node/listen.ts";',
+  it("a runtime reach is detected", () => {
+    const specifiers = extractSpecifiers(
+      `import { listen } from "./runtime/node/listen.ts";`,
     );
-    assert.deepEqual(offenders.nodeBuiltins, []);
-    assert.deepEqual(offenders.runtimeRoots, [
-      "app.ts: ./runtime/node/listen.ts",
-    ]);
+    const runtime = specifiers.filter((s) => s.includes("runtime/"));
+    const node = specifiers.filter((s) => s.startsWith("node:"));
+    assert.deepEqual(runtime, ["./runtime/node/listen.ts"]);
+    assert.deepEqual(node, []);
   });
 
-  it("the runtime vendor package is detected", () => {
-    const offenders = offendersFor(
-      "app.ts",
-      'import { serve } from "@hono/node-server";',
+  it("the vendor package is detected", () => {
+    const specifiers = extractSpecifiers(
+      `import { serve } from "@hono/node-server";`,
     );
-    assert.deepEqual(offenders.runtimeVendors, ["app.ts: @hono/node-server"]);
+    const vendor = specifiers.filter(
+      (s) => s === "@hono/node-server" || s.startsWith("@hono/node-server/"),
+    );
+    assert.deepEqual(vendor, ["@hono/node-server"]);
   });
 
   it("isExempt compares the whole path", () => {
@@ -258,8 +273,8 @@ describe("src/http/server/core-purity.test", () => {
     assert.equal(isExempt("event"), false);
   });
 
-  it("the walk applies the runtime exemption", () => {
-    const files = coreTypeScriptFiles(coreRoot);
+  it("the walk applies the exemption", () => {
+    const files = collectCoreRelativePaths();
     assert.equal(files.includes("runtime/node/listen.ts"), false);
     assert.equal(files.includes("app.ts"), true);
     assert.equal(files.includes("idempotency-key.ts"), true);
