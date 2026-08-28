@@ -1,4 +1,4 @@
-import { test, after } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import SwaggerParser from "@apidevtools/swagger-parser";
@@ -15,7 +15,7 @@ import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 
-import { publishContract } from "./publish-contract.ts";
+import { publishContract, refusesSelfPublish } from "./publish-contract.ts";
 import { KANTHORD_VERSION } from "../src/domain/version.ts";
 import { buildErrorEnvelope } from "../src/http/contract/errors.ts";
 import {
@@ -60,20 +60,24 @@ const publishedOperationIds = publishedEntries.map(
 const features = openApiFeatures();
 const featureNames = features.map((feature) => feature.name);
 
-const directory = mkdtempSync(join(tmpdir(), "kanthord-contract-"));
-after(() => {
-  rmSync(directory, { recursive: true, force: true });
-});
+function publishedDirectory(t: TestContext): string {
+  const directory = mkdtempSync(join(tmpdir(), "kanthord-contract-"));
+  t.after(() => {
+    rmSync(directory, { recursive: true, force: true });
+  });
+  publishContract({
+    outputDirectory: directory,
+    commit: "0".repeat(40),
+    tag: null,
+  });
+  return directory;
+}
 
 test("scripts/publish-contract", async (t) => {
   await t.test(
     "writes the master document, feature documents and examples",
-    async () => {
-      publishContract({
-        outputDirectory: directory,
-        commit: "0".repeat(40),
-        tag: null,
-      });
+    async (t) => {
+      const directory = publishedDirectory(t);
 
       assert.deepEqual(sortedBytewise(readdirSync(directory)), [
         "examples",
@@ -129,14 +133,16 @@ test("scripts/publish-contract", async (t) => {
     },
   );
 
-  await t.test("the document is the generated document", () => {
+  await t.test("the document is the generated document", (t) => {
+    const directory = publishedDirectory(t);
     const content = readFileSync(join(directory, "openapi.yaml"), "utf8");
     assert.equal(content, renderOpenApiYaml());
   });
 
   await t.test(
     "the manifest carries publication metadata and the operation list",
-    () => {
+    (t) => {
+      const directory = publishedDirectory(t);
       const raw = readFileSync(join(directory, "manifest.json"), "utf8");
       const manifest = JSON.parse(raw) as Record<string, unknown> & {
         source: string;
@@ -164,7 +170,8 @@ test("scripts/publish-contract", async (t) => {
     },
   );
 
-  await t.test("the manifest carries no timestamp", () => {
+  await t.test("the manifest carries no timestamp", (t) => {
+    const directory = publishedDirectory(t);
     const raw = readFileSync(join(directory, "manifest.json"), "utf8");
     assert.doesNotMatch(raw, /"[^"]*generatedAt[^"]*"\s*:/i);
     assert.doesNotMatch(raw, /"[^"]*timestamp[^"]*"\s*:/i);
@@ -264,7 +271,8 @@ test("scripts/publish-contract", async (t) => {
     }
   });
 
-  await t.test("each example file holds its keys in the fixed order", () => {
+  await t.test("each example file holds its keys in the fixed order", (t) => {
+    const directory = publishedDirectory(t);
     const createKeys = Object.keys(
       JSON.parse(
         readFileSync(
@@ -290,7 +298,8 @@ test("scripts/publish-contract", async (t) => {
     assert.deepEqual(eventListKeys, ["query", "success", "error"]);
   });
 
-  await t.test("each published example still satisfies its schema", () => {
+  await t.test("each published example still satisfies its schema", (t) => {
+    const directory = publishedDirectory(t);
     for (const entry of publishedEntries) {
       const raw = readFileSync(
         join(directory, "examples", `${entry.operationId}.json`),
@@ -313,7 +322,8 @@ test("scripts/publish-contract", async (t) => {
 
   await t.test(
     "the published provider feature carries the two request branches",
-    () => {
+    (t) => {
+      const directory = publishedDirectory(t);
       const document = YAML.parse(
         readFileSync(join(directory, "features", "provider.yaml"), "utf8"),
       ) as { components: { schemas: Record<string, SchemaNode> } };
@@ -397,7 +407,8 @@ test("scripts/publish-contract", async (t) => {
 
   await t.test(
     "every emitted document holds the closure of its own refs",
-    () => {
+    (t) => {
+      const directory = publishedDirectory(t);
       const paths = [
         "openapi.yaml",
         ...featureNames.map((n) => join("features", `${n}.yaml`)),
@@ -419,7 +430,8 @@ test("scripts/publish-contract", async (t) => {
 
   await t.test(
     "only the master and the event slice carry the catalogue",
-    () => {
+    (t) => {
+      const directory = publishedDirectory(t);
       const master = YAML.parse(
         readFileSync(join(directory, "openapi.yaml"), "utf8"),
       );
@@ -442,7 +454,8 @@ test("scripts/publish-contract", async (t) => {
     },
   );
 
-  await t.test("the node slice drops every event payload schema", () => {
+  await t.test("the node slice drops every event payload schema", (t) => {
+    const directory = publishedDirectory(t);
     const node = YAML.parse(
       readFileSync(join(directory, "features", "node.yaml"), "utf8"),
     );
@@ -470,7 +483,8 @@ test("scripts/publish-contract", async (t) => {
 
   await t.test(
     "no emitted document holds a $ref outside its own components",
-    () => {
+    (t) => {
+      const directory = publishedDirectory(t);
       const paths = [
         "openapi.yaml",
         ...featureNames.map((n) => join("features", `${n}.yaml`)),
@@ -639,7 +653,38 @@ test("scripts/publish-contract", async (t) => {
     assert.equal(existsSync(join(repositoryRoot, "openapi.yaml")), false);
   });
 
-  await t.test("clears a stale file from a previous publication", () => {
+  await t.test("refuses to publish into a repository descendant", () => {
+    const existing = join(repositoryRoot, "src");
+    const missing = join(repositoryRoot, ".kanthord-contract-child");
+    const sentinel = join(existing, "main.ts");
+    const before = readFileSync(sentinel);
+
+    assert.equal(refusesSelfPublish(existing), true);
+    assert.equal(refusesSelfPublish(missing), true);
+    assert.throws(
+      () =>
+        publishContract({
+          outputDirectory: existing,
+          commit: "0".repeat(40),
+          tag: null,
+        }),
+      /refusing to publish into the repository/,
+    );
+    assert.throws(
+      () =>
+        publishContract({
+          outputDirectory: missing,
+          commit: "0".repeat(40),
+          tag: null,
+        }),
+      /refusing to publish into the repository/,
+    );
+    assert.deepEqual(readFileSync(sentinel), before);
+    assert.equal(existsSync(missing), false);
+  });
+
+  await t.test("clears a stale file from a previous publication", (t) => {
+    const directory = publishedDirectory(t);
     writeFileSync(join(directory, "examples", "gone.json"), "junk");
     writeFileSync(join(directory, "features", "gone.yaml"), "junk");
     writeFileSync(join(directory, "openapi.yaml"), "junk");
@@ -678,7 +723,8 @@ test("scripts/publish-contract", async (t) => {
     );
   });
 
-  await t.test("refuses an unknown flag", () => {
+  await t.test("refuses an unknown flag", (t) => {
+    const directory = publishedDirectory(t);
     assert.throws(
       () =>
         execFileSync(

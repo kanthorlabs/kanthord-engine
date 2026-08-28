@@ -1,5 +1,5 @@
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { KANTHORD_VERSION } from "../src/domain/version.ts";
@@ -28,13 +28,23 @@ function resolveExisting(path: string): string {
   }
 }
 
+function containsOrEquals(parent: string, child: string): boolean {
+  const distance = relative(parent, child);
+  return (
+    distance === "" ||
+    (distance !== ".." &&
+      !distance.startsWith(`..${sep}`) &&
+      !isAbsolute(distance))
+  );
+}
+
 export function refusesSelfPublish(resolvedOutputDirectory: string): boolean {
   const repositoryRoot = resolveExisting(
     fileURLToPath(new URL("../", import.meta.url)),
   );
   return (
-    resolvedOutputDirectory === repositoryRoot ||
-    repositoryRoot.startsWith(`${resolvedOutputDirectory}/`)
+    containsOrEquals(repositoryRoot, resolvedOutputDirectory) ||
+    containsOrEquals(resolvedOutputDirectory, repositoryRoot)
   );
 }
 

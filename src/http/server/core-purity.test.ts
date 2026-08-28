@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, posix, resolve } from "node:path";
+import ts from "typescript";
 
 import { compareBytewise } from "./bytewise.ts";
 
@@ -24,28 +25,45 @@ function resolvesToRuntime(
   return specifier.includes("http/server/runtime/");
 }
 
-function stripComments(source: string): string {
-  const withoutBlock = source.replace(/\/\*[\s\S]*?\*\//g, "");
-  const withoutLine = withoutBlock.replace(/\/\/.*$/gm, "");
-  return withoutLine;
-}
-
 function extractSpecifiers(source: string): string[] {
-  const stripped = stripComments(source);
+  const file = ts.createSourceFile(
+    "source.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
   const specifiers: string[] = [];
-  const staticRe = /\b(?:import|export)\b[\s\S]*?\bfrom\s*["']([^"']+)["']/g;
-  const sideEffectRe = /\bimport\s*["']([^"']+)["']/g;
-  const dynamicRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
-  let match: RegExpExecArray | null;
-  while ((match = staticRe.exec(stripped)) !== null) {
-    specifiers.push(match[1] as string);
-  }
-  while ((match = sideEffectRe.exec(stripped)) !== null) {
-    specifiers.push(match[1] as string);
-  }
-  while ((match = dynamicRe.exec(stripped)) !== null) {
-    specifiers.push(match[1] as string);
-  }
+  const add = (value: ts.Node | undefined): void => {
+    if (value !== undefined && ts.isStringLiteralLike(value)) {
+      specifiers.push(value.text);
+    }
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node)) {
+      add(node.moduleSpecifier);
+    } else if (ts.isExportDeclaration(node)) {
+      add(node.moduleSpecifier);
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference)
+    ) {
+      add(node.moduleReference.expression);
+    } else if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length === 1
+    ) {
+      add(node.arguments[0]);
+    } else if (
+      ts.isImportTypeNode(node) &&
+      ts.isLiteralTypeNode(node.argument)
+    ) {
+      add(node.argument.literal);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
   return specifiers;
 }
 
@@ -237,6 +255,22 @@ describe("src/http/server/core-purity.test", () => {
       `/* import { createServer } from "node:http"; */`,
     );
     assert.deepEqual(blockComment, []);
+  });
+
+  it("comment markers inside strings do not hide imports", () => {
+    assert.deepEqual(
+      extractSpecifiers('const marker = "//"; import "node:http";'),
+      ["node:http"],
+    );
+  });
+
+  it("comment markers inside regular expressions do not hide imports", () => {
+    assert.deepEqual(
+      extractSpecifiers(
+        String.raw`const pattern = /https?:\/\//; import "node:http";`,
+      ),
+      ["node:http"],
+    );
   });
 
   it("an object property named node: is not detected", () => {

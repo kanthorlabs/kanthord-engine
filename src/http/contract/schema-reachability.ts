@@ -18,7 +18,11 @@ export function reachableSchemaNames(
 
   const collect = (raw: string): void => {
     if (!raw.startsWith(componentPrefix)) return;
-    const name = decodePointer(raw.slice(componentPrefix.length));
+    const pointer = raw.slice(componentPrefix.length);
+    const separator = pointer.indexOf("/");
+    const name = decodePointer(
+      separator === -1 ? pointer : pointer.slice(0, separator),
+    );
     if (reached.has(name)) return;
     reached.add(name);
     pending.push(name);

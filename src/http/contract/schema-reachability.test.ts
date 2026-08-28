@@ -109,6 +109,36 @@ describe("src/http/contract/schema-reachability", () => {
     assert.deepEqual([...result].sort(), [...expected].sort());
   });
 
+  test("uses only the first schema pointer segment for a nested reference", () => {
+    const document = {
+      paths: {
+        "/v1/example": {
+          get: {
+            responses: {
+              "200": {
+                content: {
+                  "application/json": {
+                    schema: {
+                      $ref: "#/components/schemas/a~1b/properties/value",
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          "a/b": { type: "object" },
+          "a/b/properties/value": { type: "string" },
+        },
+      },
+    };
+    const result = reachableSchemaNames(document);
+    assert.deepEqual([...result].sort(), ["a/b"]);
+  });
+
   test("decodes escaped tildes without corrupting pointer order", () => {
     const tildeDocument = {
       paths: {
