@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 
@@ -151,6 +151,67 @@ test("scripts/publish-contract", async (t) => {
     assert.doesNotMatch(raw, /"[^"]*timestamp[^"]*"\s*:/i);
     assert.doesNotMatch(raw, /"[^"]*date[^"]*"\s*:/i);
     assert.doesNotMatch(raw, /"[^"]*dirty[^"]*"\s*:/i);
+  });
+
+  await t.test("the manifest names exactly the files that were written", () => {
+    const own = mkdtempSync(join(tmpdir(), "kanthord-contract-manifest-"));
+    try {
+      const written = publishContract({
+        outputDirectory: own,
+        commit: "0".repeat(40),
+        tag: null,
+      });
+      const published = JSON.parse(
+        readFileSync(join(own, "manifest.json"), "utf8"),
+      ) as { features: string[]; operations: string[] };
+
+      const writtenFeatures = written.filter((relative) =>
+        relative.startsWith(`features${sep}`),
+      );
+      const writtenExamples = written.filter((relative) =>
+        relative.startsWith(`examples${sep}`),
+      );
+      const manifestFeatures = published.features.map((name) =>
+        join("features", `${name}.yaml`),
+      );
+      const manifestExamples = published.operations.map((id) =>
+        join("examples", `${id}.json`),
+      );
+
+      assert.equal(writtenFeatures.length, 19);
+      assert.equal(writtenExamples.length, 43);
+      assert.deepEqual(
+        manifestFeatures.filter((entry) => !writtenFeatures.includes(entry)),
+        [],
+      );
+      assert.deepEqual(
+        writtenFeatures.filter((entry) => !manifestFeatures.includes(entry)),
+        [],
+      );
+      assert.deepEqual(
+        manifestExamples.filter((entry) => !writtenExamples.includes(entry)),
+        [],
+      );
+      assert.deepEqual(
+        writtenExamples.filter((entry) => !manifestExamples.includes(entry)),
+        [],
+      );
+      assert.deepEqual(
+        sortedBytewise(manifestFeatures),
+        sortedBytewise(writtenFeatures),
+      );
+      assert.deepEqual(
+        sortedBytewise(manifestExamples),
+        sortedBytewise(writtenExamples),
+      );
+      assert.deepEqual(published.features, sortedBytewise(published.features));
+      assert.deepEqual(
+        published.operations,
+        sortedBytewise(published.operations),
+      );
+    } finally {
+      rmSync(own, { recursive: true, force: true });
+    }
   });
 
   await t.test("each example file holds its keys in the fixed order", () => {

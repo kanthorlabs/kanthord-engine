@@ -1,6 +1,7 @@
 import {
   buildOpenApiDocument,
   eventPayloadCatalogueKey,
+  openApiFeatures,
   renderOpenApiYaml,
 } from "./openapi.ts";
 import { reachableSchemaNames } from "./schema-reachability.ts";
@@ -15,6 +16,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -69,6 +71,21 @@ const openApiDirectory = mkdtempSync(join(tmpdir(), "kanthord-openapi-"));
 after(() => {
   rmSync(openApiDirectory, { recursive: true, force: true });
 });
+
+function emitEveryDocument(): string[] {
+  const written: string[] = [];
+  const masterPath = join(openApiDirectory, "openapi.yaml");
+  writeFileSync(masterPath, renderOpenApiYaml(), "utf8");
+  written.push(masterPath);
+  const featuresDirectory = join(openApiDirectory, "features");
+  mkdirSync(featuresDirectory, { recursive: true });
+  for (const feature of openApiFeatures()) {
+    const path = join(featuresDirectory, `${feature.name}.yaml`);
+    writeFileSync(path, renderOpenApiYaml(feature.operations), "utf8");
+    written.push(path);
+  }
+  return written;
+}
 
 test("documents openapi 3.0.3 and the product info", () => {
   const document = buildOpenApiDocument();
@@ -635,10 +652,82 @@ test("renders canonical yaml", () => {
   assert.equal(yaml, renderOpenApiYaml());
 });
 
-test("validates the generated document and deletes its directory", async () => {
-  const filePath = join(openApiDirectory, "openapi.yaml");
-  writeFileSync(filePath, renderOpenApiYaml(), "utf8");
-  await SwaggerParser.validate(filePath);
+test("validates the master document and every feature slice", async () => {
+  const paths = emitEveryDocument();
+  assert.equal(paths.length, 20);
+  assert.equal(readdirSync(join(openApiDirectory, "features")).length, 19);
+  for (const path of paths) {
+    await SwaggerParser.validate(path);
+  }
+});
+
+test("rejects a feature slice missing info.version", async () => {
+  const feature = openApiFeatures().find((entry) => entry.name === "system");
+  assert.ok(feature, "the system feature is absent");
+  const document = structuredClone(
+    buildOpenApiDocument(feature.operations),
+  ) as Record<string, unknown>;
+  const info = document.info as Record<string, unknown>;
+  delete info.version;
+  const filePath = join(openApiDirectory, "broken-no-version.yaml");
+  writeFileSync(filePath, YAML.stringify(document), "utf8");
+  await assert.rejects(SwaggerParser.validate(filePath));
+});
+
+test("rejects a feature slice with a dangling schema reference", async () => {
+  const feature = openApiFeatures().find((entry) => entry.name === "system");
+  assert.ok(feature, "the system feature is absent");
+  const document = structuredClone(
+    buildOpenApiDocument(feature.operations),
+  ) as Record<string, unknown>;
+  const paths = document.paths as Record<string, unknown>;
+  const health = paths["/v1/health"] as Record<string, unknown>;
+  const responses = (health.get as Record<string, unknown>).responses as Record<
+    string,
+    unknown
+  >;
+  const defaultResponse = responses.default as Record<string, unknown>;
+  const content = defaultResponse.content as Record<string, unknown>;
+  const json = content["application/json"] as Record<string, unknown>;
+  const schema = json.schema as Record<string, unknown>;
+  schema.$ref = "#/components/schemas/missing";
+  const filePath = join(openApiDirectory, "broken-dangling-ref.yaml");
+  writeFileSync(filePath, YAML.stringify(document), "utf8");
+  await assert.rejects(SwaggerParser.validate(filePath));
+});
+
+test("emits no $ref outside the document", () => {
+  const paths = emitEveryDocument();
+  assert.equal(paths.length, 20);
+  let total = 0;
+  for (const path of paths) {
+    const refs: string[] = [];
+    collectRefs(YAML.parse(readFileSync(path, "utf8")), refs);
+    assert.ok(refs.length > 0, `${path} carries no $ref at all`);
+    for (const ref of refs) {
+      assert.ok(
+        ref.startsWith("#/components/schemas/"),
+        `external or malformed $ref ${ref} in ${path}`,
+      );
+    }
+    total += refs.length;
+  }
+  assert.ok(total > 0, "the walk collected no $ref at all");
+});
+
+test("renders every feature slice to identical bytes twice", () => {
+  const features = openApiFeatures();
+  assert.equal(features.length, 19);
+  for (const feature of features) {
+    assert.equal(
+      compare(
+        renderOpenApiYaml(feature.operations),
+        renderOpenApiYaml(feature.operations),
+      ),
+      0,
+      `${feature.name}.yaml differs between two renders`,
+    );
+  }
 });
 
 test("is never committed to the repository root", () => {
