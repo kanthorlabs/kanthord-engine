@@ -1,5 +1,13 @@
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { KANTHORD_VERSION } from "../src/domain/version.ts";
@@ -21,10 +29,21 @@ export type PublishInput = Readonly<{
 const exampleKeyOrder = ["query", "request", "success", "error"] as const;
 
 function resolveExisting(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return resolve(path);
+  const unresolved: string[] = [];
+  let current = resolve(path);
+  for (;;) {
+    try {
+      const existing = realpathSync(current);
+      return unresolved.reduceRight(
+        (parent, segment) => join(parent, segment),
+        existing,
+      );
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return resolve(path);
+      unresolved.push(basename(current));
+      current = parent;
+    }
   }
 }
 

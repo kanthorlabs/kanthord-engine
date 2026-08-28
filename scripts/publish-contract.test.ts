@@ -8,10 +8,11 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 
@@ -682,6 +683,31 @@ test("scripts/publish-contract", async (t) => {
     assert.deepEqual(readFileSync(sentinel), before);
     assert.equal(existsSync(missing), false);
   });
+
+  await t.test(
+    "refuses ancestors and symlinked repository descendants",
+    (t) => {
+      const parent = mkdtempSync(join(tmpdir(), "kanthord-contract-link-"));
+      t.after(() => {
+        rmSync(parent, { recursive: true, force: true });
+      });
+      const link = join(parent, "repo-link");
+      const missing = join(link, "new-output");
+      symlinkSync(repositoryRoot, link, "dir");
+
+      assert.equal(refusesSelfPublish(dirname(repositoryRoot)), true);
+      assert.throws(
+        () =>
+          publishContract({
+            outputDirectory: missing,
+            commit: "0".repeat(40),
+            tag: null,
+          }),
+        /refusing to publish into the repository/,
+      );
+      assert.equal(existsSync(missing), false);
+    },
+  );
 
   await t.test("clears a stale file from a previous publication", (t) => {
     const directory = publishedDirectory(t);

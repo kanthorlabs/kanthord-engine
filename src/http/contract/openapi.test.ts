@@ -12,7 +12,7 @@ import { eventTypes } from "../../domain/event-type.ts";
 import { KANTHORD_VERSION } from "../../domain/version.ts";
 import SwaggerParser from "@apidevtools/swagger-parser";
 import YAML from "yaml";
-import { test, after } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import {
   existsSync,
@@ -67,17 +67,20 @@ function operationObjects(document: Readonly<Record<string, unknown>>): Array<{
   return found;
 }
 
-const openApiDirectory = mkdtempSync(join(tmpdir(), "kanthord-openapi-"));
-after(() => {
-  rmSync(openApiDirectory, { recursive: true, force: true });
-});
+function openApiDirectory(t: TestContext): string {
+  const directory = mkdtempSync(join(tmpdir(), "kanthord-openapi-"));
+  t.after(() => {
+    rmSync(directory, { recursive: true, force: true });
+  });
+  return directory;
+}
 
-function emitEveryDocument(): string[] {
+function emitEveryDocument(directory: string): string[] {
   const written: string[] = [];
-  const masterPath = join(openApiDirectory, "openapi.yaml");
+  const masterPath = join(directory, "openapi.yaml");
   writeFileSync(masterPath, renderOpenApiYaml(), "utf8");
   written.push(masterPath);
-  const featuresDirectory = join(openApiDirectory, "features");
+  const featuresDirectory = join(directory, "features");
   mkdirSync(featuresDirectory, { recursive: true });
   for (const feature of openApiFeatures()) {
     const path = join(featuresDirectory, `${feature.name}.yaml`);
@@ -652,16 +655,18 @@ test("renders canonical yaml", () => {
   assert.equal(yaml, renderOpenApiYaml());
 });
 
-test("validates the master document and every feature slice", async () => {
-  const paths = emitEveryDocument();
+test("validates the master document and every feature slice", async (t) => {
+  const directory = openApiDirectory(t);
+  const paths = emitEveryDocument(directory);
   assert.equal(paths.length, 20);
-  assert.equal(readdirSync(join(openApiDirectory, "features")).length, 19);
+  assert.equal(readdirSync(join(directory, "features")).length, 19);
   for (const path of paths) {
     await SwaggerParser.validate(path);
   }
 });
 
-test("rejects a feature slice missing info.version", async () => {
+test("rejects a feature slice missing info.version", async (t) => {
+  const directory = openApiDirectory(t);
   const feature = openApiFeatures().find((entry) => entry.name === "system");
   assert.ok(feature, "the system feature is absent");
   const document = structuredClone(
@@ -669,12 +674,13 @@ test("rejects a feature slice missing info.version", async () => {
   ) as Record<string, unknown>;
   const info = document.info as Record<string, unknown>;
   delete info.version;
-  const filePath = join(openApiDirectory, "broken-no-version.yaml");
+  const filePath = join(directory, "broken-no-version.yaml");
   writeFileSync(filePath, YAML.stringify(document), "utf8");
   await assert.rejects(SwaggerParser.validate(filePath));
 });
 
-test("rejects a feature slice with a dangling schema reference", async () => {
+test("rejects a feature slice with a dangling schema reference", async (t) => {
+  const directory = openApiDirectory(t);
   const feature = openApiFeatures().find((entry) => entry.name === "system");
   assert.ok(feature, "the system feature is absent");
   const document = structuredClone(
@@ -691,13 +697,14 @@ test("rejects a feature slice with a dangling schema reference", async () => {
   const json = content["application/json"] as Record<string, unknown>;
   const schema = json.schema as Record<string, unknown>;
   schema.$ref = "#/components/schemas/missing";
-  const filePath = join(openApiDirectory, "broken-dangling-ref.yaml");
+  const filePath = join(directory, "broken-dangling-ref.yaml");
   writeFileSync(filePath, YAML.stringify(document), "utf8");
   await assert.rejects(SwaggerParser.validate(filePath));
 });
 
-test("emits no $ref outside the document", () => {
-  const paths = emitEveryDocument();
+test("emits no $ref outside the document", (t) => {
+  const directory = openApiDirectory(t);
+  const paths = emitEveryDocument(directory);
   assert.equal(paths.length, 20);
   let total = 0;
   for (const path of paths) {
@@ -734,19 +741,21 @@ test("is never committed to the repository root", () => {
   assert.equal(existsSync(join(repositoryRoot, "openapi.yaml")), false);
 });
 
-test("rejects a document missing info.version", async () => {
+test("rejects a document missing info.version", async (t) => {
+  const directory = openApiDirectory(t);
   const document = structuredClone(buildOpenApiDocument()) as Record<
     string,
     unknown
   >;
   const info = document.info as Record<string, unknown>;
   delete info.version;
-  const filePath = join(openApiDirectory, "no-version.yaml");
+  const filePath = join(directory, "no-version.yaml");
   writeFileSync(filePath, YAML.stringify(document), "utf8");
   await assert.rejects(SwaggerParser.validate(filePath));
 });
 
-test("rejects a dangling schema reference", async () => {
+test("rejects a dangling schema reference", async (t) => {
+  const directory = openApiDirectory(t);
   const document = structuredClone(buildOpenApiDocument()) as Record<
     string,
     unknown
@@ -762,7 +771,7 @@ test("rejects a dangling schema reference", async () => {
   const json = content["application/json"] as Record<string, unknown>;
   const schema = json.schema as Record<string, unknown>;
   schema.$ref = "#/components/schemas/missing";
-  const filePath = join(openApiDirectory, "dangling-ref.yaml");
+  const filePath = join(directory, "dangling-ref.yaml");
   writeFileSync(filePath, YAML.stringify(document), "utf8");
   await assert.rejects(SwaggerParser.validate(filePath));
 });
