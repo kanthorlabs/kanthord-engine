@@ -496,6 +496,7 @@ describe("src/domain/layout.test", () => {
         "e2e/lib/secret-file.test.ts",
         "e2e/lib/shim.test.ts",
         "e2e/lib/tag.test.ts",
+        "publish-contract.source.test.ts",
         "publish-contract.test.ts",
         "release-facts.test.ts",
         "release-gate.test.ts",

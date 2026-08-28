@@ -12,7 +12,7 @@ These files never restate a request or response field schema. The typed route re
 
 ### OpenAPI documents are generated, and they are not committed
 
-One self-contained OpenAPI 3.0.3 document, with internal `#/components/…` references only. An external `$ref` split is refused: a generator, a viewer and a publish step each resolve relative file references differently, copying the root alone yields a broken specification, and a consumer bundles it back into one document anyway.
+The canonical master and each self-contained feature slice use internal `#/components/…` references only. An external `$ref` split is refused for those forms: a generator, a viewer and a publish step each resolve relative file references differently, copying the root alone yields a broken specification, and a consumer bundles it back into one document anyway.
 
 The publication also writes one self-contained document under `features/<namespace>.yaml` for each operation namespace. Each feature document carries its own schemas and references, so a UI client can generate one feature without bundling other files. The master document remains the complete API contract.
 
@@ -34,7 +34,24 @@ A document carries the extension when it holds the operation `event.list`, which
 
 OpenAPI 3.0.3 is a decision, not an accident. Every contract test pins the `openapi-3.0` mapping of `z.toJSONSchema`. A move to 3.1 changes `nullable`, `exclusiveMinimum` and `examples`, so it costs a fresh parity pass. The version, the artifact topology and the self-contained rule are three independent decisions.
 
-`npm run verify` generates the master document into a temporary directory, validates it with an independent OpenAPI validator, asserts operation parity against the registry, asserts that every reference resolves, and deletes it. `npm run contract:publish -- <output-directory>` publishes the master document, feature documents and examples. Generation is canonical: fixed path, method and component order, LF endings, one trailing newline. A release publishes the generated documents as a named artifact beside the daemon and the CLI, and a client generator consumes them. Neither the validator nor a client generator ever starts the daemon.
+`npm run verify` generates the master document into a temporary directory, validates it with an independent OpenAPI validator, asserts operation parity against the registry, asserts that every reference resolves, and deletes it. `npm run contract:publish -- <output-directory>` publishes the master document, feature documents, examples and the modular `source/` tree. Generation is canonical: fixed path, method and component order, LF endings, one trailing newline. A release publishes the generated documents as a named artifact beside the daemon and the CLI, and a client generator consumes them. Neither the validator nor a client generator ever starts the daemon.
+
+The publication writes two forms of the same contract:
+
+```text
+openapi.yaml                    self-contained canonical master
+features/<feature>.yaml         self-contained scoped bundles
+examples/<operationId>.json     request and response examples
+manifest.json                   the publication manifest
+source/openapi.yaml             modular root
+source/features/<feature>.yaml  operation fragments
+source/components/*.yaml        shared schemas and security schemes
+```
+
+A consumer that reads `openapi.yaml` sees no change. A consumer that edits, diffs or vendors the
+contract reads `source/`, where one schema lives in one place. A `$ref` under `source/` is a relative
+path plus a JSON Pointer fragment, and it always resolves to a file inside the publication directory.
+`SwaggerParser.bundle` on `source/openapi.yaml` reproduces the master.
 
 ### The release gate
 
@@ -43,7 +60,7 @@ A release is a commit that carries the git tag `v<version>`. The `version` field
 - `npm run contract:publish -- <output-directory>` refuses a dirty working tree. It exits `2` and writes `dirty-tree` to standard error.
 - The command refuses a commit that carries no tag `v<version>`. It exits `2` and writes `untagged-commit` to standard error. A commit that carries other tags is untagged for this purpose.
 - The dirty refusal comes first. A dirty and untagged tree reports `dirty-tree`.
-- `manifest.json` holds `version`, `commit`, `tag`, `features` and `operations`, in that order. It holds no `dirty` field.
+- `manifest.json` holds `version`, `commit`, `tag`, `source`, `features` and `operations`, in that order. It holds no `dirty` field. `source` is the relative path of the modular root, `source/openapi.yaml`, so a consumer discovers the second form without a guess.
 - `--unreleased` skips the tag check and writes `tag: null`. It does not skip the dirty check.
 - A client pins an artifact whose `tag` is not `null`. An artifact whose `tag` is `null` is not pinnable.
 - The release step is manual. A human bumps `package.json`, bumps `src/domain/version.ts`, commits, writes the tag, then publishes. No workflow does this.

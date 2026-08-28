@@ -7,6 +7,7 @@ import {
   openApiFeatures,
   renderOpenApiYaml,
 } from "../src/http/contract/openapi.ts";
+import { buildOpenApiSourceTree } from "../src/http/contract/openapi-source.ts";
 import { registry } from "../src/http/contract/registry.ts";
 import { readReleaseFacts } from "./release-facts.ts";
 import { cliDecision, parseArguments } from "./release-gate.ts";
@@ -53,12 +54,20 @@ export function publishContract(input: PublishInput): readonly string[] {
     recursive: true,
     force: true,
   });
+  rmSync(join(outputDirectory, "source"), {
+    recursive: true,
+    force: true,
+  });
   rmSync(join(outputDirectory, "openapi.yaml"), { force: true });
   rmSync(join(outputDirectory, "manifest.json"), { force: true });
 
   mkdirSync(outputDirectory, { recursive: true });
   mkdirSync(join(outputDirectory, "examples"), { recursive: true });
   mkdirSync(join(outputDirectory, "features"), { recursive: true });
+  mkdirSync(join(outputDirectory, "source", "components"), {
+    recursive: true,
+  });
+  mkdirSync(join(outputDirectory, "source", "features"), { recursive: true });
 
   const written: string[] = [];
   const features = openApiFeatures();
@@ -100,10 +109,17 @@ export function publishContract(input: PublishInput): readonly string[] {
     written.push(relative);
   }
 
+  for (const [relative, text] of buildOpenApiSourceTree()) {
+    const target = join("source", relative);
+    writeFileSync(join(outputDirectory, target), text, { encoding: "utf8" });
+    written.push(target);
+  }
+
   const manifest = {
     version: KANTHORD_VERSION,
     commit: input.commit,
     tag: input.tag,
+    source: "source/openapi.yaml",
     features: features.map((feature) => feature.name),
     operations: publishedEntries.map((entry) => entry.operationId),
   };

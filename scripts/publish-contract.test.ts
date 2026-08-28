@@ -80,7 +80,22 @@ test("scripts/publish-contract", async (t) => {
         "features",
         "manifest.json",
         "openapi.yaml",
+        "source",
       ]);
+
+      assert.deepEqual(sortedBytewise(readdirSync(join(directory, "source"))), [
+        "components",
+        "features",
+        "openapi.yaml",
+      ]);
+      assert.equal(
+        readdirSync(join(directory, "source", "components")).length,
+        15,
+      );
+      assert.equal(
+        readdirSync(join(directory, "source", "features")).length,
+        19,
+      );
 
       const featureFiles = readdirSync(join(directory, "features"));
       assert.deepEqual(
@@ -119,12 +134,13 @@ test("scripts/publish-contract", async (t) => {
     assert.equal(content, renderOpenApiYaml());
   });
 
-  let manifest: Record<string, unknown> = {};
   await t.test(
     "the manifest carries publication metadata and the operation list",
     () => {
       const raw = readFileSync(join(directory, "manifest.json"), "utf8");
-      manifest = JSON.parse(raw) as Record<string, unknown>;
+      const manifest = JSON.parse(raw) as Record<string, unknown> & {
+        source: string;
+      };
 
       assert.equal(manifest.version, KANTHORD_VERSION);
       assert.deepEqual(manifest.operations, publishedOperationIds);
@@ -132,15 +148,18 @@ test("scripts/publish-contract", async (t) => {
         "version",
         "commit",
         "tag",
+        "source",
         "features",
         "operations",
       ]);
       assert.equal(manifest.tag, null);
       assert.equal(String(manifest.commit), "0".repeat(40));
       assert.deepEqual(manifest.features, featureNames);
+      assert.equal(manifest.source, "source/openapi.yaml");
+      assert.equal(existsSync(join(directory, manifest.source)), true);
       assert.match(
         raw,
-        /"version"[\s\S]*"commit"[\s\S]*"tag"[\s\S]*"features"[\s\S]*"operations"/,
+        /"version"[\s\S]*"commit"[\s\S]*"tag"[\s\S]*"source"[\s\S]*"features"[\s\S]*"operations"/,
       );
     },
   );
@@ -208,6 +227,37 @@ test("scripts/publish-contract", async (t) => {
       assert.deepEqual(
         published.operations,
         sortedBytewise(published.operations),
+      );
+    } finally {
+      rmSync(own, { recursive: true, force: true });
+    }
+  });
+
+  await t.test("the manifest source and lists match returned files", () => {
+    const own = mkdtempSync(join(tmpdir(), "kanthord-contract-manifest-"));
+    try {
+      const written = publishContract({
+        outputDirectory: own,
+        commit: "0".repeat(40),
+        tag: null,
+      });
+      const manifest = JSON.parse(
+        readFileSync(join(own, "manifest.json"), "utf8"),
+      ) as { source: string; features: string[]; operations: string[] };
+
+      assert.deepEqual(
+        sortedBytewise(written.filter((name) => name.startsWith("features/"))),
+        sortedBytewise(
+          manifest.features.map((name) => `features/${name}.yaml`),
+        ),
+      );
+      assert.deepEqual(
+        sortedBytewise(written.filter((name) => name.startsWith("examples/"))),
+        sortedBytewise(manifest.operations.map((id) => `examples/${id}.json`)),
+      );
+      assert.equal(
+        written.includes(`source/${manifest.source.slice("source/".length)}`),
+        true,
       );
     } finally {
       rmSync(own, { recursive: true, force: true });
@@ -593,6 +643,7 @@ test("scripts/publish-contract", async (t) => {
     writeFileSync(join(directory, "examples", "gone.json"), "junk");
     writeFileSync(join(directory, "features", "gone.yaml"), "junk");
     writeFileSync(join(directory, "openapi.yaml"), "junk");
+    writeFileSync(join(directory, "source", "components", "gone.yaml"), "junk");
 
     publishContract({
       outputDirectory: directory,
@@ -605,6 +656,10 @@ test("scripts/publish-contract", async (t) => {
     assert.equal(
       readFileSync(join(directory, "openapi.yaml"), "utf8"),
       renderOpenApiYaml(),
+    );
+    assert.equal(
+      existsSync(join(directory, "source", "components", "gone.yaml")),
+      false,
     );
   });
 
