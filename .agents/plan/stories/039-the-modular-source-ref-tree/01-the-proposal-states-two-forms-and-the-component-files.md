@@ -230,7 +230,7 @@ Six tests.
    file. This is the naming rule asserted over all 142 schemas rather than over a sample.
 
 3. **`test("places an event payload schema by its event-type prefix")`** — parse
-   `components/node.yaml`, and assert `Object.keys(parsed.schemas).includes("node.state.changed")`.
+   `components/node.yaml`, and assert `Object.keys(parsed.schemas).includes("node.created")`.
    Assert the same file also holds `node.list.response`, so the test proves an event payload and an
    operation schema share one file.
 

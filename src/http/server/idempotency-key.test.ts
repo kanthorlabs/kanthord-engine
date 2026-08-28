@@ -370,6 +370,22 @@ describe("src/http/server/idempotency-key.test", () => {
       assert.equal(first, "x\uFFFDhash=2\u0001id=1\uFFFDactor_A\uFFFDk");
     });
 
+    it("sorts non-ASCII parameter names by UTF-8 bytes", () => {
+      assert.equal(
+        recordKey({
+          operationId: "x",
+          parameters: {
+            "\u{1F600}": "emoji",
+            "\uE000": "private",
+            a: "letter",
+          },
+          actorId: "actor_A",
+          key: "k",
+        }),
+        "x\uFFFDa=letter\u0001\uE000=private\u0001\u{1F600}=emoji\uFFFDactor_A\uFFFDk",
+      );
+    });
+
     it("two actors whose ids differ by one character render different keys", () => {
       const first = recordKey({
         operationId: "project.create",

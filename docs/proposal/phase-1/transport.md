@@ -9,6 +9,8 @@ The CLI calls the HTTP API, so parity between the two surfaces is structural rat
 This file decides the policy. The routes that policy carries are `../api/`, one file per domain, with the conventions and the lifecycle rules in `../api/README.md`. `kanthord db migrate` is the one command that does not call HTTP, and `../api/system.md` states why.
 The version compatibility policy — what `/v1` guarantees, what a client must tolerate, and the `GET /v1/health` handshake that carries the capability list — is `../api/README.md`, section `## Versioning`.
 
+Which operation runs on which runtime is `runtime-capability-matrix.md`, not this file. It holds one row per routed operation, with a verdict for the Node daemon, for AWS Lambda and for Cloudflare Workers, and it is the source of truth for that question.
+
 ## The transport core and its runtime roots
 
 The transport splits in two. `src/http/server/**`, except `src/http/server/runtime/**`, is the Fetch-native core. No file in the core imports a `node:` builtin. The core uses Web APIs only: `Request`, `Response`, `Headers`, `TextEncoder`, `Uint8Array` and `crypto.subtle`.
@@ -22,6 +24,8 @@ Each runtime gets its own root, and only a root names a platform API. The core d
 | `src/http/server/runtime/worker/` | declared, and not built.                             |
 
 `src/http/server/core-purity.test.ts` enforces the invariant. It reads every `.ts` file under `src/http/server/`, skips `runtime/` and skips a test, and it fails on a `node:` import. The failure names the file and the specifier.
+
+`src/http/server/node/` holds the handlers of the `node` domain entity, so the runtime directory takes the name `runtime` and the collision cannot happen.
 
 ## The CLI exit code names the refusal class
 

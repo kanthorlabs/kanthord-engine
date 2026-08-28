@@ -1,4 +1,4 @@
-import { test, after } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import SwaggerParser from "@apidevtools/swagger-parser";
@@ -8,20 +8,24 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 
-import { publishContract } from "./publish-contract.ts";
+import { publishContract, refusesSelfPublish } from "./publish-contract.ts";
 import { KANTHORD_VERSION } from "../src/domain/version.ts";
 import { buildErrorEnvelope } from "../src/http/contract/errors.ts";
 import {
+  eventPayloadCatalogueKey,
   openApiFeatures,
   renderOpenApiYaml,
 } from "../src/http/contract/openapi.ts";
+import { eventPayloads } from "../src/http/contract/event-payload.ts";
+import { reachableSchemaNames } from "../src/http/contract/schema-reachability.ts";
 import { registry } from "../src/http/contract/registry.ts";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -57,27 +61,46 @@ const publishedOperationIds = publishedEntries.map(
 const features = openApiFeatures();
 const featureNames = features.map((feature) => feature.name);
 
-const directory = mkdtempSync(join(tmpdir(), "kanthord-contract-"));
-after(() => {
-  rmSync(directory, { recursive: true, force: true });
-});
+function publishedDirectory(t: TestContext): string {
+  const directory = mkdtempSync(join(tmpdir(), "kanthord-contract-"));
+  t.after(() => {
+    rmSync(directory, { recursive: true, force: true });
+  });
+  publishContract({
+    outputDirectory: directory,
+    commit: "0".repeat(40),
+    tag: null,
+  });
+  return directory;
+}
 
 test("scripts/publish-contract", async (t) => {
   await t.test(
     "writes the master document, feature documents and examples",
-    async () => {
-      publishContract({
-        outputDirectory: directory,
-        commit: "0".repeat(40),
-        tag: null,
-      });
+    async (t) => {
+      const directory = publishedDirectory(t);
 
       assert.deepEqual(sortedBytewise(readdirSync(directory)), [
         "examples",
         "features",
         "manifest.json",
         "openapi.yaml",
+        "source",
       ]);
+
+      assert.deepEqual(sortedBytewise(readdirSync(join(directory, "source"))), [
+        "components",
+        "features",
+        "openapi.yaml",
+      ]);
+      assert.equal(
+        readdirSync(join(directory, "source", "components")).length,
+        15,
+      );
+      assert.equal(
+        readdirSync(join(directory, "source", "features")).length,
+        19,
+      );
 
       const featureFiles = readdirSync(join(directory, "features"));
       assert.deepEqual(
@@ -111,17 +134,20 @@ test("scripts/publish-contract", async (t) => {
     },
   );
 
-  await t.test("the document is the generated document", () => {
+  await t.test("the document is the generated document", (t) => {
+    const directory = publishedDirectory(t);
     const content = readFileSync(join(directory, "openapi.yaml"), "utf8");
     assert.equal(content, renderOpenApiYaml());
   });
 
-  let manifest: Record<string, unknown> = {};
   await t.test(
     "the manifest carries publication metadata and the operation list",
-    () => {
+    (t) => {
+      const directory = publishedDirectory(t);
       const raw = readFileSync(join(directory, "manifest.json"), "utf8");
-      manifest = JSON.parse(raw) as Record<string, unknown>;
+      const manifest = JSON.parse(raw) as Record<string, unknown> & {
+        source: string;
+      };
 
       assert.equal(manifest.version, KANTHORD_VERSION);
       assert.deepEqual(manifest.operations, publishedOperationIds);
@@ -129,20 +155,24 @@ test("scripts/publish-contract", async (t) => {
         "version",
         "commit",
         "tag",
+        "source",
         "features",
         "operations",
       ]);
       assert.equal(manifest.tag, null);
       assert.equal(String(manifest.commit), "0".repeat(40));
       assert.deepEqual(manifest.features, featureNames);
+      assert.equal(manifest.source, "source/openapi.yaml");
+      assert.equal(existsSync(join(directory, manifest.source)), true);
       assert.match(
         raw,
-        /"version"[\s\S]*"commit"[\s\S]*"tag"[\s\S]*"features"[\s\S]*"operations"/,
+        /"version"[\s\S]*"commit"[\s\S]*"tag"[\s\S]*"source"[\s\S]*"features"[\s\S]*"operations"/,
       );
     },
   );
 
-  await t.test("the manifest carries no timestamp", () => {
+  await t.test("the manifest carries no timestamp", (t) => {
+    const directory = publishedDirectory(t);
     const raw = readFileSync(join(directory, "manifest.json"), "utf8");
     assert.doesNotMatch(raw, /"[^"]*generatedAt[^"]*"\s*:/i);
     assert.doesNotMatch(raw, /"[^"]*timestamp[^"]*"\s*:/i);
@@ -150,7 +180,100 @@ test("scripts/publish-contract", async (t) => {
     assert.doesNotMatch(raw, /"[^"]*dirty[^"]*"\s*:/i);
   });
 
-  await t.test("each example file holds its keys in the fixed order", () => {
+  await t.test("the manifest names exactly the files that were written", () => {
+    const own = mkdtempSync(join(tmpdir(), "kanthord-contract-manifest-"));
+    try {
+      const written = publishContract({
+        outputDirectory: own,
+        commit: "0".repeat(40),
+        tag: null,
+      });
+      const published = JSON.parse(
+        readFileSync(join(own, "manifest.json"), "utf8"),
+      ) as { features: string[]; operations: string[] };
+
+      const writtenFeatures = written.filter((relative) =>
+        relative.startsWith(`features${sep}`),
+      );
+      const writtenExamples = written.filter((relative) =>
+        relative.startsWith(`examples${sep}`),
+      );
+      const manifestFeatures = published.features.map((name) =>
+        join("features", `${name}.yaml`),
+      );
+      const manifestExamples = published.operations.map((id) =>
+        join("examples", `${id}.json`),
+      );
+
+      assert.equal(writtenFeatures.length, 19);
+      assert.equal(writtenExamples.length, 43);
+      assert.deepEqual(
+        manifestFeatures.filter((entry) => !writtenFeatures.includes(entry)),
+        [],
+      );
+      assert.deepEqual(
+        writtenFeatures.filter((entry) => !manifestFeatures.includes(entry)),
+        [],
+      );
+      assert.deepEqual(
+        manifestExamples.filter((entry) => !writtenExamples.includes(entry)),
+        [],
+      );
+      assert.deepEqual(
+        writtenExamples.filter((entry) => !manifestExamples.includes(entry)),
+        [],
+      );
+      assert.deepEqual(
+        sortedBytewise(manifestFeatures),
+        sortedBytewise(writtenFeatures),
+      );
+      assert.deepEqual(
+        sortedBytewise(manifestExamples),
+        sortedBytewise(writtenExamples),
+      );
+      assert.deepEqual(published.features, sortedBytewise(published.features));
+      assert.deepEqual(
+        published.operations,
+        sortedBytewise(published.operations),
+      );
+    } finally {
+      rmSync(own, { recursive: true, force: true });
+    }
+  });
+
+  await t.test("the manifest source and lists match returned files", () => {
+    const own = mkdtempSync(join(tmpdir(), "kanthord-contract-manifest-"));
+    try {
+      const written = publishContract({
+        outputDirectory: own,
+        commit: "0".repeat(40),
+        tag: null,
+      });
+      const manifest = JSON.parse(
+        readFileSync(join(own, "manifest.json"), "utf8"),
+      ) as { source: string; features: string[]; operations: string[] };
+
+      assert.deepEqual(
+        sortedBytewise(written.filter((name) => name.startsWith("features/"))),
+        sortedBytewise(
+          manifest.features.map((name) => `features/${name}.yaml`),
+        ),
+      );
+      assert.deepEqual(
+        sortedBytewise(written.filter((name) => name.startsWith("examples/"))),
+        sortedBytewise(manifest.operations.map((id) => `examples/${id}.json`)),
+      );
+      assert.equal(
+        written.includes(`source/${manifest.source.slice("source/".length)}`),
+        true,
+      );
+    } finally {
+      rmSync(own, { recursive: true, force: true });
+    }
+  });
+
+  await t.test("each example file holds its keys in the fixed order", (t) => {
+    const directory = publishedDirectory(t);
     const createKeys = Object.keys(
       JSON.parse(
         readFileSync(
@@ -176,7 +299,8 @@ test("scripts/publish-contract", async (t) => {
     assert.deepEqual(eventListKeys, ["query", "success", "error"]);
   });
 
-  await t.test("each published example still satisfies its schema", () => {
+  await t.test("each published example still satisfies its schema", (t) => {
+    const directory = publishedDirectory(t);
     for (const entry of publishedEntries) {
       const raw = readFileSync(
         join(directory, "examples", `${entry.operationId}.json`),
@@ -199,7 +323,8 @@ test("scripts/publish-contract", async (t) => {
 
   await t.test(
     "the published provider feature carries the two request branches",
-    () => {
+    (t) => {
+      const directory = publishedDirectory(t);
       const document = YAML.parse(
         readFileSync(join(directory, "features", "provider.yaml"), "utf8"),
       ) as { components: { schemas: Record<string, SchemaNode> } };
@@ -281,6 +406,114 @@ test("scripts/publish-contract", async (t) => {
     },
   );
 
+  await t.test(
+    "every emitted document holds the closure of its own refs",
+    (t) => {
+      const directory = publishedDirectory(t);
+      const paths = [
+        "openapi.yaml",
+        ...featureNames.map((n) => join("features", `${n}.yaml`)),
+      ];
+      assert.equal(paths.length, 20);
+      for (const relative of paths) {
+        const document = YAML.parse(
+          readFileSync(join(directory, relative), "utf8"),
+        );
+        const schemas = document.components.schemas as Record<string, unknown>;
+        assert.deepEqual(
+          sortedBytewise([...reachableSchemaNames(document)]),
+          sortedBytewise(Object.keys(schemas)),
+          `${relative} is not its own closure`,
+        );
+      }
+    },
+  );
+
+  await t.test(
+    "only the master and the event slice carry the catalogue",
+    (t) => {
+      const directory = publishedDirectory(t);
+      const master = YAML.parse(
+        readFileSync(join(directory, "openapi.yaml"), "utf8"),
+      );
+      assert.deepEqual(
+        Object.keys(master[eventPayloadCatalogueKey]),
+        sortedBytewise(Object.keys(eventPayloads)),
+      );
+
+      for (const name of featureNames) {
+        const document = YAML.parse(
+          readFileSync(join(directory, "features", `${name}.yaml`), "utf8"),
+        );
+        const carries = Object.hasOwn(document, eventPayloadCatalogueKey);
+        assert.equal(
+          carries,
+          name === "event",
+          `${name} carries the wrong catalogue state`,
+        );
+      }
+    },
+  );
+
+  await t.test("the node slice drops every event payload schema", (t) => {
+    const directory = publishedDirectory(t);
+    const node = YAML.parse(
+      readFileSync(join(directory, "features", "node.yaml"), "utf8"),
+    );
+    const nodeSchemas = node.components.schemas as Record<string, unknown>;
+    for (const type of Object.keys(eventPayloads)) {
+      assert.equal(
+        Object.hasOwn(nodeSchemas, type),
+        false,
+        `node.yaml holds ${type}`,
+      );
+    }
+
+    const event = YAML.parse(
+      readFileSync(join(directory, "features", "event.yaml"), "utf8"),
+    );
+    const eventSchemas = event.components.schemas as Record<string, unknown>;
+    for (const type of Object.keys(eventPayloads)) {
+      assert.equal(
+        Object.hasOwn(eventSchemas, type),
+        true,
+        `event.yaml lost ${type}`,
+      );
+    }
+  });
+
+  await t.test(
+    "no emitted document holds a $ref outside its own components",
+    (t) => {
+      const directory = publishedDirectory(t);
+      const paths = [
+        "openapi.yaml",
+        ...featureNames.map((n) => join("features", `${n}.yaml`)),
+      ];
+      for (const relative of paths) {
+        const text = readFileSync(join(directory, relative), "utf8");
+        const document = YAML.parse(text);
+        const refs: string[] = [];
+        const walk = (value: unknown): void => {
+          if (Array.isArray(value)) return value.forEach(walk);
+          if (value === null || typeof value !== "object") return;
+          for (const [key, nested] of Object.entries(value)) {
+            if (key === "$ref" && typeof nested === "string") refs.push(nested);
+            else walk(nested);
+          }
+        };
+        walk(document);
+        assert.ok(refs.length > 0, `${relative} carries no $ref`);
+        for (const ref of refs) {
+          assert.ok(
+            ref.startsWith("#/components/schemas/"),
+            `${relative} holds external or malformed $ref ${ref}`,
+          );
+        }
+      }
+    },
+  );
+
   await t.test("generation is byte-identical across two runs", () => {
     const first = mkdtempSync(join(tmpdir(), "kanthord-contract-a-"));
     const second = mkdtempSync(join(tmpdir(), "kanthord-contract-b-"));
@@ -301,7 +534,11 @@ test("scripts/publish-contract", async (t) => {
       for (const relative of firstFiles) {
         const a = readFileSync(join(first, relative));
         const b = readFileSync(join(second, relative));
-        assert.deepEqual(a, b);
+        assert.equal(
+          Buffer.compare(a, b),
+          0,
+          `${relative} differs between runs`,
+        );
       }
     } finally {
       rmSync(first, { recursive: true, force: true });
@@ -417,10 +654,73 @@ test("scripts/publish-contract", async (t) => {
     assert.equal(existsSync(join(repositoryRoot, "openapi.yaml")), false);
   });
 
-  await t.test("clears a stale file from a previous publication", () => {
+  await t.test("refuses to publish into a repository descendant", (t) => {
+    const existing = join(repositoryRoot, "src");
+    const child = mkdtempSync(
+      join(repositoryRoot, ".kanthord-contract-child-"),
+    );
+    t.after(() => {
+      rmSync(child, { recursive: true, force: true });
+    });
+    const missing = join(child, "new-output");
+    const sentinel = join(existing, "main.ts");
+    const before = readFileSync(sentinel);
+
+    assert.equal(refusesSelfPublish(existing), true);
+    assert.equal(refusesSelfPublish(missing), true);
+    assert.throws(
+      () =>
+        publishContract({
+          outputDirectory: existing,
+          commit: "0".repeat(40),
+          tag: null,
+        }),
+      /refusing to publish into the repository/,
+    );
+    assert.throws(
+      () =>
+        publishContract({
+          outputDirectory: missing,
+          commit: "0".repeat(40),
+          tag: null,
+        }),
+      /refusing to publish into the repository/,
+    );
+    assert.deepEqual(readFileSync(sentinel), before);
+    assert.equal(existsSync(missing), false);
+  });
+
+  await t.test(
+    "refuses ancestors and symlinked repository descendants",
+    (t) => {
+      const parent = mkdtempSync(join(tmpdir(), "kanthord-contract-link-"));
+      t.after(() => {
+        rmSync(parent, { recursive: true, force: true });
+      });
+      const link = join(parent, "repo-link");
+      const missing = join(link, "new-output");
+      symlinkSync(repositoryRoot, link, "dir");
+
+      assert.equal(refusesSelfPublish(dirname(repositoryRoot)), true);
+      assert.throws(
+        () =>
+          publishContract({
+            outputDirectory: missing,
+            commit: "0".repeat(40),
+            tag: null,
+          }),
+        /refusing to publish into the repository/,
+      );
+      assert.equal(existsSync(missing), false);
+    },
+  );
+
+  await t.test("clears a stale file from a previous publication", (t) => {
+    const directory = publishedDirectory(t);
     writeFileSync(join(directory, "examples", "gone.json"), "junk");
     writeFileSync(join(directory, "features", "gone.yaml"), "junk");
     writeFileSync(join(directory, "openapi.yaml"), "junk");
+    writeFileSync(join(directory, "source", "components", "gone.yaml"), "junk");
 
     publishContract({
       outputDirectory: directory,
@@ -433,6 +733,10 @@ test("scripts/publish-contract", async (t) => {
     assert.equal(
       readFileSync(join(directory, "openapi.yaml"), "utf8"),
       renderOpenApiYaml(),
+    );
+    assert.equal(
+      existsSync(join(directory, "source", "components", "gone.yaml")),
+      false,
     );
   });
 
@@ -451,7 +755,8 @@ test("scripts/publish-contract", async (t) => {
     );
   });
 
-  await t.test("refuses an unknown flag", () => {
+  await t.test("refuses an unknown flag", (t) => {
+    const directory = publishedDirectory(t);
     assert.throws(
       () =>
         execFileSync(

@@ -30,7 +30,7 @@ src/services/<capability>/index.ts   the interface. No implementation, no re-exp
 src/services/<capability>/*.ts       an implementation of that interface.
 
 src/http/contract/**                 operation ids, methods, paths, lifecycle, zod schemas. No server framework.
-src/http/server/**                   the http framework, the middleware, and the handlers.
+src/http/server/**                   the runtime roots, the middleware, and the handlers.
 ```
 
 ### The import matrix
@@ -134,16 +134,17 @@ The same input produces the same output, the same order and the same bytes. Two 
 
 A rule with no mechanism is a rule a reviewer applies inconsistently. Each of these has one.
 
-| Rule                                             | Mechanism                                                         |
-| ------------------------------------------------ | ----------------------------------------------------------------- |
-| the import matrix                                | `eslint-plugin-boundaries`                                        |
-| `domain/` purity, and vendor packages by layer   | `no-restricted-imports` per glob                                  |
-| an unclassified `src/` file                      | an eslint file-pattern rule                                       |
-| a node or edge write outside the plan store      | `no-restricted-syntax`, with an enumerated exemption list         |
-| registry equals the proposal contract            | a test in `npm run verify`                                        |
-| a `stubbed` route answers 501 and writes nothing | an integration test that compares database state before and after |
-| canonical serialization                          | exact-byte unit tests                                             |
-| bytewise ordering                                | a test with non-ASCII paths, asserted through `Buffer.compare`    |
-| topological tie-break by ULID                    | an exact-order graph test                                         |
-| a constant-time token compare                    | `timingSafeEqual`, asserted by construction                       |
-| no domain branching in a handler                 | the handler signature admits only parse, invoke and format        |
+| Rule                                             | Mechanism                                                                |
+| ------------------------------------------------ | ------------------------------------------------------------------------ |
+| the import matrix                                | `eslint-plugin-boundaries`                                               |
+| `domain/` purity, and vendor packages by layer   | `no-restricted-imports` per glob                                         |
+| an unclassified `src/` file                      | an eslint file-pattern rule                                              |
+| a node or edge write outside the plan store      | `no-restricted-syntax`, with an enumerated exemption list                |
+| registry equals the proposal contract            | a test in `npm run verify`                                               |
+| a `stubbed` route answers 501 and writes nothing | an integration test that compares database state before and after        |
+| canonical serialization                          | exact-byte unit tests                                                    |
+| bytewise ordering                                | a test with non-ASCII paths, asserted through `Buffer.compare`           |
+| topological tie-break by ULID                    | an exact-order graph test                                                |
+| a constant-time token compare                    | `timingSafeEqual`, asserted by construction                              |
+| no domain branching in a handler                 | the handler signature admits only parse, invoke and format               |
+| no `node:` import in the Fetch-native core       | `src/http/server/core-purity.test.ts`, plus a no-restricted-imports glob |

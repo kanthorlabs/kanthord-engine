@@ -1,13 +1,22 @@
-import { buildOpenApiDocument, renderOpenApiYaml } from "./openapi.ts";
+import {
+  buildOpenApiDocument,
+  eventPayloadCatalogueKey,
+  openApiFeatures,
+  renderOpenApiYaml,
+} from "./openapi.ts";
+import { reachableSchemaNames } from "./schema-reachability.ts";
+import { eventPayloads } from "./event-payload.ts";
 import { registry } from "./registry.ts";
 import { renderOpenApiPath } from "./path.ts";
+import { eventTypes } from "../../domain/event-type.ts";
 import { KANTHORD_VERSION } from "../../domain/version.ts";
 import SwaggerParser from "@apidevtools/swagger-parser";
 import YAML from "yaml";
-import { test, after } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -58,10 +67,28 @@ function operationObjects(document: Readonly<Record<string, unknown>>): Array<{
   return found;
 }
 
-const openApiDirectory = mkdtempSync(join(tmpdir(), "kanthord-openapi-"));
-after(() => {
-  rmSync(openApiDirectory, { recursive: true, force: true });
-});
+function openApiDirectory(t: TestContext): string {
+  const directory = mkdtempSync(join(tmpdir(), "kanthord-openapi-"));
+  t.after(() => {
+    rmSync(directory, { recursive: true, force: true });
+  });
+  return directory;
+}
+
+function emitEveryDocument(directory: string): string[] {
+  const written: string[] = [];
+  const masterPath = join(directory, "openapi.yaml");
+  writeFileSync(masterPath, renderOpenApiYaml(), "utf8");
+  written.push(masterPath);
+  const featuresDirectory = join(directory, "features");
+  mkdirSync(featuresDirectory, { recursive: true });
+  for (const feature of openApiFeatures()) {
+    const path = join(featuresDirectory, `${feature.name}.yaml`);
+    writeFileSync(path, renderOpenApiYaml(feature.operations), "utf8");
+    written.push(path);
+  }
+  return written;
+}
 
 test("documents openapi 3.0.3 and the product info", () => {
   const document = buildOpenApiDocument();
@@ -358,6 +385,98 @@ test("registers every schema component in bytewise order", () => {
   ]);
 });
 
+test("carries the event payload catalogue in bytewise key order", () => {
+  const document = buildOpenApiDocument();
+  const catalogue = document[eventPayloadCatalogueKey] as Readonly<
+    Record<string, unknown>
+  >;
+  assert.deepEqual(
+    Object.keys(catalogue),
+    sortedBytewise(Object.keys(eventPayloads)),
+  );
+  assert.deepEqual(Object.keys(catalogue), sortedBytewise([...eventTypes]));
+  assert.equal(Object.keys(catalogue).length, 37);
+});
+
+test("resolves every catalogue entry to a component of the same document", () => {
+  const document = buildOpenApiDocument();
+  const catalogue = document[eventPayloadCatalogueKey] as Readonly<
+    Record<string, { $ref: string }>
+  >;
+  const components = document.components as Readonly<Record<string, unknown>>;
+  const schemas = components.schemas as Readonly<Record<string, unknown>>;
+  for (const [type, entry] of Object.entries(catalogue)) {
+    assert.deepEqual(Object.keys(entry), ["$ref"]);
+    assert.equal(entry.$ref, `#/components/schemas/${type}`);
+    assert.equal(
+      Object.hasOwn(schemas, type),
+      true,
+      `${type} is not a component`,
+    );
+  }
+});
+
+test("omits the event payload catalogue from a document without event.list", () => {
+  const nodeOperations = registry.filter((entry) =>
+    entry.operationId.startsWith("node."),
+  );
+  assert.ok(nodeOperations.length > 0);
+  assert.equal(
+    nodeOperations.some((entry) => entry.operationId === "event.list"),
+    false,
+  );
+  const document = buildOpenApiDocument(nodeOperations);
+  assert.equal(Object.hasOwn(document, eventPayloadCatalogueKey), false);
+});
+
+test("adds the catalogue as the only root key beyond the document core", () => {
+  const document = buildOpenApiDocument();
+  assert.deepEqual(Object.keys(document), [
+    "openapi",
+    "info",
+    "security",
+    "paths",
+    "components",
+    eventPayloadCatalogueKey,
+  ]);
+
+  const components = document.components as Readonly<Record<string, unknown>>;
+  assert.deepEqual(Object.keys(components), ["securitySchemes", "schemas"]);
+  assert.deepEqual(components.securitySchemes, {
+    bearerAuth: { type: "http", scheme: "bearer" },
+  });
+});
+
+test("the master holds exactly the transitive closure of its own references", () => {
+  const document = buildOpenApiDocument();
+  const components = document.components as Readonly<Record<string, unknown>>;
+  const schemas = components.schemas as Readonly<Record<string, unknown>>;
+  assert.deepEqual(
+    sortedBytewise([...reachableSchemaNames(document)]),
+    sortedBytewise(Object.keys(schemas)),
+  );
+  assert.equal(Object.keys(schemas).length, 142);
+  for (const type of Object.keys(eventPayloads)) {
+    assert.equal(Object.hasOwn(schemas, type), true, `${type} was pruned`);
+  }
+});
+
+test("a slice holds exactly the transitive closure of its own references", () => {
+  const nodeOperations = registry.filter((entry) =>
+    entry.operationId.startsWith("node."),
+  );
+  const document = buildOpenApiDocument(nodeOperations);
+  const components = document.components as Readonly<Record<string, unknown>>;
+  const schemas = components.schemas as Readonly<Record<string, unknown>>;
+  assert.deepEqual(
+    sortedBytewise([...reachableSchemaNames(document)]),
+    sortedBytewise(Object.keys(schemas)),
+  );
+  for (const type of Object.keys(eventPayloads)) {
+    assert.equal(Object.hasOwn(schemas, type), false, `${type} still seeded`);
+  }
+});
+
 test("plan.import's default response refs its own error component, and every stubbed operation's still refs Error", () => {
   const document = buildOpenApiDocument();
   const paths = document.paths as Readonly<Record<string, unknown>>;
@@ -536,29 +655,107 @@ test("renders canonical yaml", () => {
   assert.equal(yaml, renderOpenApiYaml());
 });
 
-test("validates the generated document and deletes its directory", async () => {
-  const filePath = join(openApiDirectory, "openapi.yaml");
-  writeFileSync(filePath, renderOpenApiYaml(), "utf8");
-  await SwaggerParser.validate(filePath);
+test("validates the master document and every feature slice", async (t) => {
+  const directory = openApiDirectory(t);
+  const paths = emitEveryDocument(directory);
+  assert.equal(paths.length, 20);
+  assert.equal(readdirSync(join(directory, "features")).length, 19);
+  for (const path of paths) {
+    await SwaggerParser.validate(path);
+  }
+});
+
+test("rejects a feature slice missing info.version", async (t) => {
+  const directory = openApiDirectory(t);
+  const feature = openApiFeatures().find((entry) => entry.name === "system");
+  assert.ok(feature, "the system feature is absent");
+  const document = structuredClone(
+    buildOpenApiDocument(feature.operations),
+  ) as Record<string, unknown>;
+  const info = document.info as Record<string, unknown>;
+  delete info.version;
+  const filePath = join(directory, "broken-no-version.yaml");
+  writeFileSync(filePath, YAML.stringify(document), "utf8");
+  await assert.rejects(SwaggerParser.validate(filePath));
+});
+
+test("rejects a feature slice with a dangling schema reference", async (t) => {
+  const directory = openApiDirectory(t);
+  const feature = openApiFeatures().find((entry) => entry.name === "system");
+  assert.ok(feature, "the system feature is absent");
+  const document = structuredClone(
+    buildOpenApiDocument(feature.operations),
+  ) as Record<string, unknown>;
+  const paths = document.paths as Record<string, unknown>;
+  const health = paths["/v1/health"] as Record<string, unknown>;
+  const responses = (health.get as Record<string, unknown>).responses as Record<
+    string,
+    unknown
+  >;
+  const defaultResponse = responses.default as Record<string, unknown>;
+  const content = defaultResponse.content as Record<string, unknown>;
+  const json = content["application/json"] as Record<string, unknown>;
+  const schema = json.schema as Record<string, unknown>;
+  schema.$ref = "#/components/schemas/missing";
+  const filePath = join(directory, "broken-dangling-ref.yaml");
+  writeFileSync(filePath, YAML.stringify(document), "utf8");
+  await assert.rejects(SwaggerParser.validate(filePath));
+});
+
+test("emits no $ref outside the document", (t) => {
+  const directory = openApiDirectory(t);
+  const paths = emitEveryDocument(directory);
+  assert.equal(paths.length, 20);
+  let total = 0;
+  for (const path of paths) {
+    const refs: string[] = [];
+    collectRefs(YAML.parse(readFileSync(path, "utf8")), refs);
+    assert.ok(refs.length > 0, `${path} carries no $ref at all`);
+    for (const ref of refs) {
+      assert.ok(
+        ref.startsWith("#/components/schemas/"),
+        `external or malformed $ref ${ref} in ${path}`,
+      );
+    }
+    total += refs.length;
+  }
+  assert.ok(total > 0, "the walk collected no $ref at all");
+});
+
+test("renders every feature slice to identical bytes twice", () => {
+  const features = openApiFeatures();
+  assert.equal(features.length, 19);
+  for (const feature of features) {
+    assert.equal(
+      compare(
+        renderOpenApiYaml(feature.operations),
+        renderOpenApiYaml(feature.operations),
+      ),
+      0,
+      `${feature.name}.yaml differs between two renders`,
+    );
+  }
 });
 
 test("is never committed to the repository root", () => {
   assert.equal(existsSync(join(repositoryRoot, "openapi.yaml")), false);
 });
 
-test("rejects a document missing info.version", async () => {
+test("rejects a document missing info.version", async (t) => {
+  const directory = openApiDirectory(t);
   const document = structuredClone(buildOpenApiDocument()) as Record<
     string,
     unknown
   >;
   const info = document.info as Record<string, unknown>;
   delete info.version;
-  const filePath = join(openApiDirectory, "no-version.yaml");
+  const filePath = join(directory, "no-version.yaml");
   writeFileSync(filePath, YAML.stringify(document), "utf8");
   await assert.rejects(SwaggerParser.validate(filePath));
 });
 
-test("rejects a dangling schema reference", async () => {
+test("rejects a dangling schema reference", async (t) => {
+  const directory = openApiDirectory(t);
   const document = structuredClone(buildOpenApiDocument()) as Record<
     string,
     unknown
@@ -574,7 +771,7 @@ test("rejects a dangling schema reference", async () => {
   const json = content["application/json"] as Record<string, unknown>;
   const schema = json.schema as Record<string, unknown>;
   schema.$ref = "#/components/schemas/missing";
-  const filePath = join(openApiDirectory, "dangling-ref.yaml");
+  const filePath = join(directory, "dangling-ref.yaml");
   writeFileSync(filePath, YAML.stringify(document), "utf8");
   await assert.rejects(SwaggerParser.validate(filePath));
 });

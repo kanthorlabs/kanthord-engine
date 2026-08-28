@@ -5,10 +5,13 @@ import { KANTHORD_VERSION } from "../../domain/version.ts";
 import { buildErrorEnvelope, errorEnvelopeSchema } from "./errors.ts";
 import { eventPayloads } from "./event-payload.ts";
 import { parameterNames, renderOpenApiPath } from "./path.ts";
+import { reachableSchemaNames } from "./schema-reachability.ts";
 import type { Operation } from "./operation.ts";
 import { registry } from "./registry.ts";
 
 const fixedMethodOrder = ["delete", "get", "post", "put"] as const;
+
+export const eventPayloadCatalogueKey = "x-kanthord-event-payloads";
 
 export type OpenApiFeature = Readonly<{
   name: string;
@@ -86,22 +89,36 @@ export function buildOpenApiDocument(
     paths[path] = pathObject;
   }
 
-  const sortedSchemas: Record<string, unknown> = {};
+  const allSchemas: Record<string, unknown> = {};
   for (const key of [...schemas.keys()].sort(compareBytewise)) {
     const schema = schemas.get(key);
-    if (schema !== undefined) sortedSchemas[key] = schema;
+    if (schema !== undefined) allSchemas[key] = schema;
   }
 
-  return {
+  const document: Record<string, unknown> = {
     openapi: "3.0.3",
     info: { title: "kanthord", version: KANTHORD_VERSION },
     security: [{ bearerAuth: [] }],
     paths,
     components: {
       securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } },
-      schemas: sortedSchemas,
+      schemas: allSchemas,
     },
   };
+
+  const catalogue = eventPayloadCatalogue(entries);
+  if (catalogue !== undefined) {
+    document[eventPayloadCatalogueKey] = catalogue;
+  }
+
+  const reachable = reachableSchemaNames(document);
+  const sortedSchemas: Record<string, unknown> = {};
+  for (const key of Object.keys(allSchemas)) {
+    if (reachable.has(key)) sortedSchemas[key] = allSchemas[key];
+  }
+  (document.components as Record<string, unknown>).schemas = sortedSchemas;
+
+  return document;
 }
 
 export function renderOpenApiYaml(
@@ -211,6 +228,19 @@ function operationObject(
   }
 
   return operation;
+}
+
+function eventPayloadCatalogue(
+  entries: readonly Operation[],
+): Record<string, { $ref: string }> | undefined {
+  if (!entries.some((entry) => entry.operationId === "event.list")) {
+    return undefined;
+  }
+  const catalogue: Record<string, { $ref: string }> = {};
+  for (const type of Object.keys(eventPayloads).sort(compareBytewise)) {
+    catalogue[type] = { $ref: `#/components/schemas/${type}` };
+  }
+  return catalogue;
 }
 
 function compareBytewise(a: string, b: string): number {

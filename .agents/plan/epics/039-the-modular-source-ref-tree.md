@@ -85,7 +85,7 @@ contract reads `source/`, where one schema lives in one place.
   An event payload schema carries the name of its event type, so this rule already places it. The
   37 event payload schemas hold nine distinct prefixes: `actor`, `lease`, `node`, `outcome`, `plan`,
   `project`, `provider`, `recovery` and `repository`. Each prefix already names a component file, so
-  `node.state.changed` lands in `source/components/node.yaml`. The component file count stays 15:
+  `node.created` lands in `source/components/node.yaml`. The component file count stays 15:
   14 schema prefixes plus `security.yaml`.
 
 - **The modular root carries the event payload catalogue.** EPIC 037 adds the root extension
@@ -96,8 +96,8 @@ contract reads `source/`, where one schema lives in one place.
 
   ```yaml
   x-kanthord-event-payloads:
-    node.state.changed:
-      $ref: ./components/node.yaml#/schemas/node.state.changed
+    node.created:
+      $ref: ./components/node.yaml#/schemas/node.created
   ```
 
   The value is the `./components/<prefix>.yaml#/schemas/<name>` form of the reference-style decision
@@ -144,7 +144,7 @@ Author with `/author`. The sequence below is the dependency order; each story is
    internal `#/components/schemas/<name>` references rewritten to
    `./components/<prefix>.yaml#/schemas/<name>`. Add `src/http/contract/openapi-source.test.ts` with
    the naming rule, the case-collision refusal, and the exact bytes of one small component file. The
-   test also asserts that `source/components/node.yaml` holds the key `node.state.changed` under
+   test also asserts that `source/components/node.yaml` holds the key `node.created` under
    `schemas`, and that the emitted map holds 15 component files.
 
 2. **`source/features/<feature>.yaml` holds the operation fragments.** Extend
@@ -167,7 +167,7 @@ Author with `/author`. The sequence below is the dependency order; each story is
    37 event type keys of the master extension in the master key order, and each value is
    `{ $ref: "./components/<prefix>.yaml#/schemas/<type>" }`, where `<prefix>` is the event type cut
    at the first `.`. Extend `src/http/contract/openapi-source.test.ts` with the exact root line
-   `$ref: ./components/node.yaml#/schemas/node.state.changed` under the key `node.state.changed`,
+   `$ref: ./components/node.yaml#/schemas/node.created` under the key `node.created`,
    and with the count of 37 extension keys. Then edit
    `scripts/publish-contract.ts`: remove `source` beside the four existing removals at lines 48-57,
    create `source/components` and `source/features`, write every entry of the map, and push each

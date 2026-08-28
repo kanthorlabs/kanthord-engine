@@ -1,6 +1,6 @@
-import { byteLength } from "./bytewise.ts";
 import type { OutcomeState } from "./idempotency-record.ts";
 import type { StoredAnswer } from "./idempotency-response.ts";
+import { byteLength } from "./bytewise.ts";
 
 export type IdempotencySettings = Readonly<{
   ttlSeconds: number;

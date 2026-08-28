@@ -142,7 +142,7 @@ describe("src/services/document/yaml.test", () => {
     assert.deepEqual(reader.read(source), reader.read(source));
   });
 
-  it("yaml is imported only in openapi.ts and document/yaml.ts", () => {
+  it("yaml is imported only in the allow-listed modules", () => {
     const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
     const srcDir = fileURLToPath(new URL("../../", import.meta.url));
     const offenders: string[] = [];
@@ -153,6 +153,7 @@ describe("src/services/document/yaml.test", () => {
       }
     }
     assert.deepEqual(offenders.sort(), [
+      "src/http/contract/openapi-source.ts",
       "src/http/contract/openapi.ts",
       "src/services/document/yaml.ts",
     ]);

@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { ZodType } from "zod";
 
 import { objectId } from "../../domain/column.ts";
-import { eventTypes, type EventType } from "../../domain/event-type.ts";
+import type { EventType } from "../../domain/event-type.ts";
 import { gitIntents } from "../../domain/git-operation.ts";
 import { differingFields } from "../../domain/node-write-legality.ts";
 import { taskReportOutcomes } from "../../domain/outcome-report.ts";
@@ -263,11 +263,3 @@ export const eventPayloads: Readonly<Record<EventType, ZodType>> = {
     landingOid: objectId,
   }),
 };
-
-export const eventPayload = z.union(
-  eventTypes.map((type) => eventPayloads[type]!) as [
-    ZodType,
-    ZodType,
-    ...ZodType[],
-  ],
-);

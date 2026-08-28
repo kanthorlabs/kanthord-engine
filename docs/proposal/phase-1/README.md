@@ -14,14 +14,15 @@ Behaviour is not an entity. A later-phase document schema, a role contract, a to
 
 ## Files
 
-| File                                           | Subject                                                                      |
-| ---------------------------------------------- | ---------------------------------------------------------------------------- |
-| [domain.md](domain.md)                         | entities, service layering, storage tables, dependencies                     |
-| [../database/README.md](../database/README.md) | every table at column level, one file per table                              |
-| [transport.md](transport.md)                   | bind address, bearer token, browser defences, CLI parity                     |
-| [plan-format.md](plan-format.md)               | the markdown a human authors, import, export, re-import                      |
-| [git-foundation.md](git-foundation.md)         | three repositories, three ref roles, seeding, branch fields, clone mechanics |
-| [state-machine.md](state-machine.md)           | states, the aggregation table, task order, rules                             |
+| File                                                         | Subject                                                                      |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| [domain.md](domain.md)                                       | entities, service layering, storage tables, dependencies                     |
+| [../database/README.md](../database/README.md)               | every table at column level, one file per table                              |
+| [transport.md](transport.md)                                 | bind address, bearer token, browser defences, CLI parity                     |
+| [runtime-capability-matrix.md](runtime-capability-matrix.md) | per-operation runtime verdicts, deployment shapes                            |
+| [plan-format.md](plan-format.md)                             | the markdown a human authors, import, export, re-import                      |
+| [git-foundation.md](git-foundation.md)                       | three repositories, three ref roles, seeding, branch fields, clone mechanics |
+| [state-machine.md](state-machine.md)                         | states, the aggregation table, task order, rules                             |
 
 ## Deliverables
 

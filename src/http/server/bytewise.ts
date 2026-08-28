@@ -1,9 +1,5 @@
 const encoder = new TextEncoder();
 
-export function byteLength(value: string): number {
-  return encoder.encode(value).byteLength;
-}
-
 export function compareBytewise(left: string, right: string): number {
   const leftBytes = encoder.encode(left);
   const rightBytes = encoder.encode(right);
@@ -16,4 +12,8 @@ export function compareBytewise(left: string, right: string): number {
     }
   }
   return leftBytes.length - rightBytes.length;
+}
+
+export function byteLength(value: string): number {
+  return encoder.encode(value).byteLength;
 }

@@ -183,7 +183,7 @@ Five further tests, after Story 2's four.
     ```ts
     assert.ok(
       text.includes(
-        "  node.state.changed:\n    $ref: ./components/node.yaml#/schemas/node.state.changed\n",
+        "  node.created:\n    $ref: ./components/node.yaml#/schemas/node.created\n",
       ),
     );
     ```
