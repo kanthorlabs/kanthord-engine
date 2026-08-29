@@ -28,9 +28,14 @@ because the epic's decisions rest on them.
 3. **Transaction persistence.** The library constrains the answer. `login()` holds its verifier in a
    closure and exposes no resumable state, so a suspended flow cannot be serialized. The engine
    therefore persists the login as a row with a state, and only the suspended part is process-local.
-4. **Token refresh.** The library owns it. `CredentialStore.modify` is the only write path, and
-   `pi-ai` runs `OAuthAuth.refresh` inside it under a per-provider lock, so concurrent requests
-   cannot double-refresh a rotated token. The dashboard has no refresh interface, exactly as it asked.
+4. **Token refresh.** The library owns the protocol. `CredentialStore.modify` is the only write path,
+   and `pi-ai` runs `OAuthAuth.refresh` inside it. The dashboard has no refresh interface, exactly as
+   it asked.
+
+   The per-provider lock that makes a concurrent double-refresh impossible is the **store's**
+   obligation, not the library's, and this epic does not meet it — see "Accepted deviations". Do not
+   read this answer as saying concurrency is handled for us.
+
 5. **Credential projection.** `OAuthCredential` is `{ type: "oauth", access, refresh, expires }`.
    The projection carries none of the three.
 6. **Backward-compatible registration union.** Decided below.
@@ -43,13 +48,27 @@ answers it. Three facts fix the shape.
 - **The set of vendors is derived from the library, and no engine edit adds one.**
   `builtinProviders()` carries `auth.oauth` as a synchronous `lazyOAuth` wrapper that exposes `name`,
   `isSubscription` and `loginLabel` without loading the flow module. So the admitted set is every
-  builtin provider whose `auth.oauth` is present, read at startup with no dynamic import and no
-  vendor list. `radius` is included: `providers/all.js` registers it with a default gateway, so it
-  needs no construction input.
+  builtin provider whose `auth.oauth` is present **and which the model catalogue carries**, read at
+  startup with no dynamic import and no vendor list. That intersection admits six vendors:
+  `anthropic`, `github-copilot`, `kimi-coding`, `openai-codex`, `openrouter` and `xai`.
+
+  **`radius` is excluded, and the catalogue is why.** `builtinProviders()` returns forty entries and
+  `getBuiltinProviders()` returns thirty-nine; the one difference is `radius`.
+  `PiAiModelCatalog.staticProviders` iterates the second, so `radius` never appears in
+  `provider.catalog` and `catalog.has("radius")` is false — and `provider.register` gates on exactly
+  that call. `getBuiltinModels("radius")` also answers an empty list, so a `radius` login could never
+  supply a `defaultModel` even past the gate. Admitting it would ship a vendor a human can
+  authenticate and then never register. The rule stays derived rather than listed: the engine
+  intersects two library-derived sets and still holds no vendor allowlist.
+
 - **The method is pinned by one preference rule over a known set of option spellings.** The engine
   prefers the device-code branch and falls back to the browser branch. The library spells the option
   id two ways — `device_code` for `openai-codex` and `device-code` for `radius` — so the recognized
-  spellings are engine-held knowledge. A flow offering neither refuses, loudly. **The vendor set
+  spellings are engine-held knowledge. Both spellings stay recognized although `radius` is not
+  admitted: the hyphen form is unreachable today and is retained so a later catalogue change costs no
+  edit here. Only `openai-codex` and `radius` present a select at all; the other five flows offer no
+  method choice, so the preference rule decides nothing for them. A flow offering neither refuses,
+  loudly. **The vendor set
   costs no engine edit; a third option spelling does.** That is deliberate: the epic prefers a loud
   refusal and a named edit over a silent fall-through to a branch that binds a local port.
 - **The login is a persisted state machine, and only the suspended flow is process-local.** A
@@ -66,13 +85,23 @@ answers it. Three facts fix the shape.
   projection carries them.
 - **No refresh operation.** The dashboard never triggers a refresh.
 - **No vendor allowlist.** The engine holds no list of admitted vendors.
-- **No login configuration input.** `radius` carries a default gateway, and every other admitted flow
-  is constructed from its id alone. A caller that wants a different gateway registers a different
-  provider id, which is out of scope.
+- **No login configuration input.** Every admitted flow is constructed from its id alone. A caller
+  that wants a different gateway registers a different provider id, which is out of scope.
 - **No cancel operation.** A pending login is superseded by nothing and cancelled by nothing. It
   expires. A human who abandons a login waits out the lifetime.
-- **No change to verification.** EPIC 044's `provider.verify` resolves through `pi-ai` and is
-  credential-type agnostic by construction. It covers an OAuth registration with no edit.
+- **No change to the verification verdict.** EPIC 044's `provider.verify` keeps its probe, its
+  outcome mapping and its response shape unchanged, and no new refusal joins `VerifyRefusal`.
+
+  It does **not** cover an OAuth registration with no edit, and the earlier claim that it did was
+  wrong. Two sites assume an api key: `ProviderAuthRow` declares a required `apiKey`
+  (`src/services/provider-auth/index.ts:17-22`) and the store returns an `api_key` credential
+  unconditionally (`src/services/provider-auth/pi-ai.ts:30-56`); and the probe refuses any vendor
+  whose `provider.auth.apiKey` is undefined (`pi-ai.ts:120-125`), which is exactly `openai-codex`,
+  the one oauth-only vendor. So this epic makes `ProviderAuthRow` a transport union, makes the store
+  serve either credential, and admits a vendor that carries only an oauth flow. Without those three
+  edits `provider.verify` refuses every subscription registration, and the decision below — that the
+  dashboard learns of an irrecoverable credential by calling `provider.verify` — does not work.
+
 - **No new error code.** Every refusal maps onto the existing closed set of
   `src/http/contract/errors.ts` and carries its name in `details.refusal`.
 
@@ -86,7 +115,8 @@ answers it. Three facts fix the shape.
      discriminated challenge;
   2. `provider.loginComplete` — `POST /v1/provider/login/complete`, takes `{ loginId, code? }`,
      answers `{ loginId, models }`;
-  3. `provider.loginCancel` — `POST /v1/provider/login/cancel`, takes `{ loginId }`, answers `204`;
+  3. `provider.loginCancel` — `POST /v1/provider/login/cancel`, takes `{ loginId }`, answers `204`,
+     the one route in the contract that does not answer `200`;
   4. `provider.register` — gains an `oauth` arm taking `{ transport: "oauth", loginId, name,
 defaultModel }`, and answers the existing `ProviderView`.
 
@@ -186,6 +216,16 @@ defaultModel }`, and answers the existing `ProviderView`.
   a successful registration answers `not-found`, as does one that never existed. The replay above is
   bounded by the row's life.
 
+- **The `204` is the contract's first non-200 success, and it costs two amendments.**
+  `docs/proposal/api/README.md:159` states that every route answers `200` on success and that no
+  route declares another status, and `src/http/contract/openapi.test.ts:227-234` asserts by loop that
+  every authored `successStatus` equals `200`. This epic amends the first with a carve-out sentence
+  and the second with a named `provider.loginCancel` exemption. The rule's own rationale does not
+  cover this route: it argues that one success status keeps a retry and a first write
+  indistinguishable, and a replayed cancel answers `404` rather than `204`, so cancel is not
+  idempotent either way. A body-less teardown is what `204` means, and a `200` carrying an empty
+  object would give the dashboard nothing more to branch on.
+
 - **A human cancels a pending login, and the cancel states what it tears down.**
   `provider.loginCancel` takes a `loginId`, aborts the live flow through its `AbortSignal`, lets
   `pi-ai` close its callback server or stop its poll, and deletes the row in the same transaction. It
@@ -197,9 +237,18 @@ defaultModel }`, and answers the existing `ProviderView`.
 
 - **An expiry is a transition, and the transition happens once.** The first request that observes an
   expired row refuses `login-expired`, aborts the live flow through its `AbortSignal`, closes
-  whatever the library opened, and deletes the row in the same transaction. A replay of that
-  `loginId` then answers `not-found`. A client can therefore tell an expiry from a replay by the
-  first answer it receives.
+  whatever the library opened, and deletes the row. A replay of that `loginId` then answers
+  `not-found`. A client can therefore tell an expiry from a replay by the first answer it receives.
+
+  **The rule applies to a `completed` row too, and expiry is checked before state.** A `completed`
+  row carries `expires_at` like any other, so a login the human never registered is torn down on its
+  own deadline rather than replaying forever while holding a credential. `provider.loginComplete`
+  therefore tests the deadline first and the state second; the replay below is bounded by the row's
+  lifetime as well as by its consumption.
+
+  The delete commits and the refusal is thrown afterwards. `src/services/storage/connection.ts:80-88`
+  rolls a transaction back when its callback throws, so a refusal thrown from inside the deleting
+  transaction would restore the row and defeat the whole rule.
 
 - **The device expiry is timed from the event, not from the row.** A vendor's device code starts its
   own lifetime when the vendor issues it, which is after every preceding prompt. So `expires_at` is
@@ -210,6 +259,25 @@ defaultModel }`, and answers the existing `ProviderView`.
 - **Only one pending login exists per vendor.** A second `start` refuses `login-in-progress`. The
   refusal is deliberate rather than a supersede: `anthropic` binds a fixed port for the life of its
   flow, and cancelling a live flow to start another races the abort against the callback.
+
+- **The rule is enforced in the service, before the flow starts, and in the database behind it.** A
+  row cannot be the lock for starting the handshake it records: `method` comes from the `notify`
+  callback and the device arm's `expires_at` comes from the `device_code` event, so neither is known
+  until the vendor answers. A check-then-insert around the vendor call therefore asserts exclusion
+  _after_ the collision it exists to prevent — two concurrent `start` calls both read no pending row,
+  and the second discovers the conflict as `EADDRINUSE` on `anthropic`'s fixed port
+  (`dist/auth/oauth/anthropic.js:17,131`) rather than as `login-in-progress`.
+
+  So the primary guard is a per-vendor claim inside `ProviderAuth`, taken **synchronously at the top
+  of `startLogin`, before the first `await`**. The daemon is one process by the home lock and Node is
+  single-threaded, so a synchronous claim cannot interleave: the second caller is refused before it
+  ever calls `login()`, and it never touches the port. The claim is released on the same three paths
+  that release the live flow — consumed, aborted, failed.
+
+  The partial unique index `provider_login_one_pending` stays as the backstop, and the insert catch
+  keeps mapping its violation to `login-in-progress`. It covers what the in-memory claim cannot: a
+  row left by a previous process. The two are not redundant — one guards the flow, the other guards
+  the row.
 
 - **A restart loses the live flow, and the row says so.** The daemon holds an exclusive home lock
   (`src/services/home-lock/sqlite.ts`) and refuses a home on a network filesystem, so two instances
@@ -257,6 +325,61 @@ defaultModel }`, and answers the existing `ProviderView`.
   response body of the three operations stay out of every log, consistent with the existing
   `provider.register` prohibition.
 
+## Accepted deviations
+
+Two properties of this design depart from a rule this repository states elsewhere, or from a
+contract the library documents. Each is deliberate, each is bounded, and neither is a defect to fix.
+They are recorded so a reviewer does not read them as oversights and a later reader does not
+"correct" them back into something that cannot work.
+
+- **A write command opens two transactions, not one.** `AGENTS.md` requires one transaction per write
+  command. `provider.loginStart` and `provider.loginComplete` cannot obey it: the vendor handshake is
+  asynchronous and `Storage.transact` is synchronous and refuses a thenable result
+  (`src/services/storage/connection.ts:90-101`), so no transaction can span the service call. Each
+  command reads in one transaction, calls the service outside it, and writes in a second that
+  re-checks what it depends on. The database closes the gap rather than the code: the partial unique
+  index `provider_login_one_pending` decides which concurrent `start` wins, and
+  `UPDATE … WHERE id = ? AND state = 'pending'` makes a concurrent `complete` lose without corrupting
+  the row. `provider.register` is unaffected and keeps its single transaction.
+
+- **The credential store does not serialize `modify`.** `pi-ai` documents `modify` as mutually
+  exclusive per provider id, with the callback seeing the current credential
+  (`dist/auth/types.d.ts:42-76`). The engine cannot honour either half, and the reason is the
+  adapter's lifetime rather than a missing lock. `createStore` is built **per probe**
+  (`src/services/provider-auth/pi-ai.ts:144`) over an already-decrypted row, so two concurrent
+  verifies hold two different store objects with no shared state to lock on, and `fn` sees the
+  credential snapshotted before the call rather than the row. EPIC 044 designed that object as a
+  read-only shim to satisfy a required `builtinModels` parameter, which was correct while api keys
+  were the only credential; this epic gives that shim a write path.
+
+  Two concurrent `provider.verify` calls on one oauth registration can therefore both refresh from
+  the same token. Neither outcome corrupts the row — the write is a whole-payload replace inside one
+  transaction — but the bound is weaker than "it heals itself". Under refresh-token rotation the
+  second refresh usually **fails**, writes nothing, and surfaces `authentication: "rejected"` on a
+  registration that is in fact healthy; where both succeed inside a vendor grace window, the later
+  write wins and one issued pair is orphaned.
+
+  The fix, when it is scoped, is to hoist the store to one long-lived instance owned by the service,
+  backed by storage and crypto rather than by a snapshot, with a per-provider-id promise chain and a
+  `SELECT → fn → UPDATE` inside one transaction.
+
+  **The existing snapshot rule does not sanction this, and must not be cited as if it did.**
+  `docs/proposal/phase-2/providers-and-credentials.md` states that the probe takes a credential
+  snapshot at request start, because the probe is a vendor round-trip and the daemon must not hold a
+  database lock across one. That rule governs the **read** path and defines what a verdict is a
+  statement about: a verdict describes the credential as it stood when the request began, and a stale
+  `rejected` is recoverable by verifying again. It says nothing about the write path, and its
+  rationale does not reach one — a `SELECT` inside `modify` is a local read of microseconds, not a
+  network call, so re-reading the row there would violate nothing. A stale verdict is harmless and
+  self-correcting; a stale write is a lost update. The deviation is accepted on its own terms, below,
+  and not because any existing rule requires it.
+
+  What actually bounds it: the daemon is single-host by the home lock, so the racing writers are two
+  requests in one process rather than two machines; the write is a whole-payload replace inside one
+  transaction, so no row is left half-written; and the damage is confined to one registration's
+  credential, recoverable by a re-login in the worst case. Hoisting the store is deferred as scope,
+  not as a design conclusion.
+
 ## Stories
 
 1. **The path grammar admits the two login segments.** Add `login` to `subresourceSegments` and
@@ -270,10 +393,12 @@ defaultModel }`, and answers the existing `ProviderView`.
    carries the vendor, the method, the state, the holding instance, the encrypted payload and the two
    timestamps.
 4. **The auth service enumerates the oauth flows and pins a method.** Extend
-   `services/provider-auth` with the derived admitted set, read from `builtinProviders()` through the
-   `lazyOAuth` wrapper with no dynamic import, and with the preference rule over the recognized option
-   spellings. Add its test, which asserts the derived set and the exact option id strings of every
-   admitted vendor against the installed library, so a rename in `pi-ai` fails the suite.
+   `services/provider-auth` with the derived admitted set — `builtinProviders()` entries carrying
+   `auth.oauth`, intersected with the catalogue, read through the `lazyOAuth` wrapper with no dynamic
+   import — and with the preference rule over the recognized option spellings. Add its test, which
+   asserts the six-vendor derived set, `radius`'s absence, and the exact option id and prompt message
+   strings of every hermetically observable vendor against the installed library, so a rename in
+   `pi-ai` fails the suite.
 5. **The auth service drives a suspended login.** Extend `services/provider-auth` with `startLogin`
    and `completeLogin` over the `AuthInteraction` adapter: the `notify` capture, the `manual_code`
    suspension, the device poll, the `answers` map and the abort path. Add its test with an injected
@@ -320,7 +445,7 @@ Proof:
 node --test \
   src/http/contract/path.test.ts \
   src/domain/provider-payload.test.ts \
-  src/services/storage/migration-provider-login.test.ts \
+  src/services/storage/migration-0010-provider-login.test.ts \
   src/services/provider-auth/pi-ai.test.ts \
   src/commands/provider/start-provider-login.test.ts \
   src/commands/provider/complete-provider-login.test.ts \
@@ -343,22 +468,42 @@ Hermetic coverage required beyond the Proof:
 - Both path tuples are asserted legal by `isLegalPath`, and a tuple with a `parameter` after the
   `login` subresource is asserted illegal. The two new segments are asserted singular.
 - The admitted set is asserted against the installed library, not against a literal list. The test
-  reads `auth.oauth` from `builtinProviders()`, asserts the derived set equals the providers that
-  carry it, and asserts that reading it triggers no dynamic import.
-- Every admitted vendor's pinned method is asserted by value, and both device-code spellings and the
-  browser option id are asserted as exact strings against the installed library.
+  reads `auth.oauth` from `builtinProviders()`, intersects it with the catalogue, asserts the derived
+  set equals those six ids, and asserts that no flow module loads. The load assertion is made by
+  passing a `lazyOAuth`-shaped double whose `load` sets a flag and asserting the flag stays false —
+  a synchronous return proves only that no import was awaited, not that none was started.
+- `radius` is asserted absent from the catalogue and absent from the admitted set, and
+  `getBuiltinProviders()` is asserted not to carry it while `builtinProviders()` does. A library
+  change that catalogues `radius` therefore fails the suite rather than silently widening the set.
+- The pinned method is asserted by value for every vendor a hermetic test can observe, and both
+  device-code spellings and the browser option id are asserted as exact strings against the installed
+  library. Five vendors are observable: `openai-codex`, `radius` and `github-copilot` answer a prompt
+  before touching the network, and `kimi-coding` and `xai` are asserted to be promptless device-code
+  flows under a stubbed `globalThis.fetch`. `anthropic` and `openrouter` are **not** asserted: each
+  binds a real loopback callback port before its first event, no `fetch` stub prevents a socket
+  listen, and the flow modules carry no public export path. That gap is deliberate, and a test that
+  opened a port to close it would break the hermetic rule it serves.
 - A `select` whose options carry no recognized spelling refuses `login-method-unavailable`, and the
   double records no further prompt.
 - A flow that asks a `text` prompt with no matching `answers` entry refuses `login-input-required`,
-  and `details.detail` holds the exact prompt message. The message strings of every admitted vendor
-  are asserted against the installed library.
-- `provider.catalog` carries a non-null `oauth` member for exactly the derived set, and `null` for
+  and `details.detail` holds the exact prompt message. The message string of `github-copilot`, the
+  one admitted vendor that asks a `text` prompt, is asserted against the installed library.
+- `provider.catalog` carries a non-null `oauth` member for exactly the derived six, and `null` for
   every other provider. `openai-compatible` is asserted to carry `null`. The `label` of a vendor with
   no `loginLabel` is asserted to equal its `name`, and the `label` of one with a `loginLabel` is
   asserted to equal that.
-- An api-key registration with no `transport` field produces a stored row and a `ProviderView`
-  deep-equal to the one it produces before this epic. The backward-compatibility case is asserted by
-  deep-equal, not by "still works".
+- An api-key registration with no `transport` field produces a stored payload whose **decrypted
+  plaintext** is byte-identical to the one it produces before this epic, and a `ProviderView`
+  deep-equal to the pre-epic one in every field except `projection.transport`, which is new and
+  carries `"api-key"`. The backward-compatibility case is asserted by deep-equal against that
+  expectation, not by "still works".
+
+  Two precisions this bullet needs. The projection gains `transport` by the decision above, so a
+  literal whole-`ProviderView` deep-equal against the pre-epic value cannot hold and is not the
+  oracle. And the comparison is on plaintext, never on ciphertext: AES-GCM takes a fresh
+  initialization vector per record (`docs/proposal/database/provider.md`), so two registrations of
+  one payload never produce equal `payload_ciphertext`.
+
 - `transport: "api-key"` and an absent `transport` produce deep-equal results.
 - A completed login stores the exact `availableModelIds` of the login result when it carries them,
   and the exact catalogue model ids otherwise. Both are asserted by value, with zero outbound calls.
