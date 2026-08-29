@@ -275,6 +275,14 @@ export function seedNodeState(
   );
 }
 
+export function seedNodeWorker(
+  transaction: Transaction,
+  id: string,
+  worker: string | null,
+): void {
+  transaction.run("UPDATE node SET worker = ? WHERE id = ?", [worker, id]);
+}
+
 export function seedNodeBlockReason(
   transaction: Transaction,
   id: string,

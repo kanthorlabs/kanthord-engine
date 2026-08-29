@@ -123,6 +123,42 @@ The same input produces the same output, the same order and the same bytes. Two 
 - A test asserts a value, never "some value". A timestamp in a snapshot is a defect.
 - **A story that cannot be made deterministic is a planning defect.** Fix the story. Never push the decision onto the implementing agent.
 
+## Handoff
+
+`HANDOFF.md` addresses the dashboard team. It is a request document, not a record. `apps/HANDOFF.md`
+is their document, in the other direction, and the engine reads it.
+
+- **It carries only pending requests.** Write an entry for something the engine still needs from the
+  dashboard: a decision that is theirs, an obligation they must take on, or a confirmation an engine
+  design depends on. Write nothing else.
+- **An answer to `apps/HANDOFF.md` is never an entry.** When the engine resolves one of their gaps,
+  the epic carries the contract and `docs/proposal/` carries the behaviour. Do not write a reply
+  document, and do not restate a delivered contract here. A register of answers makes them read
+  settled questions to find the open one.
+- **Delete a resolved entry completely.** When the dashboard answers an entry, and the engine accepts
+  the answer, remove the entry. Do not keep it as history, do not mark it answered, and do not
+  summarise it. The epic, `docs/proposal/` and the published OpenAPI document are the record.
+- **A request lives until it is answered, not until an epic merges.** These entries ask a person to
+  decide or to commit. Shipping the epic that assumes the answer does not resolve the request, and no
+  script can see the reply. A reviewer deletes the entry at the next write.
+- **State the property, not the screen.** Name the behaviour the engine needs and the reason. Let the
+  dashboard choose the component, the copy and the flow. A stated screen invites a screen argument,
+  and the dashboard knows its own domain better.
+- **Read their document as prose, never as a spec.** A shape drafted in `apps/HANDOFF.md` is a
+  request, not a contract. The engine designs the operation id, the path segments, the schemas and the
+  refusals in `http/contract/` and `docs/proposal/`. Adopting a drafted shape verbatim ships a
+  contract nobody designed, and a drafted shape often cannot express the states the domain has.
+- **Verify every claim before you write it.** Cite the engine file and line for a constraint, and the
+  `apps/` file and line for a claim about the dashboard. A stale claim makes the dashboard build
+  around a limit that does not exist.
+- **One entry per request.** Each entry states its priority, what the engine needs, why the engine
+  cannot settle it, the default the engine proceeds on if no answer arrives, and what has to change if
+  the answer arrives late. State what is deliberately not requested when a wider change is the obvious
+  wrong answer.
+- **Engine-owned work never goes in it.** A defect in this repository belongs in
+  `.agents/plan/epics/` or `.agents/plan/pending/`. The dashboard team cannot act on it, and it makes
+  the requests harder to find.
+
 ## What is enforced, and by what
 
 A rule with no mechanism is a rule a reviewer applies inconsistently. Each of these has one.

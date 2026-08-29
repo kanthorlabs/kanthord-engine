@@ -18,6 +18,11 @@ const context: ValidationContext = {
   knownRepositories: ["repo_a", "repo_b"],
 };
 
+const withoutClaudeSweContext: ValidationContext = {
+  ...context,
+  workerKinds: workerKinds.filter((kind) => kind !== "claude.swe@1"),
+};
+
 const threeFaultsContext: ValidationContext = {
   workerKinds: ["general@1", "tdd@1"],
   boundRepositories: ["repo_a"],
@@ -196,6 +201,102 @@ Do it.
       result.findings.map((finding) => finding.code),
       ["acceptance-missing", "repo-on-task", "worker-unknown"],
     );
+  });
+
+  for (const harnessKind of [
+    "claude.swe@1",
+    "claude.te@1",
+    "opencode.swe@1",
+    "opencode.te@1",
+  ] as const) {
+    it(`a task naming harness-qualified kind "${harnessKind}" produces an empty finding list`, () => {
+      const result = assertStable([
+        {
+          path: "plan/i--01/initiative.md",
+          content: `---
+id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
+kind: initiative
+title: Ship kanthord
+---
+Bootstrap the daemon.
+`,
+        },
+        {
+          path: "plan/i--01/o--01/objective.md",
+          content: `---
+id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
+kind: objective
+title: Harden the verify CLI
+repo: repo_a
+---
+Make it verifiable.
+`,
+        },
+        {
+          path: "plan/i--01/o--01/01-a.md",
+          content: `---
+id: task_01ARZ3NDEKTSV4RRFFQ69G5FAD
+kind: task
+title: Wire the events
+worker: ${harnessKind}
+---
+Emit the events.
+
+## Acceptance criteria
+
+- The events emit.
+`,
+        },
+      ]);
+      assert.deepEqual(result.findings, []);
+    });
+  }
+
+  it("a task naming claude.swe@1 outside the context produces exactly one worker-unknown finding", () => {
+    const result = assertStable(
+      [
+        {
+          path: "plan/i--01/initiative.md",
+          content: `---
+id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
+kind: initiative
+title: Ship kanthord
+---
+Bootstrap the daemon.
+`,
+        },
+        {
+          path: "plan/i--01/o--01/objective.md",
+          content: `---
+id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
+kind: objective
+title: Harden the verify CLI
+repo: repo_a
+---
+Make it verifiable.
+`,
+        },
+        {
+          path: "plan/i--01/o--01/01-a.md",
+          content: `---
+id: task_01ARZ3NDEKTSV4RRFFQ69G5FAD
+kind: task
+title: Wire the events
+worker: claude.swe@1
+---
+Emit the events.
+
+## Acceptance criteria
+
+- The events emit.
+`,
+        },
+      ],
+      { context: withoutClaudeSweContext },
+    );
+    assert.equal(result.findings.length, 1);
+    assert.equal(result.findings[0]?.code, "worker-unknown");
+    assert.equal(result.findings[0]?.path, "plan/i--01/o--01/01-a.md");
   });
 
   it("two documents each with one fault return two findings ordered by path", () => {

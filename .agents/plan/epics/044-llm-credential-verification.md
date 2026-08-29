@@ -120,6 +120,23 @@ rotated or over-quota credential is visible before a run fails:
   (`src/http/contract/credential.ts:333`), so a retried request makes no second outbound call and
   spends no second token.
 
+- **The idempotent identity is the client's `Idempotency-Key`, and nothing else.** The middleware
+  reads that header and returns early when it is absent (`src/http/server/idempotency.ts:41-50`), so a
+  request with no key always makes a fresh outbound check. A verification is therefore deduplicated
+  only when the client asks for it. Four consequences follow, and the proposal states all four
+  because the dashboard cannot read them off the contract:
+
+  - a transport retry sends the same key and receives the stored answer;
+  - a deliberate re-verification, after a human rotates the credential, sends no key or a new one, and
+    always reaches the vendor;
+  - a credential rotation invalidates no stored answer, because the record is keyed by the header and
+    holds no reference to the provider row;
+  - the record lives for `http.idempotency.ttl` and no longer, and it is in memory, so a restart
+    discards it.
+
+  So the retry the verdict's `detail` invites is a fresh check by construction, and the engine adds no
+  rotation-aware invalidation to make that true.
+
 - **A provider the engine cannot probe is refused, not guessed.** `kind = "git"`, an unknown id, and
   an `llm` registration whose vendor `pi-ai` does not catalogue each answer without any outbound
   call. An undecryptable payload answers `503 service-unavailable`, because a verification has no
@@ -156,8 +173,9 @@ rotated or over-quota credential is visible before a run fails:
 
 7. **The proposal records the operation.** Amend `docs/proposal/api/credential.md` with a
    `provider.verify` section: the prompt probe and why it is a completion rather than a models list,
-   the verdict shape, the outcome mapping, the token cap and timeout, and the statement that no
-   verdict is persisted. Amend `docs/proposal/phase-2/providers-and-credentials.md` to record that
+   the verdict shape, the outcome mapping, the token cap and timeout, the statement that no verdict is
+   persisted, and the four idempotency consequences above — what identifies an invocation, how a client
+   forces a fresh check, that a rotation invalidates nothing, and the retention window. Amend `docs/proposal/phase-2/providers-and-credentials.md` to record that
    `pi-ai` owns credential resolution and the engine owns only the store.
 
 ## Verification gate
@@ -189,8 +207,13 @@ Hermetic coverage required beyond the Proof:
 - A completion whose text is empty, whitespace, or a wrong answer all produce
   `completed: true` and an identical response body. The reply text appears nowhere in the response.
 - `checkedAt` equals the exact value a mock clock returns, and the clock records exactly one call.
-- The probe records exactly one outbound call per verification, and a second identical request within
-  the idempotency window records none.
+- The probe records exactly one outbound call per verification. A second request carrying the same
+  `Idempotency-Key` records none and answers a body deep-equal to the first. A second request carrying
+  **no** key records a second call, and a second request carrying a **different** key records a second
+  call. The three cases are asserted separately, because they are the contract the dashboard's retry
+  button depends on.
+- A verification that answers `rejected`, followed by a credential rotation, followed by a keyless
+  verification, answers the rotated credential's verdict and not the stored one.
 - A timeout produces `endpoint-unreachable`, and the abort signal is asserted to have fired.
 - `kind = "git"`, an unknown vendor id and an unknown provider id each answer without any outbound
   call, asserted by a transport double that records zero calls.
