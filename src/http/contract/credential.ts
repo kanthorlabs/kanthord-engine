@@ -77,6 +77,9 @@ export const displacedProvider = z.strictObject({
 export const providerSetDefaultResponse = providerView.extend({
   displaced: z.array(displacedProvider),
 });
+export const providerRemoveRequest = z.strictObject({
+  force: z.enum(["true", "false"]).optional(),
+});
 export const providerRemoveResponse = z.strictObject({
   id: z.string(),
 });
@@ -144,6 +147,7 @@ export const providerRenameExamples: OperationExamples = {
 };
 
 export const providerRemoveExamples: OperationExamples = {
+  query: { force: "false" },
   success: { id: `provider_${U}` },
   error: {
     error: {
@@ -394,6 +398,7 @@ export const credential = operations([
     introducedIn: "phase-2",
     status: "routed",
     allowedActors: ["human"],
+    query: providerRemoveRequest,
     response: providerRemoveResponse,
     errors: {
       ...baselineErrors,
