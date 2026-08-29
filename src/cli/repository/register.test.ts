@@ -69,6 +69,7 @@ const defaultRespond = (operationId: string): CallResult => {
         branches: ["main"],
         credential: { reachable: true, refusal: null },
         hostKey: null,
+        access: { read: { allowed: true, refusal: null }, write: null },
       },
     };
   }
@@ -299,6 +300,10 @@ describe("src/cli/repository/register.test", () => {
                   algorithm: "ssh-ed25519",
                   fingerprint: "SHA256:" + "A".repeat(43),
                 },
+                access: {
+                  read: { allowed: false, refusal: "host-key-mismatch" },
+                  write: null,
+                },
               },
             }
           : defaultRespond(operationId),
@@ -364,6 +369,10 @@ describe("src/cli/repository/register.test", () => {
                   algorithm: "ssh-ed25519",
                   fingerprint: "SHA256:" + "A".repeat(43),
                 },
+                access: {
+                  read: { allowed: false, refusal: "host-key-mismatch" },
+                  write: null,
+                },
               },
             }
           : defaultRespond(operationId),
@@ -410,6 +419,7 @@ describe("src/cli/repository/register.test", () => {
                 branches: ["trunk"],
                 credential: { reachable: true, refusal: null },
                 hostKey: null,
+                access: { read: { allowed: true, refusal: null }, write: null },
               },
             }
           : defaultRespond(operationId),

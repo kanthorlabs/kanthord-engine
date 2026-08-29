@@ -61,6 +61,9 @@ function gitMock(pairs: Readonly<Record<string, string | null>>): Readonly<{
     canPush(): Promise<never> {
       throw new Error("unexpected canPush call");
     },
+    probePush(): Promise<never> {
+      throw new Error("unexpected probePush call");
+    },
     fetch(): Promise<never> {
       throw new Error("unexpected fetch call");
     },

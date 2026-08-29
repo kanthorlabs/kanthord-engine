@@ -45,6 +45,7 @@ const everyGitFailure: Readonly<Record<GitFailure, true>> = {
   "timed-out": true,
   "output-exceeded": true,
   unknown: true,
+  "empty-remote": true,
 };
 
 const everyInspectRefusal: Readonly<Record<InspectRefusal, true>> = {

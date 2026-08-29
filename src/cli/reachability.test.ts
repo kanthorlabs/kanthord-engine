@@ -232,6 +232,7 @@ const responseFor = (request: RecordedRequest): unknown => {
         branches: ["main"],
         credential: { reachable: true, refusal: null },
         hostKey: null,
+        access: { read: { allowed: true, refusal: null }, write: null },
       };
     case "repository.register":
     case "repository.show":

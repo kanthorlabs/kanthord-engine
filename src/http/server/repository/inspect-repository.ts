@@ -30,6 +30,7 @@ export function inspectRepositoryHandler(
       const result = await dependencies.inspectRepository({
         remoteUrl: parsed.data.remoteUrl,
         credentialId: parsed.data.credentialId,
+        requiredAccess: parsed.data.requiredAccess,
       });
       return {
         kind: "json",
@@ -45,6 +46,7 @@ export function inspectRepositoryHandler(
                   algorithm: result.hostKey.algorithm,
                   fingerprint: result.hostKey.fingerprint,
                 },
+          access: result.access,
         },
       };
     } catch (error) {

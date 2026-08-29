@@ -51,6 +51,8 @@ const sshUrl = "ssh://git@github.com/kanthorlabs/kanthord-verify.git";
 
 const token = "ghp_token";
 
+type ProbePushCall = Parameters<Git["probePush"]>[0];
+
 const crypto: Crypto = new AesGcmCrypto({
   key: Buffer.alloc(32, 7),
   keyVersion: 1,
@@ -111,14 +113,17 @@ function gitMock(
     info?: RemoteInfo;
     infoError?: GitError;
     scan?: ScanOutcome;
+    probePush?: Git["probePush"];
   }>,
 ): Readonly<{
   git: Git;
   scanCalls: readonly string[];
   infoCalls: readonly { remoteUrl: string }[];
+  probeCalls: readonly ProbePushCall[];
 }> {
   const scanCalls: string[] = [];
   const infoCalls: { remoteUrl: string }[] = [];
+  const probeCalls: ProbePushCall[] = [];
   const git: Git = {
     remoteUrlVerdict(remoteUrl: string): RemoteUrlVerdict {
       return (
@@ -170,6 +175,13 @@ function gitMock(
     canPush(): Promise<never> {
       throw new Error("unexpected canPush call");
     },
+    probePush(input: ProbePushCall): ReturnType<Git["probePush"]> {
+      probeCalls.push(input);
+      if (overrides?.probePush !== undefined) {
+        return overrides.probePush(input);
+      }
+      throw new Error("unexpected probePush call");
+    },
     fetch(): Promise<void> {
       throw new Error("unexpected fetch call");
     },
@@ -204,7 +216,7 @@ function gitMock(
       throw new Error("unexpected worktreeClean call");
     },
   };
-  return { git, scanCalls, infoCalls };
+  return { git, scanCalls, infoCalls, probeCalls };
 }
 
 function rowCounts(storage: Storage): Readonly<{
@@ -260,6 +272,10 @@ describe("src/queries/repository/inspect-repository.test", () => {
       branches: ["main"],
       credential: { reachable: true, refusal: null },
       hostKey: null,
+      access: {
+        read: { allowed: true, refusal: null },
+        write: null,
+      },
     });
     assert.deepEqual(infoCalls, [{ remoteUrl: httpsUrl }]);
     const after = rowCounts(temporary.storage);
@@ -337,6 +353,10 @@ describe("src/queries/repository/inspect-repository.test", () => {
       branches: [],
       credential: { reachable: false, refusal: "auth-failed" },
       hostKey: null,
+      access: {
+        read: { allowed: false, refusal: "auth-failed" },
+        write: null,
+      },
     });
   });
 
@@ -571,5 +591,255 @@ describe("src/queries/repository/inspect-repository.test", () => {
       { remoteUrl: httpsUrl, credentialId: id },
     );
     assert.equal(JSON.stringify(result).includes(token), false);
+  });
+
+  it("omitting requiredAccess returns access.write null", async (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const id = register(temporary.storage, "github-bot", "git", {
+      transport: "http-basic",
+      forge: "github",
+      username: "x-access-token",
+      token,
+    });
+    const { git } = gitMock();
+    const result = await inspectRepository(
+      { storage: temporary.storage, crypto, git },
+      { remoteUrl: httpsUrl, credentialId: id },
+    );
+    assert.equal(result.access.write, null);
+    assert.deepEqual(result.access.read, { allowed: true, refusal: null });
+  });
+
+  it("requiredAccess read behaves identically to omitting it", async (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const id = register(temporary.storage, "github-bot", "git", {
+      transport: "http-basic",
+      forge: "github",
+      username: "x-access-token",
+      token,
+    });
+    const { git } = gitMock();
+    const omitted = await inspectRepository(
+      { storage: temporary.storage, crypto, git },
+      { remoteUrl: httpsUrl, credentialId: id },
+    );
+    const read = await inspectRepository(
+      { storage: temporary.storage, crypto, git },
+      { remoteUrl: httpsUrl, credentialId: id, requiredAccess: "read" },
+    );
+    assert.deepEqual(read, omitted);
+    assert.equal(read.access.write, null);
+    assert.deepEqual(read.access.read, { allowed: true, refusal: null });
+  });
+
+  it("requiredAccess write with writer credential returns both verdicts allowed", async (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const id = register(temporary.storage, "github-bot", "git", {
+      transport: "http-basic",
+      forge: "github",
+      username: "x-access-token",
+      token,
+    });
+    const { git, probeCalls } = gitMock({
+      probePush: async () => ({ allowed: true as const }),
+    });
+    const result = await inspectRepository(
+      { storage: temporary.storage, crypto, git },
+      { remoteUrl: httpsUrl, credentialId: id, requiredAccess: "write" },
+    );
+    assert.deepEqual(probeCalls, [
+      {
+        remoteUrl: httpsUrl,
+        branch: "main",
+        credential: {
+          transport: "http-basic",
+          forge: "github",
+          username: "x-access-token",
+          token,
+        },
+      },
+    ]);
+    assert.deepEqual(result.access.read, { allowed: true, refusal: null });
+    assert.deepEqual(result.access.write, { allowed: true, refusal: null });
+    assert.deepEqual(result.credential, { reachable: true, refusal: null });
+  });
+
+  it("requiredAccess write with push-refused credential returns write false", async (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const id = register(temporary.storage, "github-bot", "git", {
+      transport: "http-basic",
+      forge: "github",
+      username: "x-access-token",
+      token,
+    });
+    const { git } = gitMock({
+      probePush: async () => ({
+        allowed: false as const,
+        failure: "auth-failed",
+        detail: "",
+      }),
+    });
+    const result = await inspectRepository(
+      { storage: temporary.storage, crypto, git },
+      { remoteUrl: httpsUrl, credentialId: id, requiredAccess: "write" },
+    );
+    assert.deepEqual(result.access.read, { allowed: true, refusal: null });
+    assert.deepEqual(result.access.write, {
+      allowed: false,
+      refusal: "auth-failed",
+    });
+    assert.equal(result.credential.reachable, true);
+  });
+
+  it("read failure short-circuits probe; write carries same refusal", async (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const id = register(temporary.storage, "github-bot", "git", {
+      transport: "http-basic",
+      forge: "github",
+      username: "x-access-token",
+      token,
+    });
+    const { git, probeCalls } = gitMock({
+      infoError: new GitErrorValue("auth-failed", "remote read failed", ""),
+      probePush: async () => {
+        throw new Error("should not be called");
+      },
+    });
+    const result = await inspectRepository(
+      { storage: temporary.storage, crypto, git },
+      { remoteUrl: httpsUrl, credentialId: id, requiredAccess: "write" },
+    );
+    assert.equal(result.credential.reachable, false);
+    assert.deepEqual(result.access.read, {
+      allowed: false,
+      refusal: "auth-failed",
+    });
+    assert.deepEqual(result.access.write, {
+      allowed: false,
+      refusal: "auth-failed",
+    });
+    assert.deepEqual(probeCalls, []);
+  });
+
+  it("empty-remote branch returns write false with empty-remote refusal", async (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const id = register(temporary.storage, "github-bot", "git", {
+      transport: "http-basic",
+      forge: "github",
+      username: "x-access-token",
+      token,
+    });
+    const { git, probeCalls } = gitMock({
+      info: { defaultBranch: null, branches: [] },
+      probePush: async () => ({
+        allowed: false as const,
+        failure: "empty-remote",
+        detail: "",
+      }),
+    });
+    const result = await inspectRepository(
+      { storage: temporary.storage, crypto, git },
+      { remoteUrl: httpsUrl, credentialId: id, requiredAccess: "write" },
+    );
+    assert.deepEqual(result.access.write, {
+      allowed: false,
+      refusal: "empty-remote",
+    });
+    assert.equal(probeCalls.length, 1);
+    assert.equal(probeCalls[0]?.branch, null);
+  });
+
+  it("read failure without requiredAccess write leaves access.write null", async (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const id = register(temporary.storage, "github-bot", "git", {
+      transport: "http-basic",
+      forge: "github",
+      username: "x-access-token",
+      token,
+    });
+    const { git } = gitMock({
+      infoError: new GitErrorValue(
+        "transport-failed",
+        "remote read failed",
+        "",
+      ),
+    });
+    const result = await inspectRepository(
+      { storage: temporary.storage, crypto, git },
+      { remoteUrl: httpsUrl, credentialId: id },
+    );
+    assert.equal(result.access.write, null);
+    assert.deepEqual(result.access.read, {
+      allowed: false,
+      refusal: "transport-failed",
+    });
+  });
+
+  it("probePush throws GitError (fetch fails) and query converts to write verdict", async (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const stderrSentinel = "raw-git-stderr-sentinel-epic-043";
+    const id = register(temporary.storage, "github-bot", "git", {
+      transport: "http-basic",
+      forge: "github",
+      username: "x-access-token",
+      token,
+    });
+    const { git } = gitMock({
+      probePush: async () => {
+        throw new GitErrorValue(
+          "auth-failed",
+          "probe fetch failed",
+          stderrSentinel,
+        );
+      },
+    });
+    const result = await inspectRepository(
+      { storage: temporary.storage, crypto, git },
+      { remoteUrl: httpsUrl, credentialId: id, requiredAccess: "write" },
+    );
+    assert.deepEqual(result.access.write, {
+      allowed: false,
+      refusal: "auth-failed",
+    });
+    assert.deepEqual(result.access.read, { allowed: true, refusal: null });
+    assert.equal(JSON.stringify(result).includes(stderrSentinel), false);
+  });
+
+  it("no token or private key in serialized result when requiredAccess write", async (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const sshTemporary = createMigratedStorage();
+    t.after(() => sshTemporary.dispose());
+    const httpId = register(temporary.storage, "github-bot", "git", {
+      transport: "http-basic",
+      forge: "github",
+      username: "x-access-token",
+      token,
+    });
+    const sshId = register(sshTemporary.storage, "ssh-bot", "git", {
+      transport: "ssh",
+      privateKey: plainKey,
+    });
+    const { git } = gitMock({
+      probePush: async () => ({ allowed: true as const }),
+    });
+    const result = await inspectRepository(
+      { storage: temporary.storage, crypto, git },
+      { remoteUrl: httpsUrl, credentialId: httpId, requiredAccess: "write" },
+    );
+    const sshResult = await inspectRepository(
+      { storage: sshTemporary.storage, crypto, git },
+      { remoteUrl: sshUrl, credentialId: sshId, requiredAccess: "write" },
+    );
+    assert.equal(JSON.stringify(result).includes(token), false);
+    assert.equal(JSON.stringify(sshResult).includes(plainKey), false);
   });
 });

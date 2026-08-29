@@ -16,6 +16,7 @@ const result: InspectRepositoryResult = {
   branches: ["main"],
   credential: { reachable: true, refusal: null },
   hostKey: null,
+  access: { read: { allowed: true, refusal: null }, write: null },
 };
 
 async function handlerApp(
@@ -49,6 +50,7 @@ describe("src/http/server/repository/inspect-repository.test", () => {
     assert.deepEqual(called, {
       remoteUrl: "https://github.com/kanthorlabs/kanthord-verify.git",
       credentialId: "provider_01HZY8QF3M4N5P6R7S8T9V0W1X",
+      requiredAccess: undefined,
     });
   });
 
@@ -165,5 +167,92 @@ describe("src/http/server/repository/inspect-repository.test", () => {
     assert.equal(response.status, 200);
     assert.equal(Object.hasOwn(response.body, "hostKey"), true);
     assert.equal(response.body.hostKey, null);
+  });
+
+  it("body with requiredAccess write is forwarded to the query", async () => {
+    let fakeInput: InspectRepositoryInput | undefined;
+    const app = await handlerApp(async (input) => {
+      fakeInput = input;
+      return result;
+    });
+    const response = await app.post("/v1/repository/inspect").send({
+      remoteUrl: "https://x.test/r.git",
+      credentialId: "provider_01",
+      requiredAccess: "write",
+    });
+    assert.equal(response.status, 200);
+    assert.equal(fakeInput?.requiredAccess, "write");
+  });
+
+  it("response includes access field with write null when query returns write null", async () => {
+    const app = await handlerApp(async () => result);
+    const response = await app.post("/v1/repository/inspect").send({
+      remoteUrl: "https://x.test/r.git",
+      credentialId: "provider_01",
+    });
+    const parsed = repositoryInspectResponse.safeParse(response.body);
+    assert.equal(parsed.success, true);
+    assert.deepEqual(response.body.access, {
+      read: { allowed: true, refusal: null },
+      write: null,
+    });
+  });
+
+  it("response includes access.write verdict when query returns write non-null", async () => {
+    const app = await handlerApp(async () => ({
+      ...result,
+      access: {
+        read: { allowed: true, refusal: null },
+        write: { allowed: false, refusal: "auth-failed" },
+      },
+    }));
+    const response = await app.post("/v1/repository/inspect").send({
+      remoteUrl: "https://x.test/r.git",
+      credentialId: "provider_01",
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.access?.write, {
+      allowed: false,
+      refusal: "auth-failed",
+    });
+  });
+
+  it("requiredAccess push is rejected 400 before the query is called", async () => {
+    const app = await handlerApp(async () => {
+      throw new Error("should not be called");
+    });
+    const response = await app.post("/v1/repository/inspect").send({
+      remoteUrl: "https://x.test/r.git",
+      credentialId: "provider_01",
+      requiredAccess: "push",
+    });
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "invalid-request");
+  });
+
+  it("requiredAccess Write (mixed case) is rejected 400", async () => {
+    const app = await handlerApp(async () => {
+      throw new Error("should not be called");
+    });
+    const response = await app.post("/v1/repository/inspect").send({
+      remoteUrl: "https://x.test/r.git",
+      credentialId: "provider_01",
+      requiredAccess: "Write",
+    });
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "invalid-request");
+  });
+
+  it("requiredAccess empty string is rejected 400", async () => {
+    const app = await handlerApp(async () => {
+      throw new Error("should not be called");
+    });
+    const response = await app.post("/v1/repository/inspect").send({
+      remoteUrl: "https://x.test/r.git",
+      credentialId: "provider_01",
+      requiredAccess: "",
+    });
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "invalid-request");
   });
 });
