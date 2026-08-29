@@ -102,14 +102,15 @@ rotated or over-quota credential is visible before a run fails:
   answer.
 
 - **The probe's dependency on `pi-ai` error formatting is pinned by a test.** `stream.result()`
-  resolves rather than rejects on a provider error, and the HTTP status arrives as a `[STATUS]`
-  prefix that `formatProviderError` writes into `result.errorMessage`. That is `pi-ai` 0.84.1
-  internal formatting, not a documented contract. A test asserts the prefix format directly, so a
-  library upgrade that changes it fails loudly at build time instead of silently misreporting every
-  verdict as `endpoint-rejected`.
+  resolves rather than rejects on a provider error, and the HTTP status arrives as a decimal
+  `STATUS:` prefix, for example `401:`, in `result.errorMessage`. That is `pi-ai` 0.84.1 internal
+  formatting, not a documented contract. A test asserts the prefix format directly, so a library
+  upgrade that changes it fails loudly at build time instead of silently misreporting every verdict
+  as `endpoint-rejected`.
 
-- **The probe is bounded.** The request carries an `AbortSignal` with a fixed timeout, and a timeout
-  is `endpoint-unreachable`. A verification cannot hang a request thread indefinitely.
+- **The probe is bounded.** The production adapter always creates a `30_000` ms timeout signal and
+  composes it with the caller signal. A timeout is `endpoint-unreachable`, and a verification cannot
+  hang a request thread indefinitely. The timeout-signal factory is injectable for hermetic tests.
 
 - **Nothing secret leaves.** The response, the refusal and `detail` never carry the key, a token, a
   fragment of either, or a vendor response body. `detail` is limited to a status code and the fixed
@@ -214,17 +215,21 @@ Hermetic coverage required beyond the Proof:
   button depends on.
 - A verification that answers `rejected`, followed by a credential rotation, followed by a keyless
   verification, answers the rotated credential's verdict and not the stored one.
-- A timeout produces `endpoint-unreachable`, and the abort signal is asserted to have fired.
+- The production adapter creates a timeout signal with exactly `30_000` ms, composes it with the caller
+  signal, and maps its abort to `endpoint-unreachable`. The hermetic test injects the timeout-signal
+  factory, aborts its returned signal during pending transport, and asserts that the timeout signal and
+  composed transport signal fired while the non-aborted caller signal stayed active.
 - `kind = "git"`, an unknown vendor id and an unknown provider id each answer without any outbound
   call, asserted by a transport double that records zero calls.
 - A provider whose stored payload fails to decrypt answers `503 service-unavailable`, with zero
   outbound calls and an unchanged provider row.
-- The single-entry store adapter answers `list` with exactly one entry, and a `read` or `modify` for
-  any other provider id throws. Two registrations of the same vendor are asserted not to see each
-  other's credential.
+- The single-entry store adapter answers `list` with exactly one entry. A `read` for another provider
+  id resolves `undefined`, and a `modify` for another provider id resolves `undefined` without invoking
+  its callback. Two per-request adapters for registrations of the same vendor return only their
+  respective registration's credential.
 - No response body, refusal or `detail` contains the api key. The assertion searches the serialized
   response for the fixture key on every one of the six outcomes.
 - The provider row, the event table and every other table are byte-identical before and after a
   verification of each outcome. Verification writes nothing.
-- One test pins the `pi-ai` error-message contract: it asserts the exact `[STATUS]` prefix shape the
+- One test pins the `pi-ai` error-message contract: it asserts the exact `STATUS:` prefix shape the
   status parser depends on, and it fails if the installed library stops producing it.

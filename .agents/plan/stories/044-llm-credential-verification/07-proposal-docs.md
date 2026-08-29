@@ -9,7 +9,7 @@ Depends on: Story 6
 
 Add a `## provider.verify` section. Include:
 
-1. **Operation**: `POST /v1/provider/:provider/verify`
+1. **Operation**: `POST /v1/provider/:id/verify`
 2. **Why a prompt probe, not a models list**: a `GET /models` with a bearer header is
    OpenAI-shaped and fails for Anthropic and Google (different header and path). It also
    proves nothing about OAuth credentials. The prompt probe uses the actual request path
@@ -49,9 +49,13 @@ Add or amend a section on credential resolution. State:
   `rejected` verdict should retry: a fresh verification will pick up the current
   credential.
 
+### `docs/proposal/phase-1/runtime-capability-matrix.md`
+
+Add `provider.verify` in registry order with the rendered path `/v1/provider/:id/verify`. Reconcile the routed-operation counts and runtime aggregates.
+
 ## Constraints
 
-- Both files are under `docs/proposal/` — the one path an epic may edit besides `.ts`
+- All files are under `docs/proposal/` — the one path an epic may edit besides `.ts`
   / `.js` source.
 - No new TypeScript file is created or edited in Story 7.
 

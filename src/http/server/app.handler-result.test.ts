@@ -32,6 +32,7 @@ const HANDLERS: readonly (readonly [string, readonly number[]])[] = [
   ["src/http/server/credential/rename-provider.ts", [200]],
   ["src/http/server/credential/set-default-provider.ts", [200]],
   ["src/http/server/credential/show-provider.ts", [200]],
+  ["src/http/server/credential/verify-provider.ts", [200]],
   ["src/http/server/edge/list-edge.ts", [200]],
   ["src/http/server/event/list-event.ts", [200]],
   ["src/http/server/node/claim-node.ts", [200]],

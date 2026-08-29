@@ -13,6 +13,7 @@ import {
   providerRenameResponse,
   providerSetDefaultExamples,
   providerSetDefaultResponse,
+  providerVerifyResponse,
   providerView,
 } from "./credential.ts";
 import { buildErrorEnvelope } from "./errors.ts";
@@ -23,6 +24,15 @@ import {
   EXAMPLE_ULID as U,
   EXAMPLE_ULID_B as UB,
 } from "./example-literal.ts";
+
+const validSuccessBody = {
+  checkedAt: A,
+  model: "gpt-4o",
+  reachability: "reachable" as const,
+  authentication: "accepted" as const,
+  completed: true,
+  refusal: null,
+};
 
 describe("src/http/contract/credential.test", () => {
   it("the three phase-2 provider routes become routed with unchanged shape", () => {
@@ -38,6 +48,20 @@ describe("src/http/contract/credential.test", () => {
       assert.equal(entry?.introducedIn, "phase-2", operationId);
       assert.equal(renderPath(entry!.path), path, operationId);
     }
+  });
+
+  it("provider.verify is a phase-1 memory route with the verification path", () => {
+    const entry = findOperation("provider.verify");
+    assert.notEqual(entry, undefined);
+    assert.equal(entry!.method, "POST");
+    assert.equal(entry!.introducedIn, "phase-1");
+    assert.equal(entry!.status, "routed");
+    assert.deepEqual(entry!.allowedActors, ["human"]);
+    assert.equal(entry!.idempotency, "memory");
+    assert.deepEqual(entry!.replayable, [200]);
+    assert.equal(renderPath(entry!.path), "/v1/provider/:id/verify");
+    assert.equal(entry!.request, undefined);
+    assert.strictEqual(entry!.response, providerVerifyResponse);
   });
 
   it("the rename examples carry the exact story values", () => {
@@ -418,5 +442,42 @@ describe("src/http/contract/credential.test", () => {
       }
     }
     checkAdditionalPropertiesFalse(schema);
+  });
+});
+
+describe("providerVerifyResponse", () => {
+  it("parses a success verdict", () => {
+    assert.deepEqual(
+      providerVerifyResponse.parse(validSuccessBody),
+      validSuccessBody,
+    );
+  });
+
+  it("parses a verdict with detail", () => {
+    const input = {
+      checkedAt: A,
+      model: "gpt-4o",
+      reachability: "reachable",
+      authentication: "rejected",
+      completed: false,
+      refusal: "credential-rejected",
+      detail: "HTTP 401",
+    };
+    assert.deepEqual(providerVerifyResponse.parse(input), input);
+  });
+
+  it("rejects extra keys", () => {
+    assert.throws(() =>
+      providerVerifyResponse.parse({ ...validSuccessBody, extra: true }),
+    );
+  });
+
+  it("rejects an unknown refusal string", () => {
+    assert.throws(() =>
+      providerVerifyResponse.parse({
+        ...validSuccessBody,
+        refusal: "invented-refusal",
+      }),
+    );
   });
 });

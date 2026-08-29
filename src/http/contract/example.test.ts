@@ -51,6 +51,7 @@ test("src/http/contract/example.test", async (t) => {
       "provider.rename",
       "provider.setDefault",
       "provider.show",
+      "provider.verify",
       "repository.inspect",
       "repository.list",
       "repository.register",

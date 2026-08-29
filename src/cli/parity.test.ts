@@ -228,7 +228,7 @@ describe("src/cli/parity.test", () => {
     }
   });
 
-  it("the routed operations that no command names are exactly the ten accepted ones", () => {
+  it("the routed operations that no command names are exactly the eleven accepted ones", () => {
     const named = new Set(
       declaredCommands.flatMap((entry) => entry.operationIds),
     );
@@ -248,6 +248,7 @@ describe("src/cli/parity.test", () => {
       "provider.rename",
       "provider.setDefault",
       "provider.show",
+      "provider.verify",
       "system.health",
     ]);
     assert.equal(uncovered.includes("event.list"), false);

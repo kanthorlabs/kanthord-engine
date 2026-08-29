@@ -9,6 +9,7 @@ import { PayloadError } from "../../../domain/provider-payload.ts";
 import { SetDefaultProviderError } from "../../../commands/provider/set-default-provider.ts";
 import { RenameProviderError } from "../../../commands/provider/rename-provider.ts";
 import { RemoveProviderError } from "../../../commands/provider/remove-provider.ts";
+import { VerifyProviderError } from "../../../queries/provider/verify-provider.ts";
 import type { ProviderRemovalBlocker } from "../../../commands/provider/remove-provider.ts";
 
 const id = "provider_01HZY8QF3M4N5P6R7S8T9V0W1X";
@@ -103,6 +104,37 @@ describe("src/http/server/credential/refusals.test", () => {
       "provider.remove declares binding-in-use",
     );
     assert.doesNotThrow(() => declared.parse(error.details));
+  });
+
+  it("a VerifyProviderError not-found maps to a 404 not-found HttpError", () => {
+    const error = toHttpError(
+      new VerifyProviderError("not-found", `no provider ${id}`),
+    );
+    assert.ok(error instanceof HttpError);
+    assert.equal(error.code, "not-found");
+    assert.equal(error.status, 404);
+    assert.equal(error.details, undefined);
+  });
+
+  it("a VerifyProviderError service-unavailable maps to a 503 service-unavailable HttpError", () => {
+    const error = toHttpError(
+      new VerifyProviderError("service-unavailable", `cannot decrypt ${id}`),
+    );
+    assert.ok(error instanceof HttpError);
+    assert.equal(error.code, "service-unavailable");
+    assert.equal(error.status, 503);
+    assert.equal(error.details, undefined);
+  });
+
+  it("a VerifyProviderError provider-not-verifiable maps to a 400 invalid-request with the refusal", () => {
+    const error = toHttpError(
+      new VerifyProviderError("provider-not-verifiable", "kind=git"),
+    );
+    assert.ok(error instanceof HttpError);
+    assert.equal(error.code, "invalid-request");
+    assert.equal(error.status, 400);
+    assert.deepEqual(error.details, { refusal: "provider-not-verifiable" });
+    assert.doesNotThrow(() => invalidRequestDetails.parse(error.details));
   });
 
   it("a PayloadError still maps to a 400 invalid-request with refusal and detail", () => {

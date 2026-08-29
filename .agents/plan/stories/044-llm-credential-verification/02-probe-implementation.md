@@ -46,14 +46,28 @@ Add the constant and the class:
 const PROBE_TIMEOUT_MS = 30_000;
 const PROBE_PROMPT = "What time is it?";
 const PROBE_MAX_TOKENS = 16;
+
+type PiAiProviderAuthDependencies = Readonly<{
+  createTimeoutSignal: (milliseconds: number) => AbortSignal;
+  createModels: typeof builtinModels;
+}>;
 ```
 
 ```ts
 export class PiAiProviderAuth implements ProviderAuth {
   readonly #fetch: typeof fetch;
+  readonly #createTimeoutSignal: PiAiProviderAuthDependencies["createTimeoutSignal"];
+  readonly #createModels: PiAiProviderAuthDependencies["createModels"];
 
-  constructor(fetchImplementation: typeof fetch = fetch) {
+  constructor(
+    fetchImplementation: typeof fetch = fetch,
+    dependencies: Partial<PiAiProviderAuthDependencies> = {},
+  ) {
     this.#fetch = fetchImplementation;
+    this.#createTimeoutSignal =
+      dependencies.createTimeoutSignal ??
+      ((milliseconds) => AbortSignal.timeout(milliseconds));
+    this.#createModels = dependencies.createModels ?? builtinModels;
   }
 
   async probe(
@@ -85,14 +99,11 @@ export class PiAiProviderAuth implements ProviderAuth {
         ? { ...builtinModel, baseUrl: row.baseUrl }
         : builtinModel;
 
-    const probeSignal = AbortSignal.any([
-      signal,
-      AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    ]);
+    const timeoutSignal = this.#createTimeoutSignal(PROBE_TIMEOUT_MS);
+    const probeSignal = AbortSignal.any([signal, timeoutSignal]);
 
-    const store = createStore(row);
-    const models = builtinModels({
-      credentials: store,
+    const models = this.#createModels({
+      credentials: createStore(row),
       authContext: defaultProviderAuthContext(),
     });
 
@@ -136,12 +147,11 @@ function toRawOutcome(
   if (stop === "aborted" || signal.aborted) {
     return { kind: "abort" };
   }
-  // stop === "error" — extract HTTP status from errorMessage prefix "[STATUS] ..."
-  const match = result.errorMessage?.match(/^\[(\d+)\]/);
+  // stop === "error" — accept installed "STATUS: ..." and bracketed "[STATUS] ..."
+  const match = result.errorMessage?.match(/^(?:\[(\d+)\]|(\d{3}):)/);
+  const statusText = match?.[1] ?? match?.[2];
   const httpStatus =
-    match !== null && match !== undefined && match[1] !== undefined
-      ? parseInt(match[1], 10)
-      : undefined;
+    statusText === undefined ? undefined : parseInt(statusText, 10);
   if (httpStatus === undefined) {
     return { kind: "transport-error" };
   }
@@ -158,11 +168,11 @@ function toRawOutcome(
 }
 ```
 
-**Why `errorMessage` prefix parsing works**: when pi-ai's openai adapters catch a
-provider error with HTTP status, `formatProviderError(normalizeProviderError(error))`
-prefixes the string with `[STATUS]` when the status is known. The `normalizeProviderError`
+**Why `errorMessage` prefix parsing works**: pi-ai 0.84.1's openai adapters catch a
+provider error with HTTP status and format the string with a decimal `STATUS:` prefix,
+such as `401:`. This is internal behavior, not a documented contract. The parser also
+accepts the bracketed `[STATUS]` form for compatibility. The `normalizeProviderError`
 function probes `error.status` and `error.statusCode` fields set by the OpenAI SDK.
-This is documented behavior within pi-ai 0.84.1.
 
 **Why `stream.result()` / `completeSimple` always resolves**: `AssistantMessageEventStream`
 is constructed with `resolve`-only, no `reject`. Provider errors are pushed as
@@ -348,23 +358,14 @@ Test cases:
    });
    ```
 
-8. **Pre-aborted signal → endpoint-unreachable**:
+8. **Internal timeout signal → endpoint-unreachable**:
 
-   ```ts
-   const rec = recordingFetch(successFetch());
-   const outcome = await new PiAiProviderAuth(rec.fetch).probe(
-     row,
-     AbortSignal.abort(),
-   );
-   assert.deepEqual(outcome, {
-     model: "llama-3.1-8b-instant",
-     reachability: "unreachable",
-     authentication: "unknown",
-     completed: false,
-     refusal: "endpoint-unreachable",
-     detail: "timeout-or-abort",
-   });
-   ```
+   Use a non-aborted caller signal and inject a timeout factory that records its argument, returns an
+   `AbortController.signal`, and aborts that controller from a pending fetch double. The fetch double
+   records the composed transport signal and rejects when it aborts. Assert the complete
+   `endpoint-unreachable` / `timeout-or-abort` outcome, exactly one outbound call, the timeout factory
+   argument `[30_000]`, the timeout signal is aborted, the composed transport signal is aborted, and the
+   caller signal remains un-aborted. Do not advance timers or wait on wall-clock time.
 
 9. **Unknown vendor → ProviderAuthError throws, zero fetch calls**:
 
@@ -394,7 +395,15 @@ Test cases:
     returns an SSE where the assistant delta content is `""` (empty string).
     Assert `outcome.completed === true` and `outcome.refusal === null`.
 
-12. **pi-ai error format pin**: this test does NOT go through `probe()`. It calls
+12. **Single-entry store isolation**: inject a `createModels` wrapper that captures `options.credentials`
+    before delegating to `builtinModels(options)`. Probe two rows with `vendorId: "groq"` and distinct
+    api keys. For each captured store, assert `list()` deep-equals
+    `[{ providerId: "groq", type: "api_key" }]`, `read("groq")` returns that row's exact credential,
+    `read("anthropic")` returns `undefined`, and `modify("anthropic", callback)` returns `undefined`
+    without invoking its callback. Assert that neither store returns the other row's key. This tests
+    the real private `createStore` result without exporting it.
+
+13. **pi-ai error format pin**: this test does NOT go through `probe()`. It calls
     `models.completeSimple()` directly with a 401-returning fake fetch and asserts
     the `errorMessage` prefix shape. The test lives in the same `pi-ai.test.ts` file
     under a `describe("pi-ai error format contract", ...)` block:
@@ -411,54 +420,56 @@ Test cases:
         { role: "user", content: [{ type: "text", text: "What time is it?" }] },
       ],
     };
-
-    it("pi-ai formats a 401 provider error as [401] prefix in errorMessage (format pin)", async () => {
-      const fakeFetch: typeof fetch = async () =>
-        new Response(JSON.stringify({ error: { message: "Unauthorized" } }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
-      const models = builtinModels({
-        credentials: {
-          async read() {
-            return { type: "api_key" as const, key: "sk-pin-test" };
-          },
-          async list() {
-            return [];
-          },
-          async modify(_id, fn) {
-            return fn({ type: "api_key" as const, key: "sk-pin-test" });
-          },
-          async delete() {},
-        },
-        authContext: defaultProviderAuthContext(),
-      });
-      const result = await models.completeSimple(groqModel, probeContext, {
-        maxTokens: 1,
-        fetch: fakeFetch,
-      });
-      assert.equal(result.stopReason, "error");
-      assert(
-        result.errorMessage?.startsWith("[401]"),
-        `expected errorMessage to start with "[401]" but got: ${result.errorMessage}`,
-      );
-    });
     ```
-    If a pi-ai upgrade changes `formatProviderError` so it no longer emits the `[STATUS]`
-    prefix, this test fails before any probe test does, surfacing the contract break at
-    upgrade time instead of silently misreporting every non-2xx verdict.
+
+it("pi-ai formats a 401 provider error with a 401: prefix in errorMessage", async () => {
+const fakeFetch: typeof fetch = async () =>
+new Response(JSON.stringify({ error: { message: "Unauthorized" } }), {
+status: 401,
+headers: { "Content-Type": "application/json" },
+});
+const models = builtinModels({
+credentials: {
+async read() {
+return { type: "api_key" as const, key: "sk-pin-test" };
+},
+async list() {
+return [];
+},
+async modify(_id, fn) {
+return fn({ type: "api_key" as const, key: "sk-pin-test" });
+},
+async delete() {},
+},
+authContext: defaultProviderAuthContext(),
+});
+const result = await models.completeSimple(groqModel, probeContext, {
+maxTokens: 1,
+fetch: fakeFetch,
+});
+assert.equal(result.stopReason, "error");
+assert(
+result.errorMessage?.startsWith("401:"),
+`expected errorMessage to start with "401:" but got: ${result.errorMessage}`,
+);
+});
+```
+If a pi-ai upgrade changes `formatProviderError` so it no longer emits the `STATUS:`
+prefix, this test fails before any probe test does, surfacing the contract break at
+upgrade time instead of silently misreporting every non-2xx verdict.
 
 ## Constraints
 
 - No real network. Every test injects a `fetch` double.
 - `completeSimple()` always resolves. Tests assert on `outcome` fields, never try/catch
   for provider HTTP errors.
-- All 11 `assert.deepEqual` comparisons cover the entire outcome object. No field-by-field
-  checking (except test 10's key-absence assertion).
+- Every outcome `assert.deepEqual` comparison covers the entire outcome object. No field-by-field
+  checking (except the key-absence assertion).
 - The `groq` vendor MUST be used for all probe tests. Do not use `openai` (whose models
   use `openai-responses` api format, incompatible with the Chat Completions SSE fixture).
-- `SIGNAL` uses `AbortSignal.timeout(30_000)` — long enough not to fire during tests.
-  The timeout test uses `AbortSignal.abort()` (pre-aborted, no wall-clock dependence).
+- `SIGNAL` uses `AbortSignal.timeout(30_000)` — long enough not to fire during tests. The timeout test
+  injects `createTimeoutSignal`, aborts its returned signal from the pending transport double, and does
+  not advance timers or wait on wall-clock time.
 - The `model` field on every outcome is exactly `row.defaultModel`.
 
 ## Verify
@@ -468,8 +479,8 @@ node --test src/services/provider-auth/pi-ai.test.ts
 npm run lint -- --quiet
 ```
 
-`pi-ai.test.ts` contains twelve tests: eleven probe-outcome tests (cases 1–11) and one
-format-pin test (case 12). The format-pin test asserts `result.errorMessage.startsWith("[401]")`
+`pi-ai.test.ts` contains thirteen tests: twelve probe and adapter tests (cases 1–12) and one
+format-pin test (case 13). The format-pin test asserts `result.errorMessage.startsWith("401:")`
 against the installed library's live behavior. A pi-ai upgrade that changes
 `formatProviderError`'s prefix syntax will fail this test before any probe-outcome test
 does.

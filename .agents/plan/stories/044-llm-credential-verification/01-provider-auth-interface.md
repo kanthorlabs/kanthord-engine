@@ -110,8 +110,9 @@ Do NOT export `createStore`. Do NOT define `PiAiProviderAuth` (Story 2 adds it).
   with `import type { ... } from "@earendil-works/pi-ai"` (root export, accessible).
 - `read()` returns `undefined` for any `providerId !== row.vendorId` (per
   `CredentialStore` contract; not throwing).
-- `modify()` applies `fn` and returns the callback's result (per contract). No
-  persistent write in EPIC 044.
+- `modify()` returns `undefined` for any `providerId !== row.vendorId` without invoking `fn`.
+  For the bound provider id, it applies `fn` and returns the callback's result. No persistent write
+  in EPIC 044.
 - `delete()` is a silent no-op for the bound vendor; `undefined` for any other.
 - No `resolveProviderAuth` import anywhere — it is not in the public exports map.
 
@@ -121,7 +122,7 @@ Do NOT export `createStore`. Do NOT define `PiAiProviderAuth` (Story 2 adds it).
 npm run lint -- --quiet
 ```
 
-Story 1 has no standalone test. Story 2's test covers `createStore` indirectly
-through `builtinModels({ credentials: createStore(row) })`.
+Story 1 has no standalone test. Story 2 captures the private `createStore` result through an injected
+`createModels` wrapper around `builtinModels({ credentials: createStore(row) })`.
 
 Proof: prerequisite for Story 2; delivers no standalone Proof line.

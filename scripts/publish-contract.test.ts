@@ -123,7 +123,7 @@ test("scripts/publish-contract", async (t) => {
       }
 
       const exampleFiles = readdirSync(join(directory, "examples"));
-      assert.equal(exampleFiles.length, 43);
+      assert.equal(exampleFiles.length, 44);
       const exampleIds = sortedBytewise(
         exampleFiles.map((name) => name.replace(/\.json$/, "")),
       );
@@ -206,7 +206,7 @@ test("scripts/publish-contract", async (t) => {
       );
 
       assert.equal(writtenFeatures.length, 19);
-      assert.equal(writtenExamples.length, 43);
+      assert.equal(writtenExamples.length, 44);
       assert.deepEqual(
         manifestFeatures.filter((entry) => !writtenFeatures.includes(entry)),
         [],
