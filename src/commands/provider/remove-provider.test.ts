@@ -38,6 +38,19 @@ const PROVIDER_ULID = "01HZY8QF3M4N5P6R7S8T9V0W1X";
 const REGISTERED_ULID = "01HZY8QF3M4N5P6R7S8T9V0W1Y";
 const REMOVED_ULID = "01HZY8QF3M4N5P6R7S8T9V0W1Z";
 const providerId = `provider_${PROVIDER_ULID}`;
+const LLM_PROVIDER_1_ULID = "01HZY8QF3M4N5P6R7S8T9V0W2A";
+const LLM_REGISTERED_1_ULID = "01HZY8QF3M4N5P6R7S8T9V0W2B";
+const LLM_DEFAULTSET_1_ULID = "01HZY8QF3M4N5P6R7S8T9V0W2C";
+const LLM_REMOVED_1_ULID = "01HZY8QF3M4N5P6R7S8T9V0W2D";
+const LLM_PROVIDER_2_ULID = "01HZY8QF3M4N5P6R7S8T9V0W2E";
+const LLM_REGISTERED_2_ULID = "01HZY8QF3M4N5P6R7S8T9V0W2F";
+const LLM_DEFAULTSET_2_ULID = "01HZY8QF3M4N5P6R7S8T9V0W2G";
+const llmInput = {
+  provider: "anthropic",
+  apiKey: "sk-ant-x",
+  defaultModel: "claude-opus-5",
+  baseUrl: null,
+} as const;
 
 const BLOB_HASH = "a".repeat(40);
 
@@ -343,7 +356,12 @@ describe("src/commands/provider/remove-provider.test", () => {
     );
 
     assert.throws(
-      () => removeProvider(deps, { id: providerId, actor: "ulrich" }),
+      () =>
+        removeProvider(deps, {
+          id: providerId,
+          actor: "ulrich",
+          force: false,
+        }),
       (error: unknown) =>
         error instanceof RemoveProviderError &&
         error.refusal === "not-found" &&
@@ -385,15 +403,21 @@ describe("src/commands/provider/remove-provider.test", () => {
     );
 
     assert.throws(
-      () => removeProvider(deps, { id: providerId, actor: "ulrich" }),
+      () =>
+        removeProvider(deps, {
+          id: providerId,
+          actor: "ulrich",
+          force: false,
+        }),
       (error: unknown) => {
         assert.ok(error instanceof RemoveProviderError);
         assert.equal(error.refusal, "binding-in-use");
         assert.equal(error.message, `provider ${providerId} is still in use`);
-        assert.equal(
-          Object.keys(error).sort().join(","),
-          "blockers,name,refusal",
-        );
+        assert.deepEqual(Object.keys(error).sort(), [
+          "blockers",
+          "name",
+          "refusal",
+        ]);
         assert.deepEqual(error.blockers, [
           { kind: "default-chain" },
           { kind: "project-binding", projectId: "project_p" },
@@ -438,7 +462,12 @@ describe("src/commands/provider/remove-provider.test", () => {
     );
 
     assert.throws(
-      () => removeProvider(deps, { id: providerId, actor: "ulrich" }),
+      () =>
+        removeProvider(deps, {
+          id: providerId,
+          actor: "ulrich",
+          force: false,
+        }),
       (error: unknown) => {
         assert.ok(error instanceof RemoveProviderError);
         assert.deepEqual(error.blockers, [
@@ -470,7 +499,12 @@ describe("src/commands/provider/remove-provider.test", () => {
     );
 
     assert.throws(
-      () => removeProvider(deps, { id: providerId, actor: "ulrich" }),
+      () =>
+        removeProvider(deps, {
+          id: providerId,
+          actor: "ulrich",
+          force: false,
+        }),
       (error: unknown) => {
         assert.ok(error instanceof RemoveProviderError);
         assert.deepEqual(error.blockers, [
@@ -504,7 +538,12 @@ describe("src/commands/provider/remove-provider.test", () => {
     );
 
     assert.throws(
-      () => removeProvider(deps, { id: providerId, actor: "ulrich" }),
+      () =>
+        removeProvider(deps, {
+          id: providerId,
+          actor: "ulrich",
+          force: false,
+        }),
       (error: unknown) => {
         assert.ok(error instanceof RemoveProviderError);
         assert.deepEqual(error.blockers, [
@@ -542,7 +581,11 @@ describe("src/commands/provider/remove-provider.test", () => {
     );
 
     assert.deepEqual(
-      removeProvider(deps, { id: providerId, actor: "ulrich" }),
+      removeProvider(deps, {
+        id: providerId,
+        actor: "ulrich",
+        force: false,
+      }),
       {
         id: providerId,
       },
@@ -568,7 +611,11 @@ describe("src/commands/provider/remove-provider.test", () => {
     );
 
     assert.deepEqual(
-      removeProvider(deps, { id: providerId, actor: "ulrich" }),
+      removeProvider(deps, {
+        id: providerId,
+        actor: "ulrich",
+        force: false,
+      }),
       {
         id: providerId,
       },
@@ -587,6 +634,281 @@ describe("src/commands/provider/remove-provider.test", () => {
     assert.equal(event.actor_id, "ulrich");
     assert.equal(event.payload_json, '{"name":"github-bot","kind":"git"}');
     assert.equal(countRows(temporary.storage, "event"), 2);
+  });
+
+  it("a stamped provider with no other blocker refuses with default-chain when force is false", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const ids = createMockIdGenerator({
+      ulids: [PROVIDER_ULID, REGISTERED_ULID],
+    });
+    registerGitProvider(
+      temporary.storage,
+      ids,
+      createMockClock({ start: 1700000000000, step: 1000 }),
+    );
+    temporary.storage.transact((transaction) => {
+      transaction.run("UPDATE provider SET set_default_at = ? WHERE id = ?", [
+        1700000000000,
+        providerId,
+      ]);
+    });
+    const deps = removeDependencies(
+      temporary.storage,
+      new SqliteEventLog({ storage: temporary.storage, ids }),
+    );
+
+    assert.throws(
+      () =>
+        removeProvider(deps, {
+          id: providerId,
+          actor: "ulrich",
+          force: false,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof RemoveProviderError);
+        assert.equal(error.refusal, "binding-in-use");
+        assert.deepEqual(error.blockers, [{ kind: "default-chain" }]);
+        return true;
+      },
+    );
+    assert.equal(countRows(temporary.storage, "provider"), 1);
+  });
+
+  it("a stamped provider with no other blocker is removed when force is true", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const ids = createMockIdGenerator({
+      ulids: [PROVIDER_ULID, REGISTERED_ULID, REMOVED_ULID],
+    });
+    registerGitProvider(
+      temporary.storage,
+      ids,
+      createMockClock({ start: 1700000000000, step: 1000 }),
+    );
+    temporary.storage.transact((transaction) => {
+      transaction.run("UPDATE provider SET set_default_at = ? WHERE id = ?", [
+        1700000000000,
+        providerId,
+      ]);
+    });
+    const deps = removeDependencies(
+      temporary.storage,
+      new SqliteEventLog({ storage: temporary.storage, ids }),
+    );
+
+    const result = removeProvider(deps, {
+      id: providerId,
+      actor: "ulrich",
+      force: true,
+    });
+    assert.deepEqual(result, { id: providerId });
+    assert.deepEqual(Object.keys(result).sort(), ["id"]);
+    assert.equal(countRows(temporary.storage, "provider"), 0);
+    assert.equal(countRows(temporary.storage, "event"), 2);
+    const removed = readEvents(temporary.storage).filter(
+      (event) =>
+        event.subject_id === providerId && event.type === "provider.removed",
+    );
+    assert.equal(removed.length, 1);
+    assert.equal(removed[0]!.actor_kind, "human");
+    assert.equal(removed[0]!.actor_id, "ulrich");
+    assert.equal(
+      removed[0]!.payload_json,
+      '{"name":"github-bot","kind":"git"}',
+    );
+  });
+
+  it("a forced removal of a stamped provider appends provider.removed and not provider.defaultUnset", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const ids = createMockIdGenerator({
+      ulids: [PROVIDER_ULID, REGISTERED_ULID, REMOVED_ULID],
+    });
+    registerGitProvider(
+      temporary.storage,
+      ids,
+      createMockClock({ start: 1700000000000, step: 1000 }),
+    );
+    temporary.storage.transact((transaction) => {
+      transaction.run("UPDATE provider SET set_default_at = ? WHERE id = ?", [
+        1700000000000,
+        providerId,
+      ]);
+    });
+    const deps = removeDependencies(
+      temporary.storage,
+      new SqliteEventLog({ storage: temporary.storage, ids }),
+    );
+
+    removeProvider(deps, { id: providerId, actor: "ulrich", force: true });
+    const types = readEvents(temporary.storage)
+      .filter((event) => event.subject_id === providerId)
+      .map((event) => event.type);
+    assert.deepEqual(types, ["provider.registered", "provider.removed"]);
+  });
+
+  it("a stamped provider blocked by all four causes refuses with three blockers when force is true", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const ids = createMockIdGenerator({
+      ulids: [PROVIDER_ULID, REGISTERED_ULID],
+    });
+    registerGitProvider(
+      temporary.storage,
+      ids,
+      createMockClock({ start: 1700000000000, step: 1000 }),
+    );
+    temporary.storage.transact((transaction) => {
+      transaction.run("UPDATE provider SET set_default_at = ? WHERE id = ?", [
+        1700000000000,
+        providerId,
+      ]);
+    });
+    seedProjectBinding(
+      temporary.storage,
+      "project_p",
+      "p-project",
+      "provider",
+      providerId,
+    );
+    seedAttemptFixture(temporary.storage, providerId, ["attempt_chain"]);
+    const deps = removeDependencies(
+      temporary.storage,
+      new SqliteEventLog({ storage: temporary.storage, ids }),
+    );
+
+    assert.throws(
+      () =>
+        removeProvider(deps, {
+          id: providerId,
+          actor: "ulrich",
+          force: true,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof RemoveProviderError);
+        assert.equal(error.refusal, "binding-in-use");
+        assert.deepEqual(error.blockers, [
+          { kind: "project-binding", projectId: "project_p" },
+          { kind: "repository", repositoryId: "repository_chain" },
+          { kind: "attempt", attemptId: "attempt_chain" },
+        ]);
+        return true;
+      },
+    );
+    assert.equal(countRows(temporary.storage, "provider"), 1);
+    assert.equal(countRows(temporary.storage, "event"), 1);
+  });
+
+  it("an unstamped provider removed with force true and force false produces identical rows", (t) => {
+    const ULIDS_E = [PROVIDER_ULID, REGISTERED_ULID, REMOVED_ULID];
+
+    const temporaryA = createMigratedStorage();
+    t.after(() => temporaryA.dispose());
+    const idsA = createMockIdGenerator({ ulids: ULIDS_E });
+    registerGitProvider(
+      temporaryA.storage,
+      idsA,
+      createMockClock({ start: 1700000000000, step: 1000 }),
+    );
+    const depsA = removeDependencies(
+      temporaryA.storage,
+      new SqliteEventLog({ storage: temporaryA.storage, ids: idsA }),
+    );
+    const resultA = removeProvider(depsA, {
+      id: providerId,
+      actor: "ulrich",
+      force: false,
+    });
+
+    const temporaryB = createMigratedStorage();
+    t.after(() => temporaryB.dispose());
+    const idsB = createMockIdGenerator({ ulids: ULIDS_E });
+    registerGitProvider(
+      temporaryB.storage,
+      idsB,
+      createMockClock({ start: 1700000000000, step: 1000 }),
+    );
+    const depsB = removeDependencies(
+      temporaryB.storage,
+      new SqliteEventLog({ storage: temporaryB.storage, ids: idsB }),
+    );
+    const resultB = removeProvider(depsB, {
+      id: providerId,
+      actor: "ulrich",
+      force: true,
+    });
+
+    assert.deepEqual(resultA, { id: providerId });
+    assert.deepEqual(resultB, { id: providerId });
+    assert.equal(countRows(temporaryA.storage, "provider"), 0);
+    assert.equal(countRows(temporaryB.storage, "provider"), 0);
+    assert.deepEqual(
+      readEvents(temporaryA.storage),
+      readEvents(temporaryB.storage),
+    );
+  });
+
+  it("after forced removal of the stamped llm provider a new llm registration auto-stamps", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const ids = createMockIdGenerator({
+      ulids: [
+        LLM_PROVIDER_1_ULID,
+        LLM_REGISTERED_1_ULID,
+        LLM_DEFAULTSET_1_ULID,
+        LLM_REMOVED_1_ULID,
+        LLM_PROVIDER_2_ULID,
+        LLM_REGISTERED_2_ULID,
+        LLM_DEFAULTSET_2_ULID,
+      ],
+    });
+    const clock = createMockClock({ start: 1700000000000, step: 1000 });
+    const llmProvider1Id = `provider_${LLM_PROVIDER_1_ULID}`;
+    const llmProvider2Id = `provider_${LLM_PROVIDER_2_ULID}`;
+
+    registerProvider(registerDependencies(temporary.storage, ids, clock), {
+      name: "anthropic-bot",
+      kind: "llm",
+      payload: llmInput,
+      actor: "ulrich",
+    });
+
+    removeProvider(
+      removeDependencies(
+        temporary.storage,
+        new SqliteEventLog({ storage: temporary.storage, ids }),
+      ),
+      { id: llmProvider1Id, actor: "ulrich", force: true },
+    );
+
+    const countStamped = (
+      temporary.storage.transact((transaction) =>
+        transaction.get(
+          "SELECT COUNT(*) AS c FROM provider WHERE kind = 'llm' AND set_default_at IS NOT NULL",
+        ),
+      ) as { c: number }
+    ).c;
+    assert.equal(countStamped, 0);
+
+    registerProvider(registerDependencies(temporary.storage, ids, clock), {
+      name: "openai-bot",
+      kind: "llm",
+      payload: {
+        provider: "openai",
+        apiKey: "sk-x",
+        defaultModel: "gpt-4o",
+        baseUrl: null,
+      },
+      actor: "ulrich",
+    });
+
+    const stampedRow = temporary.storage.transact((transaction) =>
+      transaction.get("SELECT set_default_at FROM provider WHERE id = ?", [
+        llmProvider2Id,
+      ]),
+    ) as { set_default_at: number };
+    assert.equal(stampedRow.set_default_at, 1700000001000);
   });
 
   it("a throwing event append leaves the provider row present", (t) => {
@@ -617,7 +939,12 @@ describe("src/commands/provider/remove-provider.test", () => {
     const deps = removeDependencies(temporary.storage, events);
 
     assert.throws(
-      () => removeProvider(deps, { id: providerId, actor: "ulrich" }),
+      () =>
+        removeProvider(deps, {
+          id: providerId,
+          actor: "ulrich",
+          force: false,
+        }),
       (error: unknown) =>
         error instanceof Error &&
         error.message === "provider.removed append fails",

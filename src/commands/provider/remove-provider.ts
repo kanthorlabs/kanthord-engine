@@ -10,6 +10,7 @@ export type RemoveProviderDependencies = Readonly<{
 export type RemoveProviderInput = Readonly<{
   id: string;
   actor: string;
+  force: boolean;
 }>;
 
 export type ProviderRemovalBlocker =
@@ -65,7 +66,7 @@ export function removeProvider(
     }
     const target = selected as ProviderRow;
     const blockers: ProviderRemovalBlocker[] = [];
-    if (target.set_default_at !== null) {
+    if (target.set_default_at !== null && !input.force) {
       blockers.push({ kind: "default-chain" });
     }
     const bindings = transaction.all(

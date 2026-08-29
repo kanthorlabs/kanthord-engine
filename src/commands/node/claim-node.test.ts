@@ -40,6 +40,7 @@ import {
   seedEmptyObjectiveGraph,
   seedGraph,
   seedNodeState,
+  seedNodeWorker,
   seedRegistry,
   seedRunRow,
   seedSecondProjectGraph,
@@ -426,6 +427,37 @@ describe("src/commands/node/claim-node.test", () => {
     assert.equal(nodeState(fixture, fixtureIds.task), "running");
     assert.equal(nodeState(fixture, fixtureIds.objective), "running");
     assert.equal(nodeState(fixture, fixtureIds.initiative), "running");
+  });
+
+  it("a task whose worker is opencode.te@1 is claimed identically to a task whose worker is general@1", (t) => {
+    const fixtureA = createClaimFixture();
+    t.after(() => fixtureA.dispose());
+    seedReadyFixture(fixtureA);
+    fixtureA.storage.transact((transaction) =>
+      seedNodeWorker(transaction, fixtureIds.task, "general@1"),
+    );
+
+    const fixtureB = createClaimFixture();
+    t.after(() => fixtureB.dispose());
+    seedReadyFixture(fixtureB);
+    fixtureB.storage.transact((transaction) =>
+      seedNodeWorker(transaction, fixtureIds.task, "opencode.te@1"),
+    );
+
+    const clock = createMockClock({ start: NOW });
+    const resultA = claim(fixtureA, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    const resultB = claim(fixtureB, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+
+    assert.deepEqual(resultB.lease, resultA.lease);
+    assert.deepEqual(resultB.objectiveLease, resultA.objectiveLease);
+    assert.equal(resultB.node.state, resultA.node.state);
+    assert.equal(resultB.attemptNo, resultA.attemptNo);
   });
 
   it("a claim on a ready task opens an external objective run and an external task run", (t) => {

@@ -16,6 +16,7 @@ import type { ResolvedDocument } from "./plan-identity.ts";
 import type { Choice, ChoiceVerdict } from "./plan-choice.ts";
 import type { NodeKind } from "./state.ts";
 import { createPlanGraph } from "../../test/helpers/plan.ts";
+import { workerKinds } from "./worker.ts";
 
 const U_I = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const U_O1 = "01BQZ3NDEKTSV4RRFFQ69G5FAV";
@@ -40,6 +41,12 @@ const objectiveMM = `objective_${U_MM}`;
 
 const context: ValidationContext = {
   workerKinds: ["tdd"],
+  boundRepositories: ["repo_a"],
+  knownRepositories: ["repo_a", "repo_b"],
+};
+
+const harnessFourContext: ValidationContext = {
+  workerKinds: [...workerKinds],
   boundRepositories: ["repo_a"],
   knownRepositories: ["repo_a", "repo_b"],
 };
@@ -704,6 +711,48 @@ describe("validateCandidate", () => {
       { candidate: candidateOf(edited, [], takes), context },
     );
     record(findings);
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0]?.code, "worker-unknown");
+    assert.equal(findings[0]?.id, task1);
+    assert.equal(findings[0]?.path, null);
+  });
+
+  for (const harnessKind of [
+    "claude.swe@1",
+    "claude.te@1",
+    "opencode.swe@1",
+    "opencode.te@1",
+  ] as const) {
+    it(`a harness-qualified kind "${harnessKind}" produces an empty finding list`, () => {
+      const { submitted, takes } = hierarchy();
+      const edited = submitted.map((document) =>
+        document.identity === task1
+          ? { ...document, worker: harnessKind }
+          : document,
+      );
+      const findings = validateCandidate(
+        { findCycles },
+        {
+          candidate: candidateOf(edited, [], takes),
+          context: harnessFourContext,
+        },
+      );
+      assert.deepEqual(findings, []);
+    });
+  }
+
+  it("unqualified swe@1 produces exactly one worker-unknown finding", () => {
+    const { submitted, takes } = hierarchy();
+    const edited = submitted.map((document) =>
+      document.identity === task1 ? { ...document, worker: "swe@1" } : document,
+    );
+    const findings = validateCandidate(
+      { findCycles },
+      {
+        candidate: candidateOf(edited, [], takes),
+        context: harnessFourContext,
+      },
+    );
     assert.equal(findings.length, 1);
     assert.equal(findings[0]?.code, "worker-unknown");
     assert.equal(findings[0]?.id, task1);

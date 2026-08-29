@@ -64,7 +64,7 @@ test("src/http/contract/example.test", async (t) => {
         .filter((entry) => entry.examples!.query !== undefined)
         .map((entry) => entry.operationId)
         .sort(),
-      ["event.list", "node.list", "provider.catalog"],
+      ["event.list", "node.list", "provider.catalog", "provider.remove"],
     );
     for (const entry of withExamples) {
       if (entry.query !== undefined) {

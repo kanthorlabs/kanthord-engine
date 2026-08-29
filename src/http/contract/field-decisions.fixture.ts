@@ -510,6 +510,7 @@ export const fieldDecisions: readonly string[] = [
   "provider.register.response#/properties/projection/anyOf/1/properties/username required=true nullable=true enum=-",
   "provider.register.response#/properties/setDefaultAt required=true nullable=true enum=-",
   "provider.register.response#/properties/updatedAt required=true nullable=false enum=-",
+  "provider.remove.query#/properties/force required=false nullable=false enum=true,false",
   "provider.remove.response#/properties/id required=true nullable=false enum=-",
   "provider.rename.request#/properties/name required=true nullable=false enum=-",
   "provider.rename.response#/properties/id required=true nullable=false enum=-",

@@ -6,6 +6,7 @@ import {
   providerRegisterExamples,
   providerRegisterRequest,
   providerRemoveExamples,
+  providerRemoveRequest,
   providerRemoveResponse,
   providerRenameExamples,
   providerRenameRequest,
@@ -65,6 +66,7 @@ describe("src/http/contract/credential.test", () => {
   });
 
   it("the remove examples carry the exact story values", () => {
+    assert.deepEqual(providerRemoveExamples.query, { force: "false" });
     assert.deepEqual(providerRemoveExamples.success, { id: `provider_${U}` });
     assert.deepEqual(providerRemoveExamples.error, {
       error: {
@@ -118,6 +120,7 @@ describe("src/http/contract/credential.test", () => {
         providerRemoveExamples,
         undefined,
         providerRemoveResponse,
+        providerRemoveRequest,
       ],
       [
         "provider.setDefault",
@@ -126,7 +129,8 @@ describe("src/http/contract/credential.test", () => {
         providerSetDefaultResponse,
       ],
     ] as const;
-    for (const [operationId, examples, request, response] of operations) {
+    for (const operation of operations) {
+      const [operationId, examples, request, response] = operation;
       const entry = findOperation(operationId);
       assert.doesNotThrow(
         () => response.parse(examples.success),
@@ -142,7 +146,48 @@ describe("src/http/contract/credential.test", () => {
           `${operationId} request example fails its request`,
         );
       }
+      const [, , , , query] = operation;
+      if (query !== undefined) {
+        assert.doesNotThrow(
+          () =>
+            (query as { parse: (value: unknown) => unknown }).parse(
+              examples.query,
+            ),
+          `${operationId} query example fails its schema`,
+        );
+      }
     }
+  });
+
+  it("providerRemoveRequest parses valid force values and rejects invalid ones", () => {
+    assert.deepEqual(providerRemoveRequest.parse({}), {});
+    assert.deepEqual(providerRemoveRequest.parse({ force: "true" }), {
+      force: "true",
+    });
+    assert.deepEqual(providerRemoveRequest.parse({ force: "false" }), {
+      force: "false",
+    });
+    assert.equal(
+      providerRemoveRequest.safeParse({ force: "1" }).success,
+      false,
+    );
+    assert.equal(
+      providerRemoveRequest.safeParse({ force: "yes" }).success,
+      false,
+    );
+    assert.equal(
+      providerRemoveRequest.safeParse({ force: "TRUE" }).success,
+      false,
+    );
+    assert.equal(providerRemoveRequest.safeParse({ force: "" }).success, false);
+    assert.equal(
+      providerRemoveRequest.safeParse({ force: undefined }).success,
+      true,
+    );
+    assert.equal(
+      providerRemoveRequest.safeParse({ force: "true", extra: 1 }).success,
+      false,
+    );
   });
 
   it("an empty rename name is rejected", () => {
