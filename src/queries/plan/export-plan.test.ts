@@ -102,6 +102,29 @@ describe("src/queries/plan/export-plan.test", () => {
     assert.deepEqual(result.documents, expectedDocuments);
   });
 
+  it("preserves worker claude.swe@1 in the exported task document byte-identically", (t) => {
+    const { storage, plan, blobs, revision, dispose } = build();
+    t.after(() => dispose());
+    seedPlanFixture(storage, plan, blobs);
+
+    storage.transact((transaction) =>
+      transaction.run("UPDATE node SET worker = ? WHERE id = ?", [
+        "claude.swe@1",
+        planFixtureIdentities.task,
+      ]),
+    );
+
+    const result = exportPlan(
+      { storage, plan, revision },
+      { projectId: fixtureIds.project },
+    );
+
+    assert.deepEqual(result.documents[0], {
+      path: expectedPaths.task,
+      content: `---\nid: ${JSON.stringify(planFixtureIdentities.task)}\nkind: "task"\ntitle: "Harden the verify CLI"\nworker: "claude.swe@1"\n---\nDo the task work.\n## Acceptance criteria\n- it works\n`,
+    });
+  });
+
   it("keeps the acceptance heading on the task and off the objective and the initiative", (t) => {
     const { storage, plan, blobs, revision, dispose } = build();
     t.after(() => dispose());
