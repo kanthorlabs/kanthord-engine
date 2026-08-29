@@ -44,19 +44,56 @@ An `http-basic` url has no host key, so `hostKey` is absent from the response an
 
 A host key that changes later is a failed operation, not a silent re-pin. Re-confirmation is an explicit human act, and it reuses this route.
 
-### The credential verdict here is a read verdict
+### The credential verdict reports read and write access independently
 
-`inspect` reports whether the credential reached the remote for a **read**, and nothing more. The member is `{ reachable, refusal }`: `reachable` is true when `git ls-remote` answered, and `refusal` carries the failure classification when it did not. A refused credential is a verdict in a `200` response, not an error — a human inspecting a remote with a dead token needs to be told which of the two is wrong.
+`inspect` reports whether the credential reached the remote for a **read** and,
+when `requiredAccess: "write"` is requested, for a **write-advertisement** as
+well. The response carries two members:
 
-**The write advertisement cannot run here.** It is `git push --dry-run`, and a push needs a local repository and a local object. `inspect` writes nothing and seeds nothing, so at this point there is neither. The preflight therefore belongs to `repository.register`, which runs it from the staging home after the fetch — see the section below. An earlier draft of this file placed it on this route, and it was not implementable.
+```json
+"access": {
+  "read":  { "allowed": true,  "refusal": null },
+  "write": { "allowed": false, "refusal": "auth-failed" }
+}
+```
 
-`reachable: true` is therefore not a statement about push permission. A public repository serves `git-upload-pack` to anyone, so a garbage token reads the ref list exactly like a good one. Registration is where the credential is proved.
+`access.read` mirrors `credential` exactly. `access.write` is `null` when
+`requiredAccess` is absent or `"read"`, and a full verdict when `"write"` was
+requested.
+
+**How the write-advertisement works.** The git service creates a temporary bare
+repository, fetches the remote's default branch, calls
+`git push --dry-run` at the publish ref of that branch with the fetched object
+id, and removes the temporary repository before returning. `inspect` still seeds
+no home, and nothing written during the probe survives the call. Credential
+files (helper scripts and SSH keys) are written inside the same temporary
+directory and are removed with it. The probe's cost is one fetch plus one
+dry-run push against the remote.
+
+**A read failure short-circuits the probe.** A credential that cannot reach the
+remote via `git ls-remote` cannot fetch the object the probe needs. When
+`remoteInfo` fails, `access.write` carries the same refusal as `access.read`
+without a network call to the write side.
+
+**A remote with no default branch yields** `access.write:
+{ allowed: false, refusal: "empty-remote" }` and no fetch is attempted.
+
+**`reachable: true` is not a statement about push permission.** A public
+repository serves `git-upload-pack` to anyone, so a garbage token reads the ref
+list exactly like a good one. Use `requiredAccess: "write"` to obtain a
+write-advertisement verdict before registration.
+
+**The write-advertisement verdict proves only write-advertisement access.**
+Branch protection, a required status check, a signature rule or a server hook
+can still reject a later publish to the same ref. The verdict says the credential
+authenticates and may push to the repository; it never says a publish will be
+accepted. See the caveat at the end of this section.
 
 ## `repository.register`
 
 The body holds the remote URL, a name, a `credentialId`, the one branch field of `../phase-1/git-foundation.md` — `branch` — and, for an ssh url, the confirmed `hostFingerprint`. A missing `branch` is `400`, and a missing `hostFingerprint` on an ssh url is the same `400`. The daemon never infers one here, because `repository.inspect` is where inference happens and the human already answered.
 
-**This route repeats the preflight.** `inspect` and `register` are two requests, and between them a credential can be removed or changed, the remote can move, and the client can submit a different `credentialId` than the one it inspected. A successful inspect authorizes nothing.
+**This route repeats the preflight.** `inspect` and `register` are two requests, and between them a credential can be removed or changed, the remote can move, and the client can submit a different `credentialId` than the one it inspected. A successful inspect authorizes nothing. A write-advertisement verdict on `inspect` is evidence that push access exists at the time of the call; it is not a guarantee that a later `repository.register` or publish will succeed.
 
 ### The credential check is a write advertisement
 

@@ -293,6 +293,9 @@ function gitMock(
     canPush(): Promise<never> {
       throw new Error("unexpected canPush call");
     },
+    probePush(): Promise<never> {
+      throw new Error("unexpected probePush call");
+    },
     fetch(): Promise<never> {
       throw new Error("unexpected fetch call");
     },

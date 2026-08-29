@@ -7,6 +7,7 @@ import { confirmHostKey, scanHostKeys, trustHostKey } from "./host-key.ts";
 import { checkOutsideWriter } from "./outside-writer.ts";
 import { listPidFiles, removePidFile } from "./pid-file.ts";
 import { canPush } from "./preflight.ts";
+import { probePush } from "./push-probe.ts";
 import { resolveRef } from "./ref-read.ts";
 import { refUpdate } from "./ref-update.ts";
 import { remoteInfo } from "./remote-info.ts";
@@ -35,6 +36,7 @@ export function createBinaryGit(dependencies: BinaryGitDependencies): Git {
     trustHostKey: (input) => trustHostKey(paths, input),
     remoteInfo: (input) => remoteInfo(runner, paths, input),
     canPush: (input) => canPush(runner, paths, input),
+    probePush: (input) => probePush(runner, paths, input),
     seedHome: (input) => seedHome(runner, paths, input),
     inspectChild: (input) => inspectChild(input),
     stopChild: (input) => stopChild(input),

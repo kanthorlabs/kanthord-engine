@@ -103,7 +103,11 @@ const fixtures: Readonly<Record<string, Fixture>> = {
     expect: 404,
   },
   "repository.inspect": {
-    body: { remoteUrl: deadUrl, credentialId: missing("provider") },
+    body: {
+      remoteUrl: deadUrl,
+      credentialId: missing("provider"),
+      requiredAccess: "write",
+    },
     expect: "any-but-501",
   },
   "repository.register": {

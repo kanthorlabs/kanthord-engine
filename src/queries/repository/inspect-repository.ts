@@ -23,17 +23,27 @@ export type InspectRepositoryDependencies = Readonly<{
 export type InspectRepositoryInput = Readonly<{
   remoteUrl: string;
   credentialId: string;
+  requiredAccess?: "read" | "write";
 }>;
 
 export type CredentialVerdict =
   | Readonly<{ reachable: true; refusal: null }>
   | Readonly<{ reachable: false; refusal: GitFailure }>;
 
+export type AccessVerdict = Readonly<{
+  allowed: boolean;
+  refusal: GitFailure | null;
+}>;
+
 export type InspectRepositoryResult = Readonly<{
   defaultBranch: string | null;
   branches: readonly string[];
   credential: CredentialVerdict;
   hostKey: HostKey | null;
+  access: Readonly<{
+    read: AccessVerdict;
+    write: AccessVerdict | null;
+  }>;
 }>;
 
 export type InspectRefusal =
@@ -155,19 +165,45 @@ export async function inspectRepository(
       remoteUrl: input.remoteUrl,
       credential,
     });
+    const read: AccessVerdict = { allowed: true, refusal: null };
+    let write: AccessVerdict | null = null;
+    if (input.requiredAccess === "write") {
+      try {
+        const probe = await dependencies.git.probePush({
+          remoteUrl: input.remoteUrl,
+          branch: info.defaultBranch,
+          credential,
+        });
+        write = probe.allowed
+          ? { allowed: true, refusal: null }
+          : { allowed: false, refusal: probe.failure };
+      } catch (error) {
+        if (error instanceof GitError && error.failure !== "url-refused") {
+          write = { allowed: false, refusal: error.failure };
+        } else {
+          throw error;
+        }
+      }
+    }
     return {
       defaultBranch: info.defaultBranch,
       branches: info.branches,
       credential: { reachable: true, refusal: null },
       hostKey,
+      access: { read, write },
     };
   } catch (error) {
     if (error instanceof GitError && error.failure !== "url-refused") {
+      const refusal = error.failure;
+      const read: AccessVerdict = { allowed: false, refusal };
+      const write: AccessVerdict | null =
+        input.requiredAccess === "write" ? { allowed: false, refusal } : null;
       return {
         defaultBranch: null,
         branches: [],
-        credential: { reachable: false, refusal: error.failure },
+        credential: { reachable: false, refusal },
         hostKey,
+        access: { read, write },
       };
     }
     throw error;

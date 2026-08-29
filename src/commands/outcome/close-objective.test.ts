@@ -521,6 +521,9 @@ function recordingGit(): Readonly<{ git: Git; calls: readonly string[] }> {
     canPush(): Promise<never> {
       return Promise.resolve(record("canPush"));
     },
+    probePush(): Promise<never> {
+      return Promise.resolve(record("probePush"));
+    },
     fetch(): Promise<never> {
       return Promise.resolve(record("fetch"));
     },

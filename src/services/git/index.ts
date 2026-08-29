@@ -94,7 +94,8 @@ export type GitFailure =
   | "lock-held"
   | "timed-out"
   | "output-exceeded"
-  | "unknown";
+  | "unknown"
+  | "empty-remote";
 
 export type ForgeConvention = Readonly<{ username: string | null }>;
 
@@ -131,6 +132,12 @@ export type PushPreflight =
   | Readonly<{ allowed: true }>
   | Readonly<{ allowed: false; failure: GitFailure; detail: string }>;
 
+export type ProbePushInput = Readonly<{
+  remoteUrl: string;
+  branch: string | null;
+  credential: GitCredential;
+}>;
+
 export type OutsideWriterInput = Readonly<{
   transaction: Transaction;
   gitDir: string;
@@ -161,6 +168,7 @@ export interface Git {
     input: Readonly<{ remoteUrl: string; credential: GitCredential }>,
   ): Promise<RemoteInfo>;
   canPush(input: CanPushInput): Promise<PushPreflight>;
+  probePush(input: ProbePushInput): Promise<PushPreflight>;
   fetch(
     input: Readonly<{
       gitDir: string;

@@ -5,6 +5,8 @@ import { epochMillis, objectId } from "./column.ts";
 
 export const repositoryStates = ["ready", "needs-reconcile"] as const;
 
+export const repositoryAccessRequirements = ["read", "write"] as const;
+
 export const credentialFailures = ["auth-failed", "permission-denied"] as const;
 
 export const repositoryRow = z

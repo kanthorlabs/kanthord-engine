@@ -8,7 +8,12 @@ import { resolveTools } from "../../../test/helpers/remote/tools.ts";
 import type { Tools } from "../../../test/helpers/remote/tools.ts";
 import { fixtureObjectIds } from "../../../test/helpers/remote/index.ts";
 
-import { type Git, type GitCredential, type GitPaths } from "./index.ts";
+import {
+  TRACKING_REFSPEC,
+  type Git,
+  type GitCredential,
+  type GitPaths,
+} from "./index.ts";
 import type { GitRunRequest, GitRunner } from "./run.ts";
 import { createBinaryGit } from "./binary.ts";
 
@@ -68,14 +73,14 @@ function recordingRunner(): {
 }
 
 describe("src/services/git/binary.test", () => {
-  it("Object.keys of createBinaryGit bytewise sorted deep-equals the eighteen member names", () => {
+  it("Object.keys of createBinaryGit bytewise sorted deep-equals the nineteen member names", () => {
     const paths = makePaths();
     const { runner } = recordingRunner();
     const git = createBinaryGit({ runner, paths });
     const keys = Object.keys(git).sort((left, right) =>
       Buffer.compare(Buffer.from(left), Buffer.from(right)),
     );
-    assert.equal(keys.length, 18);
+    assert.equal(keys.length, 19);
     assert.deepEqual(keys, [
       "canPush",
       "checkOutsideWriter",
@@ -84,6 +89,7 @@ describe("src/services/git/binary.test", () => {
       "fetch",
       "inspectChild",
       "listPidFiles",
+      "probePush",
       "refUpdate",
       "remoteInfo",
       "remoteUrlVerdict",
@@ -205,6 +211,26 @@ describe("src/services/git/binary.test", () => {
       });
       assert.deepEqual(verdict, { allowed: true });
       assert.equal(requests[0]!.args.includes("push"), true);
+    });
+
+    it("probePush records fetch with the tracking refspec", async () => {
+      const paths = makePaths();
+      const { runner, requests } = recordingRunner();
+      const git = createBinaryGit({ runner, paths });
+      const verdict = await git.probePush({
+        remoteUrl: "https://forge.test/r.git",
+        branch: "main",
+        credential: httpBasic("writer", "w-tok"),
+      });
+      assert.deepEqual(verdict, { allowed: true });
+      assert.equal(
+        requests.some(
+          (request) =>
+            request.args.includes("fetch") &&
+            request.args.includes(TRACKING_REFSPEC),
+        ),
+        true,
+      );
     });
 
     it("scanHostKeys records no git call at all", async () => {

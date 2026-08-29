@@ -16,16 +16,25 @@ import {
 } from "./example-literal.ts";
 import { operations } from "./operation.ts";
 import type { OperationExamples } from "./operation.ts";
-import { repositoryStates } from "../../domain/repository.ts";
+import {
+  repositoryAccessRequirements,
+  repositoryStates,
+} from "../../domain/repository.ts";
 
 export const repositoryInspectRequest = z.strictObject({
   remoteUrl: z.string().min(1),
   credentialId: z.string().min(1),
+  requiredAccess: z.enum(repositoryAccessRequirements).optional(),
 });
 
 export const hostKeyView = z.strictObject({
   algorithm: z.string(),
   fingerprint: z.string(),
+});
+
+const accessVerdictView = z.strictObject({
+  allowed: z.boolean(),
+  refusal: z.string().nullable(),
 });
 
 export const repositoryInspectResponse = z.strictObject({
@@ -36,6 +45,10 @@ export const repositoryInspectResponse = z.strictObject({
     refusal: z.string().nullable(),
   }),
   hostKey: hostKeyView.nullable(),
+  access: z.strictObject({
+    read: accessVerdictView,
+    write: accessVerdictView.nullable(),
+  }),
 });
 
 export const branchName = z
@@ -100,12 +113,14 @@ export const repositoryInspectExamples: OperationExamples = {
   request: {
     remoteUrl: "https://example.test/atlas.git",
     credentialId: `provider_${U}`,
+    requiredAccess: "read",
   },
   success: {
     defaultBranch: "main",
     branches: ["main"],
     credential: { reachable: true, refusal: null },
     hostKey: null,
+    access: { read: { allowed: true, refusal: null }, write: null },
   },
   error: {
     error: {
