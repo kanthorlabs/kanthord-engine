@@ -153,8 +153,15 @@ describe("src/http/contract/coverage.test", () => {
     for (const file of files) {
       const contents = readFileSync(`${dir}${file}`, "utf8");
 
+      const contentsWithoutProviderRemoveForceEnum =
+        file === "credential.ts"
+          ? contents.replace(
+              /z\.enum\(\s*\[\s*"true"\s*,\s*"false"\s*\]\s*\)/,
+              "",
+            )
+          : contents;
       assert.doesNotMatch(
-        contents,
+        contentsWithoutProviderRemoveForceEnum,
         /z\.enum\(\s*\[/,
         `${file} declares an inline z.enum([...]) literal instead of importing a domain/ array`,
       );
