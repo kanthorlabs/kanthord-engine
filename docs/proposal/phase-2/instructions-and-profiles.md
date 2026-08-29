@@ -6,7 +6,7 @@ Reviewer: AI engineer. Phase 2. This file defines what an agent is told, where t
 
 Worker binding precedence is project, then graph, then node. The most specific binding wins. An objective binds one repository, so a node-level binding changes the worker kind only.
 
-`tdd@1` is a worker strategy, not an agent. Worker kinds are `general@1`, `tdd@1` and `git@1`. `tdd@1` drives `te@1`, `swe@1` and `re@1`.
+`tdd@1` is a worker strategy, not an agent. Worker kinds are `general@1`, `tdd@1` and `git@1`. Harness-qualified kinds are `claude.swe@1`, `claude.te@1`, `opencode.swe@1` and `opencode.te@1`; they name an external harness and the persona it dispatches and are validated at import but never executed by the daemon. `tdd@1` drives `te@1`, `swe@1` and `re@1`.
 
 KanthorD redesigns the loop of `.claude/skills/*`. It keeps the TDD intent and the review gate. It does not keep the role sequence.
 

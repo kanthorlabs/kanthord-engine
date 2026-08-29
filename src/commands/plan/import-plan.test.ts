@@ -122,6 +122,62 @@ const U2_O2 = "01JQZ3NDEKTSV4RRFFQ69G5FAX";
 const U2_REV = "01KQZ3NDEKTSV4RRFFQ69G5FAX";
 const U2_EDGE = "01MRZ3NDEKTSV4RRFFQ69G5FAX";
 
+const U_HI = "01ARZ3NDEKTSV4RRFFQ69G5FBF";
+const U_HT = "01ARZ3NDEKTSV4RRFFQ69G5FBG";
+const U_HO = "01ARZ3NDEKTSV4RRFFQ69G5FBH";
+const U_HREV = "01ARZ3NDEKTSV4RRFFQ69G5FBI";
+
+const harnessSubmission = [
+  {
+    path: "plan/i--01/initiative.md",
+    content: `---
+kind: initiative
+title: Harness round trip
+---
+Test harness kind routing.
+`,
+  },
+  {
+    path: "plan/i--01/o--01/objective.md",
+    content: `---
+kind: objective
+title: Harness round trip
+repo: kanthord-verify
+---
+Validate the route.
+`,
+  },
+  {
+    path: "plan/i--01/o--01/01-a.md",
+    content: `---
+kind: task
+title: Harness round trip
+worker: claude.swe@1
+---
+Do the task.
+
+## Acceptance criteria
+
+- The kind is preserved.
+`,
+  },
+];
+
+const harnessExpectedDocuments = [
+  {
+    path: "plan/harness-round-trip--01arz3ndektsv4rrffq69g5fbf/harness-round-trip--01arz3ndektsv4rrffq69g5fbh/01-harness-round-trip--01arz3ndektsv4rrffq69g5fbg.md",
+    content: `---\nid: "task_${U_HT}"\nkind: "task"\ntitle: "Harness round trip"\nworker: "claude.swe@1"\n---\nDo the task.\n\n## Acceptance criteria\n\n- The kind is preserved.\n`,
+  },
+  {
+    path: "plan/harness-round-trip--01arz3ndektsv4rrffq69g5fbf/harness-round-trip--01arz3ndektsv4rrffq69g5fbh/objective.md",
+    content: `---\nid: "objective_${U_HO}"\nkind: "objective"\ntitle: "Harness round trip"\nrepo: "kanthord-verify"\n---\nValidate the route.\n`,
+  },
+  {
+    path: "plan/harness-round-trip--01arz3ndektsv4rrffq69g5fbf/initiative.md",
+    content: `---\nid: "initiative_${U_HI}"\nkind: "initiative"\ntitle: "Harness round trip"\n---\nTest harness kind routing.\n`,
+  },
+];
+
 const low = (ulid: string): string => ulid.toLowerCase();
 
 const roundTripIdentities = [
@@ -1357,6 +1413,43 @@ Bootstrap.
         decoder.decode(accepted.content),
         canonicalDocumentsJson(result.documents),
       );
+    });
+
+    it("a plan naming claude.swe@1 imports without findings and exports byte-identically", (t) => {
+      const fixture = build([U_HI, U_HT, U_HO, U_HREV]);
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => seedRegistry(transaction));
+
+      const result = runImport(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: null,
+        importId: "imp_harness_swe_041",
+        documents: harnessSubmission,
+        choices: [
+          { id: `initiative_${U_HI}`, take: "submitted" },
+          { id: `task_${U_HT}`, take: "submitted" },
+          { id: `objective_${U_HO}`, take: "submitted" },
+        ],
+        validatedRevision: null,
+        documentsHash: fixture.blobs.hash(
+          encoder.encode(canonicalDocumentsJson(harnessExpectedDocuments)),
+        ),
+        actor: "human_1",
+      });
+
+      assert.deepEqual(result.absent, []);
+      assert.deepEqual(result.documents, harnessExpectedDocuments);
+
+      const exported = exportPlan(
+        {
+          storage: fixture.storage,
+          plan: fixture.plan,
+          revision: fixture.revision,
+        },
+        { projectId: fixtureIds.project },
+      );
+
+      assert.deepEqual(exported.documents, result.documents);
     });
 
     it("a re-import at the same revision succeeds and moves updated_at", (t) => {

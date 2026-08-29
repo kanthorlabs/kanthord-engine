@@ -60,6 +60,16 @@ persona:
   `src/domain/plan-validate.ts:286` are the two places that test membership, and both read the
   context array rather than the constant. Neither file changes.
 
+- **An agent name is refused at the document boundary, and `worker-unknown` reports a context
+  omission.** `src/domain/plan-document.ts:22` parses `worker` with `workerKind`, so `swe@1` is
+  `frontmatter-invalid` and never reaches a membership check. `worker-unknown` therefore names a
+  different fault: a well-formed kind that the project's `context.workerKinds` omits. The two faults
+  live at two layers and are proven at two layers. `src/domain/plan-document.ts` does not change.
+
+- **A candidate is not a document.** `src/domain/plan-candidate.ts` reads a node object that no
+  frontmatter parse produced, so an agent name does reach its membership check there. The candidate
+  layer keeps the `swe@1` case; the document layer cannot hold one.
+
 ## Stories
 
 1. **The domain enum admits four harness-qualified kinds.** Extend `workerKinds` in
@@ -67,10 +77,13 @@ persona:
    in `src/domain/worker.test.ts` and add a case asserting that `workerKind` parses each of the four
    and rejects `swe@1`, `te@1`, `claude.swe` and `claude.swe@2`.
 
-2. **Import accepts a harness-qualified worker.** Add cases to `src/domain/plan-candidate.test.ts`
-   and `src/domain/plan-validate.test.ts` proving that a node naming each of the four raises no
-   `worker-unknown` finding, and that an unqualified `swe@1` still raises one. No production file
-   under `src/domain/` other than `worker.ts` changes.
+2. **Import accepts a harness-qualified worker.** Add cases to `src/domain/plan-candidate.test.ts`,
+   `src/domain/plan-validate.test.ts` and `src/domain/plan-document.test.ts` proving that a node
+   naming each of the four raises no `worker-unknown` finding. Prove each fault at its own layer: a
+   candidate naming `swe@1` raises exactly one `worker-unknown`; a document naming `claude.swe@1`
+   against a context that omits that one value raises exactly one `worker-unknown`; `planFrontmatter`
+   refuses `swe@1` and `te@1` with the issue path `worker`. No production file under `src/domain/`
+   other than `worker.ts` changes.
 
 3. **The plan store passes the extended set through.** Add a case to
    `src/services/plan/sqlite.test.ts` proving the validation context built at
@@ -85,8 +98,11 @@ persona:
 5. **A claim ignores the worker kind.** Add a case to `src/commands/node/claim-node.test.ts`
    proving that a task whose `worker` is `opencode.te@1` is claimed by an actor that names no
    harness, and that the returned lease is identical to the lease the same claim produces for a task
-   whose `worker` is `general@1`. No production file changes. The case is the regression that holds
-   the first Non-goal: it fails the moment a claim starts reading `node.worker`.
+   whose `worker` is `general@1`. Both fixtures set `worker` explicitly through a `seedNodeWorker`
+   helper in `test/helpers/rows.ts`, because a null baseline compares an unassigned node against a
+   worker kind rather than one worker kind against another. No production file changes. The case is
+   the regression that holds the first Non-goal: it fails the moment a claim starts reading
+   `node.worker`.
 
 6. **The proposal defines a harness-qualified kind.** Amend
    `docs/proposal/phase-2/agents-and-workers.md` and
@@ -103,6 +119,7 @@ Proof:
 ```bash
 node --test \
   src/domain/worker.test.ts \
+  src/domain/plan-document.test.ts \
   src/domain/plan-candidate.test.ts \
   src/domain/plan-validate.test.ts \
   src/services/plan/sqlite.test.ts \
@@ -119,7 +136,16 @@ Hermetic coverage required beyond the Proof:
 - `workerKind` parses each of the four added values and rejects `swe@1`, `te@1`, `claude.swe` and
   `claude.swe@2`. Each rejection is asserted by value, not by "throws".
 - A plan candidate whose node names each of the four produces a finding list that is deep-equal to
-  the empty array. A candidate naming `swe@1` produces exactly one `worker-unknown` finding.
+  the empty array. A candidate naming `swe@1` produces exactly one `worker-unknown` finding, with
+  `id` equal to the task identity and `path` equal to `null`.
+- A plan document naming each of the four, validated against the full context, produces a finding
+  list that is deep-equal to the empty array.
+- A plan document naming `claude.swe@1`, validated against a context that omits that one value and
+  keeps the other six, produces exactly one `worker-unknown` finding on that document path. The
+  context is built by filtering `workerKinds`, so the value under test is the only variable.
+- `planFrontmatter.safeParse` refuses `swe@1` and refuses `te@1`, each with the issue path `worker`,
+  and parses each of the four. This is the boundary rejection; no plan-level assertion stands in for
+  it, because a refused task document also raises `objective-without-task`.
 - A round trip through `plan import` and `plan export` of a document naming `claude.swe@1` produces
   byte-identical output.
 - `src/commands/node/claim-node.ts` is unchanged, and a claim of a node whose worker is

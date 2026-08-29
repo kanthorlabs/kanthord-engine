@@ -79,4 +79,32 @@ describe("src/domain/plan-document.test", () => {
     assert.equal(result.success, false);
     assert.deepEqual(issuePaths(result), [["worker"]]);
   });
+
+  for (const harnessKind of [
+    "claude.swe@1",
+    "claude.te@1",
+    "opencode.swe@1",
+    "opencode.te@1",
+  ] as const) {
+    it(`worker ${harnessKind} parses`, () => {
+      const result = planFrontmatter.safeParse({
+        kind: "task",
+        title: "Ship",
+        worker: harnessKind,
+      });
+      assert.equal(result.success, true);
+    });
+  }
+
+  for (const agentName of ["swe@1", "te@1"] as const) {
+    it(`worker ${agentName} is refused with the issue path worker`, () => {
+      const result = planFrontmatter.safeParse({
+        kind: "task",
+        title: "Ship",
+        worker: agentName,
+      });
+      assert.equal(result.success, false);
+      assert.deepEqual(issuePaths(result), [["worker"]]);
+    });
+  }
 });

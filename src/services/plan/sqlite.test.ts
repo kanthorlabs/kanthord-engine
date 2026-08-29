@@ -1976,6 +1976,26 @@ describe("src/services/plan/sqlite.test", () => {
     });
   });
 
+  it("readValidationContext.workerKinds deep-equals the seven-element fixed-order array", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact(seedAll);
+
+    const context = storage.transact((transaction) =>
+      store.readValidationContext(transaction, fixtureIds.project),
+    );
+
+    assert.deepEqual(context.workerKinds, [
+      "general@1",
+      "tdd@1",
+      "git@1",
+      "claude.swe@1",
+      "claude.te@1",
+      "opencode.swe@1",
+      "opencode.te@1",
+    ]);
+  });
+
   it("readContainmentFacts reports all false for a node with nothing attached", (t) => {
     const { storage, store, dispose } = build();
     t.after(() => dispose());

@@ -6,7 +6,7 @@ Reviewer: AI engineer. Phase 2. What an agent is told is `instructions-and-profi
 
 An agent holds a role contract and a tool set defined in code. It runs alone, or a worker kind composes it with others. Agents are `general@1`, `swe@1`, `te@1` and `re@1`.
 
-A worker kind executes one objective under a lease. Kinds are `general@1`, `tdd@1` and `git@1`. Worker binding precedence is project, then graph, then node. The most specific binding wins. An objective binds one repository, so a node-level binding changes the worker kind only.
+A worker kind executes one objective under a lease. Kinds are `general@1`, `tdd@1` and `git@1`. A harness-qualified kind names an external harness and the agent persona it dispatches, using the convention `<harness>.<agent>@<version>`. The four harness-qualified kinds are `claude.swe@1`, `claude.te@1`, `opencode.swe@1` and `opencode.te@1`. The daemon validates a harness-qualified kind at import and never executes one. Claim is not restricted by worker kind; an actor of one harness may claim a node of any worker kind. A node carrying a harness-qualified kind is claimed and reported through the same operations as any other node. Worker binding precedence is project, then graph, then node. The most specific binding wins. An objective binds one repository, so a node-level binding changes the worker kind only.
 
 ## The MVP ships the `general@1` worker
 
