@@ -184,6 +184,41 @@ export const providerSetDefaultExamples: OperationExamples = {
   },
 };
 
+export const providerVerifyResponse = z.strictObject({
+  checkedAt: z.number(),
+  model: z.string(),
+  reachability: z.enum(["reachable", "unreachable"]),
+  authentication: z.enum(["accepted", "rejected", "unknown"]),
+  completed: z.boolean(),
+  refusal: z
+    .enum([
+      "endpoint-unreachable",
+      "credential-rejected",
+      "model-unavailable",
+      "quota-exceeded",
+      "endpoint-rejected",
+    ])
+    .nullable(),
+  detail: z.string().optional(),
+});
+
+export const providerVerifyExamples: OperationExamples = {
+  success: {
+    checkedAt: A,
+    model: "gpt-4o",
+    reachability: "reachable",
+    authentication: "accepted",
+    completed: true,
+    refusal: null,
+  },
+  error: {
+    error: {
+      code: "not-found",
+      message: `no provider provider_${U}`,
+    },
+  },
+};
+
 const catalogModelCostRates = {
   input: z.number(),
   output: z.number(),
@@ -376,6 +411,19 @@ export const credential = operations([
     response: providerShowResponse,
     errors: { ...baselineErrors },
     examples: providerShowExamples,
+  },
+  {
+    operationId: "provider.verify",
+    method: "POST",
+    path: [resource("provider"), parameter("provider"), action("verify")],
+    introducedIn: "phase-1",
+    status: "routed",
+    allowedActors: ["human"],
+    idempotency: "memory",
+    replayable: [200],
+    response: providerVerifyResponse,
+    errors: { ...baselineErrors },
+    examples: providerVerifyExamples,
   },
   {
     operationId: "provider.rename",

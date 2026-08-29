@@ -58,6 +58,8 @@ import { setDefaultProvider } from "./commands/provider/set-default-provider.ts"
 import { removeProvider } from "./commands/provider/remove-provider.ts";
 import { listProviders } from "./queries/provider/list-provider.ts";
 import { showProvider } from "./queries/provider/show-provider.ts";
+import { verifyProvider } from "./queries/provider/verify-provider.ts";
+import { PiAiProviderAuth } from "./services/provider-auth/pi-ai.ts";
 import { resolveActor } from "./queries/actor/resolve-actor.ts";
 import { createProject } from "./commands/project/create-project.ts";
 import { replaceProjectRepositories } from "./commands/project/replace-project-repositories.ts";
@@ -125,6 +127,7 @@ import { setDefaultProviderHandler } from "./http/server/credential/set-default-
 import { removeProviderHandler } from "./http/server/credential/remove-provider.ts";
 import { listProviderHandler } from "./http/server/credential/list-provider.ts";
 import { showProviderHandler } from "./http/server/credential/show-provider.ts";
+import { verifyProviderHandler } from "./http/server/credential/verify-provider.ts";
 import { inspectRepositoryHandler } from "./http/server/repository/inspect-repository.ts";
 import { listRepositoryHandler } from "./http/server/repository/list-repository.ts";
 import { showRepositoryHandler } from "./http/server/repository/show-repository.ts";
@@ -353,6 +356,7 @@ async function serve(options: ServeOptions): Promise<void> {
       });
       const secret = new NodeCryptoSecret();
       const catalog = new PiAiModelCatalog();
+      const providerAuth = new PiAiProviderAuth();
       const sweepExternalLeases = (
         transaction: Transaction,
         input: Readonly<{ actor: string; now: number }>,
@@ -409,6 +413,10 @@ async function serve(options: ServeOptions): Promise<void> {
         }),
         "provider.show": showProviderHandler({
           showProvider: (input) => showProvider({ storage, crypto }, input),
+        }),
+        "provider.verify": verifyProviderHandler({
+          verifyProvider: (input) =>
+            verifyProvider({ storage, crypto, providerAuth, clock }, input),
         }),
         "repository.inspect": inspectRepositoryHandler({
           inspectRepository: (input) =>

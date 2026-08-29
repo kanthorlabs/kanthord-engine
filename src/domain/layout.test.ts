@@ -98,7 +98,7 @@ describe("src/domain/layout.test", () => {
     );
   });
 
-  it("src/services/ holds exactly the nineteen capabilities plus home-lock", () => {
+  it("src/services/ holds exactly the twenty capabilities plus home-lock", () => {
     const servicesDir = new URL("../services/", import.meta.url);
     const entries = fs.readdirSync(servicesDir, { withFileTypes: true });
     const directoryNames = entries
@@ -121,6 +121,7 @@ describe("src/domain/layout.test", () => {
       "lease",
       "model-catalog",
       "plan",
+      "provider-auth",
       "readiness",
       "revision",
       "secret",

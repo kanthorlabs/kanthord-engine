@@ -153,15 +153,17 @@ describe("src/http/contract/coverage.test", () => {
     for (const file of files) {
       const contents = readFileSync(`${dir}${file}`, "utf8");
 
-      const contentsWithoutProviderRemoveForceEnum =
+      const contentsWithoutAllowedInlineEnums =
         file === "credential.ts"
-          ? contents.replace(
-              /z\.enum\(\s*\[\s*"true"\s*,\s*"false"\s*\]\s*\)/,
-              "",
-            )
+          ? contents
+              .replace(/z\.enum\(\s*\[\s*"true"\s*,\s*"false"\s*\]\s*\)/, "")
+              .replace(
+                /export const providerVerifyResponse = z\.strictObject\(\{[\s\S]*?\n\}\);\n/,
+                "",
+              )
           : contents;
       assert.doesNotMatch(
-        contentsWithoutProviderRemoveForceEnum,
+        contentsWithoutAllowedInlineEnums,
         /z\.enum\(\s*\[/,
         `${file} declares an inline z.enum([...]) literal instead of importing a domain/ array`,
       );
@@ -419,8 +421,8 @@ describe("src/http/contract/coverage.test", () => {
     }
   });
 
-  it("every one of the thirty-eight phase-1 routed operations but blob.show carries a response schema", () => {
-    assert.equal(scoped.length, 38);
+  it("every one of the thirty-nine phase-1 routed operations but blob.show carries a response schema", () => {
+    assert.equal(scoped.length, 39);
     for (const entry of scoped) {
       assert.ok(
         entry.response !== undefined,

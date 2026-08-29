@@ -14,6 +14,18 @@ Encryption at rest with a master key from configuration is the whole of the MVP 
 
 A git credential is a registration of `kind = 'git'` in the same table, because the git service authenticates from a stored credential and inherits no ambient one. It is bound by `repository.credential_id` rather than by a default. See `../phase-1/git-foundation.md`.
 
+## Pi-ai owns credential resolution
+
+`pi-ai` owns `ProviderAuth` for every catalogued vendor. The engine passes a single-entry `CredentialStore` adapter to `builtinModels({ credentials })` and calls `completeSimple()`. Pi-ai drives the store internally. The engine writes no authentication header and no vendor-specific authentication scheme.
+
+The engine implements `CredentialStore` from `@earendil-works/pi-ai` as a single-entry, per-request adapter backed by the encrypted `provider` table. One adapter wraps exactly one registration, so a probe of registration A can never read registration B's credential.
+
+`resolveProviderAuth` from `@earendil-works/pi-ai` is not in the package's public exports map. Pi-ai resolves credentials internally through `builtinModels`. EPIC 045 may revisit this if the function becomes a public export.
+
+Verification covers all credential types by construction. EPIC 045 adds OAuth, with no change to the probe or the outcome table.
+
+The probe takes a credential snapshot at request start. It is a network call that runs after the storage transaction that read the provider row closes. The daemon does not hold a database lock across a vendor round-trip. A credential rotated or revoked while the probe is in flight produces a verdict about the credential as it stood at request start. The verdict is not re-validated on return. A human who receives a stale `rejected` verdict retries, and a fresh verification reads the current credential.
+
 ## A registration is a named account
 
 The human registers an account at global scope. One registration holds a name, a kind, and one encrypted payload. `kind = 'llm'` is the account an attempt calls through `pi-ai`, and its payload holds the provider variant, the credential and the default model. `kind = 'git'` is the forge account the bare home fetches and pushes with, and its payload holds the forge, the username and the token. The same variant may be registered any number of times under different names, so three ChatGPT accounts are three registrations. The name is unique and is how a human refers to it. At least one registration is mandatory to finish onboarding, and onboarding stamps `set_default_at` on it.

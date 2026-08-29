@@ -5,6 +5,7 @@ import { SetDefaultProviderError } from "../../../commands/provider/set-default-
 import { RenameProviderError } from "../../../commands/provider/rename-provider.ts";
 import { RemoveProviderError } from "../../../commands/provider/remove-provider.ts";
 import { InspectProviderError } from "../../../queries/provider/inspect-provider.ts";
+import { VerifyProviderError } from "../../../queries/provider/verify-provider.ts";
 
 export function toHttpError(error: unknown): HttpError {
   if (error instanceof PayloadError) {
@@ -46,6 +47,17 @@ export function toHttpError(error: unknown): HttpError {
     }
     return httpError("binding-in-use", error.message, {
       blockers: error.blockers,
+    });
+  }
+  if (error instanceof VerifyProviderError) {
+    if (error.refusal === "not-found") {
+      return httpError("not-found", error.message);
+    }
+    if (error.refusal === "service-unavailable") {
+      return httpError("service-unavailable", error.message);
+    }
+    return httpError("invalid-request", error.message, {
+      refusal: error.refusal,
     });
   }
   throw error;

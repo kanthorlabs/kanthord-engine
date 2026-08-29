@@ -69,9 +69,9 @@ describe("src/http/contract/runtime-matrix.test", () => {
     );
   });
 
-  it("documents exactly 44 routed operations", () => {
-    assert.equal(documented.length, 44);
-    assert.equal(routed.length, 44);
+  it("documents exactly 45 routed operations", () => {
+    assert.equal(documented.length, 45);
+    assert.equal(routed.length, 45);
   });
 
   it("lists the operations in registry order", () => {

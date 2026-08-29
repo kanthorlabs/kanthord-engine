@@ -99,11 +99,11 @@ test("documents openapi 3.0.3 and the product info", () => {
   });
 });
 
-test("renders sixty-one distinct paths in bytewise order", () => {
+test("renders sixty-two distinct paths in bytewise order", () => {
   const document = buildOpenApiDocument();
   const paths = document.paths as Readonly<Record<string, unknown>>;
   const keys = Object.keys(paths);
-  assert.equal(keys.length, 61);
+  assert.equal(keys.length, 62);
   assert.deepEqual(keys, sortedBytewise(keys));
 });
 
@@ -140,7 +140,7 @@ test("orders methods within a path by the fixed sequence", () => {
 test("names every operation and matches the registry set", () => {
   const document = buildOpenApiDocument();
   const ids = operationObjects(document).map((entry) => entry.operationId);
-  assert.equal(ids.length, 69);
+  assert.equal(ids.length, 70);
   assert.deepEqual(
     sortedBytewise(ids),
     sortedBytewise(registry.map((entry) => entry.operationId)),
@@ -356,6 +356,8 @@ test("registers every schema component in bytewise order", () => {
     "provider.setDefault.response",
     "provider.show.error",
     "provider.show.response",
+    "provider.verify.error",
+    "provider.verify.response",
     "recovery.childReaped",
     "recovery.journalReconciled",
     "recovery.leaseBlocked",
@@ -455,7 +457,7 @@ test("the master holds exactly the transitive closure of its own references", ()
     sortedBytewise([...reachableSchemaNames(document)]),
     sortedBytewise(Object.keys(schemas)),
   );
-  assert.equal(Object.keys(schemas).length, 142);
+  assert.equal(Object.keys(schemas).length, 144);
   for (const type of Object.keys(eventPayloads)) {
     assert.equal(Object.hasOwn(schemas, type), true, `${type} was pruned`);
   }

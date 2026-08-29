@@ -19,13 +19,14 @@ A git credential is a registration too, of `kind = 'git'`, because the git servi
 | `provider.register`   | `POST /v1/provider`            | phase-1      | routed | P1-E1, the git credential of `repository.register`            |
 | `provider.list`       | `GET /v1/provider`             | phase-1      | routed | P1-E1, the CLI resolves `--credential <name>`                 |
 | `provider.show`       | `GET /v1/provider/:id`         | phase-1      | routed | providers-and-credentials.md                                  |
+| `provider.verify`     | `POST /v1/provider/:id/verify` | phase-1      | routed | providers-and-credentials.md                                  |
 | `provider.rename`     | `POST /v1/provider/:id/rename` | phase-2      | routed | providers-and-credentials.md, "rename"                        |
 | `provider.remove`     | `DELETE /v1/provider/:id`      | phase-2      | routed | providers-and-credentials.md, "remove"                        |
 | `provider.setDefault` | `PUT /v1/provider/:id/default` | phase-2      | routed | providers-and-credentials.md, "set default"                   |
 
-## Three routes ship in phase 1, and the rest in phase 2
+## Four routes ship in phase 1, and the rest in phase 2
 
-`repository.register` carries a mandatory `credentialId` that names a `provider` row of `kind = 'git'`, and the phase-1 exit criterion registers a real remote. A phase in which every provider route answers `501` therefore has no public path to the credential its own journey needs. `provider.register`, `provider.list` and `provider.show` ship in phase 1 for that reason, and they need only the crypto service that phase 1 already delivers.
+`repository.register` carries a mandatory `credentialId` that names a `provider` row of `kind = 'git'`, and the phase-1 exit criterion registers a real remote. A phase in which every provider route answers `501` therefore has no public path to the credential its own journey needs. `provider.register`, `provider.list` and `provider.show` ship in phase 1 for that reason, and they need only the crypto service that phase 1 already delivers. `provider.verify` also ships in phase 1, because it checks the stored llm credential before a run.
 
 `provider.rename`, `provider.remove` and `provider.setDefault` stay in phase 2. A rename and a removal are management of a registry that phase 1 only writes once, and `setDefault` serves the llm chain, which phase 1 has no use for.
 
@@ -59,3 +60,46 @@ The route stamps `set_default_at` on one registration, which puts it in the glob
 The chain holds one `llm` registration. Calling this route on a second registration moves the default: the same transaction clears `set_default_at` on the current holder, appends `provider.defaultUnset` on it, then stamps the target and appends `provider.defaultSet`. Calling it on the current holder changes nothing and appends no event.
 
 A project-scope binding is `project.md`, and an agent-scope binding is `instruction.md`. Both are `post-mvp`.
+
+## `provider.verify`
+
+`POST /v1/provider/:id/verify` sends one prompt to the registered provider's stored default model.
+
+The probe uses the prompt path of a real run rather than a model list. A `GET /models` request with a bearer header is OpenAI-shaped, so it fails for Anthropic and Google, which use different headers and paths. It also proves nothing about an OAuth credential. The prompt probe uses the actual request path that a run takes.
+
+The probe sends exactly `"What time is it?"` with `max_tokens: 16`. The reply text is not used or returned. A completion proves that the stored model answered, regardless of its text.
+
+The response has this shape:
+
+```ts
+{
+  checkedAt: number;                                    // epoch ms, server clock
+  model: string;                                        // the model id that was probed
+  reachability: "reachable" | "unreachable";
+  authentication: "accepted" | "rejected" | "unknown";
+  completed: boolean;                                   // a completion arrived
+  refusal: string | null;
+  detail?: string;                                      // human string, never contract
+}
+```
+
+The outcome mapping is:
+
+| Outcome                         | reachability  | authentication | completed | refusal                |
+| ------------------------------- | ------------- | -------------- | --------- | ---------------------- |
+| a completion arrives            | `reachable`   | `accepted`     | `true`    | `null`                 |
+| transport failure, no response  | `unreachable` | `unknown`      | `false`   | `endpoint-unreachable` |
+| `401` or `403`                  | `reachable`   | `rejected`     | `false`   | `credential-rejected`  |
+| `404` or an unknown-model error | `reachable`   | `accepted`     | `false`   | `model-unavailable`    |
+| `429`                           | `reachable`   | `accepted`     | `false`   | `quota-exceeded`       |
+| any other non-`2xx`             | `reachable`   | `unknown`      | `false`   | `endpoint-rejected`    |
+
+The probe timeout is 30 seconds. A timeout maps to `endpoint-unreachable`.
+
+No verdict is persisted. The provider row is unchanged, and `ProviderView` is unchanged. A re-verification runs the probe again unless the request replays a cached response within the idempotency window.
+
+The invocation identity is the client's `Idempotency-Key`, and nothing else. A transport retry sends the same key and receives the stored answer. A deliberate re-verification after credential rotation sends no key or a new key, and reaches the vendor. A request without a key always runs a fresh check.
+
+Credential rotation invalidates no stored answer. The in-memory record uses the idempotency key and has no reference to the provider row. The record lives for `http.idempotency.ttl` and no longer. A restart discards it.
+
+The api key never appears in the response body, `detail`, or refusal.
