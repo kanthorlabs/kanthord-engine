@@ -102,11 +102,11 @@ Read the relevant file **before** touching that area — not upfront.
 All run from the repo root. Never improvise a raw build/test invocation when the
 project provides a command.
 
-| Role                         | Command                                                 | PASS/FAIL artifact                              |
-| ---------------------------- | ------------------------------------------------------- | ----------------------------------------------- |
-| SE — before every handoff    | `npm run typecheck` (`tsc --noEmit`)                    | a clean type-check                              |
-| TE — test execution          | `npm test` (`node --test`)                              | the verbatim pass/fail line                     |
-| TE — handoff re-verification | `npm run verify:handoff` (`scripts/verify-handoff.mjs`) | `VERIFY: PASS` exit 0 / `VERIFY: FAIL` non-zero |
+| Role                         | Command                                                  | PASS/FAIL artifact                              |
+| ---------------------------- | -------------------------------------------------------- | ----------------------------------------------- |
+| SE — before every handoff    | `pnpm run typecheck` (`tsc --noEmit`)                    | a clean type-check                              |
+| TE — test execution          | `pnpm test` (`node --test`)                              | the verbatim pass/fail line                     |
+| TE — handoff re-verification | `pnpm run verify:handoff` (`scripts/verify-handoff.mjs`) | `VERIFY: PASS` exit 0 / `VERIFY: FAIL` non-zero |
 
 **Self-verification — MANDATORY.** A verify FAIL from a source error → fix and re-build until PASS. A FAIL from an environment error → `OPEN:` with the command + error line; no speculative edits. Never compose your turn until the check reports PASS — the TE re-runs the same check as a preflight.
 

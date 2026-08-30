@@ -82,7 +82,7 @@ they share the container prerequisite, and `P1B-E1` runs on the `local` driver
 before the first container is built. The real-profile run is last, because it is
 the bundle the phase exits by pointing at.
 
-`--record-verify` runs `npm run verify` and records the command, its exit status,
+`--record-verify` runs `pnpm run verify` and records the command, its exit status,
 the commit under test and the proposal revision beside the bundles.
 `--verdict <tag> --scenarios-only` checks the scenario axis alone. That is how you
 report a rehearsal green, and it can never close the phase.

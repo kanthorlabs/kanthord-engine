@@ -49,7 +49,7 @@ test("recordVerify returns the eight-field record built from its dependencies", 
     assert.deepEqual(record, {
       schemaVersion: 1,
       tag: "t1",
-      command: ["npm", "run", "verify"],
+      command: ["pnpm", "run", "verify"],
       exitCode: 0,
       commit: "c0ffee",
       proposalRevision: "dec0de",
@@ -105,7 +105,7 @@ test("recordVerify passes exactly [npm, run, verify] to run", async () => {
       "t1",
     );
 
-    assert.deepEqual(seen, ["npm", "run", "verify"]);
+    assert.deepEqual(seen, ["pnpm", "run", "verify"]);
   });
 });
 

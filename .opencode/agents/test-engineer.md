@@ -96,10 +96,10 @@ outside the planned coverage. Repair path, not planned coverage.
   software-engineer has not created yet. A clean-apart-from-TS2307 RED therefore
   proves nothing about your own types, and the real errors surface on the
   software-engineer's handoff gate — in a file it may not edit, which costs a
-  whole turn. So: whenever `npm run typecheck` reports `TS2307` for a seam under
+  whole turn. So: whenever `pnpm run typecheck` reports `TS2307` for a seam under
   `Open to Software Engineer`, write a throwaway stub at that exact path — the
   Story-declared signatures with `throw new Error("stub")` bodies — re-run
-  `npm run typecheck`, fix every error the stub reveals **in your own files**,
+  `pnpm run typecheck`, fix every error the stub reveals **in your own files**,
   then delete the stub before you compose the turn. The stub must not exist at
   handoff; the turn snapshot compares against `HEAD`, so a created-then-deleted
   file leaves no trace and no lane violation. Record the probe in `**RED proof.**`
@@ -191,18 +191,18 @@ Tasks are `### Task <id>` headings — track progress from the discussion file:
 All run from the repo root. Never improvise a raw build/test invocation when the
 project provides a command.
 
-| Role                         | Command                                                 | PASS/FAIL artifact                              |
-| ---------------------------- | ------------------------------------------------------- | ----------------------------------------------- |
-| SE — before every handoff    | `npm run typecheck` (`tsc --noEmit`)                    | a clean type-check                              |
-| TE — test execution          | `npm test` (`node --test`)                              | the verbatim pass/fail line                     |
-| TE — handoff re-verification | `npm run verify:handoff` (`scripts/verify-handoff.mjs`) | `VERIFY: PASS` exit 0 / `VERIFY: FAIL` non-zero |
+| Role                         | Command                                                  | PASS/FAIL artifact                              |
+| ---------------------------- | -------------------------------------------------------- | ----------------------------------------------- |
+| SE — before every handoff    | `pnpm run typecheck` (`tsc --noEmit`)                    | a clean type-check                              |
+| TE — test execution          | `pnpm test` (`node --test`)                              | the verbatim pass/fail line                     |
+| TE — handoff re-verification | `pnpm run verify:handoff` (`scripts/verify-handoff.mjs`) | `VERIFY: PASS` exit 0 / `VERIFY: FAIL` non-zero |
 
 ## Handoff verification gate — MANDATORY on every SE turn you read
 
 The invariant is _independent re-verification of the artifact the SE claims it produced_. Before confirm-GREEN, advancing, or any check of your own:
 
 1. Find the SE's verification claim in its last turn — it must cite the artifact/log(s) named in the build/test commands. Missing → gate fails.
-2. Independently re-verify each cited artifact yourself using `npm run verify:handoff` (a machine-readable PASS/FAIL, not a fragile grep). It must report PASS. Never trust the claim.
+2. Independently re-verify each cited artifact yourself using `pnpm run verify:handoff` (a machine-readable PASS/FAIL, not a fragile grep). It must report PASS. Never trust the claim.
 
 On failure, do not proceed — append a turn headed `## TEST-ENGINEER — build proof failed` with `**Cycle.** Blocked — software-engineer build verification failed`, `**Verification result.**` (verbatim output), `**Action required.**` (SE must fix the build, re-run with log output, verify, resubmit), ending `END: TEST-ENGINEER`. This is a protocol violation, not an `ATTEMPT-FAILED`.
 
@@ -239,7 +239,7 @@ END: TEST-ENGINEER
 
 **GREEN-ONLY pass-through** — same shape, with: heading `## TEST-ENGINEER — <Story slug> · GREEN-only Tasks`; `**Cycle.** GREEN-ONLY pass-through for Tasks: <task-id>, …`; `**Story file.**` (path); `**Tasks forwarded to Software Engineer.**` (one `<task-id>: <Input path> — <one-line GREEN summary>` bullet each); `**No RED phase.**` (coverage owned elsewhere per the Story gate); `**Open to Software Engineer.**` (implement GREEN+REFACTOR per the Story file's Action sections); ending `END: TEST-ENGINEER`.
 
-**IMPLEMENTATION_READY_FOR_REVIEW** — heading `## TEST-ENGINEER — implementation ready for review`; `**EPIC verification gate.**` (summary); per-gate lines (`typecheck` (npm run typecheck) and `unit` (npm test) — command → exit 0 each); `**Proof.**` (the EPIC's `Proof:` command → exit 0, plus the exact success string it printed, quoted verbatim); `**Tasks closed.**` (N across M Stories — must equal the total, with no Story outstanding); then the literal block (line-start verbatim — `/work` greps it):
+**IMPLEMENTATION_READY_FOR_REVIEW** — heading `## TEST-ENGINEER — implementation ready for review`; `**EPIC verification gate.**` (summary); per-gate lines (`typecheck` (pnpm run typecheck) and `unit` (pnpm test) — command → exit 0 each); `**Proof.**` (the EPIC's `Proof:` command → exit 0, plus the exact success string it printed, quoted verbatim); `**Tasks closed.**` (N across M Stories — must equal the total, with no Story outstanding); then the literal block (line-start verbatim — `/work` greps it):
 
 ```
 IMPLEMENTATION_READY_FOR_REVIEW:

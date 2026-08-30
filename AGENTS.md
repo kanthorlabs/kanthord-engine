@@ -2,7 +2,7 @@
 
 kanthord is one long-running daemon on **Node.js 24+ / TypeScript**, ES modules, `"type": "module"`. Node runs TypeScript directly by type stripping, so a relative import carries an explicit `.ts` extension. Tests run on the built-in **`node:test`** runner with `node:assert/strict`. There is no test framework dependency.
 
-**The published artifact is compiled; the repository is not.** Node refuses to strip types under `node_modules`, so an installed `bin` pointing at a `.ts` file cannot run. `npm run build` emits `dist/` through `tsconfig.build.json`, `prepack` runs it, and `package.json` ships `dist` and points `bin` at `dist/main.js`. `rewriteRelativeImportExtensions` turns each `.ts` import specifier into `.js` on emit, so `src/` keeps its explicit `.ts` extensions unchanged. Development, tests and lint still run TypeScript directly. Never import from `dist/`, and never commit it.
+**The published artifact is compiled; the repository is not.** Node refuses to strip types under `node_modules`, so an installed `bin` pointing at a `.ts` file cannot run. `pnpm run build` emits `dist/` through `tsconfig.build.json`, `prepack` runs it, and `package.json` ships `dist` and points `bin` at `dist/main.js`. `rewriteRelativeImportExtensions` turns each `.ts` import specifier into `.js` on emit, so `src/` keeps its explicit `.ts` extensions unchanged. Development, tests and lint still run TypeScript directly. Never import from `dist/`, and never commit it.
 
 `docs/proposal/` is the source of truth for behaviour. This file is the source of truth for structure.
 The http framework of `src/http/server/**` moves from koa to hono across EPICs 030 to 035, and
@@ -35,7 +35,7 @@ src/http/server/**                   the runtime roots, the middleware, and the 
 
 ### The import matrix
 
-This table is normative. `eslint.config.js` encodes it, so a violation fails `npm run lint`.
+This table is normative. `eslint.config.js` encodes it, so a violation fails `pnpm run lint`.
 
 | From                     | May import                                                                     |
 | ------------------------ | ------------------------------------------------------------------------------ |
@@ -104,7 +104,7 @@ A query takes the same shape. `main.ts` binds the dependencies once and passes c
 - **The transaction belongs to storage.** `services/storage` owns the transaction context. A write command opens one transaction, and every service that persists inside that write accepts the context through its interface. A state transition and its event append never sit in two transactions. `docs/proposal/phase-1/domain.md` requires them to be one.
 - **Route lifecycle is registry data, not a branch in a handler.** Every declared operation appears exactly once in `http/contract/`. A `routed` entry binds to exactly one command or query. A `stubbed` entry binds to the one shared `501` handler and names no command. A `post-mvp` row has no entry at all.
 - **A path is a typed segment tuple, never a string.** An operation declares resource, subresource, action, system and parameter segments from closed sets, and one renderer builds the path. Every resource segment is singular. `docs/proposal/api/README.md` holds the grammar. A route edit therefore cannot introduce a plural or a free-form segment.
-- **OpenAPI documents are generated and not committed.** The master and each `features/*.yaml` slice are self-contained with internal references only. `npm run verify` emits and validates the master and every slice in a temporary directory. `npm run contract:publish -- <output-directory>` emits the master, feature slices and examples for a consumer. EPIC 039 adds a second, modular `source/` tree built from external `$ref`, beside the self-contained forms and never in place of them; its bundle reproduces the master, and every reference in it stays inside the publication directory. Never commit generated documents, and never hand-edit them. Every emitted document holds the transitive closure of its own references, and nothing else. The root extension `x-kanthord-event-payloads` maps each event type to its component, so the event payload catalogue is reachable by construction. The master and `features/event.yaml` carry that extension, because both hold the operation `event.list`.
+- **OpenAPI documents are generated and not committed.** The master and each `features/*.yaml` slice are self-contained with internal references only. `pnpm run verify` emits and validates the master and every slice in a temporary directory. `pnpm run contract:publish -- <output-directory>` emits the master, feature slices and examples for a consumer. EPIC 039 adds a second, modular `source/` tree built from external `$ref`, beside the self-contained forms and never in place of them; its bundle reproduces the master, and every reference in it stays inside the publication directory. Never commit generated documents, and never hand-edit them. Every emitted document holds the transitive closure of its own references, and nothing else. The root extension `x-kanthord-event-payloads` maps each event type to its component, so the event payload catalogue is reachable by construction. The master and `features/event.yaml` carry that extension, because both hold the operation `event.list`.
 
 ## Tests
 
@@ -170,7 +170,7 @@ A rule with no mechanism is a rule a reviewer applies inconsistently. Each of th
 | `domain/` purity, and vendor packages by layer   | `no-restricted-imports` per glob                                         |
 | an unclassified `src/` file                      | an eslint file-pattern rule                                              |
 | a node or edge write outside the plan store      | `no-restricted-syntax`, with an enumerated exemption list                |
-| registry equals the proposal contract            | a test in `npm run verify`                                               |
+| registry equals the proposal contract            | a test in `pnpm run verify`                                              |
 | a `stubbed` route answers 501 and writes nothing | an integration test that compares database state before and after        |
 | canonical serialization                          | exact-byte unit tests                                                    |
 | bytewise ordering                                | a test with non-ASCII paths, asserted through `Buffer.compare`           |

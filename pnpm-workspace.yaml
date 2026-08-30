@@ -1,0 +1,8 @@
+# engine is a single package, not a workspace. This file carries the pnpm
+# settings that pnpm 10 moved out of package.json.
+#
+# Neither dependency needs its build script for a registry install. Both are
+# transitive. pnpm stops on an undeclared build script, so both are declared.
+allowBuilds:
+  "@google/genai": false
+  protobufjs: false

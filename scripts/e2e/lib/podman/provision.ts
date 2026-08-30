@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 
@@ -16,6 +16,10 @@ import { baseImageReference } from "./preflight.ts";
 import { runLabel } from "./reclaim.ts";
 import { removeTree } from "../resources.ts";
 import type { PodmanExecutor } from "../driver/podman.ts";
+
+// The assembled context is copied into an image, so node_modules must be a
+// real directory tree. pnpm's default layout symlinks into a store outside it.
+const HOISTED_LINKER = "node-linker=hoisted";
 
 export type ProvisionResult = Readonly<{
   images: Readonly<{ product: string; fixture: string }>;
@@ -59,12 +63,12 @@ function extractTarball(tarballPath: string, destination: string): void {
   }
 }
 
-async function npmPack(
+async function pnpmPack(
   executeHost: PodmanExecutor,
   destination: string,
 ): Promise<Readonly<{ tarballPath: string; digest: string }>> {
   const record = await executeHost([
-    "npm",
+    "pnpm",
     "pack",
     "--pack-destination",
     destination,
@@ -73,8 +77,10 @@ async function npmPack(
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
-  const filename = lines[lines.length - 1] as string;
-  const tarballPath = join(destination, filename);
+  const reported = lines[lines.length - 1] as string;
+  const tarballPath = isAbsolute(reported)
+    ? reported
+    : join(destination, reported);
   const bytes = readFileSync(tarballPath);
   const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
   return { tarballPath, digest };
@@ -90,18 +96,19 @@ async function assembleProductContext(
   mkdirSync(productContext, { recursive: true });
   extractTarball(tarballPath, productContext);
   copyFileSync(
-    join(repoRoot, "package-lock.json"),
-    join(productContext, "package-lock.json"),
+    join(repoRoot, "pnpm-lock.yaml"),
+    join(productContext, "pnpm-lock.yaml"),
   );
+  writeFileSync(join(productContext, ".npmrc"), `${HOISTED_LINKER}\n`);
   const install = await executeHost(
-    ["npm", "ci", "--omit=dev", "--ignore-scripts"],
+    ["pnpm", "install", "--prod", "--ignore-scripts", "--frozen-lockfile"],
     undefined,
     productContext,
   );
   if (install.exitCode !== 0) {
     throw new RunnerError(
       "unavailable",
-      `npm ci --prefix ${productContext} exited ${String(install.exitCode)}: ${install.stderr}`,
+      `pnpm install --dir ${productContext} exited ${String(install.exitCode)}: ${install.stderr}`,
     );
   }
   cpSync(join(repoRoot, "scripts/e2e/podman/bin"), join(contextRoot, "bin"), {
@@ -137,30 +144,19 @@ async function assembleFixtureContext(
     join(fixtureContext, "package.json"),
     `${JSON.stringify({ name: "kanthord-e2e-fixture", version: "1.0.0", private: true }, null, 2)}\n`,
   );
-  writeFileSync(
-    join(fixtureContext, "package-lock.json"),
-    `${JSON.stringify(
-      {
-        name: "kanthord-e2e-fixture",
-        version: "1.0.0",
-        lockfileVersion: 3,
-        requires: true,
-        packages: { "": { name: "kanthord-e2e-fixture", version: "1.0.0" } },
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  writeFileSync(join(fixtureContext, ".npmrc"), `${HOISTED_LINKER}\n`);
 
+  // The fixture declares no dependency, so there is nothing to lock and
+  // nothing to fetch. The install stays hermetic without a lockfile.
   const install = await executeHost(
-    ["npm", "ci", "--omit=dev", "--ignore-scripts"],
+    ["pnpm", "install", "--prod", "--ignore-scripts"],
     undefined,
     fixtureContext,
   );
   if (install.exitCode !== 0) {
     throw new RunnerError(
       "unavailable",
-      `npm ci --prefix ${fixtureContext} exited ${String(install.exitCode)}: ${install.stderr}`,
+      `pnpm install --dir ${fixtureContext} exited ${String(install.exitCode)}: ${install.stderr}`,
     );
   }
   return join(work, "fixture-context");
@@ -239,7 +235,7 @@ export async function provisionImages(
   const work = mkdtempSync(join(tmpdir(), "kanthord-e2e-provision-"));
 
   try {
-    const { tarballPath, digest: productDigest } = await npmPack(
+    const { tarballPath, digest: productDigest } = await pnpmPack(
       executeHost,
       work,
     );
