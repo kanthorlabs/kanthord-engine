@@ -70,6 +70,18 @@ const fixtures: Readonly<Record<string, Fixture>> = {
     expect: 400,
   },
   "provider.list": { expect: 200 },
+  "provider.loginCancel": {
+    body: { loginId: missing("login") },
+    expect: 404,
+  },
+  "provider.loginComplete": {
+    body: { loginId: missing("login") },
+    expect: 404,
+  },
+  "provider.loginStart": {
+    body: { provider: "openai-compatible" },
+    expect: 400,
+  },
   "provider.register": {
     body: {
       name: "provider-a",

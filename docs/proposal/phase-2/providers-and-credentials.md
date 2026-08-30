@@ -14,17 +14,31 @@ Encryption at rest with a master key from configuration is the whole of the MVP 
 
 A git credential is a registration of `kind = 'git'` in the same table, because the git service authenticates from a stored credential and inherits no ambient one. It is bound by `repository.credential_id` rather than by a default. See `../phase-1/git-foundation.md`.
 
+A pending subscription login is a second encrypted record in `provider_login`. It holds the credential and the model ids the vendor issued, sealed with the same master key as `provider`. It lives from vendor issuance until `provider.register` consumes it, and registration, cancellation or expiry deletes it (`src/services/storage/migration-0010-provider-login.ts:7-30`, `src/commands/provider/register-provider.ts:196-263`, `src/commands/provider/cancel-provider-login.ts:26-50`, `src/commands/provider/complete-provider-login.ts:96-145`).
+
 ## Pi-ai owns credential resolution
 
 `pi-ai` owns `ProviderAuth` for every catalogued vendor. The engine passes a single-entry `CredentialStore` adapter to `builtinModels({ credentials })` and calls `completeSimple()`. Pi-ai drives the store internally. The engine writes no authentication header and no vendor-specific authentication scheme.
 
 The engine implements `CredentialStore` from `@earendil-works/pi-ai` as a single-entry, per-request adapter backed by the encrypted `provider` table. One adapter wraps exactly one registration, so a probe of registration A can never read registration B's credential.
 
-`resolveProviderAuth` from `@earendil-works/pi-ai` is not in the package's public exports map. Pi-ai resolves credentials internally through `builtinModels`. EPIC 045 may revisit this if the function becomes a public export.
+`resolveProviderAuth` from `@earendil-works/pi-ai` is not in the package's public exports map. Pi-ai resolves credentials internally through `builtinModels`.
 
-Verification covers all credential types by construction. EPIC 045 adds OAuth, with no change to the probe or the outcome table.
+Verification keeps the existing probe and outcome table. The credential store serves either an api-key or an oauth credential, and the probe admits a vendor that carries only an oauth flow. When `pi-ai` refreshes a credential, the adapter writes it through `CredentialStore.modify`, re-encrypts the provider row inside one storage transaction and appends `provider.credentialRefreshed`. A failed refresh leaves the stored credential unchanged (`src/services/provider-auth/pi-ai.ts:50-88`, `src/services/provider-auth/credential-writer.ts:42-87`, `src/queries/provider/verify-provider.ts:103-122`).
+
+The `modify` contract of `@earendil-works/pi-ai` requires mutual exclusion per provider id and gives its callback the current credential. The engine adapter is built per probe over an already-decrypted row, so it holds no shared lock and the callback sees a snapshot. Two concurrent verifies of one oauth registration can therefore both refresh: under refresh-token rotation the second usually fails and reports a spurious `rejected`, and when both succeed the later whole-payload write wins. No row is corrupted because the write is one transaction. This is a limitation of the adapter lifetime, not a consequence of the snapshot rule below. That rule governs the probe read, because the lock cannot span a vendor round-trip (`@earendil-works/pi-ai`, `src/services/provider-auth/pi-ai.ts:50-88`, `src/services/provider-auth/credential-writer.ts:46-87`).
 
 The probe takes a credential snapshot at request start. It is a network call that runs after the storage transaction that read the provider row closes. The daemon does not hold a database lock across a vendor round-trip. A credential rotated or revoked while the probe is in flight produces a verdict about the credential as it stood at request start. The verdict is not re-validated on return. A human who receives a stale `rejected` verdict retries, and a fresh verification reads the current credential.
+
+## How the dashboard learns a credential is irrecoverable
+
+The dashboard calls `provider.verify`, which answers `authentication: "rejected"` when the refresh fails. No new field or operation is needed (`src/queries/provider/verify-provider.ts:132-160`, `src/http/contract/credential.ts:199-215`).
+
+## Two deployment decisions this design rests on
+
+The daemon runs on one host with no load-balanced pool. The dashboard team confirmed this deployment. The home lock takes an exclusive SQLite transaction and refuses a network filesystem, so two instances cannot share one database. A pending login can therefore stay process-local without sticky routing or a resumable flow (`src/services/home-lock/sqlite.ts:36-80`).
+
+`openai-compatible` is the only self-configuration escape hatch. The dashboard team confirmed that it needs no other one, so registration keeps its catalogue gate. Subscription OAuth cannot reach a self-configured endpoint because `openai-compatible` carries no `pi-ai` OAuth member (`src/commands/provider/register-provider.ts:55-80`, `src/commands/provider/register-provider.ts:227-231`, `src/services/model-catalog/pi-ai.ts:49-62`).
 
 ## A registration is a named account
 

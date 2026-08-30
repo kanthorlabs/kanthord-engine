@@ -225,8 +225,14 @@ Sequence, exactly:
      throw `CompleteProviderLoginError("code-not-accepted", …)` and change no row.
 
 2. `const outcome = await dependencies.providerAuth.completeLogin({ loginId, code })`.
-   - `{ status: "lost" }` → delete the row in a second transaction and throw
-     `"login-lost"`.
+   - `{ status: "lost" }` → read the row in a second transaction and settle on its state,
+     writing nothing. Absent → throw `CompleteProviderLoginError("not-found", …)`, because
+     `provider.register` consumed it. `completed` → return the stored result, because a
+     concurrent caller completed the login. `pending` → throw
+     `CompleteProviderLoginError("login-lost", …)`. Do not delete, and do not call
+     `abortLogin`: a `lost` outcome proves the live entry was already absent, and the
+     `loginId` is a ULID, so the call can never find one. Expiry and
+     `provider.loginCancel` reap a row this arm leaves behind.
    - `{ status: "pending" }` → throw `CompleteProviderLoginError("login-pending", …)`. The
      row stays `pending` and nothing is written.
    - a thrown `LoginError` with `refusal === "code-required"` → throw
@@ -367,7 +373,17 @@ Fixture ids: `LOGIN_ULID = "01HZY8QF3M4N5P6R7S8T9V0W1X"`, so the login id is
 25. `it("refuses login-lost when the stored instance is not the running one")` — assert the
     refusal and zero rows.
 26. `it("refuses login-lost when the service has forgotten the flow")` — the double answers
-    `{ status: "lost" }`; assert the refusal and zero rows.
+    `{ status: "lost" }`; assert the refusal, and that the row is still present in state
+    `pending` with a null payload. `it("returns the winner's stored result to a concurrent
+loser")` and `it("leaves the pending row intact when the concurrent loser resolves
+first")` — the double answers `{ status: "completed" }` to one call and
+    `{ status: "lost" }` to the other, each resolved through a test-controlled deferred, and
+    both `completeProviderLogin` calls start before either is awaited. Winner first: assert
+    the loser's exact `{ loginId, models }`, one surviving row in state `completed` whose
+    `payload_ciphertext` is byte-identical to the winner's seal, `completeLogin` called
+    twice and `abortLogin` called zero times. Loser first: assert `login-lost`, the row
+    still `pending`, then the winner's exact models, then a replay of those exact models.
+    Order the calls by deferred only — never by a timer, a sleep, or microtask order.
 27. `it("a successful complete leaves exactly one row in state completed")` — asserted by
     row count.
 

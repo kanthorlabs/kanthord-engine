@@ -214,7 +214,7 @@ test("dereferences to the same document as the canonical master", async () => {
       "x-kanthord-event-payloads"
     ];
     assert.ok(catalogue !== null && typeof catalogue === "object");
-    assert.equal(Object.keys(catalogue).length, 37);
+    assert.equal(Object.keys(catalogue).length, 38);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

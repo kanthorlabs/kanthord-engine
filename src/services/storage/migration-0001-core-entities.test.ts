@@ -20,6 +20,7 @@ import { migration0006RevisionOrigin } from "./migration-0006-revision-origin.ts
 import { migration0007ExternalExecution } from "./migration-0007-external-execution.ts";
 import { migration0008GraphIndexes } from "./migration-0008-graph-indexes.ts";
 import { migration0009OneBranch } from "./migration-0009-one-branch.ts";
+import { migration0010ProviderLogin } from "./migration-0010-provider-login.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -205,7 +206,7 @@ describe("src/services/storage/migration-0001-core-entities.test", () => {
     assert.ok(migrationDoc.includes("0001-core-entities"));
   });
 
-  it("migrations holds exactly coreEntities, graphAndPlan, executionAndJournal, migration0004EventIndexes, migration0005Actor, migration0006RevisionOrigin, migration0007ExternalExecution, migration0008GraphIndexes and migration0009OneBranch", () => {
+  it("migrations holds the ten declared migrations in order", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
@@ -216,6 +217,7 @@ describe("src/services/storage/migration-0001-core-entities.test", () => {
       migration0007ExternalExecution,
       migration0008GraphIndexes,
       migration0009OneBranch,
+      migration0010ProviderLogin,
     ]);
   });
 

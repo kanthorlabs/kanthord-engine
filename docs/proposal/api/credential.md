@@ -12,17 +12,20 @@ A git credential is a registration too, of `kind = 'git'`, because the git servi
 
 ## Routes
 
-| operationId           | Method and path                | introducedIn | status | Source                                                        |
-| --------------------- | ------------------------------ | ------------ | ------ | ------------------------------------------------------------- |
-| `provider.catalog`    | `GET /v1/provider/llm`         | phase-2      | routed | the llm provider and model catalog of `@earendil-works/pi-ai` |
-| `provider.inspect`    | `POST /v1/provider/inspect`    | phase-2      | routed | the live model list of an OpenAI compatible endpoint          |
-| `provider.register`   | `POST /v1/provider`            | phase-1      | routed | P1-E1, the git credential of `repository.register`            |
-| `provider.list`       | `GET /v1/provider`             | phase-1      | routed | P1-E1, the CLI resolves `--credential <name>`                 |
-| `provider.show`       | `GET /v1/provider/:id`         | phase-1      | routed | providers-and-credentials.md                                  |
-| `provider.verify`     | `POST /v1/provider/:id/verify` | phase-1      | routed | providers-and-credentials.md                                  |
-| `provider.rename`     | `POST /v1/provider/:id/rename` | phase-2      | routed | providers-and-credentials.md, "rename"                        |
-| `provider.remove`     | `DELETE /v1/provider/:id`      | phase-2      | routed | providers-and-credentials.md, "remove"                        |
-| `provider.setDefault` | `PUT /v1/provider/:id/default` | phase-2      | routed | providers-and-credentials.md, "set default"                   |
+| operationId              | Method and path                    | introducedIn | status | Source                                                        |
+| ------------------------ | ---------------------------------- | ------------ | ------ | ------------------------------------------------------------- |
+| `provider.catalog`       | `GET /v1/provider/llm`             | phase-2      | routed | the llm provider and model catalog of `@earendil-works/pi-ai` |
+| `provider.inspect`       | `POST /v1/provider/inspect`        | phase-2      | routed | the live model list of an OpenAI compatible endpoint          |
+| `provider.list`          | `GET /v1/provider`                 | phase-1      | routed | P1-E1, the CLI resolves `--credential <name>`                 |
+| `provider.loginCancel`   | `POST /v1/provider/login/cancel`   | phase-2      | routed | providers-and-credentials.md, subscription sign-in            |
+| `provider.loginComplete` | `POST /v1/provider/login/complete` | phase-2      | routed | providers-and-credentials.md, subscription sign-in            |
+| `provider.loginStart`    | `POST /v1/provider/login`          | phase-2      | routed | providers-and-credentials.md, subscription sign-in            |
+| `provider.register`      | `POST /v1/provider`                | phase-1      | routed | P1-E1, the git credential of `repository.register`            |
+| `provider.show`          | `GET /v1/provider/:id`             | phase-1      | routed | providers-and-credentials.md                                  |
+| `provider.verify`        | `POST /v1/provider/:id/verify`     | phase-1      | routed | providers-and-credentials.md                                  |
+| `provider.rename`        | `POST /v1/provider/:id/rename`     | phase-2      | routed | providers-and-credentials.md, "rename"                        |
+| `provider.remove`        | `DELETE /v1/provider/:id`          | phase-2      | routed | providers-and-credentials.md, "remove"                        |
+| `provider.setDefault`    | `PUT /v1/provider/:id/default`     | phase-2      | routed | providers-and-credentials.md, "set default"                   |
 
 ## Four routes ship in phase 1, and the rest in phase 2
 
@@ -103,3 +106,69 @@ The invocation identity is the client's `Idempotency-Key`, and nothing else. A t
 Credential rotation invalidates no stored answer. The in-memory record uses the idempotency key and has no reference to the provider row. The record lives for `http.idempotency.ttl` and no longer. A restart discards it.
 
 The api key never appears in the response body, `detail`, or refusal.
+
+## Subscription sign-in
+
+Registration has three steps: authenticate, list the models the account can use, then register the chosen default model. `provider.loginStart` begins authentication, `provider.loginComplete` completes it and returns the model list, and `provider.register` stores the selected model (`src/commands/provider/start-provider-login.ts:81-191`, `src/commands/provider/complete-provider-login.ts:92-249`, `src/commands/provider/register-provider.ts:178-292`).
+
+`@earendil-works/pi-ai` owns the OAuth protocol and refresh. The engine writes no PKCE code, state, token exchange, refresh logic or redirect handler. It supplies storage and transport (`@earendil-works/pi-ai`, `src/services/provider-auth/pi-ai.ts:232-476`, `src/services/provider-auth/credential-writer.ts:42-87`).
+
+The engine derives the admitted set from builtin providers whose `auth.oauth` is present and whose id is in the model catalogue. It holds no vendor list, so a new catalogued OAuth vendor in `pi-ai` needs no engine edit (`src/services/provider-auth/pi-ai.ts:93-229`, `src/services/model-catalog/pi-ai.ts:31-62`).
+
+Where a flow offers a method choice, the engine selects the device-code branch and falls back to the browser branch. It recognizes `device-code` and `device_code`; a flow that offers neither refuses `login-method-unavailable` and names the ids it saw. A third spelling requires a named engine edit, not a silent fall-through (`src/services/provider-auth/pi-ai.ts:168-181`, `src/services/provider-auth/index.ts:59-60`).
+
+`provider.loginStart` accepts an `answers` map keyed by prompt message. A missing text or secret answer refuses `login-input-required` and carries the prompt message in `details.detail` (`src/http/contract/credential.ts:217-220`, `src/services/provider-auth/pi-ai.ts:272-298`).
+
+The start response has one of these two arms:
+
+```ts
+type ProviderLoginStartResponse =
+  | {
+      loginId: string;
+      method: "manual-code";
+      authUrl: string;
+      instructions: string;
+      expiresAt: number;
+    }
+  | {
+      loginId: string;
+      method: "device-code";
+      userCode: string;
+      verificationUri: string;
+      expiresAt: number;
+      pollIntervalMs: number;
+    };
+```
+
+The complete response is:
+
+```ts
+{
+  loginId: string;
+  models: string[];
+}
+```
+
+The method is fixed when the login starts. A device login rejects a supplied `code`. A suspended manual login requires a code, unless its callback already resolved the flow (`src/commands/provider/complete-provider-login.ts:119-181`, `src/services/provider-auth/pi-ai.ts:371-409`).
+
+`pollIntervalMs` carries the vendor interval in milliseconds, or 5,000 when the vendor omits it. `pi-ai` polls the vendor inside the daemon, and `provider.loginComplete` only reads the state of that in-process flow. Faster dashboard polling costs one local request and no outbound call; the engine applies no rate limit (`src/services/provider-auth/pi-ai.ts:299-377`, `src/http/contract/credential.ts:230-252`).
+
+A login is `pending`, `completed` or consumed. A pending row holds the process-local flow. A completed row holds the encrypted credential and exact model ids. `provider.register` consumes the login by deleting its row in the provider transaction (`src/domain/provider-login.ts:1-58`, `src/commands/provider/register-provider.ts:196-263`, `docs/proposal/database/provider_login.md:32-36`).
+
+A second `provider.loginComplete` for a completed login returns the same `{ loginId, models }`, makes no vendor call and changes no row. The completed row is the idempotency record, so the replay needs no `Idempotency-Key` (`src/commands/provider/complete-provider-login.ts:109-139`).
+
+The manual arm expires at `created_at` plus ten minutes. The device arm expires at the clock time of its `device_code` event plus that event's lifetime, or ten minutes when the event carries none (`src/commands/provider/start-provider-login.ts:126-160`, `src/services/provider-auth/pi-ai.ts:299-377`).
+
+Expiry is a one-time transition. The first request that observes an expired row deletes it, aborts the live flow and refuses `login-expired`; a replay answers `not-found`. The rule also applies to completed rows, so an unregistered credential does not outlive its deadline (`src/commands/provider/complete-provider-login.ts:96-145`).
+
+`provider.loginCancel` takes a `loginId`, aborts the live flow through its `AbortSignal`, lets `pi-ai` close its callback server or stop its poll, and deletes the row in one transaction. It is the only way to release a vendor before `expiresAt`. Cancelling a completed row deletes its credential (`src/commands/provider/cancel-provider-login.ts:26-50`, `src/services/provider-auth/pi-ai.ts:378-476`).
+
+Only one pending login exists per vendor. A second start refuses `login-in-progress` (`src/services/storage/migration-0010-provider-login.ts:7-30`, `src/commands/provider/start-provider-login.ts:95-123`).
+
+A restart loses a live flow. The row records the daemon instance, so completion of a pending row from another instance refuses `login-lost` and deletes the row. A completed row has no live flow and is instance-independent (`src/commands/provider/complete-provider-login.ts:105-145`, `src/domain/provider-login.ts:30-58`).
+
+The `llm` registration arm carries `transport`; absence means `api-key`, and the OAuth arm requires `transport: "oauth"`. The API-key projection is `{ transport, provider, defaultModel, baseUrl }`; the OAuth projection is `{ transport: "oauth", provider, defaultModel }`. Neither projection has a token, and no operation returns `access`, `refresh` or `expires` (`src/domain/provider-payload.ts:11-133`, `src/http/contract/credential.ts:43-68`).
+
+The catalogue reports only static OAuth capability. Each provider carries `oauth: null` without a flow or `{ label }` with one, where `label` is `loginLabel ?? name`. It does not report the method or a prompt answer because `login()` discovers both (`src/services/model-catalog/pi-ai.ts:31-62`, `src/http/contract/credential.ts:345-362`).
+
+The token, code, callback state and every response body of these three operations stay out of every log (`src/http/server/credential/start-provider-login.ts:19-36`, `src/http/server/credential/complete-provider-login.ts:19-36`, `src/http/server/credential/cancel-provider-login.ts:14-28`).

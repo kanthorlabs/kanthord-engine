@@ -87,8 +87,6 @@ answers it. Three facts fix the shape.
 - **No vendor allowlist.** The engine holds no list of admitted vendors.
 - **No login configuration input.** Every admitted flow is constructed from its id alone. A caller
   that wants a different gateway registers a different provider id, which is out of scope.
-- **No cancel operation.** A pending login is superseded by nothing and cancelled by nothing. It
-  expires. A human who abandons a login waits out the lifetime.
 - **No change to the verification verdict.** EPIC 044's `provider.verify` keeps its probe, its
   outcome mapping and its response shape unchanged, and no new refusal joins `VerifyRefusal`.
 
@@ -309,7 +307,7 @@ defaultModel }`, and answers the existing `ProviderView`.
 
 - **The models list prefers what the login returned.** `complete` stores the `availableModelIds` the
   login result carries, and the catalogue model ids of the authenticated vendor otherwise.
-  `github-copilot` and `kimi-coding` return the first. No outbound call is made to list them, so the
+  `github-copilot` returns the first. No outbound call is made to list them, so the
   step costs nothing and cannot fail for a reason unrelated to the login.
 
 - **Refresh is the library's, invoked through the store.** The engine's `CredentialStore` adapter of

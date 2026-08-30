@@ -3,6 +3,18 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 
 import {
+  catalogProvider,
+  providerCatalogExamples,
+  providerCatalogRequest,
+  providerCatalogResponse,
+  providerLoginCancelExamples,
+  providerLoginCancelRequest,
+  providerLoginCompleteExamples,
+  providerLoginCompleteRequest,
+  providerLoginCompleteResponse,
+  providerLoginStartExamples,
+  providerLoginStartRequest,
+  providerLoginStartResponse,
   providerRegisterExamples,
   providerRegisterRequest,
   providerRemoveExamples,
@@ -34,6 +46,23 @@ const validSuccessBody = {
   refusal: null,
 };
 
+const loginId = `login_${U}`;
+const manualChallenge = {
+  loginId,
+  method: "manual-code" as const,
+  authUrl: "https://auth.example.test/authorize",
+  instructions: "Enter the code from the provider",
+  expiresAt: A,
+};
+const deviceChallenge = {
+  loginId,
+  method: "device-code" as const,
+  userCode: "ABCD-EFGH",
+  verificationUri: "https://auth.example.test/device",
+  expiresAt: A,
+  pollIntervalMs: 5000,
+};
+
 describe("src/http/contract/credential.test", () => {
   it("the three phase-2 provider routes become routed with unchanged shape", () => {
     const expected = [
@@ -62,6 +91,49 @@ describe("src/http/contract/credential.test", () => {
     assert.equal(renderPath(entry!.path), "/v1/provider/:id/verify");
     assert.equal(entry!.request, undefined);
     assert.strictEqual(entry!.response, providerVerifyResponse);
+  });
+
+  it("provider.loginStart is a phase-2 memory route with its exact schemas", () => {
+    const entry = findOperation("provider.loginStart");
+    assert.notEqual(entry, undefined);
+    assert.equal(entry!.method, "POST");
+    assert.equal(entry!.introducedIn, "phase-2");
+    assert.equal(entry!.status, "routed");
+    assert.deepEqual(entry!.allowedActors, ["human"]);
+    assert.equal(entry!.idempotency, "memory");
+    assert.deepEqual(entry!.replayable, [200]);
+    assert.equal(renderPath(entry!.path), "/v1/provider/login");
+    assert.strictEqual(entry!.request, providerLoginStartRequest);
+    assert.strictEqual(entry!.response, providerLoginStartResponse);
+  });
+
+  it("provider.loginComplete is a phase-2 memory route with its exact schemas", () => {
+    const entry = findOperation("provider.loginComplete");
+    assert.notEqual(entry, undefined);
+    assert.equal(entry!.method, "POST");
+    assert.equal(entry!.introducedIn, "phase-2");
+    assert.equal(entry!.status, "routed");
+    assert.deepEqual(entry!.allowedActors, ["human"]);
+    assert.equal(entry!.idempotency, "memory");
+    assert.deepEqual(entry!.replayable, [200]);
+    assert.equal(renderPath(entry!.path), "/v1/provider/login/complete");
+    assert.strictEqual(entry!.request, providerLoginCompleteRequest);
+    assert.strictEqual(entry!.response, providerLoginCompleteResponse);
+  });
+
+  it("provider.loginCancel is a phase-2 memory route with a 204 success", () => {
+    const entry = findOperation("provider.loginCancel");
+    assert.notEqual(entry, undefined);
+    assert.equal(entry!.method, "POST");
+    assert.equal(entry!.introducedIn, "phase-2");
+    assert.equal(entry!.status, "routed");
+    assert.deepEqual(entry!.allowedActors, ["human"]);
+    assert.equal(entry!.idempotency, "memory");
+    assert.deepEqual(entry!.replayable, [204]);
+    assert.equal(entry!.successStatus, 204);
+    assert.equal(renderPath(entry!.path), "/v1/provider/login/cancel");
+    assert.strictEqual(entry!.request, providerLoginCancelRequest);
+    assert.equal(entry!.response, undefined);
   });
 
   it("the rename examples carry the exact story values", () => {
@@ -114,6 +186,7 @@ describe("src/http/contract/credential.test", () => {
       name: "openai",
       kind: "llm",
       projection: {
+        transport: "api-key",
         provider: "openai",
         defaultModel: "gpt-4o",
         baseUrl: null,
@@ -152,14 +225,47 @@ describe("src/http/contract/credential.test", () => {
         undefined,
         providerSetDefaultResponse,
       ],
+      [
+        "provider.catalog",
+        providerCatalogExamples,
+        undefined,
+        providerCatalogResponse,
+        providerCatalogRequest,
+      ],
+      [
+        "provider.loginStart",
+        providerLoginStartExamples,
+        providerLoginStartRequest,
+        providerLoginStartResponse,
+      ],
+      [
+        "provider.loginComplete",
+        providerLoginCompleteExamples,
+        providerLoginCompleteRequest,
+        providerLoginCompleteResponse,
+      ],
+      [
+        "provider.loginCancel",
+        providerLoginCancelExamples,
+        providerLoginCancelRequest,
+        undefined,
+      ],
     ] as const;
     for (const operation of operations) {
       const [operationId, examples, request, response] = operation;
       const entry = findOperation(operationId);
-      assert.doesNotThrow(
-        () => response.parse(examples.success),
-        `${operationId} success example fails its response`,
-      );
+      if (response !== undefined) {
+        assert.doesNotThrow(
+          () => response.parse(examples.success),
+          `${operationId} success example fails its response`,
+        );
+      } else {
+        assert.equal(
+          examples.success,
+          undefined,
+          `${operationId} has no response but carries a success example`,
+        );
+      }
       assert.doesNotThrow(
         () => buildErrorEnvelope(entry!.errors!).parse(examples.error),
         `${operationId} error example fails its envelope`,
@@ -214,6 +320,139 @@ describe("src/http/contract/credential.test", () => {
     );
   });
 
+  it("the start response admits exactly one arm per method", () => {
+    assert.deepEqual(
+      providerLoginStartResponse.parse(manualChallenge),
+      manualChallenge,
+    );
+    assert.deepEqual(
+      providerLoginStartResponse.parse(deviceChallenge),
+      deviceChallenge,
+    );
+    assert.equal(
+      providerLoginStartResponse.safeParse({
+        ...manualChallenge,
+        userCode: deviceChallenge.userCode,
+      }).success,
+      false,
+    );
+    assert.equal(
+      providerLoginStartResponse.safeParse({
+        ...deviceChallenge,
+        authUrl: manualChallenge.authUrl,
+      }).success,
+      false,
+    );
+  });
+
+  it("accepts an llm registration with no transport", () => {
+    const request = {
+      name: "openai",
+      kind: "llm",
+      payload: {
+        provider: "openai",
+        apiKey: "sk-x",
+        defaultModel: "gpt-4o",
+        baseUrl: null,
+      },
+    } as const;
+    assert.deepEqual(providerRegisterRequest.parse(request), request);
+  });
+
+  it("accepts an llm registration with transport api-key", () => {
+    const request = {
+      name: "openai",
+      kind: "llm",
+      payload: {
+        transport: "api-key",
+        provider: "openai",
+        apiKey: "sk-x",
+        defaultModel: "gpt-4o",
+        baseUrl: null,
+      },
+    } as const;
+    assert.deepEqual(providerRegisterRequest.parse(request), request);
+  });
+
+  it("accepts the oauth register arm", () => {
+    const request = {
+      name: "openai-codex",
+      kind: "llm",
+      payload: {
+        transport: "oauth",
+        loginId,
+        defaultModel: "gpt-5-codex",
+      },
+    } as const;
+    assert.deepEqual(providerRegisterRequest.parse(request), request);
+  });
+
+  it("refuses an oauth register arm carrying an apiKey", () => {
+    assert.equal(
+      providerRegisterRequest.safeParse({
+        name: "openai-codex",
+        kind: "llm",
+        payload: {
+          transport: "oauth",
+          loginId,
+          defaultModel: "gpt-5-codex",
+          apiKey: "sk-secret",
+        },
+      }).success,
+      false,
+    );
+  });
+
+  it("refuses a login id that is not a login identity", () => {
+    const request = {
+      name: "openai-codex",
+      kind: "llm",
+      payload: {
+        transport: "oauth",
+        loginId: `provider_${U}`,
+        defaultModel: "gpt-5-codex",
+      },
+    } as const;
+    assert.equal(providerRegisterRequest.safeParse(request).success, false);
+    assert.equal(
+      providerLoginCompleteRequest.safeParse({
+        loginId: `provider_${U}`,
+      }).success,
+      false,
+    );
+    assert.equal(
+      providerLoginCancelRequest.safeParse({
+        loginId: `provider_${U}`,
+      }).success,
+      false,
+    );
+  });
+
+  it("the catalogue provider carries a nullable oauth member", () => {
+    const common = {
+      id: "openai",
+      name: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      requiresBaseUrl: false,
+      models: [],
+    };
+    assert.deepEqual(catalogProvider.parse({ ...common, oauth: null }), {
+      ...common,
+      oauth: null,
+    });
+    assert.deepEqual(
+      catalogProvider.parse({ ...common, oauth: { label: "OpenAI OAuth" } }),
+      { ...common, oauth: { label: "OpenAI OAuth" } },
+    );
+    assert.equal(
+      catalogProvider.safeParse({
+        ...common,
+        oauth: { label: "OpenAI OAuth", method: "device-code" },
+      }).success,
+      false,
+    );
+  });
+
   it("an empty rename name is rejected", () => {
     assert.equal(providerRenameRequest.safeParse({ name: "" }).success, false);
   });
@@ -255,7 +494,12 @@ describe("src/http/contract/credential.test", () => {
       id: `provider_${U}`,
       name: "openai",
       kind: "llm",
-      projection: { provider: "openai", defaultModel: "gpt-4o", baseUrl: null },
+      projection: {
+        transport: "api-key",
+        provider: "openai",
+        defaultModel: "gpt-4o",
+        baseUrl: null,
+      },
       setDefaultAt: A,
       updatedAt: A,
     };
@@ -333,9 +577,7 @@ describe("src/http/contract/credential.test", () => {
     assert.equal(result.success, false);
     const firstIssue = result.error.issues[0];
     assert.ok(firstIssue !== undefined);
-    assert.equal(firstIssue.code, "unrecognized_keys");
     assert.deepEqual(firstIssue.path, ["payload"]);
-    assert.deepEqual(firstIssue.keys, ["extraKey"]);
   });
 
   it("providerRegisterRequest refuses cross-product payload kinds", () => {
@@ -369,7 +611,7 @@ describe("src/http/contract/credential.test", () => {
     );
   });
 
-  it("providerRegisterRequest emits correct JSON Schema with two branches and nested git transports", () => {
+  it("the register request keeps two kind branches and admits two llm payloads", () => {
     const schema = z.toJSONSchema(providerRegisterRequest, {
       target: "openapi-3.0",
       io: "input",
@@ -384,15 +626,17 @@ describe("src/http/contract/credential.test", () => {
       enum: ["llm"],
       type: "string",
     });
+    const llmPayloadAnyOf = llmBranch.properties?.payload
+      ?.anyOf as readonly Record<string, unknown>[];
     assert.ok(
-      !llmBranch.properties?.payload?.oneOf,
-      "llm payload is not a union",
+      Array.isArray(llmPayloadAnyOf),
+      "llm payload has anyOf for transports",
     );
-    assert.equal(
-      llmBranch.properties?.payload?.additionalProperties,
-      false,
-      "llm payload has additionalProperties: false",
-    );
+    assert.equal(llmPayloadAnyOf.length, 2, "exactly two llm payload branches");
+    const llmTransports = llmPayloadAnyOf
+      .map((branch) => branch.properties?.transport?.enum?.[0])
+      .sort();
+    assert.deepEqual(llmTransports, ["api-key", "oauth"]);
 
     const gitBranch = oneOf[1];
     assert.deepEqual(gitBranch.properties?.kind, {

@@ -14,16 +14,16 @@ import {
 } from "./identity.ts";
 
 describe("src/domain/identity.test", () => {
-  it("identityKinds has 18 entries", () => {
-    assert.equal(identityKinds.length, 18);
+  it("identityKinds has 19 entries", () => {
+    assert.equal(identityKinds.length, 19);
   });
 
-  it("identityPrefixes has 18 keys", () => {
-    assert.equal(Object.keys(identityPrefixes).length, 18);
+  it("identityPrefixes has 19 keys", () => {
+    assert.equal(Object.keys(identityPrefixes).length, 19);
   });
 
-  it("all 18 prefixes are unique", () => {
-    assert.equal(new Set(Object.values(identityPrefixes)).size, 18);
+  it("all 19 prefixes are unique", () => {
+    assert.equal(new Set(Object.values(identityPrefixes)).size, 19);
   });
 
   it("identityPrefixes.actor is actor", () => {
@@ -50,6 +50,14 @@ describe("src/domain/identity.test", () => {
       });
     });
   }
+
+  it("parseIdentity round-trips the provider login prefix", () => {
+    assert.deepEqual(parseIdentity("login_01HZY8QF3M4N5P6R7S8T9V0W1X"), {
+      kind: "providerLogin",
+      prefix: "login",
+      ulid: "01HZY8QF3M4N5P6R7S8T9V0W1X",
+    });
+  });
 
   const nullCases: ReadonlyArray<[string, string]> = [
     ["empty string", ""],

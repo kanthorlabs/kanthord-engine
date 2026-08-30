@@ -24,6 +24,8 @@ const HANDLERS: readonly (readonly [string, readonly number[]])[] = [
   ["src/http/server/actor/rotate-actor-token.ts", [200]],
   ["src/http/server/actor/show-actor.ts", [200]],
   ["src/http/server/blob/show-blob.ts", [200, 206]],
+  ["src/http/server/credential/cancel-provider-login.ts", [204]],
+  ["src/http/server/credential/complete-provider-login.ts", [200]],
   ["src/http/server/credential/inspect-provider.ts", [200]],
   ["src/http/server/credential/list-provider.ts", [200]],
   ["src/http/server/credential/read-catalog.ts", [200]],
@@ -32,6 +34,7 @@ const HANDLERS: readonly (readonly [string, readonly number[]])[] = [
   ["src/http/server/credential/rename-provider.ts", [200]],
   ["src/http/server/credential/set-default-provider.ts", [200]],
   ["src/http/server/credential/show-provider.ts", [200]],
+  ["src/http/server/credential/start-provider-login.ts", [200]],
   ["src/http/server/credential/verify-provider.ts", [200]],
   ["src/http/server/edge/list-edge.ts", [200]],
   ["src/http/server/event/list-event.ts", [200]],
@@ -130,7 +133,7 @@ describe("src/http/server/app.handler-result.test", () => {
     const union = [
       ...new Set(HANDLERS.flatMap(([, statuses]) => [...statuses])),
     ].sort((a, b) => a - b);
-    assert.deepEqual(union, [200, 206]);
+    assert.deepEqual(union, [200, 204, 206]);
   });
 
   it("exactly one handler declares response headers, and it is the blob handler", () => {
@@ -140,10 +143,10 @@ describe("src/http/server/app.handler-result.test", () => {
     );
   });
 
-  it("every handler returns a payload value", () => {
+  it("every handler except cancellation returns a payload value", () => {
     assert.deepEqual(
       scanned.filter(([, , , payload]) => !payload).map(([path]) => path),
-      [],
+      ["src/http/server/credential/cancel-provider-login.ts"],
     );
   });
 

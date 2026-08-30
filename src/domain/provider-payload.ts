@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { identity } from "./identity.ts";
+
 export const providerKinds = ["llm", "git"] as const;
 export type ProviderKind = (typeof providerKinds)[number];
 
@@ -8,14 +10,50 @@ export type GitForge = (typeof gitForges)[number];
 
 export const openAiCompatibleProvider = "openai-compatible";
 
-export const llmPayload = z
+export const oauthCredential = z
   .object({
+    type: z.literal("oauth"),
+    access: z.string().min(1),
+    refresh: z.string(),
+    expires: z.number().int(),
+  })
+  .catchall(z.unknown());
+export type OauthCredential = z.infer<typeof oauthCredential>;
+
+export const llmApiKeyPayload = z
+  .object({
+    transport: z.literal("api-key").optional(),
     provider: z.string().min(1),
     apiKey: z.string().min(1),
     defaultModel: z.string().min(1),
     baseUrl: z.string().min(1).nullable(),
   })
   .strict();
+export type LlmApiKeyPayload = z.infer<typeof llmApiKeyPayload>;
+
+export const llmOauthPayload = z
+  .object({
+    transport: z.literal("oauth"),
+    provider: z.string().min(1),
+    credential: oauthCredential,
+    defaultModel: z.string().min(1),
+  })
+  .strict();
+export type LlmOauthPayload = z.infer<typeof llmOauthPayload>;
+
+export const llmOauthRegisterPayload = z
+  .object({
+    transport: z.literal("oauth"),
+    loginId: identity("providerLogin"),
+    defaultModel: z.string().min(1),
+  })
+  .strict();
+export type LlmOauthRegisterPayload = z.infer<typeof llmOauthRegisterPayload>;
+
+export const llmPayload = z.discriminatedUnion("transport", [
+  llmApiKeyPayload,
+  llmOauthPayload,
+]);
 export type LlmPayload = z.infer<typeof llmPayload>;
 
 export const gitHttpBasicPayload = z
@@ -42,10 +80,17 @@ export type GitPayload = z.infer<typeof gitPayload>;
 
 export type ProviderPayload = LlmPayload | GitPayload;
 
-export const llmProjection = z.strictObject({
+export const llmApiKeyProjection = z.strictObject({
+  transport: z.literal("api-key"),
   provider: z.string(),
   defaultModel: z.string(),
   baseUrl: z.string().nullable(),
+});
+
+export const llmOauthProjection = z.strictObject({
+  transport: z.literal("oauth"),
+  provider: z.string(),
+  defaultModel: z.string(),
 });
 
 export const gitProjection = z.strictObject({
@@ -54,7 +99,11 @@ export const gitProjection = z.strictObject({
   username: z.string().nullable(),
 });
 
-export const providerProjection = z.union([llmProjection, gitProjection]);
+export const providerProjection = z.union([
+  llmApiKeyProjection,
+  llmOauthProjection,
+  gitProjection,
+]);
 export type ProviderProjection = z.infer<typeof providerProjection>;
 
 export type BaseUrlRefusal = "base-url-required" | "base-url-not-allowed";
@@ -152,6 +201,14 @@ export function serializePayload(
 ): string {
   if (kind === "llm") {
     const value = payload as LlmPayload;
+    if (value.transport === "oauth") {
+      return JSON.stringify({
+        transport: "oauth",
+        provider: value.provider,
+        credential: value.credential,
+        defaultModel: value.defaultModel,
+      });
+    }
     return JSON.stringify({
       provider: value.provider,
       apiKey: value.apiKey,
@@ -197,7 +254,15 @@ export function projectPayload(
 ): ProviderProjection {
   if (kind === "llm") {
     const value = payload as LlmPayload;
+    if (value.transport === "oauth") {
+      return {
+        transport: "oauth",
+        provider: value.provider,
+        defaultModel: value.defaultModel,
+      };
+    }
     return {
+      transport: "api-key",
       provider: value.provider,
       defaultModel: value.defaultModel,
       baseUrl: value.baseUrl,

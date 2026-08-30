@@ -12,8 +12,8 @@ import {
   deserializePayload,
   gitProjection,
   llmBaseUrlRefusal,
+  llmApiKeyProjection,
   llmPayload,
-  llmProjection,
   parsePayload,
   payloadSchemaFor,
   privateKeyCipher,
@@ -72,6 +72,17 @@ describe("src/domain/provider-payload.test", () => {
     apiKey: "sk-ant-x",
     defaultModel: "claude-opus-5",
     baseUrl: "https://example.invalid/v1",
+  };
+  const oauthInput = {
+    transport: "oauth",
+    provider: "openai-codex",
+    credential: {
+      type: "oauth",
+      access: "at-1",
+      refresh: "rt-1",
+      expires: 1_700_000_000_000,
+    },
+    defaultModel: "gpt-5-codex",
   };
   const httpBasicInput = {
     transport: "http-basic",
@@ -197,6 +208,80 @@ describe("src/domain/provider-payload.test", () => {
       assert.deepEqual(issue.path, []);
       const keysIssue = issue as { keys: string[] };
       assert.deepEqual(keysIssue.keys, ["extraKey"]);
+    });
+  });
+
+  describe("the llm oauth variant", () => {
+    it("parses an oauth payload", () => {
+      assert.deepEqual(parsePayload("llm", oauthInput), oauthInput);
+    });
+
+    it("keeps an unknown credential key through parse and serialization", () => {
+      const input = {
+        ...oauthInput,
+        credential: {
+          ...oauthInput.credential,
+          availableModelIds: ["gpt-5-codex", "gpt-5"],
+        },
+      };
+      const parsed = parsePayload("llm", input);
+      assert.deepEqual(parsed, input);
+      assert.equal(
+        serializePayload("llm", parsed),
+        '{"transport":"oauth","provider":"openai-codex","credential":{"type":"oauth","access":"at-1","refresh":"rt-1","expires":1700000000000,"availableModelIds":["gpt-5-codex","gpt-5"]},"defaultModel":"gpt-5-codex"}',
+      );
+    });
+
+    it("refuses an oauth payload carrying an apiKey", () => {
+      const error = capturedError(() =>
+        parsePayload("llm", { ...oauthInput, apiKey: "sk-ant-x" }),
+      );
+      assert.equal(error.refusal, "payload-invalid");
+    });
+
+    it("refuses an oauth payload with no credential", () => {
+      const incomplete: Record<string, unknown> = { ...oauthInput };
+      delete incomplete.credential;
+      const error = capturedError(() => parsePayload("llm", incomplete));
+      assert.equal(error.refusal, "payload-invalid");
+    });
+
+    it("refuses a transport outside the two llm arms", () => {
+      const error = capturedError(() =>
+        parsePayload("llm", { ...oauthInput, transport: "device" }),
+      );
+      assert.equal(error.refusal, "payload-invalid");
+    });
+
+    it("round trips the oauth payload byte-identically", () => {
+      const parsed = parsePayload("llm", oauthInput);
+      const serialized = serializePayload("llm", parsed);
+      const restored = deserializePayload("llm", serialized);
+      assert.deepEqual(restored, parsed);
+      assert.equal(serializePayload("llm", restored), serialized);
+    });
+
+    it("an explicit api-key transport serializes to the same bytes as an absent one", () => {
+      const explicit = parsePayload("llm", {
+        ...llmInput,
+        transport: "api-key",
+      });
+      assert.equal(serializePayload("llm", explicit), LLM_SERIALIZED);
+    });
+
+    it("an explicit api-key transport parses to the same payload as an absent one", () => {
+      const absent = deserializePayload(
+        "llm",
+        serializePayload("llm", parsePayload("llm", llmInput)),
+      );
+      const explicit = deserializePayload(
+        "llm",
+        serializePayload(
+          "llm",
+          parsePayload("llm", { ...llmInput, transport: "api-key" }),
+        ),
+      );
+      assert.deepEqual(explicit, absent);
     });
   });
 
@@ -415,18 +500,28 @@ describe("src/domain/provider-payload.test", () => {
   });
 
   describe("the public projection", () => {
-    it("projects the llm payload without the secret", () => {
+    it("projects the api-key payload with an explicit transport", () => {
       const projection = projectPayload("llm", parsedLlm);
       assert.deepEqual(projection, {
+        transport: "api-key",
         provider: "anthropic",
         defaultModel: "claude-opus-5",
         baseUrl: null,
       });
       assert.deepEqual(Object.keys(projection), [
+        "transport",
         "provider",
         "defaultModel",
         "baseUrl",
       ]);
+    });
+
+    it("projects the oauth payload with no credential", () => {
+      assert.deepEqual(projectPayload("llm", parsePayload("llm", oauthInput)), {
+        transport: "oauth",
+        provider: "openai-codex",
+        defaultModel: "gpt-5-codex",
+      });
     });
 
     it("projects the http-basic payload without the token", () => {
@@ -453,6 +548,11 @@ describe("src/domain/provider-payload.test", () => {
       > = [
         { kind: "llm", payload: parsedLlm, secret: "sk-ant-x" },
         { kind: "llm", payload: parsedLlmWithBaseUrl, secret: "sk-ant-x" },
+        {
+          kind: "llm",
+          payload: parsePayload("llm", oauthInput),
+          secret: "at-1",
+        },
         { kind: "git", payload: parsedHttpBasic, secret: "ghp_x" },
         { kind: "git", payload: parsedSsh, secret: unencryptedEd25519 },
       ];
@@ -463,12 +563,20 @@ describe("src/domain/provider-payload.test", () => {
         assert.equal(Object.hasOwn(projection, "privateKey"), false);
         assert.ok(!JSON.stringify(projection).includes(subject.secret));
       }
+      const oauthProjection = projectPayload(
+        "llm",
+        parsePayload("llm", oauthInput),
+      );
+      const serializedOauthProjection = JSON.stringify(oauthProjection);
+      for (const secret of ["at-1", "rt-1", "access", "refresh"]) {
+        assert.ok(!serializedOauthProjection.includes(secret), secret);
+      }
     });
 
-    it("llmProjection and gitProjection each reject an unknown key", () => {
+    it("llmApiKeyProjection and gitProjection each reject an unknown key", () => {
       const llmProjected = projectPayload("llm", parsedLlm);
       assert.equal(
-        llmProjection.safeParse({ ...llmProjected, extra: true }).success,
+        llmApiKeyProjection.safeParse({ ...llmProjected, extra: true }).success,
         false,
       );
       const gitProjected = projectPayload("git", parsedHttpBasic);
@@ -485,6 +593,7 @@ describe("src/domain/provider-payload.test", () => {
       > = [
         { kind: "llm", payload: parsedLlm },
         { kind: "llm", payload: parsedLlmWithBaseUrl },
+        { kind: "llm", payload: parsePayload("llm", oauthInput) },
         { kind: "git", payload: parsedHttpBasic },
         { kind: "git", payload: parsedSsh },
       ];

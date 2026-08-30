@@ -2,6 +2,10 @@ import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 
 import { agentKinds } from "../../domain/agent.ts";
+import {
+  providerLoginMethods,
+  providerLoginStates,
+} from "../../domain/provider-login.ts";
 import { rows } from "../../domain/rows.ts";
 import { blockReasons, nodeKinds, nodeStates } from "../../domain/state.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
@@ -60,6 +64,27 @@ describe("src/services/storage/schema-parity.test", () => {
     after(() => temporary.dispose());
 
     assertClauseAgrees(storage, "agent_invocation", "agent", agentKinds);
+  });
+
+  it("provider_login.method CHECK agrees with the domain providerLoginMethods", () => {
+    const { storage, temporary } = buildMigrated();
+    after(() => storage.close());
+    after(() => temporary.dispose());
+
+    assertClauseAgrees(
+      storage,
+      "provider_login",
+      "method",
+      providerLoginMethods,
+    );
+  });
+
+  it("provider_login.state CHECK agrees with the domain providerLoginStates", () => {
+    const { storage, temporary } = buildMigrated();
+    after(() => storage.close());
+    after(() => temporary.dispose());
+
+    assertClauseAgrees(storage, "provider_login", "state", providerLoginStates);
   });
 
   it("the table set after migrate equals Object.keys(rows)", () => {

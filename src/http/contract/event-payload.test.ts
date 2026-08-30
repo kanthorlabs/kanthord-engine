@@ -207,6 +207,9 @@ const recordedPayloads: Readonly<Record<string, readonly unknown[]>> = {
   ],
   "project.created": [{ name: "project-one" }],
   "project.repositoriesReplaced": [{ repositories: ["origin"] }],
+  "provider.credentialRefreshed": [
+    { name: "work-codex", kind: "llm", refreshedAt: 1_700_000_000_000 },
+  ],
   "provider.defaultSet": [{ name: "primary", kind: "git", setDefaultAt: 1234 }],
   "provider.defaultUnset": [{ name: "primary", kind: "llm", unsetAt: 1234 }],
   "provider.registered": [{ name: "primary", kind: "git" }],
@@ -522,6 +525,30 @@ describe("src/http/contract/event-payload.test", () => {
         name: "origin",
         publishRef: "refs/heads/main",
         credentialId: "credential_1",
+      }),
+    );
+  });
+
+  it("provider.credentialRefreshed payload rejects an extra key", () => {
+    const schema = (
+      eventPayloads as Readonly<
+        Record<string, (typeof eventPayloads)[keyof typeof eventPayloads]>
+      >
+    )["provider.credentialRefreshed"];
+    assert.ok(schema !== undefined);
+    assert.doesNotThrow(() =>
+      schema.parse({
+        name: "work-codex",
+        kind: "llm",
+        refreshedAt: 1_700_000_000_000,
+      }),
+    );
+    assert.throws(() =>
+      schema.parse({
+        name: "work-codex",
+        kind: "llm",
+        refreshedAt: 1_700_000_000_000,
+        extra: "not-allowed",
       }),
     );
   });

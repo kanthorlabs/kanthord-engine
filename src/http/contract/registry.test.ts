@@ -46,13 +46,13 @@ export const harnessOperations = [
 ];
 
 describe("src/http/contract/registry.test", () => {
-  it("registers seventy operations", () => {
-    assert.equal(registry.length, 70);
+  it("registers seventy-three operations", () => {
+    assert.equal(registry.length, 73);
   });
 
   it("sorts the registry bytewise by operationId with no duplicates", () => {
     const ids = registry.map((entry) => entry.operationId);
-    assert.equal(new Set(ids).size, 70);
+    assert.equal(new Set(ids).size, 73);
     for (let i = 0; i < ids.length - 1; i += 1) {
       assert.ok(
         Buffer.compare(Buffer.from(ids[i]!), Buffer.from(ids[i + 1]!)) < 0,
@@ -64,7 +64,7 @@ describe("src/http/contract/registry.test", () => {
   it("counts routed and stubbed entries", () => {
     assert.equal(
       registry.filter((entry) => entry.status === "routed").length,
-      45,
+      48,
     );
     assert.equal(
       registry.filter((entry) => entry.status === "stubbed").length,
@@ -79,7 +79,7 @@ describe("src/http/contract/registry.test", () => {
     );
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-2").length,
-      27,
+      30,
     );
     assert.equal(
       registry.filter((entry) => entry.introducedIn === "phase-3").length,
@@ -110,7 +110,7 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("attaches requests to the seventeen write routes and responses to the forty-four routes", () => {
+  it("attaches requests to the twenty write routes and responses to the forty-six routes", () => {
     const withRequest = registry.filter((entry) => entry.request !== undefined);
     assert.deepEqual(withRequest.map((entry) => entry.operationId).sort(), [
       "actor.register",
@@ -126,6 +126,9 @@ describe("src/http/contract/registry.test", () => {
       "project.create",
       "project.repositories",
       "provider.inspect",
+      "provider.loginCancel",
+      "provider.loginComplete",
+      "provider.loginStart",
       "provider.register",
       "provider.rename",
       "repository.inspect",
@@ -166,6 +169,8 @@ describe("src/http/contract/registry.test", () => {
       "provider.catalog",
       "provider.inspect",
       "provider.list",
+      "provider.loginComplete",
+      "provider.loginStart",
       "provider.register",
       "provider.remove",
       "provider.rename",
@@ -569,6 +574,42 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
+  it("refuses a parameter after the login subresource", () => {
+    const entry = {
+      operationId: "provider.loginIllegal",
+      method: "POST",
+      path: [resource("provider"), sub("login"), parameter("provider")],
+      introducedIn: "phase-2",
+      status: "routed",
+      allowedActors: ["human"],
+    } as const;
+    const faults = registryFaults([entry]);
+    assert.equal(faults.length, 1);
+    assert.equal(faults[0]?.reason, "segment sequence is not a legal path");
+  });
+
+  it("accepts the three login tuples", () => {
+    for (const path of [
+      [resource("provider"), sub("login")],
+      [resource("provider"), sub("login"), action("complete")],
+      [resource("provider"), sub("login"), action("cancel")],
+    ] as const) {
+      assert.deepEqual(
+        registryFaults([
+          {
+            operationId: "provider.loginProbe",
+            method: "POST",
+            path,
+            introducedIn: "phase-2",
+            status: "routed",
+            allowedActors: ["human"],
+          },
+        ]),
+        [],
+      );
+    }
+  });
+
   it("accepts an action on a collection", () => {
     assert.deepEqual(
       registryFaults([
@@ -627,7 +668,7 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("declares exactly the thirty POST policies the story names", () => {
+  it("declares exactly the thirty-three POST policies the story names", () => {
     const keyed = registry
       .filter((entry) => idempotencyOf(entry) !== "none")
       .map((entry) => entry.operationId)
@@ -649,6 +690,9 @@ describe("src/http/contract/registry.test", () => {
         "plan.validate",
         "project.create",
         "provider.inspect",
+        "provider.loginCancel",
+        "provider.loginComplete",
+        "provider.loginStart",
         "provider.register",
         "provider.rename",
         "provider.verify",
@@ -678,10 +722,10 @@ describe("src/http/contract/registry.test", () => {
     );
   });
 
-  it("counts twenty-nine memory-policy operations", () => {
+  it("counts thirty-two memory-policy operations", () => {
     assert.equal(
       registry.filter((entry) => idempotencyOf(entry) === "memory").length,
-      29,
+      32,
     );
   });
 
@@ -766,10 +810,14 @@ describe("src/http/contract/registry.test", () => {
     assert.deepEqual(registryFaults(registry), []);
   });
 
-  it("declares [200] as the replayable outcome on every memory entry", () => {
+  it("declares [200] on every memory entry except login cancel", () => {
     for (const entry of registry) {
       if (idempotencyOf(entry) === "memory") {
-        assert.deepEqual(entry.replayable, [200], entry.operationId);
+        assert.deepEqual(
+          entry.replayable,
+          entry.operationId === "provider.loginCancel" ? [204] : [200],
+          entry.operationId,
+        );
       }
     }
   });

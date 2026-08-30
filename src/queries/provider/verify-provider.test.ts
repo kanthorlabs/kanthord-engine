@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
+import {
+  serializePayload,
+  type LlmOauthPayload,
+} from "../../domain/provider-payload.ts";
 import type { Clock } from "../../services/clock/index.ts";
 import { AesGcmCrypto } from "../../services/crypto/aes-gcm.ts";
 import type { Crypto } from "../../services/crypto/index.ts";
@@ -21,6 +25,7 @@ import {
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
 import { createFakeModelCatalog } from "../../../test/helpers/model-catalog.ts";
+import { createFakeProviderAuth } from "../../../test/helpers/provider-auth.ts";
 
 const FIXED_AT = 1_700_000_000_000;
 const FIXED_SIGNAL = AbortSignal.timeout(10_000);
@@ -36,6 +41,15 @@ const PROVIDER_ULIDS = [
   "01HZY8QF3M4N5P6R7S8T9V0W1Z",
 ] as const;
 
+const OAUTH_PROVIDER_ID = "provider_01HZY8QF3M4N5P6R7S8T9V0W20";
+const OAUTH_CREDENTIAL = {
+  type: "oauth",
+  access: "oauth-access",
+  refresh: "oauth-refresh",
+  expires: FIXED_AT + 600_000,
+  availableModelIds: ["gpt-5-codex"],
+} as const;
+
 type RecordingProviderAuth = ProviderAuth &
   Readonly<{
     calls: ProviderAuthRow[];
@@ -50,14 +64,16 @@ function createProviderAuth(
   return {
     calls,
     signals,
-    async probe(row, signal) {
-      calls.push(row);
-      signals.push(signal);
-      if (outcome instanceof Error) {
-        throw outcome;
-      }
-      return outcome;
-    },
+    ...createFakeProviderAuth({
+      async probe(row, signal) {
+        calls.push(row);
+        signals.push(signal);
+        if (outcome instanceof Error) {
+          throw outcome;
+        }
+        return outcome;
+      },
+    }),
   };
 }
 
@@ -124,6 +140,33 @@ function registerGitProvider(storage: Storage): string {
       actor: "test",
     },
   ).id;
+}
+
+function seedOauthProvider(storage: Storage): string {
+  const payload: LlmOauthPayload = {
+    transport: "oauth",
+    provider: "openai-codex",
+    credential: OAUTH_CREDENTIAL,
+    defaultModel: "gpt-5-codex",
+  };
+  const sealed = CRYPTO.seal(serializePayload("llm", payload));
+  storage.transact((transaction) => {
+    transaction.run(
+      "INSERT INTO provider (id, name, kind, set_default_at, payload_ciphertext, payload_iv, payload_tag, key_version, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [
+        OAUTH_PROVIDER_ID,
+        "openai-codex",
+        "llm",
+        null,
+        sealed.ciphertext,
+        sealed.iv,
+        sealed.tag,
+        sealed.keyVersion,
+        FIXED_AT,
+      ],
+    );
+  });
+  return OAUTH_PROVIDER_ID;
 }
 
 function successfulOutcome(): ProbeOutcome {
@@ -268,7 +311,9 @@ describe("src/queries/provider/verify-provider", () => {
     assert.equal("detail" in result, false);
     assert.deepEqual(providerAuth.calls, [
       {
+        providerId: id,
         vendorId: "openai",
+        transport: "api-key",
         apiKey: FIXTURE_KEY,
         defaultModel: "gpt-4o",
         baseUrl: null,
@@ -481,6 +526,45 @@ describe("src/queries/provider/verify-provider", () => {
       "provider-not-verifiable",
     );
     assert.equal(providerAuth.calls.length, 0);
+  });
+
+  it("verifies an oauth registration", async (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const id = seedOauthProvider(temporary.storage);
+    const providerAuth = createProviderAuth({
+      ...successfulOutcome(),
+      model: "gpt-5-codex",
+    });
+
+    const result = await verifyProvider(
+      {
+        storage: temporary.storage,
+        crypto: CRYPTO,
+        providerAuth,
+        clock: createRecordingClock(),
+      },
+      { id, signal: FIXED_SIGNAL },
+    );
+
+    assert.deepEqual(result, {
+      checkedAt: FIXED_AT,
+      model: "gpt-5-codex",
+      reachability: "reachable",
+      authentication: "accepted",
+      completed: true,
+      refusal: null,
+    });
+    assert.deepEqual(providerAuth.calls, [
+      {
+        providerId: id,
+        vendorId: "openai-codex",
+        defaultModel: "gpt-5-codex",
+        baseUrl: null,
+        transport: "oauth",
+        credential: OAUTH_CREDENTIAL,
+      },
+    ]);
   });
 
   it("refuses an undecryptable provider without probing", async (t) => {

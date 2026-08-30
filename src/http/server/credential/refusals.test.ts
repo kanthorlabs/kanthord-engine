@@ -11,6 +11,9 @@ import { RenameProviderError } from "../../../commands/provider/rename-provider.
 import { RemoveProviderError } from "../../../commands/provider/remove-provider.ts";
 import { VerifyProviderError } from "../../../queries/provider/verify-provider.ts";
 import type { ProviderRemovalBlocker } from "../../../commands/provider/remove-provider.ts";
+import { StartProviderLoginError } from "../../../commands/provider/start-provider-login.ts";
+import { CompleteProviderLoginError } from "../../../commands/provider/complete-provider-login.ts";
+import { CancelProviderLoginError } from "../../../commands/provider/cancel-provider-login.ts";
 
 const id = "provider_01HZY8QF3M4N5P6R7S8T9V0W1X";
 
@@ -151,6 +154,56 @@ describe("src/http/server/credential/refusals.test", () => {
       refusal: "private-key-encrypted",
       detail: "aes256-ctr",
     });
+  });
+
+  it("StartProviderLoginError → invalid-request carrying refusal and detail", () => {
+    const error = toHttpError(
+      new StartProviderLoginError(
+        "login-input-required",
+        "the provider login needs input",
+        "GitHub Enterprise URL/domain (blank for github.com)",
+      ),
+    );
+    assert.ok(error instanceof HttpError);
+    assert.equal(error.code, "invalid-request");
+    assert.equal(error.status, 400);
+    assert.deepEqual(error.details, {
+      refusal: "login-input-required",
+      detail: "GitHub Enterprise URL/domain (blank for github.com)",
+    });
+  });
+
+  it("CompleteProviderLoginError not-found → not-found", () => {
+    const error = toHttpError(
+      new CompleteProviderLoginError("not-found", `no provider login login_p`),
+    );
+    assert.ok(error instanceof HttpError);
+    assert.equal(error.code, "not-found");
+    assert.equal(error.status, 404);
+    assert.equal(error.details, undefined);
+  });
+
+  it("CompleteProviderLoginError login-pending → invalid-request", () => {
+    const error = toHttpError(
+      new CompleteProviderLoginError(
+        "login-pending",
+        "the provider login is still pending",
+      ),
+    );
+    assert.ok(error instanceof HttpError);
+    assert.equal(error.code, "invalid-request");
+    assert.equal(error.status, 400);
+    assert.deepEqual(error.details, { refusal: "login-pending" });
+  });
+
+  it("CancelProviderLoginError → not-found", () => {
+    const error = toHttpError(
+      new CancelProviderLoginError("not-found", "no provider login login_p"),
+    );
+    assert.ok(error instanceof HttpError);
+    assert.equal(error.code, "not-found");
+    assert.equal(error.status, 404);
+    assert.equal(error.details, undefined);
   });
 
   it("an unknown error is rethrown unchanged", () => {

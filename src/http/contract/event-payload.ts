@@ -192,6 +192,11 @@ export const eventPayloads: Readonly<Record<EventType, ZodType>> = {
   "project.repositoriesReplaced": z.strictObject({
     repositories: z.array(z.string()),
   }),
+  "provider.credentialRefreshed": z.strictObject({
+    name: z.string(),
+    kind: providerKind,
+    refreshedAt: fence,
+  }),
   "provider.defaultSet": z.strictObject({
     name: z.string(),
     kind: providerKind,
