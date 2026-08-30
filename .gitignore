@@ -149,3 +149,6 @@ vite.config.ts.timestamp-*
 .agents/e2e/
 **/.kanthord/
 **/kanthord.config.json
+
+# macOS
+.DS_Store

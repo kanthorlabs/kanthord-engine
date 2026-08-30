@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const identityKinds = [
   "provider",
+  "providerLogin",
   "project",
   "repository",
   "profile",
@@ -25,6 +26,7 @@ export type IdentityKind = (typeof identityKinds)[number];
 
 export const identityPrefixes: Readonly<Record<IdentityKind, string>> = {
   provider: "provider",
+  providerLogin: "login",
   project: "project",
   repository: "repo",
   profile: "profile",

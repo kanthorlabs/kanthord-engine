@@ -111,7 +111,7 @@ Epic: `.agents/plan/epics/<epic-slug>.md`
 ## Verify
 - <exact test command(s), e.g. `node --test src/.../foo.test.ts`, and the
   precise assertion each must make>
-- `npm run verify` exits 0
+- `pnpm run verify` exits 0
 - Proof: <which PASS line(s) of the EPIC Proof this story delivers>
 ```
 

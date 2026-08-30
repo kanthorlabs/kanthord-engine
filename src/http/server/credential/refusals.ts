@@ -4,6 +4,9 @@ import { RegisterProviderError } from "../../../commands/provider/register-provi
 import { SetDefaultProviderError } from "../../../commands/provider/set-default-provider.ts";
 import { RenameProviderError } from "../../../commands/provider/rename-provider.ts";
 import { RemoveProviderError } from "../../../commands/provider/remove-provider.ts";
+import { StartProviderLoginError } from "../../../commands/provider/start-provider-login.ts";
+import { CompleteProviderLoginError } from "../../../commands/provider/complete-provider-login.ts";
+import { CancelProviderLoginError } from "../../../commands/provider/cancel-provider-login.ts";
 import { InspectProviderError } from "../../../queries/provider/inspect-provider.ts";
 import { VerifyProviderError } from "../../../queries/provider/verify-provider.ts";
 
@@ -59,6 +62,23 @@ export function toHttpError(error: unknown): HttpError {
     return httpError("invalid-request", error.message, {
       refusal: error.refusal,
     });
+  }
+  if (error instanceof StartProviderLoginError) {
+    return httpError("invalid-request", error.message, {
+      refusal: error.refusal,
+      detail: error.detail,
+    });
+  }
+  if (error instanceof CompleteProviderLoginError) {
+    if (error.refusal === "not-found") {
+      return httpError("not-found", error.message);
+    }
+    return httpError("invalid-request", error.message, {
+      refusal: error.refusal,
+    });
+  }
+  if (error instanceof CancelProviderLoginError) {
+    return httpError("not-found", error.message);
   }
   throw error;
 }

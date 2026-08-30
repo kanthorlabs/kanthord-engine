@@ -478,7 +478,7 @@ function buildFakes(options: FakeOptions): Readonly<{
   };
 
   const executeHost: PodmanExecutor = async (argv) => {
-    if (argv[0] !== "npm") {
+    if (argv[0] !== "pnpm") {
       throw new Error(`unexpected host argv: ${argv.join(" ")}`);
     }
     if (argv[1] === "pack") {
@@ -487,13 +487,14 @@ function buildFakes(options: FakeOptions): Readonly<{
       ] as string;
       mkdirSync(destination, { recursive: true });
       const filename = "kanthord-27.8.1.tgz";
-      writeFileSync(join(destination, filename), packedTarball);
-      return record(argv, `${filename}\n`);
+      const tarballPath = join(destination, filename);
+      writeFileSync(tarballPath, packedTarball);
+      return record(argv, `${tarballPath}\n`);
     }
-    if (argv[1] === "ci") {
+    if (argv[1] === "install") {
       return record(argv, "");
     }
-    throw new Error(`unexpected npm argv: ${argv.join(" ")}`);
+    throw new Error(`unexpected pnpm argv: ${argv.join(" ")}`);
   };
 
   return { execute, executeHost, calls, stdins };

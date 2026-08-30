@@ -25,6 +25,7 @@ const LLM_PROVIDER = {
   name: "llm",
   kind: "llm",
   projection: {
+    transport: "api-key",
     provider: "anthropic",
     defaultModel: "claude-opus-5",
     baseUrl: null,

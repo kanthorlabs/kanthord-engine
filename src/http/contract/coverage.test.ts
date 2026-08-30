@@ -98,13 +98,44 @@ function objectNodes(schema: unknown): readonly Record<string, unknown>[] {
   return found;
 }
 
+type CollectedNode = Readonly<{
+  operationId: string;
+  slot: string;
+  node: Record<string, unknown>;
+}>;
+
+function isMapNode(node: Record<string, unknown>): boolean {
+  const additional = node.additionalProperties;
+  return (
+    additional !== null &&
+    typeof additional === "object" &&
+    !Array.isArray(additional) &&
+    Object.keys(additional as Record<string, unknown>).length > 0 &&
+    !Object.hasOwn(node, "properties")
+  );
+}
+
+function unknownKeyOffenders(
+  collected: readonly CollectedNode[],
+): readonly string[] {
+  return collected
+    .filter(
+      ({ node }) => node.additionalProperties !== false && !isMapNode(node),
+    )
+    .map(({ operationId, slot }) => `${operationId}.${slot}`);
+}
+
+function collectFixture(
+  operationId: string,
+  slot: string,
+  schema: unknown,
+): readonly CollectedNode[] {
+  return objectNodes(schema).map((node) => ({ operationId, slot, node }));
+}
+
 describe("src/http/contract/coverage.test", () => {
-  it("every object node in every registered schema forbids an unknown key", () => {
-    const collected: {
-      operationId: string;
-      slot: string;
-      node: Record<string, unknown>;
-    }[] = [];
+  it("every closed object node in every registered schema forbids an unknown key", () => {
+    const collected: CollectedNode[] = [];
 
     for (const entry of registry) {
       const slots: readonly [
@@ -133,13 +164,110 @@ describe("src/http/contract/coverage.test", () => {
       "expected at least one object node across the registry",
     );
 
-    for (const { operationId, slot, node } of collected) {
-      assert.equal(
-        node.additionalProperties,
-        false,
-        `${operationId}.${slot} carries an object node that permits an unknown key`,
-      );
+    assert.deepEqual(unknownKeyOffenders(collected), []);
+  });
+
+  it("exactly one registered object node is exempt as a map, and it is the provider.loginStart answers record", () => {
+    const exempt: { label: string; node: Record<string, unknown> }[] = [];
+
+    for (const entry of registry) {
+      const slots: readonly [
+        "query" | "request" | "response",
+        "input" | "output",
+      ][] = [
+        ["query", "input"],
+        ["request", "input"],
+        ["response", "output"],
+      ];
+      for (const [slot, io] of slots) {
+        const schema = entry[slot];
+        if (schema === undefined) continue;
+        const jsonSchema = z.toJSONSchema(schema, {
+          target: "openapi-3.0",
+          io,
+        });
+        for (const node of objectNodes(jsonSchema)) {
+          if (node.additionalProperties === false) continue;
+          exempt.push({ label: `${entry.operationId}.${slot}`, node });
+        }
+      }
     }
+
+    assert.deepEqual(
+      exempt.map((entry) => entry.label),
+      ["provider.loginStart.request"],
+    );
+    assert.deepEqual(exempt[0]?.node, {
+      type: "object",
+      additionalProperties: { type: "string" },
+    });
+  });
+
+  it("the map exemption still reports a fully open object node", () => {
+    assert.deepEqual(
+      unknownKeyOffenders(
+        collectFixture("fixture.openWithProperties", "request", {
+          type: "object",
+          properties: { name: { type: "string" } },
+          required: ["name"],
+          additionalProperties: {},
+        }),
+      ),
+      ["fixture.openWithProperties.request"],
+    );
+
+    assert.deepEqual(
+      unknownKeyOffenders(
+        collectFixture("fixture.openCatchall", "request", {
+          type: "object",
+          additionalProperties: {},
+        }),
+      ),
+      ["fixture.openCatchall.request"],
+    );
+
+    assert.deepEqual(
+      unknownKeyOffenders(
+        collectFixture("fixture.openAbsent", "response", {
+          type: "object",
+          properties: { name: { type: "string" } },
+        }),
+      ),
+      ["fixture.openAbsent.response"],
+    );
+
+    assert.deepEqual(
+      unknownKeyOffenders(
+        collectFixture("fixture.nestedOpen", "response", {
+          type: "object",
+          properties: {
+            inner: {
+              type: "object",
+              properties: { name: { type: "string" } },
+              additionalProperties: {},
+            },
+          },
+          additionalProperties: false,
+        }),
+      ),
+      ["fixture.nestedOpen.response"],
+    );
+
+    assert.deepEqual(
+      unknownKeyOffenders(
+        collectFixture("fixture.closedWithMap", "request", {
+          type: "object",
+          properties: {
+            answers: {
+              type: "object",
+              additionalProperties: { type: "string" },
+            },
+          },
+          additionalProperties: false,
+        }),
+      ),
+      [],
+    );
   });
 
   it("every z.enum argument in src/http/contract/ traces to a domain/ import, and no restated literal or blob-hash pattern exists", () => {
@@ -431,13 +559,13 @@ describe("src/http/contract/coverage.test", () => {
     }
   });
 
-  it("blob.show is the only routed operation with no response schema", () => {
+  it("blob.show and provider.loginCancel are the routed operations with no response schema", () => {
     const missing = registry
       .filter(
         (entry) => entry.status === "routed" && entry.response === undefined,
       )
       .map((entry) => entry.operationId);
-    assert.deepEqual(missing, ["blob.show"]);
+    assert.deepEqual(missing, ["blob.show", "provider.loginCancel"]);
   });
 
   it("every phase-1 routed operation but blob.show carries an example set", () => {

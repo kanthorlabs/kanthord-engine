@@ -36,8 +36,8 @@ describe("src/http/contract/path.test", () => {
 
   it("pins the closed-array sizes", () => {
     assert.equal(resourceSegments.length, 14);
-    assert.equal(subresourceSegments.length, 16);
-    assert.equal(actionSegments.length, 23);
+    assert.equal(subresourceSegments.length, 17);
+    assert.equal(actionSegments.length, 24);
     assert.equal(systemSegments.length, 3);
   });
 
@@ -161,6 +161,50 @@ describe("src/http/contract/path.test", () => {
     assert.equal(
       renderPath([resource("project"), parameter("project"), sub("graph")]),
       "/v1/project/:id/graph",
+    );
+  });
+
+  it("login is a subresource segment sorted between llm and node", () => {
+    assert.ok(
+      subresourceSegments.includes("login"),
+      "login subresource segment is missing",
+    );
+    const loginIndex = subresourceSegments.indexOf("login");
+    assert.ok(
+      loginIndex > subresourceSegments.indexOf("llm"),
+      "login must be sorted after llm",
+    );
+    assert.ok(
+      loginIndex < subresourceSegments.indexOf("node"),
+      "login must be sorted before node",
+    );
+    assert.equal(
+      renderPath([resource("provider"), sub("login")]),
+      "/v1/provider/login",
+    );
+  });
+
+  it("complete is an action segment sorted between claim and delete", () => {
+    assert.ok(
+      actionSegments.includes("complete"),
+      "complete action segment is missing",
+    );
+    const completeIndex = actionSegments.indexOf("complete");
+    assert.ok(
+      completeIndex > actionSegments.indexOf("claim"),
+      "complete must be sorted after claim",
+    );
+    assert.ok(
+      completeIndex < actionSegments.indexOf("delete"),
+      "complete must be sorted before delete",
+    );
+    assert.equal(
+      renderPath([resource("provider"), sub("login"), action("complete")]),
+      "/v1/provider/login/complete",
+    );
+    assert.equal(
+      renderPath([resource("provider"), sub("login"), action("cancel")]),
+      "/v1/provider/login/cancel",
     );
   });
 });

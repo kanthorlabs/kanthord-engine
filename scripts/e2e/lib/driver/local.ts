@@ -54,7 +54,7 @@ async function packAndInstall(context: ScenarioContext): Promise<string> {
   });
 
   await runCommand(context.sink, {
-    argv: ["npm", "pack", "--pack-destination", tmp],
+    argv: ["pnpm", "pack", "--pack-destination", tmp],
     cwd: repositoryRoot,
     env: { PATH: process.env.PATH ?? "" },
   });
@@ -66,6 +66,8 @@ async function packAndInstall(context: ScenarioContext): Promise<string> {
   const prefix = join(tmp, "prefix");
   await mkdir(prefix, { recursive: true });
 
+  // npm installs the packed artifact the way a consumer would. It manages no
+  // dependency of this repository, so it does not follow the package manager.
   await runCommand(context.sink, {
     argv: ["npm", "install", "--global", "--prefix", prefix, tarball],
     cwd: repositoryRoot,

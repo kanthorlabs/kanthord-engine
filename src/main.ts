@@ -53,6 +53,9 @@ import { NodeWriteRevision } from "./services/revision/node-write.ts";
 import { DependencyReadiness } from "./services/readiness/dependency.ts";
 import { YamlDocumentReader } from "./services/document/yaml.ts";
 import { registerProvider } from "./commands/provider/register-provider.ts";
+import { startProviderLogin } from "./commands/provider/start-provider-login.ts";
+import { completeProviderLogin } from "./commands/provider/complete-provider-login.ts";
+import { cancelProviderLogin } from "./commands/provider/cancel-provider-login.ts";
 import { renameProvider } from "./commands/provider/rename-provider.ts";
 import { setDefaultProvider } from "./commands/provider/set-default-provider.ts";
 import { removeProvider } from "./commands/provider/remove-provider.ts";
@@ -60,6 +63,7 @@ import { listProviders } from "./queries/provider/list-provider.ts";
 import { showProvider } from "./queries/provider/show-provider.ts";
 import { verifyProvider } from "./queries/provider/verify-provider.ts";
 import { PiAiProviderAuth } from "./services/provider-auth/pi-ai.ts";
+import { SqliteCredentialWriter } from "./services/provider-auth/credential-writer.ts";
 import { resolveActor } from "./queries/actor/resolve-actor.ts";
 import { createProject } from "./commands/project/create-project.ts";
 import { replaceProjectRepositories } from "./commands/project/replace-project-repositories.ts";
@@ -122,6 +126,9 @@ import { KANTHORD_VERSION } from "./domain/version.ts";
 import { declaredCapabilities } from "./http/contract/capability.ts";
 import { registry } from "./http/contract/registry.ts";
 import { registerProviderHandler } from "./http/server/credential/register-provider.ts";
+import { startProviderLoginHandler } from "./http/server/credential/start-provider-login.ts";
+import { completeProviderLoginHandler } from "./http/server/credential/complete-provider-login.ts";
+import { cancelProviderLoginHandler } from "./http/server/credential/cancel-provider-login.ts";
 import { renameProviderHandler } from "./http/server/credential/rename-provider.ts";
 import { setDefaultProviderHandler } from "./http/server/credential/set-default-provider.ts";
 import { removeProviderHandler } from "./http/server/credential/remove-provider.ts";
@@ -354,9 +361,15 @@ async function serve(options: ServeOptions): Promise<void> {
         key: settings.masterKey,
         keyVersion: 1,
       });
+      const credentialWriter = new SqliteCredentialWriter({
+        storage,
+        crypto,
+        events,
+        clock,
+      });
       const secret = new NodeCryptoSecret();
       const catalog = new PiAiModelCatalog();
-      const providerAuth = new PiAiProviderAuth();
+      const providerAuth = new PiAiProviderAuth(fetch, { credentialWriter });
       const sweepExternalLeases = (
         transaction: Transaction,
         input: Readonly<{ actor: string; now: number }>,
@@ -410,6 +423,24 @@ async function serve(options: ServeOptions): Promise<void> {
         }),
         "provider.list": listProviderHandler({
           listProviders: (input) => listProviders({ storage, crypto }, input),
+        }),
+        "provider.loginStart": startProviderLoginHandler({
+          startProviderLogin: (input) =>
+            startProviderLogin(
+              { storage, providerAuth, ids, clock, instanceId },
+              input,
+            ),
+        }),
+        "provider.loginComplete": completeProviderLoginHandler({
+          completeProviderLogin: (input) =>
+            completeProviderLogin(
+              { storage, providerAuth, crypto, catalog, clock, instanceId },
+              input,
+            ),
+        }),
+        "provider.loginCancel": cancelProviderLoginHandler({
+          cancelProviderLogin: (input) =>
+            cancelProviderLogin({ storage, providerAuth }, input),
         }),
         "provider.show": showProviderHandler({
           showProvider: (input) => showProvider({ storage, crypto }, input),

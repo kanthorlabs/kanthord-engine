@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
+import {
+  builtinProviders,
+  getBuiltinProviders,
+} from "@earendil-works/pi-ai/providers/all";
+
 import { PiAiModelCatalog } from "./pi-ai.ts";
 import { ModelCatalogError } from "./index.ts";
 
@@ -25,8 +30,104 @@ describe("src/services/model-catalog/pi-ai", () => {
         name: "OpenAI Compatible API",
         baseUrl: null,
         requiresBaseUrl: true,
+        oauth: null,
         models: [],
       });
+    });
+
+    it("carries a non-null oauth member for every catalogued oauth vendor", () => {
+      const catalog = new PiAiModelCatalog();
+
+      assert.deepEqual(
+        catalog
+          .providers()
+          .filter((provider) => provider.oauth !== null)
+          .map((provider) => provider.id),
+        [
+          "anthropic",
+          "github-copilot",
+          "kimi-coding",
+          "openai-codex",
+          "openrouter",
+          "xai",
+        ],
+      );
+    });
+
+    it("radius is absent from the catalogue", () => {
+      const catalog = new PiAiModelCatalog();
+
+      assert.equal(
+        catalog.providers().some((provider) => provider.id === "radius"),
+        false,
+      );
+      assert.equal(catalog.has("radius"), false);
+      assert.equal(
+        getBuiltinProviders().some((provider: string) => provider === "radius"),
+        false,
+      );
+      assert.equal(
+        builtinProviders().some((provider) => provider.id === "radius"),
+        true,
+      );
+    });
+
+    it("carries a null oauth member for every other provider", () => {
+      const catalog = new PiAiModelCatalog();
+
+      for (const id of ["openai", "groq", "openai-compatible"]) {
+        const entry = catalog
+          .providers()
+          .find((provider) => provider.id === id);
+        assert.equal(entry?.oauth, null, id);
+      }
+    });
+
+    it("labels a vendor with no loginLabel by its oauth name", () => {
+      const entry = new PiAiModelCatalog()
+        .providers()
+        .find((provider) => provider.id === "anthropic");
+
+      assert.deepEqual(entry?.oauth, { label: "Anthropic (Claude Pro/Max)" });
+    });
+
+    it("labels a vendor with a loginLabel by that label", () => {
+      const providers = new PiAiModelCatalog().providers();
+
+      assert.deepEqual(
+        providers.find((provider) => provider.id === "xai")?.oauth,
+        { label: "Sign in with SuperGrok or X Premium" },
+      );
+      assert.deepEqual(
+        providers.find((provider) => provider.id === "openrouter")?.oauth,
+        { label: "Sign in with OpenRouter" },
+      );
+    });
+
+    it("reports only the label on the oauth member", () => {
+      const entries = new PiAiModelCatalog()
+        .providers()
+        .filter((provider) => provider.oauth !== null);
+
+      for (const entry of entries) {
+        assert.ok(entry.oauth !== undefined && entry.oauth !== null, entry.id);
+        assert.deepEqual(Object.keys(entry.oauth), ["label"], entry.id);
+      }
+    });
+
+    it("carries only the closed provider fields", () => {
+      const entry = new PiAiModelCatalog()
+        .providers()
+        .find((provider) => provider.id === "openai");
+
+      assert.deepEqual(Object.keys(entry ?? {}), [
+        "id",
+        "name",
+        "baseUrl",
+        "requiresBaseUrl",
+        "oauth",
+        "models",
+      ]);
     });
 
     it("carries openai with its own baseUrl and needs none", () => {

@@ -5,7 +5,7 @@ import { runDirectory, verifyRecordPath } from "../tag.ts";
 
 export const verifyRecordSchemaVersion = 1;
 
-export const verifyCommand: readonly string[] = ["npm", "run", "verify"];
+export const verifyCommand: readonly string[] = ["pnpm", "run", "verify"];
 
 export type VerifyRecord = Readonly<{
   schemaVersion: number;

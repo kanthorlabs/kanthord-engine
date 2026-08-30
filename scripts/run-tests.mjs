@@ -24,10 +24,12 @@ function must(command, argv) {
 const workDirectory = await mkdtemp(join(tmpdir(), "kanthord-test-binary-"));
 
 try {
-  must("npm", ["pack", "--pack-destination", workDirectory]);
+  must("pnpm", ["pack", "--pack-destination", workDirectory]);
 
   const { version } = JSON.parse(await readFile("package.json", "utf8"));
   const prefix = join(workDirectory, "prefix");
+  // npm installs the packed artifact the way a consumer would. It manages no
+  // dependency of this repository, so it does not follow the package manager.
   must("npm", [
     "install",
     "--global",

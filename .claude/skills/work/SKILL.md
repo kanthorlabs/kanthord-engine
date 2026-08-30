@@ -37,7 +37,7 @@ The canonical TDD cycle:
 **The ready marker has three preconditions, all of them mandatory.** The EPIC's `## Verification Gate` has **two** parts — `Gates:` and `Proof:` — and running only the `Gates:` is the single most common way this loop reports work that is not done:
 
 1. **Every `### Task` in every Story file is green** — not "the stories expanded so far". A partial implementation cannot satisfy a whole-epic Proof, so a marker emitted with stories outstanding is invalid.
-2. **The `Gates:` command runs green** (typically `npm run verify`).
+2. **The `Gates:` command runs green** (typically `pnpm run verify`).
 3. **The `Proof:` command has actually been run**, and its real output — including the string the EPIC says it must print — is pasted into the turn.
 
 A marker missing any of the three is premature: the orchestrator must **reject it** and dispatch the next engineer turn instead of advancing to Step 6. `Proof:` scripts live under `scripts/`, which every role may always **run** (see AGENTS.md); only the software-engineer may **modify** it, and never the three pipeline guards. "Lane-forbidden" is never a valid reason to skip the Proof.

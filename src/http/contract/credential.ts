@@ -12,9 +12,11 @@ import type { OperationExamples } from "./operation.ts";
 import {
   providerKinds,
   providerProjection,
-  llmPayload,
+  llmApiKeyPayload,
+  llmOauthRegisterPayload,
   gitPayload,
 } from "../../domain/provider-payload.ts";
+import { identity } from "../../domain/identity.ts";
 
 const providerBindingInUseDetails = z.strictObject({
   blockers: z
@@ -38,11 +40,16 @@ const providerBindingInUseDetails = z.strictObject({
     .min(1),
 });
 
+export const llmRegisterPayload = z.union([
+  llmApiKeyPayload,
+  llmOauthRegisterPayload,
+]);
+
 export const providerRegisterRequest = z.discriminatedUnion("kind", [
   z.strictObject({
     name: z.string().min(1),
     kind: z.literal("llm"),
-    payload: llmPayload,
+    payload: llmRegisterPayload,
   }),
   z.strictObject({
     name: z.string().min(1),
@@ -170,7 +177,12 @@ export const providerSetDefaultExamples: OperationExamples = {
     id: `provider_${U}`,
     name: "openai",
     kind: "llm",
-    projection: { provider: "openai", defaultModel: "gpt-4o", baseUrl: null },
+    projection: {
+      transport: "api-key",
+      provider: "openai",
+      defaultModel: "gpt-4o",
+      baseUrl: null,
+    },
     setDefaultAt: A,
     updatedAt: A,
     displaced: [{ id: `provider_${UB}`, name: "anthropic" }],
@@ -202,6 +214,47 @@ export const providerVerifyResponse = z.strictObject({
   detail: z.string().optional(),
 });
 
+export const providerLoginStartRequest = z.strictObject({
+  provider: z.string().min(1),
+  answers: z.record(z.string(), z.string()).optional(),
+});
+
+export const providerLoginManualChallenge = z.strictObject({
+  loginId: z.string(),
+  method: z.literal("manual-code"),
+  authUrl: z.string(),
+  instructions: z.string(),
+  expiresAt: z.number(),
+});
+
+export const providerLoginDeviceChallenge = z.strictObject({
+  loginId: z.string(),
+  method: z.literal("device-code"),
+  userCode: z.string(),
+  verificationUri: z.string(),
+  expiresAt: z.number(),
+  pollIntervalMs: z.number(),
+});
+
+export const providerLoginStartResponse = z.discriminatedUnion("method", [
+  providerLoginManualChallenge,
+  providerLoginDeviceChallenge,
+]);
+
+export const providerLoginCompleteRequest = z.strictObject({
+  loginId: identity("providerLogin"),
+  code: z.string().min(1).optional(),
+});
+
+export const providerLoginCompleteResponse = z.strictObject({
+  loginId: z.string(),
+  models: z.array(z.string()),
+});
+
+export const providerLoginCancelRequest = z.strictObject({
+  loginId: identity("providerLogin"),
+});
+
 export const providerVerifyExamples: OperationExamples = {
   success: {
     checkedAt: A,
@@ -218,6 +271,44 @@ export const providerVerifyExamples: OperationExamples = {
     },
   },
 };
+
+export const providerLoginStartExamples: OperationExamples = {
+  request: { provider: "openai-codex" },
+  success: {
+    loginId: `login_${U}`,
+    method: "device-code",
+    userCode: "ABCD-EFGH",
+    verificationUri: "https://auth.example.test/device",
+    expiresAt: A,
+    pollIntervalMs: 5000,
+  },
+  error: {
+    error: {
+      code: "invalid-request",
+      message: "the provider login method is unavailable",
+      details: { refusal: "login-method-unavailable" },
+    },
+  },
+};
+
+export const providerLoginCompleteExamples: OperationExamples = {
+  request: { loginId: `login_${U}`, code: "ABCD-EFGH" },
+  success: { loginId: `login_${U}`, models: ["gpt-5-codex"] },
+  error: {
+    error: {
+      code: "invalid-request",
+      message: `login login_${U} is still pending`,
+      details: { refusal: "login-pending" },
+    },
+  },
+};
+
+export const providerLoginCancelExamples = {
+  request: { loginId: `login_${U}` },
+  error: {
+    error: { code: "not-found", message: `no login login_${U}` },
+  },
+} as OperationExamples;
 
 const catalogModelCostRates = {
   input: z.number(),
@@ -251,11 +342,14 @@ export const catalogModel = z.strictObject({
   maxTokens: z.number(),
 });
 
+export const catalogOauth = z.strictObject({ label: z.string() });
+
 export const catalogProvider = z.strictObject({
   id: z.string(),
   name: z.string(),
   baseUrl: z.string().nullable(),
   requiresBaseUrl: z.boolean(),
+  oauth: catalogOauth.nullable(),
   models: z.array(catalogModel),
 });
 
@@ -299,6 +393,7 @@ export const providerCatalogExamples: OperationExamples = {
         name: "OpenAI",
         baseUrl: "https://api.openai.com/v1",
         requiresBaseUrl: false,
+        oauth: null,
         models: [catalogModel_example],
       },
       {
@@ -306,6 +401,7 @@ export const providerCatalogExamples: OperationExamples = {
         name: "OpenAI Compatible API",
         baseUrl: null,
         requiresBaseUrl: true,
+        oauth: null,
         models: [],
       },
     ],
@@ -377,6 +473,59 @@ export const credential = operations([
     examples: providerInspectExamples,
   },
   {
+    operationId: "provider.list",
+    method: "GET",
+    path: [resource("provider")],
+    introducedIn: "phase-1",
+    status: "routed",
+    allowedActors: ["human"],
+    response: providerListResponse,
+    errors: { ...baselineErrors },
+    examples: providerListExamples,
+  },
+  {
+    operationId: "provider.loginStart",
+    method: "POST",
+    path: [resource("provider"), sub("login")],
+    introducedIn: "phase-2",
+    status: "routed",
+    allowedActors: ["human"],
+    idempotency: "memory",
+    replayable: [200],
+    request: providerLoginStartRequest,
+    response: providerLoginStartResponse,
+    errors: { ...baselineErrors },
+    examples: providerLoginStartExamples,
+  },
+  {
+    operationId: "provider.loginComplete",
+    method: "POST",
+    path: [resource("provider"), sub("login"), action("complete")],
+    introducedIn: "phase-2",
+    status: "routed",
+    allowedActors: ["human"],
+    idempotency: "memory",
+    replayable: [200],
+    request: providerLoginCompleteRequest,
+    response: providerLoginCompleteResponse,
+    errors: { ...baselineErrors },
+    examples: providerLoginCompleteExamples,
+  },
+  {
+    operationId: "provider.loginCancel",
+    method: "POST",
+    path: [resource("provider"), sub("login"), action("cancel")],
+    introducedIn: "phase-2",
+    status: "routed",
+    allowedActors: ["human"],
+    idempotency: "memory",
+    replayable: [204],
+    successStatus: 204,
+    request: providerLoginCancelRequest,
+    errors: { ...baselineErrors },
+    examples: providerLoginCancelExamples,
+  },
+  {
     operationId: "provider.register",
     method: "POST",
     path: [resource("provider")],
@@ -389,17 +538,6 @@ export const credential = operations([
     response: providerRegisterResponse,
     errors: { ...baselineErrors },
     examples: providerRegisterExamples,
-  },
-  {
-    operationId: "provider.list",
-    method: "GET",
-    path: [resource("provider")],
-    introducedIn: "phase-1",
-    status: "routed",
-    allowedActors: ["human"],
-    response: providerListResponse,
-    errors: { ...baselineErrors },
-    examples: providerListExamples,
   },
   {
     operationId: "provider.show",

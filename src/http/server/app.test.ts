@@ -167,7 +167,7 @@ describe("src/http/server/app.test", () => {
     }
     requests.push({ method: "get", path: "/v1/nope" });
     requests.push({ method: "get", path: "/v1/" });
-    assert.equal(requests.length, 72);
+    assert.equal(requests.length, 75);
 
     const responses: Array<{ status: number; body: unknown }> = [];
     for (const { method, path } of requests) {
@@ -778,12 +778,12 @@ describe("src/http/server/app.test", () => {
     assert.equal(source.includes("clearTimeout"), true);
   });
 
-  it("binding system.health and system.db leaves forty-three unimplemented ids", () => {
+  it("binding system.health and system.db leaves forty-six unimplemented ids", () => {
     const bound = {
       "system.health": healthHandler,
       "system.db": statusHandler,
     };
-    assert.equal(unimplementedFor(bound).length, 43);
+    assert.equal(unimplementedFor(bound).length, 46);
   });
 
   it("createApp throws the exact binding error before reading settings, idempotency, now or schedule", () => {

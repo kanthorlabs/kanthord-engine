@@ -25,6 +25,7 @@ import { migration0006RevisionOrigin } from "./migration-0006-revision-origin.ts
 import { migration0007ExternalExecution } from "./migration-0007-external-execution.ts";
 import { migration0008GraphIndexes } from "./migration-0008-graph-indexes.ts";
 import { migration0009OneBranch } from "./migration-0009-one-branch.ts";
+import { migration0010ProviderLogin } from "./migration-0010-provider-login.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -500,7 +501,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     assert.ok(migrationDoc.includes("0003-execution-and-journal"));
   });
 
-  it("migrations holds exactly the nine migrations and versions map to 1, 2, 3, 4, 5, 6, 7, 8, 9", () => {
+  it("migrations holds exactly the ten migrations and versions map to 1 through 10", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
@@ -511,10 +512,11 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
       migration0007ExternalExecution,
       migration0008GraphIndexes,
       migration0009OneBranch,
+      migration0010ProviderLogin,
     ]);
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     );
   });
 
@@ -531,7 +533,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     assert.deepEqual(rows, []);
   });
 
-  it("the table inventory maps to the twenty names in order", () => {
+  it("the table inventory maps to the twenty-one names in order", () => {
     const { storage, temporary } = buildMigrated();
     after(() => storage.close());
     after(() => temporary.dispose());
@@ -561,6 +563,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
         "project",
         "project_binding",
         "provider",
+        "provider_login",
         "repository",
         "run",
         "workspace",
@@ -568,7 +571,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     );
   });
 
-  it("all nineteen product tables are STRICT", () => {
+  it("all twenty product tables are STRICT", () => {
     const { storage, temporary } = buildMigrated();
     after(() => storage.close());
     after(() => temporary.dispose());
@@ -590,6 +593,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
       "project",
       "project_binding",
       "provider",
+      "provider_login",
       "repository",
       "run",
       "workspace",
@@ -601,7 +605,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     }
   });
 
-  it("the index inventory is exactly run_one_active plus the event indexes and the graph indexes", () => {
+  it("the index inventory includes the provider login, run, event and graph indexes", () => {
     const { storage, temporary } = buildMigrated();
     after(() => storage.close());
     after(() => temporary.dispose());
@@ -619,6 +623,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
         "event_subject",
         "event_type",
         "node_project",
+        "provider_login_one_pending",
         "run_one_active",
       ],
     );

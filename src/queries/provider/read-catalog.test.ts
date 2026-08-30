@@ -32,6 +32,20 @@ describe("src/queries/provider/read-catalog", () => {
     assert.deepEqual(needing[0]?.models, []);
   });
 
+  it("passes the oauth member through unchanged", () => {
+    const result = readCatalog({ catalog: createFakeModelCatalog() });
+
+    assert.deepEqual(
+      result.providers.find((provider) => provider.id === "anthropic")?.oauth,
+      { label: "Anthropic (Claude Pro/Max)" },
+    );
+    assert.equal(
+      result.providers.find((provider) => provider.id === "openai-compatible")
+        ?.oauth,
+      null,
+    );
+  });
+
   it("carries the static model list of a built-in provider", () => {
     const result = readCatalog({ catalog: createFakeModelCatalog() });
 

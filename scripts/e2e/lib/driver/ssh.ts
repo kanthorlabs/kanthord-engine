@@ -100,7 +100,7 @@ export async function createSshDriver(
       memoizedTarball = (async () => {
         const destination = tmpdir();
         await ssh.execute(localTarget, [
-          "npm",
+          "pnpm",
           "pack",
           "--pack-destination",
           destination,

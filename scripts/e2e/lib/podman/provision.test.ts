@@ -126,33 +126,35 @@ function fakePodman(
   return Object.assign(executor, { calls });
 }
 
-function fakeNpm(): PodmanExecutor & { calls: (readonly string[])[] } {
+function fakePnpm(): PodmanExecutor & { calls: (readonly string[])[] } {
   const calls: (readonly string[])[] = [];
 
   const executor = async (argv: readonly string[]): Promise<CommandRecord> => {
     calls.push(argv);
 
-    if (argv[0] !== "npm") {
-      throw new Error(`unexpected non-npm argv: ${argv.join(" ")}`);
+    if (argv[0] !== "pnpm") {
+      throw new Error(`unexpected non-pnpm argv: ${argv.join(" ")}`);
     }
 
     if (argv[1] === "pack") {
       const destinationIndex = argv.indexOf("--pack-destination");
       const destination = argv[destinationIndex + 1];
       if (destination === undefined) {
-        throw new Error("npm pack missing --pack-destination");
+        throw new Error("pnpm pack missing --pack-destination");
       }
       mkdirSync(destination, { recursive: true });
       const filename = "kanthord-27.8.1.tgz";
-      writeFileSync(join(destination, filename), packedTarball);
-      return record(argv, `${filename}\n`);
+      const tarballPath = join(destination, filename);
+      writeFileSync(tarballPath, packedTarball);
+      // pnpm reports the absolute path, where npm reported a bare filename.
+      return record(argv, `${tarballPath}\n`);
     }
 
-    if (argv[1] === "ci") {
+    if (argv[1] === "install") {
       return record(argv, "");
     }
 
-    throw new Error(`unexpected npm argv: ${argv.join(" ")}`);
+    throw new Error(`unexpected pnpm argv: ${argv.join(" ")}`);
   };
 
   return Object.assign(executor, { calls });
@@ -173,10 +175,10 @@ test("baseImageReference matches the digest-qualified node:24-bookworm pin", () 
 
 test("a missing base image throws unavailable naming podman pull and the digest-qualified reference", async () => {
   const podman = fakePodman({ missingBaseImage: true });
-  const npm = fakeNpm();
+  const pnpm = fakePnpm();
 
   await assert.rejects(
-    provisionImages(podman, npm, runId),
+    provisionImages(podman, pnpm, runId),
     (error: unknown) => {
       assert.ok(error instanceof RunnerError);
       assert.equal(error.code, "unavailable");
@@ -187,11 +189,11 @@ test("a missing base image throws unavailable naming podman pull and the digest-
   );
 });
 
-test("provisionImages builds two images with --pull=never, --network none, their own --file, and the run label, resolves distinct inspected ids and digests, and routes npm only to the host executor", async () => {
+test("provisionImages builds two images with --pull=never, --network none, their own --file, and the run label, resolves distinct inspected ids and digests, and routes pnpm only to the host executor", async () => {
   const podman = fakePodman({});
-  const npm = fakeNpm();
+  const pnpm = fakePnpm();
 
-  const result = await provisionImages(podman, npm, runId);
+  const result = await provisionImages(podman, pnpm, runId);
 
   const buildCalls = podman.calls.filter((argv) => argv.includes("build"));
   assert.equal(buildCalls.length, 2);
@@ -239,20 +241,20 @@ test("provisionImages builds two images with --pull=never, --network none, their
     podman.calls.some((argv) => argv.includes("pull")),
     false,
   );
-  for (const argv of npm.calls) {
-    assert.equal(argv[0], "npm");
+  for (const argv of pnpm.calls) {
+    assert.equal(argv[0], "pnpm");
   }
   for (const argv of podman.calls) {
-    assert.notEqual(argv[0], "npm");
+    assert.notEqual(argv[0], "pnpm");
   }
 });
 
 test("provisionImages leaves no scratch directory behind once it resolves", async () => {
   const before = new Set(scratchEntries());
   const podman = fakePodman({});
-  const npm = fakeNpm();
+  const pnpm = fakePnpm();
 
-  await provisionImages(podman, npm, runId);
+  await provisionImages(podman, pnpm, runId);
 
   const after = scratchEntries().filter((name) => !before.has(name));
   assert.deepEqual(after, []);
@@ -261,9 +263,9 @@ test("provisionImages leaves no scratch directory behind once it resolves", asyn
 test("provisionImages leaves no scratch directory behind once it rejects", async () => {
   const before = new Set(scratchEntries());
   const podman = fakePodman({ missingBaseImage: true });
-  const npm = fakeNpm();
+  const pnpm = fakePnpm();
 
-  await assert.rejects(provisionImages(podman, npm, runId));
+  await assert.rejects(provisionImages(podman, pnpm, runId));
 
   const after = scratchEntries().filter((name) => !before.has(name));
   assert.deepEqual(after, []);

@@ -32,6 +32,7 @@ const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 
 type SchemaNode = {
   oneOf?: readonly SchemaNode[];
+  anyOf?: readonly SchemaNode[];
   properties?: Record<string, SchemaNode>;
   enum?: readonly string[];
   default?: unknown;
@@ -123,7 +124,7 @@ test("scripts/publish-contract", async (t) => {
       }
 
       const exampleFiles = readdirSync(join(directory, "examples"));
-      assert.equal(exampleFiles.length, 44);
+      assert.equal(exampleFiles.length, 47);
       const exampleIds = sortedBytewise(
         exampleFiles.map((name) => name.replace(/\.json$/, "")),
       );
@@ -206,7 +207,7 @@ test("scripts/publish-contract", async (t) => {
       );
 
       assert.equal(writtenFeatures.length, 19);
-      assert.equal(writtenExamples.length, 44);
+      assert.equal(writtenExamples.length, 47);
       assert.deepEqual(
         manifestFeatures.filter((entry) => !writtenFeatures.includes(entry)),
         [],
@@ -308,7 +309,13 @@ test("scripts/publish-contract", async (t) => {
       );
       const parsed = JSON.parse(raw) as Record<string, unknown>;
 
-      assert.doesNotThrow(() => entry.response!.parse(parsed.success));
+      const response = entry.response;
+      if (response === undefined) {
+        assert.equal(entry.operationId, "provider.loginCancel");
+        assert.equal(Object.hasOwn(parsed, "success"), false);
+      } else {
+        assert.doesNotThrow(() => response.parse(parsed.success));
+      }
       if (entry.request !== undefined) {
         assert.doesNotThrow(() => entry.request!.parse(parsed.request));
       }
@@ -334,19 +341,23 @@ test("scripts/publish-contract", async (t) => {
       assert.equal(branches.length, 2);
       assert.deepEqual(branches[0]!.properties!.kind!.enum, ["llm"]);
       assert.deepEqual(branches[1]!.properties!.kind!.enum, ["git"]);
-      assert.equal(branches[0]!.properties!.payload!.oneOf, undefined);
-      assert.equal(
-        branches[0]!.properties!.payload!.additionalProperties,
-        false,
-      );
-
-      const transports = branches[1]!.properties!.payload!.oneOf!;
-      assert.equal(transports.length, 2);
+      const llmTransports = branches[0]!.properties!.payload!.anyOf!;
+      assert.equal(llmTransports.length, 2);
       assert.deepEqual(
-        transports.map((branch) => branch.properties!.transport!.enum),
+        llmTransports.map((branch) => branch.properties!.transport!.enum),
+        [["api-key"], ["oauth"]],
+      );
+      for (const transport of llmTransports) {
+        assert.equal(transport.additionalProperties, false);
+      }
+
+      const gitTransports = branches[1]!.properties!.payload!.oneOf!;
+      assert.equal(gitTransports.length, 2);
+      assert.deepEqual(
+        gitTransports.map((branch) => branch.properties!.transport!.enum),
         [["http-basic"], ["ssh"]],
       );
-      for (const transport of transports) {
+      for (const transport of gitTransports) {
         assert.equal(transport.additionalProperties, false);
       }
     },

@@ -82,6 +82,7 @@ const TRANSFER_ULIDS = [
 ] as const;
 
 const llmProjection = {
+  transport: "api-key",
   provider: "anthropic",
   defaultModel: "claude-opus-5",
   baseUrl: null,

@@ -357,7 +357,7 @@ test("carries the event payload catalogue as thirty-seven external references", 
   >;
 
   assert.ok(Object.hasOwn(root, eventPayloadCatalogueKey));
-  assert.equal(Object.keys(catalogue).length, 37);
+  assert.equal(Object.keys(catalogue).length, 38);
   assert.deepEqual(Object.keys(catalogue), Object.keys(masterCatalogue));
   assert.ok(
     text.includes(
