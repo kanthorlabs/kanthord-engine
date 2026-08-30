@@ -14,6 +14,7 @@ One file per table. Every table file holds the question the table answers, its `
 | [`actor`](actor.md)                       | who may act, and is that principal still allowed to?                                                                                                            |
 | [`blob`](blob.md)                         | which exact immutable payload did another row cite — a prompt, a profile, a plan document, a diff, a tool trace, a check log, an evidence document or an error? |
 | [`provider`](provider.md)                 | which external accounts are registered, and what does each one need to connect?                                                                                 |
+| [`provider_login`](provider_login.md)     | which subscription sign-in is in flight, and what did the vendor issue?                                                                                         |
 | [`project`](project.md)                   | which worker kind and which end-to-end binding does work under this project inherit?                                                                            |
 | [`project_binding`](project_binding.md)   | which globally registered resources does this project use?                                                                                                      |
 | [`repository`](repository.md)             | where does this code live, which branch lands work, and is the repository safe to clone from right now?                                                         |

@@ -134,13 +134,13 @@ A path noun is public contract language. It is deliberately **not** tied to a ta
 
 After `/v1`, every literal segment is exactly one of five kinds.
 
-| Kind        | Meaning                                    | Examples                                                     |
-| ----------- | ------------------------------------------ | ------------------------------------------------------------ |
-| resource    | an addressable resource or its collection  | `repository`, `project`, `node`, `event`, `blob`, `provider` |
-| subresource | one value belonging to the preceding scope | `plan`, `profile`, `approval`, `default`                     |
-| action      | an operation on the preceding resource     | `inspect`, `rename`, `reconcile`, `import`, `publish`        |
-| system      | a non-resource daemon segment              | `health`, `db`, `status`                                     |
-| parameter   | a locator                                  | `:id`, `:hash`                                               |
+| Kind        | Meaning                                    | Examples                                                          |
+| ----------- | ------------------------------------------ | ----------------------------------------------------------------- |
+| resource    | an addressable resource or its collection  | `repository`, `project`, `node`, `event`, `blob`, `provider`      |
+| subresource | one value belonging to the preceding scope | `plan`, `profile`, `approval`, `default`, `login`                 |
+| action      | an operation on the preceding resource     | `inspect`, `rename`, `reconcile`, `import`, `publish`, `complete` |
+| system      | a non-resource daemon segment              | `health`, `db`, `status`                                          |
+| parameter   | a locator                                  | `:id`, `:hash`                                                    |
 
 A parameter is a minted prefixed id. `blob/:hash` is the one content-addressed exception, and it is the only one.
 
@@ -156,7 +156,7 @@ A closed vocabulary alone would prove spelling and nothing else — it would acc
 
 A query is `GET`. A command that creates a resource is `POST` on the resource. A command that acts on a resource is `POST /<resource>/:id/<action>`. A command that replaces a whole binding is `PUT`.
 
-**Every route answers `200` on success, a creating `POST` included.** No route declares `201`. The daemon has one human and one client, the response carries the created resource in full, and no route answers with a bare `Location` header — so a second success status would give a client nothing to branch on. `plan.import` makes the rule load-bearing rather than cosmetic: a retry of a committed `importId` returns the original revision, and that answer cannot be `201` because it created nothing. One success status keeps a retry and a first import indistinguishable, which is what idempotency means here.
+**Every route answers `200` on success, a creating `POST` included, except a command whose whole result is that the thing is gone: it answers `204` with no body, and `provider.loginCancel` is the only such route.** No route declares `201`. The daemon has one human and one client, the response carries the created resource in full, and no route answers with a bare `Location` header — so a second success status would give a client nothing to branch on. `plan.import` makes the rule load-bearing rather than cosmetic: a retry of a committed `importId` returns the original revision, and that answer cannot be `201` because it created nothing. One success status keeps a retry and a first import indistinguishable, which is what idempotency means here.
 
 `unblock`, `waive`, `abandon`, `discard`, `approve`, `publish`, `reconcile` and `rename` are actions, not resource states. None of them is spelled as a field update, because a state field that a client writes cannot express what the daemon must refuse.
 

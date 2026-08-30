@@ -6,7 +6,6 @@ import { registerProvider } from "../../../commands/provider/register-provider.t
 import { AesGcmCrypto } from "../../../services/crypto/aes-gcm.ts";
 import type {
   ProbeOutcome,
-  ProviderAuth,
   ProviderAuthRow,
 } from "../../../services/provider-auth/index.ts";
 import { SqliteEventLog } from "../../../services/event/sqlite.ts";
@@ -14,6 +13,7 @@ import { createMockClock } from "../../../../test/helpers/clock.ts";
 import { createMigratedStorage } from "../../../../test/helpers/database.ts";
 import { createMockIdGenerator } from "../../../../test/helpers/ids.ts";
 import { createFakeModelCatalog } from "../../../../test/helpers/model-catalog.ts";
+import { createFakeProviderAuth } from "../../../../test/helpers/provider-auth.ts";
 import { createTestApp } from "../../../../test/helpers/app.ts";
 import { VerifyProviderError } from "../../../queries/provider/verify-provider.ts";
 import {
@@ -154,12 +154,14 @@ describe("src/http/server/credential/verify-provider.test", () => {
       refusal: null,
     };
     const probes: ProviderAuthRow[] = [];
-    const providerAuth: ProviderAuth = {
+    const providerAuth = createFakeProviderAuth({
       async probe(row, _signal) {
         probes.push(row);
-        return row.apiKey === "sk-old-key" ? rejectedResult : rotatedResult;
+        return "apiKey" in row && row.apiKey === "sk-old-key"
+          ? rejectedResult
+          : rotatedResult;
       },
-    };
+    });
     const queryClock = createMockClock({ start: 1_700_000_000_000 });
     const app = await createTestApp({
       handlers: {
@@ -244,7 +246,7 @@ describe("src/http/server/credential/verify-provider.test", () => {
     assert.deepEqual(differentKey.body, keyless.body);
     assert.equal(probes.length, 3);
     assert.deepEqual(
-      probes.map((row) => row.apiKey),
+      probes.map((row) => ("apiKey" in row ? row.apiKey : undefined)),
       ["sk-old-key", "sk-rotated-key", "sk-rotated-key"],
     );
   });

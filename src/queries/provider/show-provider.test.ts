@@ -227,8 +227,9 @@ describe("src/queries/provider/show-provider.test", () => {
     }> = [
       {
         id: llmId,
-        keys: ["baseUrl", "defaultModel", "provider"],
+        keys: ["baseUrl", "defaultModel", "provider", "transport"],
         values: {
+          transport: "api-key",
           provider: "openai-compatible",
           defaultModel: "claude-opus-5",
           baseUrl: "https://example.invalid/v1",

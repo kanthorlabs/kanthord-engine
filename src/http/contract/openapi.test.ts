@@ -99,11 +99,11 @@ test("documents openapi 3.0.3 and the product info", () => {
   });
 });
 
-test("renders sixty-two distinct paths in bytewise order", () => {
+test("renders sixty-five distinct paths in bytewise order", () => {
   const document = buildOpenApiDocument();
   const paths = document.paths as Readonly<Record<string, unknown>>;
   const keys = Object.keys(paths);
-  assert.equal(keys.length, 62);
+  assert.equal(keys.length, 65);
   assert.deepEqual(keys, sortedBytewise(keys));
 });
 
@@ -140,7 +140,7 @@ test("orders methods within a path by the fixed sequence", () => {
 test("names every operation and matches the registry set", () => {
   const document = buildOpenApiDocument();
   const ids = operationObjects(document).map((entry) => entry.operationId);
-  assert.equal(ids.length, 70);
+  assert.equal(ids.length, 73);
   assert.deepEqual(
     sortedBytewise(ids),
     sortedBytewise(registry.map((entry) => entry.operationId)),
@@ -225,7 +225,10 @@ test("documents the routed success status from successStatus", () => {
     assert.deepEqual(Object.keys(responses), [expected, "default"]);
   }
   for (const entry of registry) {
-    if (entry.successStatus !== undefined) {
+    if (
+      entry.successStatus !== undefined &&
+      entry.operationId !== "provider.loginCancel"
+    ) {
       assert.equal(
         entry.successStatus,
         200,
@@ -334,6 +337,7 @@ test("registers every schema component in bytewise order", () => {
     "project.status.response",
     "provider.catalog.error",
     "provider.catalog.response",
+    "provider.credentialRefreshed",
     "provider.defaultSet",
     "provider.defaultUnset",
     "provider.inspect.error",
@@ -341,6 +345,14 @@ test("registers every schema component in bytewise order", () => {
     "provider.inspect.response",
     "provider.list.error",
     "provider.list.response",
+    "provider.loginCancel.error",
+    "provider.loginCancel.request",
+    "provider.loginComplete.error",
+    "provider.loginComplete.request",
+    "provider.loginComplete.response",
+    "provider.loginStart.error",
+    "provider.loginStart.request",
+    "provider.loginStart.response",
     "provider.register.error",
     "provider.register.request",
     "provider.register.response",
@@ -397,7 +409,7 @@ test("carries the event payload catalogue in bytewise key order", () => {
     sortedBytewise(Object.keys(eventPayloads)),
   );
   assert.deepEqual(Object.keys(catalogue), sortedBytewise([...eventTypes]));
-  assert.equal(Object.keys(catalogue).length, 37);
+  assert.equal(Object.keys(catalogue).length, 38);
 });
 
 test("resolves every catalogue entry to a component of the same document", () => {
@@ -457,7 +469,7 @@ test("the master holds exactly the transitive closure of its own references", ()
     sortedBytewise([...reachableSchemaNames(document)]),
     sortedBytewise(Object.keys(schemas)),
   );
-  assert.equal(Object.keys(schemas).length, 144);
+  assert.equal(Object.keys(schemas).length, 153);
   for (const type of Object.keys(eventPayloads)) {
     assert.equal(Object.hasOwn(schemas, type), true, `${type} was pruned`);
   }
@@ -581,13 +593,14 @@ test("every phase-1 routed operation but blob.show refers to a response componen
   }
 });
 
-test("every routed operation resolves to a non-empty response body", () => {
+test("every routed operation except cancellation resolves to a non-empty response body", () => {
   const document = buildOpenApiDocument();
   for (const entry of operationObjects(document)) {
     const registered = registry.find(
       (row) => row.operationId === entry.operationId,
     );
     if (registered?.status !== "routed") continue;
+    if (registered.operationId === "provider.loginCancel") continue;
     const responses = entry.operation.responses as Readonly<
       Record<string, unknown>
     >;

@@ -35,6 +35,7 @@ export const defaultCatalogProviders: readonly CatalogProvider[] = [
     name: "Anthropic",
     baseUrl: "https://api.anthropic.com",
     requiresBaseUrl: false,
+    oauth: { label: "Anthropic (Claude Pro/Max)" },
     models: [
       catalogModel("claude-opus-5", {
         api: "anthropic-messages",
@@ -49,6 +50,7 @@ export const defaultCatalogProviders: readonly CatalogProvider[] = [
     name: "OpenAI",
     baseUrl: "https://api.openai.com/v1",
     requiresBaseUrl: false,
+    oauth: null,
     models: [catalogModel("gpt-4o")],
   },
   {
@@ -56,6 +58,7 @@ export const defaultCatalogProviders: readonly CatalogProvider[] = [
     name: "OpenAI Compatible API",
     baseUrl: null,
     requiresBaseUrl: true,
+    oauth: null,
     models: [],
   },
 ];

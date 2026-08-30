@@ -1,10 +1,14 @@
-import { llmPayload } from "../../domain/provider-payload.ts";
+import {
+  deserializePayload,
+  type LlmPayload,
+} from "../../domain/provider-payload.ts";
 import type { Clock } from "../../services/clock/index.ts";
 import type { Crypto } from "../../services/crypto/index.ts";
 import {
   ProviderAuthError,
   type ProbeOutcome,
   type ProviderAuth,
+  type ProviderAuthRow,
 } from "../../services/provider-auth/index.ts";
 import type { Storage } from "../../services/storage/index.ts";
 
@@ -63,12 +67,7 @@ const columns = [
 function readProviderAuthRow(
   dependencies: VerifyProviderDependencies,
   input: VerifyProviderInput,
-): Readonly<{
-  vendorId: string;
-  apiKey: string;
-  defaultModel: string;
-  baseUrl: string | null;
-}> {
+): ProviderAuthRow {
   return dependencies.storage.transact((transaction) => {
     const row = transaction.get(
       `SELECT ${columns.join(", ")} FROM provider WHERE id = ?`,
@@ -102,9 +101,21 @@ function readProviderAuthRow(
     }
 
     try {
-      const payload = llmPayload.parse(JSON.parse(text));
+      const payload = deserializePayload("llm", text) as LlmPayload;
+      if (payload.transport === "oauth") {
+        return {
+          providerId: provider.id,
+          vendorId: payload.provider,
+          defaultModel: payload.defaultModel,
+          baseUrl: null,
+          transport: "oauth",
+          credential: payload.credential,
+        };
+      }
       return {
+        providerId: provider.id,
         vendorId: payload.provider,
+        transport: "api-key",
         apiKey: payload.apiKey,
         defaultModel: payload.defaultModel,
         baseUrl: payload.baseUrl,

@@ -15,6 +15,7 @@ import { profileRow } from "./profile.ts";
 import { projectRow } from "./project.ts";
 import { projectBindingRow } from "./project-binding.ts";
 import { providerRow } from "./provider.ts";
+import { providerLoginRow } from "./provider-login.ts";
 import { repositoryRow } from "./repository.ts";
 import { runRow } from "./run.ts";
 import { workspaceRow } from "./workspace.ts";
@@ -37,6 +38,7 @@ export const rows = {
   project: projectRow,
   project_binding: projectBindingRow,
   provider: providerRow,
+  provider_login: providerLoginRow,
   repository: repositoryRow,
   run: runRow,
   workspace: workspaceRow,

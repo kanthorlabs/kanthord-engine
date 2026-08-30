@@ -34,11 +34,14 @@ function staticProviders(): readonly CatalogProvider[] {
   );
   const providers = getBuiltinProviders().map((id) => {
     const provider = named.get(id);
+    const oauth = provider?.auth.oauth;
     return {
       id,
       name: provider?.name ?? id,
       baseUrl: provider?.baseUrl ?? null,
       requiresBaseUrl: false,
+      oauth:
+        oauth === undefined ? null : { label: oauth.loginLabel ?? oauth.name },
       models: getBuiltinModels(id).map((model) =>
         toCatalogModel(model as unknown as CatalogModel),
       ),
@@ -51,6 +54,7 @@ function staticProviders(): readonly CatalogProvider[] {
       name: "OpenAI Compatible API",
       baseUrl: null,
       requiresBaseUrl: true,
+      oauth: null,
       models: [],
     },
   ].sort((left, right) =>

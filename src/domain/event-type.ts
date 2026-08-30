@@ -21,6 +21,7 @@ export const eventTypes = [
   "plan.imported",
   "project.created",
   "project.repositoriesReplaced",
+  "provider.credentialRefreshed",
   "provider.defaultSet",
   "provider.defaultUnset",
   "provider.registered",

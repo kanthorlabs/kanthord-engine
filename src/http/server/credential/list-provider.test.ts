@@ -23,6 +23,7 @@ const items: readonly ProviderListItem[] = [
     name: "anthropic-bot",
     kind: "llm",
     projection: {
+      transport: "api-key",
       provider: "anthropic",
       defaultModel: "claude-opus-5",
       baseUrl: null,

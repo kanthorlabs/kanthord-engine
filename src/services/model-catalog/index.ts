@@ -29,11 +29,14 @@ export type CatalogModel = Readonly<{
   maxTokens: number;
 }>;
 
+export type CatalogOauth = Readonly<{ label: string }>;
+
 export type CatalogProvider = Readonly<{
   id: string;
   name: string;
   baseUrl: string | null;
   requiresBaseUrl: boolean;
+  oauth: CatalogOauth | null;
   models: readonly CatalogModel[];
 }>;
 

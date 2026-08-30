@@ -14,6 +14,7 @@ import type { Clock } from "../../services/clock/index.ts";
 import type { EventLog } from "../../services/event/index.ts";
 import {
   PayloadError,
+  llmOauthRegisterPayload,
   parsePayload,
   serializePayload,
 } from "../../domain/provider-payload.ts";
@@ -24,13 +25,19 @@ import {
 import type {
   RegisterProviderDependencies,
   RegisterProviderInput,
+  RegisterProviderRefusal,
 } from "./register-provider.ts";
 import type { ProviderView } from "../../domain/provider-view.ts";
 import { createMigratedStorage } from "../../../test/helpers/database.ts";
+import { tableBytes } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
 import { resolveTools } from "../../../test/helpers/remote/tools.ts";
-import { createFakeModelCatalog } from "../../../test/helpers/model-catalog.ts";
+import {
+  catalogModel,
+  createFakeModelCatalog,
+} from "../../../test/helpers/model-catalog.ts";
+import type { ModelCatalog } from "../../services/model-catalog/index.ts";
 
 type ProviderRowReadback = Readonly<{
   id: string;
@@ -54,6 +61,20 @@ type EventRowReadback = Readonly<{
   payload_json: string;
 }>;
 
+type ProviderLoginRowReadback = Readonly<{
+  id: string;
+  provider: string;
+  method: string;
+  state: string;
+  instance_id: string;
+  payload_ciphertext: Uint8Array | null;
+  payload_iv: Uint8Array | null;
+  payload_tag: Uint8Array | null;
+  key_version: number | null;
+  created_at: number;
+  expires_at: number;
+}>;
+
 const gitHttpBasicInput = {
   transport: "http-basic",
   forge: "github",
@@ -70,7 +91,27 @@ const llmInput = {
 
 const PROVIDER_ULID = "01HZY8QF3M4N5P6R7S8T9V0W1X";
 const EVENT_ULID = "01HZY8QF3M4N5P6R7S8T9V0W1Y";
+const SECOND_EVENT_ULID = "01HZY8QF3M4N5P6R7S8T9V0W1Z";
+const SECOND_PROVIDER_ULID = "01HZY8QF3M4N5P6R7S8T0W20";
+const THIRD_PROVIDER_ULID = "01HZY8QF3M4N5P6R7S8T0W21";
+const THIRD_EVENT_ULID = "01HZY8QF3M4N5P6R7S8T0W22";
 const providerId = `provider_${PROVIDER_ULID}`;
+const LOGIN_ULID = "01HZY8QF3M4N5P6R7S8T0W23AB";
+const LOGIN_ID = `login_${LOGIN_ULID}`;
+const NOW = 1_700_000_000_000;
+const LOGIN_EXPIRES_AT = NOW + 600_000;
+const OAUTH_CREDENTIAL: Readonly<Record<string, unknown>> = {
+  type: "oauth",
+  access: "oauth-access-token",
+  refresh: "oauth-refresh-token",
+  expires: LOGIN_EXPIRES_AT,
+};
+const OAUTH_DEFAULT_MODEL = "gpt-5-codex";
+const OAUTH_INPUT = {
+  transport: "oauth",
+  loginId: LOGIN_ID,
+  defaultModel: OAUTH_DEFAULT_MODEL,
+} as const;
 
 function generateKey(file: string, passphrase: string): string {
   execFileSync(
@@ -109,6 +150,7 @@ describe("src/commands/provider/register-provider.test", () => {
     storage: Storage,
     ids: IdGenerator,
     clock: Clock,
+    catalog: ModelCatalog = createFakeModelCatalog(),
   ): RegisterProviderDependencies {
     return {
       storage,
@@ -116,11 +158,14 @@ describe("src/commands/provider/register-provider.test", () => {
       ids,
       clock,
       events: new SqliteEventLog({ storage, ids }),
-      catalog: createFakeModelCatalog(),
+      catalog,
     };
   }
 
-  function countRows(storage: Storage, table: "provider" | "event"): number {
+  function countRows(
+    storage: Storage,
+    table: "provider" | "provider_login" | "event",
+  ): number {
     const row = storage.transact((transaction) =>
       transaction.get(`SELECT COUNT(*) AS c FROM ${table}`),
     ) as { c: number };
@@ -142,6 +187,134 @@ describe("src/commands/provider/register-provider.test", () => {
         "SELECT id, subject_kind, subject_id, type, actor_kind, actor_id, payload_json FROM event",
       ),
     ) as readonly EventRowReadback[];
+  }
+
+  function readLogin(
+    storage: Storage,
+    id = LOGIN_ID,
+  ): ProviderLoginRowReadback | undefined {
+    return storage.transact((transaction) =>
+      transaction.get(
+        "SELECT id, provider, method, state, instance_id, payload_ciphertext, payload_iv, payload_tag, key_version, created_at, expires_at FROM provider_login WHERE id = ?",
+        [id],
+      ),
+    ) as ProviderLoginRowReadback | undefined;
+  }
+
+  function insertPendingLogin(
+    storage: Storage,
+    input: Readonly<{
+      id?: string;
+      provider?: string;
+      method?: "manual-code" | "device-code";
+      instanceId?: string;
+      createdAt?: number;
+      expiresAt?: number;
+    }> = {},
+  ): void {
+    storage.transact((transaction) =>
+      transaction.run(
+        "INSERT INTO provider_login (id, provider, method, state, instance_id, payload_ciphertext, payload_iv, payload_tag, key_version, created_at, expires_at) VALUES (?, ?, ?, 'pending', ?, NULL, NULL, NULL, NULL, ?, ?)",
+        [
+          input.id ?? LOGIN_ID,
+          input.provider ?? "openai-codex",
+          input.method ?? "device-code",
+          input.instanceId ?? "daemon_current",
+          input.createdAt ?? NOW,
+          input.expiresAt ?? LOGIN_EXPIRES_AT,
+        ],
+      ),
+    );
+  }
+
+  function insertCompletedLogin(
+    storage: Storage,
+    input: Readonly<{
+      id?: string;
+      provider?: string;
+      method?: "manual-code" | "device-code";
+      instanceId?: string;
+      createdAt?: number;
+      expiresAt?: number;
+      credential?: Readonly<Record<string, unknown>>;
+      models?: readonly string[];
+    }> = {},
+  ): void {
+    const credential = input.credential ?? OAUTH_CREDENTIAL;
+    const models = input.models ?? [OAUTH_DEFAULT_MODEL];
+    const sealed = crypto.seal(JSON.stringify({ credential, models }));
+    storage.transact((transaction) =>
+      transaction.run(
+        "INSERT INTO provider_login (id, provider, method, state, instance_id, payload_ciphertext, payload_iv, payload_tag, key_version, created_at, expires_at) VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?)",
+        [
+          input.id ?? LOGIN_ID,
+          input.provider ?? "openai-codex",
+          input.method ?? "device-code",
+          input.instanceId ?? "daemon_current",
+          sealed.ciphertext,
+          sealed.iv,
+          sealed.tag,
+          sealed.keyVersion,
+          input.createdAt ?? NOW,
+          input.expiresAt ?? LOGIN_EXPIRES_AT,
+        ],
+      ),
+    );
+  }
+
+  function insertExistingProvider(
+    storage: Storage,
+    name = "seed-provider",
+    id = "provider_seed",
+  ): void {
+    const sealed = crypto.seal("{}");
+    storage.transact((transaction) =>
+      transaction.run(
+        "INSERT INTO provider (id, name, kind, set_default_at, payload_ciphertext, payload_iv, payload_tag, key_version, updated_at) VALUES (?, ?, 'llm', NULL, ?, ?, ?, ?, ?)",
+        [
+          id,
+          name,
+          sealed.ciphertext,
+          sealed.iv,
+          sealed.tag,
+          sealed.keyVersion,
+          NOW,
+        ],
+      ),
+    );
+  }
+
+  function oauthCatalog(
+    modelIds: readonly string[] = [OAUTH_DEFAULT_MODEL],
+  ): ModelCatalog {
+    return createFakeModelCatalog({
+      providers: [
+        {
+          id: "openai-codex",
+          name: "OpenAI Codex",
+          baseUrl: null,
+          requiresBaseUrl: false,
+          oauth: { label: "OpenAI (ChatGPT Plus/Pro)" },
+          models: modelIds.map((id) =>
+            catalogModel(id, {
+              provider: "openai-codex",
+              baseUrl: "https://api.openai.com/v1",
+            }),
+          ),
+        },
+      ],
+    });
+  }
+
+  function assertRegisterRefusal(
+    operation: () => unknown,
+    refusal: RegisterProviderRefusal,
+  ): void {
+    assert.throws(
+      operation,
+      (error: unknown) =>
+        error instanceof RegisterProviderError && error.refusal === refusal,
+    );
   }
 
   it("a git http-basic registration inserts one row with the canonical ciphertext", (t) => {
@@ -236,6 +409,7 @@ describe("src/commands/provider/register-provider.test", () => {
     });
     assert.equal(view.kind, "llm");
     assert.deepEqual(view.projection, {
+      transport: "api-key",
       provider: "anthropic",
       defaultModel: "claude-opus-5",
       baseUrl: null,
@@ -720,6 +894,7 @@ describe("src/commands/provider/register-provider.test", () => {
       );
 
       assert.deepEqual(view.projection, {
+        transport: "api-key",
         provider: "openai-compatible",
         defaultModel: "claude-opus-5",
         baseUrl: "http://localhost:11434/v1",
@@ -746,5 +921,408 @@ describe("src/commands/provider/register-provider.test", () => {
       assert.equal(view.kind, "git");
       assert.equal(countRows(temporary.storage, "provider"), 1);
     });
+  });
+
+  it("registers from a completed login and consumes the row", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    insertCompletedLogin(temporary.storage);
+    const ids = createMockIdGenerator({
+      ulids: [PROVIDER_ULID, EVENT_ULID, SECOND_EVENT_ULID],
+    });
+    const clock = createMockClock({ start: NOW, step: 1000 });
+
+    const view = registerProvider(
+      dependencies(temporary.storage, ids, clock, oauthCatalog()),
+      {
+        name: "codex-bot",
+        kind: "llm",
+        payload: OAUTH_INPUT,
+        actor: "ulrich",
+      },
+    );
+
+    assert.equal(llmOauthRegisterPayload.safeParse(OAUTH_INPUT).success, true);
+    assert.deepEqual(view, {
+      id: providerId,
+      name: "codex-bot",
+      kind: "llm",
+      projection: {
+        transport: "oauth",
+        provider: "openai-codex",
+        defaultModel: OAUTH_DEFAULT_MODEL,
+      },
+      setDefaultAt: NOW,
+      updatedAt: NOW,
+    });
+    assert.equal(countRows(temporary.storage, "provider"), 1);
+    assert.equal(countRows(temporary.storage, "provider_login"), 0);
+  });
+
+  it("stores the credential encrypted and nowhere in plaintext", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const credential = {
+      ...OAUTH_CREDENTIAL,
+      access: "access-fixture-token",
+      refresh: "refresh-fixture-token",
+    };
+    insertCompletedLogin(temporary.storage, { credential });
+    const ids = createMockIdGenerator({
+      ulids: [PROVIDER_ULID, EVENT_ULID, SECOND_EVENT_ULID],
+    });
+
+    const view = registerProvider(
+      dependencies(
+        temporary.storage,
+        ids,
+        createMockClock({ start: NOW }),
+        oauthCatalog(),
+      ),
+      {
+        name: "codex-bot",
+        kind: "llm",
+        payload: OAUTH_INPUT,
+        actor: "ulrich",
+      },
+    );
+    const row = readProvider(temporary.storage, providerId);
+    const ciphertext = Buffer.from(row.payload_ciphertext).toString("latin1");
+    assert.equal(ciphertext.includes("access-fixture-token"), false);
+    assert.equal(ciphertext.includes("refresh-fixture-token"), false);
+    assert.equal(JSON.stringify(view).includes("access-fixture-token"), false);
+    assert.equal(JSON.stringify(view).includes("refresh-fixture-token"), false);
+    assert.deepEqual(
+      JSON.parse(
+        crypto.open({
+          ciphertext: row.payload_ciphertext,
+          iv: row.payload_iv,
+          tag: row.payload_tag,
+          keyVersion: row.key_version,
+        }),
+      ),
+      {
+        transport: "oauth",
+        provider: "openai-codex",
+        credential,
+        defaultModel: OAUTH_DEFAULT_MODEL,
+      },
+    );
+  });
+
+  it("refuses login-not-found for an unknown loginId and writes nothing", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    const ids = createMockIdGenerator({ ulids: [PROVIDER_ULID] });
+
+    assertRegisterRefusal(
+      () =>
+        registerProvider(
+          dependencies(
+            temporary.storage,
+            ids,
+            createMockClock({ start: NOW }),
+            oauthCatalog(),
+          ),
+          {
+            name: "codex-bot",
+            kind: "llm",
+            payload: OAUTH_INPUT,
+            actor: "ulrich",
+          },
+        ),
+      "login-not-found",
+    );
+    assert.equal(countRows(temporary.storage, "provider"), 0);
+  });
+
+  it("refuses login-not-completed for a pending login and leaves the login row", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    insertPendingLogin(temporary.storage);
+    const ids = createMockIdGenerator({ ulids: [PROVIDER_ULID] });
+
+    assertRegisterRefusal(
+      () =>
+        registerProvider(
+          dependencies(
+            temporary.storage,
+            ids,
+            createMockClock({ start: NOW }),
+            oauthCatalog(),
+          ),
+          {
+            name: "codex-bot",
+            kind: "llm",
+            payload: OAUTH_INPUT,
+            actor: "ulrich",
+          },
+        ),
+      "login-not-completed",
+    );
+    assert.equal(countRows(temporary.storage, "provider"), 0);
+    assert.equal(readLogin(temporary.storage)?.state, "pending");
+  });
+
+  it("refuses default-model-unknown when the model is not in the stored list", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    insertCompletedLogin(temporary.storage, { models: ["other-model"] });
+    const before = tableBytes(temporary.storage, "provider_login");
+    const ids = createMockIdGenerator({ ulids: [PROVIDER_ULID] });
+
+    assertRegisterRefusal(
+      () =>
+        registerProvider(
+          dependencies(
+            temporary.storage,
+            ids,
+            createMockClock({ start: NOW }),
+            oauthCatalog(),
+          ),
+          {
+            name: "codex-bot",
+            kind: "llm",
+            payload: OAUTH_INPUT,
+            actor: "ulrich",
+          },
+        ),
+      "default-model-unknown",
+    );
+    assert.equal(countRows(temporary.storage, "provider"), 0);
+    assert.equal(
+      tableBytes(temporary.storage, "provider_login").equals(before),
+      true,
+    );
+  });
+
+  it("rolls the delete back when the insert fails", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    insertExistingProvider(temporary.storage, "codex-bot");
+    insertCompletedLogin(temporary.storage);
+    const ids = createMockIdGenerator({ ulids: [PROVIDER_ULID] });
+
+    assertRegisterRefusal(
+      () =>
+        registerProvider(
+          dependencies(
+            temporary.storage,
+            ids,
+            createMockClock({ start: NOW }),
+            oauthCatalog(),
+          ),
+          {
+            name: "codex-bot",
+            kind: "llm",
+            payload: OAUTH_INPUT,
+            actor: "ulrich",
+          },
+        ),
+      "name-taken",
+    );
+    assert.equal(countRows(temporary.storage, "provider"), 1);
+    assert.equal(countRows(temporary.storage, "provider_login"), 1);
+    assert.equal(readLogin(temporary.storage)?.state, "completed");
+  });
+
+  it("registers on a completed login whose stored instance is not the running one", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    insertCompletedLogin(temporary.storage, { instanceId: "daemon_previous" });
+    const ids = createMockIdGenerator({
+      ulids: [PROVIDER_ULID, EVENT_ULID, SECOND_EVENT_ULID],
+    });
+
+    const view = registerProvider(
+      dependencies(
+        temporary.storage,
+        ids,
+        createMockClock({ start: NOW }),
+        oauthCatalog(),
+      ),
+      {
+        name: "codex-bot",
+        kind: "llm",
+        payload: OAUTH_INPUT,
+        actor: "ulrich",
+      },
+    );
+
+    assert.deepEqual(view.projection, {
+      transport: "oauth",
+      provider: "openai-codex",
+      defaultModel: OAUTH_DEFAULT_MODEL,
+    });
+    assert.equal(countRows(temporary.storage, "provider"), 1);
+    assert.equal(countRows(temporary.storage, "provider_login"), 0);
+  });
+
+  it("replaying a consumed loginId refuses login-not-found and writes no second row", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    insertCompletedLogin(temporary.storage);
+    const ids = createMockIdGenerator({
+      ulids: [
+        PROVIDER_ULID,
+        EVENT_ULID,
+        SECOND_EVENT_ULID,
+        SECOND_PROVIDER_ULID,
+      ],
+    });
+    const deps = dependencies(
+      temporary.storage,
+      ids,
+      createMockClock({ start: NOW }),
+      oauthCatalog(),
+    );
+
+    registerProvider(deps, {
+      name: "codex-bot",
+      kind: "llm",
+      payload: OAUTH_INPUT,
+      actor: "ulrich",
+    });
+    assertRegisterRefusal(
+      () =>
+        registerProvider(deps, {
+          name: "second-codex-bot",
+          kind: "llm",
+          payload: OAUTH_INPUT,
+          actor: "ulrich",
+        }),
+      "login-not-found",
+    );
+    assert.equal(countRows(temporary.storage, "provider"), 1);
+    assert.equal(countRows(temporary.storage, "provider_login"), 0);
+  });
+
+  it("stamps the first llm registration by the oauth arm as the default", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    insertCompletedLogin(temporary.storage);
+    const ids = createMockIdGenerator({
+      ulids: [PROVIDER_ULID, EVENT_ULID, SECOND_EVENT_ULID],
+    });
+
+    registerProvider(
+      dependencies(
+        temporary.storage,
+        ids,
+        createMockClock({ start: NOW }),
+        oauthCatalog(),
+      ),
+      {
+        name: "codex-bot",
+        kind: "llm",
+        payload: OAUTH_INPUT,
+        actor: "ulrich",
+      },
+    );
+
+    assert.equal(
+      readProvider(temporary.storage, providerId).set_default_at,
+      NOW,
+    );
+    const events = [...readEvents(temporary.storage)].sort((a, b) =>
+      Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)),
+    );
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["provider.registered", "provider.defaultSet"],
+    );
+    assert.deepEqual(
+      events.map((event) => event.subject_id),
+      [providerId, providerId],
+    );
+  });
+
+  it("appends no new event type", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    insertCompletedLogin(temporary.storage);
+    const ids = createMockIdGenerator({
+      ulids: [PROVIDER_ULID, EVENT_ULID, SECOND_EVENT_ULID],
+    });
+
+    registerProvider(
+      dependencies(
+        temporary.storage,
+        ids,
+        createMockClock({ start: NOW }),
+        oauthCatalog(),
+      ),
+      {
+        name: "codex-bot",
+        kind: "llm",
+        payload: OAUTH_INPUT,
+        actor: "ulrich",
+      },
+    );
+
+    assert.deepEqual(
+      readEvents(temporary.storage).map((event) => event.type),
+      ["provider.registered", "provider.defaultSet"],
+    );
+  });
+
+  it("an absent transport and an explicit api-key transport produce deep-equal results", (t) => {
+    const temporary = createMigratedStorage();
+    t.after(() => temporary.dispose());
+    insertExistingProvider(temporary.storage);
+    const ids = createMockIdGenerator({
+      ulids: [
+        PROVIDER_ULID,
+        EVENT_ULID,
+        SECOND_PROVIDER_ULID,
+        SECOND_EVENT_ULID,
+      ],
+    });
+    const deps = dependencies(
+      temporary.storage,
+      ids,
+      createMockClock({ start: NOW, step: 1000 }),
+    );
+
+    const absent = registerProvider(deps, {
+      name: "absent-transport",
+      kind: "llm",
+      payload: llmInput,
+      actor: "ulrich",
+    });
+    const explicit = registerProvider(deps, {
+      name: "explicit-transport",
+      kind: "llm",
+      payload: { ...llmInput, transport: "api-key" },
+      actor: "ulrich",
+    });
+
+    const comparable = (view: ProviderView): ProviderView => ({
+      ...view,
+      id: "provider_same",
+      name: "same-name",
+      updatedAt: NOW,
+    });
+    assert.deepEqual(comparable(absent), comparable(explicit));
+
+    const absentRow = readProvider(temporary.storage, absent.id);
+    const explicitRow = readProvider(temporary.storage, explicit.id);
+    const expected =
+      '{"provider":"anthropic","apiKey":"sk-ant-x","defaultModel":"claude-opus-5","baseUrl":null}';
+    const absentPlaintext = crypto.open({
+      ciphertext: absentRow.payload_ciphertext,
+      iv: absentRow.payload_iv,
+      tag: absentRow.payload_tag,
+      keyVersion: absentRow.key_version,
+    });
+    const explicitPlaintext = crypto.open({
+      ciphertext: explicitRow.payload_ciphertext,
+      iv: explicitRow.payload_iv,
+      tag: explicitRow.payload_tag,
+      keyVersion: explicitRow.key_version,
+    });
+    assert.equal(absentPlaintext, expected);
+    assert.equal(explicitPlaintext, expected);
+    assert.equal(absentPlaintext, explicitPlaintext);
   });
 });
