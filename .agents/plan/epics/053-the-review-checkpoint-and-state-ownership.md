@@ -46,7 +46,7 @@ A verdict is evidence, and the pair selects who owns a node state:
 
 - **An atomic objective reaches `awaiting_approval` whatever the projection, and this supersedes the `discarded` branch of `objectiveOutcome`.** `worker.md` section 6 states an objective reaches a terminal state when a human closes it. `src/domain/outcome.ts:26` returns `discarded` for a `discarded` projection, which lets a worker report put an objective in a terminal state directly. That branch is removed. The projection is carried on the checkpoint as evidence, and the human reads it before closing.
 
-- **A run against an initiative leaves the initiative `pending` or `ready`.** `worker.md` section 6 states a research worker finishes a run against an initiative and the initiative does not move. The accepted checkpoint is recorded and the node state is unchanged. An author worker then claims the same initiative and expands it.
+- **A run against an initiative leaves the initiative `pending` or `ready`.** An initiative's only legal deliverable is `expansion`, per the pair table of EPIC 047, so its run kind is `structural`, per `runKindFor` in EPIC 050. `worker.md` section 6 states a run never sets an initiative's terminal state. The accepted checkpoint is recorded and the node state is unchanged. The initiative then moves only through `ancestorRecomputation` over the children that structural run created. `worker.md` section 6 describes this as a research worker followed by an author worker; `research` is deferred out of the deliverable enum by EPIC 047, and `(initiative, research)` was an illegal pair in that table regardless, so the run this epic asserts is the structural one.
 
 - **A terminal state is `done`, `partial` or `discarded`, and `awaiting_approval` is not one.** `src/domain/state.ts:23` already fixes that tuple. The recomputation reads it, so a parent objective that reaches `awaiting_approval` is not a terminal child and its own parent does not move.
 
@@ -74,7 +74,7 @@ A verdict is evidence, and the pair selects who owns a node state:
 
 5. **`objectiveOutcome` loses its `discarded` branch.** Change `src/domain/outcome.ts:26` so an atomic objective's accepted checkpoint gives `awaiting_approval` for every projection. Update `src/domain/outcome.test.ts`, replacing the `discarded` case with one asserting `awaiting_approval`, and add a comment-free case asserting the projection is still carried on the checkpoint row.
 
-6. **An initiative run does not move the initiative.** Add cases to `src/commands/outcome/report-outcome.test.ts` asserting a `research` run accepted against an initiative writes the checkpoint and leaves `node.state` unchanged, run once from `pending` and once from `ready`.
+6. **An initiative run does not move the initiative.** Add cases to `src/commands/outcome/report-outcome.test.ts` asserting a `structural` run accepted against an initiative — the only run an initiative can take, because `(initiative, expansion)` is its only legal pair — writes the checkpoint and leaves `node.state` unchanged, run once from `pending` and once from `ready`.
 
 7. **The recomputation.** Wire `ancestorRecomputation` into `src/commands/outcome/report-outcome.ts`, applying its transitions and events inside the existing transaction. Add cases against one named fixture — an initiative holding one objective holding three tasks — asserting: the third task reaching `done` moves the task and the objective to `awaiting_approval` and leaves the initiative unchanged, for a total of two transitions and two events; two tasks `done` and one `discarded` gives the objective `partial` through aggregation and still stops; every task `discarded` gives the objective `discarded` and then moves the initiative, for three transitions; one task still `running` moves nothing; and a failure injected mid-walk leaves every state and every event absent.
 
@@ -110,7 +110,7 @@ Hermetic coverage required beyond the Proof:
 - An execution checkpoint row carrying `verdict` is refused by the named CHECK `checkpoint_execution_no_verdict`, asserted by message.
 - `applyReport` is asserted for every row of the transition table, including `task-not-partial` and `state-owner-aggregate` refusals by code.
 - An atomic objective reporting a `discarded` projection reaches `awaiting_approval`, not `discarded`. The projection is asserted present on the checkpoint row. This is the assertion that supersedes the shipped `objectiveOutcome` branch.
-- A `research` run accepted against an initiative leaves `node.state` unchanged, run once from `pending` and once from `ready`.
+- A `structural` run accepted against an initiative leaves `node.state` unchanged, run once from `pending` and once from `ready`. No case uses a `research` run: `research` is not in the deliverable enum, and `(initiative, research)` is not a legal pair.
 - The three-task fixture is named and its initial states are stated. The `done` case asserts exactly two transitions and two events, and the initiative state unchanged. The all-`discarded` case asserts exactly three transitions and three events.
 - A parent holding one `running` child moves nothing. The parent state and the event count are both asserted unchanged.
 - A failure injected mid-walk leaves every ancestor state and every event absent, proving the walk and the report are one transaction.

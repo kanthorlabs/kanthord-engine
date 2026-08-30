@@ -24,7 +24,7 @@ A claim opens exactly one run, and a fence guards every later write:
 
 ## Decisions
 
-- **The node deliverable selects the run kind, and the worker metadata does not.** `runKindFor(deliverable)` in `src/domain/run-kind.ts` maps `expansion` to `structural`; `test`, `implementation` and `research` to `execution`; `review` to `review`. `worker.md` section 5 states this table. The function is total over the five deliverables, so no default branch exists.
+- **The node deliverable selects the run kind, and the worker metadata does not.** `runKindFor(deliverable)` in `src/domain/run-kind.ts` maps `expansion` to `structural`; `test` and `implementation` to `execution`; `review` to `review`. `worker.md` section 5 states this table, and it lists `research` under `execution`; EPIC 047 defers `research` out of the deliverable enum, so the function has no row for it. The function is total over the four deliverables, so no default branch exists. The epic that restores `research` adds its `execution` row.
 
 - **Migration `12` is additive, per `worker.md` section 13.** It widens the `run.kind` CHECK to admit five values — the two shipped and the three new — and it drops nothing. Step 3 of section 13 deploys the writers, step 8 enforces. A migration that dropped `base_oid` and `lease_fence` here would reverse the document's own compatibility strategy, and every in-flight external-drive client would fail at once.
 
