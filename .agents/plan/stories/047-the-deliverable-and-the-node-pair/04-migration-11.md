@@ -77,6 +77,54 @@ Edit `src/services/storage/migrations.ts`:
 - Migration version is exactly `11`.
 - `schema-parity.test.ts` passes unchanged — it does not reference `deliverable`, `verify_json`, or `assignment`.
 
+## Tasks
+
+### Task 04 — Cover migration 11
+
+**Input:** `src/services/storage/migration-0011-deliverable.test.ts`,
+`src/services/storage/migration-0011-deliverable.ts`, `src/services/storage/migrations.ts`
+
+**Action — RED:** Two parts. Write both before you hand the Task over.
+
+Part A — create `src/services/storage/migration-0011-deliverable.test.ts` holding the seven
+steps named under `## Verify`, in that order. The test file is the required Proof target.
+The Proof command names it, so no other lane can supply it.
+
+Part B — repair the migration-count fixtures that registering version 11 makes stale. Each
+one asserts the exact registry, so each one must name eleven migrations with
+`migration0011Deliverable` last:
+
+- `src/services/storage/migration-0001-core-entities.test.ts:209` — `migrations holds the ten declared migrations in order`
+- `src/services/storage/migration-0002-graph-and-plan.test.ts:248` — `migrations holds the ten declared migrations in order`
+- `src/services/storage/migration-0003-execution-and-journal.test.ts:504` — `migrations holds exactly the ten migrations and versions map to 1 through 10`
+- `src/services/storage/migration-0004-event-indexes.test.ts:35` — `migrations holds ten entries, versions 1 to 10 in order`
+- `src/services/storage/migration-0006-revision-origin.test.ts:176` — `migrations holds ten entries, versions 1 to 10 with the ten names in order`
+- `src/services/storage/migration-0008-graph-indexes.test.ts:176` — `migrations holds the ten declared migrations in order`
+- `src/services/storage/migration-0009-one-branch.test.ts:215` — `migrations holds exactly ten migrations with migration0010ProviderLogin last`
+- `src/services/storage/migration-0010-provider-login.test.ts:152` — `migrations holds exactly ten migrations with migration0010ProviderLogin last`
+
+Rename each `it(...)` title to state eleven, and to name `migration0011Deliverable` where
+the old title named `migration0010ProviderLogin`. A title that states a count and a count
+that no longer matches is a defect on its own.
+
+`src/services/storage/migration-0006-revision-origin.test.ts:199` — `the rebuild applies on
+a version-5 database and copies every row` — asserts the exact `node` DDL text after every
+migration applies. Update that expected string to the post-migration-11 DDL. Three changes
+land in it, and all three are consequences of step 5 of `## Change`:
+
+- The table name is quoted as `"node"`, because `ALTER TABLE … RENAME TO` writes the stored
+  DDL with the identifier quoted.
+- `deliverable TEXT`, `verify_json TEXT` and `assignment TEXT` follow `updated_at`.
+- The four added CHECK clauses follow the existing CHECK clauses, in the `## Change` order.
+
+Take the expected string from `## Change`, not from a test run. Do not paste an actual value
+a failing run printed — that asserts what the code does rather than what the Story requires.
+
+**Action — GREEN:** Create `src/services/storage/migration-0011-deliverable.ts` and register
+it in `src/services/storage/migrations.ts`, exactly as `## Change` names both.
+
+**Action — REFACTOR:** None.
+
 ## Verify
 
 ```bash
@@ -103,8 +151,8 @@ Test steps in this order:
 4. Read each of the three seeded rows. Assert every original column of every row is unchanged, field by field via `assert.strictEqual`. Assert `deliverable`, `verify_json`, `assignment` are all `null` for every row.
 
 5. **Domain/SQLite parity proof.** Import `nodePairLegality` from `src/domain/node-pair.ts` and `nodeKinds` from `src/domain/state.ts` and `deliverables` from `src/domain/deliverable.ts`. Build two sets:
-   - `domainLegal`: iterate all 15 `(kind, deliverable)` pairs via `nodeKinds × deliverables`; collect pairs where `nodePairLegality(kind, deliverable).legal === true` as strings `"${kind}:${deliverable}"`.
-   - `sqliteLegal`: for each of the 15 pairs, attempt to insert a node row with that `(kind, deliverable)` into the migrated database (using raw SQL with `PRAGMA foreign_keys = OFF`); collect pairs where the insert succeeds.
+   - `domainLegal`: iterate all 12 `(kind, deliverable)` pairs via `nodeKinds × deliverables`; collect pairs where `nodePairLegality(kind, deliverable).legal === true` as strings `"${kind}:${deliverable}"`.
+   - `sqliteLegal`: for each of the 12 pairs, attempt to insert a node row with that `(kind, deliverable)` into the migrated database (using raw SQL with `PRAGMA foreign_keys = OFF`); collect pairs where the insert succeeds.
    - Assert `domainLegal` deep-equals `sqliteLegal` via `assert.deepStrictEqual` after sorting both arrays with `.sort()`.
 
 6. Attempt to insert a node with `verify_json = '{'`. Assert the insert throws with a SQLite constraint error.
@@ -113,4 +161,4 @@ Test steps in this order:
 
 Test framework: `node:test` and `node:assert/strict`. Uses real SQLite via helpers.
 
-Proof: PASS EPIC-047 line for `src/services/storage/migration-0011-deliverable.test.ts`; hermetic coverage — migration applied to a pre-seeded database, existing rows unchanged with three new columns null, domain and SQLite legal sets deep-equal across all 15 pairs, `json_valid` CHECK refuses malformed JSON, pair-illegal refusal error names the CHECK.
+Proof: PASS EPIC-047 line for `src/services/storage/migration-0011-deliverable.test.ts`; hermetic coverage — migration applied to a pre-seeded database, existing rows unchanged with three new columns null, domain and SQLite legal sets deep-equal across all 12 pairs, `json_valid` CHECK refuses malformed JSON, pair-illegal refusal error names the CHECK.

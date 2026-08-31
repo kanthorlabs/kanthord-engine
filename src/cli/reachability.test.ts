@@ -94,6 +94,8 @@ const node = {
   instruction: "",
   acceptance: "",
   worker: null,
+  deliverable: null,
+  verify: null,
   repositoryId: REPOSITORY_ID,
   repo: "atlas",
   revision: REVISION_ID,

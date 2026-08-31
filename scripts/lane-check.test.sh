@@ -32,6 +32,14 @@ allow software-engineer scripts/proof.sh
 deny software-engineer src/services/git/url.test.ts
 deny software-engineer src/domain/plan.spec.ts
 
+allow test-engineer test/helpers/daemon.ts
+allow test-engineer test/helpers/fixture.json
+allow test-engineer test/fixtures/plan/objective.md
+allow test-engineer test/e2e/fixtures/two-objective/plan/journey/initiative.md
+deny software-engineer test/helpers/daemon.ts
+deny software-engineer test/fixtures/plan/objective.md
+deny reviewer-engineer test/fixtures/plan/objective.md
+
 allow software-engineer docs/proposal/api/README.md
 allow software-engineer docs/proposal/phase-1/state-machine.md
 deny test-engineer docs/proposal/phase-1/state-machine.md

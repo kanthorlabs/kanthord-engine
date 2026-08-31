@@ -74,7 +74,7 @@ describe("src/queries/project/show-project-graph.test", () => {
     assert.ok(result.edges.length >= 0);
   });
 
-  it("nodes carry the seven declared attributes in bytewise key order", (t) => {
+  it("nodes carry the nine declared attributes in bytewise key order", (t) => {
     const { storage, plan, graph, dispose } = build();
     t.after(() => dispose());
     storage.transact((transaction) => {
@@ -89,18 +89,121 @@ describe("src/queries/project/show-project-graph.test", () => {
 
     const attrKeys = [
       "blockReason",
+      "deliverable",
       "discardReason",
       "kind",
       "parentId",
       "repositoryId",
       "state",
       "title",
+      "verify",
     ];
     for (const node of result.nodes) {
       assert.deepEqual(Object.keys(node.attributes).sort(), attrKeys);
     }
     const nodeKeys = result.nodes.map((n: { key: string }) => n.key);
     assert.deepEqual(nodeKeys, [...nodeKeys].sort());
+  });
+
+  it("a graph node with a deliverable and verify JSON publishes both parsed fields", (t) => {
+    const { storage, plan, graph, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      transaction.run(
+        "UPDATE node SET deliverable = ?, verify_json = ? WHERE id = ?",
+        [
+          "expansion",
+          JSON.stringify({
+            paths: ["/docs/plan.md"],
+            commands: ["pnpm run verify"],
+          }),
+          fixtureIds.objective,
+        ],
+      );
+    });
+
+    const result = showProjectGraph(
+      { storage, plan, graph },
+      { projectId: fixtureIds.project },
+    );
+    const node = result.nodes.find(
+      (candidate) => candidate.key === fixtureIds.objective,
+    );
+
+    assert.ok(node);
+    assert.equal(node.attributes.deliverable, "expansion");
+    assert.deepEqual(node.attributes.verify, {
+      paths: ["/docs/plan.md"],
+      commands: ["pnpm run verify"],
+    });
+  });
+
+  it("a graph node without deliverable or verify JSON publishes null fields", (t) => {
+    const { storage, plan, graph, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+    });
+
+    const result = showProjectGraph(
+      { storage, plan, graph },
+      { projectId: fixtureIds.project },
+    );
+    const node = result.nodes.find(
+      (candidate) => candidate.key === fixtureIds.task,
+    );
+
+    assert.ok(node);
+    assert.equal(node.attributes.deliverable, null);
+    assert.equal(node.attributes.verify, null);
+  });
+
+  it("a graph node with malformed verify JSON throws verify-json-malformed with the node id", (t) => {
+    const { storage, plan, graph, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+    });
+
+    const invalidPlan = new Proxy(plan, {
+      get(target, property) {
+        if (property === "readGraph") {
+          return (transaction: Transaction, projectId: string) => {
+            const result = plan.readGraph(transaction, projectId);
+            return {
+              ...result,
+              nodes: result.nodes.map((node) =>
+                node.id === fixtureIds.task
+                  ? { ...node, verifyJson: "{" }
+                  : node,
+              ),
+            };
+          };
+        }
+        return Reflect.get(target, property, target);
+      },
+    });
+
+    assert.throws(
+      () =>
+        showProjectGraph(
+          { storage, plan: invalidPlan, graph },
+          { projectId: fixtureIds.project },
+        ),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal(
+          (error as { code?: unknown }).code,
+          "verify-json-malformed",
+        );
+        assert.equal((error as { nodeId?: unknown }).nodeId, fixtureIds.task);
+        return true;
+      },
+    );
   });
 
   it("edges carry relation depends-on and waivedAt with source as fromNode and target as toNode", (t) => {

@@ -8,6 +8,8 @@ import {
   nodeDeleteResponse,
   nodeUpdateRequest,
   nodeUpdateResponse,
+  nodeAttributes,
+  nodeShowResponse,
   planChoiceEntry,
   planChoiceValues,
   planImportRequest,
@@ -52,6 +54,16 @@ const choiceEntry = {
   path: "initiative/atlas.md",
   submitted: { legal: true, reason: null, values: { title: "a" } },
   database: { legal: true, reason: null, values: { title: "b" } },
+};
+
+const nodeAttributesBase = {
+  kind: "task",
+  title: "add the health route",
+  state: "ready",
+  blockReason: null,
+  discardReason: null,
+  parentId: "objective_a",
+  repositoryId: null,
 };
 
 describe("src/http/contract/graph.test", () => {
@@ -396,6 +408,76 @@ describe("src/http/contract/graph.test", () => {
       }).success,
       false,
     );
+  });
+
+  it("nodeAttributes accepts a deliverable and a verify block", () => {
+    assert.equal(
+      nodeAttributes.safeParse({
+        ...nodeAttributesBase,
+        deliverable: "test",
+        verify: { paths: ["/a/b.ts"], commands: ["npm test"] },
+      }).success,
+      true,
+    );
+  });
+
+  it("nodeAttributes accepts null deliverable and verify fields", () => {
+    assert.equal(
+      nodeAttributes.safeParse({
+        ...nodeAttributesBase,
+        deliverable: null,
+        verify: null,
+      }).success,
+      true,
+    );
+  });
+
+  it("nodeAttributes refuses an invalid deliverable", () => {
+    assert.equal(
+      nodeAttributes.safeParse({
+        ...nodeAttributesBase,
+        deliverable: "invalid",
+        verify: null,
+      }).success,
+      false,
+    );
+  });
+
+  it("nodeShowResponse accepts nullable deliverable and verify fields", () => {
+    const base = {
+      id: "task_a",
+      projectId: "project_a",
+      kind: "task",
+      title: "add the health route",
+      state: "ready",
+      blockReason: null,
+      discardReason: null,
+      parentId: "objective_a",
+      dependencies: [],
+      instructionBlob: `sha256:${"a".repeat(64)}`,
+      acceptanceBlob: null,
+      instruction: "Build the route.\n",
+      acceptance: null,
+      worker: null,
+      repositoryId: null,
+      repo: null,
+      revision: "revision_a",
+      updatedAt: 1,
+      attestedObjectId: null,
+      projection: null,
+    };
+    for (const fields of [
+      { deliverable: null, verify: null },
+      {
+        deliverable: "review",
+        verify: { paths: ["/a/b.ts"], commands: ["npm test"] },
+      },
+    ]) {
+      assert.equal(
+        nodeShowResponse.safeParse({ ...base, ...fields }).success,
+        true,
+      );
+    }
   });
 
   it("planChoiceEntry accepts an entry whose branches carry values and a path", () => {

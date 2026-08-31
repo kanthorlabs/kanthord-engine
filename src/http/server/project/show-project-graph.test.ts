@@ -13,7 +13,8 @@ import {
 import { showProjectGraphHandler } from "./show-project-graph.ts";
 import { showProjectGraph } from "../../../queries/project/show-project-graph.ts";
 import { projectGraphResponse } from "../../contract/graph.ts";
-import type { Storage } from "../../../services/storage/index.ts";
+import type { Storage, Transaction } from "../../../services/storage/index.ts";
+import type { PlanStore } from "../../../services/plan/index.ts";
 import { createPlanStore } from "../../../../test/helpers/plan.ts";
 import { createGraphService } from "../../../../test/helpers/graph.ts";
 import { tableRows, dataVersion } from "../../../../test/helpers/database.ts";
@@ -51,10 +52,9 @@ function snapshotRelevantTables(storage: Storage): Buffer {
 }
 
 describe("src/http/server/project/show-project-graph.test", () => {
-  async function buildHandlerApp() {
+  async function buildHandlerApp(plan: PlanStore = createPlanStore()) {
     const temporary = createMigratedStorage();
     const storage = temporary.storage;
-    const plan = createPlanStore();
     const graph = createGraphService();
     storage.transact((transaction) => {
       seedRegistry(transaction);
@@ -106,12 +106,14 @@ describe("src/http/server/project/show-project-graph.test", () => {
     assert.equal(response.body.nodes[3].key, "task_b");
     const expectedBytewiseKeys = [
       "blockReason",
+      "deliverable",
       "discardReason",
       "kind",
       "parentId",
       "repositoryId",
       "state",
       "title",
+      "verify",
     ];
     for (const node of response.body.nodes) {
       assert.deepEqual(Object.keys(node.attributes), expectedBytewiseKeys);
@@ -139,6 +141,38 @@ describe("src/http/server/project/show-project-graph.test", () => {
 
     assert.equal(response.status, 404);
     assert.equal(response.body.error.code, "not-found");
+  });
+
+  it("GET /v1/project/:id/graph with malformed verify JSON answers 500 naming the node id", async (t) => {
+    const basePlan = createPlanStore();
+    const invalidPlan = new Proxy(basePlan, {
+      get(target, property) {
+        if (property === "readGraph") {
+          return (transaction: Transaction, projectId: string) => {
+            const result = basePlan.readGraph(transaction, projectId);
+            return {
+              ...result,
+              nodes: result.nodes.map((node) =>
+                node.id === fixtureIds.task
+                  ? { ...node, verifyJson: "{" }
+                  : node,
+              ),
+            };
+          };
+        }
+        return Reflect.get(target, property, target);
+      },
+    });
+    const { temporary, app } = await buildHandlerApp(invalidPlan);
+    t.after(() => temporary.dispose());
+
+    const response = await app.get(`/v1/project/${fixtureIds.project}/graph`);
+
+    assert.equal(response.status, 500);
+    assert.deepEqual(response.body.error, {
+      code: "internal-error",
+      message: fixtureIds.task,
+    });
   });
 
   it("GET /v1/project/:id/graph leaves every row count unchanged", async (t) => {
@@ -214,12 +248,14 @@ describe("src/http/server/project/show-project-graph.test", () => {
 
     const expectedBytewiseKeys = [
       "blockReason",
+      "deliverable",
       "discardReason",
       "kind",
       "parentId",
       "repositoryId",
       "state",
       "title",
+      "verify",
     ];
     for (const node of nodes) {
       assert.deepEqual(Object.keys(node.attributes), expectedBytewiseKeys);

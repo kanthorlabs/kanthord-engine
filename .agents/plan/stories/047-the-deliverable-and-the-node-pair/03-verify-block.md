@@ -32,7 +32,7 @@ export function parseVerifyBlock(text: string): VerifyBlock;
 
 `z.strictObject` — a third key causes a parse failure rather than silent strip.
 
-`paths` accepts a relative path and an absolute path alike. It is validated element-by-element with a `.superRefine` or `.refine` that refuses only a structurally invalid value:
+`paths` accepts absolute paths only. It is validated element-by-element with a `.superRefine` or `.refine` that refuses relative paths and structurally invalid values:
 
 - An empty string.
 - An element that holds a NUL byte (`\0`).
@@ -72,6 +72,29 @@ Imports: `zod` for the schema, `comparePaths` from `src/domain/plan-path.ts`. No
 - `renderVerifyBlock` preserves `commands` order verbatim.
 - `paths` sorting is always performed inside `renderVerifyBlock`, never by the caller.
 
+## Tasks
+
+### Task 03 — Cover the verify block
+
+**Input:** `src/domain/verify-block.test.ts`, `src/domain/verify-block.ts`
+
+**Action — RED:** Create `src/domain/verify-block.test.ts`. Write every assertion named
+under `## Verify` — items 1 to 7, 7b to 7g, and 8 to 12. Import `verifyBlock`,
+`VerifyBlockError`, `renderVerifyBlock` and `parseVerifyBlock` from `./verify-block.ts`.
+
+Assert every thrown error through its `code` property. Never assert a message string.
+
+The test file is the required Proof target. The Proof command names
+`src/domain/verify-block.test.ts`, so no other lane can supply it.
+
+Two first-run results are valid, as in Task 01. State which one happened. Do not raise
+`ATTEMPT-FAILED:` for a first-run pass.
+
+**Action — GREEN:** Create `src/domain/verify-block.ts` exactly as `## Change` names it.
+When the file already satisfies every assertion, record a no-op turn.
+
+**Action — REFACTOR:** None.
+
 ## Verify
 
 ```bash
@@ -85,13 +108,13 @@ Create `src/domain/verify-block.test.ts` with:
 3. Non-ASCII path sorting: `renderVerifyBlock` with `paths: ["ñ/f.ts", "a/f.ts"]` places `"a/f.ts"` first and `"ñ/f.ts"` second. Assert by constructing the expected sorted array via `[...paths].sort((l, r) => Buffer.compare(Buffer.from(l, "utf8"), Buffer.from(r, "utf8")))` and comparing the `paths` field of the parsed output — `comparePaths` and Buffer bytewise agree for valid UTF-8.
 4. `renderVerifyBlock({ paths: ["a", "a"], commands: [] })` throws `VerifyBlockError` with `code: "verify-json-malformed"` — assert by error `code` property.
 
-   Wait — actually the EPIC says `renderVerifyBlock` refuses a duplicate path by throwing. `VerifyBlockError` carries `code: "verify-json-malformed"`. Assert: `assert.throws(() => renderVerifyBlock({ paths: ["a", "a"], commands: [] }), (e) => e instanceof VerifyBlockError && e.code === "verify-json-malformed")`.
+   `assert.throws(() => renderVerifyBlock({ paths: ["a", "a"], commands: [] }), (e) => e instanceof VerifyBlockError && e.code === "verify-json-malformed")`.
 
 5. `commands` order preserved: `renderVerifyBlock({ paths: [], commands: ["b", "a", "b"] })` parsed back gives `commands: ["b", "a", "b"]` with both entries and in that order.
 6. `verifyBlock.safeParse({ paths: [], commands: [], extra: 1 }).success` is `false` — third key refused, not stripped.
 7. `verifyBlock.safeParse({ paths: ["/abs/src/foo.ts"], commands: [] })` returns `success: true` — an absolute path is accepted. Assert `result.success === true` and `result.data.paths` deep-equals `["/abs/src/foo.ts"]`.
 
-7b. `verifyBlock.safeParse({ paths: ["src/foo.ts"], commands: [] })` returns `success: true` — a relative path is accepted.
+7b. `verifyBlock.safeParse({ paths: ["src/foo.ts"], commands: [] })` returns `success: false` with issue path `["paths", 0]` — a relative path is refused.
 
 7c. `verifyBlock.safeParse({ paths: [""], commands: [] })` returns `success: false` AND the first issue's path is `["paths", 0]` — an empty string is refused. Assert both `.success === false` and `result.error.issues[0].path` deep-equals `["paths", 0]`.
 
@@ -107,4 +130,4 @@ All assertions on thrown errors check the `code` property, not the message strin
 
 Test framework: `node:test` and `node:assert/strict`. No SQLite, no I/O.
 
-Proof: PASS EPIC-047 line for `src/domain/verify-block.test.ts`; hermetic coverage — empty block byte-exact, non-ASCII sort asserted via Buffer.compare, duplicate path refused, commands order preserved, third key refused, absolute and relative paths accepted, empty/NUL/backslash/empty-segment/dot/dot-dot/trailing-slash paths refused, parseVerifyBlock refuses invalid JSON and missing key by error code.
+Proof: PASS EPIC-047 line for `src/domain/verify-block.test.ts`; hermetic coverage — empty block byte-exact, non-ASCII sort asserted via Buffer.compare, duplicate path refused, commands order preserved, third key refused, absolute paths accepted, relative paths refused, empty/NUL/backslash/empty-segment/dot/dot-dot/trailing-slash paths refused, parseVerifyBlock refuses invalid JSON and missing key by error code.

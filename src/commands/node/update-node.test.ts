@@ -5,6 +5,7 @@ import { updateNode } from "./update-node.ts";
 import type { UpdateNodeInput, UpdateNodeResult } from "./update-node.ts";
 import { NodeWriteError } from "./refusal.ts";
 import { canonicalDocumentsJson } from "../../domain/plan-hash.ts";
+import { nodeUpdateRequest } from "../../http/contract/graph.ts";
 import type { ActorRow } from "../../domain/actor.ts";
 import type { NodeState } from "../../domain/state.ts";
 import { nodeStates } from "../../domain/state.ts";
@@ -455,6 +456,40 @@ function staleRefusal(
 }
 
 describe("src/commands/node/update-node.test", () => {
+  it("refuses deliverable as an unrecognized node update field", () => {
+    const result = nodeUpdateRequest.safeParse({
+      fromRevision: "01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
+      node: {
+        kind: "task",
+        title: "a task",
+        parentId: "obj_01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
+        instruction: "do the thing",
+        acceptance: "it is done",
+        worker: null,
+        dependsOn: [],
+        deliverable: "test",
+      },
+    });
+    assert.strictEqual(result.success, false);
+    assert.deepStrictEqual(result.error?.issues[0]?.code, "unrecognized_keys");
+    assert.deepStrictEqual(result.error?.issues[0]?.path, ["node"]);
+    assert.strictEqual(
+      nodeUpdateRequest.safeParse({
+        fromRevision: "01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
+        node: {
+          kind: "task",
+          title: "a task",
+          parentId: "obj_01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
+          instruction: "do the thing",
+          acceptance: "it is done",
+          worker: null,
+          dependsOn: [],
+        },
+      }).success,
+      true,
+    );
+  });
+
   it("refuses a reparent whose new ancestor chain holds a terminal node", (t) => {
     const fixture = build(
       (storage, plan, blobs) => {

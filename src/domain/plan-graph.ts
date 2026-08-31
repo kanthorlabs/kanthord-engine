@@ -15,6 +15,8 @@ export type StoredNode = Readonly<{
   discardReason: string | null;
   revision: string;
   updatedAt: number;
+  deliverable: string | null;
+  verifyJson: string | null;
   dependencies: readonly string[];
 }>;
 

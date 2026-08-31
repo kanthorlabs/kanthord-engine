@@ -9,7 +9,7 @@ import type {
 } from "./plan-graph.ts";
 
 describe("src/domain/plan-graph.test", () => {
-  it("StoredNode carries exactly its fifteen members", () => {
+  it("StoredNode carries exactly its seventeen members", () => {
     const node: StoredNode = {
       id: "task_a",
       projectId: "project_a",
@@ -25,11 +25,14 @@ describe("src/domain/plan-graph.test", () => {
       discardReason: null,
       revision: "revision_a",
       updatedAt: 1,
+      deliverable: null,
+      verifyJson: null,
       dependencies: [],
     };
     assert.deepEqual(Object.keys(node).sort(), [
       "acceptanceBlob",
       "blockReason",
+      "deliverable",
       "dependencies",
       "discardReason",
       "id",
@@ -42,6 +45,7 @@ describe("src/domain/plan-graph.test", () => {
       "state",
       "title",
       "updatedAt",
+      "verifyJson",
       "worker",
     ]);
   });

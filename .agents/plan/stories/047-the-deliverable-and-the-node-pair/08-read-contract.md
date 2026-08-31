@@ -123,6 +123,71 @@ The existing example literals for `nodeAttributes` and `nodeShowResponse` need `
 - A malformed `verify_json` row surfaces as a thrown `VerifyBlockError` (code `"verify-json-malformed"`), not as `null`.
 - `assignment` does not appear in any schema, type, or mapping in this story.
 
+## Tasks
+
+### Task 08 — Cover the published read contract
+
+**Input:** `src/queries/node/show-node.test.ts`,
+`src/queries/project/show-project-graph.test.ts`, `src/http/contract/graph.test.ts`,
+`src/http/server/node/claim-node.test.ts`, `src/http/server/node/release-node.test.ts`,
+`src/http/server/project/show-project-graph.test.ts`, `src/cli/node/claim.test.ts`,
+`src/cli/node/delete.test.ts`, `src/cli/node/release.test.ts`, `src/cli/node/show.test.ts`,
+`src/cli/node/unblock.test.ts`, `src/cli/node/update.test.ts`,
+`src/cli/project/graph.test.ts`, `src/cli/reachability.test.ts`,
+`src/commands/startup/recover-expired-leases.test.ts`, plus every production file
+`## Change` names, and `src/http/contract/field-decisions.fixture.ts`
+
+**Action — RED:** Two parts. Write both before you hand the Task over.
+
+Part A — add the ten cases named under `## Verify` to the three Proof targets
+`src/queries/node/show-node.test.ts`, `src/queries/project/show-project-graph.test.ts` and
+`src/http/contract/graph.test.ts`.
+
+Part B — repair the fixtures that publishing the two fields makes stale. A node object that
+any of these tests builds or asserts now carries `deliverable` and `verify`. Both are
+required members, and `null` is the value for a node that holds neither.
+
+Exact-member assertions — the title states a count, so rename the title too:
+
+- `src/queries/node/show-node.test.ts:83` — `the seeded task returns all twenty members
+field by field` → twenty-two. `verifyJson` is not one of them; the view publishes `verify`.
+- `src/queries/node/show-node.test.ts:226` — `Object.keys of the view bytewise sorted
+deep-equals the twenty member names` → twenty-two.
+- `src/queries/project/show-project-graph.test.ts:77` — `nodes carry the seven declared
+attributes in bytewise key order` → nine.
+
+Fixture-only repairs — a node literal gains `deliverable: null` and `verify: null`:
+
+- `src/http/server/node/claim-node.test.ts` and `src/http/server/node/release-node.test.ts`
+  — the shared full-node fixture. Each file's `a successful call answers 200 with the
+contract response shape` parses the body against the contract, so an absent field refuses.
+- `src/http/server/project/show-project-graph.test.ts` — the expected node attributes.
+- `src/cli/node/claim.test.ts`, `delete.test.ts`, `release.test.ts`, `show.test.ts`,
+  `unblock.test.ts`, `update.test.ts`, `src/cli/project/graph.test.ts` and
+  `src/cli/reachability.test.ts` — every stubbed daemon response holding a node.
+- `src/commands/startup/recover-expired-leases.test.ts` — the same.
+
+Do not change a `src/cli/**` production file to accept a narrower body. The refusal is
+correct; the fixture is stale.
+
+**Action — GREEN:** Edit every production file `## Change` names. Two further production
+edits follow from the widened schemas, and both are in this lane:
+
+- Every node example literal in `src/http/contract/**` gains `deliverable: null` and
+  `verify: null` — including the `node.claim.response` and `node.release.response`
+  examples, which reuse the node shape. `src/http/contract/example.test.ts` and
+  `scripts/publish-contract.test.ts` both parse every example against its schema.
+- `src/http/contract/field-decisions.fixture.ts` gains one row per new field per response
+  that publishes it. The file is not a `.test.ts` file, so it is the software-engineer lane
+  under `scripts/lane-check.sh`. Every row keeps the fixture's existing sort order and its
+  `required=`, `nullable=` and `enum=` format. `deliverable` is
+  `required=true nullable=true enum=test,implementation,review,expansion`; `verify` is
+  `required=true nullable=true enum=-`, and its two children
+  `verify/properties/commands` and `verify/properties/paths` are
+  `required=true nullable=false enum=-`.
+
+**Action — REFACTOR:** None.
+
 ## Verify
 
 ```bash

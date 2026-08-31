@@ -37,12 +37,14 @@ describe("src/domain/node-write-legality.test", () => {
 
   it("proseFields and structuralFields keep their exact members", () => {
     assert.deepEqual(proseFields, ["body", "title"]);
+    assert.ok(!(proseFields as readonly string[]).includes("deliverable"));
     assert.deepEqual(structuralFields, [
       "depends_on",
       "parent",
       "repo",
       "worker",
     ]);
+    assert.ok(!(structuralFields as readonly string[]).includes("deliverable"));
     assert.deepEqual(differingFields, [
       "body",
       "depends_on",

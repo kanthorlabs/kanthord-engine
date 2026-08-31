@@ -174,6 +174,8 @@ export function createNode(
         discardReason: null,
         revision: revisionId,
         updatedAt: at,
+        deliverable: null,
+        verifyJson: null,
         dependencies: dependsOn,
       },
     ];

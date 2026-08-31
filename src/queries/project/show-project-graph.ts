@@ -2,6 +2,10 @@ import type { Storage } from "../../services/storage/index.ts";
 import type { PlanStore } from "../../services/plan/index.ts";
 import type { Graph } from "../../services/graph/index.ts";
 import type { StoredNode, StoredEdge } from "../../domain/plan-graph.ts";
+import {
+  parseVerifyBlock,
+  VerifyBlockError,
+} from "../../domain/verify-block.ts";
 import type {
   SerializedGraph,
   GraphAttributes,
@@ -39,7 +43,23 @@ function nodeAttributes(node: StoredNode): GraphAttributes {
     discardReason: node.discardReason,
     parentId: node.parentId,
     repositoryId: node.repositoryId,
+    deliverable: node.deliverable,
+    verify: parseNodeVerifyBlock(node),
   };
+}
+
+function parseNodeVerifyBlock(node: StoredNode) {
+  if (node.verifyJson === null) {
+    return null;
+  }
+  try {
+    return parseVerifyBlock(node.verifyJson);
+  } catch (error) {
+    if (error instanceof VerifyBlockError) {
+      Object.assign(error, { nodeId: node.id });
+    }
+    throw error;
+  }
 }
 
 function edgeAttributes(edge: StoredEdge): GraphAttributes {

@@ -310,6 +310,8 @@ describe("src/services/plan/sqlite.test", () => {
       discardReason: null,
       revision: fixtureIds.planRevision,
       updatedAt: 1,
+      deliverable: null,
+      verifyJson: null,
       dependencies: [],
     });
   });
@@ -339,6 +341,8 @@ describe("src/services/plan/sqlite.test", () => {
       discardReason: null,
       revision: fixtureIds.planRevision,
       updatedAt: 1,
+      deliverable: null,
+      verifyJson: null,
       dependencies: [],
     });
 
@@ -358,6 +362,8 @@ describe("src/services/plan/sqlite.test", () => {
       discardReason: null,
       revision: fixtureIds.planRevision,
       updatedAt: 1,
+      deliverable: null,
+      verifyJson: null,
       dependencies: [],
     });
   });
@@ -503,6 +509,8 @@ describe("src/services/plan/sqlite.test", () => {
       discardReason: null,
       revision: fixtureIds.planRevision,
       updatedAt: 1,
+      deliverable: null,
+      verifyJson: null,
       dependencies: [],
     });
 
@@ -510,6 +518,212 @@ describe("src/services/plan/sqlite.test", () => {
       store.readNode(transaction, "task_missing"),
     );
     assert.equal(missing, null);
+  });
+
+  it("mutateGraph reads back a node deliverable and verify JSON through readNode and readGraph", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact(seedAll);
+
+    const verifyJson = '{"paths":["/a/b.ts"],"commands":["npm test"]}';
+    const node = {
+      id: "task_with_verify",
+      projectId: fixtureIds.project,
+      kind: "task",
+      parentId: fixtureIds.objective,
+      title: "Task with verification",
+      instructionBlob: fixtureIds.instructionBlob,
+      acceptanceBlob: fixtureIds.acceptanceBlob,
+      worker: null,
+      repositoryId: null,
+      revision: fixtureIds.planRevision,
+      updatedAt: 2,
+      deliverable: "test",
+      verifyJson,
+    } as const;
+
+    storage.transact((transaction) => {
+      store.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [node],
+        insertEdges: [],
+        deleteEdgeIds: [],
+        nodeDeletes: [],
+        at: 2,
+        cause: { revision: fixtureIds.planRevision, importId: null },
+      });
+    });
+
+    const readNode = storage.transact((transaction) =>
+      store.readNode(transaction, node.id),
+    );
+    assert.ok(readNode);
+    assert.equal(readNode.deliverable, "test");
+    assert.equal(readNode.verifyJson, verifyJson);
+
+    const graph = storage.transact((transaction) =>
+      store.readGraph(transaction, fixtureIds.project),
+    );
+    const graphNode = graph.nodes.find((candidate) => candidate.id === node.id);
+    assert.ok(graphNode);
+    assert.equal(graphNode.deliverable, "test");
+    assert.equal(graphNode.verifyJson, verifyJson);
+  });
+
+  it("mutateGraph reads back null deliverable and verify JSON", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact(seedAll);
+
+    const node = {
+      id: "task_without_verify",
+      projectId: fixtureIds.project,
+      kind: "task",
+      parentId: fixtureIds.objective,
+      title: "Task without verification",
+      instructionBlob: fixtureIds.instructionBlob,
+      acceptanceBlob: fixtureIds.acceptanceBlob,
+      worker: null,
+      repositoryId: null,
+      revision: fixtureIds.planRevision,
+      updatedAt: 2,
+      deliverable: null,
+      verifyJson: null,
+    } as const;
+
+    storage.transact((transaction) => {
+      store.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [node],
+        insertEdges: [],
+        deleteEdgeIds: [],
+        nodeDeletes: [],
+        at: 2,
+        cause: { revision: fixtureIds.planRevision, importId: null },
+      });
+    });
+
+    const readNode = storage.transact((transaction) =>
+      store.readNode(transaction, node.id),
+    );
+    assert.ok(readNode);
+    assert.equal(readNode.deliverable, null);
+    assert.equal(readNode.verifyJson, null);
+  });
+
+  it("mutateGraph leaves assignment untouched and null for a new node", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact(seedAll);
+
+    const existingNode = {
+      id: fixtureIds.task,
+      projectId: fixtureIds.project,
+      kind: "task",
+      parentId: fixtureIds.objective,
+      title: "Updated task",
+      instructionBlob: fixtureIds.instructionBlob,
+      acceptanceBlob: fixtureIds.acceptanceBlob,
+      worker: null,
+      repositoryId: null,
+      revision: fixtureIds.planRevision,
+      updatedAt: 2,
+      deliverable: null,
+      verifyJson: null,
+    } as const;
+    const newNode = {
+      ...existingNode,
+      id: "task_assignment_null",
+      title: "New task",
+    } as const;
+
+    storage.transact((transaction) => {
+      transaction.run("UPDATE node SET assignment = ? WHERE id = ?", [
+        "sentinel",
+        fixtureIds.task,
+      ]);
+      store.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [existingNode],
+        insertEdges: [],
+        deleteEdgeIds: [],
+        nodeDeletes: [],
+        at: 2,
+        cause: { revision: fixtureIds.planRevision, importId: null },
+      });
+
+      const existing = transaction.get(
+        "SELECT assignment FROM node WHERE id = ?",
+        [fixtureIds.task],
+      ) as Readonly<{ assignment: string | null }> | undefined;
+      assert.ok(existing);
+      assert.equal(existing.assignment, "sentinel");
+
+      store.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [newNode],
+        insertEdges: [],
+        deleteEdgeIds: [],
+        nodeDeletes: [],
+        at: 2,
+        cause: { revision: fixtureIds.planRevision, importId: null },
+      });
+
+      const inserted = transaction.get(
+        "SELECT assignment FROM node WHERE id = ?",
+        [newNode.id],
+      ) as Readonly<{ assignment: string | null }> | undefined;
+      assert.ok(inserted);
+      assert.equal(inserted.assignment, null);
+    });
+  });
+
+  it("mutateGraph preserves deliverable and verify JSON when an upsert omits them", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact(seedAll);
+
+    const verifyJson = '{"paths":["/src/feature.ts"],"commands":["pnpm test"]}';
+    const existingNode = {
+      id: fixtureIds.task,
+      projectId: fixtureIds.project,
+      kind: "task",
+      parentId: fixtureIds.objective,
+      title: "Updated task",
+      instructionBlob: fixtureIds.instructionBlob,
+      acceptanceBlob: fixtureIds.acceptanceBlob,
+      worker: null,
+      repositoryId: null,
+      revision: fixtureIds.planRevision,
+      updatedAt: 2,
+    } as const;
+
+    storage.transact((transaction) => {
+      transaction.run(
+        "UPDATE node SET deliverable = ?, verify_json = ? WHERE id = ?",
+        ["test", verifyJson, fixtureIds.task],
+      );
+
+      store.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [existingNode],
+        insertEdges: [],
+        deleteEdgeIds: [],
+        nodeDeletes: [],
+        at: 2,
+        cause: { revision: fixtureIds.planRevision, importId: null },
+      });
+
+      const row = transaction.get(
+        "SELECT deliverable, verify_json FROM node WHERE id = ?",
+        [fixtureIds.task],
+      ) as
+        | Readonly<{ deliverable: string | null; verify_json: string | null }>
+        | undefined;
+      assert.ok(row);
+      assert.equal(row.deliverable, "test");
+      assert.equal(row.verify_json, verifyJson);
+    });
   });
 
   it("readAllNodes returns the nodes of two projects ascending by id across both", (t) => {

@@ -5,6 +5,7 @@ import type {
   SerializedGraphNode,
   SerializedGraphEdge,
   GraphAttributes,
+  VerifyBlockValue,
 } from "../../src/services/graph/index.ts";
 
 function compareIds(a: string, b: string): number {
@@ -13,7 +14,10 @@ function compareIds(a: string, b: string): number {
 
 function sortAttributes(attributes: GraphAttributes): GraphAttributes {
   const keys = Object.keys(attributes).sort(compareIds);
-  const sorted: Record<string, string | number | boolean | null> = {};
+  const sorted: Record<
+    string,
+    string | number | boolean | null | VerifyBlockValue
+  > = {};
   for (const key of keys) {
     sorted[key] = attributes[key]!;
   }

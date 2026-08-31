@@ -18,6 +18,7 @@ import { migration0007ExternalExecution } from "./migration-0007-external-execut
 import { migration0008GraphIndexes } from "./migration-0008-graph-indexes.ts";
 import { migration0009OneBranch } from "./migration-0009-one-branch.ts";
 import { migration0010ProviderLogin } from "./migration-0010-provider-login.ts";
+import { migration0011Deliverable } from "./migration-0011-deliverable.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 import { StorageError } from "./index.ts";
@@ -212,7 +213,7 @@ describe("src/services/storage/migration-0009-one-branch.test", () => {
     assert.equal(migration0009OneBranch.rebuild, undefined);
   });
 
-  it("migrations holds exactly ten migrations with migration0010ProviderLogin last", () => {
+  it("migrations holds exactly eleven migrations with migration0011Deliverable last", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
@@ -224,10 +225,11 @@ describe("src/services/storage/migration-0009-one-branch.test", () => {
       migration0008GraphIndexes,
       migration0009OneBranch,
       migration0010ProviderLogin,
+      migration0011Deliverable,
     ]);
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
     );
   });
 
@@ -243,7 +245,10 @@ describe("src/services/storage/migration-0009-one-branch.test", () => {
 
     storage.migrate();
 
-    assert.deepEqual(appliedVersions(storage), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert.deepEqual(
+      appliedVersions(storage),
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    );
     assert.deepEqual(storage.status().pending, []);
     assert.deepEqual(columnNames(storage), migratedColumnNames);
   });
@@ -379,7 +384,10 @@ describe("src/services/storage/migration-0009-one-branch.test", () => {
 
     full.migrate();
 
-    assert.deepEqual(appliedVersions(full), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert.deepEqual(
+      appliedVersions(full),
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    );
     const row = full.transact((t) =>
       t.get("SELECT branch FROM repository WHERE id = ?", [REPOSITORY_ID]),
     ) as { branch: string };
@@ -428,6 +436,9 @@ describe("src/services/storage/migration-0009-one-branch.test", () => {
     second.migrate();
 
     assert.deepEqual(second.status().pending, []);
-    assert.deepEqual(appliedVersions(second), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert.deepEqual(
+      appliedVersions(second),
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    );
   });
 });

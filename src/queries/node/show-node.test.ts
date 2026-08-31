@@ -13,7 +13,7 @@ import {
   seedSiblingTask,
 } from "../../../test/helpers/rows.ts";
 import { nodeShowResponse } from "../../http/contract/graph.ts";
-import type { Storage } from "../../services/storage/index.ts";
+import type { Storage, Transaction } from "../../services/storage/index.ts";
 import type { PlanStore } from "../../services/plan/index.ts";
 import type { BlobStore } from "../../services/blob/index.ts";
 import type { Execution } from "../../services/execution/index.ts";
@@ -30,11 +30,12 @@ const blobHashPattern = /^sha256:[0-9a-f]{64}$/;
 const OBJECT_ID = "a".repeat(40);
 const NEWEST_RUN_ULID = "01HZY000000000000000000001";
 
-const twentyMemberNames = [
+const twentyTwoMemberNames = [
   "acceptance",
   "acceptanceBlob",
   "attestedObjectId",
   "blockReason",
+  "deliverable",
   "dependencies",
   "discardReason",
   "id",
@@ -50,6 +51,7 @@ const twentyMemberNames = [
   "state",
   "title",
   "updatedAt",
+  "verify",
   "worker",
 ];
 
@@ -80,7 +82,7 @@ describe("src/queries/node/show-node.test", () => {
     };
   }
 
-  it("the seeded task returns all twenty members field by field", (t) => {
+  it("the seeded task returns all twenty-two members field by field", (t) => {
     const { storage, plan, blobs, execution, dispose } = build();
     t.after(() => dispose());
     storage.transact((transaction) => {
@@ -108,6 +110,8 @@ describe("src/queries/node/show-node.test", () => {
       instruction: "\u0000",
       acceptance: "\u0000",
       worker: null,
+      deliverable: null,
+      verify: null,
       repositoryId: null,
       repo: null,
       revision: fixtureIds.planRevision,
@@ -223,7 +227,7 @@ describe("src/queries/node/show-node.test", () => {
     assert.deepEqual(view.dependencies, [fixtureIds.objective]);
   });
 
-  it("Object.keys of the view bytewise sorted deep-equals the twenty member names", (t) => {
+  it("Object.keys of the view bytewise sorted deep-equals the twenty-two member names", (t) => {
     const { storage, plan, blobs, execution, dispose } = build();
     t.after(() => dispose());
     storage.transact((transaction) => {
@@ -236,7 +240,96 @@ describe("src/queries/node/show-node.test", () => {
       { id: fixtureIds.task },
     );
     assert.ok(view);
-    assert.deepEqual([...Object.keys(view)].sort(), twentyMemberNames);
+    assert.deepEqual([...Object.keys(view)].sort(), twentyTwoMemberNames);
+  });
+
+  it("a node with a deliverable and verify JSON publishes both fields without raw JSON", (t) => {
+    const { storage, plan, blobs, execution, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      transaction.run(
+        "UPDATE node SET deliverable = ?, verify_json = ? WHERE id = ?",
+        [
+          "test",
+          JSON.stringify({
+            paths: ["/src/check.ts", "/test/check.test.ts"],
+            commands: ["pnpm test", "pnpm run lint"],
+          }),
+          fixtureIds.task,
+        ],
+      );
+    });
+
+    const view = showNode(
+      { storage, plan, blobs, execution },
+      { id: fixtureIds.task },
+    );
+
+    assert.ok(view);
+    assert.equal(view.deliverable, "test");
+    assert.deepEqual(view.verify, {
+      paths: ["/src/check.ts", "/test/check.test.ts"],
+      commands: ["pnpm test", "pnpm run lint"],
+    });
+    assert.equal("verifyJson" in view, false);
+  });
+
+  it("a node without deliverable or verify JSON publishes null fields", (t) => {
+    const { storage, plan, blobs, execution, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+    });
+
+    const view = showNode(
+      { storage, plan, blobs, execution },
+      { id: fixtureIds.task },
+    );
+
+    assert.ok(view);
+    assert.equal(view.deliverable, null);
+    assert.equal(view.verify, null);
+  });
+
+  it("a malformed verify JSON throws verify-json-malformed with the node id", (t) => {
+    const { storage, plan, blobs, execution, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+    });
+
+    const invalidPlan = new Proxy(plan, {
+      get(target, property) {
+        if (property === "readNode") {
+          return (transaction: Transaction, id: string) => {
+            const node = plan.readNode(transaction, id);
+            return node === null ? null : { ...node, verifyJson: "{" };
+          };
+        }
+        return Reflect.get(target, property, target);
+      },
+    });
+
+    assert.throws(
+      () =>
+        showNode(
+          { storage, plan: invalidPlan, blobs, execution },
+          { id: fixtureIds.task },
+        ),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal(
+          (error as { code?: unknown }).code,
+          "verify-json-malformed",
+        );
+        assert.equal((error as { nodeId?: unknown }).nodeId, fixtureIds.task);
+        return true;
+      },
+    );
   });
 
   it("nodeShowResponse.safeParse succeeds", (t) => {
@@ -523,6 +616,8 @@ describe("src/queries/node/show-node.test", () => {
       instruction: "\u0000",
       acceptance: null,
       worker: null,
+      deliverable: null,
+      verify: null,
       repositoryId: fixtureIds.repository,
       repo: "kanthord-verify",
       revision: fixtureIds.planRevision,
