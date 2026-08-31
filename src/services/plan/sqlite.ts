@@ -24,7 +24,7 @@ import type {
 } from "./index.ts";
 
 const NODE_COLUMNS =
-  "id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, repository_id, state, block_reason, discard_reason, revision, updated_at";
+  "id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, repository_id, state, block_reason, discard_reason, revision, updated_at, deliverable, verify_json";
 
 const SELECT_NODE = "SELECT " + NODE_COLUMNS + " FROM node";
 
@@ -42,7 +42,7 @@ const DELETE_NODE = "DELETE FROM node WHERE id = ?";
 const INSERT_NODE =
   "INSERT INTO node (" +
   NODE_COLUMNS +
-  ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, parent_id = excluded.parent_id, title = excluded.title, instruction_blob = excluded.instruction_blob, acceptance_blob = excluded.acceptance_blob, worker = excluded.worker, repository_id = excluded.repository_id, revision = excluded.revision, updated_at = excluded.updated_at";
+  ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, parent_id = excluded.parent_id, title = excluded.title, instruction_blob = excluded.instruction_blob, acceptance_blob = excluded.acceptance_blob, worker = excluded.worker, repository_id = excluded.repository_id, revision = excluded.revision, updated_at = excluded.updated_at, deliverable = COALESCE(excluded.deliverable, deliverable), verify_json = COALESCE(excluded.verify_json, verify_json)";
 
 type NodeRow = Readonly<{
   id: string;
@@ -59,6 +59,8 @@ type NodeRow = Readonly<{
   discard_reason: string | null;
   revision: string;
   updated_at: number;
+  deliverable: string | null;
+  verify_json: string | null;
 }>;
 
 type EdgeRow = Readonly<{
@@ -93,6 +95,8 @@ const toNode = (row: NodeRow, dependencies: readonly string[]): StoredNode => ({
   discardReason: row.discard_reason,
   revision: row.revision,
   updatedAt: row.updated_at,
+  deliverable: row.deliverable,
+  verifyJson: row.verify_json,
   dependencies,
 });
 
@@ -421,7 +425,10 @@ export class SqlitePlanStore implements PlanStore {
     );
   }
 
-  private insertNode(transaction: Transaction, node: NodeWrite): void {
+  private insertNode(
+    transaction: Transaction,
+    node: NodeWrite & Partial<Pick<StoredNode, "deliverable" | "verifyJson">>,
+  ): void {
     transaction.run(INSERT_NODE, [
       node.id,
       node.projectId,
@@ -434,6 +441,8 @@ export class SqlitePlanStore implements PlanStore {
       node.repositoryId,
       node.revision,
       node.updatedAt,
+      node.deliverable ?? null,
+      node.verifyJson ?? null,
     ]);
   }
 

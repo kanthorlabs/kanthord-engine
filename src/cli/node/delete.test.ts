@@ -33,6 +33,8 @@ const SHOW: CallResult = {
     instruction: "the stored instruction\n",
     acceptance: "the stored acceptance\n",
     worker: "tdd@1",
+    deliverable: null,
+    verify: null,
     repositoryId: null,
     repo: null,
     revision: REVISION_B,

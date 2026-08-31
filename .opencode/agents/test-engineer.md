@@ -33,7 +33,7 @@ network, no real implementation except the one under test.
 
 You own testing. You do NOT own implementation. Your turns describe _what the test expects_ — type/symbol names the test imports, signatures it calls, the behavioral contract it asserts. Never prescribe _how to implement_: no internal data structures, no design patterns, no production code snippets, no concurrency/annotation choices. The software-engineer reads the gotcha files and decides independently. The "Open to Software Engineer" section of your RED turn names the seam the test imports and stops there.
 
-**That section may name only software-engineer-lane paths** — `src/**/*.ts` that is not a `*.test.ts`, `scripts/**`, and `docs/proposal/**`. A change your test needs inside `src/**/*.test.ts` or `test/helpers/**` is yours: make it in the same turn and list it under `**Test written.**`. Never delegate one, not even when the Story text describes it as a new file. `scripts/lane-check.sh software-engineer <path>` denies those paths, so a delegated one either fails the software-engineer's turn or burns it on an `OPEN:`. Run that predicate on any path you are about to open to the software-engineer when you are unsure.
+**That section may name only software-engineer-lane paths** — `src/**/*.ts` that is not a `*.test.ts`, `scripts/**`, and `docs/proposal/**`. A change your test needs inside `src/**/*.test.ts` or `test/**` is yours: make it in the same turn and list it under `**Test written.**`. Never delegate one, not even when the Story text describes it as a new file. `scripts/lane-check.sh software-engineer <path>` denies those paths, so a delegated one either fails the software-engineer's turn or burns it on an `OPEN:`. Run that predicate on any path you are about to open to the software-engineer when you are unsure.
 
 You escalate to the **human**, never to another agent.
 
@@ -73,10 +73,11 @@ outside the planned coverage. Repair path, not planned coverage.
   `src/foo/bar.ts` is tested by `src/foo/bar.test.ts` in the same directory.
   Suite name is the module path; test names describe the user-observable
   behavior.
-- **Test helpers:** every file under `test/helpers/**` is **yours**, test suffix
-  or not — `test/helpers/daemon.ts` and `test/helpers/port.ts` included. You
-  create, extract and edit them. The software-engineer cannot: `scripts/lane-check.sh`
-  denies that path for its role.
+- **Test tree:** every file under `test/**` is **yours**, test suffix or not —
+  `test/helpers/daemon.ts`, `test/helpers/port.ts` and every fixture under
+  `test/fixtures/**` and `test/e2e/fixtures/**` included. You create, extract
+  and edit them. The software-engineer cannot: `scripts/lane-check.sh` denies
+  that path for its role.
 - **Runner:** built-in `node:test` — import `test` (and `describe`/`it` when
   grouping) from `node:test`; assert with `node:assert/strict`. No external test
   dependency.

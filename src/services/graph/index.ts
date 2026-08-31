@@ -23,8 +23,13 @@ export class GraphError extends Error {
   }
 }
 
+export type VerifyBlockValue = Readonly<{
+  paths: readonly string[];
+  commands: readonly string[];
+}>;
+
 export type GraphAttributes = Readonly<
-  Record<string, string | number | boolean | null>
+  Record<string, string | number | boolean | null | VerifyBlockValue>
 >;
 
 export type SerializedGraphNode = Readonly<{

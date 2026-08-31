@@ -9,6 +9,7 @@ import { migration0007ExternalExecution } from "./migration-0007-external-execut
 import { migration0008GraphIndexes } from "./migration-0008-graph-indexes.ts";
 import { migration0009OneBranch } from "./migration-0009-one-branch.ts";
 import { migration0010ProviderLogin } from "./migration-0010-provider-login.ts";
+import { migration0011Deliverable } from "./migration-0011-deliverable.ts";
 
 export const migrations: readonly Migration[] = [
   coreEntities,
@@ -21,4 +22,5 @@ export const migrations: readonly Migration[] = [
   migration0008GraphIndexes,
   migration0009OneBranch,
   migration0010ProviderLogin,
+  migration0011Deliverable,
 ];

@@ -11,7 +11,8 @@ import {
 import { showNodeHandler } from "./show-node.ts";
 import { showNode } from "../../../queries/node/show-node.ts";
 import { nodeShowResponse } from "../../contract/graph.ts";
-import type { Storage } from "../../../services/storage/index.ts";
+import type { Storage, Transaction } from "../../../services/storage/index.ts";
+import type { PlanStore } from "../../../services/plan/index.ts";
 import {
   createBlobStore,
   createPlanStore,
@@ -32,10 +33,9 @@ function count(table: string): (storage: Storage) => number {
 }
 
 describe("src/http/server/node/show-node.test", () => {
-  async function buildHandlerApp() {
+  async function buildHandlerApp(plan: PlanStore = createPlanStore()) {
     const temporary = createMigratedStorage();
     const storage = temporary.storage;
-    const plan = createPlanStore();
     const blobs = createBlobStore(
       storage,
       createMockClock({ start: 1700000000000, step: 1000 }),
@@ -84,6 +84,31 @@ describe("src/http/server/node/show-node.test", () => {
 
     assert.equal(response.status, 404);
     assert.equal(response.body.error.code, "not-found");
+  });
+
+  it("GET /v1/node/:id with malformed verify JSON answers 500 naming the node id", async (t) => {
+    const basePlan = createPlanStore();
+    const invalidPlan = new Proxy(basePlan, {
+      get(target, property) {
+        if (property === "readNode") {
+          return (transaction: Transaction, id: string) => {
+            const node = basePlan.readNode(transaction, id);
+            return node === null ? null : { ...node, verifyJson: "{" };
+          };
+        }
+        return Reflect.get(target, property, target);
+      },
+    });
+    const { temporary, app } = await buildHandlerApp(invalidPlan);
+    t.after(() => temporary.dispose());
+
+    const response = await app.get(`/v1/node/${fixtureIds.task}`);
+
+    assert.equal(response.status, 500);
+    assert.deepEqual(response.body.error, {
+      code: "internal-error",
+      message: fixtureIds.task,
+    });
   });
 
   it("GET /v1/node/:id leaves every row count unchanged", async (t) => {

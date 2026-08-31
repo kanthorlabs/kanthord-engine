@@ -1,5 +1,9 @@
 import { aggregate } from "../../domain/aggregation.ts";
 import {
+  parseVerifyBlock,
+  VerifyBlockError,
+} from "../../domain/verify-block.ts";
+import {
   terminalStates,
   type NodeKind,
   type NodeState,
@@ -25,6 +29,8 @@ export type NodeView = Readonly<{
   instruction: string;
   acceptance: string | null;
   worker: string | null;
+  deliverable: string | null;
+  verify: { paths: string[]; commands: string[] } | null;
   repositoryId: string | null;
   repo: string | null;
   revision: string;
@@ -82,8 +88,9 @@ export function showNode(
       stored.kind === "objective"
         ? dependencies.execution.latestRunOfNode(transaction, stored.id)
         : null;
+    const { verifyJson, ...storedWithoutVerifyJson } = stored;
     return {
-      ...stored,
+      ...storedWithoutVerifyJson,
       instruction: readBlobText(
         dependencies.blobs,
         transaction,
@@ -97,6 +104,7 @@ export function showNode(
               transaction,
               stored.acceptanceBlob,
             ),
+      verify: parseNodeVerifyBlock(stored.id, verifyJson),
       repo:
         stored.repositoryId === null
           ? null
@@ -108,6 +116,23 @@ export function showNode(
       projection,
     };
   });
+}
+
+function parseNodeVerifyBlock(
+  nodeId: string,
+  verifyJson: string | null,
+): { paths: string[]; commands: string[] } | null {
+  if (verifyJson === null) {
+    return null;
+  }
+  try {
+    return parseVerifyBlock(verifyJson);
+  } catch (error) {
+    if (error instanceof VerifyBlockError) {
+      Object.assign(error, { nodeId });
+    }
+    throw error;
+  }
 }
 
 function compareIds(left: string, right: string): number {

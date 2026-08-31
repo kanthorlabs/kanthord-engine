@@ -666,6 +666,8 @@ function parseNode(fixture: RecoveryFixture, id: string): void {
       discardReason: row.discard_reason,
       revision: row.revision,
       updatedAt: row.updated_at,
+      deliverable: row.deliverable,
+      verifyJson: row.verify_json,
     }),
   );
 }

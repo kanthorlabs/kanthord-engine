@@ -56,6 +56,30 @@ Story 05 will make `src/domain/node.ts` import from `node-pair.ts`. Therefore `n
 - `stateOwner` for atomic objectives is `"attestation-then-human"` — not `"attestation"`.
 - The function is the only legality authority. Do not duplicate the logic elsewhere in this story.
 
+## Tasks
+
+### Task 02 — Cover the node pair table
+
+**Input:** `src/domain/node-pair.test.ts`, `src/domain/node-pair.ts`
+
+**Action — RED:** Create `src/domain/node-pair.test.ts`. Write the three assertion groups
+named under `## Verify`. Import `nodePairLegality` from `./node-pair.ts`, `nodeKinds` from
+`./state.ts`, and `deliverables` from `./deliverable.ts`.
+
+Enumerate the matrix by iterating `nodeKinds` against `deliverables`. Do not write the 12
+pairs as a literal list — the enumeration is what proves the table is complete.
+
+The test file is the required Proof target. The Proof command names
+`src/domain/node-pair.test.ts`, so no other lane can supply it.
+
+Two first-run results are valid, as in Task 01. State which one happened. Do not raise
+`ATTEMPT-FAILED:` for a first-run pass.
+
+**Action — GREEN:** Create `src/domain/node-pair.ts` exactly as `## Change` names it. When
+the file already satisfies every assertion, record a no-op turn.
+
+**Action — REFACTOR:** None.
+
 ## Verify
 
 ```bash
@@ -74,4 +98,4 @@ Create `src/domain/node-pair.test.ts` with:
 
 Test framework: `node:test` and `node:assert/strict`. No SQLite, no I/O.
 
-Proof: PASS EPIC-047 line for `src/domain/node-pair.test.ts`; hermetic coverage — pair matrix enumerated over all 12 concrete pairs, legal count 10, illegal count 5, each asserted as a number; each legal pair asserted by full result object; each illegal pair by value.
+Proof: PASS EPIC-047 line for `src/domain/node-pair.test.ts`; hermetic coverage — pair matrix enumerated over all 12 concrete pairs, legal count 8, illegal count 4, each asserted as a number; each legal pair asserted by full result object; each illegal pair by value.

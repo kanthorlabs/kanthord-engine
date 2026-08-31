@@ -326,6 +326,36 @@ export function seedNode(
   );
 }
 
+export function seedNodeWithDeliverable(
+  transaction: Transaction,
+  input: Readonly<{
+    id: string;
+    kind: string;
+    parentId: string | null;
+    title: string;
+    deliverable: string;
+    verifyJson?: string | null;
+  }>,
+): void {
+  transaction.run(
+    "INSERT INTO node (id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, repository_id, state, block_reason, discard_reason, revision, updated_at, deliverable, verify_json, assignment) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 'pending', NULL, NULL, ?, ?, ?, ?, NULL)",
+    [
+      input.id,
+      fixtureIds.project,
+      input.kind,
+      input.parentId,
+      input.title,
+      fixtureIds.instructionBlob,
+      input.kind === "task" ? fixtureIds.acceptanceBlob : null,
+      input.kind === "objective" ? fixtureIds.repository : null,
+      fixtureIds.planRevision,
+      1,
+      input.deliverable,
+      input.verifyJson ?? null,
+    ],
+  );
+}
+
 export function seedEdge(
   transaction: Transaction,
   input: Readonly<{ id: string; fromNode: string; toNode: string }>,

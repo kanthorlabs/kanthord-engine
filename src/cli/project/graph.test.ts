@@ -29,6 +29,8 @@ const GRAPH_RESPONSE = {
         discardReason: null,
         parentId: null,
         repositoryId: null,
+        deliverable: null,
+        verify: null,
       },
     },
     {
@@ -41,6 +43,8 @@ const GRAPH_RESPONSE = {
         discardReason: null,
         parentId: "initiative_01JQ8ZDV5W6X7Y8Z9A0B1C2D3E",
         repositoryId: null,
+        deliverable: null,
+        verify: null,
       },
     },
     {
@@ -53,6 +57,8 @@ const GRAPH_RESPONSE = {
         discardReason: null,
         parentId: "objective_01JQ8ZDV5W6X7Y8Z9A0B1C2D3E",
         repositoryId: "repo_01JQ8ZDV5W6X7Y8Z9A0B1C2D3E",
+        deliverable: null,
+        verify: null,
       },
     },
   ],

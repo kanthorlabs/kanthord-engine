@@ -1,7 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
+import { deliverables } from "./deliverable.ts";
 import { nodeRow } from "./node.ts";
+import { nodePairLegality } from "./node-pair.ts";
+import { nodeKinds } from "./state.ts";
 
 const ULID_A = "01HZY8QF3M4N5P6R7S8T9V0W1X";
 const ULID_B = "01HZY8QF3M4N5P6R7S8T9V0W2Y";
@@ -23,6 +26,8 @@ describe("src/domain/node.test", () => {
     discardReason: null,
     revision: "revision_" + ULID_A,
     updatedAt: 0,
+    deliverable: null,
+    verifyJson: null,
   };
 
   const validTask = {
@@ -40,6 +45,8 @@ describe("src/domain/node.test", () => {
     discardReason: null,
     revision: "revision_" + ULID_A,
     updatedAt: 0,
+    deliverable: null,
+    verifyJson: null,
   };
 
   const validInitiative = {
@@ -57,6 +64,8 @@ describe("src/domain/node.test", () => {
     discardReason: null,
     revision: "revision_" + ULID_A,
     updatedAt: 0,
+    deliverable: null,
+    verifyJson: null,
   };
 
   it("accepts a valid objective", () => {
@@ -69,6 +78,109 @@ describe("src/domain/node.test", () => {
 
   it("accepts a valid initiative", () => {
     assert.equal(nodeRow.safeParse(validInitiative).success, true);
+  });
+
+  it("accepts a null deliverable for an objective", () => {
+    assert.equal(
+      nodeRow.safeParse({
+        ...validObjective,
+        deliverable: null,
+        verifyJson: null,
+      }).success,
+      true,
+    );
+  });
+
+  it("accepts a null deliverable for a task", () => {
+    assert.equal(
+      nodeRow.safeParse({
+        ...validTask,
+        deliverable: null,
+        verifyJson: null,
+      }).success,
+      true,
+    );
+  });
+
+  it("accepts a null deliverable for an initiative", () => {
+    assert.equal(
+      nodeRow.safeParse({
+        ...validInitiative,
+        deliverable: null,
+        verifyJson: null,
+      }).success,
+      true,
+    );
+  });
+
+  it("refuses each illegal kind and deliverable pair", () => {
+    const illegalPairs = [
+      ["initiative", "test"],
+      ["initiative", "implementation"],
+      ["initiative", "review"],
+      ["task", "expansion"],
+    ] as const;
+
+    for (const [kind, deliverable] of illegalPairs) {
+      const fixture = kind === "initiative" ? validInitiative : validTask;
+      assert.equal(
+        nodeRow.safeParse({ ...fixture, kind, deliverable, verifyJson: null })
+          .success,
+        false,
+        `expected (${kind}, ${deliverable}) to be refused`,
+      );
+    }
+  });
+
+  it("admits each legal kind and deliverable pair", () => {
+    const legalPairs = [
+      ["initiative", "expansion"],
+      ["objective", "expansion"],
+      ["objective", "test"],
+      ["objective", "implementation"],
+      ["objective", "review"],
+      ["task", "test"],
+      ["task", "implementation"],
+      ["task", "review"],
+    ] as const;
+
+    for (const [kind, deliverable] of legalPairs) {
+      const fixture =
+        kind === "initiative"
+          ? validInitiative
+          : kind === "objective"
+            ? validObjective
+            : validTask;
+      assert.equal(
+        nodeRow.safeParse({ ...fixture, kind, deliverable, verifyJson: null })
+          .success,
+        true,
+        `expected (${kind}, ${deliverable}) to be admitted`,
+      );
+    }
+  });
+
+  it("does not publish assignment through the node row", () => {
+    assert.equal("assignment" in nodeRow.shape, false);
+  });
+
+  it("matches nodePairLegality for every kind and deliverable pair", () => {
+    for (const kind of nodeKinds) {
+      const fixture =
+        kind === "initiative"
+          ? validInitiative
+          : kind === "objective"
+            ? validObjective
+            : validTask;
+      for (const deliverable of deliverables) {
+        assert.equal(
+          nodeRow.safeParse({ ...fixture, kind, deliverable, verifyJson: null })
+            .success,
+          nodePairLegality(kind, deliverable).legal,
+          `expected (${kind}, ${deliverable}) parity`,
+        );
+      }
+    }
   });
 
   it("rejects missing required keys for objective", () => {

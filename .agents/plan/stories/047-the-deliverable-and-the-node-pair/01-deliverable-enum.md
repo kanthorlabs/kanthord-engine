@@ -28,6 +28,33 @@ The tuple order is observable (the pair table in Story 02 iterates it) and must 
 - Import only `zod`. No other dependency.
 - No default export. No extra functions or constants.
 
+## Tasks
+
+### Task 01 — Cover the deliverable enum
+
+**Input:** `src/domain/deliverable.test.ts`, `src/domain/deliverable.ts`
+
+**Action — RED:** Create `src/domain/deliverable.test.ts`. Write the nine assertions named
+under `## Verify`, in that order. Import `deliverables` and `deliverable` from
+`./deliverable.ts`.
+
+The test file is the required Proof target. The Proof command names
+`src/domain/deliverable.test.ts`, so no other lane can supply it.
+
+Two first-run results are valid, and both are correct:
+
+- `src/domain/deliverable.ts` does not exist — the import fails to resolve. That is the RED.
+- `src/domain/deliverable.ts` already exists from an earlier cycle — every assertion passes.
+
+State in the turn which of the two happened. Do not raise `ATTEMPT-FAILED:` for a first-run
+pass, and do not delete or weaken an assertion to force a failure.
+
+**Action — GREEN:** Create `src/domain/deliverable.ts` exactly as `## Change` names it. When
+the file already satisfies every assertion, record a no-op turn that lists `None` under
+`**Files changed.**` and reports `pnpm run typecheck` exit 0.
+
+**Action — REFACTOR:** None.
+
 ## Verify
 
 ```bash

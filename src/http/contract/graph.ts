@@ -23,6 +23,7 @@ import { operations } from "./operation.ts";
 import type { OperationExamples } from "./operation.ts";
 import { planFinding } from "./plan-finding.ts";
 import { blobHash } from "../../domain/blob.ts";
+import { deliverables } from "../../domain/deliverable.ts";
 import { identity } from "../../domain/identity.ts";
 import { revisionOrigins } from "../../domain/plan-revision.ts";
 import {
@@ -152,12 +153,19 @@ export const nodeListQuery = z.strictObject({
   repository: identity("repository").optional(),
 });
 
+const verifyBlockContract = z.strictObject({
+  paths: z.array(z.string()),
+  commands: z.array(z.string()),
+});
+
 export const nodeShowResponse = nodeListItem.extend({
   instructionBlob: blobHash,
   acceptanceBlob: blobHash.nullable(),
   instruction: z.string(),
   acceptance: z.string().nullable(),
   worker: z.string().nullable(),
+  deliverable: z.enum(deliverables).nullable(),
+  verify: verifyBlockContract.nullable(),
   repositoryId: z.string().nullable(),
   repo: z.string().nullable(),
   revision: z.string(),
@@ -188,6 +196,8 @@ export const nodeAttributes = z.strictObject({
   discardReason: z.string().nullable(),
   parentId: z.string().nullable(),
   repositoryId: z.string().nullable(),
+  deliverable: z.enum(deliverables).nullable(),
+  verify: verifyBlockContract.nullable(),
 });
 
 export const edgeAttributes = z.strictObject({
@@ -413,6 +423,8 @@ export const nodeShowExamples: OperationExamples = {
     instruction: "# atlas\n",
     acceptance: null,
     worker: null,
+    deliverable: null,
+    verify: null,
     repositoryId: `repo_${U}`,
     repo: "atlas",
     revision: `revision_${U}`,
@@ -728,6 +740,8 @@ export const graph = operations([
               discardReason: null,
               parentId: null,
               repositoryId: null,
+              deliverable: null,
+              verify: null,
             },
           },
           {
@@ -740,6 +754,8 @@ export const graph = operations([
               discardReason: null,
               parentId: `initiative_${U}`,
               repositoryId: `repo_${U}`,
+              deliverable: null,
+              verify: null,
             },
           },
           {
@@ -752,6 +768,8 @@ export const graph = operations([
               discardReason: null,
               parentId: `objective_${U}`,
               repositoryId: null,
+              deliverable: null,
+              verify: null,
             },
           },
           {
@@ -764,6 +782,8 @@ export const graph = operations([
               discardReason: null,
               parentId: `objective_${U}`,
               repositoryId: null,
+              deliverable: null,
+              verify: null,
             },
           },
         ],

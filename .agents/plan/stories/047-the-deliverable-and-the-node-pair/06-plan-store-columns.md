@@ -45,6 +45,33 @@ Do NOT add `assignment` to the INSERT column list, VALUES clause, or ON CONFLICT
 - `state`, `block_reason`, `discard_reason` stay excluded from the `ON CONFLICT` update clause.
 - `verifyJson` in `StoredNode` stores the raw JSON string — parsing to `VerifyBlock` is the caller's responsibility (done in Story 08 by the query layer).
 
+## Tasks
+
+### Task 06 — Cover the two plan-store columns
+
+**Input:** `src/services/plan/sqlite.test.ts`, `src/services/plan/sqlite.ts`
+
+**Action — RED:** Two parts. Write both before you hand the Task over.
+
+Part A — add the three cases named under `## Verify` to
+`src/services/plan/sqlite.test.ts`. The file is a required Proof target.
+
+Part B — repair the three exact-member assertions in the same file that the two new
+`StoredNode` members make stale. Each one lists every member of a read row, so each one
+gains `deliverable` and `verifyJson`:
+
+- `readGraph returns every member of the seeded initiative`
+- `readGraph returns every member of the seeded objective and task`
+- `readNode returns the seeded task with every member and null for an unknown id`
+
+The seeded rows carry no deliverable, so both expected values are `null` in all three.
+
+**Action — GREEN:** Edit `src/services/plan/sqlite.ts` exactly as `## Change` names it —
+`NODE_COLUMNS`, the `NodeRow` type, the `toNode` mapper and `insertNode`. `assignment`
+enters none of the four.
+
+**Action — REFACTOR:** None.
+
 ## Verify
 
 ```bash
