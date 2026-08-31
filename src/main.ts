@@ -74,7 +74,9 @@ import { exportPlan } from "./queries/plan/export-plan.ts";
 import { listRevisions } from "./queries/plan/list-revision.ts";
 import { validatePlan } from "./queries/plan/validate-plan.ts";
 import { importPlan } from "./commands/plan/import-plan.ts";
+import { listAgents } from "./queries/agent/list-agents.ts";
 import { listNodes } from "./queries/node/list-node.ts";
+import { listWorkers } from "./queries/worker/list-workers.ts";
 import { showNode } from "./queries/node/show-node.ts";
 import { createNode } from "./commands/node/create-node.ts";
 import { updateNode } from "./commands/node/update-node.ts";
@@ -148,7 +150,9 @@ import { exportPlanHandler } from "./http/server/plan/export-plan.ts";
 import { listRevisionHandler } from "./http/server/plan/list-revision.ts";
 import { validatePlanHandler } from "./http/server/plan/validate-plan.ts";
 import { importPlanHandler } from "./http/server/plan/import-plan.ts";
+import { listAgentHandler } from "./http/server/agent/list-agents.ts";
 import { listNodeHandler } from "./http/server/node/list-node.ts";
+import { listWorkerHandler } from "./http/server/worker/list-workers.ts";
 import { showNodeHandler } from "./http/server/node/show-node.ts";
 import { createNodeHandler } from "./http/server/node/create-node.ts";
 import { updateNodeHandler } from "./http/server/node/update-node.ts";
@@ -493,6 +497,12 @@ async function serve(options: ServeOptions): Promise<void> {
         "project.repositories": replaceProjectRepositoriesHandler({
           replaceProjectRepositories: (input) =>
             replaceProjectRepositories({ storage, plan, clock, events }, input),
+        }),
+        "worker.list": listWorkerHandler({
+          listWorkers: (input) => listWorkers({}, input),
+        }),
+        "agent.list": listAgentHandler({
+          listAgents: (input) => listAgents({}, input),
         }),
         "node.list": listNodeHandler({
           listNodes: (input) =>

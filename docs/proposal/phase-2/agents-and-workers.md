@@ -6,19 +6,32 @@ Reviewer: AI engineer. Phase 2. What an agent is told is `instructions-and-profi
 
 An agent holds a role contract and a tool set defined in code. It runs alone, or a worker kind composes it with others. Agents are `general@1`, `swe@1`, `te@1` and `re@1`.
 
-A worker kind executes one objective under a lease. Kinds are `general@1`, `tdd@1` and `git@1`. A harness-qualified kind names an external harness and the agent persona it dispatches, using the convention `<harness>.<agent>@<version>`. The four harness-qualified kinds are `claude.swe@1`, `claude.te@1`, `opencode.swe@1` and `opencode.te@1`. The daemon validates a harness-qualified kind at import and never executes one. Claim is not restricted by worker kind; an actor of one harness may claim a node of any worker kind. A node carrying a harness-qualified kind is claimed and reported through the same operations as any other node. Worker binding precedence is project, then graph, then node. The most specific binding wins. An objective binds one repository, so a node-level binding changes the worker kind only.
+A worker id matches `^[a-z][a-z0-9-]*@[1-9][0-9]*$`. A dot is forbidden so that a harness cannot be smuggled into a name.
 
-## The MVP ships the `general@1` worker
+The `composition` set is closed:
 
-It composes the `general@1` agent and `re@1`:
+- `single` is one execution path driving at most one agent.
+- `composed` drives multiple agents.
+- `self-managed` is an external harness driving its own agents.
 
-1. The `general@1` agent does the task.
-2. `re@1` reviews the diff against the `## Acceptance criteria` section of the task body.
-3. An acceptance reaches the task gate of `gates-and-approval.md`.
-4. A rejection routes back to the `general@1` agent for another attempt.
-5. The attempt limit ends the task in `blocked` with reason `attempt-limit`. The default limit is 3, from configuration.
+The worker registry is:
 
-`re@1` is not a component of `tdd@1`. It is the task gate for every worker kind, and it ships here.
+| `worker`     | `driver` | `agents` | `claims`            | `deliverables`                     | `harness`     | `composition`  |
+| ------------ | -------- | -------- | ------------------- | ---------------------------------- | ------------- | -------------- |
+| `claude@1`   | external | `[]`     | `objective`, `task` | `test`, `implementation`, `review` | `claude-code` | `self-managed` |
+| `opencode@1` | external | `[]`     | `objective`, `task` | `test`, `implementation`, `review` | `opencode`    | `self-managed` |
+
+Every internal worker, `general@1`, `tdd@1`, `poc@1`, `research@1` and `git@1`, is phase-2 work and is absent from the registry.
+
+## Routing
+
+Routing computes the intersection of three eligible sets. The sets obey `capable ⊇ authorized ⊇ available`.
+
+`capable` is derived from the registry alone. `authorized` is supplied by the caller. `available` is supplied by the caller.
+
+Routing takes the first entry of the intersection in registry declaration order. `initiative` and `expansion` are unroutable until an internal worker is registered in the registry.
+
+An empty intersection answers `unroutable` with `failedSet` naming the first set, in the order `capable`, `authorized`, `available`, whose intersection with the previous sets is empty.
 
 ## The four actors
 
@@ -56,16 +69,32 @@ Exactly one report ends an attempt, whatever it saw. A crashed adapter leaves no
 
 ## Capability
 
-Capability is enforced in the agent implementation, never in profile data or prose. Each role receives a tool set defined in code: `re@1` gets read-only tools, `te@1` writes tests, `swe@1` writes code, `git@1` uses no model at all. A profile cannot widen a tool set, because it holds no field that names one. An instruction such as "do not access the network" is guidance to a model, not a control, and the daemon never depends on one.
+Capability is enforced in the agent implementation, never in profile data or prose. Each role contract is one record with an agent id, a purpose and `capabilities.tools`.
 
-The tool set is an allow list in code, per role. The `pi-coding-agent` built-ins are `read`, `ls`, `find`, `grep`, `edit`, `write` and `bash`.
+The full tool set is `read`, `bash`, `edit`, `write`, `grep`, `find` and `ls`.
 
-| Role        | Tool set                                              | Reason                                                        |
-| ----------- | ----------------------------------------------------- | ------------------------------------------------------------- |
-| `general@1` | `read`, `ls`, `find`, `grep`, `edit`, `write`, `bash` | It does the task, so it reads, writes and runs commands.      |
-| `re@1`      | `read`, `ls`, `find`, `grep`                          | A reviewer reads. `bash` is excluded, because a shell writes. |
+| `agent`     | `purpose`                                   | `capabilities.tools`                                  |
+| ----------- | ------------------------------------------- | ----------------------------------------------------- |
+| `general@1` | Does any task end to end.                   | `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` |
+| `swe@1`     | Writes production code. Writes no test.     | `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` |
+| `te@1`      | Writes tests. Writes no production code.    | `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` |
+| `re@1`      | Reviews a diff against acceptance criteria. | `read`, `bash`, `grep`, `find`, `ls`                  |
 
-`te@1`, `swe@1` and `git@1` are deferred, and their tool sets are decided when they ship.
+Role path ownership is not represented. The constraint that `swe@1` and `te@1` differ by paths remains an open gap.
+
+## Harnesses
+
+The harness set is closed:
+
+| `id`          | `denyByDefault` |
+| ------------- | --------------- |
+| `claude-code` | `true`          |
+| `opencode`    | `true`          |
+| `pi`          | `false`         |
+
+Generation fails when a harness cannot deny by default.
+
+The `pi-coding-agent` built-ins are `read`, `ls`, `find`, `grep`, `edit`, `write` and `bash`.
 
 The SDK selects tools by exclusion, through `excludeTools`. An exclusion list is not fail-closed: a built-in added by a later SDK version joins every role that did not name it. The adapter therefore computes the exclusion from the allow list, then asserts the constructed session exposes exactly the allow list, and it fails closed on a mismatch. A new built-in stops the daemon rather than reaching `re@1`.
 
@@ -92,7 +121,3 @@ The attempt record answers diagnosis after the fact. Delivery while a run execut
 - An asynchronously scheduled run has no receiver. Durable attempt records are the whole delivery, and notification past them is deferred.
 
 No channel carries a child session's output into a working session without one of these three receivers.
-
-## Deferred: `tdd@1` and `git@1`
-
-`tdd@1` is a worker strategy, not an agent. It drives `te@1`, `swe@1` and `re@1`. `git@1` runs a declared git operation and needs no model; the undo node uses it. KanthorD redesigns the loop of `.claude/skills/*`: it keeps the TDD intent and the review gate, and it does not keep the role sequence.

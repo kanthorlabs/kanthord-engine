@@ -20,6 +20,7 @@ test("src/http/contract/example.test", async (t) => {
       "actor.revoke",
       "actor.rotate",
       "actor.show",
+      "agent.list",
       "edge.list",
       "event.list",
       "node.claim",
@@ -62,6 +63,7 @@ test("src/http/contract/example.test", async (t) => {
       "system.db",
       "system.health",
       "system.status",
+      "worker.list",
     ]);
     assert.deepEqual(
       withExamples

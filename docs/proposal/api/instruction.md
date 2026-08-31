@@ -8,7 +8,7 @@ What an agent is told, and where that text is stored.
 
 | operationId               | Method and path                          | introducedIn | status   | Source                                               |
 | ------------------------- | ---------------------------------------- | ------------ | -------- | ---------------------------------------------------- |
-| `agent.list`              | `GET /v1/agent`                          | phase-2      | stubbed  | domain.md, agent roles                               |
+| `agent.list`              | `GET /v1/agent`                          | phase-2      | routed   | domain.md, agent roles                               |
 | `template.list`           | `GET /v1/template`                       | phase-2      | stubbed  | instructions-and-profiles.md, templates              |
 | `template.show`           | `GET /v1/template/:id`                   | phase-2      | stubbed  | instructions-and-profiles.md                         |
 | `profile.instantiate`     | `POST /v1/repository/:id/profile`        | phase-2      | stubbed  | phase-2 onboarding, "instantiate a profile"          |
@@ -20,7 +20,14 @@ What an agent is told, and where that text is stored.
 
 ## `agent.list`
 
-Returns every agent role, its role contract identity and its tool set. It is read-only in every phase. Capability is enforced in the agent implementation, so no route widens a tool set and no body field names one. The MVP implements `general@1` and `re@1`; `swe@1`, `te@1` and `git@1` appear with a deferred marker.
+Returns the four published agent role contracts. It is read-only in every phase. Capability is enforced in the agent implementation, so no route widens a tool set and no body field names one. Each contract contains `agent`, `purpose` and `capabilities` with `tools`.
+
+| `agent`     | `purpose`                                   | `capabilities.tools`                                     |
+| ----------- | ------------------------------------------- | -------------------------------------------------------- |
+| `general@1` | Does any task end to end.                   | `read`, `bash`, `edit`, `write`, `grep`, `find` and `ls` |
+| `swe@1`     | Writes production code. Writes no test.     | `read`, `bash`, `edit`, `write`, `grep`, `find` and `ls` |
+| `te@1`      | Writes tests. Writes no production code.    | `read`, `bash`, `edit`, `write`, `grep`, `find` and `ls` |
+| `re@1`      | Reviews a diff against acceptance criteria. | `read`, `bash`, `grep`, `find` and `ls`                  |
 
 ## The profile lives in the database
 

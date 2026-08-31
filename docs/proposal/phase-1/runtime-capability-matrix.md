@@ -48,8 +48,9 @@ One row per capability under `src/services/`. The built-ins are those the shippe
 | `secret`        | `node:crypto`                                                              | yes         | yes    | yes     |
 | `storage`       | `node:sqlite`                                                              | yes         | no     | no      |
 | `verify`        | none                                                                       | yes         | yes    | yes     |
+| `worker-health` | none                                                                       | yes         | yes    | yes     |
 
-Twenty-one capabilities. Fourteen import no Node built-in at all. On Lambda nineteen are `yes` and two are `no`, and the two are `home-lock` and `storage`. On Workers seventeen are `yes` and four are `no`, and the four are `config`, `git`, `home-lock` and `storage`.
+Twenty-two capabilities. Fifteen import no Node built-in at all. On Lambda twenty are `yes` and two are `no`, and the two are `home-lock` and `storage`. On Workers eighteen are `yes` and four are `no`, and the four are `config`, `git`, `home-lock` and `storage`.
 
 A capability verdict is not an operation verdict. `blob` is `yes` on both targets because it imports `node:crypto` alone, and `blob.show` is still `no` on both, because `src/services/blob/sqlite.ts` persists through the storage transaction that `services/storage` owns. The operation table is the verdict that counts.
 
@@ -61,7 +62,7 @@ A capability verdict is not an operation verdict. `blob` is `yes` on both target
 
 ## The operation matrix
 
-One row per `routed` operation of `src/http/contract/registry.ts`, forty-eight of them, sorted bytewise by `operationId`, which is the registry order. The twenty-five `stubbed` operations enter no row: each binds to the shared `501` handler and reaches no service.
+One row per `routed` operation of `src/http/contract/registry.ts`, fifty of them, sorted bytewise by `operationId`, which is the registry order. The twenty-three `stubbed` operations enter no row: each binds to the shared `501` handler and reaches no service.
 
 A capability column holds the capability name or `-`.
 
@@ -72,6 +73,7 @@ A capability column holds the capability name or `-`.
 | `actor.revoke`           | `sqlite` | -     | -            | `memory`    | -          | yes         | no                                                   | no                                                 |
 | `actor.rotate`           | `sqlite` | -     | -            | `memory`    | -          | yes         | no                                                   | no                                                 |
 | `actor.show`             | `sqlite` | -     | -            | -           | -          | yes         | no                                                   | no                                                 |
+| `agent.list`             | -        | -     | -            | -           | -          | yes         | yes                                                  | yes                                                |
 | `blob.show`              | `sqlite` | -     | -            | -           | -          | yes         | no                                                   | no                                                 |
 | `edge.list`              | `sqlite` | -     | -            | -           | -          | yes         | no                                                   | no                                                 |
 | `event.list`             | `sqlite` | -     | `wait`       | -           | -          | yes         | no                                                   | no                                                 |
@@ -115,10 +117,11 @@ A capability column holds the capability name or `-`.
 | `system.db`              | `sqlite` | -     | -            | -           | -          | yes         | no                                                   | no                                                 |
 | `system.health`          | -        | -     | -            | -           | -          | yes         | degraded — the one storage reporter has no driver    | degraded — the one storage reporter has no driver  |
 | `system.status`          | `sqlite` | -     | -            | -           | -          | yes         | no                                                   | no                                                 |
+| `worker.list`            | -        | -     | -            | -           | -          | yes         | yes                                                  | yes                                                |
 
 ### What the columns mean
 
-`Storage` holds `sqlite` for every row that reaches `services/storage` or `services/blob`. Three rows hold `-`: `provider.catalog` and `provider.inspect` reach `services/model-catalog` alone, and `system.health` reaches the injected reporter set alone.
+`Storage` holds `sqlite` for every row that reaches `services/storage` or `services/blob`. Five rows hold `-`: `agent.list`, `provider.catalog`, `provider.inspect`, `system.health` and `worker.list` reach no storage capability. `provider.catalog` and `provider.inspect` reach `services/model-catalog` alone, `system.health` reaches the injected reporter set alone, `agent.list` reaches the agent contract set alone and `worker.list` reaches the worker registry alone.
 
 `Git` holds `git` for the four rows that reach `services/git`, and `Filesystem` holds `bare home` for the same four. No other routed operation touches either.
 
@@ -134,11 +137,11 @@ Counted from the rows above, not asserted ahead of them.
 
 | Runtime     | `yes` | `degraded` | `no` |
 | ----------- | ----- | ---------- | ---- |
-| Node daemon | 48    | 0          | 0    |
-| Lambda      | 1     | 2          | 45   |
-| Workers     | 1     | 2          | 45   |
+| Node daemon | 50    | 0          | 0    |
+| Lambda      | 3     | 2          | 45   |
+| Workers     | 3     | 2          | 45   |
 
-On the Node daemon 48 of 48 are `yes`. On Lambda and on Workers the single `yes` is `provider.catalog`, and the two `degraded` are `provider.inspect` and `system.health`.
+On the Node daemon 50 of 50 are `yes`. On Lambda and on Workers the three `yes` operations are `agent.list`, `provider.catalog` and `worker.list`, and the two `degraded` operations are `provider.inspect` and `system.health`.
 
 ## Four deployment shapes, ranked
 
@@ -146,9 +149,9 @@ The columns above read the tree as it stands, with no deployment support added. 
 
 **A shape carries an operation when that operation answers correctly under the shape.** A `degraded` row is not carried: it answers, and it answers with the defect its cell names. Each shape below therefore states one exact count of carried operations, and names every operation it does not carry.
 
-**1. The Node daemon on a long-lived host. It carries 48 of 48.** The shipped shape. Every routed operation is `yes`. The daemon owns the home: `src/main.ts` acquires the home lock and recovers expired leases at startup. Startup recovery is a property of this shape alone.
+**1. The Node daemon on a long-lived host. It carries 50 of 50.** The shipped shape. Every routed operation is `yes`. The daemon owns the home: `src/main.ts` acquires the home lock and recovers expired leases at startup. Startup recovery is a property of this shape alone.
 
-**2. A container on AWS Lambda, with reserved concurrency `1` and a durable mounted home. It carries 46 of 48.** The serverless shape that carries the most surface. A container image ships the `git` binary and starts a subprocess, so the four repository operations are not blocked here as they are on a Worker. The mounted home restores the SQLite file and the bare home, which lifts the storage `no` and the filesystem `no` of the matrix.
+**2. A container on AWS Lambda, with reserved concurrency `1` and a durable mounted home. It carries 48 of 50.** The serverless shape that carries the most surface. A container image ships the `git` binary and starts a subprocess, so the four repository operations are not blocked here as they are on a Worker. The mounted home restores the SQLite file and the bare home, which lifts the storage `no` and the filesystem `no` of the matrix.
 
 It does not carry `event.list` or `plan.import`. `event.list` holds a connection open, and a held connection outlives no invocation. `plan.import` declares `durable` idempotency, and the tree has no durable store to satisfy it.
 
@@ -156,11 +159,11 @@ Reserved concurrency `1` bounds the shape to one container at a time. It does no
 
 The Hono chain of EPIC 032 carries over with no edit, because the shape changes the packaging and not the request handling.
 
-**3. A Worker with a remote storage driver, and no git. It carries 42 of 48.** A remote storage driver lifts every row whose only obstacle is `sqlite`. It does not carry the four repository operations, because git is a subprocess capability and an isolate starts no subprocess. It does not carry `event.list` or `plan.import`, for the reasons shape 2 gives. An isolate has no equivalent of reserved concurrency, so the memory-idempotency defect is worse here than on shape 2, not better.
+**3. A Worker with a remote storage driver, and no git. It carries 44 of 50.** A remote storage driver lifts every row whose only obstacle is `sqlite`. It does not carry the four repository operations, because git is a subprocess capability and an isolate starts no subprocess. It does not carry `event.list` or `plan.import`, for the reasons shape 2 gives. An isolate has no equivalent of reserved concurrency, so the memory-idempotency defect is worse here than on shape 2, not better.
 
 Adding git as a remote capability behind the `Git` interface would carry the four repository operations as well, and make this shape carry the whole surface bar `event.list` and `plan.import`. That capability is item 3 of the gate and it is not built, so it is not part of this shape.
 
-**4. A Worker on the tree as it stands today. It carries 1 of 48.** The one is `provider.catalog`. `provider.inspect` and `system.health` answer with the degradations their cells name, and the other 45 do not answer. This is not a product shape. It is stated so the count is on the record.
+**4. A Worker on the tree as it stands today. It carries 3 of 50.** The three are `agent.list`, `provider.catalog` and `worker.list`. `provider.inspect` and `system.health` answer with the degradations their cells name, and the other 45 do not answer. This is not a product shape. It is stated so the count is on the record.
 
 Hono stays useful in shape 2 and in shape 3. That is the reason the band keeps Hono after this gate.
 

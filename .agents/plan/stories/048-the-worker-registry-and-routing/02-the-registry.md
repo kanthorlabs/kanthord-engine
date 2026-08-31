@@ -62,5 +62,6 @@ Depends on: Story 1
 - Assert `compositions` deep-equals `["single", "composed", "self-managed"]`.
 - Import `parseWorkerId` from `./worker-id.ts`. Assert `parseWorkerId(workerRegistry[0].worker)` does not throw and its `id` equals `"claude@1"`. Assert `parseWorkerId(workerRegistry[1].worker)` does not throw and its `id` equals `"opencode@1"`.
 - Assert `workerRegistry.every((e) => e.agents.length === 0)` is true (no registry entry references an agent id).
+- Import `workerKinds` from `./worker.ts`. Assert the registry ids and `workerKinds` share no member: `workerRegistry.every((e) => !workerKinds.includes(e.worker as never))` is true. This is the assertion that proves EPIC 041 is superseded.
 - Run: `node --test src/domain/worker-registry.test.ts`
 - Proof: `PASS EPIC-048` line `src/domain/worker-registry.test.ts`

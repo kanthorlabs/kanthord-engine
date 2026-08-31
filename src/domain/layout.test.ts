@@ -98,7 +98,7 @@ describe("src/domain/layout.test", () => {
     );
   });
 
-  it("src/services/ holds exactly the twenty capabilities plus home-lock", () => {
+  it("src/services/ holds exactly the twenty-one capabilities plus home-lock", () => {
     const servicesDir = new URL("../services/", import.meta.url);
     const entries = fs.readdirSync(servicesDir, { withFileTypes: true });
     const directoryNames = entries
@@ -127,6 +127,7 @@ describe("src/domain/layout.test", () => {
       "secret",
       "storage",
       "verify",
+      "worker-health",
     ]);
   });
 
@@ -147,8 +148,8 @@ describe("src/domain/layout.test", () => {
     }
   });
 
-  it("agent, verify and lease each hold a not-implemented.ts", () => {
-    for (const capability of ["agent", "verify", "lease"]) {
+  it("agent, verify, lease and worker-health each hold a not-implemented.ts", () => {
+    for (const capability of ["agent", "verify", "lease", "worker-health"]) {
       const path = fileURLToPath(
         new URL(
           `../services/${capability}/not-implemented.ts`,

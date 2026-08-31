@@ -35,6 +35,40 @@ const nodeEdgeWriteExemptions = [
   "src/services/storage/migration-0008-graph-indexes.test.ts",
 ];
 
+const compositionMessage =
+  "read .metadata.composition only in the worker registry and the worker list query";
+
+// The only files that may read a worker composition. A consumer branches on a
+// worker capability instead; see docs/proposal/phase-2/agents-and-workers.md.
+const compositionExemptions = [
+  "src/domain/worker-registry.ts",
+  "src/domain/worker-registry.test.ts",
+  "src/queries/worker/list-workers.ts",
+];
+
+const nodeEdgeWriteSelectors = [
+  {
+    selector: `Literal[value=/${nodeEdgeWritePattern}/i]`,
+    message: nodeEdgeWriteMessage,
+  },
+  {
+    selector: `TemplateElement[value.raw=/${nodeEdgeWritePattern}/i]`,
+    message: nodeEdgeWriteMessage,
+  },
+];
+
+const compositionSelectors = [
+  {
+    selector: 'MemberExpression > Identifier.property[name="composition"]',
+    message: compositionMessage,
+  },
+  {
+    selector:
+      'MemberExpression[computed=true] > Literal.property[value="composition"]',
+    message: compositionMessage,
+  },
+];
+
 const vendorPackages = [
   "koa",
   "@koa/*",
@@ -417,21 +451,30 @@ export default [
       ],
     },
   },
+  // For one rule name, the last matching flat-config block wins. The two
+  // restrictions carry different exemption lists, so each file matches exactly
+  // one of these three blocks and keeps every selector that applies to it.
   {
     files: ["src/**/*.ts"],
-    ignores: nodeEdgeWriteExemptions,
+    ignores: [...nodeEdgeWriteExemptions, ...compositionExemptions],
     rules: {
       "no-restricted-syntax": [
         "error",
-        {
-          selector: `Literal[value=/${nodeEdgeWritePattern}/i]`,
-          message: nodeEdgeWriteMessage,
-        },
-        {
-          selector: `TemplateElement[value.raw=/${nodeEdgeWritePattern}/i]`,
-          message: nodeEdgeWriteMessage,
-        },
+        ...nodeEdgeWriteSelectors,
+        ...compositionSelectors,
       ],
+    },
+  },
+  {
+    files: nodeEdgeWriteExemptions,
+    rules: {
+      "no-restricted-syntax": ["error", ...compositionSelectors],
+    },
+  },
+  {
+    files: compositionExemptions,
+    rules: {
+      "no-restricted-syntax": ["error", ...nodeEdgeWriteSelectors],
     },
   },
   {

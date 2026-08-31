@@ -55,6 +55,36 @@ describe("src/http/contract/proposal-amendment-execution.test", () => {
     );
   });
 
+  it("worker.list documents both registered workers and the response fields", () => {
+    const start = execution.indexOf("## `worker.list`");
+    assert.notEqual(start, -1, "missing the worker.list section");
+    const afterHeading = execution.slice(start);
+    const end = afterHeading.indexOf("## Leases have no route");
+    const workerList = end === -1 ? afterHeading : afterHeading.slice(0, end);
+
+    assert.ok(workerList.includes("`claude@1`"), "claude@1 is not documented");
+    assert.ok(
+      workerList.includes("`opencode@1`"),
+      "opencode@1 is not documented",
+    );
+    assert.equal(
+      workerList.includes("general@1 only"),
+      false,
+      "the obsolete general@1-only response remains",
+    );
+    for (const field of [
+      "`worker`",
+      "`driver`",
+      "`agents`",
+      "`claims`",
+      "`deliverables`",
+      "`harness`",
+      "`metadata.composition`",
+    ]) {
+      assert.ok(workerList.includes(field), `${field} is not documented`);
+    }
+  });
+
   it("state-machine.md line 78 carries the amended running-ready note", () => {
     assert.ok(
       stateMachine.includes(amendedRunningReadyNote),
