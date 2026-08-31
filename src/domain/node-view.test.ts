@@ -39,6 +39,8 @@ describe("src/domain/node-view.test", () => {
       discardReason: null,
       revision: "rev_1",
       updatedAt: 1234567890,
+      deliverable: null,
+      verifyJson: null,
       dependencies: ["dep_1", "dep_2"],
     };
 
@@ -71,6 +73,8 @@ describe("src/domain/node-view.test", () => {
       discardReason: null,
       revision: "rev_1",
       updatedAt: 1234567890,
+      deliverable: null,
+      verifyJson: null,
       dependencies: [],
     };
 
@@ -95,6 +99,8 @@ describe("src/domain/node-view.test", () => {
       discardReason: "abandoned",
       revision: "rev_1",
       updatedAt: 1234567890,
+      deliverable: null,
+      verifyJson: null,
       dependencies: [],
     };
 
@@ -120,6 +126,8 @@ describe("src/domain/node-view.test", () => {
       discardReason: null,
       revision: "rev_1",
       updatedAt: 1234567890,
+      deliverable: null,
+      verifyJson: null,
       dependencies: ["a", "b", "c"],
     };
 

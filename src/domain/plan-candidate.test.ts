@@ -90,6 +90,8 @@ function storedNode(
     discardReason: null,
     revision: "revision_a",
     updatedAt: 1,
+    deliverable: null,
+    verifyJson: null,
     dependencies: [],
     ...overrides,
   };

@@ -5,6 +5,8 @@ import { epochMillis } from "./column.ts";
 import { nodeKind, nodeState, blockReason } from "./state.ts";
 import { workerKind } from "./worker.ts";
 import { blobHash } from "./blob.ts";
+import { deliverable } from "./deliverable.ts";
+import { nodePairLegality } from "./node-pair.ts";
 
 export const nodeRow = z
   .object({
@@ -22,6 +24,8 @@ export const nodeRow = z
     discardReason: z.string().nullable(),
     revision: identity("planRevision"),
     updatedAt: epochMillis,
+    deliverable: deliverable.nullable(),
+    verifyJson: z.string().nullable(),
   })
   .refine((row) => (row.kind === "initiative") === (row.parentId === null), {
     message: "(kind = 'initiative') = (parent_id IS NULL)",
@@ -46,5 +50,12 @@ export const nodeRow = z
   })
   .refine((row) => parseIdentity(row.id)?.kind === row.kind, {
     message: "the id prefix names the node kind",
-  });
+  })
+  .refine(
+    (row) => {
+      if (row.deliverable === null) return true;
+      return nodePairLegality(row.kind, row.deliverable).legal;
+    },
+    { message: "pair-illegal: kind and deliverable combination is not legal" },
+  );
 export type NodeRow = z.infer<typeof nodeRow>;

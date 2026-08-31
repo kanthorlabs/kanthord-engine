@@ -23,6 +23,8 @@ const NODE = {
   instruction: "# atlas\n",
   acceptance: null,
   worker: null,
+  deliverable: null,
+  verify: null,
   repositoryId: "repo_01JQ8Z7G3HZZZZZZZZZZZZZZZU",
   repo: "atlas",
   revision: "revision_01JQ8Z7G3HZZZZZZZZZZZZZZZT",

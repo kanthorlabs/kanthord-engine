@@ -72,6 +72,8 @@ const nodeClaim_node = {
   instruction: "# atlas\n",
   acceptance: null,
   worker: null,
+  deliverable: null,
+  verify: null,
   repositoryId: `repo_${U}`,
   repo: "atlas",
   revision: `revision_${U}`,

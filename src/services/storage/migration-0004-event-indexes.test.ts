@@ -32,10 +32,10 @@ describe("src/services/storage/migration-0004-event-indexes.test", () => {
     );
   });
 
-  it("migrations holds ten entries, versions 1 to 10 in order", () => {
+  it("migrations holds eleven entries, versions 1 to 11 in order", () => {
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
     );
     assert.deepEqual(
       migrations.map((migration) => migration.name),
@@ -50,6 +50,7 @@ describe("src/services/storage/migration-0004-event-indexes.test", () => {
         "0008-graph-indexes",
         "0009-one-branch",
         "0010-provider-login",
+        "0011-deliverable",
       ],
     );
   });

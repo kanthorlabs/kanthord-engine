@@ -7,6 +7,7 @@ import { ReportOutcomeError } from "../../../commands/outcome/report-outcome.ts"
 import { ReportObjectiveError } from "../../../commands/outcome/report-objective.ts";
 import { CloseObjectiveError } from "../../../commands/outcome/close-objective.ts";
 import { ListProjectNodeError } from "../../../queries/node/list-project-node.ts";
+import { VerifyBlockError } from "../../../domain/verify-block.ts";
 
 export function toHttpError(
   error: unknown,
@@ -52,6 +53,13 @@ export function toHttpError(
       case "project-not-found":
         return httpError("not-found", error.message);
     }
+  }
+  if (
+    error instanceof VerifyBlockError &&
+    "nodeId" in error &&
+    typeof error.nodeId === "string"
+  ) {
+    return httpError("internal-error", error.nodeId);
   }
   throw error;
 }

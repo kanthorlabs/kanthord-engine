@@ -92,8 +92,8 @@ scripts/*)
   fi
   exit 0
   ;;
-test/helpers/*.ts)
-  [ "$role" = test-engineer ] || deny "test helpers are the test-engineer lane"
+test/*)
+  [ "$role" = test-engineer ] || deny "the test tree is the test-engineer lane"
   exit 0
   ;;
 docs/proposal/*)

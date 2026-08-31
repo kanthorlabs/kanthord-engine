@@ -51,6 +51,40 @@ Do NOT add `assignment` to `StoredNode`.
 - `StoredNode` holds no `assignment` field.
 - The refine passes when `deliverable` is `null` (no pair check on a node without a deliverable).
 
+## Tasks
+
+### Task 05 — Cover the two node-row fields
+
+**Input:** `src/domain/node.test.ts`, `src/domain/plan-graph.test.ts`,
+`src/domain/node-view.test.ts`, `src/domain/plan-candidate.test.ts`,
+`src/domain/plan-diff.test.ts`, `src/domain/node.ts`, `src/domain/plan-graph.ts`,
+`src/commands/node/create-node.ts`, `src/services/plan/sqlite.ts`
+
+**Action — RED:** Two parts. Write both before you hand the Task over.
+
+Part A — extend `src/domain/node.test.ts` with the seven assertion groups named under
+`## Verify`. `src/domain/node.test.ts` is a required Proof target.
+
+Part B — repair the fixtures the two new required fields make stale. Every existing
+`nodeRow` and `StoredNode` fixture gains `deliverable: null` and `verifyJson: null`:
+
+- `src/domain/node.test.ts` — every `validInitiative`, `validObjective` and `validTask`
+  fixture, and every inline row the refine tests build. Fifteen assertions fail without it.
+- `src/domain/plan-graph.test.ts:12` — `StoredNode carries exactly its seventeen members`.
+  Rename the title to nineteen, add both fields to the fixture, and place `deliverable`
+  before `dependencies` in the expected sorted key list. `deliverable` sorts before
+  `dependencies` bytewise, because `l` precedes `n`.
+- `src/domain/node-view.test.ts`, `src/domain/plan-candidate.test.ts` and
+  `src/domain/plan-diff.test.ts` — every `StoredNode` fixture.
+
+**Action — GREEN:** Edit `src/domain/node.ts` and `src/domain/plan-graph.ts` exactly as
+`## Change` names them. Both new `StoredNode` members are required, so every production
+producer must also supply them: `src/commands/node/create-node.ts` initialises both to
+`null`, and `src/services/plan/sqlite.ts` exposes both on every read. Story 06 replaces the
+`sqlite.ts` placeholder with the real column round-trip; this Task only has to typecheck.
+
+**Action — REFACTOR:** None.
+
 ## Verify
 
 ```bash
@@ -69,7 +103,7 @@ Extend `src/domain/node.test.ts` with:
    - `{ ...validTask, deliverable: "expansion", verifyJson: null }`
 5. Each of the 8 legal pairs causes `nodeRow.safeParse` to return `success: true`. Use representative fixtures: `{ ...validInitiative, deliverable: "expansion", verifyJson: null }`, `{ ...validObjective, deliverable: "test", verifyJson: null }`, `{ ...validTask, deliverable: "test", verifyJson: null }`, etc.
 6. Assert that `nodeRow.shape` (or equivalent Zod introspection) does not contain an `assignment` key — `"assignment" in nodeRow.shape` is `false`.
-7. The refine delegates to `nodePairLegality` and does not mirror the table. The EPIC requires "changes the table in a test double and observes the refine follow it, so a mirrored second implementation fails." The viable mechanism in this codebase: add a test in `node.test.ts` that imports `nodePairLegality` directly, calls it with a pair you expect to be legal, and confirms `nodeRow.safeParse` with that same pair is also legal. Then pick a pair that IS currently illegal, change the test expectation to legal, and confirm that `nodeRow.safeParse` ALSO moves — this is done by temporarily patching `nodePairLegality` inline using `vi.spyOn` if the test runner supports mocking, or by structuring a separate integration assertion:
+7. The refine delegates to `nodePairLegality` and does not mirror the table. The test runner is `node:test`, which has no module mock, so the parity assertion is the mechanism:
    - Write an assertion: for each of the 12 pairs, `nodePairLegality(kind, deliverable).legal === nodeRow.safeParse({ ...validFixture, kind, deliverable, verifyJson: null }).success`. This asserts the two must agree for every pair, which fails if `nodeRow` hard-codes the table differently from `nodePairLegality`.
    - This comparison test is deterministic and falsifiable: a mirrored but divergent hard-coding in `nodeRow` will fail it for any pair where the two diverge.
 

@@ -2,6 +2,7 @@ import { HttpError, httpError } from "../../contract/errors.ts";
 import { CreateProjectError } from "../../../commands/project/create-project.ts";
 import { ReplaceProjectRepositoriesError } from "../../../commands/project/replace-project-repositories.ts";
 import { ShowProjectGraphError } from "../../../queries/project/show-project-graph.ts";
+import { VerifyBlockError } from "../../../domain/verify-block.ts";
 
 export function toHttpError(error: unknown): HttpError {
   if (error instanceof CreateProjectError) {
@@ -34,6 +35,13 @@ export function toHttpError(error: unknown): HttpError {
       case "project-not-found":
         return httpError("not-found", error.message);
     }
+  }
+  if (
+    error instanceof VerifyBlockError &&
+    "nodeId" in error &&
+    typeof error.nodeId === "string"
+  ) {
+    return httpError("internal-error", error.nodeId);
   }
   throw error;
 }

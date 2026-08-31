@@ -54,6 +54,41 @@ const COPY_ROWS =
 
 const DROP_OLD = "DROP TABLE plan_revision_old";
 
+const MIGRATED_NODE = `CREATE TABLE "node" (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES project(id),
+  kind TEXT NOT NULL CHECK (kind IN ('initiative', 'objective', 'task')),
+  parent_id TEXT REFERENCES node(id),
+  title TEXT NOT NULL,
+  instruction_blob TEXT NOT NULL REFERENCES blob(hash),
+  acceptance_blob TEXT REFERENCES blob(hash),
+  worker TEXT,
+  repository_id TEXT REFERENCES repository(id),
+  state TEXT NOT NULL,
+  block_reason TEXT,
+  discard_reason TEXT,
+  revision TEXT NOT NULL REFERENCES plan_revision(id),
+  updated_at INTEGER NOT NULL,
+  deliverable TEXT,
+  verify_json TEXT,
+  assignment TEXT,
+  CHECK ((kind = 'initiative') = (parent_id IS NULL)),
+  CHECK ((kind = 'objective') = (repository_id IS NOT NULL)),
+  CHECK ((kind = 'task') = (acceptance_blob IS NOT NULL)),
+  CHECK (state IN ('pending', 'ready', 'running', 'blocked',
+                   'awaiting_approval', 'done', 'partial', 'discarded')),
+  CHECK ((state = 'blocked') = (block_reason IS NOT NULL)),
+  CHECK (block_reason IS NULL OR block_reason IN ('attempt-limit', 'dependency-discarded',
+                   'stale-base', 'dirty-recovery', 'e2e-failed', 'abandoned')),
+  CHECK (state <> 'awaiting_approval' OR kind = 'objective'),
+  CHECK (state <> 'partial' OR kind <> 'task'),
+  CHECK (deliverable IS NULL OR deliverable IN
+        ('test', 'implementation', 'review', 'expansion')),
+  CHECK (deliverable IS NULL OR kind <> 'initiative' OR deliverable = 'expansion'),
+  CHECK (deliverable IS NULL OR kind <> 'task' OR deliverable <> 'expansion'),
+  CHECK (verify_json IS NULL OR json_valid(verify_json))
+) STRICT`;
+
 const normalize = (sql: string): readonly string[] =>
   sql
     .split(";")
@@ -173,11 +208,11 @@ describe("src/services/storage/migration-0006-revision-origin.test", () => {
     }
   });
 
-  it("migrations holds ten entries, versions 1 to 10 with the ten names in order", () => {
-    assert.equal(migrations.length, 10);
+  it("migrations holds eleven entries, versions 1 to 11 with the eleven names in order", () => {
+    assert.equal(migrations.length, 11);
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
     );
     assert.deepEqual(
       migrations.map((migration) => migration.name),
@@ -192,6 +227,7 @@ describe("src/services/storage/migration-0006-revision-origin.test", () => {
         "0008-graph-indexes",
         "0009-one-branch",
         "0010-provider-login",
+        "0011-deliverable",
       ],
     );
   });
@@ -211,8 +247,6 @@ describe("src/services/storage/migration-0006-revision-origin.test", () => {
       ),
     ) as readonly Readonly<Record<string, unknown>>[];
     const countBefore = countRows(storage, "plan_revision");
-    const nodeSqlBefore = tableSql(storage, "node");
-
     const second = new SqliteStorage({
       path: temporary.path,
       clock: createMockClock({ start: 1700000000000 }),
@@ -255,7 +289,7 @@ describe("src/services/storage/migration-0006-revision-origin.test", () => {
     ) as readonly Record<string, unknown>[];
     assert.deepEqual(violations, []);
 
-    assert.equal(tableSql(second, "node"), nodeSqlBefore);
+    assert.equal(tableSql(second, "node"), MIGRATED_NODE);
 
     const oldTable = second.transact((t) =>
       t.get(
