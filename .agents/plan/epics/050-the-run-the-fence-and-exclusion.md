@@ -171,6 +171,408 @@ A claim opens exactly one run, and a fence guards every later write:
 
 - **Both budgets are configuration, and both are validated at startup.** `runTtlMs` defaults to 300000 and `runMaxLifetimeMs` to 14400000, in `src/services/config/`. Startup refuses a `runTtlMs` below 1000, a `runMaxLifetimeMs` below `runTtlMs`, and a non-integer. A renew sets `expires_at = min(now + runTtlMs, max_lifetime_at)` and refuses `lifetime-exceeded` when `now >= max_lifetime_at`. **A renew never touches the fence.** The fence rises when a run ends, and nowhere else. A renew that rotated the fence would invalidate the run id and fence pair the worker already holds, which is the authority of that run. The comparison is `>=`, so the boundary instant is expired.
 
+## Sequence
+
+Every epic from 050 to 057 carries this section, and a machine checks it. A diagram here is not
+illustration: it is the exact ordered contract of one path of one operation. A conformance scenario
+replays the real command over real SQLite and compares the seam calls it observed with the steps
+drawn below, by equality.
+
+**For a path this section draws, the seam calls and their order are authoritative over the prose of
+a story.** A story that names a seam call this section does not draw is a defect in the story, and an
+implementing agent reports it rather than editing a diagram to match the code it wrote.
+
+The precedence stops there. A diagram carries no value, no predicate, no state change and no error
+semantics, so a disagreement about any of those does not resolve to the diagram: it makes this epic
+invalid, and a human resolves it before implementation. Picking the diagram silently would only make
+a stale mistake executable.
+
+### What a diagram may say
+
+- **A message is a seam call, and nothing else is a message.** The recorder wraps the dependency
+  object a command receives, so it observes exactly one thing: a call on an injected capability. A
+  pure-domain call such as `runKindFor`, `subtreeExclusion` or `assertRunAuthority` is invisible at
+  that seam, so it is never a message. A diagram that draws one cannot be checked, and this section
+  forbids it. What those functions decide is proven by their own unit tests and by the refusal
+  decision table below, never by a trace.
+- **A participant is a dependency key, capitalized.** The recorder reports the keys of the
+  dependency object of the scenario, and the parser checks every participant against that set. No
+  epic holds a global participant list, so EPIC 051 to 057 add a capability without amending this
+  one. `Command` is the operation under test, `Client` is the caller of a wire operation, and
+  `Caller` is the caller of a nested command.
+- **A step is `<n> <key>.<method>` or `<n> <key>.<method>:<label>`.** `n` is the ordinal, and it is
+  dense from 1. The label is the projection of that call, colon-separated, and it makes two calls of
+  one method distinct.
+- **No two steps of one diagram carry the same token.** The parser refuses a repeat. A method called
+  twice therefore needs a projection that separates the calls, so no diagram can pass by counting
+  method names. This rule is what makes the comparison a contract rather than a multiplicity check.
+- **A projection is declared once, per method, in the harness.** The table is data, not a per-test
+  literal: `plan.setNodeState` projects `input.id` and `input.trigger`; `plan.setNodeAssignment` and
+  `execution.openRun` project the node id; `lease.acquire`, `lease.renew` and `lease.release`
+  project `input.subjectId`; `events.append` projects `input.type`, `input.subjectId` and
+  `input.payload.reason` when the payload holds one; `execution.activeRunsOfNodes` projects the
+  caller-supplied set name. A node id, run id or attempt id renders through the scenario alias map,
+  so a token holds `T` and never a ULID. A method with no projection admits one call per diagram.
+- **A nested command is one step.** The scenario binds the nested command to unrecorded
+  dependencies, so `expiry.expireRuns` is a single message. That nested command carries its own
+  diagrams and its own scenarios.
+- **There is no `loop` and no `opt`.** Both admitted the regression the diagram exists to catch: an
+  `opt` for a task-only lease admits a task claim that takes no lease, and a `loop` over the
+  ancestor cascade admits a cascade of zero and proves nothing about the order inside it. A count is
+  unrolled against a fixed fixture, and a branch is a separate diagram with its own id. A scenario
+  that cannot be drawn as an exact list is a planning defect, per the determinism rule of
+  `AGENTS.md`.
+- **A diagram states one terminal, `ok` or `refuse:<code>`, and the harness derives it from the
+  real result.** A scenario passes no expected terminal, so the epic holds one copy of that
+  expectation. A refusal path is its own diagram.
+- **`note over Command: tail pinned by EPIC <nnn> <diagram-id>` ends the pinned prefix.** It exists
+  for an operation this epic amends at its prelude while a later epic owns its body. Nothing after
+  the note is compared. The parser requires the epic number and the diagram id, and the range gate
+  refuses when that epic is inside the range and declares no such diagram. A diagram with no note
+  pins its whole trace, and EPIC 057 holds no note, because no epic follows it.
+- **The trace is invocation order.** Every command in this range is synchronous inside one
+  `storage.transact` callback, so invocation order is completion order. An asynchronous seam would
+  need begin and end records, and this range introduces none.
+
+### A diagram is addressed by its heading
+
+A `###` heading holding a kebab-case id in backticks names the diagram in the fenced block below
+it. A `###` heading with no backticks is prose and holds no diagram. The id is
+unique across every epic in the 050 to 057 range, and it is the file name of its scenario.
+
+### A story names the diagrams it changes, and the seams it moves
+
+A diagram nobody implements and a story that implements something nobody drew are the same defect,
+so the two texts are bound by two declared lines. A story that changes a drawn path carries them
+directly under its number, one per line:
+
+```text
+Diagrams: claim-success-task, claim-success-initiative, claim-refusal-objective-busy
+Seams: +plan.setNodeAssignment, ~plan.setNodeState, -execution.adoptRun
+```
+
+- **`Diagrams:` names the live diagram ids this story changes.** Exactly one story of the epic names
+  each live diagram, so every diagram has one owner and one author. That story adds the diagram's
+  scenario file at `test/sequence/scenarios/<id>.ts`, and the gate checks the story text holds that
+  exact path.
+- **`Seams:` carries one sign per token**, in the unlabelled form `<key>.<method>`, keeping
+  `events.append:<event-type>` because an event type is behaviour and an alias is fixture data. `+`
+  adds a call this path did not make, `~` moves an existing call, and `-` removes one. An unsigned
+  token is refused. A token belongs to exactly one story across the epic, and it is the story that
+  writes the call, not the story that declares the interface.
+- **A context token is not declared.** A call this path already made, in the position it already
+  held, belongs to no story. Every added token of this epic is `+`, because this is the first epic to
+  draw these paths and no earlier diagram holds a context token to inherit. From EPIC 051 onward a
+  redrawn path carries context tokens, and a story that claimed them would claim a change it does not
+  make.
+- **The gate compares four things.** A `+` or `~` token appears in a diagram that story names; a `-`
+  token appears in no live diagram; a token of a live diagram that no earlier live or superseded
+  diagram holds is `+` in exactly one story; and no token carries two signs. A step drawn and
+  unimplemented fails, and a seam a story moves without drawing it fails.
+- **A story that changes no drawn path carries neither line.** A schema, a migration, a proposal
+  document and a pure-domain function move no seam.
+
+### One epic owns a diagram, and a later epic supersedes it
+
+Each epic draws the paths it changes, so a path drawn here and changed later exists twice. The
+later epic wins, and it says so: it declares its own diagram id and a `Supersedes: <document-id>
+<diagram-id>` line naming both halves, because an id alone does not resolve across epics. The
+superseded diagram gains a `Superseded by: <document-id> <diagram-id>` line in its own epic. The range gate then requires the superseded id to hold no scenario file and the new
+id to hold exactly one, so exactly one diagram of a path is live at any commit. An earlier epic
+keeps its diagram as the record of what it changed, and nothing runs against it.
+
+### What a diagram does not prove
+
+- **It does not prove a refusal code.** Two refusals that stop at the same step are one diagram, and
+  the code that separates them is proven by the refusal test.
+- **It does not prove branch coverage.** A fixed fixture is one example. That the drawn set is every
+  branch of a path is a claim this epic makes in prose, and a reviewer checks it: the claim is the
+  sentence under each diagram.
+- **It does not prove refusal precedence.** A refusal is decided by pure predicates the recorder
+  cannot see, so a command could read in the drawn order, evaluate the predicates in the wrong order
+  and still conform. The read order below follows the refusal order because a read no refusal needs
+  is not taken, and the precedence itself is proven by a decision table over every pair of refusals
+  that can trigger at once, in `src/commands/node/claim-node.test.ts`.
+- **It does not prove a transaction property.** `storage.transact` is step 1 of every command
+  diagram, which proves one transaction is opened. That the expiry pass receives that same
+  transaction, and that a refusal rolls back everything inside it, are separate cases.
+- **A refusal diagram proves no write seam is reached after the refusal point.** It does not prove
+  the operation wrote nothing: `expiry.expireRuns` is a mutation, it is hidden behind one step by
+  design, and the scenario binds it to unrecorded dependencies. What proves nothing was committed is
+  the byte-identical database assertion of the Verification gate. Both assertions are required, and
+  neither replaces the other.
+
+### Seams the diagrams name, which the Stories above did not
+
+Writing the diagrams forced six seam names the prose left open. They are decisions of this epic, and
+story 16 carries their signatures:
+
+- **`plan.setNodeAssignment`.** A node write happens in the plan store — `no-restricted-syntax`
+  enforces it — so the claim's assignment write is a plan store method, not an inline update.
+- **`execution.activeRunsOfNodes(transaction, nodeIds)`.** One read serves both pure rules.
+  `subtreeExclusion` passes the subtree ids from `plan.readSubtree`, and `objectiveBusy` passes the
+  sibling ids from the graph read. A method named after the objective hierarchy would put plan
+  topology inside the execution capability, which owns runs and not the tree.
+- **`execution.runById(transaction, runId)`.** `assertRunAuthority` is pure, so the run row is read
+  at the seam. `activeRunOfNode` answers a different question and cannot answer this one.
+- **`execution.renewRun`** and **`execution.expireDueRuns`.** The `min(now + runTtlMs,
+max_lifetime_at)` write and the conditional update of the Decisions are SQL, and SQL lives in the
+  execution implementation.
+
+An initiative claim evaluates neither `drive-mode-pinned` nor `objective-busy`, because both are
+scoped to an objective and an initiative is above that scope. `claim-success-initiative` states this
+by taking neither read, and the refusal order of the Decisions is unchanged: a predicate that does
+not apply to the target is skipped, never simulated.
+
+### `claim-success-task`
+
+Fixture: initiative `I` holds objective `O`, which holds tasks `T` and `S`. Every node is `ready`,
+no node is assigned, and no run is active. The target is `T`, whose deliverable is `implementation`,
+so the run kind is `execution` and the cascade covers `O` and `I`.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Command
+    participant Storage
+    participant Clock
+    participant Expiry
+    participant Plan
+    participant Lease
+    participant Execution
+    participant Events
+    Client->>Command: node.claim
+    Command->>Storage: 1 storage.transact
+    Command->>Clock: 2 clock.now
+    Command->>Expiry: 3 expiry.expireRuns
+    Command->>Plan: 4 plan.readAllNodes
+    Command->>Plan: 5 plan.newestRevision
+    Command->>Lease: 6 lease.read
+    Command->>Execution: 7 execution.runDriversUnderObjective
+    Command->>Plan: 8 plan.readSubtree
+    Command->>Execution: 9 execution.activeRunsOfNodes:siblings
+    Command->>Execution: 10 execution.activeRunsOfNodes:subtree
+    Command->>Lease: 11 lease.acquire:O
+    Command->>Lease: 12 lease.acquire:T
+    Command->>Plan: 13 plan.setNodeAssignment:T
+    Command->>Execution: 14 execution.openRun:T
+    Command->>Execution: 15 execution.openAttempt:T
+    Command->>Plan: 16 plan.setNodeState:T:claim-taken
+    Command->>Plan: 17 plan.setNodeState:O:ancestor-started
+    Command->>Plan: 18 plan.setNodeState:I:ancestor-started
+    Command->>Events: 19 events.append:run.opened:T
+    Command->>Events: 20 events.append:node.running:O:child-started
+    Command->>Events: 21 events.append:node.running:I:child-started
+    Command->>Events: 22 events.append:node.running:T:claim-taken
+    Command-->>Client: ok
+```
+
+Steps 2 to 10 are reads, and step 11 is the first mutation of the claim itself, so every refusal is
+evaluated before it. Steps 13 and 14 are the assignment and the run, in the one transaction the
+Decisions require. Steps 17 and 18 are the cascade, unrolled, so the cascade order is part of the
+contract.
+
+### `claim-success-initiative`
+
+Fixture: initiative `I` is `ready`, unassigned, its deliverable is `expansion`, and it is the root,
+so the run kind is `structural`, no cascade exists, and the run holds no `run_base` row and no
+attempt.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Command
+    participant Storage
+    participant Clock
+    participant Expiry
+    participant Plan
+    participant Lease
+    participant Execution
+    participant Events
+    Client->>Command: node.claim
+    Command->>Storage: 1 storage.transact
+    Command->>Clock: 2 clock.now
+    Command->>Expiry: 3 expiry.expireRuns
+    Command->>Plan: 4 plan.readAllNodes
+    Command->>Plan: 5 plan.newestRevision
+    Command->>Lease: 6 lease.read
+    Command->>Plan: 7 plan.readSubtree
+    Command->>Execution: 8 execution.activeRunsOfNodes:subtree
+    Command->>Lease: 9 lease.acquire:I
+    Command->>Plan: 10 plan.setNodeAssignment:I
+    Command->>Execution: 11 execution.openRun:I
+    Command->>Plan: 12 plan.setNodeState:I:claim-taken
+    Command->>Events: 13 events.append:run.opened:I
+    Command->>Events: 14 events.append:node.running:I:claim-taken
+    Command-->>Client: ok
+```
+
+No `execution.openAttempt` step exists, so a structural run that opened an attempt fails the
+comparison. That is the assertion, not a comment.
+
+### `claim-refusal-objective-busy`
+
+Fixture: `claim-success-task`, plus an active run on the sibling task `S`.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Command
+    participant Storage
+    participant Clock
+    participant Expiry
+    participant Plan
+    participant Lease
+    participant Execution
+    Client->>Command: node.claim
+    Command->>Storage: 1 storage.transact
+    Command->>Clock: 2 clock.now
+    Command->>Expiry: 3 expiry.expireRuns
+    Command->>Plan: 4 plan.readAllNodes
+    Command->>Plan: 5 plan.newestRevision
+    Command->>Lease: 6 lease.read
+    Command->>Execution: 7 execution.runDriversUnderObjective
+    Command->>Plan: 8 plan.readSubtree
+    Command->>Execution: 9 execution.activeRunsOfNodes:siblings
+    Command-->>Client: refuse:objective-busy
+```
+
+`execution.activeRunsOfNodes:subtree` is not reached, because the earlier refusal wins, and no
+`Lease`, `Plan` or `Events` write step appears. What the operation committed is a separate
+assertion, per "What a diagram does not prove".
+
+### `renew-success`
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Command
+    participant Storage
+    participant Clock
+    participant Expiry
+    participant Execution
+    participant Plan
+    participant Lease
+    participant Events
+    Client->>Command: node.renew
+    Command->>Storage: 1 storage.transact
+    Command->>Clock: 2 clock.now
+    Command->>Expiry: 3 expiry.expireRuns
+    Command->>Execution: 4 execution.runById
+    Command->>Plan: 5 plan.readSubtree
+    Command->>Lease: 6 lease.renew:T
+    Command->>Execution: 7 execution.renewRun
+    Command->>Events: 8 events.append:run.renewed:T
+    Command-->>Client: ok
+```
+
+Steps 4 and 5 supply `assertRunAuthority` with the run and the subtree. No fence write appears, per
+the Decisions.
+
+### `renew-refusal-lifetime-exceeded`
+
+Fixture: an active run whose `max_lifetime_at` equals `now`.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Command
+    participant Storage
+    participant Clock
+    participant Expiry
+    participant Execution
+    participant Plan
+    Client->>Command: node.renew
+    Command->>Storage: 1 storage.transact
+    Command->>Clock: 2 clock.now
+    Command->>Expiry: 3 expiry.expireRuns
+    Command->>Execution: 4 execution.runById
+    Command->>Plan: 5 plan.readSubtree
+    Command-->>Client: refuse:lifetime-exceeded
+```
+
+### `release-success`
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Command
+    participant Storage
+    participant Clock
+    participant Expiry
+    participant Execution
+    participant Plan
+    participant Lease
+    participant Events
+    Client->>Command: node.release
+    Command->>Storage: 1 storage.transact
+    Command->>Clock: 2 clock.now
+    Command->>Expiry: 3 expiry.expireRuns
+    Command->>Execution: 4 execution.runById
+    Command->>Plan: 5 plan.readSubtree
+    Command->>Execution: 6 execution.endRun
+    Command->>Lease: 7 lease.release:T
+    Command->>Events: 8 events.append:run.ended:T
+    Command-->>Client: ok
+```
+
+### `report-authority-prelude`
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Command
+    participant Storage
+    participant Clock
+    participant Expiry
+    participant Execution
+    participant Plan
+    Client->>Command: node.report
+    Command->>Storage: 1 storage.transact
+    Command->>Clock: 2 clock.now
+    Command->>Expiry: 3 expiry.expireRuns
+    Command->>Execution: 4 execution.runById
+    Command->>Plan: 5 plan.readSubtree
+    note over Command: tail pinned by EPIC 051 report-execution-checkpoint
+```
+
+This epic pins the prelude, because the prelude is what it changes. EPIC 051 declares
+`report-execution-checkpoint` and pins the tail, and the range gate refuses if it does not.
+
+### `expiry-pass-one-due`
+
+Fixture: one run whose `expires_at` is `now`, called with the caller's transaction, so the pass
+opens none.
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Command
+    participant Execution
+    participant Events
+    Caller->>Command: expireRuns
+    Command->>Execution: 1 execution.expireDueRuns
+    Command->>Events: 2 events.append:run.expired:R
+    Command-->>Caller: ok
+```
+
+### `expiry-pass-none-due`
+
+Fixture: the same run, already ended by a first pass.
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Command
+    participant Execution
+    Caller->>Command: expireRuns
+    Command->>Execution: 1 execution.expireDueRuns
+    Command-->>Caller: ok
+```
+
+The second pass appends no event, which the Decisions require. The two diagrams state it as two
+exact traces, where one diagram with a repetition block would have stated neither.
+
 ## Stories
 
 1. **The run kind.** Add `src/domain/run-kind.ts` with `runKindFor`. Add `src/domain/run-kind.test.ts` asserting the mapping for all four deliverables by value, and asserting the function is total by iterating `deliverables`.
@@ -185,13 +587,25 @@ A claim opens exactly one run, and a fence guards every later write:
 
 6. **The objective-branch rule.** Add `objectiveBusy({ objectiveId, siblingRuns })` to `src/domain/run-exclusion.ts`, returning the sibling node id, the sibling run id and its `expires_at`. Add cases asserting a sibling task with an active run refuses with all three fields, and asserting a sibling task with an ended run admits.
 
-7. **The expiry pass.** Add `src/commands/run/expire-runs.ts` performing the conditional update of the Decisions and appending one `run.expired` event per affected row, in the caller's transaction. It deletes no candidate ref, per the Decisions. Add its test asserting: the fence rises by exactly one; a second call raises nothing and appends nothing; a run whose `expires_at` is exactly `now` is expired; a failure injected at the event append leaves the run active and the fence unchanged.
+7. **The expiry pass.** Add `src/commands/run/expire-runs.ts` performing the conditional update of the Decisions and appending one `run.expired` event per affected row, in the caller's transaction. It deletes no candidate ref, per the Decisions. Add its test asserting: the fence rises by exactly one; a second call raises nothing and appends nothing; a run whose `expires_at` is exactly `now` is expired; a failure injected at the event append leaves the run active and the fence unchanged. Add `test/sequence/scenarios/expiry-pass-one-due.ts` and `test/sequence/scenarios/expiry-pass-none-due.ts`.
 
-8. **The claim writes the assignment and opens the run.** Rewrite `src/commands/node/claim-node.ts` as one path: call the expiry pass, read the pair, compute the run kind, route through `routeWorker` with the caller record and the `available` assertion, write `node.assignment`, and insert exactly one run with its provenance — all inside the transaction opened at line 104. Delete `openOrAdoptRun`, the own-lease replay path, `initiative-not-claimable` and `run-driver-mismatch`. Move every refusal ahead of the first mutation. Add cases to `src/commands/node/claim-node.test.ts` per refusal, asserting the refusal code, the exact details object and that the database is byte-identical, plus a case asserting a claim failing two conditions reports the earlier one.
+   Diagrams: expiry-pass-one-due, expiry-pass-none-due
+
+   Seams: +execution.expireDueRuns, +events.append:run.expired
+
+8. **The claim writes the assignment and opens the run.** Rewrite `src/commands/node/claim-node.ts` as one path: call the expiry pass, read the pair, compute the run kind, route through `routeWorker` with the caller record and the `available` assertion, write `node.assignment`, and insert exactly one run with its provenance — all inside the transaction opened at line 104. Delete `openOrAdoptRun`, the own-lease replay path, `initiative-not-claimable` and `run-driver-mismatch`. Move every refusal ahead of the first mutation. Add cases to `src/commands/node/claim-node.test.ts` per refusal, asserting the refusal code, the exact details object and that the database is byte-identical, plus a case asserting a claim failing two conditions reports the earlier one. Add the refusal decision table over every pair of refusals that can trigger at once, asserting the winner of each pair. Add `test/sequence/scenarios/claim-success-task.ts`, `test/sequence/scenarios/claim-success-initiative.ts` and `test/sequence/scenarios/claim-refusal-objective-busy.ts`.
+
+   Diagrams: claim-success-task, claim-success-initiative, claim-refusal-objective-busy
+
+   Seams: +storage.transact, +clock.now, +expiry.expireRuns, +plan.readAllNodes, +plan.newestRevision, +lease.read, +execution.runDriversUnderObjective, +plan.readSubtree, +execution.activeRunsOfNodes, +lease.acquire, +plan.setNodeAssignment, +execution.openRun, +execution.openAttempt, +plan.setNodeState, +events.append:run.opened, +events.append:node.running, -execution.adoptRun, -execution.activeRunOfNode, -events.append:lease.claimed
 
 9. **Run authority.** Add `src/domain/run-authority.ts` with `assertRunAuthority` returning `null` or one of the six refusals in the fixed order. Add `src/domain/run-authority.test.ts` asserting each refusal in isolation, asserting the order by an input failing two conditions, asserting an ended run presented with its own last fence refuses `run-ended`, and asserting no refusal carries a fence value.
 
-10. **Renew, release and report carry the authority check.** Rename `src/commands/node/heartbeat-node.ts` to `src/commands/run/renew-run.ts`, implementing `expires_at = min(now + runTtlMs, max_lifetime_at)` and the `lifetime-exceeded` refusal. Wire `assertRunAuthority` into renew, release and report. Add cases asserting each of the three refuses a stale fence, an ended run and an expired run, and asserting a renew at `max_lifetime_at` refuses while `expires_at` stays unchanged.
+10. **Renew, release and report carry the authority check.** Rename `src/commands/node/heartbeat-node.ts` to `src/commands/run/renew-run.ts`, implementing `expires_at = min(now + runTtlMs, max_lifetime_at)` and the `lifetime-exceeded` refusal. Wire `assertRunAuthority` into renew, release and report. Add cases asserting each of the three refuses a stale fence, an ended run and an expired run, and asserting a renew at `max_lifetime_at` refuses while `expires_at` stays unchanged. Add `test/sequence/scenarios/renew-success.ts`, `test/sequence/scenarios/renew-refusal-lifetime-exceeded.ts`, `test/sequence/scenarios/release-success.ts` and `test/sequence/scenarios/report-authority-prelude.ts`.
+
+    Diagrams: renew-success, renew-refusal-lifetime-exceeded, release-success, report-authority-prelude
+
+    Seams: +execution.runById, +lease.renew, +execution.renewRun, +events.append:run.renewed, +execution.endRun, +lease.release, +events.append:run.ended, -events.append:lease.renewed, -events.append:lease.released
 
 11. **An ordinary failure never changes the assignment.** Add cases asserting `node.assignment` is unchanged after an expiry, after a release and after an unroutable claim on a different node. No case exercises an operator handoff, which EPIC 056 introduces.
 
@@ -202,6 +616,16 @@ A claim opens exactly one run, and a fence guards every later write:
 14. **The policy amendment and the capability swap.** Amend `docs/proposal/api/README.md` with the exception sentence of the Decisions, and record `023-version-compatibility-policy.md` D1 as superseded. Retire `external-drive` from `capabilityOperations` at `src/http/contract/capability.ts:5` and declare `worker-model` naming the four operations. Move `KANTHORD_VERSION` at `src/domain/version.ts:1` to `28.0.0`. Add a compatibility record to `docs/proposal/api/README.md` listing this epic's seven changes: the `node.heartbeat` rename, the required `available`, the required `runId` and `runFence`, the added `runId`, `fence`, `expiresAt` and `renewAfterMs`, the removed `heartbeatIntervalMs`, and the three removed and four added event types. `worker-model` is the last capability name this block declares; EPIC 050.1 changes no wire shape. Update `src/http/contract/capability.test.ts`, `src/http/contract/runtime-matrix.test.ts` and the `system.health` example literal at `src/http/contract/system.ts:84`.
 
 15. **The proposal records the run model.** Add `docs/proposal/phase-2/runs-and-exclusion.md` stating the three run kinds and their selection rule, the fence, the four authority conditions, the assignment rule, the subtree rule, the objective-branch refusal and its retry contract, the expiry and maximum lifetime formulas, the refusal order, the one-path claim, and that migration `12` lands the final shape and discards run history because there is nothing to be compatible with.
+
+16. **The seams the diagrams name.** Add to `src/services/plan/index.ts`: `setNodeAssignment(transaction, input: { id: string; assignment: string | null })`. Add to `src/services/execution/index.ts`: `activeRunsOfNodes(transaction, nodeIds: readonly string[]): readonly RunRecord[]`, `runById(transaction, runId: string): RunRecord | null`, `renewRun(transaction, input: { runId: string; expiresAt: number }): RunRecord`, and `expireDueRuns(transaction, now: number): readonly RunRecord[]` performing the conditional update of the Decisions and returning one record per affected row. Implement each in its capability, and add cases per method: `activeRunsOfNodes` returns no ended and no expired run and holds the input order; `runById` returns an ended run rather than null, because `assertRunAuthority` refuses it by code; `renewRun` writes `expires_at` and leaves `fence` unchanged; `expireDueRuns` returns zero records on a second call.
+
+17. **The conformance harness.** Add `test/helpers/sequence-conformance.ts` exporting `recordSeams(dependencies, aliases)`, which returns the same dependency object behind a recording proxy plus the ordered token list, and `assertConformance({ epic, diagram, recorder, result })`, which parses the named diagram out of the named epic file and compares it with the recorded list by `deepStrictEqual`. The projection table of the Sequence section lives in this file, once. The terminal is derived from `result`, so no scenario states an expected terminal. The parser refuses: an unknown diagram id; a participant outside the recorded dependency keys; a message that is not `<n> <key>.<method>` or `<n> <key>.<method>:<label>`; a non-dense ordinal sequence; two steps carrying one token; two terminals; no terminal and no note; a `note over Command` that is not `tail pinned by EPIC <nnn> <diagram-id>`; and the words `loop` or `opt`. Add `test/helpers/sequence-conformance.test.ts` asserting every parser refusal by value, and asserting that a recorded list with one extra step, one missing step, two adjacent steps swapped, or one differing label each fails.
+
+18. **The conformance runner.** Add `test/sequence/conformance.test.ts`, which reads every diagram of every epic in the 050 to 057 range, lists `test/sequence/scenarios/`, and refuses a live diagram id with no scenario file, a scenario file with no live diagram id, and a superseded id holding a scenario file. It then imports every scenario and runs it through `assertConformance`. A scenario file is owned by the story that owns its diagram, per the Sequence section, so this story adds none. Each scenario default-exports a function that builds the fixture its diagram names, runs the real command over real SQLite with the recording proxy, binds `expiry.expireRuns` to unrecorded dependencies, and returns the recorder and the result. Discovery is by directory listing and the run is by import, so a scenario cannot be satisfied by unreached source text.
+
+19. **The range gate.** Add `scripts/verify-epic-sequence.ts`, and add it to the `verify` script of `package.json`. The epic set is the file-name grammar `^(05[0-7])(\.[0-9]+)?-[a-z0-9-]+\.md$` under `.agents/plan/epics/`, and the eight base numbers 050 to 057 are each required to be present. It refuses when: an epic in the set holds no `## Sequence` section; a diagram fails the parser of story 17; a diagram id repeats across live diagrams; a `Supersedes` line names an id no epic in the set declares; an unpinned tail names an epic inside the set that declares no such diagram id; a live diagram is named by no `Diagrams:` line or by two; a `Diagrams:` line names an unknown or superseded id; a story naming a diagram does not hold the exact path `test/sequence/scenarios/<id>.ts`; a `Seams:` token carries no sign or two signs; a `+` or `~` token appears in no diagram that story names; a `-` token appears in a live diagram; or a token of a live diagram that no earlier live or superseded diagram holds is `+` in no story or in two. Add `scripts/verify-epic-sequence.test.ts` asserting each refusal against a fixture tree in its own `mktemp` directory, and asserting the real tree passes. Add a row to the `AGENTS.md` enforcement table: a sequence diagram per epic in the range, and code conformance to it, enforced by `scripts/verify-epic-sequence.ts` and `test/sequence/conformance.test.ts`.
+
+    **Rollout.** The gate refuses an epic in the range with no `## Sequence` section, so it goes red the moment it lands unless EPIC 051 to 057 already carry theirs. The script and its test land in this epic. The `verify` wiring lands in the change that completes the eighth section, and this epic does not merge a red gate.
 
 ## Verification gate
 
@@ -226,6 +650,10 @@ node --test \
   src/commands/outcome/report-outcome.test.ts \
   src/http/contract/graph.test.ts \
   src/http/contract/parity.test.ts \
+  test/helpers/sequence-conformance.test.ts \
+  test/sequence/conformance.test.ts \
+  scripts/verify-epic-sequence.test.ts \
+  && node scripts/verify-epic-sequence.ts \
   && echo "PASS EPIC-050"
 ```
 
@@ -263,3 +691,17 @@ Hermetic coverage required beyond the Proof:
 - `lease.claimed`, `lease.released` and `lease.renewed` are absent from `eventTypes`, and `retiredEventTypes` is empty. Both asserted, so the replacement is complete rather than additive.
 - `heartbeatIntervalMs` is absent from `nodeClaimResponse` and `renewAfterMs` equals `Math.floor(runTtlMs / 3)`, asserted by value. A claim's `expiresAt` equals its run row's `expires_at`.
 - A failure injected at the `run.expired` event append leaves the run `active` and the fence unchanged, proving the transition and the event are one transaction.
+- Every diagram of the Sequence section is replayed against the real command over real SQLite, and the recorded token list equals the drawn list by `deepStrictEqual`. The diagram is the only copy of the expected order, so a diagram nobody updated fails with the implementation.
+- The parser refuses every malformed diagram of story 17 by value, including two steps carrying one token and the words `loop` and `opt`. Each refusal is asserted, so the gate cannot pass by parsing nothing and cannot regain the permissive notation.
+- A recorded list with one extra step, one missing step, two adjacent steps swapped, and one differing label each fail. Without all four the comparison could be a subset check.
+- `claim-success-task` and `claim-success-initiative` are separate diagrams, and the initiative trace holds no `execution.openAttempt` and no objective-scoped read. A structural run that opened an attempt therefore fails, which an optional block would have admitted.
+- The ancestor cascade is unrolled and each step carries its node alias, so the cascade order is asserted. A cascade of zero fails.
+- `expiry-pass-one-due` and `expiry-pass-none-due` are separate diagrams, so the second pass appending no event is an exact trace rather than a block that matched zero times.
+- `claim-refusal-objective-busy` and `renew-refusal-lifetime-exceeded` each record no write seam after the refusal point. That the operation committed nothing is asserted separately by the byte-identical database comparison, because the expiry pass mutates inside the same transaction and is hidden behind one step by design.
+- The claim's refusal precedence is asserted by a decision table over every pair of refusals that can trigger at once, and the table asserts the winner for each pair. A trace proves the read order and never the precedence.
+- The expiry pass receives the same transaction the command opened, asserted by identity, so `storage.transact` appearing once in the diagram is backed by a case.
+- `test/sequence/conformance.test.ts` refuses a live diagram id with no scenario file, a scenario file with no live diagram id, and a superseded id holding a scenario file. Discovery is by directory listing, so unreached source text satisfies nothing.
+- Every live diagram is named by exactly one story `Diagrams:` line, and every token of every live diagram that no earlier diagram holds is `+` in exactly one story `Seams:` line. A diagram nobody implements and a seam no diagram draws each fail the gate, so the stories and the diagrams are one statement.
+- A `-` token appearing in a live diagram fails, and an unsigned token fails. A removal this epic claims is therefore checked against the drawn set rather than trusted.
+- A story naming a diagram holds the exact path `test/sequence/scenarios/<id>.ts`, so the diagram, the story and the scenario file have one owner.
+- `scripts/verify-epic-sequence.ts` refuses an epic in the 050 to 057 range with no `## Sequence` section, a missing base number, a repeated live diagram id, a `Supersedes` line naming an unknown id, and an unpinned tail naming an in-range epic that declares no such diagram. Each refusal is asserted against a fixture tree.
