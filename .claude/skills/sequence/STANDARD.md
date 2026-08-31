@@ -1,6 +1,6 @@
 # The sequence standard
 
-Standard-version: 1
+Standard-version: 2
 
 This file is normative and it is repository-neutral. Both kanthord repositories carry a
 byte-identical copy, and each binds it to its own seam in its own `SKILL.md`, section
@@ -39,8 +39,27 @@ function decides is proven by its own unit test, or by a decision table.
 ## 3 — The token grammar
 
 - A step is `<n> <key>.<method>` or `<n> <key>.<method>:<label>`. `n` is dense from 1.
+- **A diagram with no step is legal, and it is the strongest statement available.** It asserts that
+  the path reaches no seam at all, so any call the implementation makes fails the comparison. A path
+  that differs from another only by calling nothing is drawn this way rather than described in prose.
+- **Only a numbered step is compared.** The arrow that enters from an end and the arrow that returns
+  the terminal carry no ordinal, so a user action, a render or a call into the unit is drawn without
+  being a recorded call. An unnumbered arrow between two participants is refused, because it would
+  read as a message the recorder never saw.
 - **No two steps of one diagram carry the same token.** A method called twice needs a projection that
   separates the calls, so no diagram passes by counting method names.
+- **A method called twice with no natural projection is a decomposition signal, not a notation
+  problem.** Never add a parameter to a production interface so a diagram can tell two calls apart,
+  and never number the occurrences: an occurrence number is the method-name counting this rule exists
+  to forbid, it means a different call on every path, and inserting one call renames every later one.
+  A unit that calls one seam method repeatedly with nothing to distinguish the calls is doing several
+  things, and each becomes a nested unit obeying the repository's own one-transaction rule and
+  carrying its own diagram, where the call appears once. Where that decomposition is wrong for the
+  product, the path is not drawn and the document says why in one sentence.
+- **A call repeated over a list is drawn against a fixture whose length is stated**, and the
+  projection separates the iterations by their own data. A list whose items produce identical tokens
+  is not drawable: the fixture states a length of one, and the document says that the longer list is
+  asserted by the unit's own test.
 - A projection is declared once per method, in the harness, and never per test. It renders behaviour
   and renders an id through the scenario alias map, so a token holds `T` and never a ULID.
 - A participant is a seam key, capitalized, and the parser checks it against the keys the recorder
@@ -77,24 +96,36 @@ implementation. A gate that silently picks the diagram would only make a stale m
 
 ## 6 — Every work item declares the seams it moves, with a sign
 
-Directly under the work item's heading, one per line:
+Directly under the work item's heading, before its prose, one per line:
 
 ```text
 Diagrams: <id>, <id>
-Seams: +<key>.<method>, ~<key>.<method>, -<key>.<method>:<event-type>
+Seams: +<key>.<method>:<label>, ~<key>.<method>, -<key>.<method>
 ```
 
 - `Diagrams:` names the live ids this work item changes. Exactly one work item owns each live
-  diagram, and that work item adds the diagram's scenario file and names its exact path.
-- `Seams:` carries one sign per token, and an unsigned token is refused. `+` adds a call that did not
-  exist on this path, `~` moves an existing call, and `-` removes one.
-- **A context token is not declared.** A call this path already made, in the position it already
-  held, belongs to no work item of this document. Declaring it would force a work item to claim a
-  change it does not make, which is what makes an unsigned list unusable after the first document.
-- The gate checks four things: a `+` or `~` token appears in a diagram this work item names; a `-`
-  token appears in no live diagram; a token of a live diagram that appears in no earlier live or
-  superseded diagram is `+` in exactly one work item; and no token carries two signs across the
-  document.
+  diagram. **The scenario path is derived, never declared**: the binding gives the scenario root and
+  the file is named after the diagram id, so the gate builds the path and checks the file exists. A
+  declared path restates a derivable fact and then drifts from it.
+- **A `Seams:` token is the exact token the diagram draws, alias included.**
+  `+plan.setNodeState:T:done` is one token and `+plan.setNodeState:O:ancestor-started` is another.
+  Stripping the alias collapses two calls into one declaration, and the gate can no longer tell which
+  of them a sign governs.
+- `+` adds a call, `~` moves one, and `-` removes one. An unsigned token is refused.
+- **A renumbered call is not a moved call.** `~` states that a call's position changed relative to the other calls of the path. Inserting one step renumbers every later ordinal and moves nothing, so those tokens stay context and no work item declares them. A rule that read the ordinal instead would make a one-line insertion declare the whole path.
+- **A sign is relative to the path, not to the range.** A token is new to a path when the diagram
+  this one supersedes does not hold it, and a diagram that supersedes nothing is wholly new, so every
+  one of its tokens is `+`. A method drawn on another operation's path is not context here: a
+  `storage.transact` in one command says nothing about the first transaction of a different one.
+- **A context token is not declared.** A call the superseded diagram already held, in the position it
+  held, belongs to no work item of this document.
+- The gate checks four things: a `+` or `~` token appears verbatim in a diagram this work item names;
+  a `-` token appears in no live diagram; every token of a live diagram that its superseded diagram
+  does not hold is `+` in exactly one work item; and no token carries two signs.
+- **A work item that composes carries `Diagrams:` and no `Seams:` line.** A composed path's steps
+  are the nested units, and each unit's tokens belong to the work item that writes that unit. The
+  composing item still owns its diagram and its scenario, because the order of the units is what
+  it decides.
 - A work item that changes no drawn path carries neither line. A schema, a type, a pure function and
   a documentation item move no seam.
 

@@ -326,6 +326,8 @@ not apply to the target is skipped, never simulated.
 
 ### `claim-success-task`
 
+Superseded by: EPIC 051 claim-success-task
+
 Fixture: initiative `I` holds objective `O`, which holds tasks `T` and `S`. Every node is `ready`,
 no node is assigned, and no run is active. The target is `T`, whose deliverable is `implementation`,
 so the run kind is `execution` and the cascade covers `O` and `I`.
