@@ -64,11 +64,11 @@ describe("src/http/contract/registry.test", () => {
   it("counts routed and stubbed entries", () => {
     assert.equal(
       registry.filter((entry) => entry.status === "routed").length,
-      48,
+      50,
     );
     assert.equal(
       registry.filter((entry) => entry.status === "stubbed").length,
-      25,
+      23,
     );
   });
 
@@ -110,7 +110,7 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("attaches requests to the twenty write routes and responses to the forty-six routes", () => {
+  it("attaches requests to the twenty write routes and responses to the forty-eight routes", () => {
     const withRequest = registry.filter((entry) => entry.request !== undefined);
     assert.deepEqual(withRequest.map((entry) => entry.operationId).sort(), [
       "actor.register",
@@ -143,6 +143,7 @@ describe("src/http/contract/registry.test", () => {
       "actor.revoke",
       "actor.rotate",
       "actor.show",
+      "agent.list",
       "edge.list",
       "event.list",
       "node.claim",
@@ -184,6 +185,7 @@ describe("src/http/contract/registry.test", () => {
       "system.db",
       "system.health",
       "system.status",
+      "worker.list",
     ]);
   });
 

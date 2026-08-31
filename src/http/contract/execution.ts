@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { epochMillis } from "../../domain/column.ts";
 import { identity, nodeIdentity } from "../../domain/identity.ts";
+import { runDrivers } from "../../domain/run.ts";
+import { compositions } from "../../domain/worker-registry.ts";
 import { action, parameter, resource, sub } from "./path.ts";
 import { baselineErrors } from "./error-baseline.ts";
 import {
@@ -55,6 +57,22 @@ export const nodeHeartbeatResponse = z.strictObject({
 
 export const nodeReleaseResponse = z.strictObject({
   node: nodeShowResponse,
+});
+
+export const workerListItem = z.object({
+  worker: z.string(),
+  driver: z.enum(runDrivers),
+  agents: z.array(z.string()),
+  claims: z.array(z.string()),
+  deliverables: z.array(z.string()),
+  harness: z.string().nullable(),
+  metadata: z.object({
+    composition: z.enum(compositions),
+  }),
+});
+
+export const workerListResponse = z.object({
+  workers: z.array(workerListItem),
 });
 
 const nodeClaim_node = {
@@ -240,8 +258,31 @@ export const execution = operations([
     method: "GET",
     path: [resource("worker")],
     introducedIn: "phase-2",
-    status: "stubbed",
+    status: "routed",
     allowedActors: ["human"],
+    response: workerListResponse,
+    errors: { ...baselineErrors },
+    examples: {
+      success: {
+        workers: [
+          {
+            worker: "claude@1",
+            driver: "external",
+            agents: [],
+            claims: ["objective", "task"],
+            deliverables: ["test", "implementation", "review"],
+            harness: "claude-code",
+            metadata: { composition: "self-managed" },
+          },
+        ],
+      },
+      error: {
+        error: {
+          code: "service-unavailable",
+          message: "the daemon is shutting down",
+        },
+      },
+    },
   },
   {
     operationId: "node.claim",

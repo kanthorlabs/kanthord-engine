@@ -23,6 +23,7 @@ const HANDLERS: readonly (readonly [string, readonly number[]])[] = [
   ["src/http/server/actor/revoke-actor.ts", [200]],
   ["src/http/server/actor/rotate-actor-token.ts", [200]],
   ["src/http/server/actor/show-actor.ts", [200]],
+  ["src/http/server/agent/list-agents.ts", [200]],
   ["src/http/server/blob/show-blob.ts", [200, 206]],
   ["src/http/server/credential/cancel-provider-login.ts", [204]],
   ["src/http/server/credential/complete-provider-login.ts", [200]],
@@ -66,6 +67,7 @@ const HANDLERS: readonly (readonly [string, readonly number[]])[] = [
   ["src/http/server/system/db.ts", [200]],
   ["src/http/server/system/health.ts", [200]],
   ["src/http/server/system/status.ts", [200]],
+  ["src/http/server/worker/list-workers.ts", [200]],
 ];
 
 type Scanned = readonly [string, readonly number[], boolean, boolean];

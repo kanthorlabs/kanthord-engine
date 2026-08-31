@@ -1,5 +1,18 @@
+import { z } from "zod";
+
 import { action, parameter, resource, sub } from "./path.ts";
+import { baselineErrors } from "./error-baseline.ts";
 import { operations } from "./operation.ts";
+
+export const agentListItem = z.object({
+  agent: z.string(),
+  purpose: z.string(),
+  capabilities: z.object({ tools: z.array(z.string()) }),
+});
+
+export const agentListResponse = z.object({
+  agents: z.array(agentListItem),
+});
 
 export const instruction = operations([
   {
@@ -7,8 +20,29 @@ export const instruction = operations([
     method: "GET",
     path: [resource("agent")],
     introducedIn: "phase-2",
-    status: "stubbed",
+    status: "routed",
     allowedActors: ["human"],
+    response: agentListResponse,
+    errors: { ...baselineErrors },
+    examples: {
+      success: {
+        agents: [
+          {
+            agent: "re@1",
+            purpose: "Reviews a diff against acceptance criteria.",
+            capabilities: {
+              tools: ["read", "bash", "grep", "find", "ls"],
+            },
+          },
+        ],
+      },
+      error: {
+        error: {
+          code: "service-unavailable",
+          message: "the daemon is shutting down",
+        },
+      },
+    },
   },
   {
     operationId: "template.list",

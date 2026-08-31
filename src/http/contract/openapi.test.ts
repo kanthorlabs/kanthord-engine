@@ -258,6 +258,8 @@ test("registers every schema component in bytewise order", () => {
     "actor.show.error",
     "actor.show.response",
     "actor.tokenRotated",
+    "agent.list.error",
+    "agent.list.response",
     "blob.show.error",
     "edge.list.error",
     "edge.list.response",
@@ -396,6 +398,8 @@ test("registers every schema component in bytewise order", () => {
     "system.health.response",
     "system.status.error",
     "system.status.response",
+    "worker.list.error",
+    "worker.list.response",
   ]);
 });
 
@@ -469,7 +473,7 @@ test("the master holds exactly the transitive closure of its own references", ()
     sortedBytewise([...reachableSchemaNames(document)]),
     sortedBytewise(Object.keys(schemas)),
   );
-  assert.equal(Object.keys(schemas).length, 153);
+  assert.equal(Object.keys(schemas).length, 157);
   for (const type of Object.keys(eventPayloads)) {
     assert.equal(Object.hasOwn(schemas, type), true, `${type} was pruned`);
   }

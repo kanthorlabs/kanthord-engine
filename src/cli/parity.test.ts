@@ -228,7 +228,7 @@ describe("src/cli/parity.test", () => {
     }
   });
 
-  it("the routed operations that no command names are exactly the fourteen accepted ones", () => {
+  it("the routed operations that no command names are exactly the sixteen accepted ones", () => {
     const named = new Set(
       declaredCommands.flatMap((entry) => entry.operationIds),
     );
@@ -239,6 +239,7 @@ describe("src/cli/parity.test", () => {
       .sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
 
     assert.deepEqual(uncovered, [
+      "agent.list",
       "blob.show",
       "edge.list",
       "project.status",
@@ -253,6 +254,7 @@ describe("src/cli/parity.test", () => {
       "provider.show",
       "provider.verify",
       "system.health",
+      "worker.list",
     ]);
     assert.equal(uncovered.includes("event.list"), false);
     assert.equal(uncovered.includes("node.unblock"), false);

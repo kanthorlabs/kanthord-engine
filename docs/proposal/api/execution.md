@@ -15,7 +15,7 @@ Starting work, stopping it, and reading what an attempt did. These are the route
 | `node.attempts`  | `GET /v1/node/:id/attempt`    | phase-2      | stubbed | P2-E2, "the attempt record"                 |
 | `attempt.show`   | `GET /v1/attempt/:id`         | phase-2      | stubbed | agents-and-workers.md, inspection           |
 | `node.checks`    | `GET /v1/node/:id/check`      | phase-2      | stubbed | gates-and-approval.md, diagnostic results   |
-| `worker.list`    | `GET /v1/worker`              | phase-2      | stubbed | domain.md, worker kinds                     |
+| `worker.list`    | `GET /v1/worker`              | phase-2      | routed  | domain.md, worker kinds                     |
 | `node.claim`     | `POST /v1/node/:id/claim`     | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
 | `node.heartbeat` | `POST /v1/node/:id/heartbeat` | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
 | `node.release`   | `POST /v1/node/:id/release`   | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
@@ -86,7 +86,19 @@ Each row carries the worker kind that actually resolved at execution time, the l
 
 ## `worker.list`
 
-Returns the worker kinds the daemon implements, with the agents each one composes. The MVP returns `general@1` only. It is a query, so a client can tell a valid `worker` frontmatter value from a rejected one before it imports a plan.
+Returns the registered workers in declaration order. The response contains one entry for `claude@1` and one entry for `opencode@1`.
+
+Each entry contains:
+
+- `worker` — the worker id.
+- `driver` — `external` for both registered workers.
+- `agents` — the agents composed by the worker; both lists are empty.
+- `claims` — the node kinds that the worker can claim: `objective` and `task`.
+- `deliverables` — the deliverables that the worker can produce: `test`, `implementation` and `review`.
+- `harness` — `claude-code` for `claude@1` and `opencode` for `opencode@1`.
+- `metadata.composition` — `self-managed` for both registered workers.
+
+The response shape is `{ workers: [...] }`. It is a query, so a client can tell a valid `worker` frontmatter value from a rejected one before it imports a plan.
 
 ## Leases have no route
 

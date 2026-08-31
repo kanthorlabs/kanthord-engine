@@ -24,6 +24,5 @@ Epic: `.agents/plan/epics/048-the-worker-registry-and-routing.md`
 - Assert `parseWorkerId("tdd@1")` deep-equals `{ name: "tdd", version: 1, id: "tdd@1" }`.
 - Assert `parseWorkerId("opencode@1")` deep-equals `{ name: "opencode", version: 1, id: "opencode@1" }`.
 - Assert each of the following is refused (throws `WorkerIdError` with `code === "worker-id-invalid"`): `"claude.swe@1"`, `"general"`, `"general@"`, `"general@0"`, `"General@1"`, `"general@9007199254740993"`.
-- Assert that every member of `workerKinds` (imported from `src/domain/worker.ts`) fails `parseWorkerId` — i.e., the sets share no member. This is the assertion that proves EPIC 041 is superseded. The test iterates `workerKinds` and asserts each throws.
 - Run: `node --test src/domain/worker-id.test.ts`
 - Proof: `PASS EPIC-048` line `src/domain/worker-id.test.ts`

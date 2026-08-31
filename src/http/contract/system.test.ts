@@ -356,17 +356,18 @@ describe("src/http/contract/system.test", () => {
     }
   });
 
-  it("forty-six registry entries carry a response and twenty carry a request", () => {
+  it("forty-eight registry entries carry a response and twenty carry a request", () => {
     const withResponse = registry.filter(
       (entry) => entry.response !== undefined,
     );
-    assert.equal(withResponse.length, 46);
+    assert.equal(withResponse.length, 48);
     assert.deepEqual(withResponse.map((entry) => entry.operationId).sort(), [
       "actor.list",
       "actor.register",
       "actor.revoke",
       "actor.rotate",
       "actor.show",
+      "agent.list",
       "edge.list",
       "event.list",
       "node.claim",
@@ -408,6 +409,7 @@ describe("src/http/contract/system.test", () => {
       "system.db",
       "system.health",
       "system.status",
+      "worker.list",
     ]);
     assert.deepEqual(
       registry

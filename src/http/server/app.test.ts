@@ -23,6 +23,10 @@ import {
   unimplementedFor,
   BOOTSTRAP_ACTOR_FIXTURE,
 } from "../../../test/helpers/app.ts";
+import { listWorkerHandler } from "./worker/list-workers.ts";
+import { listWorkers } from "../../queries/worker/list-workers.ts";
+import { listAgentHandler } from "./agent/list-agents.ts";
+import { listAgents } from "../../queries/agent/list-agents.ts";
 
 const statusHandler: Handler = () => ({
   kind: "json",
@@ -193,6 +197,40 @@ describe("src/http/server/app.test", () => {
     const withToken = await app.post("/v1/node/task_01/unblock");
     assert.equal(withToken.status, 501);
     assert.equal(withToken.body.error.code, "not-implemented");
+  });
+
+  it("GET /v1/worker answers 200 with registry order instead of 501", async () => {
+    const app = await createTestApp({
+      handlers: {
+        "worker.list": listWorkerHandler({
+          listWorkers: (input) => listWorkers({}, input),
+        }),
+      },
+    });
+    const response = await app.get("/v1/worker");
+
+    assert.equal(response.status, 200);
+    assert.notEqual(response.status, 501);
+    assert.deepEqual(
+      response.body.workers.map((worker: { worker: string }) => worker.worker),
+      ["claude@1", "opencode@1"],
+    );
+  });
+
+  it("GET /v1/agent answers 200 with agent contracts instead of 501", async () => {
+    const app = await createTestApp({
+      handlers: {
+        "agent.list": listAgentHandler({
+          listAgents: (input) => listAgents({}, input),
+        }),
+      },
+    });
+    const response = await app.get("/v1/agent");
+
+    assert.equal(response.status, 200);
+    assert.notEqual(response.status, 501);
+    assert.equal(response.body.agents[0].agent, "general@1");
+    assert.equal(response.body.agents[3].agent, "re@1");
   });
 
   it("a clean request reaches the handler", async () => {
@@ -366,13 +404,13 @@ describe("src/http/server/app.test", () => {
     );
     const stubbedEntry = registry.find(
       (entry) =>
-        entry.status === "stubbed" && entry.operationId === "agent.list",
+        entry.status === "stubbed" && entry.operationId === "run.start",
     );
     const healthEntry = registry.find(
       (entry) => entry.operationId === "system.health",
     );
     assert.ok(routedEntry, "system.status exists and is routed");
-    assert.ok(stubbedEntry, "agent.list exists and is stubbed");
+    assert.ok(stubbedEntry, "run.start exists and is stubbed");
     assert.ok(healthEntry, "system.health exists");
 
     const table = [
@@ -778,12 +816,12 @@ describe("src/http/server/app.test", () => {
     assert.equal(source.includes("clearTimeout"), true);
   });
 
-  it("binding system.health and system.db leaves forty-six unimplemented ids", () => {
+  it("binding system.health and system.db leaves forty-eight unimplemented ids", () => {
     const bound = {
       "system.health": healthHandler,
       "system.db": statusHandler,
     };
-    assert.equal(unimplementedFor(bound).length, 46);
+    assert.equal(unimplementedFor(bound).length, 48);
   });
 
   it("createApp throws the exact binding error before reading settings, idempotency, now or schedule", () => {
