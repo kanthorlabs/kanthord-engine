@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import type { Deliverable } from "./deliverable.ts";
 import type { NodeKind } from "./state.ts";
 import type { CanonicalNode } from "./plan-canonical-path.ts";
 import {
@@ -11,6 +12,8 @@ import {
   renderDocumentSet,
   type RenderInput,
 } from "./plan-render.ts";
+import type { VerifyBlock } from "./verify-block.ts";
+import { YamlDocumentReader } from "../services/document/yaml.ts";
 
 const uI = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const uO1 = "01BQZ3NDEKTSV4RRFFQ69G5FAV";
@@ -36,6 +39,8 @@ const fullTask: RenderInput = {
   dependencies: ["task_01ARZ3NDEKTSV4RRFFQ69G5FAW"],
   worker: "tdd@1",
   repo: null,
+  deliverable: null,
+  verify: null,
   instruction: "Do the thing.\n",
   acceptance: "## Acceptance criteria\n- it works\n",
 };
@@ -68,6 +73,8 @@ describe("src/domain/plan-render.test", () => {
       dependencies: [],
       worker: "tdd@1",
       repo: `repo_${uI}`,
+      deliverable: null,
+      verify: null,
       instruction: "Do the objective.\n",
       acceptance: null,
     });
@@ -85,12 +92,308 @@ describe("src/domain/plan-render.test", () => {
       dependencies: [],
       worker: null,
       repo: null,
+      deliverable: null,
+      verify: null,
       instruction: "Do the initiative.\n",
       acceptance: null,
     });
     assert.ok(initiativeOut.includes('kind: "initiative"'));
     assert.ok(!initiativeOut.includes("worker:"));
     assert.ok(!initiativeOut.includes("repo:"));
+  });
+
+  it("renders a new-shape task to the exact bytes", () => {
+    const input: RenderInput = {
+      identity: "task_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      kind: "task",
+      title: "Render JSON",
+      deliverable: "test",
+      repo: null,
+      dependencies: [],
+      verify: {
+        paths: ["src/foo.ts"],
+        commands: ["! node --test src/foo.test.ts"],
+      },
+      worker: null,
+      instruction: "Do the thing.\n",
+      acceptance: null,
+    };
+    assert.equal(
+      renderDocument(input),
+      [
+        "---",
+        'id: "task_01ARZ3NDEKTSV4RRFFQ69G5FAV"',
+        'kind: "task"',
+        'title: "Render JSON"',
+        'deliverable: "test"',
+        "verify:",
+        "  paths:",
+        '    - "src/foo.ts"',
+        "  commands:",
+        '    - "! node --test src/foo.test.ts"',
+        "---",
+        "Do the thing.",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("renders an empty verify block as two single-line lists", () => {
+    const input: RenderInput = {
+      identity: "task_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      kind: "task",
+      title: "Empty verify",
+      deliverable: "test",
+      repo: null,
+      dependencies: [],
+      verify: { paths: [], commands: [] },
+      worker: null,
+      instruction: "Do the thing.\n",
+      acceptance: null,
+    };
+    assert.equal(
+      renderDocument(input),
+      [
+        "---",
+        'id: "task_01ARZ3NDEKTSV4RRFFQ69G5FAV"',
+        'kind: "task"',
+        'title: "Empty verify"',
+        'deliverable: "test"',
+        "verify:",
+        "  paths: []",
+        "  commands: []",
+        "---",
+        "Do the thing.",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("a command string holding a quote, backslash and tab survives a round trip byte-identically", () => {
+    const command = 'say "hello"\there\\done';
+    const rendered = renderDocument({
+      identity: "task_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      kind: "task",
+      title: "Special command",
+      deliverable: "test",
+      repo: null,
+      dependencies: [],
+      verify: { paths: [], commands: [command] },
+      worker: null,
+      instruction: "Do the thing.\n",
+      acceptance: null,
+    });
+    const parsed = new YamlDocumentReader().read(rendered).frontmatter as {
+      verify: { commands: readonly string[] };
+    };
+    assert.equal(parsed.verify.commands[0], command);
+  });
+
+  it("renders verify paths in comparePaths order without mutating descending non-ASCII input", () => {
+    const paths = ["é.ts", "z.ts", "a.ts"];
+    const output = renderDocument({
+      ...fullTask,
+      title: "Sorted verify paths",
+      dependencies: [],
+      worker: null,
+      deliverable: "test",
+      verify: { paths, commands: [] },
+    });
+    assert.deepEqual(paths, ["é.ts", "z.ts", "a.ts"]);
+    assert.equal(
+      output,
+      [
+        "---",
+        'id: "task_01ARZ3NDEKTSV4RRFFQ69G5FAV"',
+        'kind: "task"',
+        'title: "Sorted verify paths"',
+        'deliverable: "test"',
+        "verify:",
+        "  paths:",
+        '    - "a.ts"',
+        '    - "z.ts"',
+        '    - "é.ts"',
+        "  commands: []",
+        "---",
+        "Do the thing.",
+        "## Acceptance criteria",
+        "- it works",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("renders a new-shape objective with repo and no dependencies", () => {
+    const output = renderDocument({
+      identity: "objective_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      kind: "objective",
+      title: "Objective",
+      deliverable: "expansion",
+      repo: "kanthord-apps",
+      dependencies: [],
+      verify: { paths: [], commands: [] },
+      worker: null,
+      instruction: "Do the thing.\n",
+      acceptance: null,
+    });
+    assert.ok(
+      output.indexOf('deliverable: "expansion"') <
+        output.indexOf('repo: "kanthord-apps"'),
+    );
+    assert.ok(
+      output.indexOf('repo: "kanthord-apps"') < output.indexOf("verify:"),
+    );
+    assert.ok(!output.includes("worker:"));
+  });
+
+  it("a legacy task still renders with worker and no deliverable or verify", () => {
+    const output = renderDocument({
+      ...fullTask,
+      deliverable: null,
+      verify: null,
+    });
+    assert.ok(output.includes('worker: "tdd@1"'));
+    assert.ok(!output.includes("deliverable:"));
+    assert.ok(!output.includes("verify:"));
+  });
+
+  it("renders worker.md section 2 example 1 — initiative — byte-exact", () => {
+    assert.equal(
+      renderDocument({
+        identity: "initiative_01m13wjg401jqj8xezaph3s633",
+        kind: "initiative",
+        title: "Provider CRUD",
+        deliverable: "expansion",
+        repo: null,
+        dependencies: [],
+        verify: { paths: [], commands: [] },
+        worker: null,
+        instruction: "Body.\n",
+        acceptance: null,
+      }),
+      [
+        "---",
+        'id: "initiative_01m13wjg401jqj8xezaph3s633"',
+        'kind: "initiative"',
+        'title: "Provider CRUD"',
+        'deliverable: "expansion"',
+        "verify:",
+        "  paths: []",
+        "  commands: []",
+        "---",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("renders worker.md section 2 example 2 — objective with repo and depends_on — byte-exact", () => {
+    assert.equal(
+      renderDocument({
+        identity: "objective_01m13wjg4185jk8p3pdvzt2spv",
+        kind: "objective",
+        title: "Contract types",
+        deliverable: "implementation",
+        repo: "kanthord-apps",
+        dependencies: ["objective_01m14b2k7x9qd3vs5nfh8tzg42"],
+        verify: { paths: [], commands: [] },
+        worker: null,
+        instruction: "Body.\n",
+        acceptance: null,
+      }),
+      [
+        "---",
+        'id: "objective_01m13wjg4185jk8p3pdvzt2spv"',
+        'kind: "objective"',
+        'title: "Contract types"',
+        'deliverable: "implementation"',
+        'repo: "kanthord-apps"',
+        "depends_on:",
+        '  - "objective_01m14b2k7x9qd3vs5nfh8tzg42"',
+        "verify:",
+        "  paths: []",
+        "  commands: []",
+        "---",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("renders worker.md section 2 example 3 — task with paths and inverted command — byte-exact", () => {
+    assert.equal(
+      renderDocument({
+        identity: "task_01m13ymgvfq91nbjqbs9kgxk2n",
+        kind: "task",
+        title: "Projection union — test",
+        deliverable: "test",
+        repo: null,
+        dependencies: [],
+        verify: {
+          paths: ["apps/dashboard/src/api/types.test.ts"],
+          commands: [
+            "! pnpm --filter @kanthord/dashboard test src/api/types.test.ts",
+          ],
+        },
+        worker: null,
+        instruction: "Body.\n",
+        acceptance: null,
+      }),
+      [
+        "---",
+        'id: "task_01m13ymgvfq91nbjqbs9kgxk2n"',
+        'kind: "task"',
+        'title: "Projection union — test"',
+        'deliverable: "test"',
+        "verify:",
+        "  paths:",
+        '    - "apps/dashboard/src/api/types.test.ts"',
+        "  commands:",
+        '    - "! pnpm --filter @kanthord/dashboard test src/api/types.test.ts"',
+        "---",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("renders worker.md section 2 example 4 — implementation task with depends_on — byte-exact", () => {
+    assert.equal(
+      renderDocument({
+        identity: "task_01m13ymgvgywcy5x323zygnec1",
+        kind: "task",
+        title: "Projection union",
+        deliverable: "implementation",
+        repo: null,
+        dependencies: ["task_01m13ymgvfq91nbjqbs9kgxk2n"],
+        verify: {
+          paths: ["apps/dashboard/src/api/types.ts"],
+          commands: [
+            "pnpm --filter @kanthord/dashboard test src/api/types.test.ts",
+          ],
+        },
+        worker: null,
+        instruction: "Body.\n",
+        acceptance: null,
+      }),
+      [
+        "---",
+        'id: "task_01m13ymgvgywcy5x323zygnec1"',
+        'kind: "task"',
+        'title: "Projection union"',
+        'deliverable: "implementation"',
+        "depends_on:",
+        '  - "task_01m13ymgvfq91nbjqbs9kgxk2n"',
+        "verify:",
+        "  paths:",
+        '    - "apps/dashboard/src/api/types.ts"',
+        "  commands:",
+        '    - "pnpm --filter @kanthord/dashboard test src/api/types.test.ts"',
+        "---",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
   });
 
   it("omits the depends_on key entirely for an empty dependency list", () => {
@@ -176,6 +479,8 @@ describe("src/domain/plan-render.test", () => {
         dependencies: [],
         worker: "tdd@1",
         repo: `repo_${uI}`,
+        deliverable: null,
+        verify: null,
         instruction: "Do the objective.\n",
         acceptance: null,
       }),
@@ -186,6 +491,8 @@ describe("src/domain/plan-render.test", () => {
         dependencies: [],
         worker: null,
         repo: null,
+        deliverable: null,
+        verify: null,
         instruction: "Do the initiative.\n",
         acceptance: null,
       }),
@@ -254,6 +561,8 @@ describe("src/domain/plan-render.test", () => {
           acceptance: null,
           worker: n.kind === "task" ? "tdd@1" : null,
           repo: null,
+          deliverable: null,
+          verify: null,
         },
       ]),
     );
@@ -278,6 +587,8 @@ describe("src/domain/plan-render.test", () => {
         dependencies: [],
         worker: "tdd@1",
         repo: null,
+        deliverable: null,
+        verify: null,
         instruction: "Task A instruction.\n",
         acceptance: null,
       }),
@@ -296,6 +607,8 @@ describe("src/domain/plan-render.test", () => {
         acceptance: string | null;
         worker: string | null;
         repo: string | null;
+        deliverable: Deliverable | null;
+        verify: VerifyBlock | null;
       }
     >();
     bodies.set(`initiative_${uI}`, {
@@ -303,6 +616,8 @@ describe("src/domain/plan-render.test", () => {
       acceptance: null,
       worker: null,
       repo: null,
+      deliverable: null,
+      verify: null,
     });
     assert.throws(() => renderDocumentSet(nodes, bodies));
   });

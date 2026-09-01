@@ -23,10 +23,24 @@ const verifyPath = z.string().superRefine((path, context) => {
   }
 });
 
-export const verifyBlock = z.strictObject({
-  paths: z.array(verifyPath),
-  commands: z.array(z.string()),
-});
+export const verifyBlock = z
+  .strictObject({
+    paths: z.array(verifyPath),
+    commands: z.array(z.string()),
+  })
+  .superRefine((block, context) => {
+    const seen = new Set<string>();
+    for (const [index, path] of block.paths.entries()) {
+      if (seen.has(path)) {
+        context.addIssue({
+          code: "custom",
+          path: ["paths", index],
+          message: "duplicate verify path",
+        });
+      }
+      seen.add(path);
+    }
+  });
 
 export type VerifyBlock = z.infer<typeof verifyBlock>;
 
@@ -50,20 +64,22 @@ export function renderVerifyBlock(block: VerifyBlock): string {
   return JSON.stringify({ paths, commands: block.commands });
 }
 
-export function parseVerifyBlock(text: string): VerifyBlock {
+export function decodeVerifyBlock(
+  text: string,
+): { ok: true; block: VerifyBlock } | { ok: false } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new VerifyBlockError(`not valid JSON: ${message}`);
+  } catch {
+    return { ok: false };
   }
-
   const result = verifyBlock.safeParse(parsed);
-  if (!result.success) {
-    throw new VerifyBlockError(
-      `malformed verify block: ${result.error.message}`,
-    );
-  }
-  return result.data;
+  if (!result.success) return { ok: false };
+  return { ok: true, block: result.data };
+}
+
+export function parseVerifyBlock(text: string): VerifyBlock {
+  const result = decodeVerifyBlock(text);
+  if (!result.ok) throw new VerifyBlockError(text);
+  return result.block;
 }

@@ -15,7 +15,14 @@ import type { StoredNode, ValidationContext } from "./plan-graph.ts";
 import type { ResolvedDocument } from "./plan-identity.ts";
 import type { Choice, ChoiceVerdict } from "./plan-choice.ts";
 import type { NodeKind } from "./state.ts";
-import { createPlanGraph } from "../../test/helpers/plan.ts";
+import { createMigratedStorage } from "../../test/helpers/database.ts";
+import { createPlanGraph, createPlanStore } from "../../test/helpers/plan.ts";
+import {
+  fixtureIds,
+  seedGraph,
+  seedNodeWithDeliverable,
+  seedRegistry,
+} from "../../test/helpers/rows.ts";
 import { workerKinds } from "./worker.ts";
 
 const U_I = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -61,12 +68,14 @@ const candidateFindingCodes = [
   "identity-kind-mismatch",
   "initiative-without-objective",
   "objective-without-task",
+  "pair-illegal",
   "parent-missing",
   "reference-unresolved",
   "repo-missing",
   "repo-on-task",
   "repository-unbound",
   "repository-unknown",
+  "verify-invalid",
   "worker-unknown",
 ];
 
@@ -110,6 +119,8 @@ function submittedDocument(
     dependsOn: [],
     worker: null,
     repo: null,
+    deliverable: null,
+    verify: null,
     derivedParentPath: null,
     instruction: `${identity} work\n`,
     acceptance: null,
@@ -143,6 +154,25 @@ function candidateOf(
     choices: Object.entries(takes).map(([id, take]) => ({ id, take })),
     blobHashes: hashes(submitted.map((document) => document.identity)),
   });
+}
+
+function candidateFromDatabase(
+  storage: ReturnType<typeof createMigratedStorage>["storage"],
+  ids: readonly string[],
+): Candidate {
+  const plan = createPlanStore();
+  const stored = storage.transact((transaction) =>
+    ids.map((id) => {
+      const node = plan.readNode(transaction, id);
+      assert.ok(node !== null);
+      return node;
+    }),
+  );
+  const takes: Record<string, Choice> = {};
+  for (const id of ids) {
+    takes[id] = "database";
+  }
+  return candidateOf([], stored, takes);
 }
 
 function verdict(suggested: Choice): ChoiceVerdict {
@@ -196,6 +226,8 @@ describe("buildCandidate", () => {
         acceptanceBlob: null,
         worker: null,
         repositoryId: null,
+        deliverable: null,
+        verifyJson: null,
         dependencies: [],
         source: "submitted",
       },
@@ -208,6 +240,8 @@ describe("buildCandidate", () => {
         acceptanceBlob: null,
         worker: null,
         repositoryId: "repo_a",
+        deliverable: null,
+        verifyJson: null,
         dependencies: [],
         source: "submitted",
       },
@@ -220,6 +254,8 @@ describe("buildCandidate", () => {
         acceptanceBlob: null,
         worker: "tdd",
         repositoryId: null,
+        deliverable: null,
+        verifyJson: null,
         dependencies: [],
         source: "submitted",
       },
@@ -243,6 +279,8 @@ describe("buildCandidate", () => {
         acceptanceBlob: null,
         worker: null,
         repositoryId: null,
+        deliverable: null,
+        verifyJson: null,
         dependencies: [],
         source: "database",
       },
@@ -255,6 +293,8 @@ describe("buildCandidate", () => {
         acceptanceBlob: null,
         worker: null,
         repositoryId: null,
+        deliverable: null,
+        verifyJson: null,
         dependencies: [],
         source: "database",
       },
@@ -301,6 +341,8 @@ describe("buildCandidate", () => {
         acceptanceBlob: null,
         worker: "tdd",
         repositoryId: null,
+        deliverable: null,
+        verifyJson: null,
         dependencies: [task2],
         source: "submitted",
       },
@@ -313,6 +355,8 @@ describe("buildCandidate", () => {
         acceptanceBlob: null,
         worker: null,
         repositoryId: null,
+        deliverable: null,
+        verifyJson: null,
         dependencies: [task1],
         source: "database",
       },
@@ -325,6 +369,8 @@ describe("buildCandidate", () => {
         acceptanceBlob: null,
         worker: null,
         repositoryId: null,
+        deliverable: null,
+        verifyJson: null,
         dependencies: [],
         source: "submitted",
       },
@@ -410,6 +456,223 @@ describe("validateCandidate", () => {
     );
     record(findings);
     assert.deepEqual(findings, []);
+  });
+
+  it("validateCandidate raises pair-illegal for a task node with deliverable expansion", () => {
+    const stored = [
+      storedNode(initiativeI, "initiative"),
+      storedNode(objectiveO1, "objective", {
+        parentId: initiativeI,
+        repositoryId: "repo_a",
+      }),
+      storedNode(task1, "task", {
+        parentId: objectiveO1,
+        deliverable: "expansion",
+        verifyJson: '{"paths":[],"commands":[]}',
+      }),
+    ];
+    const candidate = candidateOf([], stored, {
+      [initiativeI]: "database",
+      [objectiveO1]: "database",
+      [task1]: "database",
+    });
+    const findings = validateCandidate({ findCycles }, { candidate, context });
+    record(findings);
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0]?.code, "pair-illegal");
+    assert.equal(findings[0]?.id, task1);
+  });
+
+  it("validateCandidate raises verify-invalid for a stored node whose verify_json fails the schema", () => {
+    for (const verifyJson of ['{"paths":["a/../b"],"commands":[]}', "{"]) {
+      const stored = [
+        storedNode(initiativeI, "initiative"),
+        storedNode(objectiveO1, "objective", {
+          parentId: initiativeI,
+          repositoryId: "repo_a",
+        }),
+        storedNode(task1, "task", {
+          parentId: objectiveO1,
+          deliverable: "test",
+          verifyJson,
+        }),
+      ];
+      const candidate = candidateOf([], stored, {
+        [initiativeI]: "database",
+        [objectiveO1]: "database",
+        [task1]: "database",
+      });
+      let findings: readonly Finding[] = [];
+      assert.doesNotThrow(() => {
+        findings = validateCandidate({ findCycles }, { candidate, context });
+      });
+      record(findings);
+      const invalidFindings = findings.filter(
+        (finding) => finding.code === "verify-invalid",
+      );
+      assert.equal(invalidFindings.length, 1);
+      assert.equal(invalidFindings[0]?.id, task1);
+    }
+  });
+
+  it("validateCandidate raises no verify-invalid for a stored node whose verify_json holds an absolute path", () => {
+    const stored = [
+      storedNode(initiativeI, "initiative"),
+      storedNode(objectiveO1, "objective", {
+        parentId: initiativeI,
+        repositoryId: "repo_a",
+      }),
+      storedNode(task1, "task", {
+        parentId: objectiveO1,
+        deliverable: "test",
+        verifyJson: '{"paths":["/abs/src/foo.ts"],"commands":[]}',
+      }),
+    ];
+    const candidate = candidateOf([], stored, {
+      [initiativeI]: "database",
+      [objectiveO1]: "database",
+      [task1]: "database",
+    });
+    const findings = validateCandidate({ findCycles }, { candidate, context });
+    record(findings);
+    assert.equal(
+      findings.filter((finding) => finding.code === "verify-invalid").length,
+      0,
+    );
+  });
+
+  it("validateCandidate raises pair-illegal for an initiative node with deliverable test", () => {
+    const stored = [
+      storedNode(initiativeI, "initiative", {
+        deliverable: "test",
+        verifyJson: '{"paths":[],"commands":[]}',
+      }),
+      storedNode(objectiveO1, "objective", {
+        parentId: initiativeI,
+        repositoryId: "repo_a",
+      }),
+      storedNode(task1, "task", { parentId: objectiveO1 }),
+    ];
+    const candidate = candidateOf([], stored, {
+      [initiativeI]: "database",
+      [objectiveO1]: "database",
+      [task1]: "database",
+    });
+    const findings = validateCandidate({ findCycles }, { candidate, context });
+    record(findings);
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0]?.code, "pair-illegal");
+    assert.equal(findings[0]?.id, initiativeI);
+  });
+
+  it("a verify_json value valid for json_valid but invalid for verifyBlock raises verify-invalid", () => {
+    const database = createMigratedStorage();
+    const id = "task_verify_json_path";
+    const verifyJson = '{"paths":["a/../b"],"commands":[]}';
+    try {
+      assert.doesNotThrow(() =>
+        database.storage.transact((transaction) => {
+          seedRegistry(transaction);
+          seedGraph(transaction);
+          seedNodeWithDeliverable(transaction, {
+            id,
+            kind: "task",
+            parentId: fixtureIds.objective,
+            title: "Stored invalid verify path",
+            deliverable: "test",
+            verifyJson,
+          });
+        }),
+      );
+      const row = database.storage.transact((transaction) =>
+        transaction.get(
+          "SELECT verify_json, json_valid(verify_json) AS valid FROM node WHERE id = ?",
+          [id],
+        ),
+      ) as Readonly<{ verify_json: string; valid: number }>;
+      assert.equal(row.verify_json, verifyJson);
+      assert.equal(row.valid, 1);
+
+      const candidate = candidateFromDatabase(database.storage, [id]);
+      const findings = validateCandidate(
+        { findCycles },
+        { candidate, context },
+      );
+      record(findings);
+      const invalidFindings = findings.filter(
+        (finding) => finding.code === "verify-invalid",
+      );
+      assert.equal(invalidFindings.length, 1);
+      assert.equal(invalidFindings[0]?.id, id);
+    } finally {
+      database.dispose();
+    }
+  });
+
+  it("a stored node with non-null deliverable and null verify_json raises verify-invalid", () => {
+    const database = createMigratedStorage();
+    const id = "task_verify_json_null";
+    try {
+      database.storage.transact((transaction) => {
+        seedRegistry(transaction);
+        seedGraph(transaction);
+        seedNodeWithDeliverable(transaction, {
+          id,
+          kind: "task",
+          parentId: fixtureIds.objective,
+          title: "Stored missing verify block",
+          deliverable: "test",
+          verifyJson: null,
+        });
+      });
+      const candidate = candidateFromDatabase(database.storage, [id]);
+      const findings = validateCandidate(
+        { findCycles },
+        { candidate, context },
+      );
+      record(findings);
+      const invalidFindings = findings.filter(
+        (finding) => finding.code === "verify-invalid",
+      );
+      assert.equal(invalidFindings.length, 1);
+      assert.equal(invalidFindings[0]?.id, id);
+    } finally {
+      database.dispose();
+    }
+  });
+
+  it("two bad rows in one candidate produce a finding count of two", () => {
+    const database = createMigratedStorage();
+    const ids = ["task_verify_json_one", "task_verify_json_two"] as const;
+    const verifyJson = '{"paths":["a/../b"],"commands":[]}';
+    try {
+      database.storage.transact((transaction) => {
+        seedRegistry(transaction);
+        seedGraph(transaction);
+        for (const id of ids) {
+          seedNodeWithDeliverable(transaction, {
+            id,
+            kind: "task",
+            parentId: fixtureIds.objective,
+            title: id,
+            deliverable: "test",
+            verifyJson,
+          });
+        }
+      });
+      const candidate = candidateFromDatabase(database.storage, ids);
+      const findings = validateCandidate(
+        { findCycles },
+        { candidate, context },
+      );
+      record(findings);
+      assert.equal(
+        findings.filter((finding) => finding.code === "verify-invalid").length,
+        2,
+      );
+    } finally {
+      database.dispose();
+    }
   });
 
   it("the cycle case is refused with exactly one dependency-cycle naming both ids", () => {
@@ -929,7 +1192,7 @@ describe("validateCandidate", () => {
     );
   });
 
-  it("every emitted code is one of the thirteen candidate codes", () => {
+  it("every emitted code is one of the fifteen candidate codes", () => {
     const difference = [...new Set(emittedCodes)].filter(
       (code) => !(candidateFindingCodes as readonly string[]).includes(code),
     );

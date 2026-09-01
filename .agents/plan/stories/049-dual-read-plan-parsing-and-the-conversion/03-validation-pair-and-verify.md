@@ -53,7 +53,7 @@ Add to `src/domain/plan-candidate.test.ts`:
 
 7. `"validateCandidate raises no verify-invalid for a stored node whose verify_json holds an absolute path"` — `verifyJson: '{"paths":["/abs/src/foo.ts"],"commands":[]}'`. Assert zero `verify-invalid` findings.
 
-8. `"validateCandidate raises pair-illegal for an objective node with deliverable test"` — build a candidate with one objective node that has `deliverable: "test"`. Assert exactly one `pair-illegal` finding.
+8. `"validateCandidate raises pair-illegal for an initiative node with deliverable test"` — build a candidate with one initiative node that has `deliverable: "test"`. Assert exactly one `pair-illegal` finding.
 
 The following three cases use real SQLite (`node:sqlite` on a temporary file, created and removed per test). They prove distinct boundaries that a schema check or a lint rule cannot cover.
 

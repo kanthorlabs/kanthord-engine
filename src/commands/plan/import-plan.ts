@@ -12,6 +12,7 @@ import type { IdGenerator } from "../../services/ids/index.ts";
 import type { Clock } from "../../services/clock/index.ts";
 import type { EventLog } from "../../services/event/index.ts";
 import type { Choice, DifferingField } from "../../domain/plan-choice.ts";
+import type { Deliverable } from "../../domain/deliverable.ts";
 import { choiceVerdict } from "../../domain/plan-choice.ts";
 import {
   assertChoiceSet,
@@ -39,6 +40,10 @@ import { findingScope, sortFindings } from "../../domain/plan-finding.ts";
 import type { ResolvedDocument } from "../../domain/plan-identity.ts";
 import { validateDocuments } from "../../domain/plan-validate.ts";
 import type { NodeState } from "../../domain/state.ts";
+import {
+  parseVerifyBlock,
+  renderVerifyBlock,
+} from "../../domain/verify-block.ts";
 
 export type ImportPlanDependencies = Readonly<{
   storage: Storage;
@@ -438,7 +443,8 @@ export function importPlan(
     });
 
     const repositoryIdsByName = readRepositoryIdsByName(transaction);
-    const nodeWrites: NodeWrite[] = [];
+    const nodeWrites: (NodeWrite &
+      Pick<StoredNode, "deliverable" | "verifyJson">)[] = [];
     for (const node of candidate.nodes) {
       let repositoryId: string | null = null;
       if (node.repositoryId !== null) {
@@ -451,6 +457,13 @@ export function importPlan(
         }
         repositoryId = id;
       }
+      const parsedDocument =
+        node.source === "submitted"
+          ? resolvedByIdentity.get(node.id)
+          : undefined;
+      if (node.source === "submitted" && parsedDocument === undefined) {
+        throw new Error(`no submitted document is known for ${node.id}`);
+      }
       nodeWrites.push({
         id: node.id,
         projectId: input.projectId,
@@ -461,6 +474,16 @@ export function importPlan(
         acceptanceBlob: node.acceptanceBlob,
         worker: node.worker,
         repositoryId,
+        deliverable:
+          parsedDocument === undefined
+            ? node.deliverable
+            : parsedDocument.deliverable,
+        verifyJson:
+          parsedDocument === undefined
+            ? node.verifyJson
+            : parsedDocument.verify === null
+              ? null
+              : renderVerifyBlock(parsedDocument.verify),
         revision,
         updatedAt,
       });
@@ -669,6 +692,8 @@ function renderResolved(
         acceptance: document.acceptance,
         worker: document.worker,
         repo: document.repo,
+        deliverable: document.deliverable,
+        verify: document.verify,
       },
     ]),
   );
@@ -699,6 +724,8 @@ function renderCandidate(
       acceptance: string | null;
       worker: string | null;
       repo: string | null;
+      deliverable: Deliverable | null;
+      verify: ReturnType<typeof parseVerifyBlock> | null;
     }>
   >();
   for (const node of candidate.nodes) {
@@ -712,6 +739,8 @@ function renderCandidate(
         acceptance: document.acceptance,
         worker: document.worker,
         repo: document.repo,
+        deliverable: document.deliverable,
+        verify: document.verify,
       });
       continue;
     }
@@ -740,6 +769,11 @@ function renderCandidate(
       acceptance,
       worker: node.worker,
       repo: node.repositoryId,
+      deliverable: node.deliverable as Deliverable | null,
+      verify:
+        node.deliverable === null || node.verifyJson === null
+          ? null
+          : parseVerifyBlock(node.verifyJson),
     });
   }
   return renderDocumentSet(

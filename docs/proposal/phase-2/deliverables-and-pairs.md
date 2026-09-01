@@ -42,3 +42,5 @@ A node imported before EPIC 047 has a null `deliverable`. Pair validation does n
 ## Legacy worker field
 
 The legacy `node.worker` field remains through EPIC 056. EPIC 057 removes it.
+
+The `worker` field in a plan document is a transitional form. A document carries either `worker` or `deliverable` + `verify`, never both, and EPIC 057 removes `worker` from `planFrontmatter`, `planFrontmatterKeys` and every rendering path. See [phase-1/plan-format.md](../phase-1/plan-format.md) for the two shapes.

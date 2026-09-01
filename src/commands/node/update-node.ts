@@ -136,6 +136,8 @@ export function updateNode(
       dependsOn: input.node.dependsOn,
       worker: input.node.worker,
       repo: repositoryId,
+      deliverable: null,
+      verify: null,
       derivedParentPath: null,
       instruction: input.node.instruction,
       acceptance: input.node.kind === "task" ? input.node.acceptance : null,
@@ -272,6 +274,8 @@ export function updateNode(
           acceptanceBlob: node.acceptanceBlob,
           worker: node.worker,
           repositoryId: repositoryName,
+          deliverable: node.deliverable,
+          verifyJson: node.verifyJson,
           dependencies: [...node.dependencies],
           source: "database" as const,
         };

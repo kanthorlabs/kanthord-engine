@@ -42,7 +42,7 @@ const DELETE_NODE = "DELETE FROM node WHERE id = ?";
 const INSERT_NODE =
   "INSERT INTO node (" +
   NODE_COLUMNS +
-  ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, parent_id = excluded.parent_id, title = excluded.title, instruction_blob = excluded.instruction_blob, acceptance_blob = excluded.acceptance_blob, worker = excluded.worker, repository_id = excluded.repository_id, revision = excluded.revision, updated_at = excluded.updated_at, deliverable = COALESCE(excluded.deliverable, deliverable), verify_json = COALESCE(excluded.verify_json, verify_json)";
+  ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, parent_id = excluded.parent_id, title = excluded.title, instruction_blob = excluded.instruction_blob, acceptance_blob = excluded.acceptance_blob, worker = excluded.worker, repository_id = excluded.repository_id, revision = excluded.revision, updated_at = excluded.updated_at, deliverable = CASE WHEN ? THEN excluded.deliverable ELSE deliverable END, verify_json = CASE WHEN ? THEN excluded.verify_json ELSE verify_json END";
 
 type NodeRow = Readonly<{
   id: string;
@@ -429,6 +429,8 @@ export class SqlitePlanStore implements PlanStore {
     transaction: Transaction,
     node: NodeWrite & Partial<Pick<StoredNode, "deliverable" | "verifyJson">>,
   ): void {
+    const hasDeliverable = Object.hasOwn(node, "deliverable");
+    const hasVerifyJson = Object.hasOwn(node, "verifyJson");
     transaction.run(INSERT_NODE, [
       node.id,
       node.projectId,
@@ -443,6 +445,8 @@ export class SqlitePlanStore implements PlanStore {
       node.updatedAt,
       node.deliverable ?? null,
       node.verifyJson ?? null,
+      hasDeliverable ? 1 : 0,
+      hasVerifyJson ? 1 : 0,
     ]);
   }
 

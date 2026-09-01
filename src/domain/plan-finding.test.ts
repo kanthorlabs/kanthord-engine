@@ -24,6 +24,7 @@ const expectedCodes: readonly string[] = [
   "identity-kind-mismatch",
   "initiative-without-objective",
   "objective-without-task",
+  "pair-illegal",
   "parent-missing",
   "path-duplicate",
   "path-invalid",
@@ -33,15 +34,16 @@ const expectedCodes: readonly string[] = [
   "repo-on-task",
   "repository-unbound",
   "repository-unknown",
+  "verify-invalid",
   "worker-unknown",
 ];
 
 describe("src/domain/plan-finding.test", () => {
-  it("findingCodes pins the twenty-four codes in bytewise order", () => {
-    assert.equal(findingCodes.length, 24);
+  it("findingCodes pins the twenty-six codes in bytewise order", () => {
+    assert.equal(findingCodes.length, 26);
     assert.deepEqual([...findingCodes], expectedCodes);
     assert.deepEqual([...findingCodes], [...findingCodes].sort());
-    assert.equal(new Set(findingCodes).size, 24);
+    assert.equal(new Set(findingCodes).size, 26);
   });
 
   it("validationScopes pins the two scopes in order", () => {
@@ -51,7 +53,7 @@ describe("src/domain/plan-finding.test", () => {
 
   it("findingScope is total over findingCodes", () => {
     const keys = Object.keys(findingScope);
-    assert.equal(keys.length, 24);
+    assert.equal(keys.length, 26);
     for (const code of findingCodes) {
       assert.ok(code in findingScope, `findingScope holds ${code}`);
     }
@@ -77,14 +79,18 @@ describe("src/domain/plan-finding.test", () => {
     const findings: readonly Finding[] = [
       { code: "repo-missing", path: "plan/a.md", id: null, message: "m" },
       { code: "path-invalid", path: "plan/a.md", id: null, message: "m" },
+      { code: "pair-illegal", path: "plan/a.md", id: null, message: "m" },
+      { code: "verify-invalid", path: "plan/a.md", id: null, message: "m" },
       { code: "worker-unknown", path: "plan/b.md", id: "task_1", message: "m" },
       { code: "path-invalid", path: null, id: null, message: "m" },
       { code: "worker-unknown", path: "plan/b.md", id: null, message: "m" },
     ];
     const expected: readonly Finding[] = [
       { code: "path-invalid", path: null, id: null, message: "m" },
+      { code: "pair-illegal", path: "plan/a.md", id: null, message: "m" },
       { code: "path-invalid", path: "plan/a.md", id: null, message: "m" },
       { code: "repo-missing", path: "plan/a.md", id: null, message: "m" },
+      { code: "verify-invalid", path: "plan/a.md", id: null, message: "m" },
       { code: "worker-unknown", path: "plan/b.md", id: null, message: "m" },
       { code: "worker-unknown", path: "plan/b.md", id: "task_1", message: "m" },
     ];

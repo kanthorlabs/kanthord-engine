@@ -7,6 +7,7 @@ import { sortFindings } from "./plan-finding.ts";
 import type { ValidationContext } from "./plan-graph.ts";
 import { resolveIdentities } from "./plan-identity.ts";
 import type { ResolvedDocument } from "./plan-identity.ts";
+import { nodePairLegality } from "./node-pair.ts";
 import {
   comparePaths,
   derivedParentPath,
@@ -160,6 +161,8 @@ export function validateDocuments(
       dependsOn: frontmatter.depends_on ?? [],
       worker: frontmatter.worker ?? null,
       repo: frontmatter.repo ?? null,
+      deliverable: frontmatter.deliverable ?? null,
+      verify: frontmatter.verify ?? null,
       derivedParentPath: derivedParentPath(entry.path),
       instruction: bodySplit.instruction,
       acceptance: bodySplit.acceptance,
@@ -209,6 +212,17 @@ export function validateDocuments(
         path: document.path,
         id: null,
         message: "an objective carries no repository",
+      });
+    }
+    if (
+      document.deliverable !== null &&
+      !nodePairLegality(document.kind, document.deliverable).legal
+    ) {
+      findings.push({
+        code: "pair-illegal",
+        path: document.path,
+        id: null,
+        message: "pair-illegal: kind and deliverable combination is not legal",
       });
     }
     kindChecked.push(document);

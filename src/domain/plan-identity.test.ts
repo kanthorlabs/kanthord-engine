@@ -32,8 +32,10 @@ function document(
     derivedParentPath: null,
     instruction: "instruction",
     acceptance: "acceptance criteria",
+    deliverable: null,
+    verify: null,
     ...fields,
-  };
+  } as ParsedDocument;
 }
 
 function makeMint(ulids: readonly string[]) {

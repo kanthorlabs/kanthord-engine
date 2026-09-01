@@ -74,6 +74,10 @@ describe("src/domain/plan-validate.test", () => {
           content: `---
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -83,6 +87,10 @@ Bootstrap the daemon.
           content: `---
 kind: objective
 title: Harden the verify CLI
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it verifiable.
@@ -125,6 +133,10 @@ Emit the events.
           content: `---
 kind: objective
 title: Harden the graph
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it fast.
@@ -167,6 +179,10 @@ Check the orders.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -177,6 +193,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Harden the verify CLI
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it verifiable.
@@ -217,6 +237,10 @@ Do it.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -227,6 +251,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Harden the verify CLI
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it verifiable.
@@ -261,6 +289,10 @@ Emit the events.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -271,6 +303,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Harden the verify CLI
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it verifiable.
@@ -307,6 +343,10 @@ Emit the events.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -317,6 +357,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Harden the verify CLI
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it verifiable.
@@ -422,6 +466,7 @@ title: Broken
         content: `---
 kind: task
 title: Bad
+worker: general@1
 status: done
 ---
 Work.
@@ -435,6 +480,201 @@ Work.
     assert.ok(result.findings[0]!.message.includes("status"));
   });
 
+  it("a task with deliverable expansion raises exactly one pair-illegal finding", () => {
+    const result = assertStable([
+      {
+        path: "plan/i--01/o--01/01-a.md",
+        content: `---
+id: task_01ARZ3NDEKTSV4RRFFQ69G5FAD
+kind: task
+title: Bad pair
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
+---
+Work.
+
+## Acceptance criteria
+
+- Done.
+`,
+      },
+    ]);
+    assert.equal(
+      result.findings.filter((finding) => finding.code === "pair-illegal")
+        .length,
+      1,
+    );
+    assert.equal(
+      result.findings.filter((finding) => finding.code === "verify-invalid")
+        .length,
+      0,
+    );
+  });
+
+  it("an initiative with deliverable implementation raises exactly one pair-illegal finding", () => {
+    const result = assertStable([
+      {
+        path: "plan/i--01/initiative.md",
+        content: `---
+id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
+kind: initiative
+title: Bad pair
+deliverable: implementation
+verify:
+  paths: []
+  commands: []
+---
+Work.
+`,
+      },
+    ]);
+    assert.equal(
+      result.findings.filter((finding) => finding.code === "pair-illegal")
+        .length,
+      1,
+    );
+  });
+
+  it("a verify block with an absolute path raises no finding", () => {
+    const result = assertStable([
+      {
+        path: "plan/i--01/o--01/01-a.md",
+        content: `---
+id: task_01ARZ3NDEKTSV4RRFFQ69G5FAD
+kind: task
+title: Absolute verify path
+deliverable: test
+verify:
+  paths:
+    - /abs/path
+  commands: []
+---
+Work.
+
+## Acceptance criteria
+
+- Done.
+`,
+      },
+    ]);
+    assert.equal(
+      result.findings.filter((finding) => finding.code === "verify-invalid")
+        .length,
+      0,
+    );
+    assert.equal(
+      result.findings.filter((finding) => finding.code === "pair-illegal")
+        .length,
+      0,
+    );
+  });
+
+  it("a submitted verify block with duplicate paths is frontmatter-invalid", () => {
+    const path = "plan/i--01/o--01/01-a.md";
+    const result = assertStable([
+      {
+        path: "plan/i--01/initiative.md",
+        content: `---
+id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
+kind: initiative
+title: Initiative
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
+---
+Work.
+`,
+      },
+      {
+        path: "plan/i--01/o--01/objective.md",
+        content: `---
+id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
+kind: objective
+title: Objective
+deliverable: expansion
+repo: repo_a
+verify:
+  paths: []
+  commands: []
+---
+Work.
+`,
+      },
+      {
+        path,
+        content: `---
+id: task_01ARZ3NDEKTSV4RRFFQ69G5FAC
+kind: task
+title: Duplicate verify path
+deliverable: test
+verify:
+  paths:
+    - /src/foo.ts
+    - /src/foo.ts
+  commands: []
+---
+Work.
+
+## Acceptance criteria
+
+- Done.
+`,
+      },
+      {
+        path: "plan/i--01/o--01/02-b.md",
+        content: `---
+id: task_01ARZ3NDEKTSV4RRFFQ69G5FAD
+kind: task
+title: Valid sibling task
+worker: general@1
+---
+Work.
+
+## Acceptance criteria
+
+- Done.
+`,
+      },
+    ]);
+
+    assert.equal(result.findings.length, 1);
+    assert.equal(result.findings[0]?.code, "frontmatter-invalid");
+    assert.equal(result.findings[0]?.path, path);
+  });
+
+  it("a legacy document with worker only raises neither pair-illegal nor verify-invalid", () => {
+    const result = assertStable([
+      {
+        path: "plan/i--01/o--01/01-a.md",
+        content: `---
+id: task_01ARZ3NDEKTSV4RRFFQ69G5FAD
+kind: task
+title: Legacy task
+worker: claude.swe@1
+---
+Work.
+
+## Acceptance criteria
+
+- Done.
+`,
+      },
+    ]);
+    assert.equal(
+      result.findings.filter((finding) => finding.code === "pair-illegal")
+        .length,
+      0,
+    );
+    assert.equal(
+      result.findings.filter((finding) => finding.code === "verify-invalid")
+        .length,
+      0,
+    );
+  });
+
   it("an objective with an acceptance section is acceptance-unexpected", () => {
     const result = assertStable([
       {
@@ -443,6 +683,10 @@ Work.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -453,6 +697,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Harden the verify CLI
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it verifiable.
@@ -544,6 +792,10 @@ One.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -554,6 +806,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Harden the verify CLI
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it verifiable.
@@ -591,6 +847,10 @@ Work.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -601,6 +861,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Harden the verify CLI
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it verifiable.
@@ -629,6 +893,10 @@ Work.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAE
 kind: objective
 title: Harden the graph
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it fast.
@@ -664,6 +932,10 @@ Work.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -674,6 +946,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Harden the verify CLI
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it verifiable.
@@ -733,6 +1009,10 @@ Work.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -743,6 +1023,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Harden the verify CLI
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it verifiable.
@@ -818,6 +1102,10 @@ Work.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -828,6 +1116,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Harden the verify CLI
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it verifiable.
@@ -863,6 +1155,10 @@ Work.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -873,6 +1169,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Harden the verify CLI
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it verifiable.
@@ -908,6 +1208,10 @@ Work.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -918,6 +1222,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Harden the verify CLI
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it verifiable.
@@ -968,6 +1276,10 @@ Work.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -978,6 +1290,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Harden the verify CLI
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Make it verifiable.
@@ -1015,6 +1331,10 @@ Work.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -1025,6 +1345,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Unbound objective
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_b
 ---
 Make it verifiable.
@@ -1060,6 +1384,10 @@ Work.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -1070,6 +1398,10 @@ Bootstrap the daemon.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: objective
 title: Unknown objective
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_missing
 ---
 Make it verifiable.
@@ -1105,6 +1437,10 @@ Work.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAA
 kind: initiative
 title: Empty initiative
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Nothing below.
 `,
@@ -1115,6 +1451,10 @@ Nothing below.
 id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAB
 kind: initiative
 title: Half initiative
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 One objective below.
 `,
@@ -1125,6 +1465,10 @@ One objective below.
 id: objective_01ARZ3NDEKTSV4RRFFQ69G5FAC
 kind: objective
 title: Empty objective
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 repo: repo_a
 ---
 Nothing below.

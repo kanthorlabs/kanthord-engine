@@ -47,6 +47,8 @@ const submittedBase: ResolvedDocument = {
   dependsOn: [],
   worker: null,
   repo: null,
+  deliverable: null,
+  verify: null,
   derivedParentPath: "plan/i--01/o--01/objective.md",
   instruction: "Build the renderer.\n",
   acceptance: "## Acceptance criteria\n- The bytes match.\n",
