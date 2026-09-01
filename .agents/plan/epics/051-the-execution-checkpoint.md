@@ -779,7 +779,7 @@ the candidate ref. The scenario for this diagram drives `acceptExecution` direct
 
 14. **The proposal records the execution checkpoint.** Add `docs/proposal/phase-2/checkpoints.md` stating the candidate ref contract, the checkpoint schema, the ordered acceptance gate, the three compare-and-swap fields, the contention lifecycle, the per-command immutable checkout, the exact-path rule, the empty-`paths` rule, the workspace head advance, and the journal recovery rule.
 
-## Verification gate
+## Verification Gate
 
 Gates: `pnpm run verify`
 

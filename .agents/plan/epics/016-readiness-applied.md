@@ -57,7 +57,7 @@ These are settled here. No story revisits one.
 
 - **The journey oracle, repaired** — `scripts/e2e/lib/scenario/journey.ts`. `parseStatusCounts` at lines 62-89 derives `tasksAllPending`, and the `status-counts` assertion at lines 387-401 expects it `true`. An imported plan now holds a ready frontier, so `runJourney` fails on the first scenario run after this epic. **This epic repairs the oracle it breaks, and no scenario epic owns the repair.** `parseStatusCounts` returns `taskStates: Readonly<Record<string, number>>` in place of `tasksAllPending`, built from the same `kanthord: node <kind> <state> <count>` lines, with one key per observed task state. The `status-counts` assertion names the exact map, `{ pending: profile.expectedPendingTaskCount, ready: profile.expectedReadyTaskCount }`, beside the two counts it asserts today. `ScenarioProfile` at `scripts/e2e/lib/profile/index.ts:3-13` gains `expectedPendingTaskCount` and `expectedReadyTaskCount` beside `expectedTaskCount`, the key list at `scripts/e2e/lib/profile/profile.test.ts:17-25` gains both names, and `scripts/e2e/lib/profile/fixture.ts:132-133` declares both for the fixture plan. `scripts/e2e/lib/scenario/p1-e4.ts:275-276`, `scripts/e2e/lib/scenario/p1-e4.test.ts:67-68` and `scripts/e2e/lib/scenario/journey.test.ts:159-160` each gain the two members with the same values. The `status-unchanged` assertion at lines 420-424 stays word for word, because `run` still answers `not-implemented`. A count is asserted rather than a frontier list, because `kanthord status` prints counts and this story changes no command output.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

@@ -155,6 +155,6 @@ git diff --stat src/http/contract/field-decisions.fixture.ts
 
 `npm run verify` exits 0.
 
-Proof — the EPIC's `## Verification gate`, its fifth check: _the registry equals the proposal
+Proof — the EPIC's `## Verification Gate`, its fifth check: _the registry equals the proposal
 contract, and `repository.landingBranch` appears in neither._ `parity.test.ts:17-21` delivers the
 equality and the first grep delivers the absence.

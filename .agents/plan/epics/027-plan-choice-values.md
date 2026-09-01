@@ -277,7 +277,7 @@ tree is red between them. Run no gate between those two.
 - **The query composes the values** — in `src/queries/plan/validate-plan.ts:213-229`, keep the `choiceVerdict` call exactly as it is and build each branch as `{ ...verdict.submitted, values: … }` and `{ ...verdict.database, values: … }`, using the exact composition D4 prescribes, including the `document === undefined` and `node === undefined` guards that produce `{}`. Hoist the `canonicalNodes` construction at `:269-277` above the choice loop, add `const submittedPaths = canonicalPaths(canonicalNodes);` beside it, and set `path` to `submittedPaths.get(identity) ?? null`. Add no read, no second loop and no `presence` branch beyond the one `selected` expression. `src/commands/plan/import-plan.ts` changes in no way.
 - **The proposal records the choice values** — `docs/proposal/api/graph.md` gains the `values` member in its `plan.validate` section: the six names, the `body` pair, the normalized `depends_on`, D1's presence table in one sentence per row, the three states of an absent key versus a `null` value, the `path` member, and D2's retrieval rule — the database side through `blob.show`, the submitted side through `documents` joined by `path`, and the statement that a submitted hash is not in the blob store. `docs/proposal/api/new-decisions.md` gains one row, because no proposal file names this member today. `src/http/contract/parity.test.ts` reads the route status table and no status changes, so parity is unaffected.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

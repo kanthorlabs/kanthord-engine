@@ -82,7 +82,7 @@ A verdict is evidence, and the pair selects who owns a node state:
 
 9. **The proposal records state ownership.** Amend `docs/proposal/phase-2/checkpoints.md` with the attestation contract, the `depends_on` lookup and its four refusals, and the verdict semantics. Add `docs/proposal/phase-2/node-state-ownership.md` stating the state owner per pair with the full transition table, the aggregation rules, the terminal-state tuple, the walk and its stop invariant, the precedence order and its provenance column, and that the verdict is trusted and a reviewer mutation is not detected.
 
-## Verification gate
+## Verification Gate
 
 Gates: `pnpm run verify`
 

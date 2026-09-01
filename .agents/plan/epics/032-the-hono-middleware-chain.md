@@ -449,7 +449,7 @@ create no commit between Stories 3 and 16. Story 16 runs the batch gate after ev
     `Response` and the bridge writes the bytes. `start.ts`, `main.ts`, `test/helpers/app.ts` and
     `test/helpers/agent.ts` do not change. Update `app.test.ts` for the new chain.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

@@ -55,7 +55,7 @@ Status: **draft**.
 
 - **The domain document amendment** — `docs/proposal/phase-1/domain.md`. The domain-model section gains one paragraph that names the two validity scopes and where each one runs. The state-and-events section gains the three actor kinds and names EPIC 015 as the epic that lands them in code. This is the file `AGENTS.md` points a later reader at, so a split recorded only in `state-machine.md` is a split a reader misses.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

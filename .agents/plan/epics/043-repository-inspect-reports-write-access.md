@@ -143,7 +143,7 @@ join(tempDir, "run") }` and passes that to both calls. `knownHosts` keeps the re
 6. **The proposal records the mechanism and the shape.** Amend
    `docs/proposal/api/repository.md` per the Decisions above.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

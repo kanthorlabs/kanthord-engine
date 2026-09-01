@@ -355,6 +355,6 @@ grep -c "\-\-upstream" docs/proposal/api/repository.md docs/proposal/phase-1/REA
 
 `npm run verify` exits 0.
 
-Proof: no line of the EPIC's `## Verification gate` is attributable to this story — the gate names no
+Proof: no line of the EPIC's `## Verification Gate` is attributable to this story — the gate names no
 documentation test. The epic is complete only when this story has landed, because `AGENTS.md` names
 `docs/proposal/` the source of truth for behaviour and the EPIC's own Goal is stated there.

@@ -94,7 +94,7 @@ A human removes the last `llm` provider through the API, so an account returns t
 4. **The proposal records what `force` overrides.** Amend `docs/proposal/api/credential.md` with the
    asymmetry of the Decisions above.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

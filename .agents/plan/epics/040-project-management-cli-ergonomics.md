@@ -161,7 +161,7 @@ Author with `/author`. The order below is dependency order; each story is one co
    `src/cli/inventory.ts` and the reachability row. It reads the source, refuses a non-empty output,
    invokes the pure mapper once and writes the returned documents once.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

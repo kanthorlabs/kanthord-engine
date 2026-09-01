@@ -161,7 +161,7 @@ story leaves `npm run verify` green on its own.
      assert a `Uint8Array` payload, and keep P21 asserting that no bound handler answers 204 or 304.
      P22 is unchanged: `showBlobHandler` stays the one handler that sets response headers.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

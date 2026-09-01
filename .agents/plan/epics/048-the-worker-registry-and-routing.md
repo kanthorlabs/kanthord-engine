@@ -105,7 +105,7 @@ A worker is a design-time record, and routing is a computation over three sets:
 
 11. **The dependency plan records the moved route.** Amend `.agents/plan/epics/100-phase-2-overview.md` row 106 so that `agent.list` closes here and EPIC 106 closes on its adapter assertions. `100-phase-2-overview.md` states 106 closes on `agent.list`, and moving a closing route without amending the plan leaves two epics claiming one route.
 
-## Verification gate
+## Verification Gate
 
 Gates: `pnpm run verify`
 

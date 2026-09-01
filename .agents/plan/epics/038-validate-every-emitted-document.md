@@ -105,7 +105,7 @@ Author with `/author`. The sequence below is the dependency order; each story is
    captures the return value of `publishContract` and asserts the two-way set equality between the
    manifest lists and the returned `features/` and `examples/` entries.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

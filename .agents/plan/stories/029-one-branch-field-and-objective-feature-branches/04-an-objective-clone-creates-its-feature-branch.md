@@ -235,7 +235,7 @@ node --test \
 
 `npm run verify` exits 0.
 
-Proof — the EPIC's `## Verification gate`, its fourth check: _an objective clone reports
+Proof — the EPIC's `## Verification Gate`, its fourth check: _an objective clone reports
 `feature/<node id>` as its checked-out branch, and the object-file link count still proves
 isolation._ The rewritten test at `clone.test.ts:145` delivers the first clause and the untouched
 test at `:168-187` delivers the second.

@@ -105,7 +105,7 @@ and it declares its kind. `.agents/plan/authoring.md` is the standard.
 
 9. **The proposal records the run model** — `docs/proposal/phase-2/runs-and-exclusion.md` is created, stating the three run kinds and their selection rule, the fence counter, the subtree rule, the objective-branch refusal, the base set, the provenance, the two budgets and the final shape migration `12` lands. The claim half of the document is EPIC 050.1 Story 9, and the authority half is EPIC 050.2 Story 9. `story-foundation`.
 
-## Verification gate
+## Verification Gate
 
 Gates: `pnpm run verify`
 

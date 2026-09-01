@@ -452,7 +452,7 @@ so it is also the one component that counts the calls and refuses the call over 
   of its own. The daemon process, the temporary home, the home lock and the fixture remote are already
   taken by the drivers and the fixture profile, and this epic adds none of them a second time.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

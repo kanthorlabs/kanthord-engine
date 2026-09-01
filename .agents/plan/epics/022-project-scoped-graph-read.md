@@ -75,7 +75,7 @@ These are settled here. No story revisits one.
 
 - **The CLI** — `src/cli/project/node.ts` exports `registerProjectNode` and `src/cli/project/graph.ts` exports `registerProjectGraph`, each a typed client of `src/http/contract/graph.ts`, each importing no command and no query. Both take `--id <id>`, and a missing `--id` is `kanthord: invalid-request: --id is required` on standard error with a non-zero exit, exactly as `src/cli/project/repository.ts:39-43` does. `project node` prints `kanthord: node <id> <kind> <state> <title>` per node and `kanthord: no node` on an empty list. `project graph` parses the body, validates it against `projectGraphResponse`, and prints `JSON.stringify(body, null, 2)` plus one newline, and nothing else on the success path. `src/cli/program.ts` imports and calls both beside `registerProjectRepository` at line 22. `src/cli/inventory.ts:6` gains `["project", "graph"]` with `["project.graph"]` and `["project", "node"]` with `["project.nodes"]`, in the sorted position the list already holds.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

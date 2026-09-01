@@ -182,7 +182,7 @@ Each one is stated here and owned there. This epic writes none of them.
 - **EPIC 020** — own run-level image sharing if the six image builds per run are unacceptable. This epic accepts them.
 - **EPIC 020** — add the three ids to `scripts/e2e/lib/record/verdict.ts:20-25`, per `020-wiring-and-scenarios.md:77`. The seven-bundle rule of this epic depends on it.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

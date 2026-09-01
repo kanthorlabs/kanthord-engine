@@ -161,7 +161,7 @@ adds no second validation path and moves none.
   development artifact. `docs/proposal/api/new-decisions.md:11` gains the same statement, because it
   is the line that already claims the artifact is published on a release and says nothing about how.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

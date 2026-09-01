@@ -34,7 +34,7 @@ stories below empty that constant.
 - **The `501` sweep** — every stubbed `operationId` answers `501` and writes no state. The assertion enumerates the route registry, so a new stub is covered without a hand-written list.
 - **The `404` sweep** — every `post-mvp` path answers `404`, because `501` says "this daemon will do it" and `404` says "this daemon does not have this operation". A `post-mvp` row has no registry entry, so this sweep reads the proposal matrix of `docs/proposal/api/` directly. The registry parity assertion of EPIC 004 covers `routed` and `stubbed` only, and these two sources must not be swapped.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

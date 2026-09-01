@@ -112,7 +112,7 @@ These are settled here. No story revisits one.
 
 - **The defects this block returns to its siblings** — one is already known and no epic owns it. `scripts/e2e/lib/scenario/journey.ts:393` asserts `tasksAllPending: true`. EPIC 016 makes an imported plan hold a ready frontier, so `runJourney` fails for every scenario after EPIC 016 lands. **EPIC 016 owns that repair**, and it is a defect returned to EPIC 016 rather than work in this epic. This epic reuses `runJourney` unchanged and asserts the repaired oracle.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

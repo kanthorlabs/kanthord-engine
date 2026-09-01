@@ -73,7 +73,7 @@ prerequisite.
 
 - **The report and the verdict** — findings grouped by root cause, each as `<B1/S1> - action:<YES/NO> - <name> - <description>`. Each blocker opens a fix epic and phase 1 stays open. The outcome is not asserted in prose: `node scripts/e2e/run.mjs --verdict <tag>` checks both axes and returns the exit status, and the report records that command and its exit status. The scenario axis needs a bundle per declared scenario, all `passed`, a verify record with exit status zero, and one commit across every record. The acceptance axis needs a signed record on that same commit. Phase 1 closes on a zero exit status from `--verdict`, a P1-E5 bundle, a proposal revision and an implementation commit.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

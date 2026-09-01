@@ -87,7 +87,7 @@ A human is the only actor that changes an existing assignment or ends an objecti
 
 11. **The proposal records the human controls.** Add `docs/proposal/phase-2/human-controls.md` stating the switch and its four transactional effects plus the postcondition, the discard-after-commit rule and its startup cleanup, the switch legality table and refusal order, that a switch consumes no attempt and preserves every checkpoint, that a new external worker needs its own grant, the close reference contract and its two staleness refusals, the precedence over aggregation, and the four authorization directions.
 
-## Verification gate
+## Verification Gate
 
 Gates: `pnpm run verify`
 

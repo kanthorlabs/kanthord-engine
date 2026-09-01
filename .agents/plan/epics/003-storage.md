@@ -22,7 +22,7 @@ Every phase-1 table exists on `node:sqlite`. `kanthord db migrate` applies migra
 - **Crypto service** — the master key from configuration, encrypt and decrypt a `provider` secret. No route reads a secret back.
 - **Blob store and the event log** — content-addressed write and read on `sha256:<hex>`, and the append path every transition uses. A state write and its event append share one transaction, and the interface admits no way to do one without the other.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

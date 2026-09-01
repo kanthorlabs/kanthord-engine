@@ -190,7 +190,7 @@ so a reformatting is a failure.
 `idempotency-key` is listed ahead of EPIC 010.6 because a header absent from this list is a
 header a browser refuses to send.
 
-### Verification gate coverage
+### Verification Gate coverage
 
 The EPIC Proof runs every suite this epic touches:
 

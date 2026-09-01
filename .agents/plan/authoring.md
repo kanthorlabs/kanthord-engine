@@ -33,7 +33,7 @@ An epic states **what was decided** and **how the result is proven**. Nothing el
 
 - **An epic holds no sequence diagram.** A diagram is the contract of one path, a path belongs to one
   story, and an epic that draws one has taken work that belongs to a story.
-- **Two sections carry weight: `## Decisions` and `## Verification gate`.** A decision states the
+- **Two sections carry weight: `## Decisions` and `## Verification Gate`.** A decision states the
   ruling and the constraint it imposes, with the evidence that forced it. The gate states every
   assertion that proves the epic shipped what it decided, and **every assertion in it is owned by
   exactly one story**.

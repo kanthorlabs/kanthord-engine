@@ -101,7 +101,7 @@ These are settled here. No story revisits one.
 
 - **The real-composition-root loop** — `src/main.report.test.ts`, one named test in the pattern of `src/main.claim.test.ts` of EPIC 018. It migrates one home, launches the daemon through `launchDaemon` at `test/helpers/daemon.ts:29`, which spawns `src/main.ts`, registers a harness actor, and drives one sequence against one database with no injected handler map at any step. It proves the production composition root. **It proves no packaging**: `package.json` publishes `dist/main.js`, `launchDaemon` spawns `src/main.ts`, and `npm run verify` never runs `npm run build`. No story of this epic claims a packaged binary.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

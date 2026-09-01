@@ -180,7 +180,7 @@ node --test src/http/server/dispatch.test.ts src/http/server/route.test.ts \
 
 ### The whole Proof block
 
-Run the EPIC's complete copy-paste Proof verbatim from its `## Verification gate` — all 22 test
+Run the EPIC's complete copy-paste Proof verbatim from its `## Verification Gate` — all 22 test
 files. It must print `PASS EPIC-030`. Edit none of the eighteen pre-existing files; each must pass
 unchanged.
 

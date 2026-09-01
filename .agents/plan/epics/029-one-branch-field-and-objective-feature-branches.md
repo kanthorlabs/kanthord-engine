@@ -112,7 +112,7 @@ Author with `/author`. The sequence below is the dependency order; each story is
 7. **The CLI carries one flag.** `--branch` replaces `--upstream`. `--landing` and `--publish-ref`
    are removed. The registration prompt asks one question.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

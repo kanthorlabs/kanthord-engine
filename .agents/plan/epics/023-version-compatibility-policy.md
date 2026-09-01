@@ -191,7 +191,7 @@ whether a _feature_ is worth rendering a screen for reads `capabilities`.
   with its replacement named. That is a commit in the client repository, and it is an Open item here
   rather than a story of this epic.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

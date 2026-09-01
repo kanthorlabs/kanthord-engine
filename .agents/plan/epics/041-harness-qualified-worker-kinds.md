@@ -110,7 +110,7 @@ persona:
    Name the four values, state the `<harness>.<agent>@<version>` convention, state that the daemon
    validates and never executes one, and state that claim is not restricted by worker kind.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

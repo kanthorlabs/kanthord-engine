@@ -193,7 +193,7 @@ Author with `/author`. The sequence below is the dependency order; each story is
    `docs/proposal/api/README.md:30` so the manifest field list names `source` in position. Extend
    the manifest agreement test of EPIC 038 with the new field and the new key order.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

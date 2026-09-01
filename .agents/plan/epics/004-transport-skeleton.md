@@ -22,7 +22,7 @@ A request reaches a handler only after it passed the bearer check, the `Origin` 
 - **CLI program skeleton** — commander, the base URL, the token, `X-Kanthord-Client`, and an exit code routed on the error `code` and never on `message`. `src/cli/` already exists: EPIC 003 created `src/cli/base-url.ts` and `src/cli/db/migrate.ts`, because `AGENTS.md` puts the migration handler in the commander program and `main.ts` injects it. This story **refactors** those two files into the program rather than starting the directory. `--base-url` and `--token` become program-level options with one resolver, `db migrate` reads the resolved base URL instead of its own option, and `isLoopbackUrl` is reused by that resolver and never duplicated. `db migrate` keeps its injected handler and still imports no service, so it stays the one command that reaches storage without HTTP.
 - **`system.health` and `system.db`** — the two routes that prove the skeleton end to end, and `kanthord db status` calling the second one over HTTP.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

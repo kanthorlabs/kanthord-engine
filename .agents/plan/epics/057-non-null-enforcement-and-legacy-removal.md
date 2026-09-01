@@ -68,7 +68,7 @@ The additive window closes and one model remains:
 
 9. **The proposal drops the legacy model.** Delete the `node.worker`, worker-kind and worker-binding-precedence text from `docs/proposal/phase-2/agents-and-workers.md` and `docs/proposal/phase-2/instructions-and-profiles.md`. Delete the legacy paragraph from `docs/proposal/phase-1/plan-format.md` and state that one frontmatter shape exists. Amend `docs/proposal/phase-2/deliverables-and-pairs.md` to state that dual read is closed. Add this epic's two removals and its capability swap to the compatibility record in `docs/proposal/api/README.md`.
 
-## Verification gate
+## Verification Gate
 
 Gates: `pnpm run verify`
 

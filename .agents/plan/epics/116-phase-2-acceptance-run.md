@@ -77,7 +77,7 @@ Two exceptions.
 
 - **The report and the verdict** — findings group by root cause. A group takes the position of the first scenario it was observed in, in the `scenarioIdsByPhase[2]` order of EPIC 115, and a finding inside a group takes observation order. Blockers number `B1` upward and suggestions number `S1` upward, each from `1`, in that one order; an id is never renumbered and never reused. Each row is `<B1/S1> - action:<YES/NO> - <name> - <description>`, and **every blocker row ends with one more field, ` - fix: .agents/plan/epics/<number>-<slug>.md`**, because free-form prose carries no identifier a command can check. A suggestion row carries no `fix` field. The blocker check of the Proof reads each named path, and phase 2 stays open while the file exists and its status is not `PASS`. The outcome is not asserted in prose: `node scripts/e2e/run.mjs --verdict <tag> --phase 2` checks both axes against the declared phase-2 id set and returns the exit status, and the report records that command and its exit status. EPIC 115 owns the phase-scoped id set the verdict reads. The scenario axis needs a bundle per declared scenario, all `passed`, a verify record with exit status zero, and one commit across every record. The acceptance axis needs a signed record on that same commit. Closure is three artifacts and nothing else: the signed report at `.agents/acceptance/<tag>/report.md` with outcome `passed`, the zero exit status of `--verdict <tag> --phase 2`, and the P2-E4 bundle it references. This epic file records no marker, because `docs/proposal/README.md` gives closure to the evidence and not to the repository.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

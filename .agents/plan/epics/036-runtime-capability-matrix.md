@@ -190,7 +190,7 @@ deployment shapes` and the reviewer `architect and whoever owns the network`. Ad
    extracted count equals 44 by value. It reads the file through `node:fs` and resolves the path from
    `import.meta.url`, so it takes no working directory from the caller.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

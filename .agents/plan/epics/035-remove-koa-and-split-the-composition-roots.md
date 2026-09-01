@@ -149,7 +149,7 @@ anchor each edit on the named symbol and read the line number as a hint.
    directory, the no-`node:` invariant, the Node root, and the two declared unbuilt roots. It names
    the enforcing test. No code.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

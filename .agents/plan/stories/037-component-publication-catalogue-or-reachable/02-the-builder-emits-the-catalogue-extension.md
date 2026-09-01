@@ -224,7 +224,7 @@ which is that the pruning removes nothing from the master.
 The two `components` assertions close the one hole the rest of the suite leaves.
 `openapi.test.ts:130-131` already pins `securitySchemes.bearerAuth` by value and
 the `security` root by value, but nothing pins that `components` holds no third
-key and that `securitySchemes` holds no second scheme. The EPIC Verification gate
+key and that `securitySchemes` holds no second scheme. The EPIC Verification Gate
 names this assertion for that reason.
 
 ## Constraints

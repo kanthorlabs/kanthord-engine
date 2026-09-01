@@ -107,7 +107,7 @@ An accepted graph patch is the checkpoint of a structural run:
 
 16. **The proposal records the structural checkpoint.** Amend `docs/proposal/phase-2/checkpoints.md` with the mutation algebra, the staged-graph rule, the three scope rules, the project rule, the fixed refusal order, the revision compare and swap, the at-least-one-child rule and its childless-node condition, the pair-fixing rule and its two-patch sequence, the delete rule, and the canonical patch serialisation.
 
-## Verification gate
+## Verification Gate
 
 Gates: `pnpm run verify`
 

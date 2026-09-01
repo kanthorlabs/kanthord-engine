@@ -33,7 +33,7 @@ This is the largest epic in phase 1, because it carries the conflict resolution 
 - **The project CLI** — `kanthord project create`, `project list`, `project show`, and the repository binding that `project.repositories` replaces. Every plan route is `/v1/project/:id/plan/...`, and import rejects an objective whose repository is not bound to its project, so a human with no project command cannot reach import at all. P1-E1 depends on this story.
 - **The plan CLI and the import handshake** — `kanthord plan export`, and `kanthord plan import` as the protocol of `docs/proposal/api/graph.md` rather than one call: `plan.validate` first, pre-select the returned suggestion for every node, carry `validatedRevision` and `documentsHash` into `plan.import`, and submit one choice per node of the identity union. A non-interactive run takes every suggestion. `409 choices-stale` and `409 choices-changed` each exit non-zero and name the reason. Import writes the returned documents and removes every `plan/**/*.md` the response does not name, because the response uses canonical paths and the human's own names would survive as orphans.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

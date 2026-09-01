@@ -86,7 +86,7 @@ A node declares an outcome, never a method:
 
 9. **The proposal records the model.** Add `docs/proposal/phase-2/deliverables-and-pairs.md` stating the four deliverables, and that `research` is deliberately absent in this phase, the pair table with its 8 legal and 4 illegal pairs, the shape and state owner per pair, the `verify` block contract, the pair-fixing rule and its enforcement owner, and the transitional meaning of a null `deliverable`. State that a deliverable is an outcome and never carries an agent name. State that `node.worker` is legacy and that EPIC 057 removes it.
 
-## Verification gate
+## Verification Gate
 
 Gates: `pnpm run verify`
 

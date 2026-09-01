@@ -21,7 +21,7 @@ Two fixture remotes serve a real git transport on loopback ports, and each passe
 - **ssh fixture remote** — `sshd` on a loopback port with a generated host key and a generated client key, serving the same seeded repositories. It runs from a generated config with no operator configuration in scope, and it publishes its host key so a test can pin it and can also present a wrong one.
 - **Fixture acceptance gate** — the factory withholds the fixture handle until its own acceptance list passes, so a consumer cannot reach an unchecked fixture by running first. Ordering between test files is not a guarantee, and this makes the check structural rather than conventional. Both fixtures prove their own list before a scenario uses them. HTTP proves `HEAD` symref discovery, a fetch, and a `git-receive-pack` advertisement that refuses a wrong token and a missing one. ssh proves a key-authenticated fetch, a refusal under a mismatched host key, and a refusal of a key file that is not mode `0600`. A fixture that fails an item makes every test that uses it prove less than it claims.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

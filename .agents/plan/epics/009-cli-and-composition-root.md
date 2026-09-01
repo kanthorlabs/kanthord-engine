@@ -28,7 +28,7 @@ This epic exists because a phase can close with every unit test green and no wor
 
 - **Daemon-backed `npm run verify`** — `verify` regains its `db status` step, now correct: migrate a temporary home, start the daemon on a loopback port with a token, call `db status` over HTTP, stop the daemon, and remove the home. EPIC 001 staged `verify` without it because `docs/proposal/api/system.md` makes `db status` an HTTP client command and no daemon existed then.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

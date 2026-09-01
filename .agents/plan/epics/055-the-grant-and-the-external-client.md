@@ -98,7 +98,7 @@ A human mints a grant, and the grant is the authority of every external write:
 
 13. **The proposal records the grant.** Add `docs/proposal/phase-2/grants-and-clients.md` stating the grant fields, the id-and-handle split, the authentication scheme and the authenticate-then-authorize rule, the three operations, the immutability and monotonicity triggers, the run binding, the two limits and their counting rule, the three end effects with their implementations, the orchestration-only rule and its claim-time refusal, and the trust boundary at which a holder key becomes necessary.
 
-## Verification gate
+## Verification Gate
 
 Gates: `pnpm run verify`
 

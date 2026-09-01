@@ -100,7 +100,7 @@ These are settled here. No story revisits one.
 
 - **The CLI** — `src/cli/node/create.ts`, `update.ts` and `delete.ts`, each a typed client of `src/http/contract/`. **The CLI keeps `plan.revisions`, because the CLI is a human client**: it carries the configured bearer token, `plan.revisions` declares `["human"]`, and one command reads one revision list rather than a whole rendered document set. The `plan.export` path of the guard-token story serves a harness, which the same operation forbids. `node create` reads the newest revision through `plan.revisions` and sends it as `fromRevision`. `node update` reads the node through `node.show` to fill the whole editable field set, from the resolved `instruction`, `acceptance` and `repo` the read now carries, sends the node revision when it changes no topology, and reads `plan.revisions` when it does. `--no-worker` clears the worker and `--no-depends-on` clears the dependency list. `node delete` reads the newest revision the same way. Each command prints every returned `completeness` finding on standard error and exits zero, because a completeness finding is a report. `src/cli/inventory.ts:6` gains `["node", "create"]` with `["plan.revisions", "node.create"]`, `["node", "update"]` with `["node.show", "plan.revisions", "node.update"]`, and `["node", "delete"]` with `["plan.revisions", "node.delete"]`, so the inventory parity assertion of EPIC 009 covers them.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

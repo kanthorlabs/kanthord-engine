@@ -110,7 +110,7 @@ Run them in this order. Each passes the full gate on its own.
 - **The CLI reaches the tail** — add `--before <event-id>` and `--order <asc|desc>` to `src/cli/event/list.ts` per D4, in the option list at lines 57-64 and in the query object at lines 66-77. Validate neither client-side.
 - **The proposal records the tail** — amend `docs/proposal/api/event.md:18`, which says paging is `after` plus `limit`. It states the exclusive range, both directions, that `asc` is the default, and that the first id of an `order=desc` page is the newest id, so no tail operation exists. `docs/proposal/api/new-decisions.md` gains one row. Line 20's `wait` paragraph and line 24's gap refusal are unchanged.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

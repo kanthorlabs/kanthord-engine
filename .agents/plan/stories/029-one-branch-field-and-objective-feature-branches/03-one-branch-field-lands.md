@@ -566,7 +566,7 @@ The second exclusion list is load-bearing: `migration-0009-one-branch.ts` and it
 contain all three old column names, because migrating them is what they do. A grep that demanded zero
 occurrences repo-wide could never pass.
 
-Proof — the EPIC's `## Verification gate`, four of its six checks:
+Proof — the EPIC's `## Verification Gate`, four of its six checks:
 
 - `npm run verify` is clean.
 - A fresh database migrates 0001 through 0009 and `repository` holds no `landing_branch` and no

@@ -25,7 +25,7 @@ A human stores a git credential, inspects a remote, confirms the detected defaul
 - **`repository.list` and `repository.show`** — the projection carries the branch fields, the landing tip, the tracking tip, `fetchedUpstreamOid`, the bound credential, and the repository state. P1-E3 asserts the ref layout through this route alone.
 - **The CLI commands** — `kanthord credential register`, `kanthord repository register --url --credential --upstream [--host-fingerprint]`, and `kanthord repository show`. `--credential <name>` resolves to an id before the call. The register command refuses when neither a prompt nor `--upstream` answered the confirmation, and refuses an ssh url when neither a prompt nor `--host-fingerprint` answered.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

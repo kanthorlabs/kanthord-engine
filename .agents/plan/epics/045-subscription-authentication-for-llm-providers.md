@@ -433,7 +433,7 @@ They are recorded so a reviewer does not read them as oversights and a later rea
     is why a pending login is process-local and needs no sticky routing; and `openai-compatible` is
     the only self-configuration escape hatch, which is why registration keeps its catalogue gate.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

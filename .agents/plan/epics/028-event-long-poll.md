@@ -158,7 +158,7 @@ does not.
   and its default, plus the generated configuration file sample if one is asserted.
 - **The capability** — `event-wait` in `src/http/contract/capability.ts`, per D7.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

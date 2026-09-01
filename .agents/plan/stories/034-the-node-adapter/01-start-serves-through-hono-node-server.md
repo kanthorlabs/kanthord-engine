@@ -107,7 +107,7 @@ ServerResponse>'`. The EPIC's Decisions say `serve()` returns a `node:http` serv
 
 - **The port is read from `server.address()` and from nowhere else.** The `serve()` second argument
   is a `listeningListener` that receives an `AddressInfo`. Do not use it. One path reports the port,
-  which is what the Verification gate requires.
+  which is what the Verification Gate requires.
 
 ### 2. `src/main.ts` — two lines
 

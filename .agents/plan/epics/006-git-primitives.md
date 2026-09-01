@@ -23,7 +23,7 @@ The git service runs the `git` binary through `node:child_process.execFile` and 
 - **Outside-writer diagnostic** — before a ref write, compare the current ref against the last completed `git_operation` for that ref, filtered by intent, and report a verdict carrying both object ids. The primitive reads and returns; the **caller** refuses the operation and writes the event, because that is operation-level logic over a storage transaction and `AGENTS.md` puts it in `commands/`. EPIC 007 owns the first call site. It never sets `needs-reconcile`. It is a diagnostic and not a boundary: it catches a human who ran `git` in the bare home, and it does not catch a writer who restores a ref, writes loose objects, or edits `packed-refs`.
 - **Objective clone** — `git clone --no-hardlinks --no-local` from the bare home into a staging directory, then remove `origin`, assert the remote list is empty, assert no `objects/info/alternates` and no promisor configuration, then rename the staging directory into place. The acceptance for isolation is the object-file link count, not the contents of the work tree.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

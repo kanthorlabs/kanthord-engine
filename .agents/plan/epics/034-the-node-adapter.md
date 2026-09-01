@@ -313,7 +313,7 @@ detailed files sit under `.agents/plan/stories/034-the-node-adapter/`.
    `src/http/server/app.test.ts`. After this story no file under `src/`, `test/` or `scripts/` names
    koa, which is the precondition of EPIC 035 story 4.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

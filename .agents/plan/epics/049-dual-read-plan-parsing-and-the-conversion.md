@@ -116,7 +116,7 @@ A plan document carries a deliverable and a verify block, and an existing docume
 
 10. **The proposal records dual read and the conversion.** Amend `docs/proposal/phase-1/plan-format.md` with the two frontmatter shapes, the exclusivity rule, the fixed key order and the verify block grammar. Add the conversion table, the six `manual` reasons, the template format, the command validation rule and the report schema to `docs/proposal/phase-2/deliverables-and-pairs.md`. State that dual read closes at EPIC 057.
 
-## Verification gate
+## Verification Gate
 
 Gates: `pnpm run verify`
 

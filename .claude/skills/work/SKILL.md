@@ -91,7 +91,7 @@ base-ref: <BASE_REF>
 
 Pulled from EPIC: `<epic-file-relative-path>`.
 
-Verification gate (binding, from the EPIC's `## Verification Gate` section):
+Verification Gate (binding, from the EPIC's `## Verification Gate` section):
 > <the prose under the EPIC's "## Verification Gate" heading, verbatim>
 
 TDD protocol:

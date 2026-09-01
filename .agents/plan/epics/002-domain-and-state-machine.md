@@ -29,7 +29,7 @@ The state machine of `docs/proposal/phase-1/state-machine.md` is defined as data
 - **Attempt accounting** — a rejection increments; the configured limit moves the task to `blocked` with `attempt-limit`.
 - **Service interfaces** — config, storage, crypto, git, graph, event, agent, verify, lease, ids, clock. A phase-2 interface exists and throws.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

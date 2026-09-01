@@ -27,7 +27,7 @@ pipeline with no socket and no port.
 The before count is 57 and the after count is 60, and the difference of 3 is named.
 `src/http/server/app.parity-path.test.ts` and `src/http/server/app.handler-result.test.ts` reach the
 harness through `createTestApp` and appeared in no table of the first draft; the recompute grep of
-the Verification gate finds them, and this epic now classifies both. `src/http/server/shutdown-socket.test.ts`
+the Verification Gate finds them, and this epic now classifies both. `src/http/server/shutdown-socket.test.ts`
 is the file story 6 creates. 57 plus those 2 plus that 1 is 60.
 
 Every count in this epic counts a file that opens a socket **through
@@ -109,7 +109,7 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
   and each awaited to a response. `fetchAgent` returns that same shape over `hono.request()`. That
   is why 45 of the 46 group-A files change zero lines: `createTestApp` swaps one call, and every
   caller keeps its syntax. `src/http/server/app.parity-path.test.ts` is the one exception, and the
-  group-A bullet of the Verification gate states its exact budget.
+  group-A bullet of the Verification Gate states its exact budget.
 
   The `Agent` contract is exact. Every member below is present because a migrated file calls it, and
   the citation names the caller:
@@ -233,7 +233,7 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
   `dispatch.test.ts` and `app.test.ts`. A file that EPIC 032 leaves with no `loopbackAgent` call
   needs no edit here, and a file that EPIC 032 gives a `loopbackAgent` call joins group B. Each
   story therefore states the edit as a rule over its group, and the implementing agent recomputes
-  the membership with the two commands of the Verification gate. A group row that no longer matches
+  the membership with the two commands of the Verification Gate. A group row that no longer matches
   is not a defect of the story.
 
 - **The 53 level-1 files, in three groups.** Group A is the 46 files that reach the harness only
@@ -326,7 +326,7 @@ none of them: `src/http/server/start.test.ts`, the nine `src/main.*.test.ts` dae
 ## Stories
 
 Author with `/author`. The sequence below is the dependency order; each story is one commit. Every
-story that adds a case names the exact count, because the Verification gate compares pass counts.
+story that adds a case names the exact count, because the Verification Gate compares pass counts.
 
 1. **`test/helpers/agent.test.ts` pins the level-2 primitive.** Add one case to the existing 4:
    `(await loopbackServer(new Koa())).address()` reports a `port` whose `typeof` is `number` and
@@ -415,7 +415,7 @@ story that adds a case names the exact count, because the Verification gate comp
    table, by exact path, so a new socket test names itself. The test states in its suite name that
    it counts only files that reach `test/helpers/agent.ts`. **Adds exactly 2 cases.**
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 
@@ -579,11 +579,11 @@ Hermetic coverage required beyond the Proof:
   harness in the same epic - fix: state in EPIC 034 that `src/http/server/start.test.ts` and the nine
   `src/main.*.test.ts` daemon tests are the oracle, and that story 3 is a harness follow-on that
   must keep every level-2 case name and assertion - why: a harness cannot be the oracle for a change
-  to itself. EPIC 034 now names the oracle in its Decisions, and its Verification gate asserts the
+  to itself. EPIC 034 now names the oracle in its Decisions, and its Verification Gate asserts the
   nine daemon tests are undiffed.
 - S8 - status:FIXED - action:YES - EPIC 032 story 15 stated five values, not a case count - the
   story named five bridge behaviours without saying how many `it` blocks carry them, and the EPIC 032
-  Verification gate named a sixth with no owner - fix: EPIC 032 story 15 now enumerates exactly 6
+  Verification Gate named a sixth with no owner - fix: EPIC 032 story 15 now enumerates exactly 6
   cases for `src/http/server/koa-bridge.test.ts`, the gate assigns case 5 and case 6 to it and the
   envelope half of the Host row to `src/http/server/app.test.ts`, and the EPIC 034 gate reads
   "falls by exactly 6" - why: EPIC 034 story 3 deletes that file, after story 2 restates all six of

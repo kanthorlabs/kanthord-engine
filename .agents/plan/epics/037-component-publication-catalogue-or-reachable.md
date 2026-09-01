@@ -28,7 +28,7 @@ OpenAPI extension that names every event type and references its component.
 - **No external `$ref`.** Every emitted document stays self-contained. EPIC 039 owns the modular
   source tree.
 - **No new validation of a slice.** EPIC 038 owns the validation of every emitted document. This epic
-  adds only the tests its own Verification gate names.
+  adds only the tests its own Verification Gate names.
 - **No change to an operation, a path, or an emitted schema.** The registry is untouched, and no zod
   schema that reaches a document changes. The deleted `eventPayload` union reaches no document.
 - **No change to `eventView.payload`.** It stays `z.unknown()`. The wire shape and the `event.list`
@@ -88,7 +88,7 @@ OpenAPI extension that names every event type and references its component.
   existing contract suite, which must pass unmodified, plus two new assertions: the root key list is
   exactly the five pre-epic keys followed by `x-kanthord-event-payloads`, and the pruning filter is the
   identity on the master. Pruning removes nothing from the master, because the 37 unreached schemas are
-  exactly the catalogue and the extension reaches all 37. The Verification gate states what the suite
+  exactly the catalogue and the extension reaches all 37. The Verification Gate states what the suite
   pins.
 
 - **A slice drops `Error` when its paths do not reach it.** Eight slices declare an error envelope on
@@ -97,7 +97,7 @@ OpenAPI extension that names every event type and references its component.
   other eleven slices keep `Error`. That is the rule working, not a regression.
 
 - **The gate asserts reachability, not mention.** A test that greps a document for a schema name
-  passes on a name that appears in prose. The Verification gate asserts that a document holds the
+  passes on a name that appears in prose. The Verification Gate asserts that a document holds the
   transitive closure of its own references, computed by the same traversal rule and asserted for a
   nested `$ref` and for a `discriminator` mapping.
 
@@ -141,7 +141,7 @@ Author with `/author`. The sequence below is the dependency order; each story is
 
 4. **The publication proves the slice contents.** `scripts/publish-contract.ts` needs no code change,
    because the builder decides both the extension and the pruning. Extend
-   `scripts/publish-contract.test.ts` with the assertions the Verification gate names: the closure of
+   `scripts/publish-contract.test.ts` with the assertions the Verification Gate names: the closure of
    every emitted document, the catalogue in `openapi.yaml` and `features/event.yaml`, no payload key
    in `features/node.yaml`, and byte reproducibility across two runs.
 
@@ -152,7 +152,7 @@ Author with `/author`. The sequence below is the dependency order; each story is
    returns an unconstrained payload and that the catalogue is advisory to a consumer, and the
    statement that 3.0.3 is a decision. No code.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

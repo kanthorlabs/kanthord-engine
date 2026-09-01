@@ -102,7 +102,7 @@ A failed attempt carries a class, and the class decides whether it costs a budge
 
 13. **The proposal records classification.** Add `docs/proposal/phase-2/attempts-and-classification.md` stating the three classes, the evidence union with its driver column, the two classifiers, the transport trust boundary, the node-scoped ambiguous budget with its reset rule and its `>=` boundary, the attempt-limit change, the caller and subject derivation, and the authority pin with its stated limit.
 
-## Verification gate
+## Verification Gate
 
 Gates: `pnpm run verify`
 

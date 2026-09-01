@@ -213,7 +213,7 @@ The client's requirement is the first row: the screens the handover scopes are p
 - **The proposal records the transfer** — the exact inventory is three edits and no more. Replace the second sentence of `docs/proposal/api/credential.md:55` so it states that the MVP holds one entry, that `setDefault` moves it by clearing the previous holder in the same transaction, and that the appending ordered chain is deferred. Add the same statement to the registry-operations paragraph at `docs/proposal/phase-2/providers-and-credentials.md:21`, and state in one sentence there that the response names every displaced registration by `id` and `name`, per D9. Amend `docs/proposal/database/provider.md:83`, which says a reorder is the first time rewriting `set_default_at` matters, because a transfer now rewrites two rows before any reorder ships. `src/http/contract/parity.test.ts` compares the registry against the status table of `docs/proposal/api/credential.md`, and no status changes here, so parity is unaffected.
 - **Inherited provider regressions** — re-run the EPIC 101 proofs this epic edits and label them regressions: `src/commands/provider/*.test.ts`, `src/queries/provider/*.test.ts`, `src/http/server/credential/*.test.ts`. The register, rename and remove commands are untouched by D1, and the remove blocker list still reports `default-chain` for the single remaining holder.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

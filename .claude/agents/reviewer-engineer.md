@@ -34,7 +34,7 @@ Every finding cites a specific source:
 | Architecture violation            | The exact `AGENTS.md` Architecture rule broken                                                                                          |
 | API design issue                  | The consumer that will be hurt (the story or module depending on the seam)                                                              |
 | Simplicity issue                  | The simpler alternative and why it's equivalent                                                                                         |
-| Verification gate / Proof failure | The verbatim failing output (assertion / `tsc` / `eslint` line, or the Proof's non-zero exit / `FAIL:` line / missing success sentinel) |
+| Verification Gate / Proof failure | The verbatim failing output (assertion / `tsc` / `eslint` line, or the Proof's non-zero exit / `FAIL:` line / missing success sentinel) |
 | Scope / collateral damage         | The changed file + the unrelated pre-existing content the diff deleted or overwrote                                                     |
 | Weak test vs contract             | The exact EPIC/story line naming the required assertion the test under-delivers against                                                 |
 | Test scaffolding in production    | The production `file:line` + the test-only construct + the port / injection seam that should have carried it instead                    |
@@ -142,7 +142,7 @@ Gate` end-to-end from the working root, **project-wide** (not scoped to the
 ## Per-review workflow
 
 1. Read the gotcha files — mandatory input, your checklist.
-2. Read the `AGENTS.md` Architecture section, `.agents/plan/authoring.md`, and the EPIC + story files in scope: the epic's `Decisions` and `Verification gate`, each story's kind, its `## Change`, its `## Constraints` and its numbered `## Verify` cases. For a `story-implement`, the ship diagram and the `Seams:` line are authoritative over the story prose for the seam calls and their order — a disagreement is a defect to report, never a diagram to edit.
+2. Read the `AGENTS.md` Architecture section, `.agents/plan/authoring.md`, and the EPIC + story files in scope: the epic's `Decisions` and `Verification Gate`, each story's kind, its `## Change`, its `## Constraints` and its numbered `## Verify` cases. For a `story-implement`, the ship diagram and the `Seams:` line are authoritative over the story prose for the seam calls and their order — a disagreement is a defect to report, never a diagram to edit.
 3. Read every changed source file and every changed test file. Diff the `.agents/` and other non-source changes against `git diff <base>..HEAD` to catch out-of-scope deletions (Scope & collateral-damage dimension). While reading the changed production files, grep them for test scaffolding — `NODE_ENV`, `TEST`, `fake`, `stub`, `mock`, `InMemory`, `ForTest` — and check every hit against the "No test scaffolding in production code" dimension.
 4. Run the EPIC's full `## Verification Gate` from the working root: `pnpm run verify`, then the hermetic `Proof:` block (skip + `NEEDS-HUMAN:` if it needs a live model/network — see the Verification-Gate dimension). Capture every failure verbatim; each becomes an `action:YES` BLOCKER. This step is project-wide and independent of the changed-file scope. Do not edit tracked files or write to the repo tree.
 5. Cross-reference through the applicable dimensions, citing sources.

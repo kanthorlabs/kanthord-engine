@@ -157,7 +157,7 @@ held request`. State P3 to P6 as the body rule, P8 to P11 as the browser-defence
    `%2F` and `%zz` requests assert they deep-equal the literal
    `["accept-encoding", "authorization", "connection", "host"]`.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

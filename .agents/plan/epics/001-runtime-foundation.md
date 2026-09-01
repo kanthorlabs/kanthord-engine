@@ -100,7 +100,7 @@ Deny set: NFS `0x6969`, CIFS `0xff534d42`, SMB2 `0xfe534d42`, FUSE `0x65735546`,
 
 **The readiness line.** `kanthord serve` prints `kanthord: ready` to stdout after the sweep. The harness launcher waits for that exact line, so no test sleeps.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

@@ -44,7 +44,7 @@ The packaged binary, the configuration discovery, the daemon lifecycle and the C
 - **Secret handling in a container run** — the token reaches a container as a mounted file with restrictive permissions, never an environment variable and never an argument. `podman inspect`, a process listing and the runner's own promise to print every command would each disclose it otherwise. Redaction is asserted over the bearer header, the fixture Basic-auth header, the config file, the printed commands, the daemon logs, the Podman inspect output and the failure diagnostics.
 - **P1-E3 — the VPN run** — mode `deployment`, `ssh` driver, real-repository profile. The CLI on one real host and the daemon on another, across the VPN, with a real credential. It proves the environment: routing, binding and token distribution. `docs/proposal/README.md` says of this mode that "a coding agent runs it when it has access to both hosts; that is a prerequisite, not a reason to call the scenario human-only", so it carries no `NEEDS-HUMAN:` marker. "Human action: none" means none once the prerequisites exist: the runner never enrolls a host in the VPN, never mints or rotates a real credential, and never edits host security configuration. A missing prerequisite makes P1-E3 fail as unavailable. It must never skip and write a passing bundle, because the phase exits by pointing at this bundle.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

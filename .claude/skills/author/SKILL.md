@@ -49,7 +49,7 @@ Abort with a clear message on any failure.
    non-empty: report `already expanded` and stop. Do not clobber.
 5. **Sequence check.** Identify epic N-1 by number. Its EPIC file missing: abort.
    Its story directory missing: warn and continue.
-6. **The EPIC is valid to expand.** It holds `## Stories`, `## Verification gate`
+6. **The EPIC is valid to expand.** It holds `## Stories`, `## Verification Gate`
    with a `Proof:` block, and **no mermaid block**. A mermaid block in an EPIC is a
    defect: stop and tell the human to move it, because a path belongs to a story.
 7. **Every story entry declares a kind.** An entry with none: stop and report it.
@@ -62,7 +62,7 @@ Extract:
 
 - **Goal** — the properties that hold when the epic lands.
 - **Decisions** — each is a constraint the stories obey and never re-decide.
-- **Verification gate** — the `Gates:` line, the full `Proof` block, and the
+- **Verification Gate** — the `Gates:` line, the full `Proof` block, and the
   hermetic-coverage list. The Proof is binding: every `PASS` line and every
   coverage assertion is delivered by some story, and each story names which.
 - **stories** — one entry becomes exactly one story file, with the kind it

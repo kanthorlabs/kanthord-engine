@@ -179,7 +179,7 @@ rotated or over-quota credential is visible before a run fails:
    forces a fresh check, that a rotation invalidates nothing, and the retention window. Amend `docs/proposal/phase-2/providers-and-credentials.md` to record that
    `pi-ai` owns credential resolution and the engine owns only the store.
 
-## Verification gate
+## Verification Gate
 
 Gates: `npm run verify`
 

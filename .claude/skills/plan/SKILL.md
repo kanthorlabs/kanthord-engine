@@ -24,7 +24,7 @@ write a story, you do not implement, you do not run a build, and you do not
 commit. `/author` expands each epic you write.
 
 **What an epic carries.** Two sections carry weight: `## Decisions` and
-`## Verification gate`. A decision states the ruling, the constraint it imposes
+`## Verification Gate`. A decision states the ruling, the constraint it imposes
 and the evidence that forced it. The gate states every assertion that proves the
 epic shipped what it decided, and every assertion is owned by exactly one story.
 Everything else is light.
@@ -129,7 +129,7 @@ standard.
 1. **<name>** — <the output, with the exact file or symbol it produces>. `story-foundation`.
 2. **<name>** — <the path it changes>. `story-implement`.
 
-## Verification gate
+## Verification Gate
 
 Gates: `pnpm run verify`
 
