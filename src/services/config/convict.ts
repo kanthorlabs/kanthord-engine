@@ -47,6 +47,12 @@ function positiveInteger(value: unknown): void {
   }
 }
 
+function runTtlMilliseconds(value: unknown): void {
+  if (!Number.isInteger(value) || (value as number) < 1000) {
+    throw new Error("must be an integer >= 1000");
+  }
+}
+
 function nonNegativeInteger(value: unknown): void {
   if (!Number.isInteger(value) || (value as number) < 0) {
     throw new Error("must be a non-negative integer >= 0");
@@ -238,6 +244,16 @@ function buildSchema(): Record<string, unknown> {
       default: 300000,
       env: "KANTHORD_LEASE_TTL_MS",
     },
+    runTtlMs: {
+      format: "runTtlMs",
+      default: 300000,
+      env: "KANTHORD_RUN_TTL_MS",
+    },
+    runMaxLifetimeMs: {
+      format: "positiveInteger",
+      default: 14400000,
+      env: "KANTHORD_RUN_MAX_LIFETIME_MS",
+    },
   };
 }
 
@@ -336,6 +352,7 @@ export class ConvictConfig implements Config {
       hostList: { validate: hostList },
       originList: { validate: originList },
       positiveInteger: { validate: positiveInteger },
+      runTtlMs: { validate: runTtlMilliseconds },
       nonNegativeInteger: { validate: nonNegativeInteger },
       absolutePath: { validate: absolutePath },
     });
@@ -353,6 +370,8 @@ export class ConvictConfig implements Config {
       ["KANTHORD_HTTP_IDEMPOTENCY_MAX_BYTES", "http.idempotency.maxBytes"],
       ["KANTHORD_ATTEMPT_LIMIT", "attemptLimit"],
       ["KANTHORD_LEASE_TTL_MS", "leaseTtlMs"],
+      ["KANTHORD_RUN_TTL_MS", "runTtlMs"],
+      ["KANTHORD_RUN_MAX_LIFETIME_MS", "runMaxLifetimeMs"],
       ["KANTHORD_HTTP_EVENT_MAX_WAIT", "http.event.maxWait"],
     ];
     for (const [envVar, configPath] of idempotencyEnvIntegers) {
@@ -436,6 +455,8 @@ export class ConvictConfig implements Config {
         allowedOrigins: config.get("http.allowedOrigins") as string[],
         allowedHosts: normalizedHosts,
         port: config.get("http.port") as number,
+        runTtlMs: config.get("runTtlMs") as number,
+        runMaxLifetimeMs: config.get("runMaxLifetimeMs") as number,
       });
 
       if (tokenHandle !== undefined) {
@@ -515,6 +536,8 @@ export class ConvictConfig implements Config {
         },
         attemptLimit: config.get("attemptLimit") as number,
         leaseTtlMs: config.get("leaseTtlMs") as number,
+        runTtlMs: config.get("runTtlMs") as number,
+        runMaxLifetimeMs: config.get("runMaxLifetimeMs") as number,
       },
       discovery: {
         resolved: resolvedPath,

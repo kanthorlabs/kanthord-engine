@@ -29,6 +29,7 @@ export type NodeView = Readonly<{
   instruction: string;
   acceptance: string | null;
   worker: string | null;
+  assignment: string | null;
   deliverable: string | null;
   verify: { paths: string[]; commands: string[] } | null;
   repositoryId: string | null;

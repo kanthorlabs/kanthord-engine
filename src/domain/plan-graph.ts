@@ -9,6 +9,7 @@ export type StoredNode = Readonly<{
   instructionBlob: string;
   acceptanceBlob: string | null;
   worker: string | null;
+  assignment: string | null;
   repositoryId: string | null;
   state: NodeState;
   blockReason: string | null;

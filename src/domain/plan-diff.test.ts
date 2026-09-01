@@ -28,6 +28,7 @@ const storedBase: StoredNode = {
   instructionBlob: instructionHash,
   acceptanceBlob: acceptanceHash,
   worker: null,
+  assignment: null,
   repositoryId: null,
   state: "pending",
   blockReason: null,

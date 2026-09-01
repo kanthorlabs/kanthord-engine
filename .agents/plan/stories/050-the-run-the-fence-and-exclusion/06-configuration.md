@@ -1,4 +1,4 @@
-# Story 7 — Configuration
+# Story 6 — Configuration
 
 Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
 Depends on: nothing in this epic. EPIC 050.1 Story 3 consumes both settings, and EPIC 050.2 Story 3 consumes `runMaxLifetimeMs` again.

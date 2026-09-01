@@ -32,14 +32,14 @@ const runKindByDeliverable: Readonly<Record<Deliverable, RunKind>> = {
 
 The record keys are in bytewise order. The annotation `Readonly<Record<Deliverable, RunKind>>` is what makes the mapping total: a fifth deliverable added to `deliverables` fails type checking here, so no default branch and no `switch` is written. `runKindFor` returns `runKindByDeliverable[deliverable]` and nothing else. It throws no error and has no fallback.
 
-`runKinds` is bytewise sorted and is the tuple `run.kind` widens to in Story 2 and Story 3.
+`runKinds` is the pinned tuple `run.kind` widens to in Story 2.
 
 ## Constraints
 
 - `src/domain/` is pure. Import `zod` only if a schema is needed; this story needs none.
 - Do not add a `research` row. EPIC 047 defers `research` out of the `deliverables` tuple. The epic that restores it adds its `execution` row.
 - Do not write a `switch` and do not write a `default` branch. The record annotation is the exhaustiveness mechanism.
-- Do not export a zod schema for `RunKind` from this file. Story 3 builds the `run.kind` enum from `runKinds` inside `src/domain/run.ts`.
+- Do not export a zod schema for `RunKind` from this file. Story 2 builds the `run.kind` enum from `runKinds` inside `src/domain/run.ts`.
 
 ## Verify
 

@@ -90,6 +90,7 @@ const nodeClaim_node = {
   instruction: "# atlas\n",
   acceptance: null,
   worker: null,
+  assignment: null,
   deliverable: null,
   verify: null,
   repositoryId: `repo_${U}`,

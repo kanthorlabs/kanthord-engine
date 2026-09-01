@@ -1,16 +1,16 @@
-# Story 3 — The run row
+# Story 2 — The run row
 
 Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
 Depends on: Story 1 (`runKinds`), EPIC 048 Story 1 (`WORKER_ID_PATTERN` in `src/domain/worker-id.ts`).
 Kind: story-foundation
 
-This story owns the `src/domain/rows.ts` registration of `run_base`. Story 2 depends on this story and adds no `rows.ts` edit of its own.
+This story registers no table. `run_base` is registered in `src/domain/rows.ts` by EPIC 050.1, in the story that lands migration `12` and creates the table: `src/services/storage/schema-parity.test.ts:90-105` asserts the migrated table set equals `Object.keys(rows)`, so the registration and the table must land together.
 
 ## Change
 
 **`src/domain/run.ts` — extend `runRow` at line 12-45.**
 
-Add to the object at `src/domain/run.ts:13-28`, keeping every shipped field and inserting each new field next to the column it mirrors in the Story 2 DDL:
+Add to the object at `src/domain/run.ts:13-28`, keeping every shipped field and inserting each new field next to the column it mirrors in the migration `12` DDL of EPIC 050.1:
 
 ```ts
 kind: z.enum(runKinds),
@@ -40,9 +40,9 @@ export const workerId = z.string().regex(WORKER_ID_PATTERN);
 
 Export the schema and **no type alias**. EPIC 048 Story 1 already exports `WorkerId` from this file as the parsed record `Readonly<{ name: string; version: number; id: string }>`. A second `export type WorkerId = z.infer<typeof workerId>` would be a duplicate export of the same name with a different meaning — a string — and would not typecheck. Where a story needs the schema's output type, write `z.infer<typeof workerId>` inline; it is `string`.
 
-The schema is declared there and not in `run.ts`, because Story 4 needs the same schema for `node.assignment`. `src/domain/` may import `zod`.
+The schema is declared there and not in `run.ts`, because Story 3 needs the same schema for `node.assignment`. `src/domain/` may import `zod`.
 
-**Delete both shipped refines at `src/domain/run.ts:29-45`.** The objective refine reads `(kind === "objective") === (parentRunId === null)`; `objective` is no longer a kind and `parentRunId` is no longer a column. The driver refine reads `(driver === "internal") === (workspaceId !== null && worker !== null && baseOid !== null)`; `baseOid` is gone and every run now carries a non-null `worker`. Story 2 drops the four SQL CHECKs they mirror. A refine with no CHECK behind it asserts a rule the database does not hold.
+**Delete both shipped refines at `src/domain/run.ts:29-45`.** The objective refine reads `(kind === "objective") === (parentRunId === null)`; `objective` is no longer a kind and `parentRunId` is no longer a column. The driver refine reads `(driver === "internal") === (workspaceId !== null && worker !== null && baseOid !== null)`; `baseOid` is gone and every run now carries a non-null `worker`. EPIC 050.1's migration `12` drops the four SQL CHECKs they mirror. A refine with no CHECK behind it asserts a rule the database does not hold.
 
 **Add the `run_base` cardinality refine, at its upper bound.** The cardinality is a property of a run and its `run_base` rows, and `runRow` describes one run row, so the refine reads a companion field rather than a second table. Add to `runRow`:
 
@@ -84,21 +84,15 @@ export const runBaseRow = z.object({
 export type RunBaseRow = z.infer<typeof runBaseRow>;
 ```
 
-**Register `run_base` in three places. This story owns all three; Story 2 adds none of them.**
-
-- `src/domain/rows.ts` — add `run_base: runBaseRow` in bytewise key order, directly after the `run: runRow` entry at `src/domain/rows.ts:43`.
-- `src/domain/rows.test.ts` — it pins `Object.keys(rows).length` at `21` (`:10`) and deep-equals the sorted 21-name table list (`:14`). Move both to `22` and insert `"run_base"` after `"run"`.
-- `docs/proposal/phase-1/domain.md:39` — the prose table list. `src/domain/rows.test.ts:48` asserts every key of `rows` appears in that document, and `:61` asserts the document's list equals `Object.keys(rows)`. Insert `run_base` after `run`.
-
-`src/services/storage/schema-parity.test.ts:90-105` then finds the table migration `12` creates.
+**Register `run_base` nowhere.** `src/domain/rows.ts`, `src/domain/rows.test.ts` and `docs/proposal/phase-1/domain.md:39` keep their shipped 21-table list. `src/services/storage/schema-parity.test.ts:90-105` asserts the migrated table set equals `Object.keys(rows)`, and no migration of this epic creates `run_base`, so a registration here fails that test. EPIC 050.1 owns the registration, in the story that lands migration `12`.
 
 **Amend `docs/proposal/phase-1/domain.md:24`.** It reads that `project.worker`, `node.worker` and `run.worker` hold a worker **kind**, and that the set is a `CHECK` clause and a zod enum. Widening `run.worker` to the worker id grammar contradicts that sentence. Amend it to say `run.worker` holds a worker **id** under the grammar of `src/domain/worker-id.ts`, and that `project.worker` and `node.worker` keep the legacy kind until EPIC 057 removes them.
 
 ## Constraints
 
-- Every new field is `.nullable()`, never `.optional()`, matching the file's convention at `src/domain/run.ts:18-27`.
-- Delete `leaseFence`. Story 2 drops the column.
-- Do not add a refine tying `judgedOid` to `kind === "review"`. Story 2 adds no such CHECK, and the EPIC states migration `12` carries no kind-conditional CHECK.
+- Only fields declared nullable in `## Change` use `.nullable()`, never `.optional()`. `worker`, `fence`, `attemptLimit`, `agents`, `expiresAt`, `maxLifetimeAt` and `baseCount` stay required.
+- Delete `leaseFence`. EPIC 050.1's migration `12` drops the column.
+- Do not add a refine tying `judgedOid` to `kind === "review"`. EPIC 050.1's migration `12` adds no such CHECK, and the EPIC states it carries no kind-conditional CHECK.
 - Do not add a refine on `graphRevision`.
 - Do not reorder the shipped fields.
 
@@ -134,7 +128,7 @@ Add, each as a separate `it`:
 
 8c. `"leaseFence, baseOid and parentRunId are not accepted"` — `runRow` is a plain `z.object`, so an unknown key is stripped rather than refused; assert instead that the parsed output has no `leaseFence`, `baseOid` or `parentRunId` key, by `assert.deepEqual(Object.keys(result.data!).sort(), <the pinned key list>)`. The removal is the assertion.
 
-9. `"refine: an execution run holding no run_base row passes"` — `kind: "execution"`, `baseCount: 0`, asserted `true`. This is the row every claim of this epic writes, and the row migration `12` backfills from a null `base_oid`. EPIC 051 changes this case to `false` when it writes the row.
+9. `"refine: an execution run holding no run_base row passes"` — `kind: "execution"`, `baseCount: 0`, asserted `true`. This is the row every claim of EPIC 050.1 writes. EPIC 051 changes this case to `false` when it writes the row.
 
 10. `"refine: an execution run holding one run_base row passes"` — `baseCount: 1`, asserted `true`.
 

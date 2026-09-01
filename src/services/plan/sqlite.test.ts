@@ -304,6 +304,7 @@ describe("src/services/plan/sqlite.test", () => {
       instructionBlob: fixtureIds.instructionBlob,
       acceptanceBlob: null,
       worker: null,
+      assignment: null,
       repositoryId: null,
       state: "pending",
       blockReason: null,
@@ -335,6 +336,7 @@ describe("src/services/plan/sqlite.test", () => {
       instructionBlob: fixtureIds.instructionBlob,
       acceptanceBlob: null,
       worker: null,
+      assignment: null,
       repositoryId: fixtureIds.repository,
       state: "pending",
       blockReason: null,
@@ -356,6 +358,7 @@ describe("src/services/plan/sqlite.test", () => {
       instructionBlob: fixtureIds.instructionBlob,
       acceptanceBlob: fixtureIds.acceptanceBlob,
       worker: null,
+      assignment: null,
       repositoryId: null,
       state: "pending",
       blockReason: null,
@@ -503,6 +506,7 @@ describe("src/services/plan/sqlite.test", () => {
       instructionBlob: fixtureIds.instructionBlob,
       acceptanceBlob: fixtureIds.acceptanceBlob,
       worker: null,
+      assignment: null,
       repositoryId: null,
       state: "pending",
       blockReason: null,
@@ -518,6 +522,37 @@ describe("src/services/plan/sqlite.test", () => {
       store.readNode(transaction, "task_missing"),
     );
     assert.equal(missing, null);
+  });
+
+  it("readNode returns the assignment stored on the node row", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedAll(transaction);
+      transaction.run("UPDATE node SET assignment = ? WHERE id = ?", [
+        "general@1",
+        fixtureIds.task,
+      ]);
+    });
+
+    const node = storage.transact((transaction) =>
+      store.readNode(transaction, fixtureIds.task),
+    );
+    assert.ok(node);
+    assert.equal(node.assignment, "general@1");
+  });
+
+  it("readAllNodes returns a null assignment for an unassigned node", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact(seedAll);
+
+    const nodes = storage.transact((transaction) =>
+      store.readAllNodes(transaction),
+    );
+    const node = nodes.find((candidate) => candidate.id === fixtureIds.task);
+    assert.ok(node);
+    assert.equal(node.assignment, null);
   });
 
   it("mutateGraph reads back a node deliverable and verify JSON through readNode and readGraph", (t) => {
@@ -611,17 +646,17 @@ describe("src/services/plan/sqlite.test", () => {
     assert.equal(readNode.verifyJson, null);
   });
 
-  it("mutateGraph leaves assignment untouched and null for a new node", (t) => {
+  it("an import writes a null assignment and a re-import leaves an existing one untouched", (t) => {
     const { storage, store, dispose } = build();
     t.after(() => dispose());
     storage.transact(seedAll);
 
-    const existingNode = {
-      id: fixtureIds.task,
+    const importedNode = {
+      id: "task_assignment_null",
       projectId: fixtureIds.project,
       kind: "task",
       parentId: fixtureIds.objective,
-      title: "Updated task",
+      title: "Imported task",
       instructionBlob: fixtureIds.instructionBlob,
       acceptanceBlob: fixtureIds.acceptanceBlob,
       worker: null,
@@ -631,37 +666,11 @@ describe("src/services/plan/sqlite.test", () => {
       deliverable: null,
       verifyJson: null,
     } as const;
-    const newNode = {
-      ...existingNode,
-      id: "task_assignment_null",
-      title: "New task",
-    } as const;
 
     storage.transact((transaction) => {
-      transaction.run("UPDATE node SET assignment = ? WHERE id = ?", [
-        "sentinel",
-        fixtureIds.task,
-      ]);
       store.mutateGraph(transaction, {
         projectId: fixtureIds.project,
-        nodes: [existingNode],
-        insertEdges: [],
-        deleteEdgeIds: [],
-        nodeDeletes: [],
-        at: 2,
-        cause: { revision: fixtureIds.planRevision, importId: null },
-      });
-
-      const existing = transaction.get(
-        "SELECT assignment FROM node WHERE id = ?",
-        [fixtureIds.task],
-      ) as Readonly<{ assignment: string | null }> | undefined;
-      assert.ok(existing);
-      assert.equal(existing.assignment, "sentinel");
-
-      store.mutateGraph(transaction, {
-        projectId: fixtureIds.project,
-        nodes: [newNode],
+        nodes: [importedNode],
         insertEdges: [],
         deleteEdgeIds: [],
         nodeDeletes: [],
@@ -671,10 +680,31 @@ describe("src/services/plan/sqlite.test", () => {
 
       const inserted = transaction.get(
         "SELECT assignment FROM node WHERE id = ?",
-        [newNode.id],
+        [importedNode.id],
       ) as Readonly<{ assignment: string | null }> | undefined;
       assert.ok(inserted);
       assert.equal(inserted.assignment, null);
+
+      transaction.run("UPDATE node SET assignment = ? WHERE id = ?", [
+        "general@1",
+        importedNode.id,
+      ]);
+      store.mutateGraph(transaction, {
+        projectId: fixtureIds.project,
+        nodes: [importedNode],
+        insertEdges: [],
+        deleteEdgeIds: [],
+        nodeDeletes: [],
+        at: 2,
+        cause: { revision: fixtureIds.planRevision, importId: null },
+      });
+
+      const reimported = transaction.get(
+        "SELECT assignment FROM node WHERE id = ?",
+        [importedNode.id],
+      ) as Readonly<{ assignment: string | null }> | undefined;
+      assert.ok(reimported);
+      assert.equal(reimported.assignment, "general@1");
     });
   });
 

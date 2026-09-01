@@ -33,6 +33,8 @@ export type Settings = Readonly<{
   tools: ToolSettings;
   attemptLimit: number;
   leaseTtlMs: number;
+  runTtlMs: number;
+  runMaxLifetimeMs: number;
 }>;
 
 export type Discovery = Readonly<{

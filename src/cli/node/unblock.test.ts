@@ -23,6 +23,7 @@ const node = (state: "ready" | "pending") => ({
   instruction: "Do the task work.\n",
   acceptance: "## Acceptance criteria\n- it works\n",
   worker: null,
+  assignment: null,
   deliverable: null,
   verify: null,
   repositoryId: null,

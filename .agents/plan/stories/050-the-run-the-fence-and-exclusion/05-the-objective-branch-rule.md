@@ -1,7 +1,7 @@
-# Story 6 — The objective-branch rule
+# Story 5 — The objective-branch rule
 
 Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
-Depends on: Story 5 (`src/domain/run-exclusion.ts` and its `ExclusionRun` type).
+Depends on: Story 4 (`src/domain/run-exclusion.ts` and its `ExclusionRun` type).
 Kind: story-foundation
 
 ## Change
@@ -28,7 +28,7 @@ export function objectiveBusy(
 ): ObjectiveBusyRefusal | null;
 ```
 
-**Algorithm.** Filter `input.siblingRuns` to the live set by the same rule Story 5 uses: `state === "active"` and (`expiresAt === null` or `expiresAt > input.now`). Extract that predicate into a module-private `isLive(run, now)` helper and have `subtreeExclusion` call it too, so one rule governs both functions.
+**Algorithm.** Filter `input.siblingRuns` to the live set by the same rule Story 4 uses: `state === "active"` and (`expiresAt === null` or `expiresAt > input.now`). Extract that predicate into a module-private `isLive(run, now)` helper and have `subtreeExclusion` call it too, so one rule governs both functions.
 
 If the live set is empty, return `null`. Otherwise pick the run whose `nodeId` sorts first bytewise, breaking a further tie by `runId` bytewise, and return the refusal carrying `input.objectiveId`, that run's `nodeId` as `siblingNodeId`, its `runId` as `siblingRunId`, and its `expiresAt`.
 

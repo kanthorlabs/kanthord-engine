@@ -9,6 +9,7 @@ import {
   nodeUpdateRequest,
   nodeUpdateResponse,
   nodeAttributes,
+  nodeListItem,
   nodeShowResponse,
   planChoiceEntry,
   planChoiceValues,
@@ -62,6 +63,7 @@ const nodeAttributesBase = {
   state: "ready",
   blockReason: null,
   discardReason: null,
+  assignment: null,
   parentId: "objective_a",
   repositoryId: null,
 };
@@ -351,6 +353,7 @@ describe("src/http/contract/graph.test", () => {
             state: "pending",
             blockReason: null,
             discardReason: null,
+            assignment: null,
             parentId: null,
             repositoryId: null,
           },
@@ -459,6 +462,7 @@ describe("src/http/contract/graph.test", () => {
       instruction: "Build the route.\n",
       acceptance: null,
       worker: null,
+      assignment: null,
       repositoryId: null,
       repo: null,
       revision: "revision_a",
@@ -478,6 +482,60 @@ describe("src/http/contract/graph.test", () => {
         true,
       );
     }
+  });
+
+  it("nodeShowResponse carries assignment as a nullable string", () => {
+    const base = {
+      id: "task_a",
+      projectId: "project_a",
+      kind: "task",
+      title: "add the health route",
+      state: "ready",
+      blockReason: null,
+      discardReason: null,
+      parentId: "objective_a",
+      dependencies: [],
+      instructionBlob: `sha256:${"a".repeat(64)}`,
+      acceptanceBlob: null,
+      instruction: "Build the route.\n",
+      acceptance: null,
+      worker: null,
+      repositoryId: null,
+      repo: null,
+      revision: "revision_a",
+      updatedAt: 1,
+      attestedObjectId: null,
+      projection: null,
+      deliverable: null,
+      verify: null,
+    };
+    assert.equal(
+      nodeShowResponse.safeParse({ ...base, assignment: "general@1" }).success,
+      true,
+    );
+    assert.equal(
+      nodeShowResponse.safeParse({ ...base, assignment: null }).success,
+      true,
+    );
+    assert.equal(nodeShowResponse.safeParse(base).success, false);
+  });
+
+  it("nodeListItem does not carry assignment", () => {
+    const validListItem = {
+      id: "task_a",
+      projectId: "project_a",
+      kind: "task",
+      title: "add the health route",
+      state: "ready",
+      blockReason: null,
+      discardReason: null,
+      parentId: "objective_a",
+      dependencies: [],
+    };
+    assert.equal(
+      nodeListItem.safeParse({ ...validListItem, assignment: null }).success,
+      false,
+    );
   });
 
   it("planChoiceEntry accepts an entry whose branches carry values and a path", () => {
