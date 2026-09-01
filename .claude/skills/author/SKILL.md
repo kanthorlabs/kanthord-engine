@@ -1,9 +1,9 @@
 ---
 name: author
-description: Expand one EPIC into deterministic, work-ready Story/Task files under .agents/plan/stories/<epic-slug>/. Grounds every story in real file:line via read-only exploration, writes execution-only stories (exact edit, exact tests, exact pass/fail — no motivation/history/debate), and enforces the sequence-order and determinism rules from AGENTS.md. Refuses to ship a story that leaves a design decision to build time.
+description: Expand one EPIC into work-ready story files under .agents/plan/stories/<epic-slug>/, each declaring its kind and drawing the diagrams the standard requires. A story-implement draws its baseline and its ship diagram and declares Diagrams/Baselines/Seams; a story-foundation draws nothing. Grounds every edit in real file:line by read-only exploration, states the exact tests, and refuses to ship a story that leaves a design decision to build time.
 ---
 
-# /author — expand an EPIC into deterministic Story/Task files
+# /author — expand an EPIC into story files and their diagrams
 
 > **Harness note.** This skill runs under Claude Code, opencode and pi from the
 > one file. Where a step says "dispatch a subagent", use the harness's dispatch
@@ -14,181 +14,373 @@ description: Expand one EPIC into deterministic, work-ready Story/Task files und
 Arguments: `$ARGUMENTS` — `<epic-file-path>`. A harness that does not substitute
 `$ARGUMENTS` passes the same text with the invocation; read it from there.
 
-You are the **planner**. You turn one EPIC's `## Stories` bullet list into the
-detailed Story/Task files `/work` consumes, under
-`.agents/plan/stories/<epic-slug>/`. You do **not** implement, run tests, edit the
-EPIC, or touch production code. You do **not** commit.
+**Read `.agents/plan/authoring.md` first. It is the standard, and it wins over
+this file.** It gives the diagram grammar, the two story kinds, the pair rule,
+the `Diagrams:`/`Baselines:`/`Seams:` binding, the supersession rule and the
+gate. This file gives the procedure and the templates.
 
-Two AGENTS.md rules are binding and are the whole point of this skill:
+You turn one EPIC's `## Stories` list into the story files `/work` consumes,
+under `.agents/plan/stories/<epic-slug>/`. You do not implement, you do not run a
+build, you do not edit the EPIC, and you do not commit. Standard supersession is
+the one exception: it edits the earlier story's diagram and deletes its scenario
+file.
 
-- **Sequence order.** Epics are sequence order only; epic N always depends on
-  epic N-1. A story for epic N may rely on N-1's capability existing — never
-  re-specify it.
-- **Deterministic stories.** Story/Task files are execution scripts, not briefs.
-  Every story states the **exact edit** (file + site), the **exact tests** to
-  write, and the **pass/fail** check — no ambiguity left to resolve at build
-  time. Include **only** what is needed to implement and verify; cut motivation,
-  history, debate, and background. Implementation and testing must be
-  deterministic (same graph → same order → same result). **If a story cannot be
-  made deterministic, that is a planning defect — fix the story, do not push the
-  decision onto the implementing agent.**
+Two rules are binding and are the whole point of this skill:
 
-## Step 1 — Parse arguments
+- **The diagram is the focus.** A story that changes a path draws the pair — the
+  baseline, which is the shipped code, and the ship diagram, which replaces it —
+  and the difference between them is the boundary of the change. A story that
+  changes no drawn path draws nothing and says so by its kind. A diagram nobody
+  implements and a story that implements something nobody drew are the same
+  defect.
+- **A story is an execution script, not a brief.** It states the exact edit at
+  `file:line`, the exact tests to write and their assertions, and the pass/fail
+  check. **A story that cannot be made deterministic is a planning defect — fix
+  the story, or report it. Never push the decision onto the implementing agent.**
 
-- **First positional** = EPIC file path (required). If missing, print usage and
-  stop.
-- Resolve `<root> = $(git rev-parse --show-toplevel)` once. All paths resolve
-  under `<root>`.
+## Step 1 — Parse and pre-flight
 
-## Step 2 — Pre-flight (abort with a clear message on any failure)
+Abort with a clear message on any failure.
 
-1. The EPIC file exists, is readable, and is under `.agents/plan/epics/`.
-2. Derive `<epic-slug>` = the EPIC basename without `.md` (e.g.
-   `007.12-initiative-branch-workflow`).
-3. **Already expanded?** If `.agents/plan/stories/<epic-slug>/` exists and is
-   non-empty, report `already expanded` and stop — do not clobber. (The human
-   re-runs only after moving the old dir aside.)
-4. **Sequence check.** Identify the previous epic (N-1) by number. If its EPIC
-   file does not exist, abort — epic N depends on N-1. If N-1's story dir does
-   not exist yet, **warn** (the human may be authoring ahead) but continue.
+1. Resolve `<root> = $(git rev-parse --show-toplevel)` once.
+2. The EPIC file exists, is readable, and is under `.agents/plan/epics/`.
+3. `<epic-slug>` is the EPIC basename without `.md`.
+4. **Already expanded?** `.agents/plan/stories/<epic-slug>/` exists and is
+   non-empty: report `already expanded` and stop. Do not clobber.
+5. **Sequence check.** Identify epic N-1 by number. Its EPIC file missing: abort.
+   Its story directory missing: warn and continue.
+6. **The EPIC is valid to expand.** It holds `## Stories`, `## Verification gate`
+   with a `Proof:` block, and **no mermaid block**. A mermaid block in an EPIC is a
+   defect: stop and tell the human to move it, because a path belongs to a story.
+7. **Every story entry declares a kind.** An entry with none: stop and report it.
+   The kind decides what the story draws, and guessing it is `/plan`'s work done
+   here.
 
-## Step 3 — Read the EPIC (it is the source of truth)
+## Step 2 — Read the EPIC, which is the source of truth
 
-Read the EPIC and extract:
+Extract:
 
-- **Goal** — the capability that exists after the epic.
-- **Verification Gate** — the `Gates:` line and the full copy-paste **Proof**
-  block. The Proof is binding: every `PASS <X>` / story marker in it must be
-  delivered by some story, and each story names which Proof line(s) it delivers.
-- **Stories** — the bullet list. Each bullet becomes exactly one Story/Task file.
-- **Non-goals** — scope fences the stories must respect.
+- **Goal** — the properties that hold when the epic lands.
+- **Decisions** — each is a constraint the stories obey and never re-decide.
+- **Verification gate** — the `Gates:` line, the full `Proof` block, and the
+  hermetic-coverage list. The Proof is binding: every `PASS` line and every
+  coverage assertion is delivered by some story, and each story names which.
+- **stories** — one entry becomes exactly one story file, with the kind it
+  declares.
+- **Non-goals** — scope fences every story respects.
 
-If the EPIC has no program-level `Proof:` block, stop: it is not a valid epic to
-expand (AGENTS.md binding rule) — tell the human to fix the EPIC first.
+## Step 3 — Decide the paths, before drawing anything
 
-## Step 4 — Map the code surface (read-only, parallel)
+For every entry the EPIC marks `story-implement`, name the one path it changes.
+Apply the drawing rules of the standard: one diagram per success branch, one per
+refusal that stops at a step no drawn refusal stops at, one per nested command,
+and no diagram for a path whose order is legitimately not fixed.
 
-Determinism requires real anchors, not guesses. For each story (or a small
-group), dispatch a **read-only explorer subagent** (`Explore` under Claude Code, the
-read-only agent of the harness otherwise) to gather the exact facts the
-story's `Change`/`Verify` sections need. Launch the independent explorations
-**in one message** so they run concurrently. Each explorer prompt must ask for,
-and the agent must return:
+- **One implement story is one changed path.** An entry that changes two paths is
+  too big: report it as a blocker for the EPIC, and do not split it yourself.
+- **An entry that draws no baseline and changes a shipped path is too small**, or
+  is foundation work wearing the wrong label. Report it.
+- A path's branch set that is not decidable from the EPIC is a planning defect.
+  Report it and stop, rather than drawing a block that admits two traces.
 
-- exact **file paths + line numbers** of every site the story will edit;
-- **class / method / function signatures** and the **current behavior** at those
-  sites (quoted snippets);
-- the **test file** that covers each site and the **test convention** (framework,
-  fakes vs real sqlite/git, hermetic temp dirs);
-- any **greenfield gap or gotcha** (a thing that does not exist yet, a contract
-  that must change, a shared mechanism that behaves unexpectedly).
+State in each story, in one sentence, that the drawn set is every branch of that
+path. A fixture proves no such thing, so the claim is prose a reviewer checks, and
+it must be visible to be checked.
 
-Tell each explorer subagent: **map what exists, do not propose changes.** Wait for
-all findings before writing.
+## Step 4 — Map the code surface, read-only and parallel
 
-## Step 5 — Write the Story/Task files
+Determinism needs real anchors. Dispatch a read-only explorer subagent per story
+or small group, all **in one message** so they run concurrently. Each explorer
+returns:
 
-Create `.agents/plan/stories/<epic-slug>/`. Write **one file per EPIC Story
-bullet**, named `NN-<kebab-slug>.md` in the epic's story order, plus an
-`index.md`. Every file is **execution-only** — no motivation, history, or debate.
+- exact **file paths and line numbers** of every site the story edits;
+- **signatures and current behaviour** at those sites, quoted;
+- the **dependency type** of each command in scope and every key on it, at
+  `file:line`;
+- the **current ordered seam calls** of the path, quoted, one citation per call;
+- which seam calls this story adds, moves or removes;
+- every seam call the EPIC implies that no interface declares yet;
+- the **test file** covering each site and its convention — framework, fakes
+  against mocks, real SQLite or git, hermetic temp dirs — with the helper names
+  and their lines;
+- any **greenfield gap or gotcha**.
 
-### Per-story file template
+Tell each explorer: **map what exists, do not propose changes.** Wait for every
+finding before writing.
 
-```
+The explorer's ordered seam calls are what separate a context token from a
+change. **Never sign a token from memory.**
+
+## Step 5 — Write the story files
+
+Create `.agents/plan/stories/<epic-slug>/`. Write one file per EPIC story entry,
+named `NN-<kebab-slug>.md` in the epic's story order, plus `index.md`. Every file
+is execution-only: no motivation, no history, no debate.
+
+### `story-foundation` template
+
+````
 # Story <X> — <name>
 
 Epic: `.agents/plan/epics/<epic-slug>.md`
-[Depends on: Story <Y> / EPIC <N-1>]   ← only if a real ordering constraint exists
+Depends on: <only a real ordering constraint>
+Kind: story-foundation
 
 ## Change
-- <required behavior change from the Goal, with exact file:line or symbol>
-- <required new file or type, with its responsibility and public contract>
-- ... (prose instructions concrete enough to produce one deterministic result)
+
+**`<path>` — <the edit>.** <the exact behaviour, at file:line or symbol>
 
 ## Constraints
-- <correctness-critical only: surgical scope, invariants, "do not break X">
+
+- <correctness-critical only>
 
 ## Verify
-- <exact test command(s), e.g. `node --test src/.../foo.test.ts`, and the
-  precise assertion each must make>
-- `pnpm run verify` exits 0
-- Proof: <which PASS line(s) of the EPIC Proof this story delivers>
+
+```
+node --test <exact files>
 ```
 
-Rules for each story:
+<the test file to extend, and its existing helpers at file:line>
 
-- **Exact site.** Name the file and line/symbol for every edit. "Somewhere in the
-  landing code" is a defect; `src/landing/git.ts:95-261` is a spec.
-- **Exact tests.** State the test file path and what each new test asserts —
-  including the regression guards. The implementer writes tests to this list, not
-  from imagination.
-- **Deterministic behavior.** If the feature involves ordering (task/objective
-  scheduling, event order, id generation), the story must pin the order rule
-  (e.g. "topological, tie-broken by explicit order then id") so the same input
-  always yields the same result. No "the agent decides."
-- **Only what is needed.** Cut backstory. Keep a load-bearing fact (a greenfield
-  gap, a gotcha, a migration-version rule) only as a terse bullet, never a
-  paragraph.
+Add, each as a separate `it`:
 
-### index.md template
+1. `"<the test name>"` — <the exact assertion, by value>.
+2. ...
+
+`pnpm run verify` exits 0.
+
+Proof: PASS line delivered — <files> in `PASS EPIC-<nnn>`.
+````
+
+It carries no `Diagrams:`, no `Baselines:` and no `Seams:` line. The pair rule
+does not reach it, and it is never "too small" for holding no diagram.
+
+### `story-implement` template
+
+````
+# Story <X> — <name>
+
+Epic: `.agents/plan/epics/<epic-slug>.md`
+Depends on: <the stories and epics whose output this story reads>
+Kind: story-implement
+
+Diagrams: <live-id>
+Baselines: <live-id> <- baseline-<id>
+Seams: <live-id>: +<key>.<method>, ~<key>.<method>, -<key>.<method> @<file>:<line>
+
+<one sentence naming what this story leaves to a later story of the epic>
+
+## The shipped path
+
+### `baseline-<id>`
+
+Superseded by: EPIC <nnn> <live-id>
+
+Shipped path: `<file>:<from>-<to>`. Fixture: <the exact fixture, stated>.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Command
+    participant <Key>
+    Client->>Command: <operation>
+    Command->><Key>: 1 <key>.<method>:<label>
+    Command-->>Client: ok
+```
+
+Citations, one per step: `:<line>`, `:<line>`, ...
+
+<the sentences that say what this baseline records, and which of its properties
+the story changes>
+
+### `<live-id>`
+
+Supersedes: EPIC <nnn> baseline-<id>
+
+Fixture: <the fixture, and what it makes the run kind or the branch>.
+
+```mermaid
+<the ship diagram>
+```
+
+<the sentences that say what the shape asserts: where the first mutation is, why
+one step follows another, what is unrolled>
+
+Add `test/sequence/scenarios/<live-id>.ts`.
+
+## Change
+
+**`<file>` — <the edit in one bold sentence>.** <why the boundary is where it is>
+
+### <the first linear step>
+
+<the exact edit, with every deletion citing `file:line`>
+
+### <the next step>
+
+...
+
+## Constraints
+
+- <correctness-critical only: transaction scope, what must not change, invariants>
+
+## Verify
+
+```
+node --test <exact files> test/sequence/conformance.test.ts
+```
+
+<the test file to extend, and its existing helpers at file:line>
+
+Add, each as a separate `it`:
+
+1. `"<the test name>"` — <the exact assertion, by value>.
+2. ...
+
+Add `test/sequence/scenarios/<live-id>.ts`, building the fixture the diagram
+names, running the real command over real SQLite behind the recorder, binding
+every nested command to unrecorded dependencies, and returning the recorder and
+the result.
+
+`pnpm run verify` exits 0.
+
+Proof: PASS line delivered — <files> in `PASS EPIC-<nnn>`.
+````
+
+### The declared lines
+
+- **`Diagrams:` names the live diagram ids this story owns.** Exactly one story
+  owns each live diagram, and that story adds the scenario file.
+- **`Baselines:` maps a live diagram to the shipped path it replaces.** A live
+  diagram in no pair is a path written from nothing, and its prior set is empty.
+- **A path an earlier epic already drew has no `baseline-` diagram.** Its prior
+  set is the live diagram it supersedes, and the story declares `Supersedes:`
+  where a first change declares `Baselines:`. The two never appear together for
+  one diagram, and drawing a baseline for a path an earlier epic owns claims that
+  epic never landed.
+- **`Seams:` is one line per live diagram**, prefixed by that diagram id. Every
+  token carries one sign, and the token is exact, label included. A context token
+  is not declared. A removal from a path no baseline draws cites its source as
+  `-<key>.<method> @<file>:<line>`.
+
+### The numbered case is the unit of implementation
+
+`## Verify` holds a numbered list, in **both** templates, and `/work` dispatches one numbered case per
+turn as `<story-file-stem>#V<n>`. Three rules follow, and they are what make a story executable:
+
+- **Every case is written as a case, never as prose.** It quotes the `it` name the test-engineer uses
+  verbatim, and it states the assertion by value. A story whose `## Verify` is a paragraph gives the
+  loop nothing to open as RED.
+- **`## Change` is the whole-story implementation contract.** Its `###` steps order the work for a
+  reader; they are never scheduled one per turn, because a step is a slice of one operation and is not
+  independently green. Do not number the steps to the cases, and do not add a mapping line.
+- **Every `## Change` obligation is proven by a numbered case or by an assertion of the epic's gate.**
+  An obligation neither proves is an authoring defect, and you report it rather than inventing a case
+  for it. A case whose proof is the build states the build check instead of a test, and the loop runs
+  it as a build-only check.
+
+The numbering freezes when implementation starts, because a case id is written into the discussion
+file. A later regression case appends; it never renumbers.
+
+### `index.md` template
 
 ```
 # EPIC <NNN> — <name> — stories
 
 Epic: `.agents/plan/epics/<epic-slug>.md`
-Prereq: EPIC <N-1> (sequence order).
+Prereq: EPIC <N-1> (sequence order). <what each story reads from it>
 
 <one-sentence capability restatement>
 
+## One story, one path
+
+<how many stories carry a diagram, and which>
+
 ## Dispatch order
-<the order /work should take the stories, and which are a coupled pair>
+
+<the order /work takes the stories, the coupled pairs, and one workable serial
+order proving no story depends on a later one>
 
 ## Stories
-- <X> — <one line> → `NN-<slug>.md`
+
+- <X> — <one line> → `NN-<slug>.md` — draws `<id>` and `<baseline-id>`
 - ...
 
 ## Facts (needed for implementation)
-- <terse, load-bearing facts shared across stories: greenfield gaps, gotchas,
-  the migration-version rule, the capability template to mirror — each with a
-  file:line>
+
+- <terse, load-bearing, each with a file:line>
+
+## Decisions taken during authoring, and now recorded in the EPIC
+
+- **<the ruling>.** <the evidence, at file:line> See `NN-<slug>.md`.
+
 ```
 
-## Step 6 — Determinism self-check (gate before you finish)
+A decision you had to take while authoring goes here **and** into the EPIC's
+`## Decisions` — by asking the human, never by deciding alone. See Step 7.
 
-Re-read each story you wrote and confirm, per story:
+## Step 6 — Self-check, and prove it
 
-1. Every edit names a concrete file + site.
-2. Every behavior a test depends on is pinned (order, states, error types).
-3. The `Verify` section lists exact test files/commands and the Proof line(s).
-4. No sentence asks the implementer to design, choose, or decide at build time.
-5. No motivation/history/debate prose remains.
+Run `node scripts/verify-epic-sequence.ts` when it exists. When it does not,
+perform its checks yourself over what you wrote, and report each result:
 
-If any story fails this check and you **cannot** make it deterministic from the
-EPIC + exploration facts, that is a **planning defect**. Do not ship a vague
-story. Stop and report the specific gap to the human (e.g. "Story C needs a
-decision on the migration table shape — the EPIC does not fix it"), so the human
-fixes the EPIC or answers the question. Ambiguity is never handed to `/work`.
+1. every story declares a kind; a `story-foundation` carries none of the three
+   declared lines, and a `story-implement` carries them;
+2. every backticked `###` heading holds one `sequenceDiagram`, its ordinals are
+   dense from 1, and no unnumbered arrow appears between two non-end participants;
+3. no diagram repeats a token, and none holds `loop` or `opt`;
+4. every diagram states one terminal, or ends with a well-formed pinned-tail note
+   naming a diagram id that exists;
+5. every diagram id is unique across every epic in the gate's range;
+6. every live diagram is named by exactly one `Diagrams:` line, and every story
+   owning a diagram holds the exact path `test/sequence/scenarios/<id>.ts`;
+7. every baseline carries `Superseded by:` and holds no scenario file;
+8. every `Seams:` token carries one sign; a `+` or `~` token appears verbatim in a
+   diagram that line names; a `+` token appears in no baseline of it; a `-` token
+   appears in no live diagram and appears in its baseline or in a citation; every
+   token of a live diagram that is no context token of its baseline is `+` or `~`
+   in exactly one story;
+9. every `Supersedes:` names a document and an id that resolve;
+10. `## Verify` holds a numbered case list in every story, each case quoting its `it` name and
+    stating its assertion by value;
+11. every `## Change` obligation is proven by a numbered case or by an assertion of the epic's gate,
+    and no story carries a step-to-case mapping line;
+12. every edit names a concrete file and site; every behaviour a test depends on
+    is pinned; every `Verify` lists exact commands and its Proof line; no sentence
+    asks the implementer to design, choose or decide at build time; no
+    motivation, history or debate prose remains.
+
+A failure here is yours to fix before you report, not the reader's to find.
 
 ## Step 7 — Report
 
-Print:
+Print the story files created, the diagram ids with their owning story, the
+dispatch order, the seams this epic now owns that no interface declares yet, and
+every open item as a bullet list in the house format:
 
-- the created files (index + stories) under `.agents/plan/stories/<epic-slug>/`;
-- the dispatch order;
-- any **planning defects / open questions** as a bullet list
-  (`<B/S> - action:<YES/NO> - <name> - <description>`) that block a clean
-  handoff to `/work`.
+```text
+<B1/S1> - status:<FIXED/OPEN> - action:<YES/NO> - <name> - <description> - fix:<recommended change> - why:<reason>
+```
+
+Report a behaviour question the diagrams exposed as a **blocker**, not as a note.
+A diagram that forces a decision the EPIC avoided is this skill working, and a
+person decides it. Ambiguity is never handed to `/work`.
 
 Do **not** commit — the human reviews and commits.
 
-## Notes for the planner (you)
+## What this skill refuses
 
-- Use `Bash` for path checks, `Read` for the EPIC and any file you must confirm,
-  the harness dispatch tool (a read-only explorer subagent) for the code map, and
-  `Write` for the story files.
-- Never edit the EPIC, production sources, tests, or config — you only create
-  files under `.agents/plan/stories/<epic-slug>/`.
-- The EPIC's Proof is the contract: if no story delivers a given `PASS` line, a
-  story is missing.
-- Prefer the path that keeps `/work`'s implementing agents mechanical: they
-  follow steps; they do not reason toward a design.
+- a diagram message that is not a seam call;
+- `loop`, `opt`, or any notation that admits more than one trace;
+- a diagram with no scenario file, and a scenario file with no diagram;
+- an unsigned `Seams:` token, and a context token declared as a change;
+- a `story-implement` that draws no pair for a shipped path, and a
+  `story-foundation` that draws anything;
+- a story with no kind;
+- a `## Verify` written as prose instead of a numbered case list;
+- a `## Change` obligation no case and no gate assertion proves;
+- a gate bullet claiming a property the trace does not prove, in particular "the
+  operation wrote nothing" and "every branch is drawn";
+- renaming or renumbering a live diagram id another epic references;
+- editing the EPIC, production code, a test, or any file outside
+  `.agents/plan/stories/<epic-slug>/` and the one diagram a supersession retires.

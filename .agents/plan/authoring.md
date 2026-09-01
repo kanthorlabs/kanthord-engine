@@ -4,6 +4,29 @@ This document is the standard for every epic in `.agents/plan/epics/` and every 
 `.agents/plan/stories/`. It is a planning convention, so it lives here and not in `docs/proposal/`.
 `AGENTS.md` names the mechanism that enforces it.
 
+Two skills consume it and nothing else authors a plan document: `/plan` writes the epics, and
+`/author` writes the stories and their diagrams. Where a skill and this file disagree, this file wins,
+and the disagreement is a defect to report.
+
+## The seam, in this repository
+
+| Concept          | Engine                                                                             |
+| ---------------- | ---------------------------------------------------------------------------------- |
+| plan document    | `.agents/plan/epics/<NNN>-<slug>.md`                                               |
+| work item        | one story file in `.agents/plan/stories/<epic-slug>/`                              |
+| document id      | `EPIC <nnn>`                                                                       |
+| the seam         | the dependency object a command receives, per `## The shape of a command`          |
+| participant keys | the keys of that object, capitalized — `Plan`, `Lease`, `Execution`, `Events`, ... |
+| the two ends     | `Command`, plus `Client` for a wire operation and `Caller` for a nested command    |
+| the recorder     | `test/helpers/sequence-conformance.ts`, a proxy over the dependency object         |
+| a scenario       | `test/sequence/scenarios/<diagram-id>.ts`, exporting the fixture and the run       |
+| the runner       | `test/sequence/conformance.test.ts`, on `node:test`                                |
+| the range gate   | `scripts/verify-epic-sequence.ts`, in `pnpm run verify`                            |
+
+A command runs inside one `storage.transact` callback and is synchronous, so the trace is invocation
+order and invocation order is completion order. An asynchronous seam needs begin and end records; do
+not introduce one inside a drawn path without saying so.
+
 ## The epic
 
 An epic states **what was decided** and **how the result is proven**. Nothing else in it is heavy.
@@ -25,6 +48,13 @@ An epic states **what was decided** and **how the result is proven**. Nothing el
 ## The story, and its two kinds
 
 Every story declares its kind on the line under its title. The kind decides what it draws.
+
+**The unit of implementation is one numbered case under `## Verify`**, addressed as
+`<story-file-stem>#V<n>`, and `/work` dispatches one case per turn. `## Change` is the whole-story
+implementation contract, read whole and never scheduled step by step, because a `## Change` step is a
+slice of one operation and is not independently green. Every obligation of `## Change` is proven by a
+numbered case or by an assertion of the epic's gate, and the numbering freezes when implementation
+starts.
 
 ### `story-foundation`
 
@@ -59,6 +89,18 @@ path, so an epic changes at most ten paths and in practice fewer, because founda
 slots. Counting the paths before authoring is what decides whether an epic splits, and the count is
 the number of commands, queries and nested commands whose seam trace moves.
 
+## Which paths are drawn
+
+- **A diagram covers one path of one operation, and it states one terminal.** A branch is a separate
+  diagram with its own id, never an optional block.
+- **Draw a path only when its seam set or its seam order differs from a path already drawn.** Two
+  refusals that stop at the same step are one diagram. A branch that changes a value and not the call
+  set is not a diagram.
+- **A path whose seam order is legitimately not fixed is not drawn.** Two concurrent requests with no
+  ordering rule are asserted as a set or a partial order by the story that makes them, and the story
+  says so in one sentence. Never invent an order in production to satisfy a notation, and never draw a
+  diagram that admits two traces.
+
 ## What a diagram may say
 
 - **A message is a seam call, and nothing else is a message.** The recorder wraps the dependency
@@ -70,8 +112,26 @@ the number of commands, queries and nested commands whose seam trace moves.
   the caller of a wire operation, and `Caller` is the caller of a nested command.
 - **A step is `<n> <key>.<method>` or `<n> <key>.<method>:<label>`.** `n` is the ordinal, and it is
   dense from 1. The label is the projection of that call, colon-separated.
+- **Only a numbered step is compared.** The arrow that enters from an end and the arrow that returns
+  the terminal carry no ordinal, so a client call and the terminal are drawn without being recorded
+  calls. An unnumbered arrow between two other participants is refused, because it reads as a message
+  the recorder never saw.
+- **A diagram with no step is legal, and it is the strongest statement available.** It asserts the
+  path reaches no seam at all, so any call the implementation makes fails the comparison. A path that
+  differs from another only by calling nothing is drawn this way, never described in prose.
 - **No two steps of one diagram carry the same token.** The parser refuses a repeat. A method called
   twice needs a projection that separates the calls, so no diagram passes by counting method names.
+- **A method called twice with no natural projection is a decomposition signal, not a notation
+  problem.** Never add a parameter to a production interface so a diagram can separate two calls, and
+  never number the occurrences: an occurrence number means a different call on every path, and
+  inserting one call renames every later one. A command that calls one seam method repeatedly with
+  nothing to distinguish the calls is doing several things, and each becomes a nested command with its
+  own diagram, where the call appears once. Where that decomposition is wrong for the product, the
+  path is not drawn and the story says why in one sentence.
+- **A call repeated over a list is drawn against a fixture whose length is stated**, and the
+  projection separates the iterations by their own data. A list whose items produce identical tokens
+  is not drawable: the fixture states a length of one, and the story says the longer list is asserted
+  by the command's own test.
 - **A projection is declared once, per method, in the harness.** The table is data, not a per-test
   literal. A projection names a value the call actually receives: a run-scoped method projects the
   run id, and a node-scoped method projects the node id. A method with no projection admits one call
@@ -149,6 +209,21 @@ Seams: claim-success-task: +plan.setNodeAssignment, ~lease.read, -execution.adop
   is empty.
 - **`Seams:` is one line per live diagram**, prefixed by that diagram id, because a call removed from
   one path survives on another. A token carries one sign per diagram.
+- **A `Seams:` token is the exact token the diagram draws, label included.**
+  `+plan.setNodeState:T:done` is one token and `+plan.setNodeState:O:ancestor-started` is another.
+  Stripping the label collapses two calls into one declaration, and the gate can no longer tell which
+  of them a sign governs.
+- **A sign is relative to the path, not to the range.** A token is new to a path when the prior
+  diagram of that path does not hold it, and a diagram with an empty prior set is wholly new, so every
+  one of its tokens is `+`. A method drawn on another operation's path is not context here: a
+  `storage.transact` in one command says nothing about the first transaction of a different one.
+- **A renumbered call is not a moved call.** `~` states that a call's position changed relative to the
+  other calls of the path. Inserting one step renumbers every later ordinal and moves nothing, so
+  those tokens stay context and no story declares them.
+- **A story that only composes carries `Diagrams:` and no `Seams:` line.** A composed path's steps are
+  the nested commands, and each command's tokens belong to the story that writes that command. The
+  composing story still owns its diagram and its scenario, because the order of the commands is what
+  it decides.
 - **A sign is decided over token sets**, never over ordinals: `+` names a token the diagram holds and
   its baseline does not, `-` names a token the baseline holds and the diagram does not, and `~` names
   a token both hold at a changed count or a changed label. Order is proven by the diagram comparison
@@ -172,7 +247,8 @@ Seams: claim-success-task: +plan.setNodeAssignment, ~lease.read, -execution.adop
   branch of a path is a claim the story makes in prose, and a reviewer checks it.
 - **It does not prove refusal precedence.** A refusal is decided by pure predicates the recorder
   cannot see. Precedence is proven by a decision table over every pair of refusals that can trigger
-  at once.
+  at once. A pair table does not cover a three-way interaction; an epic whose refusals interact three
+  ways says so and adds the cases.
 - **It does not prove a transaction property.** `storage.transact` as step 1 proves one transaction
   is opened. That a nested command receives that same transaction is a separate case.
 - **A refusal diagram proves no write seam is reached after the refusal point.** It does not prove
@@ -194,6 +270,7 @@ invalid, and a human resolves it before implementation.
 `scripts/verify-epic-sequence.ts` reads every story of the range and refuses when:
 
 - a diagram fails the parser above;
+- a diagram holds an unnumbered arrow between two participants that are not an end;
 - an epic file holds a mermaid block;
 - a diagram id repeats across live diagrams;
 - a `Supersedes` line names an id no story declares;
@@ -211,5 +288,30 @@ invalid, and a human resolves it before implementation.
 - a story that changes an existing command declares no baseline. That a path is shipped is not
   machine-decidable, so the epic's story list is where a reviewer checks the set;
 - an epic file holds more than ten stories;
+- a story holds no numbered case list under `## Verify`;
 - a story declares no kind, or a `story-foundation` carries a `Diagrams:`, `Baselines:` or `Seams:`
-  line, or a `story-implement` carries none.
+  line, or a `story-implement` declares no `Diagrams:` line. A `story-implement` that only composes
+  declares `Diagrams:` and no `Seams:`, so the gate requires the first line and never the second.
+
+## What makes this standard the default
+
+A skill produces a compliant story when it is invoked. It is not the mechanism that makes the story
+compliant. Three mechanisms carry that, and a repository holding only the first has an aspiration:
+
+1. **The range gate** — `scripts/verify-epic-sequence.ts` in `pnpm run verify`, refusing every
+   inconsistency listed above.
+2. **The declared kind** — every story states `story-foundation` or `story-implement` on the line
+   under its title. A story that draws nothing is a visible decision, never a silent omission, and the
+   gate refuses a story with no kind.
+3. **The consuming skills** — `/author` refuses to write a story with no kind, `/work` refuses to
+   implement one, and `/review` refuses to pass one.
+
+## Rollout, and what is grandfathered
+
+- **The harness is proven on a slice before it is required anywhere.** The recorder, one scenario and
+  the runner land against two paths of the first epic that needs them, and the implementation is
+  mutated to confirm the comparison fails. This standard is revised from what that slice teaches.
+- **The gate's range is explicit data**, and an epic outside it is grandfathered with no annotation.
+  An epic inside the range carries stories that satisfy this file.
+- **The gate enters `pnpm run verify` only when every epic in its range satisfies it.** A gate that
+  lands red teaches the team to skip it.

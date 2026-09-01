@@ -1,9 +1,9 @@
 ---
-name: review-epic
+name: review
 description: Human-side review of one EPIC implementation — resolves the change set in a shared tree, dispatches the canonical reviewer-engineer contract, runs the EPIC Gates plus Proof plus the sibling regression proofs, validates supplied review notes by their premise, and reports blocker/suggestion bullets. Never commits; applies action:YES fixes only on request.
 ---
 
-# /review-epic — human-side review of one EPIC's implementation
+# /review — human-side review of one EPIC's implementation
 
 > **Harness note.** This skill runs under Claude Code, opencode and pi from the
 > one file. Where a step says "dispatch a subagent", use the harness's dispatch
@@ -44,7 +44,7 @@ not write the discussion file, and does not record `HUMAN_REVIEW:`.
     are mandatory and a failure is a blocker.
   - **progress** (`--progress`): review only the Tasks the discussion file marks
     complete. Say plainly that **no delivery verdict is possible**. List
-    unfinished Stories as _remaining work_, never as blockers — a partial
+    unfinished stories as _remaining work_, never as blockers — a partial
     implementation cannot satisfy a whole-EPIC Proof, so reporting that as a
     defect is noise.
 - **Notes** — `--notes <file>`, or a clearly delimited block. Notes are **input
@@ -63,7 +63,7 @@ git ls-files --others --exclude-standard      # untracked
 ```
 
 - **Never** `stash`, `reset`, `clean`, `checkout`, or otherwise disturb the tree.
-- A changed file that traces to no Story is **ambiguous ownership**: report it in
+- A changed file that traces to no story is **ambiguous ownership**: report it in
   its own list. Do not assume it belongs to this EPIC, and do not review it as
   if it did.
 
@@ -73,11 +73,31 @@ Read in this order, because later sources are interpreted through earlier ones:
 
 1. The `## Architecture` section of `AGENTS.md`, plus the gotcha files.
 2. The **EPIC**.
-3. Every expanded Story/Task file in `.agents/plan/stories/<epic-slug>/` that is
-   in scope. Binding detail often lives there, not in the EPIC.
+3. Every expanded story file in `.agents/plan/stories/<epic-slug>/` that is in
+   scope. Binding detail often lives there, not in the EPIC.
+4. `.agents/plan/authoring.md`, which is the standard those story files obey.
+
+**Read each story by its kind.** The line under a story title states
+`story-foundation` or `story-implement`, and it decides what the story must carry:
+
+- A **`story-foundation`** carries no `Diagrams:`, `Baselines:` or `Seams:` line.
+  It is proven by its own unit test and by the epic's gate, never by a trace.
+- A **`story-implement`** carries all the lines the standard requires, and draws
+  its baseline and its ship diagram. **The difference between the two diagrams is
+  the boundary of the change, so it is the review's map of the diff.** A seam call
+  in the implementation that the ship diagram does not draw, and a drawn call the
+  implementation does not make, are both defects — and per the standard's
+  precedence rule the defect is reported, never fixed by editing the diagram to
+  match the code.
+- A `story-implement` owning a diagram holds `test/sequence/scenarios/<id>.ts`.
+  That file missing from the change set is a blocker.
+
+The precedence stops at order. A diagram carries no value, no predicate, no state
+change and no error semantics, so a disagreement about any of those does not
+resolve to the diagram: it makes the EPIC invalid, and a human resolves it.
 
 From the EPIC extract verbatim: **Goal**, **Gates:**, **Proof:** with the exact
-success sentinel it must print, **Stories**, **Non-goals**. Also **Decisions**
+success sentinel it must print, **stories**, **Non-goals**. Also **Decisions**
 and any "hermetic coverage required beyond the Proof" list **when present** —
 these are optional sections in the template, so do not invent them and do not
 treat their absence as a defect.
@@ -86,7 +106,7 @@ treat their absence as a defect.
 later):
 
 1. `AGENTS.md` hard rules.
-2. EPIC and Story/Task directives.
+2. EPIC and story/Task directives.
 3. Documented Decisions.
 4. Existing tests — **evidence, not authority.** A test is a strong signal about
    intent, but if the EPIC deliberately changes that behaviour the test is
@@ -99,7 +119,7 @@ risk.
 
 ## Step 4 — Dispatch `reviewer-engineer` for the deep pass
 
-Hand it: working root, EPIC path, base ref, the Step 2 file list, the Story
+Hand it: working root, EPIC path, base ref, the Step 2 file list, the story
 files in scope, the discussion file if one exists, and the mode. It reads every
 changed production **and** test file, runs the `Gates:` and the hermetic
 `Proof:`, and returns its structured verdict.

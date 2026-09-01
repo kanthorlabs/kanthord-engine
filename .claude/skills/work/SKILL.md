@@ -1,6 +1,6 @@
 ---
 name: work
-description: Drive a TDD implementation cycle for one EPIC — dispatching test-engineer / software-engineer in alternation until IMPLEMENTATION_READY_FOR_REVIEW, then a reviewer-engineer gate that auto-routes action:YES findings back through the loop once, then the human review. A Task that fails its attempt limit goes to the debate engine for an unblock guideline first, and reaches the human only when that guideline also fails. Lifecycle state lives in the discussion file; the orchestrator writes no frontmatter or status board.
+description: Drive a TDD implementation cycle for one EPIC — dispatching test-engineer / software-engineer in alternation until IMPLEMENTATION_READY_FOR_REVIEW, then a reviewer-engineer gate that auto-routes action:YES findings back through the loop once, then the human review. A case that fails its attempt limit goes to the debate engine for an unblock guideline first, and reaches the human only when that guideline also fails. Lifecycle state lives in the discussion file; the orchestrator writes no frontmatter or status board.
 ---
 
 # /work — orchestrate a TDD implementation cycle
@@ -17,26 +17,26 @@ Arguments: `$ARGUMENTS` — `<epic-file-path> [--max-turns N]`. A harness that d
 You are the **orchestrator**. You own everything the test-engineer / software-engineer cannot do on their own:
 
 - **TDD dispatch** — alternating `test-engineer` and `software-engineer` turns until `IMPLEMENTATION_READY_FOR_REVIEW:` lands in the discussion file or the turn cap fires.
-- **Escalation** — counting `ATTEMPT-FAILED:` lines per Task; when one Task has failed **3** attempts, asking the debate engine for an unblock guideline through `/debate`, and handing the Task to the human only when that guideline also fails. **One blocker skips both counters: a fix that needs a path locked to every role goes to the human on its first appearance**, because no engineer and no guideline can close it.
+- **Escalation** — counting `ATTEMPT-FAILED:` lines per case; when one case has failed **3** attempts, asking the debate engine for an unblock guideline through `/debate`, and handing the case to the human only when that guideline also fails. **One blocker skips both counters: a fix that needs a path locked to every role goes to the human on its first appearance**, because no engineer and no guideline can close it.
 - **Reviewer auto-fix routing** — after the reviewer-engineer gate, auto-routing every `action:YES` finding back through the TDD loop **once** per review cycle; only `action:NO` findings reach the human.
 - **Final review handoff** — after implementation and the reviewer auto-fix pass, pausing for the **human operator's** review (`HUMAN_REVIEW: PASS|FAIL`). If the human fails it, routing their `BLOCKER:` lines back through the TDD loop.
 - **Discussion-file seed** — the one-time header write.
 
-Lifecycle state lives **only in the discussion file** — there is no separate status board and the EPIC/Story files carry no frontmatter to flip. An EPIC is "in progress" once its discussion file exists and "done" once that file contains `HUMAN_REVIEW: PASS`.
+Lifecycle state lives **only in the discussion file** — there is no separate status board and the EPIC/story files carry no frontmatter to flip. An EPIC is "in progress" once its discussion file exists and "done" once that file contains `HUMAN_REVIEW: PASS`.
 
-You do **not** commit; the human reviews and commits. You do **not** write to the discussion file after seeding it — subagents own every subsequent append via the race-safe `cat >>` protocol in their personas. (The one exception: the auto-review routing block the orchestrator appends in Step 6b.) You do **not** edit production sources, test files, or the locked EPIC/Story files — the engineers and the planning phase own those.
+You do **not** commit; the human reviews and commits. You do **not** write to the discussion file after seeding it — subagents own every subsequent append via the race-safe `cat >>` protocol in their personas. (The one exception: the auto-review routing block the orchestrator appends in Step 6b.) You do **not** edit production sources, test files, or the locked EPIC/story files — the engineers and the planning phase own those.
 
 A "turn" is one logical handoff, not one keystroke. A subagent may make many tool calls inside a single Task invocation (read context, edit sources / test files, build, append) and produce one substantive entry in the discussion file. Granularity below that belongs in version-control commits, not in the discussion file.
 
 The canonical TDD cycle:
 
-- `test-engineer` opens with either a failing test (RED) for the next unimplemented Task, or a GREEN-ONLY pass-through for Tasks that have no `Action — RED:` block. Tasks are `### Task` headings in the Story files — there are no checkboxes; progress is tracked from the discussion file.
-- `software-engineer` makes that test green by editing production sources (RED flow), or implements the forwarded Task(s) directly from the Story spec (GREEN-ONLY flow).
-- `test-engineer` runs the test (GREEN), then either opens the next RED or — when every Task is green and the EPIC's Verification Gate runs clean — appends `IMPLEMENTATION_READY_FOR_REVIEW:`. For GREEN-ONLY Tasks, the TE runs a build-only check instead of a test.
+- `test-engineer` opens with either a failing test (RED) for the next unimplemented case, or a GREEN-ONLY pass-through for cases that state a build-only check. A case is one numbered entry under a story's `## Verify`, addressed as `<story-file-stem>#V<n>` — there are no checkboxes; progress is tracked from the discussion file.
+- `software-engineer` makes that test green by editing production sources (RED flow), or implements the forwarded case(s) directly from the story's `## Change` (GREEN-ONLY flow). `## Change` is the whole-story implementation contract and is read whole; its `###` steps are never scheduled one per turn.
+- `test-engineer` runs the test (GREEN), then either opens the next RED or — when every case is green and the EPIC's Verification Gate runs clean — appends `IMPLEMENTATION_READY_FOR_REVIEW:`. For GREEN-ONLY cases, the TE runs a build-only check instead of a test.
 
 **The ready marker has three preconditions, all of them mandatory.** The EPIC's `## Verification Gate` has **two** parts — `Gates:` and `Proof:` — and running only the `Gates:` is the single most common way this loop reports work that is not done:
 
-1. **Every `### Task` in every Story file is green** — not "the stories expanded so far". A partial implementation cannot satisfy a whole-epic Proof, so a marker emitted with stories outstanding is invalid.
+1. **Every numbered `## Verify` case in every story file is green** — not "the stories expanded so far". A `## Change` obligation that no case and no gate proves is an authoring defect, reported to the human, never a reason to invent a case. A partial implementation cannot satisfy a whole-epic Proof, so a marker emitted with stories outstanding is invalid.
 2. **The `Gates:` command runs green** (typically `pnpm run verify`).
 3. **The `Proof:` command has actually been run**, and its real output — including the string the EPIC says it must print — is pasted into the turn.
 
@@ -44,7 +44,7 @@ A marker missing any of the three is premature: the orchestrator must **reject i
 
 After the TDD loop completes (`IMPLEMENTATION_READY_FOR_REVIEW:` detected), the orchestrator runs the **reviewer-engineer gate** and auto-routes its `action:YES` findings back through the TDD loop (once per cycle), leaving only `action:NO` findings for the human. It then **pauses for the human operator's review**. The human reviews the implementation and records the verdict in the discussion file as `HUMAN_REVIEW: PASS` or `HUMAN_REVIEW: FAIL` (with `BLOCKER:` lines). On `PASS`, the EPIC is done. On `FAIL`, the orchestrator routes the `BLOCKER:` lines back through the TDD loop until the next `IMPLEMENTATION_READY_FOR_REVIEW:`.
 
-Separately, while the TDD loop runs, the orchestrator counts `ATTEMPT-FAILED: <task-id>` lines emitted by the engineers. When any single Task accumulates **3** failed attempts, the loop cannot self-resolve it — but the human is not the first stop. The orchestrator asks the **debate engine** for an unblock guideline through the `/debate` skill, records that guideline in the discussion file, and gives the Task 3 more attempts under it. The human is reached only when the debate engine cannot be used, its run fails, or the Task fails its 3 attempts under the guideline as well. Each Task gets at most one guideline per review cycle.
+Separately, while the TDD loop runs, the orchestrator counts `ATTEMPT-FAILED: <case-id>` lines emitted by the engineers. When any single case accumulates **3** failed attempts, the loop cannot self-resolve it — but the human is not the first stop. The orchestrator asks the **debate engine** for an unblock guideline through the `/debate` skill, records that guideline in the discussion file, and gives the case 3 more attempts under it. The human is reached only when the debate engine cannot be used, its run fails, or the case fails its 3 attempts under the guideline as well. Each case gets at most one guideline per review cycle.
 
 The count answers "can the loop still resolve this?". It is the wrong question for a blocker whose fix needs a file locked to every pipeline role — the plan tree, the pipeline definition, the pipeline guards, `package.json`, `tsconfig*.json`, `AGENTS.md`, the `Makefile`, `Containerfile` or `compose.yaml`. No number of attempts closes such a blocker, and a debate guideline cannot either, because the guideline would have to be executed by a role that may not write the file. The engineers mark it `OPEN: OUT-OF-LANE — <path> — <change>`, and Step 5h escalates it to the human on the **first** occurrence, after validating the claimed lock with `scripts/lane-check.sh`.
 
@@ -95,9 +95,9 @@ Verification gate (binding, from the EPIC's `## Verification Gate` section):
 > <the prose under the EPIC's "## Verification Gate" heading, verbatim>
 
 TDD protocol:
-1. test-engineer writes the next failing test (RED) — or a GREEN-ONLY pass-through for Tasks without `Action — RED:`.
-2. software-engineer makes the test green (RED flow) or implements the Task spec directly (GREEN-ONLY flow).
-3. test-engineer confirms GREEN (or runs a build-only check for GREEN-ONLY), then either opens the next Task or runs the full Verification Gate and appends IMPLEMENTATION_READY_FOR_REVIEW.
+1. test-engineer writes the next failing test (RED) — or a GREEN-ONLY pass-through for cases that state a build-only check.
+2. software-engineer makes the test green (RED flow) or implements the story's `## Change` for the forwarded cases (GREEN-ONLY flow).
+3. test-engineer confirms GREEN (or runs a build-only check for GREEN-ONLY), then either opens the next case or runs the full Verification Gate and appends IMPLEMENTATION_READY_FOR_REVIEW.
 ```
 
 (If the discussion file already exists, leave it alone — you are resuming a prior cycle.)
@@ -123,7 +123,7 @@ FAIL_LINE=$(grep -nE '^(HUMAN_REVIEW: FAIL|AUTO_REVIEW: FAIL)' '<discussion-file
 awk -v s="${FAIL_LINE:-0}" 'NR>s && /^IMPLEMENTATION_READY_FOR_REVIEW:/' '<discussion-file>'
 ```
 
-If that prints any line, **validate the LATEST such marker before honouring it** (append `| tail -1` — a rejected marker stays in the file, so always judge the most recent one). Read the turn that carries it and confirm it evidences all three preconditions from "The ready marker has three preconditions" above: every Story Task green, the `Gates:` command green, and the `Proof:` command run with its real output and the EPIC's success string present. A marker that admits outstanding work ("Stories 4-6 remain pending", "not yet expanded") or that never ran the Proof is **premature**:
+If that prints any line, **validate the LATEST such marker before honouring it** (append `| tail -1` — a rejected marker stays in the file, so always judge the most recent one). Read the turn that carries it and confirm it evidences all three preconditions from "The ready marker has three preconditions" above: every story case green, the `Gates:` command green, and the `Proof:` command run with its real output and the EPIC's success string present. A marker that admits outstanding work ("stories 4-6 remain pending", "not yet expanded") or that never ran the Proof is **premature**:
 
 - Print `premature ready marker rejected: <what is missing>`.
 - Do **not** jump to Step 6. Continue the loop at 5c so the next engineer turn finishes the work.
@@ -197,13 +197,13 @@ SINGLE-TURN CONTRACT (OVERRIDES everything below):
 - ONE turn = ONE role = ONE append (ONE "END: <ROLE>") = ONE `cat >>`, then STOP and return your one-sentence summary.
 - Do NOT switch/impersonate the other role.
 - Do NOT spawn or dispatch any sub-agent.
-- Append "IMPLEMENTATION_READY_FOR_REVIEW:" ONLY when this turn IS it (test-engineer, EVERY Task in EVERY Story green, Gates: green, AND the Proof: command run with its real output pasted in). Stories still unexpanded or unimplemented means NOT ready.
+- Append "IMPLEMENTATION_READY_FOR_REVIEW:" ONLY when this turn IS it (test-engineer, EVERY case in EVERY story green, Gates: green, AND the Proof: command run with its real output pasted in). stories still unexpanded or unimplemented means NOT ready.
 
 Follow your discussion-channel protocol exactly:
-1. Read the EPIC file and the discussion file for full context. The EPIC's `## Verification Gate` is binding. If the discussion file's last "DEBATE_GUIDELINE:" block is newer than the last engineer turn, its "GUIDELINE:" lines are binding direction for this turn — the loop already failed this Task three times without them. The `## Architecture` section of AGENTS.md (repo root) is binding for all production code. The discussion file's last turn (if any) tells you what was just done.
+1. Read the EPIC file and the discussion file for full context. The EPIC's `## Verification Gate` is binding. If the discussion file's last "DEBATE_GUIDELINE:" block is newer than the last engineer turn, its "GUIDELINE:" lines are binding direction for this turn — the loop already failed this case three times without them. The `## Architecture` section of AGENTS.md (repo root) is binding for all production code. The discussion file's last turn (if any) tells you what was just done.
 2. Do the work your persona owns this turn:
-   - If you are test-engineer: identify the next unimplemented Task, write its failing test under the exact verify path the Task names, then run the test using the project's test command and capture the failing assertion line. Tasks run in dependency order. When a Task has no `Action — RED:` block (GREEN-only), write a GREEN-ONLY pass-through turn listing the Task(s) for the software-engineer; do not write tests for them; after the SE's turn, run a build-only check. When every Task is green, run the Verification Gate and prepare an IMPLEMENTATION_READY_FOR_REVIEW turn if green.
-   - If you are software-engineer: read the most recent TEST-ENGINEER turn, identify the failing test and the seam it imports, and edit production sources to make that test green with the smallest correct change. If the last TEST-ENGINEER turn is a GREEN-ONLY pass-through, read the Story file path and Task IDs from the turn and implement all listed Tasks' GREEN+REFACTOR specs from the Story file. Never edit the test files, and never edit anything under `test/**` — both are the test-engineer's lane, even when the last TEST-ENGINEER turn asks you to. Do not run tests.
+   - If you are test-engineer: identify the next unimplemented case, write its failing test under the exact test command the story's `## Verify` names, using the `it` name the case quotes verbatim, then run the test using the project's test command and capture the failing assertion line. Cases run in document order. When a case states a build-only check (GREEN-only), write a GREEN-ONLY pass-through turn listing the case(s) for the software-engineer; do not write tests for them; after the SE's turn, run a build-only check. When every case is green, run the Verification Gate and prepare an IMPLEMENTATION_READY_FOR_REVIEW turn if green.
+   - If you are software-engineer: read the most recent TEST-ENGINEER turn, identify the failing test and the seam it imports, and edit production sources to make that test green with the smallest correct change. If the last TEST-ENGINEER turn is a GREEN-ONLY pass-through, read the story file path and case ids from the turn and implement the story's `## Change` for every listed case. Never edit the test files, and never edit anything under `test/**` — both are the test-engineer's lane, even when the last TEST-ENGINEER turn asks you to. Do not run tests.
 3. Draft your turn into exactly this file: <DRAFT_FILE>
 4. Append your turn to the discussion file via shell:  cat '<DRAFT_FILE>' >> '<DISCUSSION_FILE>'
 5. Re-read the tail of the discussion file and verify the final non-blank line is exactly "END: <YOUR_ROLE>".
@@ -212,17 +212,17 @@ Follow your discussion-channel protocol exactly:
 
 Do NOT use an editor on the discussion file — only shell append.
 Do NOT edit files outside your lane (see the lane table in your persona).
-Do NOT edit the EPIC or Story files — those are locked by planning. Do NOT touch the build/project config files (see the always-forbidden list in your persona).
+Do NOT edit the EPIC or story files — those are locked by planning. Do NOT touch the build/project config files (see the always-forbidden list in your persona).
 
-If you are test-engineer and you have just confirmed that every Task is green AND the Verification Gate runs green end-to-end, append an IMPLEMENTATION_READY_FOR_REVIEW turn (still ending with END: TEST-ENGINEER). /work greps "^IMPLEMENTATION_READY_FOR_REVIEW:" to stop the TDD loop and hand the cycle to the human for review.
+If you are test-engineer and you have just confirmed that every case is green AND the Verification Gate runs green end-to-end, append an IMPLEMENTATION_READY_FOR_REVIEW turn (still ending with END: TEST-ENGINEER). /work greps "^IMPLEMENTATION_READY_FOR_REVIEW:" to stop the TDD loop and hand the cycle to the human for review.
 
-"The Verification Gate runs green end-to-end" means BOTH of its parts: the `Gates:` command AND the `Proof:` command, each actually executed this turn, with the Proof's real output (including the exact success string the EPIC names) pasted into your turn. A Proof script under `scripts/` is always allowed to RUN by every role — never skip it on lane grounds. If the Proof fails, you are not ready: report the failure as your turn instead. If any Story Task is still unimplemented or its story file still unexpanded, you are not ready either — open the next Task.
+"The Verification Gate runs green end-to-end" means BOTH of its parts: the `Gates:` command AND the `Proof:` command, each actually executed this turn, with the Proof's real output (including the exact success string the EPIC names) pasted into your turn. A Proof script under `scripts/` is always allowed to RUN by every role — never skip it on lane grounds. If the Proof fails, you are not ready: report the failure as your turn instead. If any story case is still unimplemented or its story file still unexpanded, you are not ready either — open the next case.
 ```
 
 Also append:
 
 ```
-If this turn is a failed attempt at the active Task — you raised an "OPEN:" blocker (missing copy, a missing seam, an unimplementable acceptance criterion), or (test-engineer) a confirm-GREEN turn found the test still red — add an "ATTEMPT-FAILED: <task-id> — <reason>" line just above your END marker. /work counts these per Task: 3 failed attempts on the same Task escalates it to the human.
+If this turn is a failed attempt at the active case — you raised an "OPEN:" blocker (missing copy, a missing seam, an unimplementable acceptance criterion), or (test-engineer) a confirm-GREEN turn found the test still red — add an "ATTEMPT-FAILED: <case-id> — <reason>" line just above your END marker. /work counts these per case: 3 failed attempts on the same case escalates it to the human.
 
 Return one short sentence summarizing what you wrote.
 ```
@@ -293,9 +293,9 @@ Two properties matter here. The flag replaces an in-loop `exit 1`, which stopped
 
 Otherwise the turn is clean. Delete this turn's draft temp by its **exact** path — the orchestrator owns this cleanup: `rm -f '<DRAFT_FILE>'`. Then remove the two `/tmp` snapshot files.
 
-### 5h. Escalation — an out-of-lane blocker → Human at once; a Task at its attempt limit → debate, then Human
+### 5h. Escalation — an out-of-lane blocker → Human at once; a case at its attempt limit → debate, then Human
 
-After verifying the subagent wrote, check whether this turn was a **failed attempt** at the active Task. Engineers mark a failed attempt with a greppable line `ATTEMPT-FAILED: <task-id> — <reason>`.
+After verifying the subagent wrote, check whether this turn was a **failed attempt** at the active case. Engineers mark a failed attempt with a greppable line `ATTEMPT-FAILED: <case-id> — <reason>`.
 
 ```bash
 LAST_FAIL=$(grep '^ATTEMPT-FAILED:' '<discussion-file>' | tail -1)
@@ -303,20 +303,20 @@ LAST_FAIL=$(grep '^ATTEMPT-FAILED:' '<discussion-file>' | tail -1)
 
 If `LAST_FAIL` is empty → no failed attempt this turn — skip to 5i.
 
-Otherwise extract its `<task-id>` (everything between `ATTEMPT-FAILED:` and the `—` em-dash delimiter) and count how many failed attempts that same Task has accumulated **in the current review cycle**. Splitting on the em-dash only — not on any hyphen — is load-bearing: task-ids contain hyphens, so a `[—-]` split would truncate them. Scoping the count to lines after the last review-fail boundary stops a Task that already went green in an earlier cycle from inheriting stale failures and false-escalating.
+Otherwise extract its `<case-id>` (everything between `ATTEMPT-FAILED:` and the `—` em-dash delimiter) and count how many failed attempts that same case has accumulated **in the current review cycle**. Splitting on the em-dash only — not on any hyphen — is load-bearing: a case id is `<story-file-stem>#V<n>` and a story file stem holds hyphens, so a `[—-]` split would truncate it. Scoping the count to lines after the last review-fail boundary stops a case that already went green in an earlier cycle from inheriting stale failures and false-escalating.
 
 A guideline from a previous escalation (5h.1) also bounds the count. It is a
-second boundary, not a replacement: the attempts a Task made **before** its
-guideline were made without it, so counting them again would send the Task to
+second boundary, not a replacement: the attempts a case made **before** its
+guideline were made without it, so counting them again would send the case to
 the human on its first attempt under the new direction. The count therefore
 starts at whichever boundary is later:
 
 ```bash
-TASK_ID=$(printf '%s\n' "$LAST_FAIL" | sed -E 's/^ATTEMPT-FAILED:[[:space:]]*//; s/[[:space:]]*—.*$//')
+CASE_ID=$(printf '%s\n' "$LAST_FAIL" | sed -E 's/^ATTEMPT-FAILED:[[:space:]]*//; s/[[:space:]]*—.*$//')
 FAIL_LINE=$(grep -nE '^(HUMAN_REVIEW: FAIL|AUTO_REVIEW: FAIL)' '<discussion-file>' | tail -1 | cut -d: -f1)
-GUIDE_LINE=$(grep -nF "DEBATE_GUIDELINE: $TASK_ID —" '<discussion-file>' | tail -1 | cut -d: -f1)
+GUIDE_LINE=$(grep -nF "DEBATE_GUIDELINE: $CASE_ID —" '<discussion-file>' | tail -1 | cut -d: -f1)
 START=$(printf '%s\n%s\n' "${FAIL_LINE:-0}" "${GUIDE_LINE:-0}" | sort -n | tail -1)
-FAIL_COUNT=$(awk -v s="$START" 'NR>s' '<discussion-file>' | grep -F "ATTEMPT-FAILED: $TASK_ID —" | wc -l | tr -d ' ')
+FAIL_COUNT=$(awk -v s="$START" 'NR>s' '<discussion-file>' | grep -F "ATTEMPT-FAILED: $CASE_ID —" | wc -l | tr -d ' ')
 ```
 
 **Check the out-of-lane marker before the count.** An engineer whose blocker needs a path locked to **every** role marks it `OPEN: OUT-OF-LANE — <repo-relative path> — <the change it needs>`. That is not a stuck implementation, and neither the attempt budget nor a debate guideline can move it:
@@ -331,24 +331,24 @@ if [ -n "$OOL_LINE" ] && [ "$OOL_LINE" -gt "${START:-0}" ]; then
 fi
 ```
 
-Splitting on the em-dash only is load-bearing here for the same reason it is for `TASK_ID`: a path contains hyphens.
+Splitting on the em-dash only is load-bearing here for the same reason it is for `CASE_ID`: a path contains hyphens.
 
-- **`te=no` and `se=no`** → the path is locked to both engineers. **Stop the loop and escalate to the human operator now**, whatever `FAIL_COUNT` says. Print the `OPEN: OUT-OF-LANE` line, the denial reason `scripts/lane-check.sh` writes to stderr for that path, the discussion file path, and instructions to make the change — or amend the Story that needs it — and re-run the skill. Jump to Step 8 with `reason=human-escalation-out-of-lane`. Do **not** run 5h.1: a debate cannot author a locked file, so its guideline would name a change no role may execute.
+- **`te=no` and `se=no`** → the path is locked to both engineers. **Stop the loop and escalate to the human operator now**, whatever `FAIL_COUNT` says. Print the `OPEN: OUT-OF-LANE` line, the denial reason `scripts/lane-check.sh` writes to stderr for that path, the discussion file path, and instructions to make the change — or amend the story that needs it — and re-run the skill. Jump to Step 8 with `reason=human-escalation-out-of-lane`. Do **not** run 5h.1: a debate cannot author a locked file, so its guideline would name a change no role may execute.
 - **Either one `yes`** → the claim is wrong. The path is one engineer's lane, so the work is in lane for that role. Log `out-of-lane claim rejected: <path> is the <role> lane`, and fall through to the count below, which treats the turn as an ordinary failed attempt. The rejected claim reaches the human through the review, not through an escalation.
 
-The `scripts/lane-check.sh` validation is what stops this marker becoming an exit hatch from a hard Task: a role cannot escalate by asserting a lock the script does not agree with.
+The `scripts/lane-check.sh` validation is what stops this marker becoming an exit hatch from a hard case: a role cannot escalate by asserting a lock the script does not agree with.
 
 Then the count:
 
-- If `FAIL_COUNT < 3` → log `attempt <FAIL_COUNT>/3 failed for task <TASK_ID>` and continue to 5i.
-- If `FAIL_COUNT >= 3` and the Task has **no** guideline in the current review cycle (`GUIDE_LINE` empty, or `GUIDE_LINE` not greater than `${FAIL_LINE:-0}`) → the Task is stuck. Run the debate escalation of **5h.1**, then continue to 5i.
-- If `FAIL_COUNT >= 3` and the Task **already carries** a guideline in this cycle → the guideline failed too. **Stop the loop and escalate to the human operator** — print the failed-attempt lines, the guideline that did not unblock them, the discussion file path, and instructions to resolve the blocker and re-run the skill. Jump to Step 8 with `reason=human-escalation`.
+- If `FAIL_COUNT < 3` → log `attempt <FAIL_COUNT>/3 failed for case <CASE_ID>` and continue to 5i.
+- If `FAIL_COUNT >= 3` and the case has **no** guideline in the current review cycle (`GUIDE_LINE` empty, or `GUIDE_LINE` not greater than `${FAIL_LINE:-0}`) → the case is stuck. Run the debate escalation of **5h.1**, then continue to 5i.
+- If `FAIL_COUNT >= 3` and the case **already carries** a guideline in this cycle → the guideline failed too. **Stop the loop and escalate to the human operator** — print the failed-attempt lines, the guideline that did not unblock them, the discussion file path, and instructions to resolve the blocker and re-run the skill. Jump to Step 8 with `reason=human-escalation`.
 
-(A Task that flips to GREEN simply stops emitting `ATTEMPT-FAILED:` lines, so only a Task that never goes green reaches the limit.)
+(A case that flips to GREEN simply stops emitting `ATTEMPT-FAILED:` lines, so only a case that never goes green reaches the limit.)
 
 ### 5h.1. Debate escalation — ask for an unblock guideline before the human
 
-Reached only from 5h, for one `<TASK_ID>` that failed 3 attempts with no
+Reached only from 5h, for one `<CASE_ID>` that failed 3 attempts with no
 guideline yet in this review cycle. The `/debate` skill owns the engine call.
 Restate none of its mechanics — not the engine selection, not the read-only
 enforcement, not the watchdog, not the validation gate. It hard-fails loudly,
@@ -356,14 +356,14 @@ and every one of its failures is a human escalation here.
 
 **1. Check the engine is usable.** `KANTHOR_DEBATE_ENGINE` must be set to one of
 `opencode`, `codex` or `pi`, and its binary must be executable (`command -v`).
-If it is not, do **not** fall back and do **not** retry the Task: escalate to
+If it is not, do **not** fall back and do **not** retry the case: escalate to
 the human now, with `reason=human-escalation` and the exact reason the engine is
 unusable.
 
 **2. Build the unblock prompt.** Assemble it from the repository, in this order:
 
-- the `<TASK_ID>` heading block from its Story file, verbatim;
-- every `ATTEMPT-FAILED:` line for `<TASK_ID>` after `START`, each with the turn
+- the numbered `<CASE_ID>` case from its story file, verbatim, with that story's `## Change` and `## Constraints`;
+- every `ATTEMPT-FAILED:` line for `<CASE_ID>` after `START`, each with the turn
   that carries it;
 - the failing assertion output the last `TEST-ENGINEER` turn pasted;
 - the EPIC's `## Verification Gate`, both parts;
@@ -372,11 +372,11 @@ unusable.
 - this question, last:
 
   ```
-  The TDD loop failed this Task three times. Produce the unblock guideline: the smallest concrete change that makes the named check pass within the lanes above, named by file and line. If the Task as specified cannot pass, state exactly why and what the EPIC or the Story must change. Propose no scope the EPIC does not carry.
+  The TDD loop failed this case three times. Produce the unblock guideline: the smallest concrete change that makes the named check pass within the lanes above, named by file and line. If the case as specified cannot pass, state exactly why and what the EPIC or the story must change. Propose no scope the EPIC does not carry.
   ```
 
 **Cap the assembled prompt at ~25 KB.** A large inlined input stalls the engine
-silently. Trim the pasted turns first, longest first; never trim the Task block,
+silently. Trim the pasted turns first, longest first; never trim the case block,
 the `ATTEMPT-FAILED:` lines or the question.
 
 **3. Invoke `/debate` with that prompt** and take its merged answer as
@@ -387,7 +387,7 @@ direction — treat it as a failed run and escalate to the human.
 **4. On any `/debate` failure** — engine error, stall, or a failed validation
 gate — print the failure verbatim, then **stop the loop and escalate to the
 human operator**. Jump to Step 8 with `reason=human-escalation`. Never retry the
-Task on a failed debate, and never invent a guideline yourself.
+case on a failed debate, and never invent a guideline yourself.
 
 **5. Record the guideline.** Append **one** block to the discussion file. This is
 the orchestrator's third and last write, beside the Step 3 seed and the Step 6b
@@ -396,7 +396,7 @@ after it returns, and it is `/work`'s write, not the engine's.
 
 ```bash
 cat >> '<discussion-file>' <<'WORK_EOF'
-DEBATE_GUIDELINE: <TASK_ID> — <one-line summary of the guideline>
+DEBATE_GUIDELINE: <CASE_ID> — <one-line summary of the guideline>
 GUIDELINE: <step 1 of the guideline>
 GUIDELINE: <step 2 of the guideline>
 WORK_EOF
@@ -404,9 +404,9 @@ WORK_EOF
 
 One line per step, each a single line, so the engineers' `grep` of the tail
 reads them whole. The marker also becomes the new counting boundary in 5h, which
-gives the Task 3 fresh attempts under the guideline.
+gives the case 3 fresh attempts under the guideline.
 
-**6. Continue.** Print `debate guideline issued for task <TASK_ID>`, do **not**
+**6. Continue.** Print `debate guideline issued for case <CASE_ID>`, do **not**
 reset `turn_count` (the max-turns cap still bounds the run), and continue to 5i.
 The next role comes from the 5d alternation as usual — a guideline is direction,
 not a review verdict, so it does not override the alternation. The engineer whose
@@ -418,7 +418,7 @@ turn it is reads the guideline out of the discussion file.
 
 ## Step 6 — Human review handoff
 
-Reached when Step 5b detects `^IMPLEMENTATION_READY_FOR_REVIEW:`. All Tasks are green and the verification gate has passed. Final review is the **human operator's**, recorded as a `HUMAN_REVIEW:` line.
+Reached when Step 5b detects `^IMPLEMENTATION_READY_FOR_REVIEW:`. All cases are green and the verification gate has passed. Final review is the **human operator's**, recorded as a `HUMAN_REVIEW:` line.
 
 ### 6a. Check for the human verdict
 
@@ -470,7 +470,7 @@ Base ref: <BASE_REF>
 Changed files (review ONLY these — do not review unchanged files):
 <CHANGED_FILES>
 
-Follow your per-review workflow exactly. Read the gotcha files first, then the EPIC/Story files, then the changed source and test files. Cross-reference against all review dimensions and produce your structured verdict.
+Follow your per-review workflow exactly. Read the gotcha files first, then the EPIC/story files, then the changed source and test files. Cross-reference against all review dimensions and produce your structured verdict.
 ```
 
 **Parse the reviewer's verdict** into two lists by each finding's `action:` tag: `YES` = apply, `NO` = informational.
@@ -496,7 +496,7 @@ The reviewer's verdict is the review. Stop the loop and present it to the human 
 ```
 REVIEW COMPLETE — <EPIC_SLUG>
 
-Any action:YES findings were auto-routed through the TDD loop and fixed; only the action:NO findings (above) were left unapplied. All Tasks are green and the verification gate passed.
+Any action:YES findings were auto-routed through the TDD loop and fixed; only the action:NO findings (above) were left unapplied. All cases are green and the verification gate passed.
 
 Record your decision in the discussion file (append, do not edit) and re-run /work:
   - To accept:    append `HUMAN_REVIEW: PASS`
@@ -534,7 +534,7 @@ When the run ends, print a one-line summary:
 
 - Use `Bash` for `grep`/`sed`/`tail`/`awk`/path checks and the one-time seed. Use `Read` for the EPIC's `## Verification Gate`. Use the harness dispatch tool for subagent dispatch. The orchestrator touches the discussion file only via the Step 3 seed and the Step 6b auto-review block.
 - Do not summarize, judge, or editorialize turns between dispatches. You dispatch; you do not participate. The one exception is 5h.1: an unblock guideline is a dispatch decision, not participation in a turn.
-- `/debate` is the only skill this one invokes, and only from 5h.1. It never runs on a healthy loop, and it never runs twice for the same Task in one review cycle.
+- `/debate` is the only skill this one invokes, and only from 5h.1. It never runs on a healthy loop, and it never runs twice for the same case in one review cycle.
 - Test engineer always opens. The first dispatch is always `test-engineer` if the file is fresh.
 - If the user interrupts, stop cleanly. Each subagent's append is atomic, and the orchestrator holds no other mutable state.
-- **GREEN-only Task flow.** Some Tasks have no `Action — RED:` block. The cycle is compressed: TE writes a GREEN-ONLY pass-through → SE implements GREEN+REFACTOR → TE runs a build-only check (no test) and advances.
+- **GREEN-only case flow.** Some cases state a build-only check and no test. The cycle is compressed: TE writes a GREEN-ONLY pass-through → SE implements the story's `## Change` for those cases → TE runs a build-only check (no test) and advances.
