@@ -2,6 +2,7 @@
 
 Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
 Depends on: Story 3 (the `workerId` zod schema in `src/domain/worker-id.ts`), EPIC 047 Story 7 (migration `11` creates the `node.assignment` column).
+Kind: story-foundation
 
 ## Change
 

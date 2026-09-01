@@ -2,6 +2,7 @@
 
 Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
 Depends on: Story 5 (`src/domain/run-exclusion.ts` and its `ExclusionRun` type).
+Kind: story-foundation
 
 ## Change
 
@@ -31,7 +32,7 @@ export function objectiveBusy(
 
 If the live set is empty, return `null`. Otherwise pick the run whose `nodeId` sorts first bytewise, breaking a further tie by `runId` bytewise, and return the refusal carrying `input.objectiveId`, that run's `nodeId` as `siblingNodeId`, its `runId` as `siblingRunId`, and its `expiresAt`.
 
-`siblingRuns` holds the runs on the other task children of the objective. The caller builds the set; `objectiveBusy` resolves no hierarchy. The claimed node's own run is never in the set — Story 8 excludes it when it assembles the input, and `subtreeExclusion` covers the same-node case.
+`siblingRuns` holds the runs on the other task children of the objective. The caller builds the set; `objectiveBusy` resolves no hierarchy. The claimed node's own run is never in the set — EPIC 050.1 Story 5 excludes it when it assembles the input, and `subtreeExclusion` covers the same-node case.
 
 The refusal names the sibling node, the sibling run and that run's `expires_at`, so the client knows what it waits on and until when. The daemon holds no queue; the caller retries.
 

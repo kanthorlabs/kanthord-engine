@@ -2,6 +2,7 @@
 
 Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
 Depends on: Story 1 (`runKinds`), Story 3 (`runBaseRow`, and the `src/domain/rows.ts` registration Story 3 owns), EPIC 047 Story 7 (`src/services/storage/migration-0011-deliverable.ts` at version `11`).
+Kind: story-foundation
 
 ## Change
 
@@ -150,7 +151,7 @@ DROP TABLE run_old
 - Do not delete a `node`, `edge`, `blob`, `plan_revision`, `project` or `repository` row.
 - Do not add a kind-conditional CHECK on `graph_revision` or `judged_oid`.
 - Do not add a CHECK expressing the `run_base` cardinality. That rule is a zod refine in Story 3; a SQL CHECK cannot see another table.
-- Do not touch the `lease` table. EPIC 050.1 removes its node rows.
+- Do not touch the `lease` table. EPIC 050.4 removes its node rows.
 
 ## Verify
 

@@ -1,7 +1,8 @@
-# Story 9 — Run authority
+# Story 1 — Run authority
 
-Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
+Epic: `.agents/plan/epics/050.2-the-run-renew-release-and-report.md`
 Depends on: Story 3 (`RunRow` and its new fields). No storage dependency — this story adds a pure function.
+Kind: story-foundation
 
 ## Change
 

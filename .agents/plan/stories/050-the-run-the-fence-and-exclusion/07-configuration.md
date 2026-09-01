@@ -1,7 +1,8 @@
-# Story 12 — Configuration
+# Story 7 — Configuration
 
 Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
-Depends on: nothing in this epic. Story 8 and Story 10 consume the two settings.
+Depends on: nothing in this epic. EPIC 050.1 Story 3 consumes both settings, and EPIC 050.2 Story 3 consumes `runMaxLifetimeMs` again.
+Kind: story-foundation
 
 ## Change
 
@@ -69,7 +70,7 @@ if (input.runMaxLifetimeMs < input.runTtlMs) {
 
 with `runMaxLifetimeBelowTtl` declared as a message const beside the file's other message consts. Thread the two values in at the `assertStartable` call site, `src/services/config/convict.ts:427-439`.
 
-**7 — the consumers.** `src/main.ts` passes `settings.runTtlMs` and `settings.runMaxLifetimeMs` into the claim of Story 8 and the renew of Story 10, beside the existing `leaseTtlMs`.
+**7 — the consumers.** `src/main.ts` passes `settings.runTtlMs` and `settings.runMaxLifetimeMs` into the claim of EPIC 050.1 Story 3, beside the existing `leaseTtlMs`. EPIC 050.2 Story 3 adds the renew as the second consumer.
 
 ## Constraints
 

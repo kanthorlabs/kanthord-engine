@@ -1,6 +1,38 @@
 # EPIC 051 — The execution checkpoint
 
-Status: **draft**. It follows EPIC 050 by sequence order.
+Status: **draft**. It follows EPIC 050.5 by sequence order.
+
+## Known defect — this epic predates `.agents/plan/authoring.md`, and its conversion fixes four things
+
+This epic was authored against the original EPIC 050, before the decimal epics 050.1 to 050.5 were
+inserted between the two and before `.agents/plan/authoring.md` set the epic-and-story form. Nothing
+here is redundant work, and no diagram of it should be deleted: EPIC 050.4 **removes** the lease
+calls from the claim, and this epic **adds** `plan.readWorkspace`, so the two are different changes to
+one path. What is stale is the chain and the shape. Fix all four in the conversion, not before, since
+the conversion moves every diagram out of this file anyway:
+
+1. **The epic holds 22 mermaid blocks, and it owns no story tree.** An epic draws nothing, and there
+   is no `.agents/plan/stories/051-*/`. The conversion creates the story directory and moves each
+   diagram into the story that owns its path. `scripts/verify-epic-sequence.ts` of EPIC 050.1 Story 8
+   covers EPIC 050 to 057 and refuses an epic holding a mermaid block, so this epic fails the gate on
+   its first rule until then.
+
+2. **`claim-success-task` at line 154 supersedes the wrong diagram.** It reads
+   `Supersedes: EPIC 050.1 claim-success-task`. EPIC 050.4 Story 1 already supersedes that diagram and
+   ships first, so one live diagram has two successors. The prior set of this path is
+   `EPIC 050.4 claim-lease-free-task`.
+
+3. **That diagram reuses a live id.** `claim-success-task` is the id EPIC 050.1 Story 3 owns. The gate
+   refuses a diagram id that repeats across live diagrams, so the converted story gives this path its
+   own id.
+
+4. **That diagram draws seam calls this range deletes.** Its steps 6, 11 and 12 are `lease.read` and
+   two `lease.acquire` calls. EPIC 050.4 deletes them from the claim and EPIC 050.5 deletes the lease
+   service, so redraw the path without them, renumber, and state the `Seams:` line against
+   `claim-lease-free-task`.
+
+The verification-gate bullet near the end of this file that asserts the `claim-success-task`
+supersession triple names the same diagram, and it moves with the rest.
 
 ## Goal
 
@@ -151,7 +183,7 @@ any claim runs. A ready node with no workspace is an invariant violation, not a 
 
 ### `claim-success-task`
 
-Supersedes: EPIC 050 claim-success-task
+Supersedes: EPIC 050.1 claim-success-task
 
 Fixture: initiative `I` holds objective `O`, which holds tasks `T` and `S`. Every node is `ready`,
 no node is assigned, no run is active, and a workspace row exists for `O` with `head_oid` = `A`.
@@ -196,11 +228,11 @@ sequenceDiagram
     Command-->>Client: ok
 ```
 
-Steps 1 to 13 and 15 to 23 are context from EPIC 050 `claim-success-task`. Step 14 is the only
+Steps 1 to 13 and 15 to 23 are context from EPIC 050.1 `claim-success-task`. Step 14 is the only
 change: `plan.readWorkspace` reads the workspace head and the result is passed as the run's base
-oid, so `run_base` is inserted atomically with the run at step 15. EPIC 050's diagram held no step
+oid, so `run_base` is inserted atomically with the run at step 15. EPIC 050.1's diagram held no step
 14; the original step 14 (`execution.openRun:T`) shifts to 15 and all later ordinals shift by one.
-The same read supplies `judged_oid` for a review claim, lifting EPIC 050's `review-head-unavailable`
+The same read supplies `judged_oid` for a review claim, lifting EPIC 050.1's `review-head-unavailable`
 guard. `workspace.openWorkspace` is removed: the workspace exists before the claim runs.
 
 ### `workspace-cut-begin`
@@ -696,7 +728,7 @@ the candidate ref. The scenario for this diagram drives `acceptExecution` direct
 
    When a node transitions to `ready` and its run kind will be `execution`, the readiness command performs a journaled cut of `refs/heads/<objectiveId>` from `repository.branch`. The journaled cut is `workspace-cut`: the begin nested unit opens the journal row in one transaction, the git write creates the branch ref, and the settle nested unit inserts the workspace row and completes the journal row in a second transaction. Startup reconciles an `open` `cut` row left by a crash between the two transactions.
 
-   Extend `src/commands/node/claim-node.ts` to call `plan.readWorkspace` inside the claim transaction and pass its `head_oid` as the run's base oid, so `run_base` is inserted atomically with the run. An execution claim on a node with no workspace row is an invariant violation; the claim does not guard it. The same workspace head read supplies `judged_oid` for a review claim, lifting EPIC 050's `review-head-unavailable` guard.
+   Extend `src/commands/node/claim-node.ts` to call `plan.readWorkspace` inside the claim transaction and pass its `head_oid` as the run's base oid, so `run_base` is inserted atomically with the run. An execution claim on a node with no workspace row is an invariant violation; the claim does not guard it. The same workspace head read supplies `judged_oid` for a review claim, lifting EPIC 050.1's `review-head-unavailable` guard.
 
    Add cases to `src/commands/node/claim-node.test.ts` asserting the run's base oid equals the workspace's `head_oid`. Add `src/commands/node/mark-node-ready.ts` (or the equivalent readiness command) performing the workspace cut, with cases asserting the ref exists in the loopback repository, asserting `origin_oid` equals the resolved branch oid, asserting `head_oid` equals `origin_oid` at creation, asserting the journal row is `complete`, asserting a second readiness transition finds the workspace and cuts no ref, and asserting two concurrent first transitions produce one workspace and one ref.
 
@@ -773,7 +805,7 @@ node --test \
 Hermetic coverage required beyond the Proof:
 
 - A reported oid that the candidate ref does not reach refuses `candidate-unreachable`, and no git read of the objective branch happens.
-- The candidate ref is deleted on acceptance, on rejection and on contention. Three cases, each asserting the ref is absent. EPIC 050 covers the expiry path and EPIC 054 covers the operator handoff.
+- The candidate ref is deleted on acceptance, on rejection and on contention. Three cases, each asserting the ref is absent. EPIC 050.1 covers the expiry path and EPIC 054 covers the operator handoff.
 - A ref the worker wrote outside `refs/kanthord/candidate/` changes no outcome. The case writes `refs/heads/<objectiveId>` directly, then reports, and asserts the daemon still lands by compare and swap from the recorded base. The assertion is that the daemon ignores the ref, not that the worker cannot write it.
 - The changed-path set comes from a name-only diff of the recorded base against the candidate. The assertion drives the real git service against the loopback fixture, so `declaredPathVerdict` is never fed a hand-built list in the end-to-end case.
 - The `origin_oid` trigger refuses an `UPDATE` that changes it, and the delete trigger refuses a `DELETE` while a checkpoint names the workspace. Both against real SQLite, by refusal message.
@@ -798,7 +830,7 @@ Hermetic coverage required beyond the Proof:
 - The sequence conformance harness replays each of the twenty-two diagrams of this EPIC by equality, asserting the recorded trace equals the diagram token list, and the comparison fails when any step is removed from or reordered in the implementation. The harness test asserts this in `test/helpers/sequence-conformance.test.ts`.
 - The conformance runner in `test/sequence/conformance.test.ts` runs every scenario file under `test/sequence/scenarios/` against its diagram, passing with the real dependency implementations over the loopback fixture, and failing with a mutation applied to each step in turn. All twenty-two diagrams are covered.
 - The parser in `scripts/verify-epic-sequence.ts` (owned by EPIC 050) refuses this document if the `## Sequence` section is absent, if any diagram id repeats a live id from EPIC 050, if a `Supersedes` line names an id the target document does not declare, or if any `Seams:` token carries no sign. These refusals are asserted against fixture trees in `scripts/verify-epic-sequence.test.ts`.
-- The `claim-success-task` supersession is complete: EPIC 050's diagram carries `Superseded by: EPIC 051 claim-success-task`, this document's diagram carries `Supersedes: EPIC 050 claim-success-task`, and no scenario file exists for the EPIC 050 diagram. The gate asserts this triple.
+- The `claim-success-task` supersession is complete: EPIC 050.1's diagram carries `Superseded by: EPIC 051 claim-success-task`, this document's diagram carries `Supersedes: EPIC 050.1 claim-success-task`, and no scenario file exists for the EPIC 050.1 diagram. The gate asserts this triple.
 - The `report-execution-checkpoint` id is declared in this document, so EPIC 050's `report-authority-prelude` pinned-tail note resolves. The gate asserts the named id exists.
 - The two paths of `workspace-cut-settle` (success) and the startup-recovery discard path are separated: startup reconciles an `open` `cut` row by comparing the ref to `proposed_head_oid`. The workspace settle path and the discard path are tested by `src/commands/startup/recover-journal.test.ts`.
 - The ordered short-circuit of `acceptExecution` is asserted across all six refusals by a decision table in `src/domain/execution-acceptance.test.ts`: each pair of conditions that can trigger simultaneously is asserted to report the earlier one.

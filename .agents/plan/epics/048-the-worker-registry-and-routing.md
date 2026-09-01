@@ -14,7 +14,7 @@ A worker is a design-time record, and routing is a computation over three sets:
 ## Non-goals
 
 - **No internal worker at all.** A human ruled that `general@1`, `tdd@1`, `poc@1`, `research@1` and `git@1` are phase-2 work. The registry holds two entries, and neither has an executor here either: `claude@1` and `opencode@1` are external, so the harness implements them. EPIC 110 adds `general@1`, and the other four follow it.
-- **No claim change.** `src/commands/node/claim-node.ts` does not read the registry here. EPIC 050 wires routing into the claim, so the routing function ships one epic before its production caller.
+- **No claim change.** `src/commands/node/claim-node.ts` does not read the registry here. EPIC 050.1 wires routing into the claim, so the routing function ships one epic before its production caller.
 
 - **No additive schema.** `worker.md` section 13 step 1 pairs the registry with the additive nullable schema. EPIC 047 shipped that half. This epic ships the registry half, and no column is added here.
 

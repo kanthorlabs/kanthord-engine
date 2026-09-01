@@ -1,7 +1,8 @@
-# Story 14 — The policy amendment and the capability swap
+# Story 8 — The policy amendment and the capability swap
 
-Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
+Epic: `.agents/plan/epics/050.2-the-run-renew-release-and-report.md`
 Depends on: Story 13 (`node.renew` is in the registry and `node.heartbeat` is gone).
+Kind: story-foundation
 
 ## Change
 

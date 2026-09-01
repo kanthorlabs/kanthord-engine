@@ -2,6 +2,7 @@
 
 Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
 Depends on: Story 1 (`RunKind`). No storage dependency — this story adds a pure function.
+Kind: story-foundation
 
 ## Change
 
@@ -53,7 +54,7 @@ export function subtreeExclusion(
 
 The refusal carries the matched run's `nodeId`, `runId` and `expiresAt`, so a client learns which node holds the subtree and until when.
 
-`ancestorIds` and `descendantIds` are supplied by the caller. `subtreeExclusion` computes no hierarchy and reads no store; Story 8 derives both sets from `plan.readAllNodes` inside the claim transaction.
+`ancestorIds` and `descendantIds` are supplied by the caller. `subtreeExclusion` computes no hierarchy and reads no store; EPIC 050.1 Story 3 derives both sets from `plan.readAllNodes` and `plan.readSubtree` inside the claim transaction.
 
 ## Constraints
 

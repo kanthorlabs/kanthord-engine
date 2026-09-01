@@ -2,6 +2,7 @@
 
 Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
 Depends on: Story 1 (`runKinds`), EPIC 048 Story 1 (`WORKER_ID_PATTERN` in `src/domain/worker-id.ts`).
+Kind: story-foundation
 
 This story owns the `src/domain/rows.ts` registration of `run_base`. Story 2 depends on this story and adds no `rows.ts` edit of its own.
 
@@ -96,7 +97,7 @@ export type RunBaseRow = z.infer<typeof runBaseRow>;
 ## Constraints
 
 - Every new field is `.nullable()`, never `.optional()`, matching the file's convention at `src/domain/run.ts:18-27`.
-- Keep `leaseFence: z.int()` non-nullable. Story 2 keeps the column `NOT NULL`.
+- Delete `leaseFence`. Story 2 drops the column.
 - Do not add a refine tying `judgedOid` to `kind === "review"`. Story 2 adds no such CHECK, and the EPIC states migration `12` carries no kind-conditional CHECK.
 - Do not add a refine on `graphRevision`.
 - Do not reorder the shipped fields.

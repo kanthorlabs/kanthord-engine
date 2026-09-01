@@ -2,6 +2,7 @@
 
 Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
 Depends on: EPIC 047 Story 1 (`src/domain/deliverable.ts` exports `deliverables` and `Deliverable`).
+Kind: story-foundation
 
 ## Change
 
