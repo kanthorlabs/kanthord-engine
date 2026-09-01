@@ -422,38 +422,40 @@ Test cases:
     };
     ```
 
+```ts
 it("pi-ai formats a 401 provider error with a 401: prefix in errorMessage", async () => {
-const fakeFetch: typeof fetch = async () =>
-new Response(JSON.stringify({ error: { message: "Unauthorized" } }), {
-status: 401,
-headers: { "Content-Type": "application/json" },
-});
-const models = builtinModels({
-credentials: {
-async read() {
-return { type: "api_key" as const, key: "sk-pin-test" };
-},
-async list() {
-return [];
-},
-async modify(_id, fn) {
-return fn({ type: "api_key" as const, key: "sk-pin-test" });
-},
-async delete() {},
-},
-authContext: defaultProviderAuthContext(),
-});
-const result = await models.completeSimple(groqModel, probeContext, {
-maxTokens: 1,
-fetch: fakeFetch,
-});
-assert.equal(result.stopReason, "error");
-assert(
-result.errorMessage?.startsWith("401:"),
-`expected errorMessage to start with "401:" but got: ${result.errorMessage}`,
-);
+  const fakeFetch: typeof fetch = async () =>
+    new Response(JSON.stringify({ error: { message: "Unauthorized" } }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  const models = builtinModels({
+    credentials: {
+      async read() {
+        return { type: "api_key" as const, key: "sk-pin-test" };
+      },
+      async list() {
+        return [];
+      },
+      async modify(_id, fn) {
+        return fn({ type: "api_key" as const, key: "sk-pin-test" });
+      },
+      async delete() {},
+    },
+    authContext: defaultProviderAuthContext(),
+  });
+  const result = await models.completeSimple(groqModel, probeContext, {
+    maxTokens: 1,
+    fetch: fakeFetch,
+  });
+  assert.equal(result.stopReason, "error");
+  assert(
+    result.errorMessage?.startsWith("401:"),
+    `expected errorMessage to start with "401:" but got: ${result.errorMessage}`,
+  );
 });
 ```
+
 If a pi-ai upgrade changes `formatProviderError` so it no longer emits the `STATUS:`
 prefix, this test fails before any probe test does, surfacing the contract break at
 upgrade time instead of silently misreporting every non-2xx verdict.
