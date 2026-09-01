@@ -18,6 +18,7 @@ export const findingCodes = [
   "identity-kind-mismatch",
   "initiative-without-objective",
   "objective-without-task",
+  "pair-illegal",
   "parent-missing",
   "path-duplicate",
   "path-invalid",
@@ -27,6 +28,7 @@ export const findingCodes = [
   "repo-on-task",
   "repository-unbound",
   "repository-unknown",
+  "verify-invalid",
   "worker-unknown",
 ] as const;
 
@@ -54,6 +56,7 @@ export const findingScope: Readonly<Record<FindingCode, ValidationScope>> = {
   "identity-kind-mismatch": "structural",
   "initiative-without-objective": "completeness",
   "objective-without-task": "completeness",
+  "pair-illegal": "structural",
   "parent-missing": "structural",
   "path-duplicate": "structural",
   "path-invalid": "structural",
@@ -63,6 +66,7 @@ export const findingScope: Readonly<Record<FindingCode, ValidationScope>> = {
   "repo-on-task": "structural",
   "repository-unbound": "structural",
   "repository-unknown": "structural",
+  "verify-invalid": "structural",
   "worker-unknown": "structural",
 };
 

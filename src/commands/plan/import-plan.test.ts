@@ -750,6 +750,14 @@ function fixtureDocuments(fixture: ImportFixture): readonly RenderedDocument[] {
   ).documents;
 }
 
+function fixtureTaskDocument(fixture: ImportFixture): RenderedDocument {
+  const document = fixtureDocuments(fixture).find((entry) =>
+    entry.content.includes(`id: "${planFixtureIdentities.task}"`),
+  );
+  assert.ok(document);
+  return document;
+}
+
 function withTaskDependsOn(
   documents: readonly RenderedDocument[],
 ): readonly RenderedDocument[] {
@@ -1198,6 +1206,223 @@ Bootstrap.
   });
 
   describe("the round trip", () => {
+    it("a new-shape plan imports with no finding and the deliverable is stored", (t) => {
+      const fixture = build([U_NEW]);
+      t.after(() => fixture.dispose());
+      seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+
+      const task = fixtureTaskDocument(fixture);
+      const submitted = {
+        path: task.path,
+        content: task.content.replace(
+          'title: "Harden the verify CLI"\n',
+          'title: "Harden the verify CLI"\ndeliverable: "test"\nverify:\n  paths:\n    - "/src/foo.ts"\n  commands:\n    - "! node --test src/foo.test.ts"\n',
+        ),
+      };
+      const result = runImport(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: fixtureIds.planRevision,
+        importId: "imp_new_shape",
+        documents: [submitted],
+        choices: [
+          { id: planFixtureIdentities.initiative, take: "database" },
+          { id: planFixtureIdentities.objective, take: "database" },
+          { id: planFixtureIdentities.task, take: "submitted" },
+        ],
+        validatedRevision: fixtureIds.planRevision,
+        documentsHash: planHash(fixture, [submitted], []),
+        actor: "human_1",
+      });
+
+      assert.deepEqual(result.completeness, []);
+      const stored = fixture.storage.transact((transaction) =>
+        transaction.get(
+          "SELECT deliverable, verify_json FROM node WHERE id = ?",
+          [planFixtureIdentities.task],
+        ),
+      ) as Readonly<{
+        deliverable: string | null;
+        verify_json: string | null;
+      }>;
+      assert.equal(stored.deliverable, "test");
+      assert.equal(
+        stored.verify_json,
+        '{"paths":["/src/foo.ts"],"commands":["! node --test src/foo.test.ts"]}',
+      );
+    });
+
+    it("a legacy plan still imports byte-identically after dual-read", (t) => {
+      const fixture = build([U_NEW]);
+      t.after(() => fixture.dispose());
+      seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+
+      const task = fixtureTaskDocument(fixture);
+      const submitted = {
+        path: task.path,
+        content: task.content.replace(
+          'title: "Harden the verify CLI"\n',
+          'title: "Harden the verify CLI"\nworker: "claude.swe@1"\n',
+        ),
+      };
+      runImport(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: fixtureIds.planRevision,
+        importId: "imp_legacy_dual_read",
+        documents: [submitted],
+        choices: [
+          { id: planFixtureIdentities.initiative, take: "database" },
+          { id: planFixtureIdentities.objective, take: "database" },
+          { id: planFixtureIdentities.task, take: "submitted" },
+        ],
+        validatedRevision: fixtureIds.planRevision,
+        documentsHash: planHash(fixture, [submitted], []),
+        actor: "human_1",
+      });
+
+      const stored = fixture.storage.transact((transaction) =>
+        transaction.get("SELECT deliverable FROM node WHERE id = ?", [
+          planFixtureIdentities.task,
+        ]),
+      ) as Readonly<{ deliverable: string | null }>;
+      assert.equal(stored.deliverable, null);
+      const exported = fixtureTaskDocument(fixture);
+      assert.equal(exported.content, submitted.content);
+    });
+
+    it("a new-shape plan can transition to a legacy document and clear stored fields", (t) => {
+      const fixture = build(["z-first", "z-second"]);
+      t.after(() => fixture.dispose());
+      seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+
+      const task = fixtureTaskDocument(fixture);
+      const objective = fixtureDocuments(fixture).find((entry) =>
+        entry.content.includes(`id: "${planFixtureIdentities.objective}"`),
+      );
+      assert.ok(objective);
+      const newShape = {
+        path: task.path,
+        content: task.content.replace(
+          'title: "Harden the verify CLI"\n',
+          'title: "Harden the verify CLI"\ndeliverable: "test"\nverify:\n  paths:\n    - "/src/foo.ts"\n  commands:\n    - "! node --test src/foo.test.ts"\n',
+        ),
+      };
+      const objectiveNewShape = {
+        path: objective.path,
+        content: objective.content.replace(
+          'title: "Harden the verify CLI"\n',
+          'title: "Harden the verify CLI"\ndeliverable: "implementation"\nverify:\n  paths:\n    - "/src/objective.ts"\n  commands:\n    - "node --test src/objective.test.ts"\n',
+        ),
+      };
+      const first = runImport(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: fixtureIds.planRevision,
+        importId: "imp_new_before_legacy",
+        documents: [newShape, objectiveNewShape],
+        choices: [
+          { id: planFixtureIdentities.initiative, take: "database" },
+          { id: planFixtureIdentities.objective, take: "submitted" },
+          { id: planFixtureIdentities.task, take: "submitted" },
+        ],
+        validatedRevision: fixtureIds.planRevision,
+        documentsHash: planHash(fixture, [newShape, objectiveNewShape], []),
+        actor: "human_1",
+      });
+
+      const legacy = {
+        path: task.path,
+        content: task.content.replace(
+          'title: "Harden the verify CLI"\n',
+          'title: "Harden the verify CLI"\nworker: "claude.swe@1"\n',
+        ),
+      };
+      runImport(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: first.revision,
+        importId: "imp_new_to_legacy",
+        documents: [legacy],
+        choices: [
+          { id: planFixtureIdentities.initiative, take: "database" },
+          { id: planFixtureIdentities.objective, take: "database" },
+          { id: planFixtureIdentities.task, take: "submitted" },
+        ],
+        validatedRevision: first.revision,
+        documentsHash: planHash(fixture, [legacy], []),
+        actor: "human_1",
+      });
+
+      const stored = fixture.storage.transact((transaction) =>
+        transaction.get(
+          "SELECT deliverable, verify_json FROM node WHERE id = ?",
+          [planFixtureIdentities.task],
+        ),
+      ) as Readonly<{
+        deliverable: string | null;
+        verify_json: string | null;
+      }>;
+      assert.equal(stored.deliverable, null);
+      assert.equal(stored.verify_json, null);
+      const retained = fixture.storage.transact((transaction) =>
+        transaction.get(
+          "SELECT deliverable, verify_json FROM node WHERE id = ?",
+          [planFixtureIdentities.objective],
+        ),
+      ) as Readonly<{
+        deliverable: string | null;
+        verify_json: string | null;
+      }>;
+      assert.equal(retained.deliverable, "implementation");
+      assert.equal(
+        retained.verify_json,
+        '{"paths":["/src/objective.ts"],"commands":["node --test src/objective.test.ts"]}',
+      );
+      assert.equal(fixtureTaskDocument(fixture).content, legacy.content);
+    });
+
+    it("a duplicate submitted verify path is refused as plan-invalid", (t) => {
+      const fixture = build([U_NEW]);
+      t.after(() => fixture.dispose());
+      seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+
+      const task = fixtureTaskDocument(fixture);
+      const submitted = {
+        path: task.path,
+        content: task.content.replace(
+          'title: "Harden the verify CLI"\n',
+          'title: "Harden the verify CLI"\ndeliverable: "test"\nverify:\n  paths:\n    - "/src/foo.ts"\n    - "/src/foo.ts"\n  commands: []\n',
+        ),
+      };
+      const before = snapshot(fixture.storage);
+      const error = importRefusal(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: fixtureIds.planRevision,
+        importId: "imp_duplicate_verify_path",
+        documents: [submitted],
+        choices: [
+          { id: planFixtureIdentities.initiative, take: "database" },
+          { id: planFixtureIdentities.objective, take: "database" },
+          { id: planFixtureIdentities.task, take: "submitted" },
+        ],
+        validatedRevision: fixtureIds.planRevision,
+        documentsHash: planHash(fixture, [submitted], []),
+        actor: "human_1",
+      });
+
+      assert.equal(error.refusal, "plan-invalid");
+      const findings = (
+        error.details as Readonly<{
+          findings: readonly Readonly<{
+            code: string;
+            path: string | null;
+          }>[];
+        }>
+      ).findings;
+      assert.deepEqual(
+        findings.map(({ code, path }) => ({ code, path })),
+        [{ code: "frontmatter-invalid", path: submitted.path }],
+      );
+      assert.deepEqual(snapshot(fixture.storage), before);
+    });
+
     it("a two-objective plan imports with every node row asserted field by field", (t) => {
       const fixture = build([U_I, U_T1, U_O1, U_T2, U_T3, U_O2, U_REV, U_EDGE]);
       t.after(() => fixture.dispose());

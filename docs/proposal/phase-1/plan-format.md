@@ -18,7 +18,7 @@ plan/<slug>--<initiative-ulid>/<slug>--<objective-ulid>/<NN>-<slug>--<task-ulid>
 
 This layout is the human's own directory, and export writes it. The daemon stores no path.
 
-Frontmatter fields: `id`, `kind`, `title`, `depends_on`, `worker`. An objective also carries `repo`. The body needs an `## Acceptance criteria` heading, because `re@1` judges against it. Everything before that heading is the instruction.
+Frontmatter fields: `id`, `kind`, `title`, `depends_on`, and either `worker` (legacy) or `deliverable` + `verify` (new). An objective also carries `repo`. The body needs an `## Acceptance criteria` heading, because `re@1` judges against it. Everything before that heading is the instruction.
 
 **`repo` holds the registered repository name, never its id.** A repository id is a ULID minted at registration, and a human authoring a plan by hand cannot know one — the same reason an authored document may lack identities and reference by path. Import resolves the name to the id, and `repository-unknown` names the unresolved name back.
 
@@ -46,7 +46,8 @@ A task ordinal comes from a Kahn walk inside the objective that takes the lexico
 
 Byte identity needs a canonical rendering, and these rules are it:
 
-- Frontmatter key order is `id`, `kind`, `title`, `depends_on`, `worker`, `repo`. An absent field is omitted, never rendered as null.
+- Legacy shape (worker): `id`, `kind`, `title`, `depends_on`, `worker`, `repo`. An absent field is omitted.
+- New shape (deliverable): `id`, `kind`, `title`, `deliverable`, `repo`, `depends_on`, `verify`. An absent field is omitted. `depends_on` moves after `repo` in the new shape.
 - Every scalar is double-quoted, with one escaping rule. No anchors, no aliases, no flow collections, no single quotes.
 - `depends_on` is a block sequence, sorted lexicographically by identity.
 - UTF-8 and LF only. A document ends with exactly one LF.
@@ -54,6 +55,23 @@ Byte identity needs a canonical rendering, and these rules are it:
 - Documents are ordered by canonical path, compared bytewise.
 
 The baseline of byte identity is the **accepted** document that import returned, never the document a human authored. An authored document may lack identities, reference by path, and use noncanonical YAML, so no renderer can reproduce it.
+
+### Dual-read window
+
+- The two shapes are exclusive per document. A document carries either `worker` (legacy) or `deliverable` + `verify` (new), never both.
+- A document carrying both raises `frontmatter-invalid` on the issue path `deliverable`.
+- A document carrying neither field is legal through the dual-read window. `worker` is nullable in the `node.create` request, so the daemon creates such a node itself. EPIC 057 closes the window and makes `deliverable` mandatory.
+- A document carrying `deliverable` and no `verify` raises `frontmatter-invalid` on the issue path `verify`.
+- `verify` is required in the new shape and may be `{ paths: [], commands: [] }`.
+- The dual-read window closes at EPIC 057, which removes the `worker` field.
+
+### verify block
+
+- The `verify` block is a nested YAML structure with exactly two keys: `paths` (list of absolute paths, anchored at the repository root) and `commands` (list of shell strings).
+- An empty list renders as `  paths: []` on one line.
+- A non-empty `paths` list renders as one `    - <quoted-path>` line per entry.
+- A non-empty `commands` list renders as one `    - <quoted-command>` line per entry.
+- Paths are sorted bytewise; commands preserve author order.
 
 ## The database is the source of truth
 

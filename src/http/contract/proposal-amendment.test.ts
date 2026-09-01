@@ -105,6 +105,80 @@ describe("src/http/contract/proposal-amendment.test", () => {
     );
   });
 
+  it("plan-format.md records both frontmatter shapes and the dual-read window", () => {
+    assert.match(
+      planFormat,
+      /Frontmatter fields:.*worker.*deliverable.*verify/,
+    );
+    assert.ok(
+      planFormat.includes(
+        "The two shapes are exclusive per document. A document carries either `worker` (legacy) or `deliverable` + `verify` (new), never both.",
+      ),
+    );
+    assert.ok(
+      planFormat.includes(
+        "A document carrying both raises `frontmatter-invalid` on the issue path `deliverable`.",
+      ),
+    );
+    assert.ok(
+      planFormat.includes(
+        "A document carrying neither field is legal through the dual-read window. `worker` is nullable in the `node.create` request, so the daemon creates such a node itself. EPIC 057 closes the window and makes `deliverable` mandatory.",
+      ),
+    );
+    assert.ok(
+      planFormat.includes(
+        "A document carrying `deliverable` and no `verify` raises `frontmatter-invalid` on the issue path `verify`.",
+      ),
+    );
+    assert.ok(
+      planFormat.includes(
+        "`verify` is required in the new shape and may be `{ paths: [], commands: [] }`.",
+      ),
+    );
+    assert.ok(
+      planFormat.includes(
+        "The dual-read window closes at EPIC 057, which removes the `worker` field.",
+      ),
+    );
+  });
+
+  it("plan-format.md records the two key orders and verify block grammar", () => {
+    assert.ok(
+      planFormat.includes(
+        "Legacy shape (worker): `id`, `kind`, `title`, `depends_on`, `worker`, `repo`. An absent field is omitted.",
+      ),
+    );
+    assert.ok(
+      planFormat.includes(
+        "New shape (deliverable): `id`, `kind`, `title`, `deliverable`, `repo`, `depends_on`, `verify`. An absent field is omitted. `depends_on` moves after `repo` in the new shape.",
+      ),
+    );
+    assert.ok(planFormat.includes("### verify block"));
+    assert.ok(
+      planFormat.includes(
+        "The `verify` block is a nested YAML structure with exactly two keys: `paths` (list of absolute paths, anchored at the repository root) and `commands` (list of shell strings).",
+      ),
+    );
+    assert.ok(
+      planFormat.includes("An empty list renders as ` paths: []` on one line."),
+    );
+    assert.ok(
+      planFormat.includes(
+        "A non-empty `paths` list renders as one ` - <quoted-path>` line per entry.",
+      ),
+    );
+    assert.ok(
+      planFormat.includes(
+        "A non-empty `commands` list renders as one ` - <quoted-command>` line per entry.",
+      ),
+    );
+    assert.ok(
+      planFormat.includes(
+        "Paths are sorted bytewise; commands preserve author order.",
+      ),
+    );
+  });
+
   it("the precondition table carries fromRevision for the three node operations", () => {
     const rows = read("api/README.md")
       .split("\n")

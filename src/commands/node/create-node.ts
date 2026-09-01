@@ -209,6 +209,8 @@ export function createNode(
       acceptanceBlob,
       worker: input.node.worker,
       repositoryId: repositoryName,
+      deliverable: null,
+      verifyJson: null,
       dependencies: dependsOn,
       source: "database",
     });

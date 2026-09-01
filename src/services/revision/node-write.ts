@@ -5,6 +5,8 @@ import type { CanonicalNode } from "../../domain/plan-canonical-path.ts";
 import { renderDocumentSet } from "../../domain/plan-render.ts";
 import type { RenderedDocument } from "../../domain/plan-render.ts";
 import { canonicalDocumentsJson } from "../../domain/plan-hash.ts";
+import type { Deliverable } from "../../domain/deliverable.ts";
+import { parseVerifyBlock } from "../../domain/verify-block.ts";
 import {
   RevisionError,
   type Revision,
@@ -41,6 +43,8 @@ export class NodeWriteRevision implements Revision {
         acceptance: string | null;
         worker: string | null;
         repo: string | null;
+        deliverable: Deliverable | null;
+        verify: ReturnType<typeof parseVerifyBlock> | null;
       }>
     >();
     for (const node of input.nodes) {
@@ -79,6 +83,9 @@ export class NodeWriteRevision implements Revision {
         acceptance,
         worker: node.worker,
         repo,
+        deliverable: node.deliverable as Deliverable | null,
+        verify:
+          node.verifyJson === null ? null : parseVerifyBlock(node.verifyJson),
       });
     }
     const canonicalNodes: readonly CanonicalNode[] = input.nodes.map(

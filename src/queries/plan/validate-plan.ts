@@ -15,6 +15,7 @@ import type {
 import { choiceVerdict } from "../../domain/plan-choice.ts";
 import { containmentMovable } from "../../domain/plan-containment.ts";
 import { canonicalPaths } from "../../domain/plan-canonical-path.ts";
+import type { Deliverable } from "../../domain/deliverable.ts";
 import type { StoredNode } from "../../domain/plan-graph.ts";
 import {
   differingFields,
@@ -29,6 +30,7 @@ import type { RenderedDocument } from "../../domain/plan-render.ts";
 import { renderDocumentSet } from "../../domain/plan-render.ts";
 import type { NodeKind, NodeState } from "../../domain/state.ts";
 import { validateDocuments } from "../../domain/plan-validate.ts";
+import type { VerifyBlock } from "../../domain/verify-block.ts";
 
 export type ValidatePlanDependencies = Readonly<{
   storage: Storage;
@@ -282,6 +284,8 @@ export function validatePlan(
         acceptance: string | null;
         worker: string | null;
         repo: string | null;
+        deliverable: Deliverable | null;
+        verify: VerifyBlock | null;
       }>
     >();
     for (const document of resolved) {
@@ -290,6 +294,8 @@ export function validatePlan(
         acceptance: document.acceptance,
         worker: document.worker,
         repo: document.repo,
+        deliverable: document.deliverable,
+        verify: document.verify,
       });
     }
     const documents = renderDocumentSet(canonicalNodes, bodies);

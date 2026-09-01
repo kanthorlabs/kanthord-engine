@@ -1,7 +1,11 @@
 import { z } from "zod";
 
+import { deliverable } from "./deliverable.ts";
+import type { Deliverable } from "./deliverable.ts";
 import type { NodeKind } from "./state.ts";
 import { nodeKind } from "./state.ts";
+import { verifyBlock } from "./verify-block.ts";
+import type { VerifyBlock } from "./verify-block.ts";
 import { workerKind } from "./worker.ts";
 
 const planFrontmatterKeys = new Set([
@@ -11,9 +15,11 @@ const planFrontmatterKeys = new Set([
   "depends_on",
   "worker",
   "repo",
+  "deliverable",
+  "verify",
 ]);
 
-export const planFrontmatter = z
+const planFrontmatterBase = z
   .object({
     id: z.string().optional(),
     kind: nodeKind,
@@ -21,6 +27,8 @@ export const planFrontmatter = z
     depends_on: z.array(z.string().min(1)).optional(),
     worker: workerKind.optional(),
     repo: z.string().min(1).optional(),
+    deliverable: deliverable.optional(),
+    verify: verifyBlock.optional(),
   })
   .passthrough()
   .superRefine((value, context) => {
@@ -35,6 +43,25 @@ export const planFrontmatter = z
     }
   });
 
+export const planFrontmatter = planFrontmatterBase.superRefine(
+  (value, context) => {
+    if (value.worker !== undefined && value.deliverable !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["deliverable"],
+        message: "frontmatter-invalid",
+      });
+    }
+    if (value.deliverable !== undefined && value.verify === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["verify"],
+        message: "frontmatter-invalid",
+      });
+    }
+  },
+);
+
 export type ParsedDocument = Readonly<{
   path: string;
   kind: NodeKind;
@@ -43,6 +70,8 @@ export type ParsedDocument = Readonly<{
   dependsOn: readonly string[];
   worker: string | null;
   repo: string | null;
+  deliverable: Deliverable | null;
+  verify: VerifyBlock | null;
   derivedParentPath: string | null;
   instruction: string;
   acceptance: string | null;

@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import { describe, it } from "node:test";
 
 import {
+  decodeVerifyBlock,
   parseVerifyBlock,
   renderVerifyBlock,
   verifyBlock,
@@ -29,6 +30,30 @@ function assertMalformedJson(text: string): void {
 }
 
 describe("src/domain/verify-block.ts", () => {
+  it("decodeVerifyBlock returns a block for valid JSON", () => {
+    const text = '{"paths":["/src/test.ts"],"commands":["pnpm test"]}';
+
+    assert.deepStrictEqual(decodeVerifyBlock(text), {
+      ok: true,
+      block: { paths: ["/src/test.ts"], commands: ["pnpm test"] },
+    });
+    assert.deepStrictEqual(parseVerifyBlock(text), {
+      paths: ["/src/test.ts"],
+      commands: ["pnpm test"],
+    });
+  });
+
+  it("decodeVerifyBlock returns not ok for malformed JSON", () => {
+    assert.deepStrictEqual(decodeVerifyBlock("{"), { ok: false });
+  });
+
+  it("decodeVerifyBlock returns not ok for an invalid verify block", () => {
+    assert.deepStrictEqual(
+      decodeVerifyBlock('{"paths":["a/../b"],"commands":[]}'),
+      { ok: false },
+    );
+  });
+
   it("renders an empty block as canonical bytes", () => {
     assert.strictEqual(
       renderVerifyBlock({ paths: [], commands: [] }),
@@ -62,6 +87,15 @@ describe("src/domain/verify-block.ts", () => {
         error instanceof VerifyBlockError &&
         error.code === "verify-json-malformed",
     );
+  });
+
+  it("the submitted verify schema refuses duplicate paths", () => {
+    const result = verifyBlock.safeParse({
+      paths: ["/src/foo.ts", "/src/foo.ts"],
+      commands: [],
+    });
+
+    assert.equal(result.success, false);
   });
 
   it("preserves duplicate commands in author order", () => {

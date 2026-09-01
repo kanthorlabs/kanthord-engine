@@ -1,5 +1,7 @@
 import { parseIdentity } from "./identity.ts";
 import { completenessFindings } from "./plan-completeness.ts";
+import type { Deliverable } from "./deliverable.ts";
+import { nodePairLegality } from "./node-pair.ts";
 import type { Choice, ChoiceVerdict } from "./plan-choice.ts";
 import type { Finding } from "./plan-finding.ts";
 import { findingScope, sortFindings } from "./plan-finding.ts";
@@ -8,6 +10,7 @@ import type { ResolvedDocument } from "./plan-identity.ts";
 import { comparePaths } from "./plan-path.ts";
 import type { CycleFinder } from "./plan-validate.ts";
 import type { NodeKind } from "./state.ts";
+import { decodeVerifyBlock } from "./verify-block.ts";
 
 export type CandidateNode = Readonly<{
   id: string;
@@ -18,6 +21,8 @@ export type CandidateNode = Readonly<{
   acceptanceBlob: string | null;
   worker: string | null;
   repositoryId: string | null;
+  deliverable: string | null;
+  verifyJson: string | null;
   dependencies: readonly string[];
   source: "submitted" | "database";
 }>;
@@ -61,6 +66,9 @@ export function buildCandidate(
         acceptanceBlob: blobs.acceptance,
         worker: document.worker,
         repositoryId: document.repo,
+        deliverable: document.deliverable,
+        verifyJson:
+          document.verify === null ? null : JSON.stringify(document.verify),
         dependencies: [...document.dependencies],
         source: "submitted",
       });
@@ -74,6 +82,8 @@ export function buildCandidate(
         acceptanceBlob: node.acceptanceBlob,
         worker: node.worker,
         repositoryId: node.repositoryId,
+        deliverable: node.deliverable,
+        verifyJson: node.verifyJson,
         dependencies: [...node.dependencies],
         source: "database",
       });
@@ -188,6 +198,34 @@ export function validateCandidate(
           path: null,
           id: node.id,
           message: `${node.repositoryId} is not bound to the project`,
+        });
+      }
+    }
+    if (node.deliverable !== null) {
+      if (!nodePairLegality(node.kind, node.deliverable as Deliverable).legal) {
+        findings.push({
+          code: "pair-illegal",
+          path: null,
+          id: node.id,
+          message:
+            "pair-illegal: kind and deliverable combination is not legal",
+        });
+      }
+      if (node.verifyJson === null) {
+        findings.push({
+          code: "verify-invalid",
+          path: null,
+          id: node.id,
+          message: "a node with a deliverable has no verify block",
+        });
+        continue;
+      }
+      if (!decodeVerifyBlock(node.verifyJson).ok) {
+        findings.push({
+          code: "verify-invalid",
+          path: null,
+          id: node.id,
+          message: "the stored verify block is invalid",
         });
       }
     }
