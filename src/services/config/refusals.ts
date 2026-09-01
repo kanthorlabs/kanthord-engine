@@ -7,6 +7,9 @@ import { isLoopbackHost as isLoopback } from "../../domain/loopback.ts";
 
 export { isLoopbackHost as isLoopback } from "../../domain/loopback.ts";
 
+const runMaxLifetimeBelowTtl =
+  "runMaxLifetimeMs must be greater than or equal to runTtlMs";
+
 export type StartableInput = Readonly<{
   masterKey: string;
   masterKeyFile: string;
@@ -19,6 +22,8 @@ export type StartableInput = Readonly<{
   allowedOrigins: readonly string[];
   allowedHosts: readonly string[] | null;
   port: number;
+  runTtlMs: number;
+  runMaxLifetimeMs: number;
 }>;
 
 export function assertStartable(input: StartableInput): void {
@@ -95,5 +100,9 @@ export function assertStartable(input: StartableInput): void {
 
   if (input.allowedHosts === null && input.port === 0) {
     throw new ConfigError("config-refused", explicitAllowedHostsRequired);
+  }
+
+  if (input.runMaxLifetimeMs < input.runTtlMs) {
+    throw new ConfigError("config-refused", runMaxLifetimeBelowTtl);
   }
 }

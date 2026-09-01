@@ -19,6 +19,8 @@ The human clears every stuck node by hand in this phase. The daemon recovers not
 | File                                                         | Subject                                                           |
 | ------------------------------------------------------------ | ----------------------------------------------------------------- |
 | [providers-and-credentials.md](providers-and-credentials.md) | registrations, encryption at rest, per-attempt selection          |
+| [deliverables-and-pairs.md](deliverables-and-pairs.md)       | deliverables and legal node pairs                                 |
+| [runs-and-exclusion.md](runs-and-exclusion.md)               | run kinds, the fence, run authority, exclusion, expiry            |
 | [instructions-and-profiles.md](instructions-and-profiles.md) | prompt compilation, repository profiles, templates, ambient files |
 | [agents-and-workers.md](agents-and-workers.md)               | the `general@1` worker, capability, attempts, inspection          |
 | [gates-and-approval.md](gates-and-approval.md)               | the task gate, the objective gate, approval evidence              |

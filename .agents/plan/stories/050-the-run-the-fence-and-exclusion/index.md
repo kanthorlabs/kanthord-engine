@@ -3,49 +3,64 @@
 Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
 Prereq: EPIC 049 (sequence order). EPICs 047, 048 and 049 must all be implemented before any story here runs — none of their outputs exists in `src/` yet. See **Facts** below.
 
-The run row exists, records its kind, its provenance and its budgets, the node assignment is published, and the two exclusion rules are written as pure functions. The claim that opens the run belongs to EPIC 050.1. `node.renew`, `node.release` and `node.report` belong to EPIC 050.2, and the node lease is removed in EPIC 050.4.
+The run vocabulary exists — its kind, its row schema, its provenance and its budgets — the node assignment is published, and the two exclusion rules are written as pure functions. This epic changes no table and implements no seam: migration `12` and the three claim seams belong to EPIC 050.1, because `src/services/execution/sqlite.ts:88` `openRun` cannot satisfy the new `run` shape and EPIC 050.1 is the epic that rewrites it. The claim that opens the run belongs to EPIC 050.1. `node.renew`, `node.release` and `node.report` belong to EPIC 050.2, and the node lease is removed in EPIC 050.4.
 
 ## One story, one path
 
-Every story of this epic is a `story-foundation`: a migration, a schema, a pure function, a service interface, a configuration budget or a proposal document. A story that changes no path draws nothing, and the pair rule does not reach it. `.agents/plan/authoring.md` is the grammar, and `scripts/verify-epic-sequence.ts` of EPIC 050.1 Story 8 enforces it.
+Every story of this epic is a `story-foundation`: a migration, a schema, a pure function, a service interface, a configuration budget or a proposal document. A story that changes no path draws nothing, and the pair rule does not reach it. `.agents/plan/authoring.md` is the grammar, and `scripts/verify-epic-sequence.ts` of EPIC 050.1 enforces it.
 
 No story of this epic carries a diagram.
 
 ## Dispatch order
 
-Stories 1, 5 and 7 are independent and can run concurrently — each is a greenfield pure module or a configuration addition.
+Stories 1, 4 and 6 are independent and can run concurrently — each is a greenfield pure module or a configuration addition.
 
-Story 6 depends on Story 5 (same file, shared liveness predicate); implement Story 6 directly after Story 5 in the same unit.
+Story 5 depends on Story 4 (same file, shared liveness predicate); implement Story 5 directly after Story 4 in the same unit.
 
-Story 3 depends on Story 1 alone. It is a zod schema and needs no DDL to exist first. **Story 3 owns every `run_base` registration** — `src/domain/rows.ts`, `src/domain/rows.test.ts` and `docs/proposal/phase-1/domain.md:39`. Story 2 adds none of them.
+Story 2 depends on Story 1 alone. It is a zod schema and needs no DDL to exist first. **Story 2 registers no table.** `run_base` reaches `src/domain/rows.ts`, `src/domain/rows.test.ts` and `docs/proposal/phase-1/domain.md:39` in EPIC 050.1, together with the migration that creates it, because `src/services/storage/schema-parity.test.ts:90-105` asserts the migrated table set equals `Object.keys(rows)`.
 
-Story 2 depends on Story 1 and Story 3. The dependency is one way: 3 → 2. There is no cycle.
+Story 3 depends on Story 2.
 
-Story 4 depends on Story 3.
+Story 7 depends on every prior story of this epic. It states what the code does, so write it last. It records the run model only: the claim sections are EPIC 050.1 Story 9 and the authority sections are EPIC 050.2 Story 9, so no sentence of it describes code a later epic ships.
 
-Story 8 depends on Stories 2, 3 and 4.
-
-Story 9 depends on every prior story of this epic. It states what the code does, so write it last. It records the run model only: the claim sections are EPIC 050.1 Story 9 and the authority sections are EPIC 050.2 Story 9, so no sentence of it describes code a later epic ships.
-
-A workable serial order: **1 → 3 → 2 → 5 → 6 → 7 → 4 → 8 → 9**.
+A workable serial order: **1 → 2 → 4 → 5 → 6 → 3 → 7**.
 
 No story depends on a story later than itself in that order.
 
 ## Stories
 
 - 1 — The run kind → `01-the-run-kind.md`
-- 2 — Migration 12 → `02-migration-12.md`
-- 3 — The run row → `03-the-run-row.md`
-- 4 — `assignment` is published → `04-assignment-is-published.md`
-- 5 — Subtree exclusion → `05-subtree-exclusion.md`
-- 6 — The objective-branch rule → `06-the-objective-branch-rule.md`
-- 7 — Configuration → `07-configuration.md`
-- 8 — The claim seams → `08-the-claim-seams.md`
-- 9 — The proposal records the run model → `09-the-proposal-records-the-run-model.md`
+- 2 — The run row → `02-the-run-row.md`
+- 3 — `assignment` is published → `03-assignment-is-published.md`
+- 4 — Subtree exclusion → `04-subtree-exclusion.md`
+- 5 — The objective-branch rule → `05-the-objective-branch-rule.md`
+- 6 — Configuration → `06-configuration.md`
+- 7 — The proposal records the run model → `07-the-proposal-records-the-run-model.md`
+
+## Transferred to EPIC 050.1 during implementation
+
+Migration `12` and the three claim seams left this epic on 2026-09-01, after Story 4 failed three
+attempts. The drafts are parked at `.agents/plan/pending/050.1-migration-12.md` and
+`.agents/plan/pending/050.1-the-claim-seams.md`, and `/plan` must absorb both into EPIC 050.1.
+The reason is one fact: migration `12` drops `run.parent_run_id`, `lease_fence` and `base_oid`,
+narrows the `kind` CHECK to the three new values, and makes `worker`, `fence`, `agents_json`,
+`expires_at` and `max_lifetime_at` `NOT NULL`, while `src/services/execution/sqlite.ts:88` `openRun`
+writes the dropped columns, a null `worker` and the `kind` values `objective` and `task`, and writes
+none of the four new `NOT NULL` columns. EPIC 050 defers that rewrite to EPIC 050.1 by its own
+non-goal, so the schema and its only writer must land in one epic. `plan.setNodeAssignment`,
+`execution.activeRunsOfNodes` and `execution.expireDueRuns` move with it, because they read
+`run.fence` and `run.expires_at`.
+
+Two node changes left the drafts entirely. Migration `12` no longer drops `node.worker` and no
+longer makes `node.deliverable` and `node.verify_json` `NOT NULL`, and its null-deliverable guard is
+gone. EPIC 047 keeps `node.worker` through EPIC 056, EPIC 049 keeps a plan document naming neither
+`worker` nor `deliverable` legal, `src/commands/node/create-node.ts:178` writes a null
+`deliverable`, and every node read path still selects `worker`. EPIC 057 migration `17` owns all
+three changes and its preflight.
 
 ## Moved to EPIC 050.1
 
-The claim contract, the expiry pass, the claim of a task, the claim of an initiative, the objective-busy refusal, the conformance harness, the conformance runner, the range gate and the claim half of the proposal left this epic when it split at the ten-story cap. `.agents/plan/stories/050.1-the-claim/` holds all nine. EPIC 050 changes no drawn path and nothing on the wire.
+The claim contract, the expiry pass, the claim of a task, the claim of an initiative, the objective-busy refusal, the conformance harness, the conformance runner, the range gate and the claim half of the proposal left this epic when it split at the ten-story cap. `.agents/plan/stories/050.1-the-claim/` holds all nine. EPIC 050 changes no drawn path and nothing on the wire. EPIC 050.1 now stands at eleven stories with the two transferred drafts, over the ten-story cap, so `/plan` must decide its split.
 
 ## Moved to EPIC 050.2
 
@@ -55,12 +70,12 @@ Run authority, the renew, the release, the report prelude, the worker contract a
 
 A human ruled on each. The EPIC carries them; these stories implement them.
 
-- **Migration 12 rebuilds the run table empty and discards every run and attempt row.** SQLite cannot widen or drop a table-level CHECK with `ALTER TABLE`, so the rename-copy-drop pattern of migration `0007` is forced. There are no deployments, so there is no row to preserve and no backfill rule to invent: `DELETE FROM attempt` then `DELETE FROM run` runs before the rebuild, and the `NOT NULL` columns land with no row to violate them. The migration is destructive to run history and to nothing else. See `02-migration-12.md` and `03-the-run-row.md`.
-- **The `run_base` cardinality rule lands at its upper bound.** EPIC 050 creates the table and the rule; EPIC 051 writes the row. An `execution` run therefore holds no row for the whole of this range, so the refine states _at most_ one for `execution` and exactly none for `structural` and `review`. `runRow` is parsed only in `src/domain/run.test.ts`, so no production path validates a live run row against it. See `03-the-run-row.md`.
-- **The proposal document is written in three parts, one per epic.** Story 9 here creates `docs/proposal/phase-2/runs-and-exclusion.md` and records the run model. EPIC 050.1 Story 9 adds the claim sections and EPIC 050.2 Story 9 adds the authority sections. One story carrying the whole document would state rules two later epics implement, and would import `runAuthorityRefusals` from a module EPIC 050.2 creates — a story EPIC 050 cannot prove in dispatch order. See `09-the-proposal-records-the-run-model.md`.
-- **The Proof names the config test files that exist.** `src/services/config/config.test.ts` does not exist; the EPIC Proof names `src/services/config/convict.test.ts` and `src/services/config/refusals.test.ts`. See `07-configuration.md`.
-- **`graph_revision` is a plan revision identity.** The column is `TEXT REFERENCES plan_revision(id)`. A compare and swap needs equality on an immutable token, not ordering, so a ULID identity is sufficient and no counter is added to `plan_revision`. Which revision the claim records is EPIC 050.1's ruling. See `02-migration-12.md` and `03-the-run-row.md`.
-- **One liveness predicate governs both exclusion rules.** A run whose `expires_at` has passed is live for neither `subtreeExclusion` nor `objectiveBusy`, the boundary instant is expired, and a module-private `isLive(run, now)` helper is what keeps the two from disagreeing. See `05-subtree-exclusion.md` and `06-the-objective-branch-rule.md`.
+- **Migration 12 rebuilds the run table empty and discards every run and attempt row, and it lands in EPIC 050.1.** SQLite cannot widen or drop a table-level CHECK with `ALTER TABLE`, so the rename-copy-drop pattern of migration `0007` is forced. There are no deployments, so there is no row to preserve and no backfill rule to invent. The migration is destructive to run history and to nothing else. See `.agents/plan/pending/050.1-migration-12.md`.
+- **The `run_base` cardinality rule lands at its upper bound.** EPIC 050 states the rule as a zod refine, EPIC 050.1 creates the table, and EPIC 051 writes the row. An `execution` run therefore holds no row for the whole of this range, so the refine states _at most_ one for `execution` and exactly none for `structural` and `review`. `runRow` is parsed only in `src/domain/run.test.ts`, so no production path validates a live run row against it. See `02-the-run-row.md`.
+- **The proposal document is written in three parts, one per epic.** Story 7 here creates `docs/proposal/phase-2/runs-and-exclusion.md` and records the run model. EPIC 050.1 Story 9 adds the claim sections and EPIC 050.2 Story 9 adds the authority sections. One story carrying the whole document would state rules two later epics implement, and would import `runAuthorityRefusals` from a module EPIC 050.2 creates — a story EPIC 050 cannot prove in dispatch order. See `07-the-proposal-records-the-run-model.md`.
+- **The Proof names the config test files that exist.** `src/services/config/config.test.ts` does not exist; the EPIC Proof names `src/services/config/convict.test.ts` and `src/services/config/refusals.test.ts`. See `06-configuration.md`.
+- **`graph_revision` is a plan revision identity.** The column is `TEXT REFERENCES plan_revision(id)`. A compare and swap needs equality on an immutable token, not ordering, so a ULID identity is sufficient and no counter is added to `plan_revision`. Which revision the claim records is EPIC 050.1's ruling. See `02-the-run-row.md`.
+- **One liveness predicate governs both exclusion rules.** A run whose `expires_at` has passed is live for neither `subtreeExclusion` nor `objectiveBusy`, the boundary instant is expired, and a module-private `isLive(run, now)` helper is what keeps the two from disagreeing. See `04-subtree-exclusion.md` and `05-the-objective-branch-rule.md`.
 
 ## Still open
 
@@ -70,14 +85,14 @@ Nothing blocks dispatch.
 
 ### The prerequisite epics are not implemented
 
-`grep -rn "deliverable\|assignment\|workerId\|routeWorker" src/` returns zero hits. None of these exists yet, and Stories 1, 2, 3 and 4 import them:
+`grep -rn "deliverable\|assignment\|workerId\|routeWorker" src/` returns zero hits. None of these exists yet, and Stories 1, 2 and 3 import them:
 
 - `src/domain/deliverable.ts` — `deliverables = ["test", "implementation", "review", "expansion"]`, four members. EPIC 047 Story 1.
 - `src/domain/node-pair.ts` — `nodePairLegality(kind, deliverable)`. EPIC 047 Story 2.
-- `src/domain/worker-id.ts` — `WORKER_ID_PATTERN = /^[a-z][a-z0-9-]*@[1-9][0-9]*$/`, a RegExp and **not** a zod schema. EPIC 048 Story 1. Story 3 here adds the zod schema beside it.
-- `src/services/storage/migration-0011-deliverable.ts` at version `11`, which creates `node.assignment`, `node.deliverable` and `node.verify_json`. EPIC 047 Story 7. Migration `12` is the next version.
+- `src/domain/worker-id.ts` — `WORKER_ID_PATTERN = /^[a-z][a-z0-9-]*@[1-9][0-9]*$/`, a RegExp and **not** a zod schema. EPIC 048 Story 1. Story 2 here adds the zod schema beside it.
+- `src/services/storage/migration-0011-deliverable.ts` at version `11`, which creates `node.assignment`, `node.deliverable` and `node.verify_json`. EPIC 047 Story 7. It is the highest version this epic leaves in the tree.
 - `node.worker` is legacy. The shipped `workerKinds` enum at `src/domain/worker.ts:3-11` holds seven values. The four dotted ones — `claude.swe@1`, `claude.te@1`, `opencode.swe@1`, `opencode.te@1` — are refused by `WORKER_ID_PATTERN`, because `.` is outside `[a-z0-9-]`. The three undotted ones — `general@1`, `tdd@1`, `git@1` — match the grammar. The two sets **overlap**; they are not disjoint. A test asserting disjointness would fail.
-- `docs/proposal/phase-1/domain.md:24` states that `project.worker`, `node.worker` and `run.worker` hold a worker _kind_ and that the set is a `CHECK` clause and a zod enum. Story 3 widens `run.worker` to the id grammar and amends that sentence.
+- `docs/proposal/phase-1/domain.md:24` states that `project.worker`, `node.worker` and `run.worker` hold a worker _kind_ and that the set is a `CHECK` clause and a zod enum. Story 2 widens `run.worker` to the id grammar and amends that sentence.
 
 ### Line anchors the EPIC cites that are stale
 

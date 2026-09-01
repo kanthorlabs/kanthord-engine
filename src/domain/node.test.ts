@@ -20,6 +20,7 @@ describe("src/domain/node.test", () => {
     instructionBlob: HASH,
     acceptanceBlob: null,
     worker: null,
+    assignment: null,
     repositoryId: "repo_" + ULID_A,
     state: "ready" as const,
     blockReason: null,
@@ -39,6 +40,7 @@ describe("src/domain/node.test", () => {
     instructionBlob: HASH,
     acceptanceBlob: HASH,
     worker: null,
+    assignment: null,
     repositoryId: null,
     state: "ready" as const,
     blockReason: null,
@@ -58,6 +60,7 @@ describe("src/domain/node.test", () => {
     instructionBlob: HASH,
     acceptanceBlob: null,
     worker: null,
+    assignment: null,
     repositoryId: null,
     state: "pending" as const,
     blockReason: null,
@@ -160,8 +163,49 @@ describe("src/domain/node.test", () => {
     }
   });
 
-  it("does not publish assignment through the node row", () => {
-    assert.equal("assignment" in nodeRow.shape, false);
+  it("nodeRow accepts an assignment carrying a worker id", () => {
+    assert.equal(
+      nodeRow.safeParse({ ...validObjective, assignment: "general@1" }).success,
+      true,
+    );
+  });
+
+  it("nodeRow accepts a null assignment", () => {
+    assert.equal(
+      nodeRow.safeParse({ ...validObjective, assignment: null }).success,
+      true,
+    );
+  });
+
+  it("nodeRow refuses an assignment value outside the worker id grammar", () => {
+    for (const assignment of [
+      "claude.swe@1",
+      "general",
+      "general@",
+      "general@0",
+      "General@1",
+    ]) {
+      assert.equal(
+        nodeRow.safeParse({ ...validObjective, assignment }).success,
+        false,
+        assignment,
+      );
+    }
+  });
+
+  it("nodeRow accepts an assignment on every node kind", () => {
+    for (const [fixture, kind] of [
+      [validInitiative, "initiative"],
+      [validObjective, "objective"],
+      [validTask, "task"],
+    ] as const) {
+      assert.equal(
+        nodeRow.safeParse({ ...fixture, kind, assignment: "general@1" })
+          .success,
+        true,
+        kind,
+      );
+    }
   });
 
   it("matches nodePairLegality for every kind and deliverable pair", () => {

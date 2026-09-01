@@ -9,7 +9,7 @@ import type {
 } from "./plan-graph.ts";
 
 describe("src/domain/plan-graph.test", () => {
-  it("StoredNode carries exactly its seventeen members", () => {
+  it("StoredNode carries exactly its eighteen members", () => {
     const node: StoredNode = {
       id: "task_a",
       projectId: "project_a",
@@ -19,6 +19,7 @@ describe("src/domain/plan-graph.test", () => {
       instructionBlob: `sha256:${"0".repeat(64)}`,
       acceptanceBlob: `sha256:${"1".repeat(64)}`,
       worker: null,
+      assignment: null,
       repositoryId: null,
       state: "pending",
       blockReason: null,
@@ -31,6 +32,7 @@ describe("src/domain/plan-graph.test", () => {
     };
     assert.deepEqual(Object.keys(node).sort(), [
       "acceptanceBlob",
+      "assignment",
       "blockReason",
       "deliverable",
       "dependencies",

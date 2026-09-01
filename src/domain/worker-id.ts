@@ -1,4 +1,8 @@
+import { z } from "zod";
+
 export const WORKER_ID_PATTERN: RegExp = /^[a-z][a-z0-9-]*@[1-9][0-9]*$/;
+
+export const workerId = z.string().regex(WORKER_ID_PATTERN);
 
 export type WorkerId = Readonly<{
   name: string;

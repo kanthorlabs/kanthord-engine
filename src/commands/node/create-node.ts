@@ -168,6 +168,7 @@ export function createNode(
         instructionBlob,
         acceptanceBlob,
         worker: input.node.worker,
+        assignment: null,
         repositoryId,
         state: "pending",
         blockReason: null,

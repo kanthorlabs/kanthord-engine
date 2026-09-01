@@ -105,6 +105,7 @@ describe("src/http/server/project/show-project-graph.test", () => {
     assert.equal(response.body.nodes[2].key, fixtureIds.task);
     assert.equal(response.body.nodes[3].key, "task_b");
     const expectedBytewiseKeys = [
+      "assignment",
       "blockReason",
       "deliverable",
       "discardReason",
@@ -247,6 +248,7 @@ describe("src/http/server/project/show-project-graph.test", () => {
     assert.equal(taskNode.attributes.repositoryId, null);
 
     const expectedBytewiseKeys = [
+      "assignment",
       "blockReason",
       "deliverable",
       "discardReason",

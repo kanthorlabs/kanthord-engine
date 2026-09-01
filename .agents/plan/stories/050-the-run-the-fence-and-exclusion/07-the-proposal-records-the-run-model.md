@@ -1,4 +1,4 @@
-# Story 9 — The proposal records the run model
+# Story 7 — The proposal records the run model
 
 Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
 Depends on: every prior story of this epic. This document states what the code does; write it last.
@@ -6,8 +6,8 @@ Kind: story-foundation
 
 This story creates the run-model document and records the half EPIC 050 implements: the run kinds,
 the fence column, the exclusion rules, the base set, the provenance and the budgets. EPIC 050.1
-Story 9 adds the claim half to the same file, and EPIC 050.2 Story 9 adds the authority half. It
-draws no path.
+Story 9 adds the claim half to the same file, and EPIC 050.2 Story 9 adds the authority half. It draws
+no path.
 
 ## Change
 
@@ -36,8 +36,6 @@ Sections, in this order, each stating the rule the code enforces:
 
 - **`## Both run budgets are configuration`** — `runTtlMs` and `runMaxLifetimeMs` are settings, and both are validated at startup: a `runTtlMs` below 1000 is refused, a `runMaxLifetimeMs` below `runTtlMs` is refused, and a non-integer is refused. State that a run carries both as absolute timestamps. The renew formula belongs to the epic that ships the renew.
 
-- **`## Migration 12 lands the final shape`** — there are no deployments, so the migration rebuilds `run` empty rather than backfilling it. State what it removes: `lease_fence`, `base_oid`, the `objective` and `task` members of the kind set, and `node.worker`. State what it makes non-null: `fence`, `agents_json`, `expires_at`, `max_lifetime_at`, `node.deliverable` and `node.verify_json`. State that it discards every `run` and `attempt` row and touches no other table, and that it refuses to run while any node holds a null deliverable.
-
 **Add one row to the `## Files` table in `docs/proposal/phase-2/README.md:19-25`**, in the table's existing two-column form:
 
 ```
@@ -50,7 +48,7 @@ Sections, in this order, each stating the rule the code enforces:
 - **Write no section this epic does not implement.** The claim, the refusal order, the review refusal and the expiry pass belong to EPIC 050.1 Story 9. Run authority, the renew and the release belong to EPIC 050.2 Story 9. A section written here that a later epic implements makes this story unprovable in dispatch order.
 - Do not restate the checkpoint contract. `checkpoints.md` of the next epic owns it.
 - Do not describe the worker switch or the operator handoff. A later epic owns both.
-- Do not name a table column that migration `12` does not create.
+- Do not describe migration `12`. EPIC 050.1 owns that migration and its database proposal updates.
 - ASD-STE100 style, matching the sibling phase-2 documents: simple tenses, active voice, one instruction per sentence.
 
 ## Verify

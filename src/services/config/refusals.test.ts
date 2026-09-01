@@ -28,6 +28,8 @@ function validInput(overrides?: Partial<StartableInput>): StartableInput {
     // explicitly.
     allowedHosts: ["127.0.0.1:31415"],
     port: 31415,
+    runTtlMs: 300000,
+    runMaxLifetimeMs: 14400000,
     ...overrides,
   };
 }
@@ -505,6 +507,34 @@ describe("src/services/config/refusals.test", () => {
     it("rule 7: a non-null allowedHosts with port 0 never triggers the new refusal", () => {
       const result = assertStartable(
         validInput({ bind: "127.0.0.1", allowedHosts: ["h:1"], port: 0 }),
+      );
+      assert.equal(result, undefined);
+    });
+
+    it("runMaxLifetimeMs below runTtlMs throws config-refused", () => {
+      assert.throws(
+        () =>
+          assertStartable(
+            validInput({ runTtlMs: 300000, runMaxLifetimeMs: 299999 }),
+          ),
+        (err: unknown) => {
+          assert.ok(err instanceof ConfigError);
+          assert.equal(err.code, "config-refused");
+          return true;
+        },
+      );
+    });
+
+    it("runMaxLifetimeMs equal to runTtlMs starts", () => {
+      const result = assertStartable(
+        validInput({ runTtlMs: 300000, runMaxLifetimeMs: 300000 }),
+      );
+      assert.equal(result, undefined);
+    });
+
+    it("the defaults start", () => {
+      const result = assertStartable(
+        validInput({ runTtlMs: 300000, runMaxLifetimeMs: 14400000 }),
       );
       assert.equal(result, undefined);
     });

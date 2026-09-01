@@ -21,7 +21,7 @@ An agent is a dedicated unit. A worker kind composes agents. The MVP ships the `
 
 The list names the domain model, and a reader must not read it as a table list. Three entries hold no row.
 
-- **Worker** and **Agent** are closed sets of kinds, defined in code. A kind is vocabulary that a row cites: `project.worker`, `node.worker` and `run.worker` hold a worker kind, and `agent_invocation.agents` holds an agent kind. The set is a `CHECK` clause and a zod enum, never a table.
+- **Worker** and **Agent** are closed sets of kinds, defined in code. `run.worker` holds a worker id under the grammar of `src/domain/worker-id.ts`; `project.worker` and `node.worker` keep the legacy kind until EPIC 057 removes them. `agent_invocation.agents` holds an agent kind. The set is a `CHECK` clause and a zod enum, never a table.
 - **Template** is content shipped with KanthorD. It has no table, no row and no id in the database. **Profile** is the instantiation of a template for one repository, and `profile` is the table that holds the pointer.
 
 The table list below is complete. A domain-model entry absent from it persists nothing, and a phase that names such an entry delivers code or content rather than a migration.

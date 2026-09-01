@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { parseWorkerId, WorkerIdError } from "./worker-id.ts";
+import { parseWorkerId, workerId, WorkerIdError } from "./worker-id.ts";
 
 function assertInvalidWorkerId(raw: string): void {
   assert.throws(
@@ -37,4 +37,17 @@ describe("src/domain/worker-id", () => {
       assertInvalidWorkerId(raw);
     });
   }
+
+  it("the workerId schema accepts every value the pattern accepts", () => {
+    assert.equal(workerId.safeParse("general@1").success, true);
+    for (const raw of [
+      "claude.swe@1",
+      "general",
+      "general@",
+      "general@0",
+      "General@1",
+    ]) {
+      assert.equal(workerId.safeParse(raw).success, false, raw);
+    }
+  });
 });

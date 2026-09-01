@@ -24,7 +24,7 @@ import type {
 } from "./index.ts";
 
 const NODE_COLUMNS =
-  "id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, repository_id, state, block_reason, discard_reason, revision, updated_at, deliverable, verify_json";
+  "id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, assignment, repository_id, state, block_reason, discard_reason, revision, updated_at, deliverable, verify_json";
 
 const SELECT_NODE = "SELECT " + NODE_COLUMNS + " FROM node";
 
@@ -42,7 +42,7 @@ const DELETE_NODE = "DELETE FROM node WHERE id = ?";
 const INSERT_NODE =
   "INSERT INTO node (" +
   NODE_COLUMNS +
-  ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, parent_id = excluded.parent_id, title = excluded.title, instruction_blob = excluded.instruction_blob, acceptance_blob = excluded.acceptance_blob, worker = excluded.worker, repository_id = excluded.repository_id, revision = excluded.revision, updated_at = excluded.updated_at, deliverable = CASE WHEN ? THEN excluded.deliverable ELSE deliverable END, verify_json = CASE WHEN ? THEN excluded.verify_json ELSE verify_json END";
+  ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'pending', NULL, NULL, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, parent_id = excluded.parent_id, title = excluded.title, instruction_blob = excluded.instruction_blob, acceptance_blob = excluded.acceptance_blob, worker = excluded.worker, repository_id = excluded.repository_id, revision = excluded.revision, updated_at = excluded.updated_at, deliverable = CASE WHEN ? THEN excluded.deliverable ELSE deliverable END, verify_json = CASE WHEN ? THEN excluded.verify_json ELSE verify_json END";
 
 type NodeRow = Readonly<{
   id: string;
@@ -53,6 +53,7 @@ type NodeRow = Readonly<{
   instruction_blob: string;
   acceptance_blob: string | null;
   worker: string | null;
+  assignment: string | null;
   repository_id: string | null;
   state: NodeState;
   block_reason: string | null;
@@ -89,6 +90,7 @@ const toNode = (row: NodeRow, dependencies: readonly string[]): StoredNode => ({
   instructionBlob: row.instruction_blob,
   acceptanceBlob: row.acceptance_blob,
   worker: row.worker,
+  assignment: row.assignment,
   repositoryId: row.repository_id,
   state: row.state,
   blockReason: row.block_reason,

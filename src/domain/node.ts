@@ -7,6 +7,7 @@ import { workerKind } from "./worker.ts";
 import { blobHash } from "./blob.ts";
 import { deliverable } from "./deliverable.ts";
 import { nodePairLegality } from "./node-pair.ts";
+import { workerId } from "./worker-id.ts";
 
 export const nodeRow = z
   .object({
@@ -18,6 +19,7 @@ export const nodeRow = z
     instructionBlob: blobHash,
     acceptanceBlob: blobHash.nullable(),
     worker: workerKind.nullable(),
+    assignment: workerId.nullable(),
     repositoryId: identity("repository").nullable(),
     state: nodeState,
     blockReason: blockReason.nullable(),

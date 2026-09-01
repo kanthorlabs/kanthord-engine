@@ -1,4 +1,4 @@
-# Story 5 — Subtree exclusion
+# Story 4 — Subtree exclusion
 
 Epic: `.agents/plan/epics/050-the-run-the-fence-and-exclusion.md`
 Depends on: Story 1 (`RunKind`). No storage dependency — this story adds a pure function.
@@ -6,7 +6,7 @@ Kind: story-foundation
 
 ## Change
 
-**Create `src/domain/run-exclusion.ts`** (greenfield). This story adds `subtreeExclusion`; Story 6 adds `objectiveBusy` to the same file.
+**Create `src/domain/run-exclusion.ts`** (greenfield). This story adds `subtreeExclusion`; Story 5 adds `objectiveBusy` to the same file.
 
 Export:
 
@@ -60,7 +60,7 @@ The refusal carries the matched run's `nodeId`, `runId` and `expiresAt`, so a cl
 
 - Pure. No clock, no store, no `Date.now()`. `now` is an input.
 - `input.targetId` appears in neither `ancestorIds` nor `descendantIds`. The function does not assert that; the caller builds the sets.
-- Do not fold the objective-branch rule in here. That is `objectiveBusy` in Story 6, and it carries a different refusal code.
+- Do not fold the objective-branch rule in here. That is `objectiveBusy` in Story 5, and it carries a different refusal code.
 - Do not use `Array.prototype.sort` on the input arrays. Sort a copy, or select the minimum by comparison, so the caller's arrays are not mutated.
 
 ## Verify

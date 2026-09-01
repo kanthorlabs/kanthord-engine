@@ -74,7 +74,7 @@ describe("src/queries/project/show-project-graph.test", () => {
     assert.ok(result.edges.length >= 0);
   });
 
-  it("nodes carry the nine declared attributes in bytewise key order", (t) => {
+  it("nodes carry the ten declared attributes in bytewise key order", (t) => {
     const { storage, plan, graph, dispose } = build();
     t.after(() => dispose());
     storage.transact((transaction) => {
@@ -88,6 +88,7 @@ describe("src/queries/project/show-project-graph.test", () => {
     );
 
     const attrKeys = [
+      "assignment",
       "blockReason",
       "deliverable",
       "discardReason",
@@ -138,6 +139,35 @@ describe("src/queries/project/show-project-graph.test", () => {
       paths: ["/docs/plan.md"],
       commands: ["pnpm run verify"],
     });
+  });
+
+  it("project.graph carries the assignment on every node", (t) => {
+    const { storage, plan, graph, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      transaction.run("UPDATE node SET assignment = ? WHERE id = ?", [
+        "general@1",
+        fixtureIds.task,
+      ]);
+    });
+
+    const result = showProjectGraph(
+      { storage, plan, graph },
+      { projectId: fixtureIds.project },
+    );
+    const assigned = result.nodes.find(
+      (candidate) => candidate.key === fixtureIds.task,
+    );
+    const unassigned = result.nodes.find(
+      (candidate) => candidate.key === fixtureIds.initiative,
+    );
+
+    assert.ok(assigned);
+    assert.ok(unassigned);
+    assert.equal(assigned.attributes.assignment, "general@1");
+    assert.equal(unassigned.attributes.assignment, null);
   });
 
   it("a graph node without deliverable or verify JSON publishes null fields", (t) => {

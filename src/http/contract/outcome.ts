@@ -115,6 +115,7 @@ export const nodeUnblockExamples: OperationExamples = {
       instruction: "# atlas\n",
       acceptance: null,
       worker: null,
+      assignment: null,
       deliverable: null,
       verify: null,
       repositoryId: `repo_${U}`,

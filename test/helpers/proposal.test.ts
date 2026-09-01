@@ -1,7 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
-import { proposalStatements } from "./proposal.ts";
+import { proposalStatements, readRouteMatrix } from "./proposal.ts";
+import {
+  objectiveBusy,
+  subtreeExclusion,
+} from "../../src/domain/run-exclusion.ts";
 
 const tables = [
   "agent_invocation",
@@ -59,5 +65,92 @@ describe("test/helpers/proposal.test", () => {
       (error: unknown) =>
         error instanceof Error && error.message === "no sql block in README.md",
     );
+  });
+
+  it("the phase-2 file table and the phase-2 directory agree", () => {
+    const directory = resolve(
+      import.meta.dirname,
+      "../../docs/proposal/phase-2",
+    );
+    const readme = readFileSync(resolve(directory, "README.md"), "utf8");
+    const filesSection = readme.split(/^## Files$/m)[1]?.split(/^## /m)[0];
+    assert.ok(filesSection);
+    const linkedFiles = [
+      ...filesSection.matchAll(/^\| \[([^\]]+)\]\(([^)]+)\)/gm),
+    ].map((match) => match[2]!);
+    const actualFiles = readdirSync(directory)
+      .filter((name) => name.endsWith(".md"))
+      .filter((name) => name !== "README.md")
+      .sort();
+
+    assert.deepEqual(
+      linkedFiles.map((file) => file.replace(/^.*\//, "")).sort(),
+      actualFiles,
+    );
+    for (const file of linkedFiles) {
+      assert.equal(existsSync(resolve(directory, file)), true, file);
+    }
+  });
+
+  it("runs-and-exclusion.md declares no route table", () => {
+    const phase2File = resolve(
+      import.meta.dirname,
+      "../../docs/proposal/phase-2/runs-and-exclusion.md",
+    );
+    const apiFile = resolve(
+      import.meta.dirname,
+      "../../docs/proposal/api/runs-and-exclusion.md",
+    );
+
+    assert.equal(existsSync(phase2File), true);
+    assert.equal(existsSync(apiFile), false);
+    assert.equal(
+      readRouteMatrix().filter(
+        (row) => row.status === "routed" || row.status === "stubbed",
+      ).length,
+      73,
+    );
+  });
+
+  it("the run model document names both exclusion refusal codes", () => {
+    const document = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../docs/proposal/phase-2/runs-and-exclusion.md",
+      ),
+      "utf8",
+    );
+    const now = 100;
+    const subtree = subtreeExclusion({
+      targetId: "node-target",
+      ancestorIds: ["node-ancestor"],
+      descendantIds: [],
+      runs: [
+        {
+          runId: "run-ancestor",
+          nodeId: "node-ancestor",
+          state: "active",
+          expiresAt: now + 1,
+        },
+      ],
+      now,
+    });
+    const objective = objectiveBusy({
+      objectiveId: "objective-1",
+      siblingRuns: [
+        {
+          runId: "run-sibling",
+          nodeId: "node-sibling",
+          state: "active",
+          expiresAt: now + 1,
+        },
+      ],
+      now,
+    });
+
+    assert.equal(subtree?.refusal, "subtree-busy");
+    assert.equal(objective?.refusal, "objective-busy");
+    assert.ok(document.includes(subtree!.refusal));
+    assert.ok(document.includes(objective!.refusal));
   });
 });

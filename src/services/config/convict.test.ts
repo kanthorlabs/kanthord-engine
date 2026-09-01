@@ -101,7 +101,7 @@ describe("src/services/config/convict.test", () => {
       }
     });
 
-    it("Settings key order is home, actor, masterKey, http, tools, attemptLimit, leaseTtlMs", () => {
+    it("Settings key order is home, actor, masterKey, http, tools, attemptLimit, leaseTtlMs, runTtlMs, runMaxLifetimeMs", () => {
       const dir = tmpDir();
       try {
         const filePath = writeJson(dir, validFile());
@@ -114,6 +114,8 @@ describe("src/services/config/convict.test", () => {
           "tools",
           "attemptLimit",
           "leaseTtlMs",
+          "runTtlMs",
+          "runMaxLifetimeMs",
         ]);
       } finally {
         fs.rmSync(dir, { recursive: true });
@@ -438,6 +440,142 @@ describe("src/services/config/convict.test", () => {
         const filePath = writeJson(dir, validFile({ attemptLimit: 1 }));
         const result = config.load(loadInput(dir, filePath));
         assert.equal(result.settings.attemptLimit, 1);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+  });
+
+  describe("run budgets", () => {
+    it("defaults runTtlMs to 300000 when omitted", () => {
+      const dir = tmpDir();
+      try {
+        const file = validFile();
+        delete (file as any).runTtlMs;
+        const filePath = writeJson(dir, file);
+        const result = config.load(loadInput(dir, filePath));
+        assert.equal(result.settings.runTtlMs, 300000);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("defaults runMaxLifetimeMs to 14400000 when omitted", () => {
+      const dir = tmpDir();
+      try {
+        const file = validFile();
+        delete (file as any).runMaxLifetimeMs;
+        const filePath = writeJson(dir, file);
+        const result = config.load(loadInput(dir, filePath));
+        assert.equal(result.settings.runMaxLifetimeMs, 14400000);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("loads runTtlMs: 1000", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile({ runTtlMs: 1000 }));
+        const result = config.load(loadInput(dir, filePath));
+        assert.equal(result.settings.runTtlMs, 1000);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    for (const [key, value] of [
+      ["runTtlMs", 999],
+      ["runTtlMs", 0],
+      ["runTtlMs", -1],
+      ["runTtlMs", 1500.5],
+      ["runTtlMs", "300000"],
+      ["runMaxLifetimeMs", 0],
+      ["runMaxLifetimeMs", -1],
+      ["runMaxLifetimeMs", 1.5],
+    ] as const) {
+      it(`throws config-invalid for ${key}: ${JSON.stringify(value)}`, () => {
+        const dir = tmpDir();
+        try {
+          const filePath = writeJson(dir, validFile({ [key]: value }));
+          assert.throws(
+            () => config.load(loadInput(dir, filePath)),
+            (err: any) => {
+              assert.equal(err.code, "config-invalid");
+              return true;
+            },
+          );
+        } finally {
+          fs.rmSync(dir, { recursive: true });
+        }
+      });
+    }
+
+    it("KANTHORD_RUN_TTL_MS=600000 wins over the file value", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile({ runTtlMs: 300000 }));
+        const result = config.load(
+          loadInput(dir, filePath, {
+            env: { KANTHORD_RUN_TTL_MS: "600000" },
+          }),
+        );
+        assert.equal(result.settings.runTtlMs, 600000);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("KANTHORD_RUN_MAX_LIFETIME_MS=7200000 wins over the file value", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(
+          dir,
+          validFile({ runMaxLifetimeMs: 14400000 }),
+        );
+        const result = config.load(
+          loadInput(dir, filePath, {
+            env: { KANTHORD_RUN_MAX_LIFETIME_MS: "7200000" },
+          }),
+        );
+        assert.equal(result.settings.runMaxLifetimeMs, 7200000);
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("KANTHORD_RUN_TTL_MS=abc throws config-invalid", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile());
+        assert.throws(
+          () =>
+            config.load(
+              loadInput(dir, filePath, {
+                env: { KANTHORD_RUN_TTL_MS: "abc" },
+              }),
+            ),
+          (err: any) => {
+            assert.equal(err.code, "config-invalid");
+            return true;
+          },
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+
+    it("an unknown key runTtlMillis throws config-invalid", () => {
+      const dir = tmpDir();
+      try {
+        const filePath = writeJson(dir, validFile({ runTtlMillis: 300000 }));
+        assert.throws(
+          () => config.load(loadInput(dir, filePath)),
+          (err: any) => {
+            assert.equal(err.code, "config-invalid");
+            return true;
+          },
+        );
       } finally {
         fs.rmSync(dir, { recursive: true });
       }

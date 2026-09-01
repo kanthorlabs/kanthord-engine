@@ -660,6 +660,7 @@ function parseNode(fixture: RecoveryFixture, id: string): void {
       instructionBlob: row.instruction_blob,
       acceptanceBlob: row.acceptance_blob,
       worker: row.worker,
+      assignment: row.assignment,
       repositoryId: row.repository_id,
       state: row.state,
       blockReason: row.block_reason,

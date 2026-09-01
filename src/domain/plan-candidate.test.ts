@@ -93,6 +93,7 @@ function storedNode(
     instructionBlob: `sha256:${"a".repeat(64)}`,
     acceptanceBlob: null,
     worker: null,
+    assignment: null,
     repositoryId: null,
     state: "pending",
     blockReason: null,

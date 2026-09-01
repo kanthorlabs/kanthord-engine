@@ -43,6 +43,7 @@ function nodeAttributes(node: StoredNode): GraphAttributes {
     discardReason: node.discardReason,
     parentId: node.parentId,
     repositoryId: node.repositoryId,
+    assignment: node.assignment,
     deliverable: node.deliverable,
     verify: parseNodeVerifyBlock(node),
   };

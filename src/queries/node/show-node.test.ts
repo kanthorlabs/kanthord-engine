@@ -30,9 +30,10 @@ const blobHashPattern = /^sha256:[0-9a-f]{64}$/;
 const OBJECT_ID = "a".repeat(40);
 const NEWEST_RUN_ULID = "01HZY000000000000000000001";
 
-const twentyTwoMemberNames = [
+const twentyThreeMemberNames = [
   "acceptance",
   "acceptanceBlob",
+  "assignment",
   "attestedObjectId",
   "blockReason",
   "deliverable",
@@ -82,7 +83,7 @@ describe("src/queries/node/show-node.test", () => {
     };
   }
 
-  it("the seeded task returns all twenty-two members field by field", (t) => {
+  it("the seeded task returns all twenty-three members field by field", (t) => {
     const { storage, plan, blobs, execution, dispose } = build();
     t.after(() => dispose());
     storage.transact((transaction) => {
@@ -110,6 +111,7 @@ describe("src/queries/node/show-node.test", () => {
       instruction: "\u0000",
       acceptance: "\u0000",
       worker: null,
+      assignment: null,
       deliverable: null,
       verify: null,
       repositoryId: null,
@@ -227,7 +229,7 @@ describe("src/queries/node/show-node.test", () => {
     assert.deepEqual(view.dependencies, [fixtureIds.objective]);
   });
 
-  it("Object.keys of the view bytewise sorted deep-equals the twenty-two member names", (t) => {
+  it("Object.keys of the view bytewise sorted deep-equals the twenty-three member names", (t) => {
     const { storage, plan, blobs, execution, dispose } = build();
     t.after(() => dispose());
     storage.transact((transaction) => {
@@ -240,7 +242,29 @@ describe("src/queries/node/show-node.test", () => {
       { id: fixtureIds.task },
     );
     assert.ok(view);
-    assert.deepEqual([...Object.keys(view)].sort(), twentyTwoMemberNames);
+    assert.deepEqual([...Object.keys(view)].sort(), twentyThreeMemberNames);
+  });
+
+  it("showNode returns the assignment", (t) => {
+    const { storage, plan, blobs, execution, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      transaction.run("UPDATE node SET assignment = ? WHERE id = ?", [
+        "general@1",
+        fixtureIds.task,
+      ]);
+    });
+
+    const view = showNode(
+      { storage, plan, blobs, execution },
+      { id: fixtureIds.task },
+    );
+
+    assert.ok(view);
+    assert.equal(view.assignment, "general@1");
+    assert.equal(nodeShowResponse.safeParse(view).success, true);
   });
 
   it("a node with a deliverable and verify JSON publishes both fields without raw JSON", (t) => {
@@ -616,6 +640,7 @@ describe("src/queries/node/show-node.test", () => {
       instruction: "\u0000",
       acceptance: null,
       worker: null,
+      assignment: null,
       deliverable: null,
       verify: null,
       repositoryId: fixtureIds.repository,
