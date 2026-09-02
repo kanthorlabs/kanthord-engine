@@ -25,7 +25,7 @@
     "format": "prettier --write src test scripts docs eslint.config.js",
     "lint": "eslint .",
     "start": "node src/main.ts",
-    "verify": "prettier --check src test scripts docs eslint.config.js && pnpm run typecheck && pnpm test && pnpm run lint && node scripts/verify-db-status.ts && pnpm run verify:guards",
+    "verify": "prettier --check src test scripts docs eslint.config.js && pnpm run typecheck && pnpm test && pnpm run lint && node scripts/verify-db-status.ts && node scripts/verify-schema-writers.ts && pnpm run verify:guards",
     "verify:handoff": "node scripts/verify-handoff.mjs",
     "verify:guards": "scripts/lane-check.test.sh && scripts/turn-snapshot.test.sh && scripts/memory-append-only.test.sh && scripts/persona-sync.test.sh",
     "contract:publish": "node scripts/publish-contract.ts",
