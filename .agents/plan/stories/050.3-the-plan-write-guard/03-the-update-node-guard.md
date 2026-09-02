@@ -1,7 +1,7 @@
 # Story 3 — The update-node guard
 
 Epic: `.agents/plan/epics/050.3-the-plan-write-guard.md`
-Depends on: Story 1 (`plan.runCoversNode`), Story 8 (`subtree-busy` on `node.update`).
+Depends on: Story 1 (01-the-run-covers-node-rule), for `plan.runCoversNode`; Story 8 (08-subtree-busy-joins-the-plan-operations), for `subtree-busy` on `node.update`; EPIC 050.1 Story 6 (06-the-conformance-harness) and EPIC 050.1 Story 7 (07-the-conformance-runner), which this story's scenario file runs on.
 Kind: story-implement
 
 Diagrams: update-node-guard
@@ -38,7 +38,16 @@ sequenceDiagram
     note over Command: tail unchanged by EPIC 050.3
 ```
 
-Citations: `:92`, `:93`, `:95`, `:124`.
+Citations, one per step: `src/commands/node/update-node.ts:92 — `storage.transact``,
+`src/commands/node/update-node.ts:93 — `clock.now``,
+`src/commands/node/update-node.ts:95 — `readNode``,
+`src/commands/node/update-node.ts:124 — `blobs.hash``.
+
+Callee anchors, one per step: `src/services/storage/index.ts:33 — `transact``,
+`src/services/clock/index.ts:2 — `now``, `src/services/plan/index.ts:73 — `readNode``,
+`src/services/blob/index.ts:24 — `hash``. Step 4 is reachable because the fixture submits an
+instruction, which `:124` hashes unconditionally; step 3 returns a stored objective, so `readNode`
+does not refuse `node-not-found`.
 
 **The drawn path is an objective update.** `blobs.hash` is called a second time at `:129` only when
 `input.node.kind` is `task`, so a task update carries a different call set and is a different path
@@ -46,14 +55,18 @@ under `.agents/plan/authoring.md`. The objective update draws one `blobs.hash` t
 repeats that token, which the parser refuses. The insertion point is one source line for both kinds,
 and the numbered cases below drive both kinds.
 
-The tail this note pins is `plan.readSubtreeContainmentFacts` at `:174`, `ids.mint` at `:206`,
-`plan.newestRevision` at `:207`, `blobs.put` at `:212`, `plan.readGraph` at `:224`,
-`plan.readValidationContext` at `:256`, `graph.cycles` at `:295`, `revision.render` at `:306`,
-`revision.record` at `:309`, `plan.mutateGraph` at `:375`, `graph.cycles` at `:386` and
-`events.append` at `:390`. `graph.cycles` sits inside it twice, because
-`validateCandidateStructural` and `validateCandidateCompleteness` both reach
-`src/domain/plan-candidate.ts:292`, so the tail could not be drawn without a projection this story
-does not need. Only the prefix moves.
+The tail this note pins holds every seam call after step 4: `plan.readContainmentFacts` at `:173`
+or `plan.readSubtreeContainmentFacts` at `:174`, which are the two branches of one ternary, then
+`ids.mint` at `:206`, `plan.newestRevision` at `:207`, `blobs.put` at `:212` and `:218`,
+`plan.readGraph` at `:224`, `plan.readValidationContext` at `:256`, `graph.cycles` at `:295`,
+`revision.render` at `:306`, `revision.record` at `:309`, `ids.mint` at `:356`, `plan.mutateGraph` at
+`:375`, `graph.cycles` at `:386` and `events.append` at `:390`. Two more calls sit after step 4 that
+the drawn fixture does not reach: `blobs.hash` at `:129`, which only a task update makes, and
+`plan.newestRevision` at `:162`, which only the project revision guard makes. `graph.cycles` sits
+inside the tail twice, because `validateCandidateStructural` and `validateCandidateCompleteness` both
+reach `src/domain/plan-candidate.ts:292 — `findCycles``, and `blobs.put`, `ids.mint` and
+`plan.newestRevision` repeat too, so the tail could not be drawn without projections this story does
+not need. Only the prefix moves.
 
 ### `update-node-guard`
 
@@ -149,7 +162,7 @@ Add, each as a separate `it`:
 
 3. `"an update on an objective whose child holds an active run refuses, naming the descendant"` — run on `T`, update `O`. Assert `relation === "descendant"`.
 
-4. `"an update on a node whose sibling holds an active run succeeds"` — run on `S`, seeded by `seedSiblingTask` at `test/helpers/rows.ts:184`, update `T`.
+4. `"an update on a node whose sibling holds an active run succeeds"` — run on `S`, seeded by `test/helpers/rows.ts:184 — `seedSiblingTask``, update `T`.
 
 5. `"an update on a node covered by an expired run succeeds"`.
 
@@ -157,9 +170,11 @@ Add, each as a separate `it`:
 
 7. `"the refusal precedence of node.update"` — one decision table over every pair of `node-not-found`, `kind-mismatch`, `stale-revision`, `subtree-busy`, `illegal-transition`, `binding-in-use` and `plan-invalid` that can trigger at once, with the winner named per pair and every unreachable pair marked unreachable with its reason. The `stale-revision` against `subtree-busy` row asserts `stale-revision` wins, because the revision guard is decided at `:154-169` and the guard sits at `:170`.
 
-8. `"the blocker list no longer holds a lease member"` — seed a live node lease on `T` with `seedLeaseOnNode` at `test/helpers/rows.ts:668` and no run, and assert a containment move succeeds. This is the relaxation the Change names.
+8. `"the blocker list no longer holds a lease member"` — seed a live node lease on `T` with `test/helpers/rows.ts:668 — `seedLeaseOnNode`` and no run, and assert a containment move succeeds. This is the relaxation the Change names.
 
-9. `"the blocker list still refuses on a workspace row"` — seed a workspace row with `seedWorkspaceOnNode` at `test/helpers/rows.ts:646` and assert `binding-in-use` with `blockers` deep-equal to `[{ nodeId: T, blocker: "workspace" }]`. With case 8 the deletion is exactly one member.
+9. `"the blocker list still refuses on a workspace row"` — seed a workspace row with `test/helpers/rows.ts:646 — `seedWorkspaceOnNode`` and assert `binding-in-use` with `blockers` deep-equal to `[{ nodeId: T, blocker: "workspace" }]`. With case 8 the deletion is exactly one member.
+
+10. `"an update on a node covered by an ended run succeeds"` — `state: 'ended'` on `T`. With case 5 both liveness boundaries of this command are pinned, and the epic's gate requires both.
 
 Add `test/sequence/scenarios/update-node-guard.ts`.
 

@@ -1,7 +1,7 @@
 # Story 7 — The objective attestation drops the lease
 
 Epic: `.agents/plan/epics/050.4-the-node-lease-removal.md`
-Depends on: Story 6 (the parent command, which deletes `fence` from the `attested` member of `nodeReportRequest`, from `ReportObjectiveInput` and from the nested call).
+Depends on: EPIC 050.4 Story 6 (`06-the-report-drops-the-lease`) — the parent command, which deletes `fence` from the `attested` member of `nodeReportRequest`, from `ReportObjectiveInput` and from the nested call.
 Kind: story-implement
 
 Diagrams: attest-lease-free
@@ -46,7 +46,10 @@ sequenceDiagram
     Command-->>Caller: ok
 ```
 
-Citations, one per step: `:56`, `:65`, `:80`, `:113`, `:142`, `:152`, `:160`, `:165`, `:174`. No
+Citations, one per step, each naming the identifier its line holds: `:56` — `clock.now`, `:65` —
+`readNode`, `:80` — `lease.read`, `:114` — `readAllNodes` (the call is chained off
+`dependencies.plan` at `:113`), `:142` — `setNodeState`, `:152` — `activeRunOfNode`, `:160` —
+`stampRunHead`, `:165` — `lease.release`, `:174` — `events.append`. No
 `Storage` participant appears: the command receives the transaction its caller opened and never opens
 one. Step 5 writes the node state **before** step 6 reads the run, so an objective with no active run
 is refused after its state has already been set — that ordering defect is drawn rather than described,

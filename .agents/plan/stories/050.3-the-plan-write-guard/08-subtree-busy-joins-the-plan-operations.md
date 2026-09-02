@@ -1,17 +1,33 @@
 # Story 8 — `subtree-busy` joins the plan operations
 
 Epic: `.agents/plan/epics/050.3-the-plan-write-guard.md`
-Depends on: EPIC 050.1 Story 1 (`subtree-busy` and its details schema exist). Stories 2 to 6 need this story's error registration; implement it before all five.
+Depends on: EPIC 050.1 Story 1 (01-the-claim-contract), which registers `subtree-busy` and its details schema. Stories 2 to 6 of this epic need this story's error registration; implement it before all five.
 Kind: story-foundation
 
 This story changes the contract only. It draws no path.
 
 ## Change
 
-**Add `"subtree-busy"` to the `errors` record of five operations**: `plan.import`, `node.create`,
-`node.update`, `node.delete` and `node.unblock`. EPIC 050.1 registered the code in
-`src/http/contract/errors.ts` as a 409 precondition and its details schema in
-`src/http/contract/error-details.ts`, so this story defines neither and reuses both.
+**Add `"subtree-busy"` to the `errors` record of five operations.** Each record is one object
+literal, and the entry is appended after the last member:
+
+| operation      | record                                        |
+| -------------- | --------------------------------------------- |
+| `plan.import`  | `src/http/contract/graph.ts:563 — `errors``   |
+| `node.create`  | `src/http/contract/graph.ts:652 — `errors``   |
+| `node.update`  | `src/http/contract/graph.ts:672 — `errors``   |
+| `node.delete`  | `src/http/contract/graph.ts:692 — `errors``   |
+| `node.unblock` | `src/http/contract/outcome.ts:171 — `errors`` |
+
+The value is the details schema EPIC 050.1 Story 1 (01-the-claim-contract) exports from
+`src/http/contract/error-details.ts` for `subtree-busy`, used exactly as
+`src/http/contract/graph.ts:653 — `baselineErrors`` uses the neighbouring schemas. That story also
+registered the code in `src/http/contract/errors.ts` as a 409 precondition, so this story defines
+neither the code nor the schema and reuses both.
+
+`node.unblock` is the one of the five whose record holds no `staleRevisionDetails`: it carries
+`baselineErrors`, `"invalid-request"` and `"illegal-transition"` only, at
+`src/http/contract/outcome.ts:172 — `baselineErrors``. Append to it and change nothing else.
 
 **Add `"subtree-busy"` to each of the five operations' entries in `operationAdditions`** at
 `src/http/contract/coverage.test.ts:19-59`, the closed map of extra codes per operation. Keep each

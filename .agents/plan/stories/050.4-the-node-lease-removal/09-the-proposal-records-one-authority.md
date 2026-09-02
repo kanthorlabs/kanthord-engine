@@ -1,7 +1,7 @@
 # Story 9 — The proposal records one authority
 
 Epic: `.agents/plan/epics/050.4-the-node-lease-removal.md`
-Depends on: every prior story. Both tree assertions enumerate the result.
+Depends on: every prior story of EPIC 050.4. Both tree assertions enumerate the result.
 Kind: story-foundation
 
 ## Change
@@ -81,19 +81,19 @@ Add, each as a separate `it`:
 
 1. `"no file under commands/node, commands/run or commands/outcome imports or calls the lease"` — the tree assertion, by enumeration over import specifiers and `.lease.<member>` access. Assert the offending list is empty and report the file names on failure.
 
-1b. `"the tree assertion does not match the word release"` — run it against a fixture holding `releaseNode`, `ReleaseRefusal` and `outcome: "released"`, and assert it finds nothing. Without this case the assertion could be a substring search that happens to pass today.
+2. `"the tree assertion does not match the word release"` — run it against a fixture holding `releaseNode`, `ReleaseRefusal` and `outcome: "released"`, and assert it finds nothing. Without this case the assertion could be a substring search that happens to pass today.
 
-2. `"the Lease service has exactly three importers"` — deep-equal against the three-name literal above.
+3. `"the Lease service has exactly three importers"` — deep-equal against the three-name literal above.
 
-3. `"the execution proposal names runId and runFence and not a lease"` — assert the document holds `runFence` and holds no `lease-held`.
+4. `"the execution proposal names runId and runFence and not a lease"` — assert the document holds `runFence` and holds no `lease-held`.
 
-4. `"the outcome proposal declares no fence request field"`.
+5. `"the outcome proposal declares no fence request field"`.
 
-5. `"the runs-and-exclusion proposal states the run is the only authority"` — assert the section exists by heading.
+6. `"the runs-and-exclusion proposal states the run is the only authority"` — assert the section exists by heading.
 
-6. `"docs/proposal/database/lease.md is unchanged by this epic"` — assert the file still describes both subject kinds. The interval where the table outlives its writers is deliberate, and this assertion is what makes it visible.
+7. `"docs/proposal/database/lease.md is unchanged by this epic"` — assert the file still describes both subject kinds. The interval where the table outlives its writers is deliberate, and this assertion is what makes it visible.
 
-7. `"system.status still projects the lease table"` — assert `systemStatusResponse` still holds its `leases` key. The projection is truthful while the table exists, and EPIC 050.5 removes both together.
+8. `"system.status still projects the lease table"` — assert `systemStatusResponse` still holds its `leases` key. The projection is truthful while the table exists, and EPIC 050.5 removes both together.
 
 `pnpm run verify` exits 0.
 

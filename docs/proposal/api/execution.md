@@ -118,7 +118,7 @@ The refusals are `404 not-found` for an unknown node, `400 invalid-request` with
 
 The request body is `{ fence }`, the fence the claim returned. The response carries the renewed task lease, the renewed objective lease and the heartbeat interval. The refusals are `404 not-found` for an unknown node, `400 invalid-request` with `refusal: "initiative-not-claimable"` for an initiative, and `409 lease-held` for a stale fence, another owner, or an absent, free or expired objective lease.
 
-A claim and every heartbeat each write `expires_at = now + leaseTtlMs`, so expiry measures from the latest renewal. `heartbeatIntervalMs` is `Math.floor(leaseTtlMs / 3)`, `100000` under the default, and the claim response and every heartbeat response carry it, so the harness never guesses. The harness adds uniform jitter of at most ten percent of that interval, so a fleet does not synchronise.
+A claim and every heartbeat each write `expires_at = now + leaseTtlMs`, so expiry measures from the latest renewal. `heartbeatIntervalMs` is `Math.floor(leaseTtlMs / 3)`, `100000` under the default, and the claim response and every heartbeat response carry it, so the harness never guesses.
 
 On a request timeout or a network partition the harness retries at the same interval, and it stops all work once `leaseTtlMs` has passed since its last successful heartbeat. On `409 lease-held` the harness stops at once, because the claim is gone, and it reports nothing. A daemon restart is not an expiry: the `lease` row is durable, so a heartbeat with a live fence still succeeds.
 

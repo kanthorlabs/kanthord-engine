@@ -1,7 +1,7 @@
 # Story 6 — The report drops the lease
 
 Epic: `.agents/plan/epics/050.4-the-node-lease-removal.md`
-Depends on: EPIC 050.2 Story 6 (the authority prelude) and Story 7 (the worker contract).
+Depends on: EPIC 050.2 Story 6 (`06-the-report-prelude`) and EPIC 050.2 Story 7 (`07-the-worker-contract`).
 Kind: story-implement
 
 Diagrams: report-lease-free
@@ -61,22 +61,36 @@ sequenceDiagram
     Command->>Storage: 1 storage.transact
     Command->>Clock: 2 clock.now
     Command->>Expiry: 3 expiry.expireRuns
-    Command->>Execution: 4 execution.runById:R
-    Command->>Plan: 5 plan.readSubtree
-    Command->>Execution: 6 execution.attemptsOfRun:R
-    Command->>Execution: 7 execution.closeAttempt:A
-    Command->>Plan: 8 plan.setNodeState:T:outcome-accepted
-    Command->>Execution: 9 execution.stampRunHead:R
-    Command->>Execution: 10 execution.endRun:R
-    Command->>Events: 11 events.append:outcome.reported:T
-    Command->>Plan: 12 plan.readAllNodes
+    Command->>Plan: 4 plan.readNode
+    Command->>Execution: 5 execution.runById:R
+    Command->>Plan: 6 plan.readSubtree
+    Command->>Execution: 7 execution.attemptsOfRun:R
+    Command->>Execution: 8 execution.closeAttempt:A
+    Command->>Plan: 9 plan.setNodeState:T:outcome-accepted
+    Command->>Execution: 10 execution.stampRunHead:R
+    Command->>Execution: 11 execution.endRun:R
+    Command->>Events: 12 events.append:outcome.reported:T
+    Command->>Plan: 13 plan.readAllNodes
     Command-->>Client: ok
 ```
 
-Steps 1 to 5 are the prelude EPIC 050.2 drew, unchanged. Step 6 is one read where the shipped path
-read twice. `lease.release` sat between step 10 and step 11 and is gone, so a report that released a
-lease fails the comparison. Step 12 is the sibling read that builds the objective projection of the
-response; it is a read after every write and it does not move.
+**Steps 1 to 6 are the pinned prefix, reproduced token for token and in its order.**
+EPIC 050.2 Story 6 (`06-the-report-prelude`) ends `report-authority-prelude` with
+`note over Command: tail pinned by EPIC 050.4 report-lease-free`, so this diagram is what that note
+names and its first six steps must be that prefix exactly: `storage.transact`, `clock.now`,
+`expiry.expireRuns`, `plan.readNode`, `execution.runById:R`, `plan.readSubtree`.
+
+**`plan.readNode` is step 4, ahead of the authority check, and that position is the prefix's.** That
+story states why: _"this command already read the node first, so `node-not-found` and
+`initiative-not-reportable` keep their shipped precedence with no reordering."_ It is a context token
+— the tail reads `node.kind` and `node.state` from it, `plan.readSubtree` is added **beside** it and
+replaces neither — so this story deletes the lease and no consumer of the node row, and no `Seams:`
+token governs the read. Drawing it after the authority check would move a shipped refusal's
+precedence, which no story of this epic decides.
+
+Step 7 is one read where the shipped path read twice. `lease.release` sat between step 11 and step 12
+and is gone, so a report that released a lease fails the comparison. Step 13 is the sibling read that
+builds the objective projection of the response; it is a read after every write and it does not move.
 
 Add `test/sequence/scenarios/report-lease-free.ts`.
 

@@ -1,10 +1,10 @@
 # Story 7 — The worker contract
 
 Epic: `.agents/plan/epics/050.2-the-run-renew-release-and-report.md`
-Depends on: Story 1 (`runAuthorityRefusals`). Stories 3 to 6 need this story's request fields and event types; implement this story before all four.
+Depends on: Story 1 (`01-run-authority`), for `runAuthorityRefusals`. Story 3 (`03-the-renew`) through Story 6 (`06-the-report-prelude`) need this story's request fields; implement this story before all four.
 Kind: story-foundation
 
-EPIC 050.1 Story 1 already carried the `node.claim` half of the wire: `available`, the claim response
+EPIC 050.1 Story 1 (`01-the-claim-contract`) already carried the `node.claim` half of the wire: `available`, the claim response
 fields, `run.opened`, `run.expired` and the claim refusal codes. This story carries everything else,
 and after it the worker protocol is one shape.
 
@@ -31,13 +31,13 @@ In `src/http/contract/execution.ts:309-327`, change `operationId` to `"node.rene
 
 Update every example literal that these schemas parse: `nodeRenewExamples.request` at `:151`, `nodeReleaseExamples.request` at `:183`, and `nodeReportExamples.request` at `src/http/contract/outcome.ts:75`. `src/http/contract/example.test.ts:73-142` parses each against its schema.
 
-**`heartbeatIntervalMs` is removed, not renamed.** It is `Math.floor(leaseTtlMs / 3)` at `src/commands/node/claim-node.ts:356`, derived from a lease this block replaces, and the epic states its replacement: `expiresAt` as the deadline and `renewAfterMs` as the relative hint. EPIC 050.1 removed it from the claim response; this story removes its last producer and every remaining site listed in section 5b. A response field removal is outside the closed list of `docs/proposal/api/README.md:100`, which is exactly what Story 8's policy amendment and capability retirement authorise.
+**`heartbeatIntervalMs` is removed, not renamed.** It is `Math.floor(leaseTtlMs / 3)` at `src/commands/node/claim-node.ts:356` — `heartbeatIntervalMs` and again at `src/commands/node/claim-node.ts:415` — `heartbeatIntervalMs`, a third copy beside `src/commands/node/heartbeat-node.ts:112` — `heartbeatIntervalMs` with no shared constant, and derived from a lease this block replaces, and the epic states its replacement: `expiresAt` as the deadline and `renewAfterMs` as the relative hint. EPIC 050.1 removed it from the claim response; this story removes its last producer and every remaining site listed in section 5b. A response field removal is outside the closed list of `docs/proposal/api/README.md:100`, which is exactly what Story 8's policy amendment and capability retirement authorise.
 
 ### 4 — the error codes
 
-Add the six authority codes plus `lifetime-exceeded` to `src/http/contract/errors.ts:7-31`. EPIC 050.1 Story 1 already added the five claim refusals. The ordering convention is ascending HTTP status, and within a status group the proposal table's order — `src/http/contract/errors.test.ts:28-54` pins the exact key array and `:94-128` pins the per-status grouping.
+Add the six authority codes plus `lifetime-exceeded` to `src/http/contract/errors.ts:7-31`. EPIC 050.1 Story 1 already added the five claim refusals. The ordering convention is ascending HTTP status, and within a status group the proposal table's order. `src/http/contract/errors.test.ts:28` — `it` pins the exact key array and `src/http/contract/errors.test.ts:94` — `it` pins the per-status grouping. Neither array lives in `src/http/contract/errors.ts`; that file holds `src/http/contract/errors.ts:7` — `errorStatuses` and its 409 group at `:14` through `:23`.
 
-Every new code is a **409 precondition**, appended to the end of the 409 group, in this order:
+Every new code is a **409 precondition**, appended to the end of the ten-member 409 group, in this order:
 
 ```
 "run-not-found", "run-ended", "run-expired", "run-caller-mismatch",
@@ -46,74 +46,60 @@ Every new code is a **409 precondition**, appended to the end of the 409 group, 
 
 `run-not-found` is 409 and not 404: the run exists in the caller's hand and the daemon refuses its authority, which is a precondition failure, not a missing resource. Every 409 is a `PreconditionCode`, and `httpError` at `src/http/contract/errors.ts:95-111` then **requires** a `details` argument for each — which matches Story 1, where every refusal carries `{ runId }`.
 
-Add a details schema per code to `src/http/contract/error-details.ts`, shaped exactly as the command throws it in Stories 3 to 6. Register the new codes on the three operations' `errors` records in `execution.ts` and `outcome.ts`, and add each to `operationAdditions` in `src/http/contract/coverage.test.ts:19-59`, which is the closed map of extra codes per operation.
+Add a details schema per code to `src/http/contract/error-details.ts`, shaped exactly as the command throws it in Stories 3 to 6. Register the new codes on the three operations' `errors` records in `execution.ts` and `outcome.ts`, and add each to `operationAdditions` at `src/http/contract/coverage.test.ts:19` — `operationAdditions`, whose `node.heartbeat` key is `src/http/contract/coverage.test.ts:51` — `node.heartbeat`. `node.report`'s error map is not the others': `src/http/contract/outcome.ts:150` — `errors` omits `plan-invalid` and adds `acknowledgement-required`, so one map cannot be copied into four places.
 
-Add matching rows to the error-code table in `docs/proposal/api/README.md` (section `## Errors`, `:222`). `src/http/contract/errors.test.ts:16-26` compares the key set and the status of every code against that table, so the code list and the document must agree.
+Add matching rows to the error-code table in `docs/proposal/api/README.md:222` — `## Errors`. `src/http/contract/errors.test.ts:16-26` compares the key set and the status of every code against that table, so the code list and the document must agree.
 
-### 5 — the event types
+### 5 — the event types are not this story's
 
-Remove `"lease.renewed"` and `"lease.released"` from `src/domain/event-type.ts`, and add `"run.ended"` and `"run.renewed"` in their bytewise positions. EPIC 050.1 already removed `"lease.claimed"` and added `"run.opened"` and `"run.expired"`, so after this story no `lease.*` type remains and `retiredEventTypes` is still empty: there are no deployments, so there is no stored event to keep readable.
-
-Add both payloads to `eventPayloads` in `src/http/contract/event-payload.ts`, in the same bytewise positions. The record is typed `Readonly<Record<EventType, ZodType>>`, so omitting one fails type checking:
-
-```ts
-"run.ended": z.strictObject({
-  runId: z.string(),
-  nodeId: z.string(),
-  fence,
-  outcome: z.string(),
-  reason: z.string().nullable(),
-}),
-"run.renewed": z.strictObject({
-  runId: z.string(),
-  nodeId: z.string(),
-  fence,
-  expiresAt: z.number().int(),
-}),
-```
-
-`fence` is the shared alias declared at `src/http/contract/event-payload.ts:29-35`. Each payload shape is exactly what Story 3 and Story 5 append.
+`run.renewed` and `run.ended` are registered by the stories that write their producers: Story 3
+(`03-the-renew`) and Story 5 (`05-the-release`). `src/http/contract/event-payload.test.ts:344` — `it`
+asserts every produced type is declared, and `src/http/contract/event-payload.test.ts:365` — `it`
+asserts every declared non-retired type has a producer, both by literal string scan over
+`src/commands` and `src/services`. This story dispatches before all four command stories, so
+declaring a type here would fail the producer scan and retiring one here would fail the produced
+scan. Touch `src/domain/event-type.ts` and `src/http/contract/event-payload.ts` in neither direction.
 
 ### 5b — every remaining site, enumerated by grep
 
 The list above is the contract package only. Run `grep -rn "heartbeat\|Heartbeat" src docs/proposal` and change every hit. As of authoring there are 35 files beyond the four renamed modules. Each of these is a site the fan-out above does not reach, and an unlisted one fails `pnpm run verify`:
 
-| site                                                        | what it holds                                                                                                   |
-| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `src/http/contract/field-decisions.fixture.ts` (15 hits)    | one line per `node.heartbeat` request and response field                                                        |
-| `src/main.claim.test.ts` (14 hits)                          | the end-to-end claim-and-heartbeat flow                                                                         |
-| `src/http/contract/registry.test.ts` (10 hits)              | includes a **second** occurrence at `:1055-1062`, the seven-name harness-set case, beyond the lists named above |
-| `docs/proposal/api/execution.md` (8 hits)                   | the route row **and** its surrounding prose                                                                     |
-| `src/http/server/node/refusals.ts` (7 hits)                 | `import { HeartbeatNodeError }` at `:4`, the `instanceof` branch at `:36-37`, and `heartbeatRefusal` at `:181`  |
-| `src/cli/reachability.test.ts` (6 hits)                     | CLI-command-to-operationId reachability                                                                         |
-| `src/main.ts` (5 hits)                                      | the command import at `:83`, the handler import at `:157`, the handler map entry at `:560-561`                  |
-| `src/http/contract/path.test.ts` (4 hits)                   | the three-name action-segment case                                                                              |
-| `src/cli/inventory.test.ts` (4 hits)                        | the CLI inventory fixture                                                                                       |
-| `src/http/contract/openapi.test.ts` (3 hits)                | the component list                                                                                              |
-| `src/commands/node/claim-node.ts` (3 hits)                  | **`heartbeatIntervalMs` only** — removed by EPIC 050.1 Story 1                                                  |
-| `src/cli/node/claim.test.ts` (3 hits)                       | the claim CLI output fixture                                                                                    |
-| `src/http/server/node/claim-node.test.ts` (2 hits)          | `heartbeatIntervalMs` in the response fixture                                                                   |
-| `src/http/contract/system.test.ts` (2 hits)                 | the third copy of the request and response lists                                                                |
-| `src/commands/node/release-node.test.ts` (2 hits)           | imports the old command to build state                                                                          |
-| `src/commands/node/claim-node.test.ts` (2 hits)             | `heartbeatIntervalMs` assertions                                                                                |
-| `src/cli/program.ts` (2 hits)                               | `import { registerNodeHeartbeat }` at `:44` and the registration at `:378`                                      |
-| `src/cli/program.test.ts` (2 hits)                          | the registered-command list                                                                                     |
-| `src/cli/inventory.ts` (2 hits)                             | `path: ["node", "heartbeat"]` and `operationIds: ["node.heartbeat"]` at `:68-69`                                |
-| `docs/proposal/phase-2/agents-and-workers.md` (2 hits)      | prose                                                                                                           |
-| `docs/proposal/phase-1/README.md` (2 hits)                  | prose                                                                                                           |
-| `src/main.test.ts`                                          | the production handler map                                                                                      |
-| `src/http/server/app.handler-result.test.ts:45`             | the `["src/http/server/node/heartbeat-node.ts", [200]]` entry                                                   |
-| `src/http/contract/proposal-amendment-execution.test.ts:39` | asserts a proposal sentence naming `POST /v1/node/:id/heartbeat` verbatim                                       |
-| `src/http/contract/path.ts`                                 | the `actionSegments` entry, kept per section 1                                                                  |
-| `src/http/contract/example.test.ts`                         | the examples list                                                                                               |
-| `src/http/contract/coverage.test.ts`                        | `operationAdditions`                                                                                            |
-| `src/http/contract/capability.ts`                           | the `external-drive` entry, retired by Story 8                                                                  |
-| `src/http/contract/authorization.test.ts`                   | the second copy of the harness list                                                                             |
-| `src/cli/parity.test.ts:99`                                 | the `"node heartbeat"` command-name row                                                                         |
-| `src/cli/node/claim.ts:51`                                  | the claim CLI output string                                                                                     |
-| `docs/proposal/phase-1/runtime-capability-matrix.md`        | the matrix row                                                                                                  |
-| `docs/proposal/open-items.md`                               | prose                                                                                                           |
-| `docs/proposal/memory/write-path.md`                        | prose                                                                                                           |
+| site                                                        | what it holds                                                                                                                                                                                                        |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/http/contract/field-decisions.fixture.ts` (15 hits)    | one line per `node.heartbeat` request and response field                                                                                                                                                             |
+| `src/main.claim.test.ts` (14 hits)                          | the end-to-end claim-and-heartbeat flow                                                                                                                                                                              |
+| `src/http/contract/registry.test.ts` (10 hits)              | the pinned lists at `:33`, `:120`, `:152`, `:687`, `:841`, `:844`, `:857`, `:868`, `:870`, plus a **second** occurrence at `src/http/contract/registry.test.ts:1060` — `node.heartbeat` in the `allowedActors` block |
+| `docs/proposal/api/execution.md` (8 hits)                   | the route row **and** its surrounding prose                                                                                                                                                                          |
+| `src/http/server/node/refusals.ts` (7 hits)                 | `src/http/server/node/refusals.ts:4` — `HeartbeatNodeError`, the `instanceof` branch at `:36`, `heartbeatRefusal` at `:181`, and the two type unions at `:234` and `:266`                                            |
+| `src/cli/reachability.test.ts` (6 hits)                     | CLI-command-to-operationId reachability                                                                                                                                                                              |
+| `src/main.ts` (5 hits)                                      | `src/main.ts:85` — `heartbeatNode`, `src/main.ts:161` — `heartbeatNodeHandler`, and the handler map entry `src/main.ts:570` — `node.heartbeat` through `:583`                                                        |
+| `src/http/contract/path.test.ts` (4 hits)                   | the three-name action-segment case                                                                                                                                                                                   |
+| `src/cli/inventory.test.ts` (4 hits)                        | the CLI inventory fixture                                                                                                                                                                                            |
+| `src/http/contract/openapi.test.ts` (3 hits)                | the component list                                                                                                                                                                                                   |
+| `src/commands/node/claim-node.ts` (3 hits)                  | **`heartbeatIntervalMs` only** — removed by EPIC 050.1 Story 1                                                                                                                                                       |
+| `src/cli/node/claim.test.ts` (3 hits)                       | the claim CLI output fixture                                                                                                                                                                                         |
+| `src/http/server/node/claim-node.test.ts` (2 hits)          | `heartbeatIntervalMs` in the response fixture                                                                                                                                                                        |
+| `src/http/contract/system.test.ts` (2 hits)                 | the third copy of the request and response lists                                                                                                                                                                     |
+| `src/commands/node/release-node.test.ts` (2 hits)           | imports the old command to build state                                                                                                                                                                               |
+| `src/commands/node/claim-node.test.ts` (2 hits)             | `heartbeatIntervalMs` assertions                                                                                                                                                                                     |
+| `src/cli/program.ts` (2 hits)                               | `src/cli/program.ts:44` — `registerNodeHeartbeat` and the registration at `src/cli/program.ts:378` — `registerNodeHeartbeat`                                                                                         |
+| `src/cli/program.test.ts` (2 hits)                          | the registered-command list                                                                                                                                                                                          |
+| `src/cli/inventory.ts` (2 hits)                             | `src/cli/inventory.ts:68` — `heartbeat` and `src/cli/inventory.ts:69` — `node.heartbeat`                                                                                                                             |
+| `docs/proposal/phase-2/agents-and-workers.md` (2 hits)      | prose                                                                                                                                                                                                                |
+| `docs/proposal/phase-1/README.md` (2 hits)                  | prose                                                                                                                                                                                                                |
+| `src/main.test.ts`                                          | the production handler map                                                                                                                                                                                           |
+| `src/http/server/app.handler-result.test.ts:45`             | the `["src/http/server/node/heartbeat-node.ts", [200]]` entry                                                                                                                                                        |
+| `src/http/contract/proposal-amendment-execution.test.ts:39` | asserts a proposal sentence naming `POST /v1/node/:id/heartbeat` verbatim                                                                                                                                            |
+| `src/http/contract/path.ts`                                 | the `actionSegments` entry, kept per section 1                                                                                                                                                                       |
+| `src/http/contract/example.test.ts`                         | the examples list                                                                                                                                                                                                    |
+| `src/http/contract/coverage.test.ts`                        | `operationAdditions`                                                                                                                                                                                                 |
+| `src/http/contract/capability.ts`                           | the `external-drive` entry, retired by Story 8                                                                                                                                                                       |
+| `src/http/contract/authorization.test.ts`                   | the second copy of the harness list                                                                                                                                                                                  |
+| `src/cli/parity.test.ts:99`                                 | the `"node heartbeat"` command-name row                                                                                                                                                                              |
+| `src/cli/node/claim.ts:51`                                  | the claim CLI output string                                                                                                                                                                                          |
+| `docs/proposal/phase-1/runtime-capability-matrix.md`        | the matrix row                                                                                                                                                                                                       |
+| `docs/proposal/open-items.md`                               | prose                                                                                                                                                                                                                |
+| `docs/proposal/memory/write-path.md`                        | prose                                                                                                                                                                                                                |
 
 The registry total stays **73** and the routed total stays **50**: one operation is renamed, none is added and none is removed. Do not change the counts at `src/http/contract/registry.test.ts:48-50` and `:64-72`.
 
@@ -130,11 +116,12 @@ The registry total stays **73** and the routed total stays **50**: one operation
 - `runId` and `runFence` are required on `node.renew`, `node.release` and `node.report`.
 - Do not touch `node.claim`'s request or response. EPIC 050.1 settled both.
 - `heartbeatIntervalMs` appears in no schema and no production file when this story ends.
+- Touch neither `src/domain/event-type.ts` nor `src/http/contract/event-payload.ts`. Story 3 (`03-the-renew`) and Story 5 (`05-the-release`) own both, because a declared type must have a producer in the same story.
 
 ## Verify
 
 ```
-node --test src/http/contract/parity.test.ts src/http/contract/registry.test.ts src/http/contract/path.test.ts src/http/contract/errors.test.ts src/http/contract/example.test.ts src/http/contract/coverage.test.ts src/http/contract/event-payload.test.ts src/http/contract/runtime-matrix.test.ts src/http/contract/openapi.test.ts src/http/contract/openapi-source.test.ts src/http/contract/authorization.test.ts src/http/contract/system.test.ts src/http/contract/proposal-amendment-execution.test.ts src/cli/parity.test.ts src/cli/reachability.test.ts src/cli/inventory.test.ts src/cli/program.test.ts src/main.test.ts src/main.claim.test.ts src/http/server/app.handler-result.test.ts
+node --test src/http/contract/parity.test.ts src/http/contract/registry.test.ts src/http/contract/path.test.ts src/http/contract/errors.test.ts src/http/contract/example.test.ts src/http/contract/coverage.test.ts src/http/contract/runtime-matrix.test.ts src/services/config/convict.test.ts src/http/contract/openapi.test.ts src/http/contract/openapi-source.test.ts src/http/contract/authorization.test.ts src/http/contract/system.test.ts src/http/contract/proposal-amendment-execution.test.ts src/cli/parity.test.ts src/cli/reachability.test.ts src/cli/inventory.test.ts src/cli/program.test.ts src/main.test.ts src/main.claim.test.ts src/http/server/app.handler-result.test.ts
 ```
 
 Every file this story edits appears in that command.
@@ -147,19 +134,17 @@ Add:
 
 3. `"renew is an action segment sorted between rename and report"` — assert `actionSegments.includes("renew")` and that its index is exactly one after `"rename"` and one before `"report"`.
 
-4. `"a node.report omitting runId fails schema validation with the issue path runId"` — parse a report body carrying every other field and assert `result.success === false` and that some issue has `path` deep-equal to `["runId"]`. Repeat for the `closed` member, which carries no lease fence.
+4. `"a node.report omitting runId fails schema validation with the issue path runId"` — for **each of the six members** of the union, parse a body carrying every other field of that member and assert `result.success === false` and that some issue has `path` deep-equal to `["runId"]`. The `closed` member at `src/http/contract/outcome.ts:50` — `closed` carries no lease fence, and it is asserted like the rest; `nodeReportRequest` is a `z.discriminatedUnion`, so there is no shared base object and each member is checked on its own.
 
 5. `"nodeRenewResponse carries expiresAt and renewAfterMs and no heartbeatIntervalMs"` — parse the example and assert both new fields, and assert the key set holds no `heartbeatIntervalMs`.
 
 6. `"heartbeatIntervalMs appears in no contract schema"` — walk the registry's request and response schemas and assert the identifier is absent. The removal is the assertion, not a comment.
 
-7. `"run.ended and run.renewed are registered in bytewise order, and no lease type remains"` — assert both are members, assert `eventTypes` holds no member starting with `lease.`, assert `retiredEventTypes` is empty, and assert the list equals its own `Buffer.compare` sort.
+7. `"renewAfterMs is one third of runTtlMs"` — assert the `node.renew` response example's `renewAfterMs` equals `Math.floor(runTtlMs / 3)` for the configured default of `300000`, read from `src/services/config/convict.ts:249` — `default`. The shipped `src/services/config/convict.test.ts:450` — `it` pins that default, so the two cannot drift.
 
-8. `"the run.ended and run.renewed payloads match what the commands append"` — in `src/http/contract/event-payload.test.ts`, parse one valid payload each and one omitting `fence`, asserting success and failure.
+8. `"every new refusal code maps to 409"` — assert `errorStatuses[code] === 409` for each of the seven. Update the pinned key array, which is `src/http/contract/errors.test.ts:29` — `deepEqual` through `:53`, whose first member is `src/http/contract/errors.test.ts:36` — `stale-revision`, and the 409 group, which is `src/http/contract/errors.test.ts:107` — `409` through `:118`. Both are positional `deepEqual` comparisons, so appending is not enough.
 
-9. `"every new refusal code maps to 409"` — assert `errorStatuses[code] === 409` for each of the seven, and update the pinned key array at `:28-54` and the 409 group at `:94-128`.
-
-10. `"the error code table and the proposal agree"` — the shipped `readErrorCodeMatrix()` case at `:16-26` covers it once `docs/proposal/api/README.md` carries the new rows.
+9. `"the error code table and the proposal agree"` — the shipped case at `src/http/contract/errors.test.ts:16` — `it` reads `docs/proposal/api/README.md` through `test/helpers/proposal.ts:89` — `readErrorCodeMatrix` and asserts sorted key equality plus per-code status. It fails until the markdown table carries the seven new rows, so the document edit is not optional.
 
 `pnpm run verify` exits 0. It emits and validates the master OpenAPI document and every feature slice in a temporary directory, so a schema or component drift fails there too.
 

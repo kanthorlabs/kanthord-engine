@@ -1,7 +1,7 @@
 # Story 2 — The claim of an initiative drops the lease
 
 Epic: `.agents/plan/epics/050.4-the-node-lease-removal.md`
-Depends on: Story 1 (the deletion), EPIC 050.1 Story 4 (the initiative path).
+Depends on: EPIC 050.4 Story 1 (`01-the-claim-of-a-task-drops-the-lease`) for the deletion, and EPIC 050.1 Story 4 (`04-the-claim-of-an-initiative`) for the initiative path.
 Kind: story-implement
 
 Diagrams: claim-lease-free-initiative

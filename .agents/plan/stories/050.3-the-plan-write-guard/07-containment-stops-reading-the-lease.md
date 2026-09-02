@@ -1,7 +1,7 @@
 # Story 7 — Containment stops reading the lease
 
 Epic: `.agents/plan/epics/050.3-the-plan-write-guard.md`
-Depends on: Story 3 (`update-node` stops pushing the `lease` blocker), Story 6 (the import guard).
+Depends on: Story 3 (03-the-update-node-guard), which stops `update-node` pushing the `lease` blocker; Story 6 (06-the-import-plan-guard), for the import guard.
 Kind: story-foundation
 
 This story changes one pure function. It draws no path: `containmentMovable` is a domain call, and a
@@ -38,8 +38,8 @@ returns a refusal object; this function returns a verdict about execution bindin
 
 **`ContainmentFacts.lease` stays.** It is still produced by `readContainmentFacts` at
 `src/services/plan/sqlite.ts:278` and `readSubtreeContainmentFacts` at `:308`, and nothing reads it
-once this story and Story 3 land. EPIC 050.5 Story 5 deletes the field with `leaseHeld`, the private
-method that computes it. Deleting it here would force the store change into this epic and split one
+once this story and Story 3 land. EPIC 050.5 Story 5 (05-the-plan-store-stops-computing-the-lease-facts) deletes the field with
+`leaseHeld`, the private method that computes it. Deleting it here would force the store change into this epic and split one
 mechanism removal across two.
 
 The unread interval is deliberate, and this story asserts it rather than leaving it to be noticed.
@@ -69,9 +69,9 @@ Add, each as a separate `it`:
 
 Cases 2 to 4 with case 1 prove the drop is exactly one conjunct.
 
-5. `"an import moving a node holding an orphan lease is admitted"` — in `src/commands/plan/import-plan.test.ts`, seed a live node lease on `T` with `seedLeaseOnNode` at `test/helpers/rows.ts:668` and no run, submit a document moving `T` to a new parent, and assert the move is legal.
+5. `"an import moving a node holding an orphan lease is admitted"` — in `src/commands/plan/import-plan.test.ts`, seed a live node lease on `T` with `test/helpers/rows.ts:668 — `seedLeaseOnNode`` and no run, submit a document moving `T` to a new parent, and assert the move is legal.
 
-6. `"plan.validate suggests the submitted document for a node holding an orphan lease"` — in `src/queries/plan/validate-plan.test.ts`, the same fixture, and assert the choice carries `containmentMovable: true` and `suggested: "submitted"` by value. `containmentMovable` has **three** callers — `update-node.ts:178`, `import-plan.ts:320` and `validate-plan.ts:230` — and Story 3 asserts only the first. All three are relaxed by this one-line change, and all three are asserted.
+6. `"plan.validate suggests the submitted document for a node holding an orphan lease"` — in `src/queries/plan/validate-plan.test.ts`, the same fixture, and assert the choice carries `containmentMovable: true` and `suggested: "submitted"` by value. `containmentMovable` has **three** callers — `update-node.ts:178`, `import-plan.ts:320` and `src/queries/plan/validate-plan.ts:230 — `containmentMovable`` — and Story 3 (03-the-update-node-guard) asserts only the first. All three are relaxed by this one-line change, and all three are asserted.
 
 7. `"ContainmentFacts.lease is read by no production file"` — a tree assertion, not a single grep: enumerate every file under `src/` that is not a test, and assert none matches `facts.lease` or `.lease` on a `ContainmentFacts` value. The producer survives on purpose, and this assertion is what makes that interval safe. Write it in `src/domain/plan-containment.test.ts`, beside the four unit cases above.
 

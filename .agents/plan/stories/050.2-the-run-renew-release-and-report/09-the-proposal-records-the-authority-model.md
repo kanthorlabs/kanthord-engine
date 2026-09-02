@@ -1,11 +1,12 @@
 # Story 9 — The proposal records the authority model
 
 Epic: `.agents/plan/epics/050.2-the-run-renew-release-and-report.md`
-Depends on: Stories 1 to 8.
+Depends on: Story 1 (`01-run-authority`) through Story 8 (`08-the-policy-amendment-and-the-capability-swap`).
 Kind: story-foundation
 
-EPIC 050 Story 7 created `docs/proposal/phase-2/runs-and-exclusion.md` and recorded the run model,
-and EPIC 050.1 Story 9 added the claim half. This story adds the authority half. It draws no path.
+EPIC 050 Story 7 (`07-the-proposal-records-the-run-model`) created
+`docs/proposal/phase-2/runs-and-exclusion.md` and recorded the run model, and EPIC 050.1 Story 9
+(`09-the-proposal-records-the-claim`) added the claim half. This story adds the authority half. It draws no path.
 
 ## Change
 
@@ -15,7 +16,7 @@ Extend `docs/proposal/phase-2/runs-and-exclusion.md` with:
 - **The renew.** `expires_at = min(now + runTtlMs, max_lifetime_at)`, `lifetime-exceeded` at `now >= max_lifetime_at`, and that a renew never touches the fence.
 - **The release.** A worker voluntarily ends its run with no checkpoint. The node returns to `ready`, the open attempt is cancelled, the run ends and the fence rises.
 - **One terminal event per run.** A run that moves from `active` to `ended` appends exactly one of `run.ended` or `run.expired`, never both and never neither, in the same transaction as the transition and the fence raise.
-- **The lease renewal is transitional.** The renew renews both leases until EPIC 050.4 removes the node lease, and that removal changes no wire shape.
+- **The lease renewal is transitional.** The renew renews both leases until EPIC 050.4 Story 4 (`04-the-renew-drops-the-lease`) removes the node lease, and that removal changes no wire shape.
 
 State no diagram and no seam name. The proposal records behaviour; the stories record the paths.
 
@@ -32,8 +33,8 @@ node --test test/helpers/proposal.test.ts
 ```
 
 Add each case to `test/helpers/proposal.test.ts`, the suite that already reads documents under
-`docs/proposal/` and asserts their content, and which EPIC 050 Story 7 and EPIC 050.1 Story 9 also
-extend for this document.
+`docs/proposal/` and asserts their content, and which EPIC 050 Story 7 (`07-the-proposal-records-the-run-model`) and
+EPIC 050.1 Story 9 (`09-the-proposal-records-the-claim`) also extend for this document.
 
 1. `"the proposal states the five authority conditions"` — assert the section exists and names all six refusal codes, built by importing `runAuthorityRefusals` from `src/domain/run-authority.ts` rather than restating six literals, so the document and the code cannot drift.
 2. `"the proposal states the renew formula and the lifetime boundary"` — assert the document holds `min(now + runTtlMs, max_lifetime_at)` and `now >= max_lifetime_at`.

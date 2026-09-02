@@ -1,7 +1,7 @@
 # Story 5 — The release drops the lease
 
 Epic: `.agents/plan/epics/050.4-the-node-lease-removal.md`
-Depends on: EPIC 050.2 Story 5 (the run-ending release) and Story 7 (the worker contract).
+Depends on: EPIC 050.2 Story 5 (`05-the-release`) and EPIC 050.2 Story 7 (`07-the-worker-contract`).
 Kind: story-implement
 
 Diagrams: release-lease-free
@@ -51,16 +51,23 @@ sequenceDiagram
     Command->>Expiry: 3 expiry.expireRuns
     Command->>Execution: 4 execution.runById:R
     Command->>Plan: 5 plan.readSubtree
-    Command->>Execution: 6 execution.attemptsOfRun:R
-    Command->>Execution: 7 execution.closeAttempt:A
-    Command->>Plan: 8 plan.setNodeState:T:claim-released
-    Command->>Execution: 9 execution.endRun:R
-    Command->>Events: 10 events.append:run.ended:R
+    Command->>Plan: 6 plan.readNode
+    Command->>Execution: 7 execution.attemptsOfRun:R
+    Command->>Execution: 8 execution.closeAttempt:A
+    Command->>Plan: 9 plan.setNodeState:T:claim-released
+    Command->>Execution: 10 execution.endRun:R
+    Command->>Events: 11 events.append:run.ended:R
     Command-->>Client: ok
 ```
 
-One step leaves the superseded diagram, and `Lease` leaves the participant list. Step 9 is still the
-last write and step 10 the only event, so a release appends exactly one terminal event.
+**`plan.readNode` at step 6 is a context token, and it stays.** EPIC 050.2 Story 5 (`05-the-release`)
+states what it supplies: `node.kind` for the branch, `node.revision` for `cause`, and the
+`node-not-found` and `initiative-not-claimable` refusals — and `plan.readSubtree` returns ids alone,
+so it replaces neither. That story's own case asserts both refusals still fire. This story deletes
+the lease and no consumer of the node row, so the read is unchanged and no `Seams:` token governs it.
+
+One step leaves the superseded diagram, and `Lease` leaves the participant list. Step 10 is still the
+last write and step 11 the only event, so a release appends exactly one terminal event.
 
 Add `test/sequence/scenarios/release-lease-free.ts`.
 
@@ -137,19 +144,19 @@ Add, each as a separate `it`:
 
 4. `"a task release appends exactly one run.ended event"`.
 
-4b. `"an objective release appends exactly one run.ended event for the objective run"` — a separate case, so neither branch kept a second event.
+5. `"an objective release appends exactly one run.ended event for the objective run"` — a separate case, so neither branch kept a second event.
 
-5. `"the exhausted branch still blocks with attempt-limit and ends the run"` — the shipped case, carried across.
+6. `"the exhausted branch still blocks with attempt-limit and ends the run"` — the shipped case, carried across.
 
-6. `"node.release declares no lease-held error and its request holds no fence"` — assert the operation's `errors` record and `nodeReleaseRequest` by key set. `ReleaseRefusal` is an erased type; `pnpm run typecheck` carries the type-level removal.
+7. `"node.release declares no lease-held error and its request holds no fence"` — assert the operation's `errors` record and `nodeReleaseRequest` by key set. `ReleaseRefusal` is an erased type; `pnpm run typecheck` carries the type-level removal.
 
-7. `"a release refuses a stale run fence and writes nothing"` — assert `refusal === "fence-stale"` and `databaseBytes` deep-equals the snapshot. The authority check is the only proof of the caller now, so it needs a case in this story and not only in EPIC 050.2's.
+8. `"a release refuses a stale run fence and writes nothing"` — assert `refusal === "fence-stale"` and `databaseBytes` deep-equals the snapshot. The authority check is the only proof of the caller now, so it needs a case in this story and not only in EPIC 050.2's.
 
-8. `"every shipped release case still passes"` — carry the file's cases across with `fence` removed from their inputs.
+9. `"every shipped release case still passes"` — carry the file's cases across with `fence` removed from their inputs.
 
-9. `"kanthord node release takes no --fence"` — assert the command refuses an unknown `--fence` option and succeeds without one.
+10. `"kanthord node release takes no --fence"` — assert the command refuses an unknown `--fence` option and succeeds without one.
 
-10. `"the derived field decisions hold no node.release fence line"` — the shipped `coverage.test.ts` harness over the regenerated fixture.
+11. `"the derived field decisions hold no node.release fence line"` — the shipped `coverage.test.ts` harness over the regenerated fixture.
 
 Add `test/sequence/scenarios/release-lease-free.ts`.
 

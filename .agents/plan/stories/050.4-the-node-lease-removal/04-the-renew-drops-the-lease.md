@@ -1,7 +1,7 @@
 # Story 4 — The renew drops the lease
 
 Epic: `.agents/plan/epics/050.4-the-node-lease-removal.md`
-Depends on: EPIC 050.2 Story 3 (the renamed command) and Story 7 (the worker contract). Story 1 must land first, because this story deletes `claimedLease` and `node.claim` is its other consumer.
+Depends on: EPIC 050.2 Story 3 (`03-the-renew`) and EPIC 050.2 Story 7 (`07-the-worker-contract`). EPIC 050.4 Story 1 (`01-the-claim-of-a-task-drops-the-lease`) must land first, because this story deletes `claimedLease` and `node.claim` is its other consumer.
 Kind: story-implement
 
 Diagrams: renew-lease-free
@@ -38,14 +38,23 @@ sequenceDiagram
     Command->>Expiry: 3 expiry.expireRuns
     Command->>Execution: 4 execution.runById:R
     Command->>Plan: 5 plan.readSubtree
-    Command->>Execution: 6 execution.renewRun:R
-    Command->>Events: 7 events.append:run.renewed:R
+    Command->>Plan: 6 plan.readNode
+    Command->>Execution: 7 execution.renewRun:R
+    Command->>Events: 8 events.append:run.renewed:R
     Command-->>Client: ok
 ```
 
 Three steps leave the superseded diagram: the target renew, the objective read and the objective
 renew. `Lease` leaves the participant list. No fence write appears, and that absence is still the
 assertion EPIC 050.2 made: the fence rises when a run ends and nowhere else.
+
+**`plan.readNode` at step 6 is a context token, and it stays.** It is the only node read of this
+command, and it is not the lease's. EPIC 050.2 Story 3 (`03-the-renew`) states what it supplies:
+`node.kind` for the objective branch, `node.parentId` for `objectiveScopeOf`, and the
+`node-not-found` and `initiative-not-claimable` refusals — and `plan.readSubtree` returns ids alone,
+so it replaces neither. Item 5 below keeps both refusals in `RenewRefusal`, so deleting the read
+would leave a path that cannot raise them. What the objective-lease deletion removes is the two
+**consumers** `node.kind` and `node.parentId` fed, not the read.
 
 `renew-refusal-lifetime-exceeded`, the second live diagram of this command, holds no lease token and
 does not change. EPIC 050.2 Story 4 owns it and keeps it.
@@ -141,17 +150,17 @@ Add, each as a separate `it`:
 
 7. `"the renew result, nodeRenewResponse and nodeRenewRequest hold no lease field"` — three key-set assertions against pinned literals, in one case, so the command and the two schemas cannot drift apart.
 
-7b. `"claimedLease is not exported"` — assert the module's export names do not hold it. Story 1 removed its first consumer and this story removes its second.
+8. `"claimedLease is not exported"` — assert the module's export names do not hold it. Story 1 removed its first consumer and this story removes its second.
 
-8. `"a renew still refuses lifetime-exceeded"` — the EPIC 050.2 Story 4 case, carried across unchanged, so this story cannot have moved that refusal while deleting around it.
+9. `"a renew still refuses lifetime-exceeded"` — the EPIC 050.2 Story 4 case, carried across unchanged, so this story cannot have moved that refusal while deleting around it.
 
-9. `"every shipped renew case still passes"` — carry the file's cases across with `fence` removed from their inputs.
+10. `"every shipped renew case still passes"` — carry the file's cases across with `fence` removed from their inputs.
 
-10. `"kanthord node renew takes no --fence and prints no lease"` — assert the command refuses an unknown `--fence` option and that its stdout line holds `expiresAt` and no fence.
+11. `"kanthord node renew takes no --fence and prints no lease"` — assert the command refuses an unknown `--fence` option and that its stdout line holds `expiresAt` and no fence.
 
-11. `"leaseTtlMs is absent from the settings"` — assert the config key set holds no `leaseTtlMs` and that `KANTHORD_LEASE_TTL_MS` sets nothing.
+12. `"leaseTtlMs is absent from the settings"` — assert the config key set holds no `leaseTtlMs` and that `KANTHORD_LEASE_TTL_MS` sets nothing.
 
-12. `"the derived field decisions hold no node.heartbeat lease line and no node.renew fence line"` — the shipped `coverage.test.ts` harness over the regenerated fixture.
+13. `"the derived field decisions hold no node.heartbeat lease line and no node.renew fence line"` — the shipped `coverage.test.ts` harness over the regenerated fixture.
 
 Add `test/sequence/scenarios/renew-lease-free.ts`.
 
