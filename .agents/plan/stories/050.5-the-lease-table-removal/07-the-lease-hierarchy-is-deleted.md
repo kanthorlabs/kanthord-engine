@@ -1,7 +1,7 @@
 # Story 7 — The lease hierarchy is deleted
 
 Epic: `.agents/plan/epics/050.5-the-lease-table-removal.md`
-Depends on: Story 6 (the last two importers), and EPIC 050.4 Story 8 (the contract package's imports of `leaseRelations` **and** `leaseOwnerKinds`).
+Depends on: Story 6 (the last two importers), and EPIC 050.4 Story 8 (`08-lease-held-is-retired`), which removes the contract package's imports of `leaseRelations` **and** `leaseOwnerKinds`.
 Kind: story-foundation
 
 This story deletes a pure domain module. It draws no path: `liveLeaseRefusal` is a domain function, and
@@ -16,13 +16,13 @@ with its two private helpers `relationOf` and `refusesAt`.
 **Its importers are gone by this point, and each was removed by a named story.** Verify all five before
 deleting, and report a survivor rather than editing it here:
 
-| importer                             | site   | removed by           |
-| ------------------------------------ | ------ | -------------------- |
-| `src/http/contract/error-details.ts` | `:6`   | EPIC 050.4 Story 8   |
-| `src/commands/node/claim-node.ts`    | `:3-5` | EPIC 050.4 Story 1   |
-| `src/services/lease/index.ts`        | `:2`   | Story 6 of this epic |
-| `src/services/lease/sqlite.ts`       | `:3-6` | Story 6 of this epic |
-| `test/helpers/lease.ts`              | `:2-6` | Story 6 of this epic |
+| importer                             | site   | removed by                                                    |
+| ------------------------------------ | ------ | ------------------------------------------------------------- |
+| `src/http/contract/error-details.ts` | `:6`   | EPIC 050.4 Story 8 (`08-lease-held-is-retired`)               |
+| `src/commands/node/claim-node.ts`    | `:3-5` | EPIC 050.4 Story 1 (`01-the-claim-of-a-task-drops-the-lease`) |
+| `src/services/lease/index.ts`        | `:2`   | Story 6 of this epic                                          |
+| `src/services/lease/sqlite.ts`       | `:3-6` | Story 6 of this epic                                          |
+| `test/helpers/lease.ts`              | `:2-6` | Story 6 of this epic                                          |
 
 **`src/domain/lease.ts` survives, whole, and the reason is decided rather than left open.**
 `src/domain/rows.ts:10,33` registers `leaseRow` as the row schema of the `lease` table, and
@@ -46,8 +46,14 @@ epic asks for is that migration `17` **drops the table** rather than narrowing i
 ## Verify
 
 ```
-node --test src/http/contract/error-details.test.ts src/http/contract/parity.test.ts src/domain/version.test.ts
+node --test src/http/contract/error-details.test.ts src/http/contract/parity.test.ts
 ```
+
+`src/domain/version.test.ts` is deliberately not in that list. EPIC 050.5 Story 0 (`00-groundwork`)
+moved `package.json` to `30.0.0` before the loop started, so its `KANTHORD_VERSION` assertion is red
+until EPIC 050.5 Story 8 (`08-the-proposal-records-the-removal`) moves `src/domain/version.ts`. This
+story asserts nothing about the version, and running that file here would fail a case on another
+story's interval.
 
 Add, each as a separate `it`:
 

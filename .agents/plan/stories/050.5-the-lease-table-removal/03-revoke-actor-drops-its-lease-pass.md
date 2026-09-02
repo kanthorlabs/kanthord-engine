@@ -35,9 +35,13 @@ sequenceDiagram
     Command-->>Client: ok
 ```
 
-Citations, one per step: `:81`, `:95`, `:100`, `:104`.
+Citations, one per step:
+`src/commands/actor/revoke-actor.ts:81 — `storage.transact``,
+`src/commands/actor/revoke-actor.ts:95 — `clock.now``,
+`src/commands/actor/revoke-actor.ts:100 — `lease.expireLeasesOfOwner``,
+`src/commands/actor/revoke-actor.ts:104 — `events.append``.
 
-`loadActor` at `:39-58` and the `UPDATE actor` at `:96-99` are raw SQL on the transaction object, so
+`loadActor` at `:40-59` and the `UPDATE actor` at `:96-99` are raw SQL on the transaction object, so
 neither is a message. The clock is read at `:95`, **after** the three refusals at `:82-94`, which is
 the shipped order and this story does not change it.
 

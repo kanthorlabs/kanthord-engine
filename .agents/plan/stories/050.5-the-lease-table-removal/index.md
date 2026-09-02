@@ -11,9 +11,15 @@ rows, and the drop belongs there.
 
 A story that changes a shipped path draws a pair: the baseline, which is the shipped code, and the
 ship diagram. A story that changes no path draws nothing. `.agents/plan/authoring.md` is the grammar,
-and `scripts/verify-epic-sequence.ts` of EPIC 050.1 Story 8 enforces it.
+and `scripts/verify-epic-sequence.ts` of EPIC 050.1 Story 8 (`08-the-range-gate`) enforces it.
 
-Four stories carry a pair: 1, 2, 3 and 4. Four carry none.
+Nine stories, and four carry a pair: 1, 2, 3 and 4. Five carry none, and one of those five is the
+groundwork story.
+
+**Story 0 is the groundwork story, and it holds the two paths no engineer may write.**
+`eslint.config.js` and `package.json` are the epic's whole locked set: `scripts/lane-check.sh` denies
+both to the test-engineer and to the software-engineer and allows both to `groundwork-engineer`. It
+draws nothing, its cases are build checks, and it counts against the ten-story cap — nine of ten.
 
 **Every prior set here is a `baseline-` diagram.** No epic drew the external sweep, the recovery
 verdict, the revocation or the status query, so each of the four stories draws the shipped path with a
@@ -26,7 +32,7 @@ prior sets were live diagrams.
 
 `recoverExpiredLeases` calls `storage.transact` three times — `:218` for the candidate read, `:231`
 for the external sweep and `:328` for each per-node verdict. `storage.transact` has no projection in
-the harness of EPIC 050.1 Story 6, and a method with no projection admits one call per diagram, so the
+the harness of EPIC 050.1 Story 6 (`06-the-conformance-harness`), and a method with no projection admits one call per diagram, so the
 outer pass's trace would need `:#2` and `:#3` — tokens the parser refuses outside a `baseline-` id.
 
 **The cause cannot be removed.** The git worktree reads at `:277-281` must sit outside a transaction,
@@ -41,23 +47,30 @@ depends on the answer, and no story is blocked by it.
 
 ## Dispatch order
 
+Story 0 runs before the loop, and it runs once. `/work` Step 4.5 dispatches
+`groundwork-engineer` over its `Paths:` grant, and the whole `## Change` of that story lands in that
+one turn. Story 1 depends on its `eslint.config.js` entry and Story 8 depends on its `package.json`
+value, so nothing of the loop may run before it.
+
 Story 1 owns the shared candidate query and the two event-type renames, and Story 2 consumes both, so
-Story 1 lands first.
+Story 1 lands first of the loop.
 
 Stories 3 and 4 are independent of Stories 1 and 2 and of each other.
 
 Story 5 is independent — one plan store method and the two facts it feeds.
 
-Story 6 deletes the service, so it follows Stories 1, 2 and 3, the last three importers, and it
-follows Story 4, because the two write the same two literals of `src/domain/layout.test.ts`: Story 4
-adds `health` and takes the count to twenty-two, Story 6 removes `lease` and takes it back to
-twenty-one. Story 7 deletes the module Story 6 orphans. Story 8 follows every prior story, because its
+Story 6 deletes the service, so it follows Stories 1, 2 and 3, the last three importers. **It no
+longer follows Story 4.** An earlier draft had Story 4 add `health` to `src/domain/layout.test.ts`
+and Story 6 take the count back; Story 4 opens no service directory now, so Story 6 is the only story
+that touches those literals and it takes the count from twenty-one to twenty on its own. Story 7
+deletes the module Story 6 orphans. Story 8 follows every prior story, because its
 tree assertion enumerates the result.
 
-The serial order is the numeric order: **1 → 2 → 3 → 4 → 5 → 6 → 7 → 8**.
+The serial order is the numeric order: **0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8**.
 
 ## Stories
 
+- 0 — groundwork → `00-groundwork.md` — draws nothing; `Paths: eslint.config.js package.json`
 - 1 — The external sweep scans runs → `01-the-external-sweep-scans-runs.md` — draws `baseline-sweep-external-leases` and `sweep-external-runs`
 - 2 — Startup recovery scans runs → `02-startup-recovery-scans-runs.md` — draws `baseline-recovery-verdict` and `recovery-verdict-run`
 - 3 — `revoke-actor` drops its lease pass → `03-revoke-actor-drops-its-lease-pass.md` — draws `baseline-revoke-actor` and `revoke-actor-lease-free`
@@ -107,7 +120,7 @@ Each was read out of the source before a story was written, and each one changed
 - **`run.driver` survives migration `12`.** EPIC 050.1's migration `12`, drafted at
   `.agents/plan/pending/050.1-migration-12.md`, keeps
   `driver TEXT NOT NULL CHECK (driver IN ('internal', 'external'))` and drops only the three
-  `driver = 'internal'` biconditional CHECKs. EPIC 050 Story 2 is the zod row schema `runRow` and
+  `driver = 'internal'` biconditional CHECKs. EPIC 050 Story 2 (`02-the-run-row`) is the zod row schema `runRow` and
   creates no table. The external-versus-internal split the two readers turn
   on is therefore still expressible after EPIC 050.
 
@@ -119,7 +132,7 @@ Each was read out of the source before a story was written, and each one changed
 - **`revoke-actor`'s lease call is its only lease reach**, and its baseline citations are `:81`,
   `:95`, `:100` and `:104`. `storage.transact` is at `:81`, the clock at `:95` after the three refusals
   at `:82-94`, `lease.expireLeasesOfOwner` at `:100` and `events.append` at `:104`; `loadActor` at
-  `:39-58` and the `UPDATE actor` at `:96-99` are raw SQL on `actor`.
+  `:40-59` and the `UPDATE actor` at `:96-99` are raw SQL on `actor`.
 
 - **`actor.revoked` has a strict payload and `leasesFenced` is required in it.**
   `src/http/contract/event-payload.ts:78-85`. `eventView.payload` is `z.unknown()` at
@@ -133,10 +146,15 @@ Each was read out of the source before a story was written, and each one changed
 
 - **`readStatus`'s `health` dependency is function-valued.** `health: () => HealthResult` at `:8`,
   called at `:50`, so its baseline token is `health.call` — legal in a baseline and refused in a live
-  diagram. Story 4 removes the cause by making it an object with one method. That is **not** the shape
-  of EPIC 050.1's `expiry` key, which is an inline object literal over a nested command with no
-  interface file; Story 4 opens a service capability and `src/domain/layout.test.ts` moves with it. The
-  epic records the open ruling between that and an inline structural type.
+  diagram. Story 4 removes the cause by injecting the **computed value**: `health` becomes
+  `HealthResult`, `:50` becomes a field read, and `src/main.ts:398` becomes
+  `health: readHealth(healthDependencies)`. The ship diagram loses the step and the `Health`
+  participant with it. **No service capability is opened.** An earlier draft opened
+  `src/services/health/index.ts`; `main.ts` binds `health` to `readHealth`, a **query** at
+  `src/queries/system/read-health.ts:28`, so a `services/` interface would declare a capability whose
+  only producer lives in `queries/`. Nothing is deferred by the value injection: `main.ts` builds the
+  dependencies inside the per-request `readStatus` closure, `readHealth` takes no `storage` and no
+  `clock`, and `readStatus` reads `health` unconditionally before `storage.transact` at `:54`.
 
 - **The CLI renders the lease lines.** `src/cli/status.ts:88-95` prints
   `kanthord: no expired lease` or one line per row, so Story 4 changes the CLI with the query.
@@ -163,7 +181,8 @@ Each was read out of the source before a story was written, and each one changed
 
 - **`executionBlockers` has seven members, not five.** `src/domain/plan-graph.ts:38-46` is
   `["lease", "workspace", "run", "attempt", "commit", "check-result", "git-operation"]`, and
-  `readSubtreeExecutionFacts` at `src/services/plan/sqlite.ts:351-382` carries one query per member.
+  the `queries` list of `readSubtreeExecutionFacts` at `src/services/plan/sqlite.ts:351-382` carries one
+  entry per member.
   Story 5 deletes exactly one and the list keeps **six**. An earlier draft of this tree said four,
   which would have dropped `check-result` and `git-operation` with it.
 
@@ -200,7 +219,7 @@ Each was read out of the source before a story was written, and each one changed
   An earlier draft of this epic named a file that does not exist.
 
 - **`leaseOwnerKinds` has one consumer outside the lease modules**, `src/http/contract/error-details.ts:5`,
-  used only at `:125` inside `leaseHeldDetails`. EPIC 050.4 Story 8 deletes that schema, so it must
+  used only at `:125` inside `leaseHeldDetails`. EPIC 050.4 Story 8 (`08-lease-held-is-retired`) deletes that schema, so it must
   delete this import in the same edit; the amendment is listed in the epic.
 
 - **`migration-0007-external-execution.ts:69` copies lease rows.** It is a shipped historical
@@ -222,15 +241,33 @@ Each was read out of the source before a story was written, and each one changed
 w.repository_id`. A join on `run_id` alone returns one candidate row per base, and both readers
   write once per row. An earlier draft of Story 1 carried exactly that join.
 
-- **EPIC 050.4 Story 9 asserts the `Lease` importer set by value.** Story 6 deletes the service and
+- **EPIC 050.4 Story 9 (`09-the-proposal-records-one-authority`) asserts the `Lease` importer set by value.** Story 6 deletes the service and
   retires that assertion in the same edit. A landed value assertion nobody retires is a red suite at
   the boundary of the story that made it false.
+
+- **The epic edits exactly two paths that `scripts/lane-check.sh` denies to both engineers**, and the
+  set was decided with the guard rather than from memory. `eslint.config.js` matches `*.config.*` and
+  `package.json` is the toolchain manifest; `scripts/lane-check.sh groundwork-engineer` allows both.
+  Nothing else the epic touches is locked: `src/**`, `test/**`, `docs/proposal/**` and `scripts/**`
+  all stay in an engineer lane, `kanthord.config.json` holds no key this epic moves, and
+  `pnpm-lock.yaml` records no package version, so the bump does not reach it.
+
+- **`eslint.config.js:21` names the test file Story 1 renames.**
+  `nodeEdgeWriteExemptions` at `eslint.config.js:17` lists
+  `src/commands/startup/recover-expired-leases.test.ts`, which holds six raw `node` writes. Story 1
+  moves that file to `recover-expired-runs.test.ts`, so the list must name the new path or
+  `pnpm run lint` fails on every one of the six. This coupling was missed on the first pass: the epic
+  swept `src/`, `test/` and `docs/` and no story read the toolchain config.
+
+- **`src/domain/version.test.ts:13` is the only file that couples the two version strings.** The other
+  eleven readers of `KANTHORD_VERSION` under `src/` read the constant alone, so the interval Story 0
+  opens is one `it` in one file, closed by Story 8. Story 7's `node --test` list dropped that file for
+  exactly this reason.
 
 ## What this epic is not
 
 It is **not** wire-invisible. One response field, `system.status.leases[]`, leaves the contract. That
-is outside the closed list of `docs/proposal/api/README.md:100-106`, and the amended policy of EPIC
-050.2 Story 8 makes it legal behind a recorded human ruling **and** a capability retirement.
+is outside the closed list of `docs/proposal/api/README.md:100-106`, and the amended policy of EPIC 050.2 Story 8 (`08-the-policy-amendment-and-the-capability-swap`) makes it legal behind a recorded human ruling **and** a capability retirement.
 `system.status` is covered by no capability, so there is no name to retire — the epic records the
 ruling, moves `KANTHORD_VERSION` to `30.0.0`, and writes a compatibility-record row whose "capability
 retired" cell reads **none**.
@@ -244,11 +281,86 @@ survive, empty and unreachable, until EPIC 057's migration `17`.
 
 ## Still open
 
-- **The `system.status` policy hole.** A response field removal on an operation covered by no
-  capability has no announcement mechanism. A human decides before dispatch: either
-  `docs/proposal/api/README.md` gains a clause for such an operation, or `system.status` gains a
-  capability. Story 8 ships one shape — both capability cells empty, plus a sentence saying why — and a
-  ruling amends that story rather than leaving the implementing agent a branch.
+- **The stale write-exemption entry.** **Decided: the list holds both names, and
+  EPIC 057 prunes the dead one.** Story 0 adds
+  `"src/commands/startup/recover-expired-runs.test.ts"` beside the shipped
+  `"src/commands/startup/recover-expired-leases.test.ts"`, so `nodeEdgeWriteExemptions` holds
+  nineteen and lint is green before Story 1's rename and after it.
+
+  **The exemption follows the rename, and that is not a new authorization.**
+  `eslint.config.js:13-16` says "a NEW file belongs on neither list — seed through
+  test/helpers/rows.ts instead". A `git mv` of a grandfathered fixture produces no new file: it is the
+  same six statements under a new name, and a rename that dropped their exemption would be a
+  behaviour change this epic did not ask for. An earlier draft of this note called the renamed file
+  "new" while also arguing the exemption should carry across; that was inconsistent, and the rename
+  reading is the correct one.
+
+  **Migrating the six writes to `test/helpers/rows.ts` was considered and rejected on scope.** It is
+  the shape the config comment prefers, and `eslint.config.js:458` scopes the restriction to
+  `files: ["src/**/*.ts"]`, so `test/**` is unrestricted and the helper is the right home for a _new_
+  fixture. It does not fit here. Two of the six map cleanly — `UPDATE node SET state = 'running'` at
+  `:495` and `:902` become `seedNodeState` (`test/helpers/rows.ts:267`), whose `block_reason` `CASE`
+  writes NULL for a non-blocked state, which both sites already hold. The other four do not. The
+  three inserts at `:198`, `:217` and `:236` pass this suite's **per-fixture** ids —
+  `projectId = project_${ulid}` at `:158`, `revisionId = revision_${ulid}` at `:159`,
+  `INSTRUCTION_BLOB` at `:53` and `NOW = 1700000000000` at `:46` — while `seedNode`
+  (`test/helpers/rows.ts:297`) hardcodes `fixtureIds.project`, `fixtureIds.instructionBlob`,
+  `fixtureIds.planRevision` and `updated_at: 1`. Serving them needs four new optional parameters on a
+  helper many suites share. The `INSERT ... SELECT` at `:1819` copies `project_id`,
+  `instruction_blob`, `acceptance_blob`, `worker`, `repository_id`, `revision` and `updated_at` from a
+  sibling row, which `seedNode` cannot express at all and which needs a new helper. Refactoring
+  shared test infrastructure to tidy one allowlist line is adjacent work in a lease-removal epic, and
+  the smallest complete change is the rename that carries its exemption.
+
+  **A pre-loop deletion was also rejected.** It would open a lint-red interval, and EPIC 050.4 Story 0
+  (`00-groundwork`) is not a precedent for it: there the mismatch is forced by two locked lanes and
+  its single assertion is isolated, whereas here the groundwork story would change lint policy and
+  then decline to run the policy check. The standard gives a groundwork edit build-only checks
+  because it opens no failing test, and swapping `pnpm run lint` for `pnpm run typecheck` proves the
+  config parses, not that it works.
+
+  **`/work` offers no mid-loop route for this path.** Step 5h.2 dispatches only an
+  `OPEN: OUT-OF-LANE` marker "whose path the `groundwork-engineer` ceiling allows **and that no
+  `GROUNDWORK-COMPLETE:` line of this cycle has written**", and Step 4.6 skips a marker whose path a
+  completion line already names. Story 0 grants `eslint.config.js`, so a later turn for it is
+  excluded by construction.
+
+  The residue is one inert line: an unmatched `files` pattern at `eslint.config.js:469` applies to
+  nothing, and reclaiming the old pathname would take a reviewed source change. The epic asks EPIC
+  057 to delete it with the rest of the lease cleanup.
+
+- **Two citations of the EPIC point one line high.** `.agents/plan/epics/050.5-the-lease-table-removal.md:47`
+  and `:67` both cite `src/http/contract/event.ts:25` for `eventView.type`. The field is at `:26`;
+  `:25` is `id`. The claim the citation supports — `type` is `z.string()`, so the event catalogue is
+  not wire-constrained — is true. `/author` does not edit an EPIC, so **a human moves both to `:26`**.
+
+- **The `system.status` policy hole.** **Ruled: the field leaves, and
+  Story 8 writes the policy clause that makes it legal.** `docs/proposal/api/README.md:100` —
+  `remove or rename a response field` is forbidden inside `/v1`, and `:106` closes the list. EPIC
+  050.2 Story 8 (`08-the-policy-amendment-and-the-capability-swap`) opened the one legalizing path,
+  and its sentence pairs a human ruling with "the capability swap that announced it". `system.status`
+  is in no `capabilityOperations` entry (`src/http/contract/capability.ts:5-15`), so no swap exists to
+  pair with — and a swap would not repair this direction anyway: a capability lets a _newer client_
+  detect an _older daemon_, while this removal breaks an _older client_ against a _newer daemon_.
+
+  The human ruled the removal, on the standing constraint that the product carries no
+  backward-compatible obligation and has no deployment. **Story 8 therefore amends the policy rather
+  than recording a hole**: it adds one clause admitting an operation that no capability covers, and
+  writes the compatibility row with both capability cells reading the literal `none`. A deprecated
+  `leases: []` on the wire was the alternative and is refused — it is a compatibility shim, which is
+  the thing the constraint exists to avoid.
+
+- **The dashboard types the field, and no `HANDOFF.md` entry asks it to drop it.**
+  `apps/apps/dashboard/src/api/types.ts:440` — `leases: SystemStatusLease[]`, a fixture at
+  `apps/apps/dashboard/src/api/fixtures/system.ts:23`, and a contract copy at
+  `apps/docs/api/contract/source/components/system.yaml:617` with `leases` in the **required** list at
+  `:656`. No file under `apps/apps/dashboard/src` reads `.leases`, so this is a contract and type
+  divergence rather than a runtime break, and the contract copy regenerates from the engine's
+  publication. `types.ts` and `fixtures/system.ts` are hand-written and do not. `AGENTS.md` puts an
+  obligation the dashboard must take on in `HANDOFF.md`, and no story of the 050 family writes that
+  file — the human does, and `HANDOFF.md:85` and `:92` are the EPIC 050.1 and EPIC 050.2 entries.
+  **A human writes the entry**, and it is a second reason to prefer the deprecated-empty-array
+  option.
 
 - **The `storage.transact` projection.** The outer recovery pass is undrawable without one. Story 2
   works around it by drawing the nested verdict write, so no story is blocked; the ruling decides
@@ -269,14 +381,14 @@ None is applied here, and a human applies each before dispatch. Each is named in
   assertion; and its `lease-hierarchy` deletion becomes a no-op, because EPIC 050.4 and Story 7 here
   already do it.
 
-- **EPIC 050.4 Story 8** — delete the `leaseOwnerKinds` import at `error-details.ts:5` with the
+- **EPIC 050.4 Story 8 (`08-lease-held-is-retired`)** — delete the `leaseOwnerKinds` import at `error-details.ts:5` with the
   `leaseRelations` import at `:6`. Both serve only `leaseHeldDetails`, which that story deletes.
 
 - **EPIC 050.4, the `leaseTtlMs` configuration** — its Story 1 and Story 4 delete the last two readers
   and no epic through EPIC 057 removes the setting. The default if no ruling arrives is that Story 6
   here takes it.
 
-- **EPIC 050.2 Story 2, the `endRun` fence raise** — gate rows 1 and 10b depend on it and no `## Change`
+- **EPIC 050.2 Story 2 (`02-the-authority-seams`), the `endRun` fence raise** — gate rows 1 and 10b depend on it and no `## Change`
   section in the family instructs the write. The default if no ruling arrives is that the implementing
   agent reports a red row as an EPIC 050.2 defect rather than writing the execution service here.
 

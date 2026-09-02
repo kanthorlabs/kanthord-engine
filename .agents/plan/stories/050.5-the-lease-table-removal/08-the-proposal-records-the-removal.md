@@ -55,7 +55,7 @@ because the table survives to EPIC 057. `:10` describes a worker as executing _"
 lease"_; it is a run.
 
 **`docs/proposal/phase-2/runs-and-exclusion.md`**, created by EPIC 050 Story 7
-(`07-the-proposal-records-the-run-model`) and amended by EPIC 050.4 Story 9, gains one closing
+(`07-the-proposal-records-the-run-model`) and amended by EPIC 050.4 Story 9 (`09-the-proposal-records-one-authority`), gains one closing
 section: no production code reaches a node lease, the run is the only exclusion and the only
 authority, startup recovery and the read-path sweep both key on run expiry, and the empty `lease`
 table is dropped by EPIC 057's migration `17`.
@@ -66,23 +66,43 @@ epic does not touch.
 
 ### 2 — the version and the compatibility record
 
-`src/domain/version.ts:1` moves to `"30.0.0"`, and `package.json`'s `version` field moves with it in
-the same edit — `src/domain/version.test.ts:12-14` asserts the two are equal.
+`src/domain/version.ts:1` — `KANTHORD_VERSION` moves to `"30.0.0"`. **`package.json`'s `version`
+field is already `30.0.0`, and this story does not write it.** `package.json` matches the toolchain
+manifest `scripts/lane-check.sh` denies to both engineers, so EPIC 050.5 Story 0 (`00-groundwork`)
+moved it before the loop started. `src/domain/version.test.ts:13` — `assert.equal` asserts the two
+are equal, so it is red from that turn until this edit, and this edit is what closes it. Case 5 below
+reads both values and asserts nothing about who wrote them.
 
 **It is a major, not a patch.** Story 4 removes `leases[]` from the `system.status` response, and a
 response field removal is outside the closed list of `docs/proposal/api/README.md:100-106`.
 
-Add one row to the compatibility record EPIC 050.2 Story 8 created, **exactly as written**:
+**The policy gains one clause, and this story writes it.** The amended policy legalizes a change
+outside the closed list behind a human ruling plus the capability swap that announced it, and
+`system.status` is in no `capabilityOperations` entry
+(`src/http/contract/capability.ts:5-15`), so no swap exists to pair with. A human ruled the removal.
+Add this paragraph to `docs/proposal/api/README.md`, directly under the sentence at `:106` that
+closes the list, **exactly as written**:
+
+> An operation that no capability covers has no capability swap to announce a change to it. Such a
+> change is recorded in `## Compatibility record` with both capability cells reading `none`, and the
+> human ruling plus the major version bump is its whole announcement. A capability would not serve
+> the case in any event: a capability lets a newer client detect an older daemon, and a removed
+> response field breaks an older client against a newer daemon.
+
+Write the clause, not a variation of it. It is the ruling made durable, and a later reader must find
+the rule rather than infer it from one row.
+
+Add one row to the compatibility record EPIC 050.2 Story 8 (`08-the-policy-amendment-and-the-capability-swap`) created, **exactly as written**:
 
 | epic       | change outside the closed list                 | capability retired | capability declared |
 | ---------- | ---------------------------------------------- | ------------------ | ------------------- |
-| EPIC 050.5 | `leases[]` leaves the `system.status` response | _(empty)_          | _(empty)_           |
+| EPIC 050.5 | `leases[]` leaves the `system.status` response | `none`             | `none`              |
 
 Then add one sentence directly under the table:
 
-> EPIC 050.5's row carries no capability because `system.status` is covered by none. The policy's
-> announcement mechanism does not reach an operation outside `capabilityOperations`, and EPIC 050.5
-> records that gap rather than inventing a capability to fill it.
+> EPIC 050.5's row reads `none` in both capability cells because `system.status` is covered by no
+> capability. The clause under `## Versioning` is the rule it follows, and EPIC 050.5 did not invent
+> a capability to fill the cells.
 
 **This story ships one shape and no branch.** The policy gap is a real open question and the epic's
 index records it, but a story that offered the implementing agent two possible tables would be
@@ -118,9 +138,10 @@ exclusion list would hide the reference it exists to catch.
 - Amend `lease.md`; do not delete it. The table still exists, and EPIC 057 deletes the document with it.
 - Amend three README rows, every lease-generation sentence of `run.md`, the three actor sites, the five recovery sites and the two `domain.md` sites. Leave the `lease` table-index row and the polymorphic-column lists alone: `lease` and `lease.subject_id` both still exist.
 - Gate row 25 pins expected values. Do not write it as "unchanged since EPIC 050.4"; nothing in the tree holds that past.
-- Write the compatibility row with both capability cells empty, plus the explanatory sentence. Do not invent a capability to fill them, and do not offer a second table.
+- Write the `## Versioning` clause and both capability cells as the literal `none`, plus the explanatory sentence. A blank cell is ambiguous between "no capability" and "not filled in", and the epic's own Decisions say the cell reads `none`. Do not invent a capability to fill them, and do not offer a second table.
 - The tree assertion matches imports and identifiers. Do not match the bare substring `lease`.
-- Change no production source in this story.
+- Do not edit `package.json`. EPIC 050.5 Story 0 (`00-groundwork`) already moved its `version` field, and the file is outside both engineer lanes. Write `src/domain/version.ts` alone.
+- Change no production source in this story beyond `src/domain/version.ts`.
 
 ## Verify
 
@@ -144,9 +165,11 @@ Add, each as a separate `it`:
 
 4c. `"declaredCapabilities is four names by value and no operation's errors record moved"` — assert `declaredCapabilities(registry)` deep-equals the exact literal `["event-wait", "per-node-write", "project-graph", "worker-run"]`, the four EPIC 050.4 leaves, and assert the operation-id-to-sorted-`errors` map deep-equals a literal this story commits beside the case. **An "unchanged since EPIC 050.4" assertion has no oracle**: the prior value is history and nothing in the tree holds it, so this case pins expected values instead of comparing against a past the test cannot read. It is gate row 25.
 
-5. `"KANTHORD_VERSION is 30.0.0 and package.json agrees"` — both in one case.
+5. `"KANTHORD_VERSION is 30.0.0 and package.json agrees"` — assert the constant equals the literal `"30.0.0"` and assert `package.json`'s `version` field equals it. Both in one case. This is the case that closes the interval EPIC 050.5 Story 0 (`00-groundwork`) opened, and asserting the literal rather than only the equality is what stops the pair agreeing at the wrong value.
 
-6. `"the compatibility record holds one row naming EPIC 050.5 with empty capability cells"` — parse the section of `docs/proposal/api/README.md`, assert the row count, the epic name, and that both capability cells are empty. Assert the explanatory sentence follows the table. The empty cells are the recorded open question, and the test pins them so a later edit cannot fill them silently.
+5b. `"the versioning policy admits an operation covered by no capability"` — read `docs/proposal/api/README.md`, assert the clause follows the closed-list sentence at `:106`, and assert it names both `none` and the older-client direction. Without this case the row's `none` cells rest on no written rule.
+
+6. `"the compatibility record holds one row naming EPIC 050.5 with both capability cells reading none"` — parse the section of `docs/proposal/api/README.md`, assert the row count, the epic name, and that both capability cells equal the literal `none`. Assert the explanatory sentence follows the table. The `none` cells are the recorded open question, and the test pins them so a later edit cannot fill them silently.
 
 `pnpm run verify` exits 0.
 
