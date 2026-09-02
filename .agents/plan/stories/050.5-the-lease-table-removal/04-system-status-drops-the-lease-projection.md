@@ -8,7 +8,7 @@ Diagrams: read-status-lease-free
 
 Baselines: read-status-lease-free <- baseline-read-status
 
-Seams: read-status-lease-free: +health.read, -health.call, -clock.now
+Seams: read-status-lease-free: -health.call, -clock.now
 
 ## The shipped path
 
@@ -33,7 +33,10 @@ sequenceDiagram
     Command-->>Client: ok
 ```
 
-Citations, one per step: `:50`, `:54`, `:79`.
+Citations, one per step:
+`src/queries/system/read-status.ts:50 — `dependencies.health``,
+`src/queries/system/read-status.ts:54 — `storage.transact``,
+`src/queries/system/read-status.ts:79 — `clock.now``.
 
 The three projections are raw `transaction.all` calls at `:55`, `:63` and `:73`, so none of them is a
 message. **Step 1 is a function-valued dependency**, `health: () => HealthResult` at `:8`, and it is
@@ -50,17 +53,17 @@ Fixture: the fixture of `baseline-read-status`. The lease row is seeded and surv
 sequenceDiagram
     participant Client
     participant Command
-    participant Health
     participant Storage
     Client->>Command: system.status
-    Command->>Health: 1 health.read
-    Command->>Storage: 2 storage.transact
+    Command->>Storage: 1 storage.transact
     Command-->>Client: ok
 ```
 
-Two tokens change. `health.call` becomes `health.read`, because a live diagram may hold no `.call`
-token and the story that draws one **removes the cause** rather than working around it. `clock.now`
-leaves with the query that made it, and the `clock` dependency leaves with it.
+Two tokens leave and none arrives. `health.call` goes because `health` stops being callable: it
+becomes the `HealthResult` value itself, so the recorder observes no call on it and the seam has no
+`Health` participant at all. `clock.now` leaves with the query that made it, and the `clock`
+dependency leaves with it. **A live diagram may hold no `.call` token, and this story removes the
+cause by deleting the call rather than by renaming it.**
 
 The seeded lease row surviving unread is what proves the query stopped, rather than the table
 emptying. The table still exists in this story; Story 8 drops it.
@@ -86,36 +89,35 @@ not rule on, and `event.list` already reports `run.expired`.
 
 ### 2 — the health dependency
 
-`health: () => HealthResult` at `:8` becomes an object with one method:
+`health: () => HealthResult` at `:8` becomes the value itself:
 
 ```ts
-// src/services/health/index.ts
-export interface Health {
-  read(): HealthResult;
-}
+health: HealthResult;
 ```
 
-`ReadStatusDependencies.health` takes that type, and `:50` becomes `dependencies.health.read()`.
-`src/main.ts` binds `{ read: () => health() }` over the closure it already holds. **This is a new
-service capability, not the shape of EPIC 050.1's `expiry` key**: `expiry` wraps a nested command in
-an inline object literal and declares no interface file. An interface with no vendor implementation is
-legal — `AGENTS.md` requires a dependency to inject through an interface and lets `main.ts` name the
-value — and the alternative, declaring `health: Readonly<{ read(): HealthResult }>` inline on
-`ReadStatusDependencies`, removes the same `.call` token without adding a directory. **A human rules
-which shape ships.** This story writes the service capability, and a ruling for the inline type deletes
-`src/services/health/` from this section and case 8 below with it.
+`:50` becomes `const health = dependencies.health;`, and `src/main.ts:398` becomes
+`health: readHealth(healthDependencies),`.
 
-**`src/domain/layout.test.ts` moves with the directory.** `:101` asserts the service directory list by
-value and `:134` asserts every directory holds an `index.ts`. Adding `health` breaks the first, so this
-story adds `"health"` to that literal in sorted position and changes the count in the suite name to
-twenty-two. Story 6 removes `"lease"` and takes it back to twenty-one.
+**Nothing is deferred by the change, and that is why it is legal.** `src/main.ts:398` builds
+`ReadStatusDependencies` inside the per-request `readStatus: () => readStatus({ ... })` closure, so
+the value is computed once per request either way. `readHealth` at
+`src/queries/system/read-health.ts:28` takes `reporters`, `version` and `capabilities` and no
+`storage` and no `clock`, so it opens no transaction; and `readStatus` reads `health` unconditionally
+at `:50`, before `storage.transact` at `:54`. Eager and lazy therefore evaluate at the same point in
+the same order.
 
-**This is not incidental cleanup.** `.agents/plan/authoring.md` states that a live diagram needing a
-`<key>.call` token is a defect and that the story removes the cause. This story is the first to draw
-`system.status`, so it is the story that owes the removal.
+**No service capability is opened, and `src/domain/layout.test.ts` does not move.** An earlier draft
+of this story opened `src/services/health/index.ts` and took the `:101` count to twenty-two. That was
+wrong on its own premise: `main.ts` binds `health` to `readHealth`, which is a **query**, so a
+`services/` interface would declare a capability whose only producer lives in `queries/`. Injecting
+the computed `HealthResult` removes the `.call` token without an interface, a directory or a
+callback, and it is the smallest edit that removes it — one type, one call site, one binding.
 
-Change no other consumer. The `system.health` operation has its own handler and its own binding, and
-this story does not touch either.
+**`HealthResult` stays in `src/domain/health.ts`.** It is already there at `:11`, `readStatus`
+already imports it at `:3`, and nothing about the type changes.
+
+Change no other consumer. The `system.health` operation has its own handler and its own binding at
+`src/main.ts:387-389`, and this story does not touch either.
 
 ### 3 — the contract, the CLI and every fixture that names `leases`
 
@@ -151,6 +153,7 @@ the four production files above:
 ## Constraints
 
 - Change the four production files, the proposal, and every fixture the grep returns. Do not touch the node projection, the repository projection or `HealthResult`.
+- Do not open `src/services/health/`. `health` becomes the `HealthResult` value, and `src/domain/layout.test.ts` does not move in this story.
 - Delete the `clock` dependency. A dependency nothing reads is a key a later story has to explain.
 - Do not add an expired-run projection. Adding a response field is a wire change this epic did not rule on.
 - Do not change the `system.health` operation, its handler or its binding.
@@ -159,7 +162,7 @@ the four production files above:
 ## Verify
 
 ```
-node --test src/queries/system/read-status.test.ts src/http/contract/system.test.ts src/http/contract/example.test.ts src/cli/status.test.ts src/domain/layout.test.ts src/main.test.ts test/sequence/conformance.test.ts
+node --test src/queries/system/read-status.test.ts src/http/contract/system.test.ts src/http/contract/example.test.ts src/cli/status.test.ts src/main.test.ts test/sequence/conformance.test.ts
 ```
 
 Add, each as a separate `it`:
@@ -170,7 +173,7 @@ Add, each as a separate `it`:
 
 3. `"the node and repository projections are unchanged"` — carry the shipped cases across and assert both arrays by value against one fixture. Without this the deletion could have taken a second projection with it.
 
-4. `"the production status binding passes no clock and an object-shaped health"` — assert against the value `main.ts` builds, not against a hand-written fixture. A key-set assertion over a fixture proves only that the fixture omitted `clock`, because a TypeScript dependency type is erased at run time and cannot refuse a key.
+4. `"the production status binding passes no clock and a HealthResult-valued health"` — assert against the value `main.ts` builds, not against a hand-written fixture. A key-set assertion over a fixture proves only that the fixture omitted `clock`, because a TypeScript dependency type is erased at run time and cannot refuse a key.
 
 4b. `"a ReadStatusDependencies carrying a clock does not typecheck"` — a fixture file asserted not to compile, through the existing lint or typecheck harness. That is what proves the key left the type, and it is the same mechanism EPIC 050.4's gate uses for the `Lease` interface.
 
@@ -178,9 +181,7 @@ Add, each as a separate `it`:
 
 6. `"the CLI status output holds no lease heading and no lease row"` — `src/cli/status.test.ts:40` seeds a `subjectKind: "repository"` line today; assert the rendered output holds neither the heading nor a row, and assert the node and repository lines still render.
 
-7. `"the production dependency map binds health as an object"` — in `src/main.test.ts`, assert the `system.status` binding's `health` value has a `read` method.
-
-8. `"the service inventory names health"` — in `src/domain/layout.test.ts`, the shipped `:101` case with `"health"` in sorted position and the suite name at twenty-two. Story 6 takes it back to twenty-one. Drop this case if the ruling of section 2 chooses the inline type.
+7. `"the production dependency map binds health as a value, not a function"` — in `src/main.test.ts`, assert `typeof` the `system.status` binding's `health` is `"object"` and that it holds `status` and `dependencies` by key set. A function-valued binding is what the diagram forbids, so the type is the assertion.
 
 Add `test/sequence/scenarios/read-status-lease-free.ts`.
 

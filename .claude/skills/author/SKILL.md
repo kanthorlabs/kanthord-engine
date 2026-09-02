@@ -270,7 +270,12 @@ sequenceDiagram
     Command-->>Client: ok
 ```
 
-Citations, one per step: `:<line>`, `:<line>`, ...
+Citations, one per step, each in the form the standard fixes:
+`<file>:<line> — `<identifier>``,
+`<file>:<line> — `<identifier>``, ...
+
+The identifier is a token the cited line holds, and the gate agrees all three. A bare `:<line>` is
+refused: a stale line number still points at a valid line, and only the identifier catches the drift.
 
 <the sentences that say what this baseline records, and which of its properties
 the story changes>

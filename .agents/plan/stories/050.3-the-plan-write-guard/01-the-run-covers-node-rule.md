@@ -1,7 +1,7 @@
 # Story 1 — The run-covers-node rule
 
 Epic: `.agents/plan/epics/050.3-the-plan-write-guard.md`
-Depends on: EPIC 050 Story 2 (`runRow`), EPIC 050 Story 4 (`subtreeExclusion` and `SubtreeExclusionRefusal`, whose shape this read returns), EPIC 050.1 (migration `12`, which gives `run` its `state` and `expires_at` columns), EPIC 050.2 Story 1 (`assertRunAuthority`, which cases 18 and 19 compare against).
+Depends on: EPIC 050 Story 2 (02-the-run-row), for the `run` row; EPIC 050 Story 4 (04-subtree-exclusion), for `subtreeExclusion` and `SubtreeExclusionRefusal`, whose shape this read returns; EPIC 050.1's migration `12`, drafted at `.agents/plan/pending/050.1-migration-12.md`, which gives `run` its `state` and `expires_at` columns and declares `expires_at` `NOT NULL`; EPIC 050.2 Story 1 (01-run-authority), for `assertRunAuthority`, which cases 19 and 20 compare against.
 Kind: story-foundation
 
 This story adds one read to the plan store. It draws no path: declaring and implementing a store
@@ -23,7 +23,7 @@ The command passes the **seed**, never the closure. The store expands it.
 
 **`src/services/plan/sqlite.ts`** implements it in one statement group, in the caller's transaction:
 
-1. Expand the seed to its **descendants** with the recursive walk `readSubtreeContainmentFacts` already uses at `:302`:
+1. Expand the seed to its **descendants** with the recursive walk `readSubtreeContainmentFacts` already uses at `src/services/plan/sqlite.ts:302 — `WITH RECURSIVE``:
    `WITH RECURSIVE descendant(id) AS (SELECT ? UNION ALL SELECT n.id FROM node n JOIN descendant d ON n.parent_id = d.id) SELECT id FROM descendant`.
 2. Expand the seed to its **ancestors** with the mirror walk over `parent_id`.
 3. Read every covering run over the closure:
@@ -42,16 +42,24 @@ this order: a covering node **inside** the seed is `"self"`; otherwise a coverin
 seed member is `"ancestor"`; otherwise it is `"descendant"`. Step 4 applies that order to the ordered
 rows, so the class picks the group and `ORDER BY node_id ASC, id ASC` picks the row inside it.
 
-That is exactly the order `subtreeExclusion` evaluates at `src/domain/run-exclusion.ts:88-105`: `self`
+That is exactly the order `subtreeExclusion` evaluates at `src/domain/run-exclusion.ts:88 — `firstMatch``: `self`
 before `ancestor` before `descendant`, each class resolved by `compareBytewise` on the node id and
 then on the run id. One input always names the same run, so a refusal message is reproducible and a
 test asserts it by value.
 
 The liveness predicate is `state = 'active' AND expires_at > ?`, which makes `expires_at <= now`
-expired. That is `isLive` of `src/domain/run-exclusion.ts:41-45` and the boundary of
+expired. That is `isLive` of `src/domain/run-exclusion.ts:41 — `isLive`` and the boundary of
 `assertRunAuthority` in EPIC 050.2. `expires_at` carries no null branch: EPIC 050.1's migration `12`
 declares the column `INTEGER NOT NULL`, so a run with no budget cannot exist and a predicate that
 admitted one would be a branch no test could seed.
+
+**The two rules disagree on exactly one row, and migration `12` makes that row unseedable.**
+`isLive` admits a null `expires_at` at `src/domain/run-exclusion.ts:43 — `run.expiresAt === null``,
+because `SubtreeExclusionRefusal.expiresAt` is `number | null` at
+`src/domain/run-exclusion.ts:21 — `expiresAt``. SQL answers the other way: `expires_at > ?` is unknown
+for a null, so the row does not cover. Never seed a null `expires_at` in case 18. The column is
+`NOT NULL` from migration `12`, so the divergence is unreachable rather than untested, and narrowing
+the domain type is EPIC 050.5's work with the rest of the mechanism.
 
 **This read and `subtreeExclusion` are two implementations of one decision, so they are asserted to
 agree.** Case 18 drives both from one fixture over every relation and both liveness boundaries. Two
@@ -76,11 +84,13 @@ implementations nothing compares are two decisions.
 node --test src/services/plan/sqlite.test.ts src/commands/node/update-node.test.ts
 ```
 
-Seed with `seedGraph` at `test/helpers/rows.ts:102`, `seedSiblingTask` at `:184` and `seedRunRow` at
-`:688`, against `createMigratedStorage()`. `seedGraph` inserts three nodes — initiative `I`
-(`initiative_a`), objective `O` (`objective_a`) under it and task `T` (`task_a`) under that —
-asserted at `test/helpers/rows.test.ts:86`. `seedSiblingTask` adds task `S` (`task_b`) beside `T`.
-Both seeders are needed: `seedGraph` alone holds no `S`.
+Seed with `test/helpers/rows.ts:102 — `seedGraph``, `test/helpers/rows.ts:184 — `seedSiblingTask``
+and `test/helpers/rows.ts:688 — `seedRunRow``, against `createMigratedStorage()`. `seedGraph` inserts
+three nodes — initiative `I` (`initiative_a`), objective `O` (`objective_a`) under it and task `T`
+(`task_a`) under that — asserted at
+`test/helpers/rows.test.ts:86 — `seedGraph after seedRegistry inserts one plan_revision and three nodes``.
+`seedSiblingTask` adds task `S` (`task_b`) beside `T`. Both seeders are needed: `seedGraph` alone
+holds no `S`.
 
 Assert, each as a separate `it`:
 
@@ -112,7 +122,7 @@ Assert, each as a separate `it`:
 
 14. `"an empty seed returns null"`.
 
-15. `"runCoversNode reads no lease row"` — seed a live node lease on `T` with `seedLeaseOnNode` at `test/helpers/rows.ts:668` and no run, call with `[T]`, and assert `null`.
+15. `"runCoversNode reads no lease row"` — seed a live node lease on `T` with `test/helpers/rows.ts:668 — `seedLeaseOnNode`` and no run, call with `[T]`, and assert `null`.
 
 16. `"self beats ancestor for a multi-id seed"` — run on `O`, call with `[O, T]`. Assert `relation === "self"`, not `"ancestor"`.
 

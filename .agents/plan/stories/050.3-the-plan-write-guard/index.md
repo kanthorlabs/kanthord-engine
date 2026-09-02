@@ -1,9 +1,18 @@
 # EPIC 050.3 — The plan-write guard — stories
 
 Epic: `.agents/plan/epics/050.3-the-plan-write-guard.md`
-Prereq: EPIC 050, EPIC 050.1 and EPIC 050.2, implemented. Every story here reads a `run` row of EPIC 050.1's migration `12` and the `subtree-busy` code EPIC 050.1 Story 1 registered.
+Prereq: EPIC 050, EPIC 050.1 and EPIC 050.2, implemented. Every story here reads a `run` row of EPIC 050.1's migration `12`, drafted at `.agents/plan/pending/050.1-migration-12.md`, and the `subtree-busy` code EPIC 050.1 Story 1 (01-the-claim-contract) registered. Stories 2 to 6 also read the recorder of EPIC 050.1 Story 6 (06-the-conformance-harness) and the runner of EPIC 050.1 Story 7 (07-the-conformance-runner), because each adds a scenario file.
 
 A human editing the plan cannot write under a worker's feet. Five plan commands gain one guard, and the two lease-derived reads on a plan write stop being read.
+
+## Locked paths
+
+**This epic holds no `00-groundwork.md`, because it needs no locked path.** Every path the nine
+stories edit was checked with `scripts/lane-check.sh` against both engineer roles, and every one is
+allowed to exactly one of them: `src/**` production source and `docs/proposal/**` to the
+software-engineer, `src/**/*.test.ts`, `test/helpers/**` and `test/sequence/**` to the test-engineer.
+No path is denied to both, so no `Executor:` line and no `Paths:` line appears in this epic, and
+`.agents/plan/authoring.md` refuses an empty groundwork story written anyway.
 
 ## One story, one path
 
@@ -25,7 +34,9 @@ Story 7 depends on Story 3, which removes the other reader of `facts.lease` in t
 
 Story 9 depends on every prior story.
 
-A workable serial order: **1 → 8 → 2 → 3 → 4 → 5 → 6 → 7 → 9**.
+A workable serial order: **1 → 8 → 2 → 3 → 4 → 5 → 6 → 7 → 9**. No story in it depends on a later
+one: Story 1 and Story 8 read nothing of this epic, Stories 2 to 6 read both of them, Story 7 reads
+Story 3 and Story 6, and Story 9 reads all eight.
 
 ## Stories
 
@@ -53,6 +64,8 @@ before the stories were written, and each one changed a story.
 - **`import-plan` reads the clock at `:395`, inside the tail.** Story 6 moves it to just after the idempotency replay so the guard has a `now`, and the move carries `~clock.now` with a citation rather than `+`. It is the one seam call that leaves a pinned tail in this epic.
 - **`import-plan` cannot seed its guard before `:195`.** The ids it deletes are the project's nodes no submitted document names, and that set needs `storedNodes` from the graph read. Its guard therefore sits after that read and before the first write at `:413`, and its diagram draws the ordinal.
 - **`create-node` writes before it reads the graph.** `blobs.put` at `:116` and `:122` precede `plan.readGraph` at `:128`. That is why `runCoversNode` expands the closure inside the store: a command-side ancestor walk would need the graph read, and placing the guard after it would refuse after two blob writes.
+- **Two drawn methods carry a label the harness dictates.** EPIC 050.1 Story 6 (06-the-conformance-harness) projects `events.append` by `input.type` then `input.subjectId`, and `plan.setNodeState` by `input.id` then `input.trigger`. Both methods appear only in `unblock-node`, so its two diagrams draw `events.append:node.unblocked:T` and `plan.setNodeState:T:manual-unblock`. Every other method these diagrams draw carries no projection, and each appears once per diagram, which is what the standard admits.
+- **`SubtreeExclusionRefusal.expiresAt` is `number | null`** at `src/domain/run-exclusion.ts:21 — `expiresAt``, and `isLive` treats a null as live at `src/domain/run-exclusion.ts:43 — `run.expiresAt === null``. SQL answers the other way for `expires_at > ?`. Migration `12` declares the column `NOT NULL`, so the one divergent row cannot be seeded, and Story 1 states the constraint on its case-18 fixture rather than leaving it to be found.
 
 ## Decisions the source check forced
 

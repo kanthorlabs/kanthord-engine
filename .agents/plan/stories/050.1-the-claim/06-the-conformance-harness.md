@@ -49,12 +49,19 @@ ULID. A method with no projection admits one call per diagram.
 `result`, and compares the drawn list with the recorded list by `deepStrictEqual`. A scenario passes
 no expected terminal, so the story holds one copy of that expectation.
 
+**A `note over Command` ends the compared prefix, and it takes two forms.** `tail pinned by EPIC
+<nnn> <diagram-id>` names the diagram that owns the body, and `tail unchanged by EPIC <nnn>` names no
+diagram because no later story owns the body. Both truncate the drawn list at the note, so the
+comparison holds only the steps above it, and the recorded list is truncated to the same length. The
+two differ only in what the range gate resolves afterwards: the pinned form names a diagram id, and
+`scripts/verify-epic-sequence.ts` refuses one that no story declares.
+
 **The parser refuses**, each by value: an unknown diagram id; a participant outside the recorded
 dependency keys; a message that is not `<n> <key>.<method>` or `<n> <key>.<method>:<label>`; a
 non-dense ordinal sequence; two steps carrying one token; two terminals; no terminal and no note; a
-`note over Command` that is not `tail pinned by EPIC <nnn> <diagram-id>`; the words `loop` or `opt`;
-and a `<key>.call` message or a `:#<n>` discriminator in a diagram whose id does not start with
-`baseline-`.
+`note over Command` that is neither `tail pinned by EPIC <nnn> <diagram-id>` nor `tail unchanged by
+EPIC <nnn>`; the words `loop` or `opt`; and a `<key>.call` message or a `:#<n>` discriminator in a
+diagram whose id does not start with `baseline-`.
 
 `.agents/plan/authoring.md` is the specification this file implements. Where the two disagree,
 that document wins and this file is the defect.
@@ -85,6 +92,16 @@ Without all four the comparison could be a subset check and still pass.
 5. `"an exact list passes"` — the control case.
 6. `"a pure-domain call produces no token"` — call a plain function inside the recorded block and assert the token list is unchanged.
 7. `"a nested command bound to unrecorded dependencies is one token"`.
+
+Then assert both note forms, because the malformed-note refusal above is a negative-only proof and
+needs a control for each form a diagram may legally carry:
+
+8. `"a pinned tail truncates the comparison"` — a diagram of four steps ending
+   `note over Command: tail pinned by EPIC 050.1 claim-success-task`, recorded against six calls.
+   Assert the comparison passes on the first four and that a differing fifth call does not fail it.
+9. `"an unchanged tail truncates the comparison"` — the same diagram ending
+   `note over Command: tail unchanged by EPIC 050.1`, asserted the same way. EPIC 050.3 draws eight
+   diagrams in this form, so a parser that admitted only the pinned form would refuse all eight.
 
 `pnpm run verify` exits 0.
 

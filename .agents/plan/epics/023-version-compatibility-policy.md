@@ -34,6 +34,10 @@ operation it names is `routed`, and a test enforces that.
 
 ### D1 — `/v1` is the compatibility contract, and the package version is not
 
+**Superseded in part by EPIC 050.2.** The closed list at `:52-58`, and the sentence at `:60`, are
+closed by default rather than absolutely. `docs/proposal/api/README.md` carries the exception sentence, and the capability name
+covering the affected operations is retired and replaced. Nothing else in D1 changes.
+
 `KANTHORD_VERSION` is a hardcoded literal at `src/domain/version.ts:1`, today `"27.8.1"`. One
 repository ships the daemon and the CLI, so that string describes a build, and it describes the wire
 contract only by accident. **The wire contract is `/v1`, and the policy binds to `/v1` alone.**

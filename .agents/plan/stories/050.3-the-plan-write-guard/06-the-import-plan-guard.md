@@ -1,7 +1,7 @@
 # Story 6 — The import-plan guard
 
 Epic: `.agents/plan/epics/050.3-the-plan-write-guard.md`
-Depends on: Story 1 (`plan.runCoversNode`), Story 8 (`subtree-busy` on `plan.import`).
+Depends on: Story 1 (01-the-run-covers-node-rule), for `plan.runCoversNode`; Story 8 (08-subtree-busy-joins-the-plan-operations), for `subtree-busy` on `plan.import`; EPIC 050.1 Story 6 (06-the-conformance-harness) and EPIC 050.1 Story 7 (07-the-conformance-runner), which this story's scenario file runs on.
 Kind: story-implement
 
 Diagrams: import-plan-guard
@@ -35,9 +35,24 @@ sequenceDiagram
     note over Command: tail unchanged by EPIC 050.3
 ```
 
-Citations: `:149`, `:160`, `:169`, `:191`, `:195`. The project existence check at `:150` reads through the
-transaction object, which is not a dependency key, so it is no message. `plan.readGraph` also appears
-at `:181`, inside the `choices-stale` branch, which is a different path this diagram does not draw.
+Citations, one per step: `src/commands/plan/import-plan.ts:149 — `storage.transact``,
+`src/commands/plan/import-plan.ts:160 — `findByImportId``,
+`src/commands/plan/import-plan.ts:169 — `newestRevision``,
+`src/commands/plan/import-plan.ts:191 — `readValidationContext``,
+`src/commands/plan/import-plan.ts:195 — `readGraph``. The project existence check at `:150` reads
+through the transaction object, which is not a dependency key, so it is no message. `plan.readGraph`
+also appears at `src/commands/plan/import-plan.ts:182 — `readGraph``, inside the `choices-stale`
+branch, and again at `src/commands/plan/import-plan.ts:657 — `readGraph``, inside `retryResult`. Both
+are on paths this diagram does not draw.
+
+Callee anchors, one per step: `src/services/storage/index.ts:33 — `transact``,
+`src/services/plan/index.ts:80 — `findByImportId``,
+`src/services/plan/index.ts:75 — `newestRevision``,
+`src/services/plan/index.ts:85 — `readValidationContext``,
+`src/services/plan/index.ts:66 — `readGraph``. Steps 3 to 5 are reachable because the fixture carries
+a fresh `importId`, so step 2 returns nothing and the replay at `:160-166` does not return, and
+because `fromRevision` and `validatedRevision` both equal the newest revision, so neither
+`stale-revision` nor `choices-stale` fires.
 
 The prefix reaches `plan.readGraph` because that is where the guard must sit: the ids the import
 deletes are the project's nodes no submitted document names, and that set needs the graph.
@@ -154,7 +169,7 @@ Add, each as a separate `it`:
 
 3. `"an import deleting a node whose descendant holds an active run refuses, naming the descendant"` — run on `T`, submit a set that omits `O`. Assert `relation === "descendant"`.
 
-4. `"an import touching only unrelated nodes succeeds"` — run on a node of the second project `seedSecondProjectGraph` adds at `test/helpers/rows.ts:406`, import into `P`. A node of another project is neither above nor below any seed, and it is the only unrelated node available: an import of `P` that submits every node of `P` seeds every node of `P`.
+4. `"an import touching only unrelated nodes succeeds"` — run on a node of the second project `test/helpers/rows.ts:406 — `seedSecondProjectGraph`` adds, import into `P`. A node of another project is neither above nor below any seed, and it is the only unrelated node available: an import of `P` that submits every node of `P` seeds every node of `P`.
 
 5. `"an import over an expired run succeeds"`, and the same over an `ended` run.
 

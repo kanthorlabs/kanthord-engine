@@ -1,7 +1,7 @@
 # Story 3 — The objective-busy refusal drops the lease
 
 Epic: `.agents/plan/epics/050.4-the-node-lease-removal.md`
-Depends on: Story 1 (the deletion), EPIC 050.1 Story 5 (the refusal).
+Depends on: EPIC 050.4 Story 1 (`01-the-claim-of-a-task-drops-the-lease`) for the deletion, and EPIC 050.1 Story 5 (`05-the-objective-busy-refusal`) for the refusal.
 Kind: story-implement
 
 Diagrams: claim-lease-free-objective-busy

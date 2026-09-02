@@ -14,7 +14,7 @@ Seams: recovery-verdict-run: +execution.attemptsOfRun:R, +execution.closeAttempt
 
 `recoverExpiredLeases` calls `storage.transact` three times — `:218` for the candidate read, `:231`
 for the external sweep and `:328` for each per-node verdict. `storage.transact` has no projection in
-the harness of EPIC 050.1 Story 6, and a method with no projection admits one call per diagram, so the
+the harness of EPIC 050.1 Story 6 (`06-the-conformance-harness`), and a method with no projection admits one call per diagram, so the
 outer pass's trace needs `:#2` and `:#3` — tokens the parser refuses outside a `baseline-` id.
 
 **The cause cannot be removed.** The git worktree reads at `:277-281` must sit outside a transaction,
@@ -72,7 +72,10 @@ sequenceDiagram
     Command-->>Caller: ok
 ```
 
-Citations, one per step: `:328`, `:329`, `:343`.
+Citations, one per step:
+`src/commands/startup/recover-expired-leases.ts:328 — `storage.transact``,
+`src/commands/startup/recover-expired-leases.ts:329 — `plan.setNodeState``,
+`src/commands/startup/recover-expired-leases.ts:343 — `events.append``.
 
 The `UPDATE lease` at `:339-342` sits between steps 2 and 3 and is raw SQL, so it is invisible at this
 seam. **The shipped verdict never ends the run**: the lease expiry was what freed the node, and no

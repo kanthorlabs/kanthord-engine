@@ -1,7 +1,7 @@
 # Story 8 — `lease-held` is retired and the capability is swapped
 
 Epic: `.agents/plan/epics/050.4-the-node-lease-removal.md`
-Depends on: Stories 1, 4, 5, 6 and 7 — every one of them removes `lease-held` from one operation's `errors` record, and this story cannot delete the code until no operation declares it.
+Depends on: EPIC 050.4 Stories 1 (`01-the-claim-of-a-task-drops-the-lease`), 4 (`04-the-renew-drops-the-lease`), 5 (`05-the-release-drops-the-lease`), 6 (`06-the-report-drops-the-lease`) and 7 (`07-the-objective-attestation-drops-the-lease`) — every one of them removes `lease-held` from one operation's `errors` record, and this story cannot delete the code until no operation declares it. EPIC 050.4 Story 0 (`00-groundwork`) moved the `package.json` half of the version pair this story closes.
 Kind: story-foundation
 
 This story changes no path. It is the cross-cutting half of the contract change, and it lands **last**
@@ -82,8 +82,12 @@ shape the daemon does not yet serve, which is the worse of the two.
 
 ### 3 — the version and the compatibility record
 
-`src/domain/version.ts:1` moves to `"29.0.0"`, and `package.json`'s `version` field moves with it in
-the same edit — `src/domain/version.test.ts:12-14` asserts the two are equal.
+`src/domain/version.ts:1` — `KANTHORD_VERSION` moves to `"29.0.0"`.
+`src/domain/version.test.ts:13` — `assert.equal` asserts it equals the `version` field of
+`package.json`, and **EPIC 050.4 Story 0 (`00-groundwork`) already moved that field**. `package.json`
+is denied to both engineers by `scripts/lane-check.sh`, so the pair cannot land in one turn; this
+story writes the constant, and the assertion goes green here. Do not edit `package.json`: it is
+outside this role's lane, and Story 0 applied it before the loop opened.
 
 Add one row to the compatibility record EPIC 050.2 Story 8 created in `docs/proposal/api/README.md`:
 
@@ -116,15 +120,15 @@ Add, each as a separate `it`:
 
 4. `"error-details imports nothing from lease-hierarchy and nothing from domain/lease"` — read the source of `src/http/contract/error-details.ts` and assert it holds neither a `lease-hierarchy` nor a `domain/lease.ts` import specifier. Two assertions, one case: the first is the fact EPIC 050.5 depends on, the second is the import that would otherwise be left orphaned.
 
-4b. `"no server file raises lease-held"` — create `src/lease-absence.test.ts`, modelled on the shipped tree assertion at `src/koa-absence.test.ts`. Read every non-test file under `src/http/server/` and assert none holds the literal `"lease-held"`. `leaseHeld` and the `presented` channel are gone, so this is decidable by construction and does not depend on an unused-code check that this repository does not run. Story 9 adds its two tree assertions to the same file.
+5. `"no server file raises lease-held"` — create `src/lease-absence.test.ts`, modelled on the shipped tree assertion at `src/koa-absence.test.ts`. Read every non-test file under `src/http/server/` and assert none holds the literal `"lease-held"`. `leaseHeld` and the `presented` channel are gone, so this is decidable by construction and does not depend on an unused-code check that this repository does not run. Story 9 adds its two tree assertions to the same file.
 
-5. `"declaredCapabilities is event-wait, per-node-write, project-graph and worker-run"` — asserted by value, and assert `worker-model` is absent. This is the assertion that the breaking change was announced.
+6. `"declaredCapabilities is event-wait, per-node-write, project-graph and worker-run"` — asserted by value, and assert `worker-model` is absent. This is the assertion that the breaking change was announced.
 
-6. `"KANTHORD_VERSION is 29.0.0 and package.json agrees"` — both in one case.
+7. `"KANTHORD_VERSION is 29.0.0 and package.json agrees"` — both in one case.
 
-7. `"the compatibility record holds one row naming EPIC 050.4"` — parse the section of `docs/proposal/api/README.md` and assert the row count and the epic name.
+8. `"the compatibility record holds one row naming EPIC 050.4"` — parse the section of `docs/proposal/api/README.md` and assert the row count and the epic name.
 
-8. `"every example parses against its schema"` — the shipped `example.test.ts` harness, run unchanged. The four error literals Stories 1, 4, 5 and 6 replaced are what it now checks.
+9. `"every example parses against its schema"` — the shipped `example.test.ts` harness, run unchanged. The four error literals Stories 1, 4, 5 and 6 replaced are what it now checks.
 
 `pnpm run verify` exits 0.
 

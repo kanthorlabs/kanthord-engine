@@ -1,7 +1,7 @@
 # Story 5 — The plan store stops computing the lease facts
 
 Epic: `.agents/plan/epics/050.5-the-lease-table-removal.md`
-Depends on: nothing in this epic. EPIC 050.3 Story 3 and Story 7 removed the last two readers of `ContainmentFacts.lease`.
+Depends on: nothing in this epic. EPIC 050.3 Story 3 (`03-the-update-node-guard`) and Story 7 removed the last two readers of `ContainmentFacts.lease`.
 Kind: story-foundation
 
 This story changes one store method and two of its callers. It draws no path: `leaseHeld` is
@@ -30,19 +30,19 @@ from. **The list keeps six members**: `workspace`, `run`, `attempt`, `commit`, `
 **The `run` blocker at `:361-364` is shipped and it stays.** It matches any run row on a subtree node,
 not only an active one, which is wider than the `lease` member it now replaces. This story does not
 narrow it: `delete-node`'s `binding-in-use` refusal is about a node that is bound to execution
-history, and a finished run is such a binding. EPIC 050.3 Story 4 drew that path and left both
+history, and a finished run is such a binding. EPIC 050.3 Story 4 (`04-the-delete-node-guard`) drew that path and left both
 members; this story removes one.
 
 **No wire schema moves.** `src/http/contract/error-details.ts:36` types the blocker as
 `blocker: z.string()`, so the closed union is a TypeScript type and not an emitted enum.
 
-**`containmentMovable` is not touched.** EPIC 050.3 Story 7 already dropped its `!facts.lease`
+**`containmentMovable` is not touched.** EPIC 050.3 Story 7 (`07-containment-stops-reading-the-lease`) already dropped its `!facts.lease`
 conjunct, and it takes `ContainmentFacts` by type, so removing the field is a type-level change its
 body does not see.
 
 **One string it feeds is touched.** `src/domain/plan-choice.ts:97` returns the containment refusal
 reason `"the node or a descendant holds a lease, a workspace or a commit"`. The lease left that
-predicate at EPIC 050.3 Story 7 and its last producer dies here, so change the string to
+predicate at EPIC 050.3 Story 7 (`07-containment-stops-reading-the-lease`) and its last producer dies here, so change the string to
 `"the node or a descendant holds a workspace or a commit"`. It is asserted verbatim at
 `src/domain/plan-choice.test.ts:157,321,337`, so those three sites move in the same edit.
 `src/cli/plan/import.test.ts:509,513` hold a shorter hand-written fixture reason,

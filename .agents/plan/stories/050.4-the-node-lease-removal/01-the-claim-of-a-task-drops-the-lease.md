@@ -1,7 +1,7 @@
 # Story 1 — The claim of a task drops the lease
 
 Epic: `.agents/plan/epics/050.4-the-node-lease-removal.md`
-Depends on: EPIC 050.1 Story 3 (the rewritten command) and Story 13 (the claim contract).
+Depends on: EPIC 050.1 Story 3 (`03-the-claim-of-a-task`) and EPIC 050.1 Story 1 (`01-the-claim-contract`).
 Kind: story-implement
 
 Diagrams: claim-lease-free-task
@@ -14,8 +14,8 @@ This story owns the deletion. Story 2 owns the initiative path and Story 3 owns 
 refusal; both draw paths through the command this story leaves.
 
 It carries its own half of the contract. The `node.claim` request and response fields die in the same
-story as the code that populates them, so `pnpm run verify` is green at every story boundary. A story
-that removed a required request field ahead of its command would leave the handler unable to compile.
+story as the code that populates them, so no schema in this epic outlives its reader. A story that
+removed a required request field ahead of its command would leave the handler unable to compile.
 
 EPIC 050.1 Story 3 rewrites `claim-node.ts` whole, so the line numbers below name the **shipped** file
 and locate the code by the symbol that survives the rewrite. The ordinal contract of this story is the
@@ -102,10 +102,12 @@ still uses it. Story 4 deletes it as the second and last consumer.
 
 **4b — `objectiveRunId` goes with them.** `nodeClaimResponse.objectiveRunId` at `:45` is required, and
 EPIC 050's `claim-success-task` opens one run where the baseline opened two, so this command can no
-longer populate it. EPIC 050.1 Story 1 lists what the response keeps, gains and loses and does not name
-it, which is a gap in that story. This story closes it rather than leaving a required field with no
-producer: delete `objectiveRunId` from the schema, from `ClaimNodeResult` and from the examples, and
-record it in the compatibility row Story 8 writes.
+longer populate it. **This story deletes it, unconditionally.** EPIC 050.1 Story 1
+(`01-the-claim-contract`) lists what the response keeps, gains and loses and never names the field, so
+that epic leaves it in place; verified against that story on 2026-09-02. Delete `objectiveRunId` from
+the schema, from `ClaimNodeResult` and from the examples, and record it in the compatibility row Story
+8 writes. Report a field already absent as an EPIC 050.1 change, and do not treat its absence as a
+reason to skip the compatibility row: the field left the wire either way.
 
 **4c — the CLI and the derived fixture.** `src/cli/node/claim.ts:51` prints `body.lease.fence` and
 `:54` prints `body.objectiveRunId` and `body.objectiveLease.fence`. Delete all three from the two
