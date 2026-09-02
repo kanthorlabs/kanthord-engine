@@ -30,6 +30,7 @@ export function claimNodeHandler(
         nodeId: id,
         actorId: context.actor.id,
         actorKind: context.actor.kind,
+        available: parsed.data.available,
       });
       return { kind: "json", status: 200, body: result };
     } catch (error) {

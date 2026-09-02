@@ -9,6 +9,8 @@ import {
   type AttemptRecord,
   type CloseAttemptInput,
   type EndRunInput,
+  type ExpireDueRun,
+  type ExpireDueRunsInput,
   type Execution,
   type OpenAttemptInput,
   type OpenRunInput,
@@ -18,7 +20,7 @@ import {
 } from "./index.ts";
 
 const RUN_COLUMNS =
-  "id, kind, node_id, parent_run_id, driver, lease_fence, attempt_limit, state, outcome, head_oid, ended_at";
+  "id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at";
 
 const ATTEMPT_COLUMNS =
   "id, run_id, driver, attempt_no, head_oid, outcome, ended_at";
@@ -27,10 +29,16 @@ type RunRow = Readonly<{
   id: string;
   kind: RunKind;
   node_id: string;
-  parent_run_id: string | null;
   driver: RunDriver;
-  lease_fence: number;
+  workspace_id: string | null;
+  worker: string;
+  fence: number;
   attempt_limit: number;
+  judged_oid: string | null;
+  graph_revision: string | null;
+  agents_json: string;
+  expires_at: number;
+  max_lifetime_at: number;
   state: "active" | "ended";
   outcome: string | null;
   head_oid: string | null;
@@ -52,13 +60,19 @@ function toRunRecord(row: RunRow): RunRecord {
     id: row.id,
     kind: row.kind,
     nodeId: row.node_id,
-    parentRunId: row.parent_run_id,
     driver: row.driver,
-    leaseFence: row.lease_fence,
+    workspaceId: row.workspace_id,
+    worker: row.worker,
+    fence: row.fence,
     attemptLimit: row.attempt_limit,
+    headOid: row.head_oid,
+    judgedOid: row.judged_oid,
+    graphRevision: row.graph_revision,
+    agents: JSON.parse(row.agents_json) as readonly string[],
+    expiresAt: row.expires_at,
+    maxLifetimeAt: row.max_lifetime_at,
     state: row.state,
     outcome: row.outcome,
-    headOid: row.head_oid,
     endedAt: row.ended_at,
   };
 }
@@ -85,30 +99,67 @@ export class SqliteExecution implements Execution {
   openRun(transaction: Transaction, input: OpenRunInput): RunRecord {
     const id = this.ids.mint("run");
     transaction.run(
-      `INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at)
-VALUES (?, ?, ?, ?, 'external', NULL, NULL, ?, ?, NULL, NULL, 'active', NULL, NULL)`,
+      `INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at)
+VALUES (?, ?, ?, 'external', ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 'active', NULL, NULL)`,
       [
         id,
         input.kind,
         input.nodeId,
-        input.parentRunId,
-        input.leaseFence,
+        input.workspaceId,
+        input.worker,
+        input.fence,
         input.attemptLimit,
+        input.judgedOid,
+        input.graphRevision,
+        JSON.stringify(input.agents),
+        input.expiresAt,
+        input.maxLifetimeAt,
       ],
     );
     return {
       id,
       kind: input.kind,
       nodeId: input.nodeId,
-      parentRunId: input.parentRunId,
       driver: "external",
-      leaseFence: input.leaseFence,
+      workspaceId: input.workspaceId,
+      worker: input.worker,
+      fence: input.fence,
       attemptLimit: input.attemptLimit,
+      headOid: null,
+      judgedOid: input.judgedOid,
+      graphRevision: input.graphRevision,
+      agents: input.agents,
+      expiresAt: input.expiresAt,
+      maxLifetimeAt: input.maxLifetimeAt,
       state: "active",
       outcome: null,
-      headOid: null,
       endedAt: null,
     };
+  }
+
+  expireDueRuns(
+    transaction: Transaction,
+    input: ExpireDueRunsInput,
+  ): readonly ExpireDueRun[] {
+    const rows = transaction.all(
+      `UPDATE run SET state = 'ended', fence = fence + 1, ended_at = ?, outcome = 'expired'
+WHERE state = 'active' AND expires_at <= ?
+RETURNING id, node_id, fence`,
+      [input.now, input.now],
+    ) as readonly Readonly<{
+      id: string;
+      node_id: string;
+      fence: number;
+    }>[];
+    return [...rows]
+      .sort((left, right) =>
+        Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)),
+      )
+      .map((row) => ({
+        runId: row.id,
+        nodeId: row.node_id,
+        fence: row.fence,
+      }));
   }
 
   activeRunOfNode(transaction: Transaction, nodeId: string): RunRecord | null {
@@ -119,6 +170,22 @@ WHERE node_id = ? AND state = 'active'`,
       [nodeId],
     ) as RunRow | undefined;
     return row === undefined ? null : toRunRecord(row);
+  }
+
+  activeRunsOfNodes(
+    transaction: Transaction,
+    nodeIds: readonly string[],
+  ): readonly RunRecord[] {
+    if (nodeIds.length === 0) return [];
+    const placeholders = nodeIds.map(() => "?").join(", ");
+    const rows = transaction.all(
+      `SELECT ${RUN_COLUMNS}
+FROM run
+WHERE state = 'active' AND node_id IN (${placeholders})
+ORDER BY node_id, id`,
+      nodeIds,
+    ) as readonly RunRow[];
+    return rows.map(toRunRecord);
   }
 
   latestRunOfNode(transaction: Transaction, nodeId: string): RunRecord | null {
@@ -134,7 +201,7 @@ ORDER BY id DESC LIMIT 1`,
 
   adoptRun(transaction: Transaction, input: AdoptRunInput): RunRecord {
     const rows = transaction.all(
-      `UPDATE run SET lease_fence = ?
+      `UPDATE run SET fence = ?
 WHERE id = ? AND state = 'active'
 RETURNING ${RUN_COLUMNS}`,
       [input.leaseFence, input.runId],

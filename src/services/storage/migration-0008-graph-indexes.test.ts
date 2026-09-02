@@ -25,6 +25,7 @@ import { migration0008GraphIndexes } from "./migration-0008-graph-indexes.ts";
 import { migration0009OneBranch } from "./migration-0009-one-branch.ts";
 import { migration0010ProviderLogin } from "./migration-0010-provider-login.ts";
 import { migration0011Deliverable } from "./migration-0011-deliverable.ts";
+import { migration0012RunModel } from "./migration-0012-run-model.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -174,7 +175,7 @@ describe("src/services/storage/migration-0008-graph-indexes.test", () => {
     );
   });
 
-  it("migrations holds the eleven declared migrations in order", () => {
+  it("migrations holds the twelve declared migrations in order", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
@@ -187,6 +188,7 @@ describe("src/services/storage/migration-0008-graph-indexes.test", () => {
       migration0009OneBranch,
       migration0010ProviderLogin,
       migration0011Deliverable,
+      migration0012RunModel,
     ]);
   });
 

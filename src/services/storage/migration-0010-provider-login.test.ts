@@ -19,6 +19,7 @@ import { migration0008GraphIndexes } from "./migration-0008-graph-indexes.ts";
 import { migration0009OneBranch } from "./migration-0009-one-branch.ts";
 import { migration0010ProviderLogin } from "./migration-0010-provider-login.ts";
 import { migration0011Deliverable } from "./migration-0011-deliverable.ts";
+import { migration0012RunModel } from "./migration-0012-run-model.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -150,7 +151,7 @@ describe("src/services/storage/migration-0010-provider-login.test", () => {
     assert.equal(migration0010ProviderLogin.rebuild, undefined);
   });
 
-  it("migrations holds exactly eleven migrations with migration0011Deliverable last", () => {
+  it("migrations holds exactly twelve migrations with migration0012RunModel last", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
@@ -163,10 +164,11 @@ describe("src/services/storage/migration-0010-provider-login.test", () => {
       migration0009OneBranch,
       migration0010ProviderLogin,
       migration0011Deliverable,
+      migration0012RunModel,
     ]);
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     );
   });
 
@@ -177,7 +179,7 @@ describe("src/services/storage/migration-0010-provider-login.test", () => {
 
       assert.deepEqual(
         migratedVersions(upgrade.storage),
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
       );
       assert.deepEqual(upgrade.storage.status().pending, []);
 
@@ -337,7 +339,7 @@ describe("src/services/storage/migration-0010-provider-login.test", () => {
         assert.deepEqual(second.status().pending, []);
         assert.deepEqual(
           migratedVersions(second),
-          [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+          [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         );
       } finally {
         second.close();

@@ -208,11 +208,11 @@ describe("src/services/storage/migration-0006-revision-origin.test", () => {
     }
   });
 
-  it("migrations holds eleven entries, versions 1 to 11 with the eleven names in order", () => {
-    assert.equal(migrations.length, 11);
+  it("migrations holds twelve entries, versions 1 to 12 with the twelve names in order", () => {
+    assert.equal(migrations.length, 12);
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     );
     assert.deepEqual(
       migrations.map((migration) => migration.name),
@@ -228,6 +228,7 @@ describe("src/services/storage/migration-0006-revision-origin.test", () => {
         "0009-one-branch",
         "0010-provider-login",
         "0011-deliverable",
+        "0012-run-model",
       ],
     );
   });

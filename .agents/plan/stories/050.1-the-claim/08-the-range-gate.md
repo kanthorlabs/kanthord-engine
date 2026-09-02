@@ -8,11 +8,14 @@ This story enforces `.agents/plan/authoring.md` over the plan tree. It draws no 
 
 ## Change
 
-**Create `scripts/verify-epic-sequence.ts`**, and add it to the `verify` script of `package.json`.
+**Create `scripts/verify-epic-sequence.ts`.** Story 7 creates
+`scripts/epic-sequence-range.ts`; import `authoredEpics` and `shippedEpics` from it rather than
+restating either list.
 
-The epic set is the file-name grammar `^(05[0-7])(\.[0-9]+)?-[a-z0-9-]+\.md$` under
-`.agents/plan/epics/`, and the eight base numbers 050 to 057 are each required to be present. The
-story set is `.agents/plan/stories/<epic-id>/` for each.
+The epic set is `authoredEpics`. Each id names one file under `.agents/plan/epics/` and one directory
+`.agents/plan/stories/<epic-id>/`, and the gate refuses when either is absent. EPIC 051 to EPIC 057
+are numbered and outside this set: they hold no stories yet, so there is nothing to lint, and the
+epic that authors each one adds its id to `authoredEpics` in the same change.
 
 It refuses when:
 
@@ -23,9 +26,9 @@ It refuses when:
 - an unpinned tail names an epic inside the set that declares no such diagram id;
 - a live diagram is named by no `Diagrams:` line or by two;
 - a story owns more than one live diagram. One story, one path;
-- a story naming a diagram does not hold the exact path `test/sequence/scenarios/<id>.ts`;
+- a story of a **shipped** epic naming a due diagram does not hold the exact path `test/sequence/scenarios/<id>.ts`. Due is what Story 7 defines: the owning epic is in `shippedEpics`, and no epic in `shippedEpics` superseded the diagram. This one refusal narrows to the shipped set, because a scenario is code and an unshipped epic has none. Every other refusal above reads the plan text only, so it applies to the whole authored set;
 - a baseline id holds a scenario file, or carries no `Superseded by:` line;
-- a `Baselines:` pair names an id that is not a baseline diagram, or maps a diagram the story does not own;
+- a `Baselines:` pair names an id that is not a baseline diagram, or names a live diagram the story does not own. The ownership test applies to the live side only. A refusal diagram names the baseline of the path it refuses, and that baseline belongs to another story, which `.agents/plan/authoring.md` permits;
 - a `Seams:` line names no diagram, or names a diagram the story does not own;
 - a `Seams:` token carries no sign, or two signs for one diagram;
 - a `+` or `~` token appears in no diagram that line names;
@@ -37,8 +40,9 @@ It refuses when:
 conformance to it, enforced by `scripts/verify-epic-sequence.ts` and `test/sequence/conformance.test.ts`.
 
 **Rollout.** The gate goes red the moment it lands unless every story of the range carries its
-diagrams. The script and its test land in this epic. The `verify` wiring lands in the change that
-completes the last story of the range, and this epic does not merge a red gate.
+diagrams. The script and its test land in this epic, and `package.json` is not touched. The `verify`
+wiring lands in the change that completes the last story of EPIC 050.5, and this epic does not merge
+a red gate.
 
 ## Constraints
 
@@ -54,10 +58,13 @@ node --test scripts/verify-epic-sequence.test.ts && node scripts/verify-epic-seq
 ```
 
 Create `scripts/verify-epic-sequence.test.ts`. Assert each refusal above by value against a fixture
-tree, one case each, and assert the real tree passes. The two cases that carry the most weight:
+tree, one case each, and assert the real tree passes. The four cases that carry the most weight:
 
 1. `"an epic holding a mermaid block fails"` — Rule A is enforced, not requested.
 2. `"a story owning two live diagrams fails"` — Rule B is enforced, not requested.
+3. `"a story of an unshipped epic needs no scenario file"` — a pass, not a refusal, so the shipped-set
+   narrowing cannot be a silent skip of every scenario check.
+4. `"a story of a shipped epic missing its scenario file fails"` — the same rule from the other side.
 
 `pnpm run verify` exits 0.
 

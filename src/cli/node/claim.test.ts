@@ -58,7 +58,9 @@ const claimedBody = (attemptNo: number | null) => ({
   objectiveRunId: OBJECTIVE_RUN,
   attemptId: ATTEMPT,
   attemptNo,
-  heartbeatIntervalMs: 100000,
+  fence: 1,
+  expiresAt: 1722800300000,
+  renewAfterMs: 100000,
   node: NODE,
 });
 
@@ -140,13 +142,13 @@ const run = async (
 };
 
 describe("src/cli/node/claim.test", () => {
-  it("node claim sends an empty body with the id parameter", async () => {
+  it("node claim sends available true with the id parameter", async () => {
     const h = harness();
     await run(h.program, ["node", "claim", "--id", TASK]);
 
     assert.deepEqual(h.calls()[0]?.operationId, "node.claim");
     assert.deepEqual(h.calls()[0]?.parameters, { id: TASK });
-    assert.deepEqual(h.calls()[0]?.body, {});
+    assert.deepEqual(h.calls()[0]?.body, { available: true });
     assert.equal(h.failCalls(), 0);
   });
 
@@ -156,7 +158,7 @@ describe("src/cli/node/claim.test", () => {
 
     assert.equal(
       h.stdoutText(),
-      `kanthord: claimed ${TASK} fence 1 expires 1722800300000 heartbeat 100000ms\n` +
+      `kanthord: claimed ${TASK} fence 1 expires 1722800300000\n` +
         `kanthord: run ${RUN} attempt 1 objective-run ${OBJECTIVE_RUN} objective-fence 2\n`,
     );
     assert.equal(h.stderrText(), "");
@@ -175,7 +177,7 @@ describe("src/cli/node/claim.test", () => {
 
     assert.equal(
       h.stdoutText(),
-      `kanthord: claimed ${TASK} fence 1 expires 1722800300000 heartbeat 100000ms\n` +
+      `kanthord: claimed ${TASK} fence 1 expires 1722800300000\n` +
         `kanthord: run ${RUN} attempt - objective-run ${OBJECTIVE_RUN} objective-fence 2\n`,
     );
     assert.equal(h.failCalls(), 0);

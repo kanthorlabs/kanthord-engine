@@ -7,11 +7,11 @@ import { rows } from "./rows.ts";
 import { profileRow } from "./profile.ts";
 
 describe("src/domain/rows.test", () => {
-  it("Object.keys(rows).length equals 21", () => {
-    assert.equal(Object.keys(rows).length, 21);
+  it("Object.keys(rows).length equals 22", () => {
+    assert.equal(Object.keys(rows).length, 22);
   });
 
-  it("Object.keys(rows) deep-equals the 21 table names sorted lexicographically", () => {
+  it("Object.keys(rows) deep-equals the 22 table names sorted lexicographically", () => {
     assert.deepEqual(Object.keys(rows), [
       "actor",
       "agent_invocation",
@@ -33,6 +33,7 @@ describe("src/domain/rows.test", () => {
       "provider_login",
       "repository",
       "run",
+      "run_base",
       "workspace",
     ]);
   });

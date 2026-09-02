@@ -65,20 +65,22 @@ sequenceDiagram
     Command->>Plan: 4 plan.readAllNodes
     Command->>Plan: 5 plan.newestRevision
     Command->>Lease: 6 lease.read:I
-    Command->>Plan: 7 plan.readSubtree
-    Command->>Execution: 8 execution.activeRunsOfNodes:subtree
-    Command->>Lease: 9 lease.acquire:I
-    Command->>Plan: 10 plan.setNodeAssignment:I
-    Command->>Execution: 11 execution.openRun:I
-    Command->>Plan: 12 plan.setNodeState:I:claim-taken
-    Command->>Events: 13 events.append:run.opened:I
-    Command->>Events: 14 events.append:node.running:I:claim-taken
+    Command->>Lease: 7 lease.read:O
+    Command->>Plan: 8 plan.readSubtree
+    Command->>Execution: 9 execution.activeRunsOfNodes:subtree
+    Command->>Lease: 10 lease.acquire:I
+    Command->>Plan: 11 plan.setNodeAssignment:I
+    Command->>Execution: 12 execution.openRun:I
+    Command->>Plan: 13 plan.setNodeState:I:claim-taken
+    Command->>Events: 14 events.append:run.opened:R
+    Command->>Events: 15 events.append:node.running:I:claim-taken
     Command-->>Client: ok
 ```
 
 No `execution.openAttempt` step exists, so a structural run that opened an attempt fails the
-comparison. That is the assertion, not a comment. The initiative fixture holds one relative, so step 6
-is one lease read where the task path takes three. Neither `execution.runDriversUnderObjective` nor
+comparison. That is the assertion, not a comment. The initiative fixture holds two relatives — itself
+and the child objective — so steps 6 and 7 are two lease reads where the task path takes three. An
+initiative has no parent and no sibling. Neither `execution.runDriversUnderObjective` nor
 `execution.activeRunsOfNodes:siblings` appears: both are scoped to an objective, and an initiative is
 above that scope. A predicate that does not apply to the target is skipped, never simulated.
 
@@ -101,6 +103,14 @@ at `:204` and the sibling read of Story 5 both take an objective id. An initiati
 neither call is made. `objectiveScopeId` at `:485` throws for a task with no parent; keep it, and give
 the initiative path no call site rather than a synthetic objective id.
 
+**Route an initiative through the one routing path, and inject the registry.** `claimNode` takes
+`registry: readonly WorkerEntry[]` and passes it to `capableWorkers` and `routeWorker`. It applies no
+per-kind routing branch. The production registry claims no `initiative` and declares no `expansion`,
+so a production initiative claim answers `unroutable` with `failedSet: "capable"`, which EPIC 048
+decided is correct. This story proves the structural mechanism against
+`test/helpers/worker-registry.ts`, whose single entry claims `initiative` and declares `expansion`.
+EPIC 048 already names that mechanism for EPIC 052.
+
 **Take no cascade.** `cascadeVerdicts` at `:495` walks the ancestor chain, which is empty for the
 root, so it already returns an empty list and appends no `node.running` event for an ancestor. Assert
 the emptiness rather than special-casing it.
@@ -111,6 +121,7 @@ the emptiness rather than special-casing it.
 - Do not open a `run_base` row for a structural run. The cardinality rule of EPIC 050 Story 3 refuses one.
 - Do not write `judged_oid`. A `structural` run has no judged commit.
 - The lease acquire on the initiative stays. The node-lease mechanism lives until EPIC 050.4.
+- Add no worker capability to `src/domain/worker-registry.ts`. Both production entries are external, and `worker.md` section 10 makes expansion internal-only work. A capability edit belongs to the epic that designs an expansion-capable worker.
 
 ## Verify
 
@@ -120,7 +131,9 @@ node --test src/commands/node/claim-node.test.ts test/sequence/conformance.test.
 
 Add to `src/commands/node/claim-node.test.ts`, each as a separate `it`:
 
-1. `"a claim on an initiative whose deliverable is expansion succeeds"` — assert the claim returns a run id and the run's `kind` is `"structural"`.
+1. `"a claim on an initiative whose deliverable is expansion succeeds"` — against `expansionCapableRegistry`, assert the claim returns a run id and the run's `kind` is `"structural"`.
+
+   Add two cases for the production posture: `"a claim on an initiative refuses unroutable with failedSet capable against the production registry"` and `"a claim on an objective carrying expansion refuses unroutable with failedSet capable, like an initiative"`. Each asserts `databaseBytes` unchanged. The second pins that one deliverable takes one answer whatever the node kind.
 
 2. `"initiative-not-claimable is not a member of ClaimRefusal"` — assert against the exported refusal list, so the deletion is proven by the type and not by the absence of a test.
 

@@ -37,7 +37,7 @@ A pair becomes fixed when its node holds a child or an accepted checkpoint. In E
 
 ## Null deliverables
 
-A node imported before EPIC 047 has a null `deliverable`. Pair validation does not apply to that node. EPIC 047 does not define its claim eligibility. EPIC 050 owns that rule.
+A node can carry a null `deliverable`. Pair validation does not apply to that node. A claim on it is refused `pair-illegal`. `docs/proposal/phase-2/runs-and-exclusion.md` states the rule.
 
 ## Legacy worker field
 

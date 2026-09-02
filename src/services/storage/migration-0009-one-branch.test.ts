@@ -19,6 +19,7 @@ import { migration0008GraphIndexes } from "./migration-0008-graph-indexes.ts";
 import { migration0009OneBranch } from "./migration-0009-one-branch.ts";
 import { migration0010ProviderLogin } from "./migration-0010-provider-login.ts";
 import { migration0011Deliverable } from "./migration-0011-deliverable.ts";
+import { migration0012RunModel } from "./migration-0012-run-model.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 import { StorageError } from "./index.ts";
@@ -213,7 +214,7 @@ describe("src/services/storage/migration-0009-one-branch.test", () => {
     assert.equal(migration0009OneBranch.rebuild, undefined);
   });
 
-  it("migrations holds exactly eleven migrations with migration0011Deliverable last", () => {
+  it("migrations holds exactly twelve migrations with migration0012RunModel last", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
@@ -226,14 +227,15 @@ describe("src/services/storage/migration-0009-one-branch.test", () => {
       migration0009OneBranch,
       migration0010ProviderLogin,
       migration0011Deliverable,
+      migration0012RunModel,
     ]);
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     );
   });
 
-  it("a fresh database migrates 0001 through 0010 and repository carries branch and neither dropped column", () => {
+  it("a fresh database migrates through 0012 and repository carries branch and neither dropped column", () => {
     const temporary = createTemporaryDatabase();
     after(() => temporary.dispose());
     const storage = new SqliteStorage({
@@ -247,7 +249,7 @@ describe("src/services/storage/migration-0009-one-branch.test", () => {
 
     assert.deepEqual(
       appliedVersions(storage),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     );
     assert.deepEqual(storage.status().pending, []);
     assert.deepEqual(columnNames(storage), migratedColumnNames);
@@ -386,7 +388,7 @@ describe("src/services/storage/migration-0009-one-branch.test", () => {
 
     assert.deepEqual(
       appliedVersions(full),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     );
     const row = full.transact((t) =>
       t.get("SELECT branch FROM repository WHERE id = ?", [REPOSITORY_ID]),
@@ -438,7 +440,7 @@ describe("src/services/storage/migration-0009-one-branch.test", () => {
     assert.deepEqual(second.status().pending, []);
     assert.deepEqual(
       appliedVersions(second),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     );
   });
 });

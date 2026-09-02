@@ -27,6 +27,7 @@ import { migration0008GraphIndexes } from "./migration-0008-graph-indexes.ts";
 import { migration0009OneBranch } from "./migration-0009-one-branch.ts";
 import { migration0010ProviderLogin } from "./migration-0010-provider-login.ts";
 import { migration0011Deliverable } from "./migration-0011-deliverable.ts";
+import { migration0012RunModel } from "./migration-0012-run-model.ts";
 import { migrations } from "./migrations.ts";
 import { SqliteStorage } from "./sqlite.ts";
 
@@ -197,21 +198,17 @@ type RunValues = Readonly<{
 const insertRun = (storage: SqliteStorage, values: RunValues): void => {
   storage.transact((t) => {
     t.run(
-      "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, ?, ?, 'internal', ?, ?, ?, ?, NULL, NULL, ?, '[]', 1700300000000, 1700300000000, ?, NULL, NULL)",
       [
         values.id,
-        values.kind ?? "task",
+        values.kind ?? "execution",
         values.nodeId ?? fixtureIds.task,
-        values.parentRunId ?? fixtureIds.objectiveRun,
         values.workspaceId ?? fixtureIds.workspace,
         "general@1",
         1,
         3,
-        "a".repeat(40),
-        null,
+        fixtureIds.planRevision,
         values.state ?? "active",
-        null,
-        null,
       ],
     );
   });
@@ -502,7 +499,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     assert.ok(migrationDoc.includes("0003-execution-and-journal"));
   });
 
-  it("migrations holds exactly the eleven migrations and versions map to 1 through 11", () => {
+  it("migrations holds exactly the twelve migrations and versions map to 1 through 12", () => {
     assert.deepEqual(migrations, [
       coreEntities,
       graphAndPlan,
@@ -515,10 +512,11 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
       migration0009OneBranch,
       migration0010ProviderLogin,
       migration0011Deliverable,
+      migration0012RunModel,
     ]);
     assert.deepEqual(
       migrations.map((migration) => migration.version),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     );
   });
 
@@ -535,7 +533,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     assert.deepEqual(rows, []);
   });
 
-  it("the table inventory maps to the twenty-one names in order", () => {
+  it("the table inventory maps to the twenty-two names in order", () => {
     const { storage, temporary } = buildMigrated();
     after(() => storage.close());
     after(() => temporary.dispose());
@@ -568,12 +566,13 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
         "provider_login",
         "repository",
         "run",
+        "run_base",
         "workspace",
       ],
     );
   });
 
-  it("all twenty product tables are STRICT", () => {
+  it("all twenty-one product tables are STRICT", () => {
     const { storage, temporary } = buildMigrated();
     after(() => storage.close());
     after(() => temporary.dispose());
@@ -598,6 +597,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
       "provider_login",
       "repository",
       "run",
+      "run_base",
       "workspace",
     ]) {
       const row = storage.transact((t) =>
@@ -665,30 +665,7 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     assert.equal(countRows(storage, "run"), 4);
   });
 
-  it("run refuses an objective kind with a parent and a task kind without one", () => {
-    const { storage, temporary } = buildMigrated();
-    after(() => storage.close());
-    after(() => temporary.dispose());
-
-    assertRefused(
-      storage,
-      () =>
-        insertRun(storage, {
-          id: "run_obj_parent",
-          kind: "objective",
-          nodeId: fixtureIds.objective,
-          parentRunId: fixtureIds.objectiveRun,
-        }),
-      "run",
-    );
-    assertRefused(
-      storage,
-      () => insertRun(storage, { id: "run_task_noparent", parentRunId: null }),
-      "run",
-    );
-  });
-
-  it("run refuses a state outside active and ended, and a kind outside objective and task", () => {
+  it("run refuses a state outside active and ended, and a kind outside structural, execution and review", () => {
     const { storage, temporary } = buildMigrated();
     after(() => storage.close());
     after(() => temporary.dispose());
@@ -705,19 +682,12 @@ describe("src/services/storage/migration-0003-execution-and-journal.test", () =>
     );
   });
 
-  it("run refuses a parent_run_id or workspace_id without a row", () => {
+  it("run refuses a workspace_id without a row", () => {
     const { storage, temporary } = buildMigrated();
     after(() => storage.close());
     after(() => temporary.dispose());
 
     endTaskRun(storage);
-    assertRefused(
-      storage,
-      () =>
-        insertRun(storage, { id: "run_badparent", parentRunId: "run_missing" }),
-      "run",
-      { message: "FOREIGN KEY constraint failed" },
-    );
     assertRefused(
       storage,
       () =>

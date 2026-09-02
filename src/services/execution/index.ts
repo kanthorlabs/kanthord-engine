@@ -1,20 +1,27 @@
 import type { AttemptOutcome } from "../../domain/attempt.ts";
 import type { RunDriver } from "../../domain/run.ts";
+import type { RunKind } from "../../domain/run-kind.ts";
 import type { Transaction } from "../storage/index.ts";
 
-export type RunKind = "objective" | "task";
+export type { RunKind } from "../../domain/run-kind.ts";
 
 export type RunRecord = Readonly<{
   id: string;
   kind: RunKind;
   nodeId: string;
-  parentRunId: string | null;
   driver: RunDriver;
-  leaseFence: number;
+  workspaceId: string | null;
+  worker: string;
+  fence: number;
   attemptLimit: number;
+  headOid: string | null;
+  judgedOid: string | null;
+  graphRevision: string | null;
+  agents: readonly string[];
+  expiresAt: number;
+  maxLifetimeAt: number;
   state: "active" | "ended";
   outcome: string | null;
-  headOid: string | null;
   endedAt: number | null;
 }>;
 
@@ -31,9 +38,23 @@ export type AttemptRecord = Readonly<{
 export type OpenRunInput = Readonly<{
   nodeId: string;
   kind: RunKind;
-  parentRunId: string | null;
-  leaseFence: number;
+  workspaceId: string | null;
+  worker: string;
+  fence: number;
   attemptLimit: number;
+  judgedOid: string | null;
+  graphRevision: string | null;
+  agents: readonly string[];
+  expiresAt: number;
+  maxLifetimeAt: number;
+}>;
+
+export type ExpireDueRunsInput = Readonly<{ now: number }>;
+
+export type ExpireDueRun = Readonly<{
+  runId: string;
+  nodeId: string;
+  fence: number;
 }>;
 
 export type AdoptRunInput = Readonly<{ runId: string; leaseFence: number }>;
@@ -73,7 +94,15 @@ export class ExecutionError extends Error {
 
 export interface Execution {
   openRun(transaction: Transaction, input: OpenRunInput): RunRecord;
+  expireDueRuns(
+    transaction: Transaction,
+    input: ExpireDueRunsInput,
+  ): readonly ExpireDueRun[];
   activeRunOfNode(transaction: Transaction, nodeId: string): RunRecord | null;
+  activeRunsOfNodes(
+    transaction: Transaction,
+    nodeIds: readonly string[],
+  ): readonly RunRecord[];
   latestRunOfNode(transaction: Transaction, nodeId: string): RunRecord | null;
   adoptRun(transaction: Transaction, input: AdoptRunInput): RunRecord;
   endRun(transaction: Transaction, input: EndRunInput): RunRecord;

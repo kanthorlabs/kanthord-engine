@@ -44,7 +44,7 @@ sequenceDiagram
     Command->>Plan: 8 plan.setNodeAssignment:I
     Command->>Execution: 9 execution.openRun:I
     Command->>Plan: 10 plan.setNodeState:I:claim-taken
-    Command->>Events: 11 events.append:run.opened:I
+    Command->>Events: 11 events.append:run.opened:R
     Command->>Events: 12 events.append:node.running:I:claim-taken
     Command-->>Client: ok
 ```

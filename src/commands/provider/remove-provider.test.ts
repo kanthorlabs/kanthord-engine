@@ -254,21 +254,17 @@ describe("src/commands/provider/remove-provider.test", () => {
         ],
       );
       transaction.run(
-        "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, ?, ?, 'internal', ?, ?, ?, ?, NULL, NULL, ?, '[]', 1700300000000, 1700300000000, ?, NULL, NULL)",
         [
           "run_objective",
-          "objective",
+          "structural",
           "node_objective",
-          null,
           "workspace_objective",
           "general@1",
           1,
           3,
-          BLOB_HASH,
-          null,
+          "revision_chain",
           "active",
-          null,
-          null,
         ],
       );
       for (const attemptId of attemptIds) {
@@ -308,21 +304,17 @@ describe("src/commands/provider/remove-provider.test", () => {
           ],
         );
         transaction.run(
-          "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, ?, ?, 'internal', ?, ?, ?, ?, NULL, NULL, ?, '[]', 1700300000000, 1700300000000, ?, NULL, NULL)",
           [
             `run_${attemptId}`,
-            "task",
+            "execution",
             `node_${attemptId}`,
-            "run_objective",
             `workspace_${attemptId}`,
             "general@1",
             1,
             3,
-            BLOB_HASH,
-            null,
+            "revision_chain",
             "active",
-            null,
-            null,
           ],
         );
         transaction.run(

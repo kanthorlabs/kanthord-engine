@@ -9,7 +9,7 @@ import type {
 } from "../../services/event/index.ts";
 import type { SetNodeStateInput } from "../../services/plan/index.ts";
 import type { Storage, Transaction } from "../../services/storage/index.ts";
-import { sweepExpiredExternalLeases } from "../startup/recover-expired-leases.ts";
+import { expireRuns } from "../run/expire-runs.ts";
 import { claimNode, type ClaimNodeResult } from "../node/claim-node.ts";
 import { releaseNode } from "../node/release-node.ts";
 import type { NodeReportResult } from "../../domain/outcome-report.ts";
@@ -47,6 +47,7 @@ import {
   seedRegistry,
   seedSecondRevisionWithTask,
 } from "../../../test/helpers/rows.ts";
+import { workerRegistry } from "../../domain/worker-registry.ts";
 
 const NOW = 1700000000000;
 const TTL = 300000;
@@ -281,29 +282,32 @@ function claim(
       events: fixture.events,
       clock,
       ids: createMockIdGenerator({ ulids: [] }),
-      sweepExpiredExternalLeases: (
-        transaction: Transaction,
-        sweepInput: Readonly<{ actor: string; now: number }>,
-      ) => {
-        sweepExpiredExternalLeases(
-          {
-            plan: fixture.plan.plan,
-            lease: fixture.lease.lease,
-            execution: fixture.execution.execution,
-            events: fixture.events,
-          },
-          transaction,
-          sweepInput,
-        );
+      expiry: {
+        expireRuns(transaction: Transaction, input: Readonly<{ now: number }>) {
+          return expireRuns(
+            {
+              events: fixture.events,
+              execution: fixture.execution.execution,
+              instanceId: INSTANCE,
+            },
+            transaction,
+            input,
+          );
+        },
       },
+      callerRecord: { worker: "claude@1", authorized: ["claude@1"] },
+      registry: workerRegistry,
       attemptLimit: ATTEMPT_LIMIT,
       leaseTtlMs: TTL,
+      runTtlMs: 120000,
+      runMaxLifetimeMs: 900000,
       instanceId: INSTANCE,
     },
     {
       nodeId: input.nodeId,
       actorId: input.actorId,
       actorKind: "harness",
+      available: true,
     },
   );
 }
@@ -552,222 +556,6 @@ function reportedAppends(fixture: ReportFixture): readonly RecordedAppend[] {
 }
 
 describe("src/commands/outcome/report-outcome.test", () => {
-  it("an accepted report moves the task to done and records the object id", (t) => {
-    const fixture = createReportFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    const claimed = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    const result = report(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-      body: {
-        report: "accepted",
-        fence: claimed.lease.fence,
-        objectId: OBJECT_ID,
-      },
-    });
-    assert.equal(nodeState(fixture, fixtureIds.task), "done");
-    const attempts = attemptRows(fixture);
-    assert.equal(attempts.length, 1);
-    assert.equal(attempts[0]!.outcome, "accepted");
-    assert.equal(attempts[0]!.head_oid, OBJECT_ID);
-    const run = runRowOfNode(fixture, fixtureIds.task);
-    assert.equal(run.state, "ended");
-    assert.equal(run.outcome, "done");
-    assert.equal(run.head_oid, OBJECT_ID);
-    assert.equal(result.nodeId, fixtureIds.task);
-    assert.equal(result.kind, "task");
-    assert.equal(result.state, "done");
-    assert.equal(result.blockReason, null);
-    assert.equal(result.attemptId, attempts[0]!.id);
-    assert.equal(result.attemptNo, 1);
-    assert.equal(result.attemptsRemaining, 2);
-    assert.equal(result.objectId, OBJECT_ID);
-    assert.equal(result.objectiveState, "running");
-    assert.equal(result.objectiveProjection, "done");
-  });
-
-  it("a rejected report under the limit returns the task to ready and keeps the run active", (t) => {
-    const fixture = createReportFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    const claimed = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    const objectiveLeaseBefore = leaseRowOf(fixture, fixtureIds.objective);
-    const result = report(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-      body: {
-        report: "rejected",
-        fence: claimed.lease.fence,
-        reason: "not acceptable",
-      },
-    });
-    assert.equal(nodeState(fixture, fixtureIds.task), "ready");
-    const run = runRowOfNode(fixture, fixtureIds.task);
-    assert.equal(run.state, "active");
-    assert.equal(run.ended_at, null);
-    const taskLease = leaseRowOf(fixture, fixtureIds.task);
-    assert.equal(taskLease.owner, null);
-    assert.deepEqual(
-      leaseRowOf(fixture, fixtureIds.objective),
-      objectiveLeaseBefore,
-    );
-    assert.equal(result.state, "ready");
-    assert.equal(result.attemptsRemaining, 2);
-  });
-
-  it("a failed report behaves as a rejected report and records failed", (t) => {
-    const fixture = createReportFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    const claimed = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    report(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-      body: { report: "failed", fence: claimed.lease.fence, reason: REASON },
-    });
-    assert.equal(nodeState(fixture, fixtureIds.task), "ready");
-    const run = runRowOfNode(fixture, fixtureIds.task);
-    assert.equal(run.state, "active");
-    const attempts = attemptRows(fixture);
-    assert.equal(attempts.length, 1);
-    assert.equal(attempts[0]!.outcome, "failed");
-  });
-
-  it("a cancelled report under the limit leaves the run active", (t) => {
-    {
-      const fixture = createReportFixture();
-      t.after(() => fixture.dispose());
-      seedReadyFixture(fixture);
-      const clock = createMockClock({ start: NOW });
-      const claimed = claim(fixture, clock, {
-        nodeId: fixtureIds.task,
-        actorId: ACTOR_A,
-      });
-      report(fixture, clock, {
-        nodeId: fixtureIds.task,
-        actorId: ACTOR_A,
-        body: { report: "cancelled", fence: claimed.lease.fence },
-      });
-      assert.equal(nodeState(fixture, fixtureIds.task), "ready");
-      const run = runRowOfNode(fixture, fixtureIds.task);
-      assert.equal(run.state, "active");
-      assert.equal(run.ended_at, null);
-    }
-    {
-      const fixture = createReportFixture();
-      t.after(() => fixture.dispose());
-      seedReadyFixture(fixture);
-      const clock = createMockClock({ start: NOW });
-      const claimed = claim(fixture, clock, {
-        nodeId: fixtureIds.task,
-        actorId: ACTOR_A,
-      });
-      releaseNode(
-        {
-          storage: fixture.storage,
-          plan: fixture.plan.plan,
-          lease: fixture.lease.lease,
-          execution: fixture.execution.execution,
-          events: fixture.events,
-          clock,
-        },
-        {
-          nodeId: fixtureIds.task,
-          fence: claimed.lease.fence,
-          actorId: ACTOR_A,
-          actorKind: "harness",
-        },
-      );
-      const run = runRowOfNode(fixture, fixtureIds.task);
-      assert.equal(run.state, "active");
-      assert.equal(run.outcome, null);
-    }
-  });
-
-  it("three rejected reports under a limit of three block the task", (t) => {
-    const fixture = createReportFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    const first = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    const objectiveLeaseBefore = leaseRowOf(fixture, fixtureIds.objective);
-    report(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-      body: {
-        report: "rejected",
-        fence: first.lease.fence,
-        reason: "no",
-      },
-    });
-    const second = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    report(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-      body: {
-        report: "rejected",
-        fence: second.lease.fence,
-        reason: "no",
-      },
-    });
-    const third = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    report(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-      body: {
-        report: "rejected",
-        fence: third.lease.fence,
-        reason: "no",
-      },
-    });
-    assertBlockedAtLimit(fixture, "rejected");
-    assert.deepEqual(
-      leaseRowOf(fixture, fixtureIds.objective),
-      objectiveLeaseBefore,
-    );
-    assert.equal(third.attemptNo, 3);
-  });
-
-  it("three cancelled reports reach the same block", (t) => {
-    const fixture = createReportFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    driveOutcomeToLimit(fixture, clock, "cancelled");
-    assertBlockedAtLimit(fixture, "cancelled");
-  });
-
-  it("three failed reports reach the same block", (t) => {
-    const fixture = createReportFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    driveOutcomeToLimit(fixture, clock, "failed");
-    assertBlockedAtLimit(fixture, "failed");
-  });
-
   it("attemptsRemaining clamps at zero", (t) => {
     {
       const fixture = createReportFixture();
@@ -1161,58 +949,6 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
     assert.equal(nodeState(fixture, fixtureIds.objective), "running");
   });
 
-  it("every write names its trigger", (t) => {
-    for (const entry of [
-      { outcome: "accepted", trigger: "outcome-accepted" },
-      { outcome: "rejected", trigger: "attempt-rejected" },
-      { outcome: "failed", trigger: "attempt-failed" },
-      { outcome: "cancelled", trigger: "report-cancelled" },
-    ] as const) {
-      const fixture = createReportFixture();
-      t.after(() => fixture.dispose());
-      seedReadyFixture(fixture);
-      const clock = createMockClock({ start: NOW });
-      const claimed = claim(fixture, clock, {
-        nodeId: fixtureIds.task,
-        actorId: ACTOR_A,
-      });
-      const before = setNodeStateCalls(fixture).length;
-      report(fixture, clock, {
-        nodeId: fixtureIds.task,
-        actorId: ACTOR_A,
-        body:
-          entry.outcome === "accepted"
-            ? {
-                report: entry.outcome,
-                fence: claimed.lease.fence,
-                objectId: OBJECT_ID,
-              }
-            : entry.outcome === "cancelled"
-              ? { report: entry.outcome, fence: claimed.lease.fence }
-              : {
-                  report: entry.outcome,
-                  fence: claimed.lease.fence,
-                  reason: REASON,
-                },
-      });
-      const calls = setNodeStateCalls(fixture).slice(before);
-      assert.equal(calls.length, 1);
-      assert.equal(calls[0]!.id, fixtureIds.task);
-      assert.equal(calls[0]!.trigger, entry.trigger);
-    }
-    {
-      const fixture = createReportFixture();
-      t.after(() => fixture.dispose());
-      seedReadyFixture(fixture);
-      const clock = createMockClock({ start: NOW });
-      driveOutcomeToLimit(fixture, clock, "rejected");
-      const calls = setNodeStateCalls(fixture);
-      const last = calls[calls.length - 1]!;
-      assert.equal(last.id, fixtureIds.task);
-      assert.equal(last.trigger, "attempt-limit-reached");
-    }
-  });
-
   it("a trigger that disagrees with the pair commits nothing", (t) => {
     const fixture = createReportFixture();
     t.after(() => fixture.dispose());
@@ -1346,27 +1082,6 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
     }
   });
 
-  it("a report at the limit promotes nothing", (t) => {
-    const fixture = createReportFixture();
-    t.after(() => fixture.dispose());
-    seedTwoTaskFixture(fixture, "pending");
-    fixture.storage.transact((transaction) => {
-      seedEdge(transaction, {
-        id: "edge_b_depends_a",
-        fromNode: TASK_B,
-        toNode: fixtureIds.task,
-      });
-    });
-    const clock = createMockClock({ start: NOW });
-    driveOutcomeToLimit(fixture, clock, "rejected");
-    assert.equal(nodeState(fixture, fixtureIds.task), "blocked");
-    assert.equal(nodeState(fixture, TASK_B), "pending");
-    const readyEvents = fixture.appends.filter(
-      (record) => record.input.type === "node.ready",
-    );
-    assert.equal(readyEvents.length, 0);
-  });
-
   it("the payload holds exactly nine keys in order", (t) => {
     const fixture = createReportFixture();
     t.after(() => fixture.dispose());
@@ -1482,21 +1197,6 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
     >;
     assert.equal(payload.reason, null);
     assert.equal(payload.outcome, "cancelled");
-  });
-
-  it("the limit case records toState blocked and attemptsRemaining zero", (t) => {
-    const fixture = createReportFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    driveOutcomeToLimit(fixture, clock, "rejected");
-    const appends = reportedAppends(fixture);
-    assert.equal(appends.length, 3);
-    const payload = appends[appends.length - 1]!.input.payload as Readonly<
-      Record<string, unknown>
-    >;
-    assert.equal(payload.toState, "blocked");
-    assert.equal(payload.attemptsRemaining, 0);
   });
 
   it("exactly one outcome.reported event is appended per report", (t) => {

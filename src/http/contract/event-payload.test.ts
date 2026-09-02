@@ -75,19 +75,6 @@ const recordedPayloads: Readonly<Record<string, readonly unknown[]>> = {
       rotatedAt: 1234,
     },
   ],
-  "lease.claimed": [
-    {
-      subjectId: "task_1",
-      objectiveId: "objective_1",
-      fence: 1,
-      objectiveFence: 2,
-      expiresAt: 1234,
-      runId: "run_1",
-      objectiveRunId: "run_2",
-      attemptId: "attempt_1",
-      attemptNo: 1,
-    },
-  ],
   "lease.released": [
     { subjectId: "task_1", objectiveId: "objective_1", fence: 1 },
   ],
@@ -289,6 +276,24 @@ const recordedPayloads: Readonly<Record<string, readonly unknown[]>> = {
       landingOid: H40,
     },
   ],
+  "run.expired": [
+    {
+      runId: "run_1",
+      nodeId: "task_1",
+      fence: 4,
+      expiredAt: 1234,
+    },
+  ],
+  "run.opened": [
+    {
+      runId: "run_1",
+      nodeId: "task_1",
+      fence: 1,
+      kind: "execution",
+      worker: "claude@1",
+      expiresAt: 1234,
+    },
+  ],
 };
 
 type ScanResult = Readonly<{ files: string[]; literals: Set<string> }>;
@@ -341,6 +346,66 @@ function payloadKeyDiff(
 }
 
 describe("src/http/contract/event-payload.test", () => {
+  it("run.opened and run.expired are registered in bytewise order", () => {
+    assert.ok(eventTypes.includes("run.opened"));
+    assert.ok(eventTypes.includes("run.expired"));
+    assert.equal(
+      (eventTypes as readonly string[]).includes("lease.claimed"),
+      false,
+    );
+    assert.deepEqual(retiredEventTypes, []);
+    assert.deepEqual(
+      eventTypes,
+      [...eventTypes].sort((left, right) =>
+        Buffer.compare(Buffer.from(left), Buffer.from(right)),
+      ),
+    );
+  });
+
+  it("the run.opened payload matches what the claim appends", () => {
+    const schema = eventPayloads["run.opened"];
+    assert.ok(schema !== undefined);
+    assert.doesNotThrow(() =>
+      schema.parse({
+        runId: "run_1",
+        nodeId: "task_1",
+        fence: 1,
+        kind: "execution",
+        worker: "claude@1",
+        expiresAt: 1_700_000_300_000,
+      }),
+    );
+    assert.throws(() =>
+      schema.parse({
+        runId: "run_1",
+        nodeId: "task_1",
+        fence: 1,
+        kind: "execution",
+        expiresAt: 1_700_000_300_000,
+      }),
+    );
+  });
+
+  it("the run.expired payload matches what the expiry pass appends", () => {
+    const schema = eventPayloads["run.expired"];
+    assert.ok(schema !== undefined);
+    assert.doesNotThrow(() =>
+      schema.parse({
+        runId: "run_1",
+        nodeId: "task_1",
+        fence: 4,
+        expiredAt: 1_700_000_000_000,
+      }),
+    );
+    assert.throws(() =>
+      schema.parse({
+        runId: "run_1",
+        nodeId: "task_1",
+        expiredAt: 1_700_000_000_000,
+      }),
+    );
+  });
+
   it("every scanned candidate that names an event type is declared", () => {
     const scanned = scanProducers().literals;
     for (const literal of nonEventLiterals) {
@@ -456,39 +521,10 @@ describe("src/http/contract/event-payload.test", () => {
     assert.throws(() => schema.parse({ ...shape, extra: 1 }));
   });
 
-  it("lease event payloads reject invented string fences", () => {
-    const claimed = eventPayloads["lease.claimed"];
+  it("remaining lease event payloads reject invented string fences", () => {
     const released = eventPayloads["lease.released"];
     const renewed = eventPayloads["lease.renewed"];
-    assert.ok(
-      claimed !== undefined && released !== undefined && renewed !== undefined,
-    );
-    assert.doesNotThrow(() =>
-      claimed.parse({
-        subjectId: "task_1",
-        objectiveId: "objective_1",
-        fence: 1,
-        objectiveFence: 2,
-        expiresAt: 1234,
-        runId: "run_1",
-        objectiveRunId: "run_2",
-        attemptId: "attempt_1",
-        attemptNo: 1,
-      }),
-    );
-    assert.throws(() =>
-      claimed.parse({
-        subjectId: "task_1",
-        objectiveId: "objective_1",
-        fence: "1",
-        objectiveFence: 2,
-        expiresAt: 1234,
-        runId: "run_1",
-        objectiveRunId: "run_2",
-        attemptId: "attempt_1",
-        attemptNo: 1,
-      }),
-    );
+    assert.ok(released !== undefined && renewed !== undefined);
     assert.throws(() =>
       released.parse({
         subjectId: "task_1",

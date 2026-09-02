@@ -221,7 +221,7 @@ sequenceDiagram
     Command->>Plan: 17 plan.setNodeState:T:claim-taken
     Command->>Plan: 18 plan.setNodeState:O:ancestor-started
     Command->>Plan: 19 plan.setNodeState:I:ancestor-started
-    Command->>Events: 20 events.append:run.opened:T
+    Command->>Events: 20 events.append:run.opened:R
     Command->>Events: 21 events.append:node.running:O:child-started
     Command->>Events: 22 events.append:node.running:I:child-started
     Command->>Events: 23 events.append:node.running:T:claim-taken

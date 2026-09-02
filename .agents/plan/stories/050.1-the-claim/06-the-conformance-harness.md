@@ -14,6 +14,7 @@ This story builds the machine that compares a drawn diagram with a real trace. I
 export function recordSeams<T extends object>(
   dependencies: T,
   aliases: Readonly<Record<string, string>>,
+  sets?: Readonly<Record<string, readonly string[]>>,
 ): Readonly<{ dependencies: T; tokens: readonly string[] }>;
 
 export function assertConformance(
@@ -38,12 +39,21 @@ invisible at that seam, so it never becomes a token.
 | `plan.setNodeAssignment`, `execution.openRun`                             | the node id                                                                            |
 | `execution.runById`, `renewRun`, `endRun`, `openAttempt`, `attemptsOfRun` | the run id                                                                             |
 | `execution.closeAttempt`                                                  | the attempt id                                                                         |
-| `execution.activeRunsOfNodes`                                             | the caller-supplied set name                                                           |
+| `execution.activeRunsOfNodes`                                             | the name of the declared `sets` entry whose members equal the passed node ids          |
 | `lease.read`, `acquire`, `renew`, `release`                               | `input.subjectId`                                                                      |
 | `events.append`                                                           | `input.type`, `input.subjectId`, and `input.payload.reason` when the payload holds one |
 
 A node id, run id or attempt id renders through the `aliases` map, so a token holds `T` and never a
 ULID. A method with no projection admits one call per diagram.
+
+`execution.activeRunsOfNodes` takes `(transaction, nodeIds)` and carries no name, because a set name
+is plan topology and the execution capability owns runs. The scenario declares the sets it expects,
+and the projection matches the passed ids against them. A label therefore proves the ids, not the
+caller's wording. The projection refuses a set it cannot name and a set that matches two names.
+
+**A projection refuses a field the input does not hold.** A missing field becomes an error naming the
+method and the field, never the token `undefined`. A stringified miss turns a signature mismatch into
+a label mismatch and hides the cause.
 
 `assertConformance` parses the named diagram out of the named story file, derives the terminal from
 `result`, and compares the drawn list with the recorded list by `deepStrictEqual`. A scenario passes

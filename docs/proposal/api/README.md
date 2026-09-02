@@ -256,6 +256,12 @@ The CLI routes on `code` and never parses `message`. A block reason, a publish r
 | 409    | `choices-stale`            | topology moved since `plan.validate`, so the required choice set changed                          |
 | 409    | `choices-changed`          | a selected outcome is no longer legal against current runtime state                               |
 | 409    | `host-key-mismatch`        | the host presented no key matching the confirmed fingerprint                                      |
+| 409    | `pair-illegal`             | the node kind and deliverable cannot be claimed together                                          |
+| 409    | `assignment-held`          | another worker holds the node assignment                                                          |
+| 409    | `unroutable`               | no capable worker is available to claim the node                                                  |
+| 409    | `review-head-unavailable`  | the review run has no workspace head to judge                                                     |
+| 409    | `objective-busy`           | a sibling task already has an active run                                                          |
+| 409    | `subtree-busy`             | an active run already covers the node or its subtree                                              |
 | 422    | `plan-invalid`             | the plan failed validation, and `details` lists every finding                                     |
 | 422    | `choices-invalid`          | the choice set builds an invalid graph, and `details` names the nodes                             |
 | 422    | `identity-kind-mismatch`   | one ULID payload appeared under two kind prefixes                                                 |

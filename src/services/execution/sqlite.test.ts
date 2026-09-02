@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { SqliteExecution } from "./sqlite.ts";
-import { ExecutionError } from "./index.ts";
+import { ExecutionError, type OpenRunInput } from "./index.ts";
 import type { Transaction } from "../storage/index.ts";
 import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
@@ -74,24 +74,19 @@ function insertInternalRun(
   transaction: Transaction,
   id: string,
   nodeId: string,
-  parentRunId: string | null,
 ): void {
   transaction.run(
-    "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, 'execution', ?, 'internal', ?, ?, ?, ?, NULL, NULL, ?, '[]', ?, ?, 'active', NULL, NULL)",
     [
       id,
-      "task",
       nodeId,
-      parentRunId,
       fixtureIds.workspace,
       "general@1",
       1,
       3,
-      BASE,
-      null,
-      "active",
-      null,
-      null,
+      fixtureIds.planRevision,
+      NOW + 300000,
+      NOW + 300000,
     ],
   );
 }
@@ -134,95 +129,68 @@ function assertExecutionError(
   });
 }
 
-const objectiveRunInput = {
+const objectiveRunInput: OpenRunInput = {
   nodeId: fixtureIds.objective,
-  kind: "objective" as const,
-  parentRunId: null,
-  leaseFence: 1,
+  kind: "structural",
+  workspaceId: null,
+  worker: "general@1",
+  fence: 1,
   attemptLimit: 3,
+  judgedOid: null,
+  graphRevision: fixtureIds.planRevision,
+  agents: [],
+  expiresAt: NOW + 300000,
+  maxLifetimeAt: NOW + 300000,
+};
+
+const executionRunInput: OpenRunInput = {
+  ...objectiveRunInput,
+  nodeId: fixtureIds.task,
+  kind: "execution",
 };
 
 describe("src/services/execution/sqlite.test", () => {
-  it("openRun writes an external objective run with null workspace, worker and base oid", () => {
+  it("openRun writes an external structural run with migration-12 nullable values", () => {
     const { storage, execution, dispose } = build([RUN1]);
     try {
       storage.transact((transaction) => {
         const record = execution.openRun(transaction, objectiveRunInput);
         assert.equal(record.id, `run_${RUN1}`);
-        assert.equal(record.kind, "objective");
+        assert.equal(record.kind, "structural");
         assert.equal(record.nodeId, fixtureIds.objective);
-        assert.equal(record.parentRunId, null);
         assert.equal(record.driver, "external");
-        assert.equal(record.leaseFence, 1);
+        assert.equal(record.workspaceId, null);
+        assert.equal(record.worker, "general@1");
+        assert.equal(record.fence, 1);
         assert.equal(record.attemptLimit, 3);
+        assert.equal(record.headOid, null);
+        assert.equal(record.judgedOid, null);
+        assert.equal(record.graphRevision, fixtureIds.planRevision);
+        assert.deepEqual(record.agents, []);
+        assert.equal(record.expiresAt, NOW + 300000);
+        assert.equal(record.maxLifetimeAt, NOW + 300000);
         assert.equal(record.state, "active");
         assert.equal(record.outcome, null);
-        assert.equal(record.headOid, null);
         assert.equal(record.endedAt, null);
         const row = transaction.get(
-          "SELECT driver, workspace_id, worker, base_oid, kind, parent_run_id, lease_fence, attempt_limit, state, head_oid, outcome, ended_at FROM run WHERE id = ?",
+          "SELECT driver, workspace_id, worker, kind, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at FROM run WHERE id = ?",
           [record.id],
         ) as Readonly<Record<string, unknown>>;
         assert.equal(row.driver, "external");
         assert.equal(row.workspace_id, null);
-        assert.equal(row.worker, null);
-        assert.equal(row.base_oid, null);
-        assert.equal(row.kind, "objective");
-        assert.equal(row.parent_run_id, null);
-        assert.equal(row.lease_fence, 1);
+        assert.equal(row.worker, "general@1");
+        assert.equal(row.kind, "structural");
+        assert.equal(row.fence, 1);
         assert.equal(row.attempt_limit, 3);
-        assert.equal(row.state, "active");
         assert.equal(row.head_oid, null);
+        assert.equal(row.judged_oid, null);
+        assert.equal(row.graph_revision, fixtureIds.planRevision);
+        assert.equal(row.agents_json, "[]");
+        assert.equal(row.expires_at, NOW + 300000);
+        assert.equal(row.max_lifetime_at, NOW + 300000);
+        assert.equal(row.state, "active");
         assert.equal(row.outcome, null);
         assert.equal(row.ended_at, null);
-      });
-    } finally {
-      dispose();
-    }
-  });
-
-  it("openRun writes an external task run whose parent_run_id names the objective run", () => {
-    const { storage, execution, dispose } = build([RUN1, RUN2]);
-    try {
-      storage.transact((transaction) => {
-        const objectiveRun = execution.openRun(transaction, objectiveRunInput);
-        const taskRun = execution.openRun(transaction, {
-          nodeId: fixtureIds.task,
-          kind: "task",
-          parentRunId: objectiveRun.id,
-          leaseFence: 1,
-          attemptLimit: 3,
-        });
-        assert.equal(taskRun.kind, "task");
-        assert.equal(taskRun.parentRunId, objectiveRun.id);
-        const row = transaction.get(
-          "SELECT kind, parent_run_id FROM run WHERE id = ?",
-          [taskRun.id],
-        ) as Readonly<Record<string, unknown>>;
-        assert.equal(row.kind, "task");
-        assert.equal(row.parent_run_id, objectiveRun.id);
-      });
-    } finally {
-      dispose();
-    }
-  });
-
-  it("openRun refuses an objective run that names a parent run", () => {
-    const { storage, execution, dispose } = build([RUN1, RUN2]);
-    try {
-      storage.transact((transaction) => {
-        const objectiveRun = execution.openRun(transaction, objectiveRunInput);
-        assertConstraint(
-          () =>
-            execution.openRun(transaction, {
-              nodeId: fixtureIds.task,
-              kind: "objective",
-              parentRunId: objectiveRun.id,
-              leaseFence: 1,
-              attemptLimit: 3,
-            }),
-          /CHECK constraint failed/,
-        );
       });
     } finally {
       dispose();
@@ -264,23 +232,10 @@ describe("src/services/execution/sqlite.test", () => {
     const { storage, execution, dispose } = build([RUN1, RUN2, RUN3]);
     try {
       storage.transact((transaction) => {
-        const objectiveRun = execution.openRun(transaction, objectiveRunInput);
-        execution.openRun(transaction, {
-          nodeId: fixtureIds.task,
-          kind: "task",
-          parentRunId: objectiveRun.id,
-          leaseFence: 1,
-          attemptLimit: 3,
-        });
+        execution.openRun(transaction, objectiveRunInput);
+        execution.openRun(transaction, executionRunInput);
         assertConstraint(
-          () =>
-            execution.openRun(transaction, {
-              nodeId: fixtureIds.task,
-              kind: "task",
-              parentRunId: objectiveRun.id,
-              leaseFence: 1,
-              attemptLimit: 3,
-            }),
+          () => execution.openRun(transaction, executionRunInput),
           /UNIQUE constraint failed/,
         );
       });
@@ -289,7 +244,7 @@ describe("src/services/execution/sqlite.test", () => {
     }
   });
 
-  it("adoptRun moves the lease fence and opens no second run", () => {
+  it("adoptRun moves the fence and opens no second run", () => {
     const { storage, execution, dispose } = build([RUN1]);
     try {
       storage.transact((transaction) => {
@@ -298,7 +253,7 @@ describe("src/services/execution/sqlite.test", () => {
           runId: record.id,
           leaseFence: 7,
         });
-        assert.equal(adopted.leaseFence, 7);
+        assert.equal(adopted.fence, 7);
         assert.equal(adopted.id, record.id);
         const count = transaction.get(
           "SELECT COUNT(*) AS n FROM run WHERE node_id = ?",
@@ -310,7 +265,7 @@ describe("src/services/execution/sqlite.test", () => {
           fixtureIds.objective,
         );
         assert.ok(active !== null);
-        assert.equal(active.leaseFence, 7);
+        assert.equal(active.fence, 7);
       });
     } finally {
       dispose();
@@ -401,14 +356,8 @@ describe("src/services/execution/sqlite.test", () => {
     ]);
     try {
       storage.transact((transaction) => {
-        const objectiveRun = execution.openRun(transaction, objectiveRunInput);
-        const taskRun = execution.openRun(transaction, {
-          nodeId: fixtureIds.task,
-          kind: "task",
-          parentRunId: objectiveRun.id,
-          leaseFence: 1,
-          attemptLimit: 3,
-        });
+        execution.openRun(transaction, objectiveRunInput);
+        const taskRun = execution.openRun(transaction, executionRunInput);
         const first = execution.openAttempt(transaction, {
           runId: taskRun.id,
         });
@@ -450,13 +399,7 @@ describe("src/services/execution/sqlite.test", () => {
     try {
       storage.transact((transaction) => {
         const objectiveRun = execution.openRun(transaction, objectiveRunInput);
-        const taskRun = execution.openRun(transaction, {
-          nodeId: fixtureIds.task,
-          kind: "task",
-          parentRunId: objectiveRun.id,
-          leaseFence: 1,
-          attemptLimit: 3,
-        });
+        const taskRun = execution.openRun(transaction, executionRunInput);
         insertExternalAttempt(transaction, "attempt_seeded", taskRun.id, 5);
         const next = execution.openAttempt(transaction, { runId: taskRun.id });
         assert.equal(next.attemptNo, 6);
@@ -476,13 +419,7 @@ describe("src/services/execution/sqlite.test", () => {
     try {
       storage.transact((transaction) => {
         const objectiveRun = execution.openRun(transaction, objectiveRunInput);
-        const taskRun = execution.openRun(transaction, {
-          nodeId: fixtureIds.task,
-          kind: "task",
-          parentRunId: objectiveRun.id,
-          leaseFence: 1,
-          attemptLimit: 3,
-        });
+        const taskRun = execution.openRun(transaction, executionRunInput);
         const attempt = execution.openAttempt(transaction, {
           runId: taskRun.id,
         });
@@ -519,13 +456,7 @@ describe("src/services/execution/sqlite.test", () => {
     try {
       storage.transact((transaction) => {
         const objectiveRun = execution.openRun(transaction, objectiveRunInput);
-        const taskRun = execution.openRun(transaction, {
-          nodeId: fixtureIds.task,
-          kind: "task",
-          parentRunId: objectiveRun.id,
-          leaseFence: 1,
-          attemptLimit: 3,
-        });
+        const taskRun = execution.openRun(transaction, executionRunInput);
         insertExternalAttempt(transaction, "attempt_seeded_c", taskRun.id, 3);
         insertExternalAttempt(transaction, "attempt_seeded_a", taskRun.id, 1);
         insertExternalAttempt(transaction, "attempt_seeded_b", taskRun.id, 2);
@@ -734,13 +665,7 @@ describe("src/services/execution/sqlite.test", () => {
     try {
       storage.transact((transaction) => {
         const objectiveRun = execution.openRun(transaction, objectiveRunInput);
-        const taskRun = execution.openRun(transaction, {
-          nodeId: fixtureIds.task,
-          kind: "task",
-          parentRunId: objectiveRun.id,
-          leaseFence: 1,
-          attemptLimit: 3,
-        });
+        const taskRun = execution.openRun(transaction, executionRunInput);
         const attempt = execution.openAttempt(transaction, {
           runId: taskRun.id,
         });
@@ -769,20 +694,11 @@ describe("src/services/execution/sqlite.test", () => {
     const { storage, execution, dispose } = build([RUN1, RUN2, RUN3]);
     try {
       storage.transact((transaction) => {
-        const objectiveRun = execution.openRun(transaction, objectiveRunInput);
-        const taskRunA = execution.openRun(transaction, {
-          nodeId: fixtureIds.task,
-          kind: "task",
-          parentRunId: objectiveRun.id,
-          leaseFence: 1,
-          attemptLimit: 3,
-        });
+        execution.openRun(transaction, objectiveRunInput);
+        const taskRunA = execution.openRun(transaction, executionRunInput);
         execution.openRun(transaction, {
+          ...executionRunInput,
           nodeId: "task_b",
-          kind: "task",
-          parentRunId: objectiveRun.id,
-          leaseFence: 1,
-          attemptLimit: 3,
         });
         execution.endRun(transaction, {
           runId: taskRunA.id,
@@ -798,7 +714,6 @@ describe("src/services/execution/sqlite.test", () => {
           transaction,
           "run_0000000000000000000000000000",
           fixtureIds.task,
-          objectiveRun.id,
         );
         assert.deepEqual(
           execution.runDriversUnderObjective(transaction, fixtureIds.objective),
@@ -830,12 +745,7 @@ describe("src/services/execution/sqlite.test", () => {
       storage.transact((transaction) => {
         const objectiveRun = execution.openRun(transaction, objectiveRunInput);
         insertWorkspaceForTask(transaction, fixtureIds.task);
-        insertInternalRun(
-          transaction,
-          "run_internal",
-          fixtureIds.task,
-          objectiveRun.id,
-        );
+        insertInternalRun(transaction, "run_internal", fixtureIds.task);
         assertConstraint(
           () => execution.openAttempt(transaction, { runId: "run_internal" }),
           /FOREIGN KEY constraint failed/,

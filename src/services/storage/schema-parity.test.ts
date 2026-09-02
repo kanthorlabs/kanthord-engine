@@ -100,7 +100,7 @@ describe("src/services/storage/schema-parity.test", () => {
 
     assert.deepEqual(
       tables.map((row) => row.name),
-      Object.keys(rows),
+      Object.keys(rows).sort(),
     );
   });
 });

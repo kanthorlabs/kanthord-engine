@@ -37,6 +37,7 @@ import {
   nodeStates,
   terminalStates,
 } from "../../domain/state.ts";
+import { workerId } from "../../domain/worker-id.ts";
 
 export const planDocument = z.strictObject({
   path: z.string().min(1),
@@ -164,7 +165,7 @@ export const nodeShowResponse = nodeListItem.extend({
   instruction: z.string(),
   acceptance: z.string().nullable(),
   worker: z.string().nullable(),
-  assignment: z.string().nullable(),
+  assignment: workerId.nullable(),
   deliverable: z.enum(deliverables).nullable(),
   verify: verifyBlockContract.nullable(),
   repositoryId: z.string().nullable(),
@@ -197,7 +198,7 @@ export const nodeAttributes = z.strictObject({
   discardReason: z.string().nullable(),
   parentId: z.string().nullable(),
   repositoryId: z.string().nullable(),
-  assignment: z.string().nullable(),
+  assignment: workerId.nullable(),
   deliverable: z.enum(deliverables).nullable(),
   verify: verifyBlockContract.nullable(),
 });

@@ -245,7 +245,7 @@ const buildMigratedThroughSeven = (): Context => {
   const second = new SqliteStorage({
     path: temporary.path,
     clock: createMockClock({ start: 1700000000000 }),
-    migrations,
+    migrations: migrations.slice(0, 7),
   });
   second.migrate();
   return { storage: second, temporary };
@@ -525,7 +525,7 @@ describe("src/services/storage/migration-0007-external-execution.test", () => {
     const second = new SqliteStorage({
       path: temporary.path,
       clock: createMockClock({ start: 1700000000000 }),
-      migrations,
+      migrations: migrations.slice(0, 7),
     });
     after(() => second.close());
     second.migrate();

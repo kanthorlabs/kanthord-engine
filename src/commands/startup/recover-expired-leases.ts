@@ -43,7 +43,7 @@ type CandidateRow = Readonly<{
 
 const CANDIDATE_SQL = `
 SELECT l.subject_id, l.fence, n.kind,
-       ra.base_oid, ra.id AS run_id, COALESCE(ra.driver, rl.driver) AS driver,
+       rb.oid AS base_oid, ra.id AS run_id, COALESCE(ra.driver, rl.driver) AS driver,
        w.path, w.repository_id, n.revision AS revision
 FROM lease l
 JOIN node n ON n.id = l.subject_id
@@ -52,6 +52,7 @@ LEFT JOIN run rl ON rl.id = (
   SELECT id FROM run WHERE node_id = n.id ORDER BY id DESC LIMIT 1
 )
 LEFT JOIN workspace w ON w.id = ra.workspace_id
+LEFT JOIN run_base rb ON rb.run_id = ra.id AND rb.repository_id = w.repository_id
 WHERE l.subject_kind = 'node'
   AND l.expires_at IS NOT NULL
   AND l.expires_at <= ?

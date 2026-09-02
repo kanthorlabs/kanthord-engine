@@ -1,4 +1,4 @@
-import type { WorkerEntry, workerRegistry } from "./worker-registry.ts";
+import type { WorkerEntry } from "./worker-registry.ts";
 
 export type WorkerRoutingErrorCode =
   | "worker-unknown-id"
@@ -22,23 +22,31 @@ type CapabilityInput = Readonly<{
 }>;
 
 type RouteWorkerInput = Readonly<{
-  registry: typeof workerRegistry;
+  registry: readonly WorkerEntry[];
   kind: string;
   deliverable: string;
   authorized: readonly string[];
   available: readonly string[];
 }>;
 
+export const routingFailedSets = [
+  "capable",
+  "authorized",
+  "available",
+] as const;
+
+export type RoutingFailedSet = (typeof routingFailedSets)[number];
+
 type RouteWorkerResult =
   | Readonly<{ routed: true; worker: WorkerEntry }>
   | Readonly<{
       routed: false;
       refusal: "unroutable";
-      failedSet: "capable" | "authorized" | "available";
+      failedSet: RoutingFailedSet;
     }>;
 
 export function capableWorkers(
-  registry: typeof workerRegistry,
+  registry: readonly WorkerEntry[],
   input: CapabilityInput,
 ): readonly string[] {
   return registry

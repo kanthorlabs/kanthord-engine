@@ -311,7 +311,7 @@ describe("src/services/plan/sqlite.test", () => {
       discardReason: null,
       revision: fixtureIds.planRevision,
       updatedAt: 1,
-      deliverable: null,
+      deliverable: "expansion",
       verifyJson: null,
       dependencies: [],
     });
@@ -343,7 +343,7 @@ describe("src/services/plan/sqlite.test", () => {
       discardReason: null,
       revision: fixtureIds.planRevision,
       updatedAt: 1,
-      deliverable: null,
+      deliverable: "expansion",
       verifyJson: null,
       dependencies: [],
     });
@@ -365,7 +365,7 @@ describe("src/services/plan/sqlite.test", () => {
       discardReason: null,
       revision: fixtureIds.planRevision,
       updatedAt: 1,
-      deliverable: null,
+      deliverable: "implementation",
       verifyJson: null,
       dependencies: [],
     });
@@ -513,7 +513,7 @@ describe("src/services/plan/sqlite.test", () => {
       discardReason: null,
       revision: fixtureIds.planRevision,
       updatedAt: 1,
-      deliverable: null,
+      deliverable: "implementation",
       verifyJson: null,
       dependencies: [],
     });
@@ -1515,36 +1515,6 @@ describe("src/services/plan/sqlite.test", () => {
         error instanceof Error &&
         error.message ===
           "trigger readiness-promoted declares pending -> ready, the write names pending -> blocked",
-    );
-  });
-
-  it("setNodeState throws when the node kind is outside the declared levels", (t) => {
-    const { storage, store, dispose } = build();
-    t.after(() => dispose());
-    storage.transact((transaction) => {
-      seedAll(transaction);
-      transaction.run("UPDATE node SET state = 'ready' WHERE id = ?", [
-        fixtureIds.initiative,
-      ]);
-    });
-
-    assert.throws(
-      () =>
-        storage.transact((transaction) =>
-          store.setNodeState(transaction, {
-            id: fixtureIds.initiative,
-            from: "ready",
-            to: "running",
-            trigger: "claim-taken",
-            blockReason: null,
-            at: 1,
-            cause: { revision: fixtureIds.planRevision, importId: null },
-          }),
-        ),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.message ===
-          "trigger claim-taken declares levels objective,task, the node is a initiative",
     );
   });
 

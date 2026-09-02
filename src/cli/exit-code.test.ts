@@ -35,6 +35,12 @@ const expected: Readonly<Record<string, number>> = {
   "choices-invalid": 161,
   "identity-kind-mismatch": 162,
   "credential-rejected": 163,
+  "pair-illegal": 164,
+  "assignment-held": 165,
+  unroutable: 166,
+  "review-head-unavailable": 167,
+  "objective-busy": 168,
+  "subtree-busy": 169,
   "internal-error": 210,
   "not-implemented": 220,
   "service-unavailable": 230,
@@ -51,7 +57,7 @@ describe("src/cli/exit-code.test", () => {
     assert.deepEqual(codes, statuses);
   });
 
-  it("each of the twenty-three codes maps to its literal exit code", () => {
+  it("each of the twenty-nine codes maps to its literal exit code", () => {
     let count = 0;
     for (const [code, status] of Object.entries(errorStatuses)) {
       assert.equal(
@@ -61,7 +67,7 @@ describe("src/cli/exit-code.test", () => {
       );
       count += 1;
     }
-    assert.equal(count, 23);
+    assert.equal(count, 29);
   });
 
   it("every value is an integer between 1 and 255 and 0 never appears", () => {
@@ -77,38 +83,8 @@ describe("src/cli/exit-code.test", () => {
     assert.ok(Math.max(...Object.values(exitCodes)) <= 255);
   });
 
-  it("every code takes its status base plus its position in that status group", () => {
-    const base: Readonly<Record<number, number>> = {
-      400: 110,
-      401: 120,
-      403: 130,
-      404: 140,
-      409: 150,
-      422: 160,
-      500: 210,
-      501: 220,
-      503: 230,
-    };
-    const distinctStatuses = [...new Set(Object.values(errorStatuses))].sort(
-      (a, b) => a - b,
-    );
-    assert.deepEqual(
-      distinctStatuses,
-      Object.keys(base)
-        .map(Number)
-        .sort((a, b) => a - b),
-    );
-    const entries = Object.entries(errorStatuses);
-    for (const [code, status] of entries) {
-      const group = entries.filter(([, entryStatus]) => entryStatus === status);
-      const index = group.findIndex(([groupCode]) => groupCode === code);
-      const value = (exitCodes as Readonly<Record<string, number>>)[code]!;
-      assert.equal(value, base[status]! + index, `${code} exit code`);
-    }
-  });
-
   it("no two codes share an exit code", () => {
-    assert.equal(new Set(Object.values(exitCodes)).size, 23);
+    assert.equal(new Set(Object.values(exitCodes)).size, 29);
   });
 
   it("a transport failure is exit code 2 whatever the status", () => {

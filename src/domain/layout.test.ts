@@ -503,6 +503,7 @@ describe("src/domain/layout.test", () => {
         "release-facts.test.ts",
         "release-gate.test.ts",
         "verify-db-status.test.ts",
+        "verify-epic-sequence.test.ts",
       ],
       `${offenders.join(", ")} match a default test pattern; npm test would run them`,
     );

@@ -16,7 +16,10 @@ import { nodeShowResponse } from "../../http/contract/graph.ts";
 import type { Storage, Transaction } from "../../services/storage/index.ts";
 import type { PlanStore } from "../../services/plan/index.ts";
 import type { BlobStore } from "../../services/blob/index.ts";
-import type { Execution } from "../../services/execution/index.ts";
+import type {
+  Execution,
+  OpenRunInput,
+} from "../../services/execution/index.ts";
 import {
   createBlobStore,
   createPlanStore,
@@ -29,6 +32,24 @@ const blobHashPattern = /^sha256:[0-9a-f]{64}$/;
 
 const OBJECT_ID = "a".repeat(40);
 const NEWEST_RUN_ULID = "01HZY000000000000000000001";
+
+const structuralRunInput: OpenRunInput = {
+  nodeId: fixtureIds.objective,
+  kind: "structural",
+  workspaceId: null,
+  worker: "general@1",
+  fence: 1,
+  attemptLimit: 3,
+  judgedOid: null,
+  graphRevision: fixtureIds.planRevision,
+  agents: [],
+  expiresAt: 1700000300000,
+  maxLifetimeAt: 1700000300000,
+};
+
+function clearPlanDeliverables(transaction: Transaction): void {
+  transaction.run("UPDATE node SET deliverable = NULL, verify_json = NULL");
+}
 
 const twentyThreeMemberNames = [
   "acceptance",
@@ -89,6 +110,7 @@ describe("src/queries/node/show-node.test", () => {
     storage.transact((transaction) => {
       seedRegistry(transaction);
       seedGraph(transaction);
+      clearPlanDeliverables(transaction);
     });
 
     const view = showNode(
@@ -306,6 +328,7 @@ describe("src/queries/node/show-node.test", () => {
     storage.transact((transaction) => {
       seedRegistry(transaction);
       seedGraph(transaction);
+      clearPlanDeliverables(transaction);
     });
 
     const view = showNode(
@@ -490,11 +513,7 @@ describe("src/queries/node/show-node.test", () => {
     });
     storage.transact((transaction) => {
       const opened = execution.openRun(transaction, {
-        nodeId: fixtureIds.objective,
-        kind: "objective",
-        parentRunId: null,
-        leaseFence: 1,
-        attemptLimit: 3,
+        ...structuralRunInput,
       });
       execution.stampRunHead(transaction, {
         runId: opened.id,
@@ -522,11 +541,7 @@ describe("src/queries/node/show-node.test", () => {
     });
     storage.transact((transaction) => {
       const opened = execution.openRun(transaction, {
-        nodeId: fixtureIds.objective,
-        kind: "objective",
-        parentRunId: null,
-        leaseFence: 1,
-        attemptLimit: 3,
+        ...structuralRunInput,
       });
       execution.stampRunHead(transaction, {
         runId: opened.id,
@@ -560,11 +575,7 @@ describe("src/queries/node/show-node.test", () => {
     });
     storage.transact((transaction) => {
       const first = execution.openRun(transaction, {
-        nodeId: fixtureIds.objective,
-        kind: "objective",
-        parentRunId: null,
-        leaseFence: 1,
-        attemptLimit: 3,
+        ...structuralRunInput,
       });
       execution.stampRunHead(transaction, {
         runId: first.id,
@@ -576,11 +587,8 @@ describe("src/queries/node/show-node.test", () => {
         at: 2,
       });
       const second = execution.openRun(transaction, {
-        nodeId: fixtureIds.objective,
-        kind: "objective",
-        parentRunId: null,
-        leaseFence: 2,
-        attemptLimit: 3,
+        ...structuralRunInput,
+        fence: 2,
       });
       execution.stampRunHead(transaction, {
         runId: second.id,
@@ -605,14 +613,11 @@ describe("src/queries/node/show-node.test", () => {
     storage.transact((transaction) => {
       seedRegistry(transaction);
       seedGraph(transaction);
+      clearPlanDeliverables(transaction);
     });
     storage.transact((transaction) => {
       const opened = execution.openRun(transaction, {
-        nodeId: fixtureIds.objective,
-        kind: "objective",
-        parentRunId: null,
-        leaseFence: 1,
-        attemptLimit: 3,
+        ...structuralRunInput,
       });
       execution.stampRunHead(transaction, {
         runId: opened.id,

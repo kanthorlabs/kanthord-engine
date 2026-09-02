@@ -36,6 +36,8 @@ const TASK_BETA = "task_01HRZ3NDEKTSV4RRFFQ69G5FAV";
 const INITIATIVE_GAMMA = "initiative_01JQZ3NDEKTSV4RRFFQ69G5FAV";
 const OBJECTIVE_GAMMA = "objective_01KQZ3NDEKTSV4RRFFQ69G5FAV";
 const TASK_GAMMA = "task_01MQZ3NDEKTSV4RRFFQ69G5FAV";
+const OBJECTIVE_RUN_ALPHA = "run_objective_alpha";
+const OBJECTIVE_RUN_BETA = "run_objective_beta";
 
 type StoredRow = Readonly<Record<string, unknown>>;
 
@@ -116,6 +118,10 @@ const documents: readonly Readonly<{ path: string; content: string }>[] = [
 id: ${INITIATIVE_ALPHA}
 kind: initiative
 title: Alpha initiative
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Complete alpha.
 `,
@@ -127,6 +133,10 @@ id: ${OBJECTIVE_ALPHA}
 kind: objective
 title: Alpha objective
 repo: kanthord-verify
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Complete alpha objective.
 `,
@@ -137,7 +147,10 @@ Complete alpha objective.
 id: ${TASK_ALPHA_ONE}
 kind: task
 title: Alpha first task
-worker: tdd@1
+deliverable: implementation
+verify:
+  paths: []
+  commands: []
 ---
 Complete alpha first.
 
@@ -154,7 +167,10 @@ kind: task
 title: Alpha second task
 depends_on:
   - ${TASK_ALPHA_ONE}
-worker: tdd@1
+deliverable: implementation
+verify:
+  paths: []
+  commands: []
 ---
 Complete alpha second.
 
@@ -172,6 +188,10 @@ title: Beta objective
 depends_on:
   - ${OBJECTIVE_ALPHA}
 repo: kanthord-verify
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Complete beta objective.
 `,
@@ -182,7 +202,10 @@ Complete beta objective.
 id: ${TASK_BETA}
 kind: task
 title: Beta task
-worker: tdd@1
+deliverable: implementation
+verify:
+  paths: []
+  commands: []
 ---
 Complete beta task.
 
@@ -197,6 +220,10 @@ Complete beta task.
 id: ${INITIATIVE_GAMMA}
 kind: initiative
 title: Gamma initiative
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Complete gamma.
 `,
@@ -208,6 +235,10 @@ id: ${OBJECTIVE_GAMMA}
 kind: objective
 title: Gamma objective
 repo: kanthord-verify
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Complete gamma objective.
 `,
@@ -218,7 +249,10 @@ Complete gamma objective.
 id: ${TASK_GAMMA}
 kind: task
 title: Gamma task
-worker: tdd@1
+deliverable: implementation
+verify:
+  paths: []
+  commands: []
 ---
 Complete gamma.
 
@@ -386,6 +420,30 @@ function runRow(homePath: string, runId: string): StoredRow {
   );
 }
 
+function seedObjectiveRun(
+  homePath: string,
+  objectiveId: string,
+  runId: string,
+  worker: string,
+  fence: number,
+): void {
+  withDatabase(homePath, (database) => {
+    database
+      .prepare(
+        `INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at)
+VALUES (?, 'structural', ?, 'external', NULL, ?, ?, 3, NULL, NULL, NULL, '[]', ?, ?, 'active', NULL, NULL)`,
+      )
+      .run(
+        runId,
+        objectiveId,
+        worker,
+        fence,
+        Number.MAX_SAFE_INTEGER,
+        Number.MAX_SAFE_INTEGER,
+      );
+  });
+}
+
 function objectiveLeaseRow(homePath: string, objectiveId: string): StoredRow {
   return withDatabase(homePath, (database) =>
     oneRow(
@@ -439,6 +497,14 @@ function expireLease(homePath: string, subjectId: string): void {
   });
 }
 
+function expireRun(homePath: string, nodeId: string): void {
+  withDatabase(homePath, (database) => {
+    database
+      .prepare("UPDATE run SET expires_at = 1 WHERE node_id = ?")
+      .run(nodeId);
+  });
+}
+
 function daemonInstanceId(homePath: string): string {
   return (
     JSON.parse(
@@ -462,7 +528,7 @@ async function importPlan(client: ClientDependencies): Promise<void> {
     body: {
       fromRevision: null,
       importId: IMPORT_ID,
-      documents: validation.documents,
+      documents,
       choices: validation.choices.map((choice) => ({
         id: choice.id,
         take: choice.suggested,
@@ -559,7 +625,7 @@ async function claim(
   const result = await call(fixture.client(actor.token), {
     operationId: "node.claim",
     parameters: { id: nodeId },
-    body: {},
+    body: { available: true },
   });
   assertStatus(result, 200);
   return bodyOf(result) as ClaimBody;
@@ -627,14 +693,16 @@ async function blockTask(
   fixture: Fixture,
   actor: Actor,
   taskId: string,
+  limit = 3,
 ): Promise<Readonly<{ endedRunId: string; objectiveFence: number }>> {
   let endedRunId = "";
   let objectiveFence = 0;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < limit; attempt++) {
     const claimed = await claim(fixture, actor, taskId);
     objectiveFence = claimed.objectiveLease.fence;
     endedRunId = claimed.runId;
     await rejectTask(fixture, actor, taskId, claimed.lease.fence);
+    expireRun(fixture.home.path, taskId);
   }
   return { endedRunId, objectiveFence };
 }
@@ -643,40 +711,44 @@ describe("src/main.report.test", () => {
   it("the whole loop reaches done through the real composition root", async () => {
     const fixture = await createFixture();
     try {
-      const first = await claim(fixture, fixture.harness, TASK_ALPHA_ONE);
-      const firstReport = await acceptTask(
+      const first = await acceptTask(
         fixture,
         fixture.harness,
         TASK_ALPHA_ONE,
         OBJECT_ID_ONE,
       );
-      assert.equal(firstReport.claim.runId, first.runId);
-      assert.equal(firstReport.report.state, "done");
-      assert.equal(firstReport.report.objectiveProjection, null);
+      assert.equal(first.report.state, "done");
+      assert.equal(first.report.objectiveProjection, null);
       assert.equal(nodeRow(fixture.home.path, TASK_ALPHA_ONE).state, "done");
 
-      const second = await claim(fixture, fixture.harness, TASK_ALPHA_TWO);
-      const secondReport = await acceptTask(
+      const second = await acceptTask(
         fixture,
         fixture.harness,
         TASK_ALPHA_TWO,
         OBJECT_ID_TWO,
       );
-      assert.equal(secondReport.claim.runId, second.runId);
-      assert.equal(secondReport.report.state, "done");
-      assert.equal(secondReport.report.objectiveState, "running");
-      assert.equal(secondReport.report.objectiveProjection, "done");
+      assert.equal(second.report.state, "done");
+      assert.equal(second.report.objectiveState, "running");
+      assert.equal(second.report.objectiveProjection, "done");
 
       const heldObjectiveLease = objectiveLeaseRow(
         fixture.home.path,
         OBJECTIVE_ALPHA,
       );
       assert.equal(heldObjectiveLease.owner, fixture.harness.id);
-      assert.equal(heldObjectiveLease.fence, first.objectiveLease.fence);
+      assert.equal(heldObjectiveLease.fence, first.claim.objectiveLease.fence);
 
       const beforeAttestation = await nodeShow(fixture, OBJECTIVE_ALPHA);
       assert.equal(beforeAttestation.projection, "done");
       assert.equal(beforeAttestation.attestedObjectId, null);
+
+      seedObjectiveRun(
+        fixture.home.path,
+        OBJECTIVE_ALPHA,
+        OBJECTIVE_RUN_ALPHA,
+        "claude@1",
+        first.claim.objectiveLease.fence,
+      );
 
       const attested = await report(
         fixture,
@@ -684,7 +756,7 @@ describe("src/main.report.test", () => {
         OBJECTIVE_ALPHA,
         {
           report: "attested",
-          fence: first.objectiveLease.fence,
+          fence: first.claim.objectiveLease.fence,
           objectId: OBJECT_ID_TWO,
         },
       );
@@ -692,10 +764,7 @@ describe("src/main.report.test", () => {
       const attestedBody = bodyOf(attested) as NodeReportBody;
       assert.equal(attestedBody.state, "awaiting_approval");
 
-      const activeObjectiveRun = runRow(
-        fixture.home.path,
-        first.objectiveRunId,
-      );
+      const activeObjectiveRun = runRow(fixture.home.path, OBJECTIVE_RUN_ALPHA);
       assert.equal(activeObjectiveRun.state, "active");
       assert.equal(activeObjectiveRun.head_oid, OBJECT_ID_TWO);
 
@@ -711,7 +780,7 @@ describe("src/main.report.test", () => {
       assertStatus(closed, 200);
       assert.equal((bodyOf(closed) as NodeReportBody).state, "done");
 
-      const endedObjectiveRun = runRow(fixture.home.path, first.objectiveRunId);
+      const endedObjectiveRun = runRow(fixture.home.path, OBJECTIVE_RUN_ALPHA);
       assert.equal(endedObjectiveRun.state, "ended");
       assert.equal(endedObjectiveRun.outcome, "done");
       assert.equal(
@@ -727,6 +796,13 @@ describe("src/main.report.test", () => {
         OBJECT_ID_ONE,
       );
       assert.equal(betaTask.report.objectiveProjection, "done");
+      seedObjectiveRun(
+        fixture.home.path,
+        OBJECTIVE_BETA,
+        OBJECTIVE_RUN_BETA,
+        "claude@1",
+        betaTask.claim.objectiveLease.fence,
+      );
       const betaAttested = await report(
         fixture,
         fixture.harness.token,
@@ -769,7 +845,7 @@ describe("src/main.report.test", () => {
       const refused = await call(fixture.client(secondHarness.token), {
         operationId: "node.claim",
         parameters: { id: TASK_ALPHA_TWO },
-        body: {},
+        body: { available: true },
       });
       assertRefusal(refused, 409, "lease-held");
 
@@ -779,7 +855,14 @@ describe("src/main.report.test", () => {
         TASK_ALPHA_TWO,
         OBJECT_ID_TWO,
       );
-      assert.equal(second.claim.objectiveRunId, first.claim.objectiveRunId);
+      assert.notEqual(second.claim.objectiveRunId, first.claim.objectiveRunId);
+      seedObjectiveRun(
+        fixture.home.path,
+        OBJECTIVE_ALPHA,
+        OBJECTIVE_RUN_ALPHA,
+        "claude@1",
+        first.claim.objectiveLease.fence,
+      );
       const attested = await report(
         fixture,
         fixture.harness.token,
@@ -796,7 +879,7 @@ describe("src/main.report.test", () => {
     }
   });
 
-  it("the active run survives a daemon restart and adoption is the only recovery", async () => {
+  it("an active run survives restart and blocks a new claim", async () => {
     const fixture = await createFixture();
     try {
       const first = await claim(fixture, fixture.harness, TASK_ALPHA_ONE);
@@ -817,20 +900,19 @@ describe("src/main.report.test", () => {
       assert.equal(objectiveBeforeRestart.fence, first.objectiveLease.fence);
 
       await fixture.restart();
-      const adopted = await claim(fixture, fixture.harness, TASK_ALPHA_ONE);
-      assert.equal(adopted.runId, first.runId);
-      assert.equal(adopted.attemptNo, 2);
-      assert.notEqual(adopted.lease.fence, first.lease.fence);
+      const refused = await call(fixture.client(fixture.harness.token), {
+        operationId: "node.claim",
+        parameters: { id: TASK_ALPHA_ONE },
+        body: { available: true },
+      });
+      assertRefusal(refused, 409, "subtree-busy");
       const objectiveAfterRestart = objectiveLeaseRow(
         fixture.home.path,
         OBJECTIVE_ALPHA,
       );
       assert.equal(objectiveAfterRestart.owner, fixture.harness.id);
       assert.equal(objectiveAfterRestart.fence, first.objectiveLease.fence);
-      assert.equal(
-        taskLeaseRow(fixture.home.path, TASK_ALPHA_ONE).owner,
-        fixture.harness.id,
-      );
+      assert.equal(taskLeaseRow(fixture.home.path, TASK_ALPHA_ONE).owner, null);
     } finally {
       await fixture.cleanup();
     }
@@ -864,7 +946,7 @@ describe("src/main.report.test", () => {
         fixture.home.path,
         OBJECTIVE_ALPHA,
       );
-      assert.equal(recoveredLease.owner, null);
+      assert.equal(recoveredLease.owner, fixture.harness.id);
       assert.equal(
         nodeRow(fixture.home.path, OBJECTIVE_ALPHA).state,
         "running",
@@ -875,7 +957,7 @@ describe("src/main.report.test", () => {
     }
   });
 
-  it("an expired lease is swept before reclaim, and stale owner and fence reports are refused", async () => {
+  it("an expired run is swept before a later claim, and stale reports are refused", async () => {
     const fixture = await createFixture();
     try {
       const first = await claim(fixture, fixture.harness, TASK_ALPHA_ONE);
@@ -883,68 +965,52 @@ describe("src/main.report.test", () => {
         fixture.client(fixture.humanToken),
         "harness-b",
       );
-      expireLease(fixture.home.path, TASK_ALPHA_ONE);
-      expireLease(fixture.home.path, OBJECTIVE_ALPHA);
+      expireRun(fixture.home.path, TASK_ALPHA_ONE);
+      expireRun(fixture.home.path, OBJECTIVE_ALPHA);
 
-      const reclaimed = await claim(fixture, secondHarness, TASK_ALPHA_ONE);
-      assert.equal(reclaimed.node.state, "running");
-      assert.equal(reclaimed.lease.owner, secondHarness.id);
-      assert.equal(reclaimed.lease.fence, first.lease.fence + 1);
+      const unrelated = await claim(fixture, secondHarness, TASK_GAMMA);
+      assert.equal(unrelated.node.state, "running");
       assert.equal(runRow(fixture.home.path, first.runId).outcome, "expired");
-      assert.equal(
-        runRow(fixture.home.path, first.objectiveRunId).outcome,
-        "expired",
-      );
-      assert.ok(
-        eventRows(fixture.home.path, TASK_ALPHA_ONE).some(
-          (event) => event.type === "recovery.leaseRecovered",
-        ),
-      );
-      assert.ok(
-        eventRows(fixture.home.path, OBJECTIVE_ALPHA).some(
-          (event) => event.type === "recovery.leaseRecovered",
-        ),
+      assert.deepEqual(
+        eventRows(fixture.home.path, first.runId).map((event) => event.type),
+        ["run.opened", "run.expired"],
       );
 
-      const beforeStaleOwner = databaseSnapshot(fixture.home.path);
-      const staleOwner = await report(
+      const notReclaimed = await call(fixture.client(secondHarness.token), {
+        operationId: "node.claim",
+        parameters: { id: TASK_ALPHA_ONE },
+        body: { available: true },
+      });
+      assertRefusal(notReclaimed, 409, "lease-held");
+      assert.equal(nodeRow(fixture.home.path, TASK_ALPHA_ONE).state, "running");
+
+      const beforeStaleFence = databaseSnapshot(fixture.home.path);
+      const staleFence = await report(
         fixture,
         fixture.harness.token,
         TASK_ALPHA_ONE,
         {
           report: "accepted",
-          fence: reclaimed.lease.fence,
-          objectId: OBJECT_ID_ONE,
-        },
-      );
-      assertRefusal(staleOwner, 409, "lease-held");
-      assert.deepEqual(databaseSnapshot(fixture.home.path), beforeStaleOwner);
-
-      const beforeStaleFence = databaseSnapshot(fixture.home.path);
-      const staleFence = await report(
-        fixture,
-        secondHarness.token,
-        TASK_ALPHA_ONE,
-        {
-          report: "accepted",
-          fence: first.lease.fence,
+          fence: first.lease.fence + 1,
           objectId: OBJECT_ID_ONE,
         },
       );
       assertRefusal(staleFence, 409, "lease-held");
       assert.deepEqual(databaseSnapshot(fixture.home.path), beforeStaleFence);
 
-      const accepted = await report(
+      const beforeStaleOwner = databaseSnapshot(fixture.home.path);
+      const staleOwner = await report(
         fixture,
         secondHarness.token,
         TASK_ALPHA_ONE,
         {
           report: "accepted",
-          fence: reclaimed.lease.fence,
+          fence: first.lease.fence + 1,
           objectId: OBJECT_ID_ONE,
         },
       );
-      assertStatus(accepted, 200);
+      assertRefusal(staleOwner, 409, "lease-held");
+      assert.deepEqual(databaseSnapshot(fixture.home.path), beforeStaleOwner);
     } finally {
       await fixture.cleanup();
     }
@@ -1018,12 +1084,29 @@ describe("src/main.report.test", () => {
       assertRefusal(humanReport, 403, "actor-forbidden");
       assert.deepEqual(databaseSnapshot(fixture.home.path), beforeReport);
 
-      await acceptTask(fixture, fixture.harness, TASK_ALPHA_ONE, OBJECT_ID_ONE);
+      const accepted = await report(
+        fixture,
+        fixture.harness.token,
+        TASK_ALPHA_ONE,
+        {
+          report: "accepted",
+          fence: claimed.lease.fence,
+          objectId: OBJECT_ID_ONE,
+        },
+      );
+      assertStatus(accepted, 200);
       const second = await acceptTask(
         fixture,
         fixture.harness,
         TASK_ALPHA_TWO,
         OBJECT_ID_TWO,
+      );
+      seedObjectiveRun(
+        fixture.home.path,
+        OBJECTIVE_ALPHA,
+        OBJECTIVE_RUN_ALPHA,
+        "claude@1",
+        claimed.objectiveLease.fence,
       );
       const attested = await report(
         fixture,
@@ -1053,9 +1136,14 @@ describe("src/main.report.test", () => {
   });
 
   it("a task blocked at the attempt limit runs again after an unblock", async () => {
-    const fixture = await createFixture({ attemptLimit: 3 });
+    const fixture = await createFixture({ attemptLimit: 1 });
     try {
-      const blocked = await blockTask(fixture, fixture.harness, TASK_ALPHA_ONE);
+      const blocked = await blockTask(
+        fixture,
+        fixture.harness,
+        TASK_ALPHA_ONE,
+        1,
+      );
       assert.equal(nodeRow(fixture.home.path, TASK_ALPHA_ONE).state, "blocked");
       assert.equal(
         nodeRow(fixture.home.path, TASK_ALPHA_ONE).block_reason,
@@ -1127,6 +1215,13 @@ describe("src/main.report.test", () => {
         OBJECT_ID_TWO,
       );
       assert.equal(secondTask.report.objectiveProjection, "done");
+      seedObjectiveRun(
+        fixture.home.path,
+        OBJECTIVE_ALPHA,
+        OBJECTIVE_RUN_ALPHA,
+        "claude@1",
+        blocked.objectiveFence,
+      );
       const attested = await report(
         fixture,
         fixture.harness.token,
@@ -1155,6 +1250,7 @@ describe("src/main.report.test", () => {
     const fixture = await createFixture();
     try {
       await claim(fixture, fixture.harness, TASK_ALPHA_ONE);
+      expireRun(fixture.home.path, TASK_ALPHA_ONE);
       seedBlockedNode(fixture.home.path, TASK_ALPHA_TWO);
 
       const unblocked = await call(fixture.client(fixture.humanToken), {
@@ -1175,7 +1271,7 @@ describe("src/main.report.test", () => {
       const refused = await call(fixture.client(fixture.harness.token), {
         operationId: "node.claim",
         parameters: { id: TASK_ALPHA_TWO },
-        body: {},
+        body: { available: true },
       });
       assertRefusal(refused, 409, "illegal-transition");
       if (refused.ok) {

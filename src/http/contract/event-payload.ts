@@ -90,17 +90,6 @@ export const eventPayloads: Readonly<Record<EventType, ZodType>> = {
     rotatedBy: z.string(),
     rotatedAt: z.number().int(),
   }),
-  "lease.claimed": z.strictObject({
-    subjectId: z.string(),
-    objectiveId: z.string(),
-    fence,
-    objectiveFence: fence,
-    expiresAt: z.number().int(),
-    runId: z.string(),
-    objectiveRunId: z.string(),
-    attemptId: z.string().nullable(),
-    attemptNo: z.number().int().nullable(),
-  }),
   "lease.released": z.strictObject({
     subjectId: z.string(),
     objectiveId: z.string(),
@@ -266,5 +255,19 @@ export const eventPayloads: Readonly<Record<EventType, ZodType>> = {
     credentialId: z.string(),
     fetchedUpstreamOid: objectId,
     landingOid: objectId,
+  }),
+  "run.expired": z.strictObject({
+    runId: z.string(),
+    nodeId: z.string(),
+    fence,
+    expiredAt: z.number().int(),
+  }),
+  "run.opened": z.strictObject({
+    runId: z.string(),
+    nodeId: z.string(),
+    fence,
+    kind: z.string(),
+    worker: z.string(),
+    expiresAt: z.number().int(),
   }),
 };

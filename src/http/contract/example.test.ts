@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { nodeClaimResponse } from "./execution.ts";
 import { buildErrorEnvelope } from "./errors.ts";
 import { findOperation, registry } from "./registry.ts";
 
@@ -12,6 +13,40 @@ const routedWithoutExamples = registry
   .sort();
 
 test("src/http/contract/example.test", async (t) => {
+  await t.test(
+    "a node.claim request omitting available fails validation",
+    () => {
+      const result = findOperation("node.claim")!.request!.safeParse({});
+
+      assert.equal(result.success, false);
+      if (!result.success) {
+        assert.deepEqual(result.error.issues[0]?.path, ["available"]);
+      }
+    },
+  );
+
+  await t.test(
+    "nodeClaimResponse carries runId, fence, expiresAt and renewAfterMs",
+    () => {
+      const response = nodeClaimResponse.parse(
+        findOperation("node.claim")!.examples!.success,
+      ) as Record<string, unknown>;
+
+      assert.equal(typeof response.runId, "string");
+      assert.equal(typeof response.fence, "number");
+      assert.equal((response.fence as number) >= 1, true);
+      assert.equal(typeof response.expiresAt, "number");
+      assert.equal((response.renewAfterMs as number) > 0, true);
+    },
+  );
+
+  await t.test("heartbeatIntervalMs is absent from nodeClaimResponse", () => {
+    assert.equal(
+      Object.hasOwn(nodeClaimResponse.shape, "heartbeatIntervalMs"),
+      false,
+    );
+  });
+
   await t.test("every example parses against its declared schema", () => {
     const covered = withExamples.map((entry) => entry.operationId).sort();
     assert.deepEqual(covered, [
