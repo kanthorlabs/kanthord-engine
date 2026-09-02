@@ -15,7 +15,8 @@ the conversion moves every diagram out of this file anyway:
    is no `.agents/plan/stories/051-*/`. The conversion creates the story directory and moves each
    diagram into the story that owns its path. `scripts/verify-epic-sequence.ts` of EPIC 050.1 Story 8
    covers EPIC 050 to 057 and refuses an epic holding a mermaid block, so this epic fails the gate on
-   its first rule until then.
+   its first rule until then. `.agents/plan/pending/051-the-story-tree-conversion.md` tracks the
+   conversion as an obligation, with its owner and the trigger that forces it.
 
 2. **`claim-success-task` at line 154 supersedes the wrong diagram.** It reads
    `Supersedes: EPIC 050.1 claim-success-task`. EPIC 050.4 Story 1 already supersedes that diagram and
@@ -831,6 +832,6 @@ Hermetic coverage required beyond the Proof:
 - The conformance runner in `test/sequence/conformance.test.ts` runs every scenario file under `test/sequence/scenarios/` against its diagram, passing with the real dependency implementations over the loopback fixture, and failing with a mutation applied to each step in turn. All twenty-two diagrams are covered.
 - The parser in `scripts/verify-epic-sequence.ts` (owned by EPIC 050) refuses this document if the `## Sequence` section is absent, if any diagram id repeats a live id from EPIC 050, if a `Supersedes` line names an id the target document does not declare, or if any `Seams:` token carries no sign. These refusals are asserted against fixture trees in `scripts/verify-epic-sequence.test.ts`.
 - The `claim-success-task` supersession is complete: EPIC 050.1's diagram carries `Superseded by: EPIC 051 claim-success-task`, this document's diagram carries `Supersedes: EPIC 050.1 claim-success-task`, and no scenario file exists for the EPIC 050.1 diagram. The gate asserts this triple.
-- The `report-execution-checkpoint` id is declared in this document, so EPIC 050's `report-authority-prelude` pinned-tail note resolves. The gate asserts the named id exists.
+- `report-execution-checkpoint` draws the nested command `acceptExecution` at `:700`, so it supersedes no `node.report` diagram. EPIC 050.2's `report-authority-prelude` pins its tail to EPIC 050.4 `report-lease-free`. EPIC 050.4 Story 6 declares that id, so the note resolves outside this document. The successor of `report-lease-free` is the `node.report` diagram of story 12. The conversion declares that id and its `Supersedes` line, so this document declares neither yet.
 - The two paths of `workspace-cut-settle` (success) and the startup-recovery discard path are separated: startup reconciles an `open` `cut` row by comparing the ref to `proposed_head_oid`. The workspace settle path and the discard path are tested by `src/commands/startup/recover-journal.test.ts`.
 - The ordered short-circuit of `acceptExecution` is asserted across all six refusals by a decision table in `src/domain/execution-acceptance.test.ts`: each pair of conditions that can trigger simultaneously is asserted to report the earlier one.

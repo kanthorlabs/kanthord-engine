@@ -67,9 +67,14 @@ they run concurrently. Ask each for, and require it to return:
 - the dependency type of each, and every key on it, at `file:line`;
 - the current ordered seam calls of each path, quoted, at `file:line`;
 - the migration version the repository is at, and the test convention;
-- every seam call the source implies that no interface declares yet.
+- every seam call the source implies that no interface declares yet;
+- the dependency closure of every symbol the source deletes, at `file:line` — importers, exact
+  import specifiers and literal values, tests and helpers, generated artifacts and their generators.
 
 Tell each explorer: **map what exists, do not propose changes.**
+
+**Removal scope is that closure, and the closure sizes the range.** A directory sweep is not a
+consumer set. Split on the closure, never on the directory count.
 
 A seam the source needs and no interface declares is a decision an epic of this
 range now owns. Name it in that epic's `## Decisions` and give it a story.
@@ -141,9 +146,11 @@ node --test \
   && echo "PASS EPIC-<NNN>"
 ```
 
-Hermetic coverage required beyond the Proof:
+Hermetic coverage required beyond the Proof. **Every row names exactly one proof owner.**
 
-- <one assertion, stating both directions where a boundary is involved>. Story <n>.
+| #   | assertion                                                             | story |
+| --- | --------------------------------------------------------------------- | ----- |
+| 1   | <one assertion, stating both directions where a boundary is involved> | <n>   |
 ````
 
 Rules for the text you write:
@@ -157,7 +164,11 @@ Rules for the text you write:
   `/author`'s work done in the wrong place.
 - **Every entry declares its kind**, `story-foundation` or `story-implement`, so
   the pair rule is decidable before the story is written.
-- **Every gate assertion names its owning story**, and exactly one.
+- **The hermetic-coverage list is a table, and every row names one proof owner.** Other stories
+  contribute the implementation; the named story owns the proof.
+- **An epic that introduces or changes an event type settles it in `## Decisions`.** State the type,
+  its `subjectKind`, its `subjectId`, its payload and the transaction it appends in. An unsettled
+  subject reaches every story as a settled one.
 - **The Proof passes on exit 0 and its sentinel.** A printed string alone is not
   a pass.
 - Cut motivation, history and background everywhere.
@@ -171,12 +182,15 @@ Confirm, per epic file you wrote:
 3. every story entry declares a kind;
 4. the number of `story-implement` entries equals the number of paths Step 4
    counted for that epic;
-5. every `Hermetic coverage` assertion names exactly one story, and every story
-   is named by at least one assertion or delivers a Proof test file;
+5. the hermetic-coverage list is a table, every row names exactly one proof-owning
+   story, and every story is named by at least one row or delivers a Proof test
+   file;
 6. every `## Non-goals` bullet names where the work went instead;
 7. every `## Decisions` bullet carries evidence at `file:line` or a
    `docs/proposal/` citation;
-8. no sentence leaves a design choice to `/author` or to build time.
+8. no sentence leaves a design choice to `/author` or to build time;
+9. every event type the epic introduces or changes carries its subject kind,
+   subject id, payload and transaction in `## Decisions`.
 
 A failure here is yours to fix before you report.
 
@@ -200,7 +214,10 @@ Do **not** commit — the human reviews and commits.
 - a diagram in an epic file, in any form;
 - an epic with more than ten stories;
 - a story entry with no kind;
-- a gate assertion owned by no story or by two;
+- a hermetic-coverage list that is not a table, and a row owned by no story or by
+  two;
 - a decision with no evidence;
+- an event type introduced or changed with no settled subject kind, subject id,
+  payload and transaction;
 - writing a story file, a test, production code, or any document outside
   `.agents/plan/epics/`.

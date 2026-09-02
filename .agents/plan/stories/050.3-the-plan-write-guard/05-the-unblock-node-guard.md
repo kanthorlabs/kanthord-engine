@@ -121,17 +121,21 @@ Add, each as a separate `it`:
 
 2. `"an unblock on a node whose ancestor holds an active run refuses, naming the ancestor"` — run on `O`, unblock `T`.
 
-3. `"an unblock on a node whose sibling holds an active run succeeds"`.
+3. `"an unblock on a node whose sibling holds an active run succeeds"` — run on `S`, seeded by `seedSiblingTask` at `test/helpers/rows.ts:184`, unblock `T`.
 
-3b. `"an unblock on a node whose descendant holds an active run refuses"` — the closure is symmetric, and a task can hold no child today, so seed the case on an objective if the fixture admits one and assert it is skipped with a stated reason otherwise. State which, rather than leaving the case ambiguous: `unblock-node` refuses `node-kind-invalid` for an objective at `:68`, so a descendant case is unreachable through this command and the symmetry is proven by Story 1 case 4 alone.
+4. `"an unblock on a node whose descendant holds an active run"` — **there is no such case, and this entry records why rather than leaving the closure half-asserted.** `unblock-node` refuses `node-kind-invalid` at `:68` for an initiative and an objective, so the only node it reaches is a task, and a task holds no child. Assert instead that an unblock of an objective under a covering run refuses `node-kind-invalid`, so the unreachability is a fact of the command and not an untested assumption. Story 1 carries the descendant direction of the closure.
 
-4. `"an unblock on a node covered by an expired run succeeds"`.
+5. `"an unblock on a node covered by an expired run succeeds"`.
 
-5. `"a subtree-busy refusal appends no event and leaves the database byte-identical"` — both halves, because the event append is the first write and the whole trace is drawn.
+6. `"an unblock on a node covered by an ended run succeeds"`.
 
-6. `"not-blocked beats a covering run"` — a `ready` node under a covering run. Assert `error.refusal === "not-blocked"`, proving the guard is last in the order.
+7. `"a subtree-busy refusal appends no event and leaves the database byte-identical"` — both halves, because the event append is the first write and the whole trace is drawn.
 
-7. `"a harness actor beats a covering run"` — assert `error.refusal === "actor-forbidden"`.
+8. `"the refusal precedence of node.unblock"` — one decision table over every pair of `actor-forbidden`, `not-found`, `node-kind-invalid`, `not-blocked`, `block-reason-not-clearable`, `subtree-busy` and `illegal-transition` that can trigger at once, with the winner named per pair and every unreachable pair marked unreachable with its reason. `subtree-busy` loses every pair, because the guard is last.
+
+9. `"not-blocked beats a covering run"` — a `ready` node under a covering run. Assert `error.refusal === "not-blocked"`, proving the guard is last in the order.
+
+10. `"a harness actor beats a covering run"` — assert `error.refusal === "actor-forbidden"`.
 
 Add `test/sequence/scenarios/unblock-node-guard.ts`.
 

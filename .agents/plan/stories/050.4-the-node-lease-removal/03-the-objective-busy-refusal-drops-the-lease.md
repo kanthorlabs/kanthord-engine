@@ -8,10 +8,10 @@ Diagrams: claim-lease-free-objective-busy
 
 Supersedes: EPIC 050.1 claim-refusal-objective-busy
 
-Seams: claim-lease-free-objective-busy: -lease.read
+Seams: claim-lease-free-objective-busy: -lease.read:T, -lease.read:O, -lease.read:S
 
-The prior set of this path is `claim-refusal-objective-busy`, the live refusal diagram EPIC 050 Story
-12 drew. Its signs are measured only over the tokens it holds: `lease.acquire` is a token the refusal
+The prior set of this path is `claim-refusal-objective-busy`, the live refusal diagram EPIC 050.1 Story
+5 drew. Its signs are measured only over the tokens it holds: `lease.acquire` is a token the refusal
 never reached, so its deletion is Story 1's and not this story's.
 
 ## The ship path

@@ -1,14 +1,14 @@
 # Story 1 — The external sweep scans runs
 
 Epic: `.agents/plan/epics/050.5-the-lease-table-removal.md`
-Depends on: EPIC 050.4, implemented. EPIC 050 Story 2 (`run.expires_at`, `run.driver`, `run_base`).
+Depends on: EPIC 050.4, implemented. EPIC 050.1 migration `12` (`run.expires_at`, `run.driver`, `run.fence`, `run_base`).
 Kind: story-implement
 
 Diagrams: sweep-external-runs
 
 Baselines: sweep-external-runs <- baseline-sweep-external-leases
 
-Seams: sweep-external-runs: -events.append:recovery.leaseRecovered, +events.append:recovery.runRecovered
+Seams: sweep-external-runs: -events.append:recovery.leaseRecovered:T, +events.append:recovery.runRecovered:T
 
 This story owns the shared candidate query and the two recovery event types. Story 2 consumes both.
 
@@ -104,8 +104,8 @@ SELECT r.node_id AS node_id, r.fence, r.id AS run_id, r.driver, n.kind,
        rb.oid AS base_oid, w.path, w.repository_id, n.revision AS revision
 FROM run r
 JOIN node n ON n.id = r.node_id
-LEFT JOIN run_base rb ON rb.run_id = r.id
 LEFT JOIN workspace w ON w.id = r.workspace_id
+LEFT JOIN run_base rb ON rb.run_id = r.id AND rb.repository_id = w.repository_id
 WHERE r.state = 'active'
   AND r.expires_at <= ?
   AND n.state = 'running'
@@ -122,6 +122,14 @@ run's. Three shipped columns change source and none changes meaning:
 | `base_oid` | `ra.base_oid` on the active run   | `rb.oid` on `run_base`                       |
 | `run_id`   | the active run of that node       | the candidate run itself                     |
 | `driver`   | `COALESCE(ra.driver, rl.driver)`  | `r.driver`, with no fallback to the last run |
+
+**`run_base` is joined on the repository too, and the order of the two `LEFT JOIN` clauses is part of
+the statement.** Its primary key is `(run_id, repository_id)`, so a run holds one base row per
+repository and a join on `run_id` alone returns one candidate row per base. Both consumers write once
+per row, so the sweep would move one node twice and the verdict would compare the worktree head
+against whichever base SQLite returned first. The recovery compares the head of `workspace.path`
+against the base of `workspace.repository_id`, and the composite key then yields at most one row.
+`workspace` is joined first because the `run_base` predicate reads `w.repository_id`.
 
 **The two `LEFT JOIN run` clauses are gone.** The shipped query joined the active run and, failing
 that, the newest run by id — a fallback that existed because the _lease_ was the candidate and its run
@@ -180,7 +188,9 @@ Add, each as a separate `it`:
 
 2. `"the sweep appends exactly one recovery.runRecovered event and no recovery.leaseRecovered"`.
 
-3. `"the sweep writes no lease row"` — seed one owned, unexpired lease row on `T`, run the sweep, and assert **all eight columns** deep-equal the seeded values. The table still exists after this epic, so the comparison is real and it stays green through EPIC 057.
+3. `"the sweep writes no lease row"` — seed one owned, unexpired lease row on `T` by raw SQL and assert **all eight columns** deep-equal the seeded values: `('node', T, 'daemon_test', 'daemon', 1, NOW, NOW, NOW + 300000)`. `test/helpers/rows.ts:668 seedLeaseOnNode` writes `expires_at: 2`, which is expired under this suite's clock, so it cannot serve this case. The table still exists after this epic, so the comparison is real and it stays green through EPIC 057.
+
+3b. `"a run holding two base rows produces one candidate row"` — seed the expired external run of case 1 with two `run_base` rows, one for the workspace's repository and one for another. Assert the sweep appends exactly one `recovery.runRecovered` event and raises the fence by exactly one. Without this case the `repository_id` predicate could be dropped and the suite would stay green on a one-repository fixture.
 
 4. `"a run one millisecond from expiry is untouched"` — `expires_at: NOW + 1`. Assert the node stays `running` and the run stays `active`. With case 1 the boundary is pinned from both sides.
 

@@ -38,8 +38,8 @@ Citations: `:84`, `:85`, `:97`. The project existence check at `:86` reads throu
 object, which is not a dependency key, so it is no message.
 
 The tail this note pins is `ids.mint` at `:113` and `:114`, `blobs.put` at `:116` and `:122`,
-`plan.readGraph` at `:128`, `plan.readValidationContext` at `:183`, `revision.render` at `:229`,
-`revision.record` at `:232`, `plan.mutateGraph` at `:260` and `events.append` at `:275`. None of them
+`plan.readGraph` at `:128`, `plan.readValidationContext` at `:184`, `revision.render` at `:232`,
+`revision.record` at `:235`, `plan.mutateGraph` at `:263` and `events.append` at `:278`. None of them
 moves: this story inserts one read ahead of all of them and changes nothing after.
 
 ### `create-node-guard`
@@ -72,7 +72,7 @@ Add `test/sequence/scenarios/create-node-guard.ts`.
 ## Change
 
 **`src/commands/node/create-node.ts` — insert one guard.** After the `stale-revision` throw at
-`:100-110` and before `const id = dependencies.ids.mint(...)` at `:113`:
+`:101-111` and before `const id = dependencies.ids.mint(...)` at `:113`:
 
 ```ts
 const covering = dependencies.plan.runCoversNode(
@@ -125,19 +125,19 @@ Add, each as a separate `it`:
 
 2. `"a create under a parent whose ancestor holds an active run refuses, naming the ancestor"` — run on `I`, create under `O`. Assert `relation === "ancestor"` and `nodeId === I`.
 
-3. `"a create under a parent whose sibling holds an active run succeeds"` — run on a second objective under `I`, create under `O`. The sibling is neither above nor below the parent.
+3. `"a create under a parent whose sibling holds an active run succeeds"` — run on a second objective under `I`, seeded by `seedSiblingObjective` at `test/helpers/rows.ts:206`, create under `O`. The sibling is neither above nor below the parent.
 
-3b. `"a create under a parent whose existing child holds an active run refuses, naming the descendant"` — run on task `T` under `O`, create a second task under `O`. Assert `relation === "descendant"`. This is a refusal `create-node` never had and the closure is symmetric on purpose: adding a sibling changes the child set of the objective the worker is executing under.
+4. `"a create under a parent whose existing child holds an active run refuses, naming the descendant"` — run on task `T` under `O`, create a second task under `O`. Assert `relation === "descendant"`. This is a refusal `create-node` never had and the closure is symmetric on purpose: adding a sibling changes the child set of the objective the worker is executing under.
 
-4. `"a create under a parent covered by an expired run succeeds"` — `expires_at: NOW - 1`.
+5. `"a create under a parent covered by an expired run succeeds"` — `expires_at: NOW - 1`.
 
-5. `"a create under a parent covered by an ended run succeeds"`.
+6. `"a create under a parent covered by an ended run succeeds"`.
 
-6. `"an initiative create is never refused by the guard"` — an active run on every other node, and a root create succeeds. The seed is empty.
+7. `"an initiative create is never refused by the guard"` — an active run on every other node, and a root create succeeds. The seed is empty.
 
-7. `"a subtree-busy refusal leaves the database byte-identical"` — assert `databaseBytes` deep-equals the snapshot. This is the case that fails if the guard is placed after `blobs.put` at `:116`.
+8. `"a subtree-busy refusal leaves the database byte-identical"` — assert `databaseBytes` deep-equals the snapshot. This is the case that fails if the guard is placed after `blobs.put` at `:116`.
 
-8. `"a stale revision beats a covering run"` — a covering run **and** a stale `fromRevision`. Assert `error.refusal === "stale-revision"`, proving the guard's position in the refusal order.
+9. `"the refusal precedence of node.create"` — one decision table over every pair of `project-not-found`, `stale-revision`, `subtree-busy`, `plan-invalid`, `illegal-transition` and `binding-in-use` that can trigger at once, with the winner named per pair and every unreachable pair marked unreachable with its reason. `stale-revision` beats `subtree-busy` is one row, and it is the row the drawn ordinal implies but does not prove.
 
 Add `test/sequence/scenarios/create-node-guard.ts`.
 

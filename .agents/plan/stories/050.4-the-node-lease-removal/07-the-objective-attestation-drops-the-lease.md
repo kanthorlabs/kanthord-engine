@@ -1,14 +1,14 @@
 # Story 7 — The objective attestation drops the lease
 
 Epic: `.agents/plan/epics/050.4-the-node-lease-removal.md`
-Depends on: Story 6 (the parent command, which deletes `fence` from the `attested` member of `nodeReportRequest` and stops passing it).
+Depends on: Story 6 (the parent command, which deletes `fence` from the `attested` member of `nodeReportRequest`, from `ReportObjectiveInput` and from the nested call).
 Kind: story-implement
 
 Diagrams: attest-lease-free
 
 Baselines: attest-lease-free <- baseline-report-objective
 
-Seams: attest-lease-free: -lease.read, -lease.release
+Seams: attest-lease-free: -lease.read:O, -lease.release:O
 
 `report-objective.ts` is a nested command. `report-outcome.ts:125` binds it to unrecorded dependencies
 and it counts as one step there, so it carries its own pair and its own scenario. No epic has drawn
@@ -100,9 +100,11 @@ the very run that is reporting.
 **2 — the release.** Delete `dependencies.lease.release` at `:165-172`. It sits between
 `execution.stampRunHead` at `:160-163` and `events.append` at `:174-188`, and neither moves.
 
-**3 — the dependencies and the input.** Delete `lease: Lease` from `ReportObjectiveDependencies` at
-`:15` and the `services/lease/index.ts` import at `:9`. Delete `fence` from `ReportObjectiveInput`.
-Stop passing `lease` in `src/main.ts:295`, and stop passing `fence` from `report-outcome.ts:125-131`.
+**3 — the dependencies.** Delete `lease: Lease` from `ReportObjectiveDependencies` at `:15` and the
+`services/lease/index.ts` import at `:9`. Stop passing `lease` in `src/main.ts:295`. `fence` is
+**already gone** from `ReportObjectiveInput` and from the call at `report-outcome.ts:125-131`: Story 6
+takes both, because `body.fence` — the value that argument carried — stops existing there. Report a
+surviving `fence` as a Story 6 defect rather than deleting it here.
 
 **4 — the refusal.** Delete `"lease-held"` from `ReportObjectiveRefusal` at `:33`, leaving
 `"actor-forbidden" | "illegal-transition"`. Delete its branch in `reportObjectiveRefusal` at

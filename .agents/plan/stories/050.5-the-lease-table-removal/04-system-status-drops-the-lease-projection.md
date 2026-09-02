@@ -96,8 +96,19 @@ export interface Health {
 ```
 
 `ReadStatusDependencies.health` takes that type, and `:50` becomes `dependencies.health.read()`.
-`src/main.ts` binds `{ read: () => health() }` over the closure it already holds — the shape EPIC 050
-used for the `expiry` key, so this introduces no new pattern.
+`src/main.ts` binds `{ read: () => health() }` over the closure it already holds. **This is a new
+service capability, not the shape of EPIC 050.1's `expiry` key**: `expiry` wraps a nested command in
+an inline object literal and declares no interface file. An interface with no vendor implementation is
+legal — `AGENTS.md` requires a dependency to inject through an interface and lets `main.ts` name the
+value — and the alternative, declaring `health: Readonly<{ read(): HealthResult }>` inline on
+`ReadStatusDependencies`, removes the same `.call` token without adding a directory. **A human rules
+which shape ships.** This story writes the service capability, and a ruling for the inline type deletes
+`src/services/health/` from this section and case 8 below with it.
+
+**`src/domain/layout.test.ts` moves with the directory.** `:101` asserts the service directory list by
+value and `:134` asserts every directory holds an `index.ts`. Adding `health` breaks the first, so this
+story adds `"health"` to that literal in sorted position and changes the count in the suite name to
+twenty-two. Story 6 removes `"lease"` and takes it back to twenty-one.
 
 **This is not incidental cleanup.** `.agents/plan/authoring.md` states that a live diagram needing a
 `<key>.call` token is a defect and that the story removes the cause. This story is the first to draw
@@ -115,7 +126,10 @@ the `leaseSubjectKinds` import at `:5`, and the `leases` literal of `systemStatu
 **`src/cli/status.ts:88-95`** — remove the `no expired lease` line and the per-row line. The node and
 repository sections are untouched.
 
-**`docs/proposal/api/system.md`** — remove the `leases` row from the `system.status` response table.
+**`docs/proposal/api/system.md`** — remove the `leases` row from the `system.status` response table,
+and the three prose sentences that describe the list: `:61` ("every expired lease, of either subject
+kind, with its owner and its fence"), the stale-lease clause of `:63`, and `:65` whole. A response
+table without its prose is half an amendment.
 
 **Every fixture and test that names `leases` on a status value.** The field is required today, so a
 literal that keeps it fails the schema and a literal that drops it fails the shipped assertions. Run
@@ -145,12 +159,12 @@ the four production files above:
 ## Verify
 
 ```
-node --test src/queries/system/read-status.test.ts src/http/contract/system.test.ts src/http/contract/example.test.ts src/cli/status.test.ts src/main.test.ts test/sequence/conformance.test.ts
+node --test src/queries/system/read-status.test.ts src/http/contract/system.test.ts src/http/contract/example.test.ts src/cli/status.test.ts src/domain/layout.test.ts src/main.test.ts test/sequence/conformance.test.ts
 ```
 
 Add, each as a separate `it`:
 
-1. `"readStatus returns no leases member"` — seed one owned, unexpired lease row and one expired one, call `readStatus`, and assert `Object.keys(result).sort()` deep-equals the pinned list. Seeding rows that survive unread is what proves the query stopped rather than the table emptying, and the table survives this epic so the seed stays valid through EPIC 057.
+1. `"readStatus returns no leases member"` — seed one unexpired lease row by raw SQL, `('node', T, 'daemon_test', 'daemon', 1, NOW, NOW, NOW + 300000)`, and one expired one through `test/helpers/rows.ts:668 seedLeaseOnNode`, call `readStatus`, and assert `Object.keys(result).sort()` deep-equals the pinned list. Seeding rows that survive unread is what proves the query stopped rather than the table emptying, and the table survives this epic so the seed stays valid through EPIC 057.
 
 2. `"systemStatusResponse holds no leases key"` — assert by key set on the schema.
 
@@ -165,6 +179,8 @@ Add, each as a separate `it`:
 6. `"the CLI status output holds no lease heading and no lease row"` — `src/cli/status.test.ts:40` seeds a `subjectKind: "repository"` line today; assert the rendered output holds neither the heading nor a row, and assert the node and repository lines still render.
 
 7. `"the production dependency map binds health as an object"` — in `src/main.test.ts`, assert the `system.status` binding's `health` value has a `read` method.
+
+8. `"the service inventory names health"` — in `src/domain/layout.test.ts`, the shipped `:101` case with `"health"` in sorted position and the suite name at twenty-two. Story 6 takes it back to twenty-one. Drop this case if the ruling of section 2 chooses the inline type.
 
 Add `test/sequence/scenarios/read-status-lease-free.ts`.
 

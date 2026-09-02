@@ -8,10 +8,11 @@ Diagrams: report-authority-prelude
 
 Baselines: report-authority-prelude <- baseline-report-prelude
 
-Seams: report-authority-prelude: +expiry.expireRuns, +execution.runById, +plan.readSubtree, -plan.readNode, -lease.read, -execution.activeRunOfNode
+Seams: report-authority-prelude: +expiry.expireRuns, +execution.runById:R, +plan.readSubtree, -lease.read:T, -execution.activeRunOfNode:T
 
-This story changes the prelude of `node.report` and nothing after it. EPIC 051 declares
-`report-execution-checkpoint` and owns the tail.
+This story changes the prelude of `node.report` and nothing after it. EPIC 050.4 Story 6 declares
+`report-lease-free` and owns the tail. EPIC 051's `report-execution-checkpoint` draws
+`acceptExecution`, a nested command on another path, so it never owned this tail.
 
 ## The shipped path
 
@@ -64,10 +65,16 @@ sequenceDiagram
     Command->>Expiry: 3 expiry.expireRuns
     Command->>Execution: 4 execution.runById:R
     Command->>Plan: 5 plan.readSubtree
+    Command->>Plan: 6 plan.readNode
     note over Command: tail pinned by EPIC 050.4 report-lease-free
 ```
 
-This story pins the prelude, because the prelude is what it changes. EPIC 050.4 Story 8 declares
+Step 6 is the shipped node read, moved behind the authority check. It stays because the tail reads
+`node.kind` at `:122` and `node.state` at `:165`, and `plan.readSubtree` returns ids alone and
+supplies neither. It is a context token: the baseline holds it and this diagram holds it, at one
+count and one label.
+
+This story pins the prelude, because the prelude is what it changes. EPIC 050.4 Story 6 declares
 `report-lease-free`, draws the whole path and owns the tail, and the range gate refuses if it does
 not. EPIC 051 then supersedes `report-lease-free`.
 
@@ -81,8 +88,9 @@ existing `storage.transact` at `:107`:
 1. `const now = dependencies.clock.now();` — unchanged, at `:108`.
 2. `dependencies.expiry.expireRuns(transaction, { now });` — new.
 3. `execution.runById(transaction, input.runId)` — new, replacing `execution.activeRunOfNode` at `:206`.
-4. `plan.readSubtree(transaction, run.nodeId)` — new, replacing `plan.readNode` at `:110`. The node the report targets is inside the subtree the run covers, and `assertRunAuthority` needs the whole set.
+4. `plan.readSubtree(transaction, run.nodeId)` — new. The node the report targets is inside the subtree the run covers, and `assertRunAuthority` needs the whole set.
 5. `assertRunAuthority(...)`, throwing `ReportOutcomeError(refusal.refusal, ..., { runId })`. This replaces the lease read at `:173`.
+6. `plan.readNode(transaction, input.nodeId)` at `:110`, moved behind the authority check and otherwise unchanged. The tail reads `node.kind` at `:122` and `node.state` at `:165`, and `plan.readSubtree` supplies neither.
 
 Everything after step 5 keeps its shipped shape. EPIC 051 rewrites it.
 
@@ -95,8 +103,8 @@ Add the six authority codes to `ReportOutcomeRefusal` at `:79-85`.
 
 ## Constraints
 
-- Change nothing after the authority check. The note pins the boundary, and EPIC 051 owns the tail.
-- `plan.readSubtree` replaces `plan.readNode`. Do not keep both: a read no refusal needs is not taken.
+- Change nothing after the node read. The note pins the boundary, and EPIC 050.4 Story 6 owns the tail.
+- `plan.readSubtree` is added beside `plan.readNode`; it does not replace it. The subtree serves the authority check and the node row serves the tail, and neither answers the other's question.
 - Do not change the existing `fence` field's meaning. Add `runFence` beside it.
 - The prelude runs for all six members of the report union, including `closed`.
 

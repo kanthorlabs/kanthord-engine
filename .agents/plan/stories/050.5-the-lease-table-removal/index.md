@@ -1,7 +1,7 @@
 # EPIC 050.5 — The lease table removal — stories
 
 Epic: `.agents/plan/epics/050.5-the-lease-table-removal.md`
-Prereq: EPIC 050, EPIC 050.2, EPIC 050.3 and EPIC 050.4, implemented. After EPIC 050.4 the `Lease` service has exactly three importers, and this epic removes all three.
+Prereq: EPIC 050, EPIC 050.1, EPIC 050.2, EPIC 050.3 and EPIC 050.4, implemented. EPIC 050.1's migration `12` is what gives the rewritten candidate query `run.expires_at`, `run.fence` and `run_base`, and its Story 2 is what gives Story 3 the `expireRuns` pass. After EPIC 050.4 the `Lease` service has exactly three importers, and this epic removes all three.
 
 The lease table has no writer left. This epic moves its remaining readers onto the run and deletes the
 service and the domain module. **It drops no table**: EPIC 057's migration `17` already owns the lease
@@ -48,9 +48,11 @@ Stories 3 and 4 are independent of Stories 1 and 2 and of each other.
 
 Story 5 is independent — one plan store method and the two facts it feeds.
 
-Story 6 deletes the service, so it follows Stories 1, 2 and 3, the last three importers. Story 7
-deletes the module Story 6 orphans. Story 8 follows every prior story, because its tree assertion
-enumerates the result.
+Story 6 deletes the service, so it follows Stories 1, 2 and 3, the last three importers, and it
+follows Story 4, because the two write the same two literals of `src/domain/layout.test.ts`: Story 4
+adds `health` and takes the count to twenty-two, Story 6 removes `lease` and takes it back to
+twenty-one. Story 7 deletes the module Story 6 orphans. Story 8 follows every prior story, because its
+tree assertion enumerates the result.
 
 The serial order is the numeric order: **1 → 2 → 3 → 4 → 5 → 6 → 7 → 8**.
 
@@ -102,14 +104,16 @@ Each was read out of the source before a story was written, and each one changed
   `sweepExpiredExternalLeases` already ends one at `:118`, and the fence rises there. The draft of
   this epic said recovery would take `expireRuns` as an injected dependency; it must not.
 
-- **`run.driver` survives migration `12`.** EPIC 050 Story 2's new `run` table keeps
+- **`run.driver` survives migration `12`.** EPIC 050.1's migration `12`, drafted at
+  `.agents/plan/pending/050.1-migration-12.md`, keeps
   `driver TEXT NOT NULL CHECK (driver IN ('internal', 'external'))` and drops only the three
-  `driver = 'internal'` biconditional CHECKs. The external-versus-internal split the two readers turn
+  `driver = 'internal'` biconditional CHECKs. EPIC 050 Story 2 is the zod row schema `runRow` and
+  creates no table. The external-versus-internal split the two readers turn
   on is therefore still expressible after EPIC 050.
 
 - **`run.base_oid` does not survive migration `12`.** It is in that story's "gone, and not replaced"
-  list. The rewritten candidate query reads `run_base.oid`, the table EPIC 050 Story 2 creates and
-  EPIC 051 writes, so before EPIC 051 every candidate takes the shipped
+  list. The rewritten candidate query reads `run_base.oid`, the table EPIC 050.1's migration `12` creates
+  and EPIC 051 writes, so before EPIC 051 every candidate takes the shipped
   `row.base_oid === null` branch at `:258` and blocks with `recovery-inputs-missing`.
 
 - **`revoke-actor`'s lease call is its only lease reach**, and its baseline citations are `:81`,
@@ -129,8 +133,10 @@ Each was read out of the source before a story was written, and each one changed
 
 - **`readStatus`'s `health` dependency is function-valued.** `health: () => HealthResult` at `:8`,
   called at `:50`, so its baseline token is `health.call` — legal in a baseline and refused in a live
-  diagram. Story 4 removes the cause by making it an object with one method, the shape EPIC 050
-  already used for the `expiry` key.
+  diagram. Story 4 removes the cause by making it an object with one method. That is **not** the shape
+  of EPIC 050.1's `expiry` key, which is an inline object literal over a nested command with no
+  interface file; Story 4 opens a service capability and `src/domain/layout.test.ts` moves with it. The
+  epic records the open ruling between that and an inline structural type.
 
 - **The CLI renders the lease lines.** `src/cli/status.ts:88-95` prints
   `kanthord: no expired lease` or one line per row, so Story 4 changes the CLI with the query.
@@ -150,14 +156,14 @@ Each was read out of the source before a story was written, and each one changed
 - **`Lease.expired()` has no production caller.** `grep -rn '\.expired(' src/` returns test files
   only. Story 6 deletes it with the interface and no command loses a call.
 
-- **`plan.leaseHeld` is private and reached from three places.** `src/services/plan/sqlite.ts:558`,
-  called at `:276` and `:306` for `ContainmentFacts.lease`, with a separate `lease` blocker query at
-  `:349-353` inside `readSubtreeExecutionFacts`. No command calls it, so no command's seam trace
+- **`plan.leaseHeld` is private and reached from three places.** `src/services/plan/sqlite.ts:564`,
+  called at `:278` and `:308` for `ContainmentFacts.lease`, with a separate `lease` blocker query at
+  `:351-356` inside `readSubtreeExecutionFacts`. No command calls it, so no command's seam trace
   changes when it dies — which is why Story 5 draws nothing.
 
-- **`executionBlockers` has seven members, not five.** `src/domain/plan-graph.ts:37-45` is
+- **`executionBlockers` has seven members, not five.** `src/domain/plan-graph.ts:38-46` is
   `["lease", "workspace", "run", "attempt", "commit", "check-result", "git-operation"]`, and
-  `readSubtreeExecutionFacts` at `src/services/plan/sqlite.ts:349-381` carries one query per member.
+  `readSubtreeExecutionFacts` at `src/services/plan/sqlite.ts:351-382` carries one query per member.
   Story 5 deletes exactly one and the list keeps **six**. An earlier draft of this tree said four,
   which would have dropped `check-result` and `git-operation` with it.
 
@@ -200,6 +206,26 @@ Each was read out of the source before a story was written, and each one changed
 - **`migration-0007-external-execution.ts:69` copies lease rows.** It is a shipped historical
   migration and no story here touches it.
 
+- **`test/helpers/lease.ts` imports all three modules this epic deletes**, and fourteen `*.test.ts`
+  files import it. Story 6 deletes it, and its table assigns each importer to the first story that
+  invalidates it: six to EPIC 050.4, three to Stories 1 to 3 here, five to Story 6. Every tree
+  assertion in this epic enumerates **production** files, so none of them sees a test helper. That is
+  how the coupling was missed on the first pass.
+
+- **`src/domain/layout.test.ts` pins the service inventory by value**, at `:101` for the directory
+  list and `:151` for the `not-implemented.ts` set. Story 4 adds `health` and Story 6 removes `lease`,
+  so the file moves twice and the count returns to twenty-one. It is in the epic's Proof.
+
+- **`run_base`'s primary key is `(run_id, repository_id)`**, and the migration's own constraints
+  forbid a CHECK on its cardinality, so a run holds one base row per repository. The candidate query
+  therefore joins `workspace` first and `run_base` on `rb.run_id = r.id AND rb.repository_id =
+w.repository_id`. A join on `run_id` alone returns one candidate row per base, and both readers
+  write once per row. An earlier draft of Story 1 carried exactly that join.
+
+- **EPIC 050.4 Story 9 asserts the `Lease` importer set by value.** Story 6 deletes the service and
+  retires that assertion in the same edit. A landed value assertion nobody retires is a red suite at
+  the boundary of the story that made it false.
+
 ## What this epic is not
 
 It is **not** wire-invisible. One response field, `system.status.leases[]`, leaves the contract. That
@@ -235,7 +261,7 @@ survive, empty and unreachable, until EPIC 057's migration `17`.
 
 ## Amendments this epic asks of other epics
 
-Neither is applied here, and a human applies both before dispatch. Both are named in the epic.
+None is applied here, and a human applies each before dispatch. Each is named in the epic.
 
 - **EPIC 057 Stories 5, 6 and 7** — migration `17` drops the `lease` table instead of narrowing it,
   and deletes `src/domain/lease.ts`, `rows.lease` and `docs/proposal/database/lease.md` in the same
@@ -245,5 +271,13 @@ Neither is applied here, and a human applies both before dispatch. Both are name
 
 - **EPIC 050.4 Story 8** — delete the `leaseOwnerKinds` import at `error-details.ts:5` with the
   `leaseRelations` import at `:6`. Both serve only `leaseHeldDetails`, which that story deletes.
+
+- **EPIC 050.4, the `leaseTtlMs` configuration** — its Story 1 and Story 4 delete the last two readers
+  and no epic through EPIC 057 removes the setting. The default if no ruling arrives is that Story 6
+  here takes it.
+
+- **EPIC 050.2 Story 2, the `endRun` fence raise** — gate rows 1 and 10b depend on it and no `## Change`
+  section in the family instructs the write. The default if no ruling arrives is that the implementing
+  agent reports a red row as an EPIC 050.2 defect rather than writing the execution service here.
 
 Nothing else blocks dispatch.

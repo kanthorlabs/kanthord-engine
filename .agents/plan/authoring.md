@@ -36,7 +36,9 @@ An epic states **what was decided** and **how the result is proven**. Nothing el
 - **Two sections carry weight: `## Decisions` and `## Verification Gate`.** A decision states the
   ruling and the constraint it imposes, with the evidence that forced it. The gate states every
   assertion that proves the epic shipped what it decided, and **every assertion in it is owned by
-  exactly one story**.
+  exactly one story**. The hermetic-coverage list is a table with a `story` column, and every row
+  names one **proof owner**. Other stories contribute the implementation; the named story owns the
+  proof.
 - **Everything else is light.** `## Goal` is a short list of the properties that hold when the epic
   lands. `## Non-goals` names what a reader would otherwise expect here and where it went instead.
   `## Stories` is a list of names and outputs, one entry per story, and the story file carries the
@@ -61,6 +63,18 @@ implementation contract, read whole and never scheduled step by step, because a 
 slice of one operation and is not independently green. Every obligation of `## Change` is proven by a
 numbered case or by an assertion of the epic's gate, and the numbering freezes when implementation
 starts.
+
+- **A cross-reference to a story names its file stem, not its ordinal alone**, as
+  `EPIC 050 Story 7 (07-the-proposal-records-the-run-model)`. A split renumbers the stories of the
+  epic it splits, and every pre-split ordinal still resolves — to the wrong story. The stem is what
+  makes the reference exact, and the gate resolves it.
+- **A citation is written ``<file>:<line> — `<identifier>` ``**, and the identifier is a token the
+  cited line holds. The gate agrees all three. A check that the file exists and holds that many lines
+  catches nearly nothing, because a stale citation still points at a valid line. The form is fixed
+  here so that check is implementable, and is never a decision its implementer takes. A `Seams:`
+  removal token carries the same anchor in its own `@<file>:<line>` form, and its key and method are
+  the identifier. The gate reads a citation only inside its range, per
+  `## Rollout, and what is grandfathered`.
 
 ### `story-foundation`
 
@@ -240,6 +254,36 @@ Seams: claim-success-task: +plan.setNodeAssignment, ~lease.read, -execution.adop
   `-<key>.<method> @<file>:<line>`. A removal is never legal without evidence.
 - **A story that changes no drawn path carries none of the three lines.**
 
+## The evidence a change kind requires
+
+A change of one of these kinds carries the evidence of its row, at `file:line`. A story that carries
+less is not implementable.
+
+| change kind                          | required evidence                                                                                                 |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| a deletion                           | semantic consumers, exact imports and literal values, tests and helpers, generated artifacts and their generators |
+| a removed read                       | the replacement source of every field the surviving code still reads                                              |
+| an event introduced or changed       | the settled type, subject kind, subject id, payload and transaction                                               |
+| a fixture- or SQL-dependent path     | the reachable setup, and the complete key predicate of every table named                                          |
+| a proof whose only oracle is absence | a control case proving the assertion detects a nearby forbidden case                                              |
+
+Each row is forced by a shipped defect:
+
+- a lease-removal epic swept three `src/` directories. The sweep missed `src/cli/`, three
+  `src/http/server/` handlers, a typed `httpError("lease-held", …)` call two directories away, the
+  generated fixture `src/http/contract/field-decisions.fixture.ts` its own Proof pins, and
+  `test/helpers/lease.ts` with fourteen importers;
+- three ship diagrams deleted the only node read, while the surviving code still reads `node.kind`,
+  `node.parentId`, `node.revision` and `node.state`. The drawn path could not execute;
+- no story pinned the subject of `run.opened`, `run.renewed` or `run.ended`. Four epics inherited an
+  undecided value as a settled one, and drew the node alias where the code writes the run id;
+- a story joined `run_base` on `run_id` alone. Its primary key is `(run_id, repository_id)`, so the
+  sweep moved one node once per repository;
+- a harness stringified a missing field to `undefined`, and a scenario author wrote the alias
+  `undefined: "siblings"` to work around it.
+
+No gate checks this table. A reviewer checks it.
+
 ## What a diagram does not prove
 
 - **It does not prove a refusal code.** Two refusals that stop at the same step are one diagram, and
@@ -297,7 +341,12 @@ invalid, and a human resolves it before implementation.
 - a story holds no numbered case list under `## Verify`;
 - a story declares no kind, or a `story-foundation` carries a `Diagrams:`, `Baselines:` or `Seams:`
   line, or a `story-implement` declares no `Diagrams:` line. A `story-implement` that only composes
-  declares `Diagrams:` and no `Seams:`, so the gate requires the first line and never the second.
+  declares `Diagrams:` and no `Seams:`, so the gate requires the first line and never the second;
+- a cross-reference to a story carries an ordinal and no file stem, or a stem that resolves to no
+  story of the named epic;
+- a citation names an absent file, a line that file does not hold, or a line that does not hold the
+  identifier the citation names;
+- an epic's hermetic-coverage list is not a table, or a row of it names no story or two.
 
 ## What makes this standard the default
 

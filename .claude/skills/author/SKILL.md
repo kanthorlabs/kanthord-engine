@@ -99,6 +99,12 @@ returns:
   `file:line`;
 - the **current ordered seam calls** of the path, quoted, one citation per call;
 - which seam calls this story adds, moves or removes;
+- per baseline step, the **caller anchor and the callee anchor**, and the fixture
+  state that makes that step reachable;
+- per removal, **what replaces the data the removed call supplied**;
+- the **consumers of every symbol this story deletes**, resolved against the
+  current tree — importers, exact import specifiers and literal values, tests and
+  helpers, generated artifacts and their generators;
 - every seam call the EPIC implies that no interface declares yet;
 - the **test file** covering each site and its convention — framework, fakes
   against mocks, real SQLite or git, hermetic temp dirs — with the helper names
@@ -110,6 +116,10 @@ finding before writing.
 
 The explorer's ordered seam calls are what separate a context token from a
 change. **Never sign a token from memory.**
+
+**Rerun the epic's consumer discovery against the current tree.** Code moves
+between planning and authoring, so the epic's closure is already stale at
+dispatch. A directory sweep is not a consumer set.
 
 ## Step 5 — Write the story files
 
@@ -345,7 +355,10 @@ perform its checks yourself over what you wrote, and report each result:
     stating its assertion by value;
 11. every `## Change` obligation is proven by a numbered case or by an assertion of the epic's gate,
     and no story carries a step-to-case mapping line;
-12. every edit names a concrete file and site; every behaviour a test depends on
+12. every baseline step names a caller anchor, a callee anchor and the fixture state
+    that reaches it, and every removal names what replaces the data the removed
+    call supplied. No syntax gate checks reachability, so this check is yours;
+13. every edit names a concrete file and site; every behaviour a test depends on
     is pinned; every `Verify` lists exact commands and its Proof line; no sentence
     asks the implementer to design, choose or decide at build time; no
     motivation, history or debate prose remains.
@@ -379,6 +392,9 @@ Do **not** commit — the human reviews and commits.
 - a story with no kind;
 - a `## Verify` written as prose instead of a numbered case list;
 - a `## Change` obligation no case and no gate assertion proves;
+- a baseline step with no caller anchor, no callee anchor, or no fixture state
+  that reaches it;
+- a removal that names no replacement for the data the removed call supplied;
 - a gate bullet claiming a property the trace does not prove, in particular "the
   operation wrote nothing" and "every branch is drawn";
 - renaming or renumbering a live diagram id another epic references;

@@ -8,7 +8,7 @@ Diagrams: claim-lease-free-initiative
 
 Supersedes: EPIC 050.1 claim-success-initiative
 
-Seams: claim-lease-free-initiative: -lease.read, -lease.acquire
+Seams: claim-lease-free-initiative: -lease.read:I, -lease.acquire:I
 
 Story 1 deletes the code. This story draws the second path through it, and its verification is what
 proves the deletion reached the initiative branch as well as the task one.

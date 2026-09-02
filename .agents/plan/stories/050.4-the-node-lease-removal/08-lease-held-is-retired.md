@@ -18,12 +18,28 @@ which is legal to remove only once every raiser and every declaration is gone.
 
 ### 1 — the error code
 
-Delete `"lease-held"` from `errorStatuses` at `src/http/contract/errors.ts:16` and from `exitCodes` at
+Delete `"lease-held"` from `errorStatuses` at `src/http/contract/errors.ts:19` and from `exitCodes` at
 `src/cli/exit-code.ts:25`. Both are ordered records and both have a test pinning the exact key array.
 
-Delete `leaseHeldDetails` at `src/http/contract/error-details.ts:120-135` whole, and with it the
-`leaseRelations` import at `:6`. That import is the contract package's only reference to
-`src/domain/lease-hierarchy.ts`, and removing it is what lets EPIC 050.5 delete the file.
+Delete `leaseHeldDetails` at `src/http/contract/error-details.ts:120-135` whole, and with it the two
+imports it is the only consumer of: `leaseOwnerKinds` at `:5`, used only at `:125`, and
+`leaseRelations` at `:6`, used only at `:128`. The second is the contract package's only reference to
+`src/domain/lease-hierarchy.ts`, and removing it is what lets EPIC 050.5 delete the file. `epochMillis`
+at `:3` and `nodeIdentity` at `:4` stay: EPIC 050.1 Story 1's `objective-busy` and `subtree-busy`
+details carry `expiresAt` and node ids in the same file.
+
+### 1b — the refusal helper that raised it
+
+`errorStatuses` is what types `ErrorCode`, and `httpError` at `src/http/contract/errors.ts:95-111`
+takes an `ErrorCode`. So deleting the key breaks every remaining `httpError("lease-held", ...)` call,
+and `src/http/server/node/refusals.ts` holds two, at `:242` and `:253`, inside `function leaseHeld` at
+`:231-259`. Delete that function. Stories 1, 4, 5, 6 and 7 delete its five call sites with their
+`case "lease-held":` branches, so it has none left.
+
+`presented` exists only to feed it. Delete the parameter from `toHttpError` at `:14`, the four
+arguments that thread it at `:37`, `:40`, `:43` and `:46`, and the parameter of each sub-refusal
+function that took it — `:69`, `:90`, `:183` and `:199`. Stories 4, 5 and 6 delete the three handler
+sites that build it.
 
 **Delete `leaseHeldDetails` rather than leave it exported.**
 `src/http/contract/schema-reachability.test.ts` walks the operation registry and refuses a schema no
@@ -79,14 +95,15 @@ Add one row to the compatibility record EPIC 050.2 Story 8 created in `docs/prop
 
 - Land last of the contract work. Every per-operation field and `errors` entry belongs to its command's story.
 - Delete `leaseHeldDetails`. Do not keep it exported for a future caller.
+- Delete `leaseHeld` and the `presented` channel here, not in a per-operation story. Five stories share the helper, and the last of them to run is the only one that can remove it.
 - Do not touch `src/domain/lease-hierarchy.ts` or `src/services/lease/**`. EPIC 050.5 owns both, and this story only removes the contract package's import of the first.
-- The registry total stays 73 and the routed total stays 48. No operation is added or removed.
+- The registry total stays 73 and the routed total stays 50. No operation is added or removed.
 - Do not touch `system.status`. Its `leases[]` projection is EPIC 050.5's, with the table it reports.
 
 ## Verify
 
 ```
-node --test src/http/contract/errors.test.ts src/http/contract/error-details.test.ts src/http/contract/capability.test.ts src/http/contract/coverage.test.ts src/http/contract/example.test.ts src/http/contract/schema-reachability.test.ts src/http/contract/parity.test.ts src/domain/version.test.ts src/cli/exit-code.test.ts
+node --test src/http/contract/errors.test.ts src/http/contract/error-details.test.ts src/http/contract/capability.test.ts src/http/contract/coverage.test.ts src/http/contract/example.test.ts src/http/contract/schema-reachability.test.ts src/http/contract/parity.test.ts src/lease-absence.test.ts src/domain/version.test.ts src/cli/exit-code.test.ts
 ```
 
 Add, each as a separate `it`:
@@ -97,7 +114,9 @@ Add, each as a separate `it`:
 
 3. `"leaseHeldDetails is not exported"` — assert the module's export names do not hold it.
 
-4. `"error-details imports nothing from lease-hierarchy"` — read the source of `src/http/contract/error-details.ts` and assert it holds no `lease-hierarchy` substring. This is the fact EPIC 050.5 depends on.
+4. `"error-details imports nothing from lease-hierarchy and nothing from domain/lease"` — read the source of `src/http/contract/error-details.ts` and assert it holds neither a `lease-hierarchy` nor a `domain/lease.ts` import specifier. Two assertions, one case: the first is the fact EPIC 050.5 depends on, the second is the import that would otherwise be left orphaned.
+
+4b. `"no server file raises lease-held"` — create `src/lease-absence.test.ts`, modelled on the shipped tree assertion at `src/koa-absence.test.ts`. Read every non-test file under `src/http/server/` and assert none holds the literal `"lease-held"`. `leaseHeld` and the `presented` channel are gone, so this is decidable by construction and does not depend on an unused-code check that this repository does not run. Story 9 adds its two tree assertions to the same file.
 
 5. `"declaredCapabilities is event-wait, per-node-write, project-graph and worker-run"` — asserted by value, and assert `worker-model` is absent. This is the assertion that the breaking change was announced.
 

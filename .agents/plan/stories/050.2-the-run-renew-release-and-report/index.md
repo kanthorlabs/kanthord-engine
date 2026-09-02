@@ -1,7 +1,7 @@
 # EPIC 050.2 — The run renew, release and report — stories
 
 Epic: `.agents/plan/epics/050.2-the-run-renew-release-and-report.md`
-Prereq: EPIC 050, implemented. Every story here reads a run row and a fence that EPIC 050 creates, and an expiry pass that EPIC 050.1 creates.
+Prereq: EPIC 050 and EPIC 050.1, both implemented. EPIC 050 states the run row and the exclusion rules; EPIC 050.1 lands migration `12`, opens the run at the claim and creates the expiry pass.
 
 A fence guards every write after the claim. This epic rewrites `node.renew`, `node.release` and the prelude of `node.report`, and it carries the wire announcement of the whole worker protocol.
 
@@ -15,7 +15,7 @@ Four stories carry a diagram: 3, 4, 5 and 6. The other five carry none.
 
 Story 1 is independent — a greenfield pure function.
 
-Story 2 depends on EPIC 050 Story 3 (`runRow`) alone.
+Story 2 depends on EPIC 050 Story 2 (`runRow`) and on EPIC 050.1 Story 3, which rewrites `openRun` and lands the `RunRecord` shape `runById` returns.
 
 Story 7 is a wide fan-out across the contract and must land before Stories 3 to 6, all of which need its request fields and its event types.
 

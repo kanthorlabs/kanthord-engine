@@ -18,18 +18,18 @@ Update `src/http/contract/path.test.ts:40` from `assert.equal(actionSegments.len
 
 ### 2 — `node.heartbeat` becomes `node.renew`
 
-In `src/http/contract/execution.ts:265-283`, change `operationId` to `"node.renew"` and the path to `[resource("node"), parameter("node"), action("renew")]`. Rename `nodeHeartbeatRequest` (`:31-33`), `nodeHeartbeatResponse` (`:50-54`) and `nodeHeartbeatExamples` (`:129-159`) to `nodeRenewRequest`, `nodeRenewResponse` and `nodeRenewExamples`. The old operation id is removed, not kept beside the new one.
+In `src/http/contract/execution.ts:309-327`, change `operationId` to `"node.renew"` and the path to `[resource("node"), parameter("node"), action("renew")]`. Rename `nodeHeartbeatRequest` (`:33-35`), `nodeHeartbeatResponse` (`:52-56`) and `nodeHeartbeatExamples` (`:150-180`) to `nodeRenewRequest`, `nodeRenewResponse` and `nodeRenewExamples`. The old operation id is removed, not kept beside the new one.
 
 ### 3 — the request and response fields
 
-`src/http/contract/execution.ts:29-58`:
+`src/http/contract/execution.ts:33-60`:
 
 - `nodeRenewRequest` gains `runId: identity("run")` and `runFence: z.int().min(1)` as **required** fields, beside the shipped lease `fence`. The run fence is named `runFence` to keep the two distinct, matching the command inputs of Story 3.
 - `nodeRenewResponse` gains `expiresAt: z.int()` and `renewAfterMs: z.int().min(1)`, the same two fields EPIC 050.1 put on the claim response, and **loses `heartbeatIntervalMs`**.
-- `nodeReleaseRequest` (`:35-37`) gains the same two required fields.
+- `nodeReleaseRequest` (`:37-39`) gains the same two required fields.
 - `nodeReportRequest` in `src/http/contract/outcome.ts:23-53` is a six-member discriminated union. Add `runId` and `runFence` as required fields to **all six** members, including the `closed` member at `:49-52` which carries no lease `fence` today. A worker that cannot name its run has no authority to write, so the schema says so rather than a refusal code.
 
-Update every example literal that these schemas parse: `nodeRenewExamples.request` at `:130`, `nodeReleaseExamples.request` at `:162`, and `nodeReportExamples.request` at `src/http/contract/outcome.ts:75`. `src/http/contract/example.test.ts:73-142` parses each against its schema.
+Update every example literal that these schemas parse: `nodeRenewExamples.request` at `:151`, `nodeReleaseExamples.request` at `:183`, and `nodeReportExamples.request` at `src/http/contract/outcome.ts:75`. `src/http/contract/example.test.ts:73-142` parses each against its schema.
 
 **`heartbeatIntervalMs` is removed, not renamed.** It is `Math.floor(leaseTtlMs / 3)` at `src/commands/node/claim-node.ts:356`, derived from a lease this block replaces, and the epic states its replacement: `expiresAt` as the deadline and `renewAfterMs` as the relative hint. EPIC 050.1 removed it from the claim response; this story removes its last producer and every remaining site listed in section 5b. A response field removal is outside the closed list of `docs/proposal/api/README.md:100`, which is exactly what Story 8's policy amendment and capability retirement authorise.
 
@@ -82,9 +82,9 @@ The list above is the contract package only. Run `grep -rn "heartbeat\|Heartbeat
 | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `src/http/contract/field-decisions.fixture.ts` (15 hits)    | one line per `node.heartbeat` request and response field                                                        |
 | `src/main.claim.test.ts` (14 hits)                          | the end-to-end claim-and-heartbeat flow                                                                         |
-| `src/http/contract/registry.test.ts` (10 hits)              | includes a **second** occurrence at `:1053-1060`, the seven-name harness-set case, beyond the lists named above |
+| `src/http/contract/registry.test.ts` (10 hits)              | includes a **second** occurrence at `:1055-1062`, the seven-name harness-set case, beyond the lists named above |
 | `docs/proposal/api/execution.md` (8 hits)                   | the route row **and** its surrounding prose                                                                     |
-| `src/http/server/node/refusals.ts` (7 hits)                 | `import { HeartbeatNodeError }` at `:4`, the `instanceof` branch at `:35-36`, and `heartbeatRefusal` at `:173`  |
+| `src/http/server/node/refusals.ts` (7 hits)                 | `import { HeartbeatNodeError }` at `:4`, the `instanceof` branch at `:36-37`, and `heartbeatRefusal` at `:181`  |
 | `src/cli/reachability.test.ts` (6 hits)                     | CLI-command-to-operationId reachability                                                                         |
 | `src/main.ts` (5 hits)                                      | the command import at `:83`, the handler import at `:157`, the handler map entry at `:560-561`                  |
 | `src/http/contract/path.test.ts` (4 hits)                   | the three-name action-segment case                                                                              |
@@ -102,7 +102,7 @@ The list above is the contract package only. Run `grep -rn "heartbeat\|Heartbeat
 | `docs/proposal/phase-2/agents-and-workers.md` (2 hits)      | prose                                                                                                           |
 | `docs/proposal/phase-1/README.md` (2 hits)                  | prose                                                                                                           |
 | `src/main.test.ts`                                          | the production handler map                                                                                      |
-| `src/http/server/app.handler-result.test.ts:44`             | the `["src/http/server/node/heartbeat-node.ts", [200]]` entry                                                   |
+| `src/http/server/app.handler-result.test.ts:45`             | the `["src/http/server/node/heartbeat-node.ts", [200]]` entry                                                   |
 | `src/http/contract/proposal-amendment-execution.test.ts:39` | asserts a proposal sentence naming `POST /v1/node/:id/heartbeat` verbatim                                       |
 | `src/http/contract/path.ts`                                 | the `actionSegments` entry, kept per section 1                                                                  |
 | `src/http/contract/example.test.ts`                         | the examples list                                                                                               |
@@ -115,17 +115,17 @@ The list above is the contract package only. Run `grep -rn "heartbeat\|Heartbeat
 | `docs/proposal/open-items.md`                               | prose                                                                                                           |
 | `docs/proposal/memory/write-path.md`                        | prose                                                                                                           |
 
-The registry total stays **73** and the routed total stays **48**: one operation is renamed, none is added and none is removed. Do not change the counts at `src/http/contract/registry.test.ts:49-51` and `:64-73`.
+The registry total stays **73** and the routed total stays **50**: one operation is renamed, none is added and none is removed. Do not change the counts at `src/http/contract/registry.test.ts:48-50` and `:64-72`.
 
 ### 6 — the parity and matrix documents
 
 - `docs/proposal/api/execution.md` — change the `node.heartbeat` row to `node.renew` with path `/v1/node/:id/renew`, keeping `phase-1` and `routed`. `src/http/contract/parity.test.ts:12-22` compares operationId, method, rendered path, `introducedIn` and `status` against every `*.md` under `docs/proposal/api/` except `README.md` and `new-decisions.md`, and pins the comparable count at **73** — unchanged by a rename.
-- `docs/proposal/phase-1/runtime-capability-matrix.md` — rename the `node.heartbeat` row and move it to its bytewise position among the routed operations. `src/http/contract/runtime-matrix.test.ts:77-79` asserts the document rows equal the registry order, and `:81-92` asserts every row has exactly nine cells. The count stays **48** at `:72-75`.
+- `docs/proposal/phase-1/runtime-capability-matrix.md` — rename the `node.heartbeat` row and move it to its bytewise position among the routed operations. `src/http/contract/runtime-matrix.test.ts:77-79` asserts the document rows equal the registry order, and `:81-92` asserts every row has exactly nine cells. The count stays **50** at `:72-75`.
 
 ## Constraints
 
 - Add `"renew"` to `actionSegments`; do not remove `"heartbeat"`.
-- Keep the registry at 73 operations and 48 routed. This story renames; it adds no operation.
+- Keep the registry at 73 operations and 50 routed. This story renames; it adds no operation.
 - Every new error code is 409, appended in the stated order at the end of the 409 group.
 - `runId` and `runFence` are required on `node.renew`, `node.release` and `node.report`.
 - Do not touch `node.claim`'s request or response. EPIC 050.1 settled both.

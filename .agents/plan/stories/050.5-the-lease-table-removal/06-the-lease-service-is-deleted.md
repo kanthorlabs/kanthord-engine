@@ -33,6 +33,50 @@ defect that epic left, reported rather than patched around.
 **`Lease.expired()` has no production caller.** `grep -rn '\.expired(' src/` returns test files only,
 so no command loses a call when the interface goes.
 
+**`test/helpers/lease.ts` is deleted with the service, and its importers are named.** It imports
+`SqliteLease` from `services/lease/sqlite.ts`, seven types and `LeaseError` from
+`services/lease/index.ts`, and `liveLeaseRefusal` from `domain/lease-hierarchy.ts`, so it cannot
+survive this story. It exports `createLeaseFake`, `createBackedLeaseFake` and
+`acquireLeaseOnDatabaseFile`, and fourteen test files import one of the three. **Each importer is
+repaired by the first story that invalidates it, and this story takes only the residue.**
+
+| importer                                            | repaired by                      |
+| --------------------------------------------------- | -------------------------------- |
+| `src/commands/node/claim-node.test.ts`              | EPIC 050.4 Story 1               |
+| `src/commands/node/heartbeat-node.test.ts`          | EPIC 050.4 Story 4               |
+| `src/commands/node/release-node.test.ts`            | EPIC 050.4 Story 5               |
+| `src/commands/outcome/report-outcome.test.ts`       | EPIC 050.4 Story 6               |
+| `src/commands/outcome/report-objective.test.ts`     | EPIC 050.4 Story 7               |
+| `src/main.claim.test.ts`                            | EPIC 050.4 Story 1               |
+| `src/commands/startup/recover-expired-runs.test.ts` | Story 1 and Story 2 of this epic |
+| `src/commands/actor/revoke-actor.test.ts`           | Story 3 of this epic             |
+| `src/http/server/actor/revoke-actor.test.ts`        | Story 3 of this epic             |
+| `src/commands/outcome/close-objective.test.ts`      | this story                       |
+| `src/commands/actor/rotate-actor-token.test.ts`     | this story                       |
+| `src/http/server/actor/rotate-actor-token.test.ts`  | this story                       |
+| `src/http/server/actor/registration.test.ts`        | this story                       |
+| `src/queries/actor/list-actor.test.ts`              | this story                       |
+
+The five in the last group hold the fake only as an inert dependency of a command whose behaviour
+this epic does not change, so they lose the import and the fixture key and assert nothing new.
+**`src/main.claim.test.ts` also imports `LeaseError` from `services/lease/index.ts` directly**, at
+`:17`, and uses it at `:472-483` to assert a foreign `lease-held` takeover; that case dies with the
+claim's lease, which is EPIC 050.4 Story 1's. **Report a survivor in the first two groups as a defect
+of the story that owed it**, and delete only the helper and the last group here. A repair this story
+takes for a file the table assigns elsewhere hides a red boundary in the epic that caused it.
+
+**`src/domain/layout.test.ts` moves with the directory.** `:101` asserts the service directory list by
+value and `:151` asserts that `agent`, `verify`, `lease` and `worker-health` each hold a
+`not-implemented.ts`. Remove `"lease"` from both literals and take the count in the `:101` suite name
+back to twenty-one, the value Story 4 raised to twenty-two when it added `health`.
+
+**EPIC 050.4 Story 9's three-importer assertion is retired here.** That story lands
+`it("the Lease service keeps exactly three importers")`, asserting the importer set deep-equals
+`["src/commands/actor/revoke-actor.ts", "src/commands/startup/recover-expired-leases.ts", "src/main.ts"]`.
+Two of those files no longer import the service and the third no longer exists under that name, so the
+assertion cannot pass. Delete it and let case 3 below take its place: an empty importer set is the same
+claim, made against a tree the service has left.
+
 **`src/domain/lease-hierarchy.ts` is not deleted here.** Story 7 deletes it, once this story has
 orphaned it: `src/services/lease/index.ts:2` and `sqlite.ts:3-6` are its last two importers, and EPIC
 050.4 Story 8 removed the contract package's.
@@ -50,16 +94,24 @@ remove all three at once.
 - Do not delete `src/domain/lease-hierarchy.ts` or `src/domain/lease.ts`. Story 7 owns both.
 - Do not touch the `lease` table, `src/domain/lease.ts` or `src/domain/rows.ts`. All three survive until EPIC 057's migration `17`.
 - If a `LeaseError` catch survives anywhere, report it as an EPIC 050.4 defect rather than editing that command here.
+- Delete `test/helpers/lease.ts` whole. Do not keep `createBackedLeaseFake` against raw SQL: a lease row is seeded by `test/helpers/rows.ts`, which imports no lease module and survives to EPIC 057.
+- Repair only the five importers the table assigns to this story. Report a survivor in the other two groups rather than fixing it here.
 
 ## Verify
 
 ```
-node --test src/main.test.ts src/http/contract/parity.test.ts
+node --test src/main.test.ts src/http/contract/parity.test.ts src/domain/layout.test.ts src/commands/outcome/close-objective.test.ts src/commands/actor/rotate-actor-token.test.ts src/http/server/actor/rotate-actor-token.test.ts src/http/server/actor/registration.test.ts src/queries/actor/list-actor.test.ts
 ```
 
 Add, each as a separate `it`:
 
 1. `"src/services/lease is absent"` — assert by a directory listing rather than by an import, which would fail to resolve the test itself.
+
+1b. `"test/helpers/lease.ts is absent"` — the same directory listing, over `test/helpers/`. A helper that survives its service is a module nothing can resolve.
+
+1c. `"no test file imports test/helpers/lease.ts"` — enumerate every `*.test.ts` under `src/` and assert none holds a matching import specifier. Report the file names on failure. Case 3 covers production files and case 4 covers the identifier; neither sees a test helper, which is how this deletion was missed.
+
+1d. `"the service inventory names no lease"` — the shipped `src/domain/layout.test.ts:101` case with `"lease"` removed and the suite name back at twenty-one, and the `:151` case over `agent`, `verify` and `worker-health` alone.
 
 2. `"src/main.ts imports nothing from services/lease"` — an import-graph assertion over that one file. `main.ts` exports no dependency map to introspect — it is the composition root and `src/main.test.ts` drives the daemon through its routes — so the import graph is the decidable proof, and it is exact: the implementation cannot be constructed without importing it.
 

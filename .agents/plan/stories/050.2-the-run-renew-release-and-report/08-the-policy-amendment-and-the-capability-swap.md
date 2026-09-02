@@ -1,7 +1,7 @@
 # Story 8 — The policy amendment and the capability swap
 
 Epic: `.agents/plan/epics/050.2-the-run-renew-release-and-report.md`
-Depends on: Story 13 (`node.renew` is in the registry and `node.heartbeat` is gone).
+Depends on: Story 7 (`node.renew` is in the registry and `node.heartbeat` is gone).
 Kind: story-foundation
 
 ## Change
@@ -20,7 +20,7 @@ Replace that sentence with the amendment. Use the wording recorded in `.agents/p
 
 `.agents/plan/epics/023-version-compatibility-policy.md:35-60` is decision D1. The file's convention is `### D<n> — <the ruling as a clause>` under a `## Decisions` heading at `:33`. Add one line directly under the D1 heading at `:36`, before the body:
 
-> **Superseded in part by EPIC 050.** The closed list at `:48-54` is closed by default, not absolutely. `docs/proposal/api/README.md` carries the exception sentence. Nothing else in D1 changes.
+> **Superseded in part by EPIC 050.2.** The closed list at `:48-54` is closed by default, not absolutely. `docs/proposal/api/README.md` carries the exception sentence. Nothing else in D1 changes.
 
 Do not delete D1 and do not renumber the decisions.
 
@@ -68,15 +68,20 @@ capabilities: ["event-wait", "per-node-write", "project-graph", "worker-model"],
 
 Each row records one change outside the closed list of `## Versioning`, the epic whose human ruling made it legal, and the capability swap that announced it.
 
-| Change                                                                                                       | Epic | Capability                                        |
-| ------------------------------------------------------------------------------------------------------------ | ---- | ------------------------------------------------- |
-| `node.heartbeat` is removed and replaced by `node.renew`                                                     | 050  | `external-drive` retired, `worker-model` declared |
-| `available` becomes a required field of the `node.claim` request                                             | 050  | `external-drive` retired, `worker-model` declared |
-| `runId` and `runFence` become required fields of the `node.renew`, `node.release` and `node.report` requests | 050  | `external-drive` retired, `worker-model` declared |
-| `runId` and `fence` are added to the `node.claim` response                                                   | 050  | `external-drive` retired, `worker-model` declared |
+| epic       | change outside the closed list                                                                                                                                       | capability retired | capability declared |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------- |
+| EPIC 050.1 | `available` becomes a required field of the `node.claim` request                                                                                                     | `external-drive`   | `worker-model`      |
+| EPIC 050.1 | `heartbeatIntervalMs` leaves the `node.claim` response                                                                                                               | `external-drive`   | `worker-model`      |
+| EPIC 050.2 | `node.heartbeat` is removed and replaced by `node.renew`                                                                                                             | `external-drive`   | `worker-model`      |
+| EPIC 050.2 | `runId` and `runFence` become required fields of the `node.renew`, `node.release` and `node.report` requests; `heartbeatIntervalMs` leaves the `node.renew` response | `external-drive`   | `worker-model`      |
 ```
 
-Four rows, one per change this epic makes. The table shape is three columns and is fixed here, because EPIC 057 adds its two removals to the same table.
+Four rows, one per change of this wire generation that the closed list forbids. `runId` and `fence`
+arriving on the `node.claim` response is **not** a row: `docs/proposal/api/README.md:92` already
+permits adding a response field, and a record of legal changes would hide the illegal ones.
+
+The table shape is four columns and is fixed here, because EPIC 050.4 Story 8, EPIC 050.5 Story 8 and
+EPIC 057 each append a row in exactly this shape, with the epic cell written `EPIC <nnn>`.
 
 ## Constraints
 
@@ -84,7 +89,7 @@ Four rows, one per change this epic makes. The table shape is three columns and 
 - `worker-model` names exactly four operations: `node.claim`, `node.renew`, `node.release`, `node.report`.
 - `KANTHORD_VERSION` and `package.json` `version` move together.
 - Do not add a `/v2` anywhere, and do not add a version negotiation field.
-- The compatibility record is a table with three columns. EPIC 057 appends to it.
+- The compatibility record is a table with four columns, and the epic cell reads `EPIC <nnn>`. EPIC 050.4, EPIC 050.5 and EPIC 057 each append to it.
 
 ## Verify
 
@@ -112,10 +117,10 @@ Add:
 
 Add cases 8 and 9 to `test/helpers/proposal.test.ts`, which is the suite that already reads documents under `docs/proposal/` and asserts their content.
 
-8. `"the compatibility record names every change of this epic"` — read `docs/proposal/api/README.md`, take the `## Compatibility record` section, parse its table rows, and assert exactly four rows whose Epic cell is `050`. This makes the record a checked artifact rather than prose.
+8. `"the compatibility record names every change of this wire generation"` — read `docs/proposal/api/README.md`, take the `## Compatibility record` section, parse its table rows, and assert exactly four rows: two whose epic cell is `EPIC 050.1` and two whose epic cell is `EPIC 050.2`, every one naming `external-drive` retired and `worker-model` declared. This makes the record a checked artifact rather than prose.
 
 9. `"the versioning section carries the exception sentence"` — read the same file and assert the `## Versioning` section contains the string `"closed by default"` and does not contain `"The list is closed. A change outside it is a "`. Both halves are asserted, so the replacement is complete rather than additive.
 
 `pnpm run verify` exits 0.
 
-Proof: PASS lines delivered — `src/http/contract/parity.test.ts` in `PASS EPIC-050`, plus the `capability` and `runtime-matrix` coverage the EPIC names beyond the Proof.
+Proof: PASS lines delivered — `src/http/contract/parity.test.ts` in `PASS EPIC-050.2`, plus the `capability` and `runtime-matrix` coverage the EPIC names beyond the Proof.
