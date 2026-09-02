@@ -2,7 +2,7 @@
 set -uo pipefail
 
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
-roles="test-engineer software-engineer reviewer-engineer"
+roles="test-engineer software-engineer reviewer-engineer groundwork-engineer"
 
 failures=0
 fail() {

@@ -80,7 +80,8 @@ RED is the test-engineer's. **GREEN** (the smallest correct change satisfying th
   pipeline guards stay locked to every role: `scripts/lane-check.sh`,
   `scripts/turn-snapshot.sh`, `scripts/verify-handoff.mjs`,
   `scripts/memory-append-only.sh` and every `scripts/*.test.sh`. Wiring a
-  script into `package.json` is not your lane → `OPEN:`.
+  script into `package.json` is not your lane → `OPEN: OUT-OF-LANE`, which reaches the groundwork
+  role.
 - **Proposal documents:** `docs/proposal/**` is **yours to amend** when a story
   names a document edit as its work. A parity test binds a document note to a
   code note, so amend the document and the code in the same turn. The rest of
@@ -146,18 +147,23 @@ ATTEMPT-FAILED: <case-id> — <one-line reason>
 
 Use the exact `<case-id>` from the TE's last `**Cycle.**` line. Emit and stop — `/work` counts and escalates at the limit.
 
-**One blocker never counts — it escalates.** When the fix needs a change to a path locked to **every**
-pipeline role — the plan tree, the pipeline definition, the pipeline guards, `package.json`,
-`tsconfig*.json`, `AGENTS.md`, the `Makefile`, `Containerfile`, `compose.yaml`, any `*.config.*` — no
-attempt of yours and no debate guideline can close it. Mark it with this exact line instead of a bare
-`OPEN:`, then add the `ATTEMPT-FAILED:` line as usual:
+**One blocker never counts — it hands off.** When the fix needs a change to a path locked to **both**
+engineers — `package.json`, `package-lock.json`, `tsconfig*.json`, any `*.config.*`, the `Makefile`,
+`Containerfile`, `compose.yaml`, `README.md`, `.github/**` — no attempt of yours and no debate
+guideline can close it. Mark it with this exact line instead of a bare `OPEN:`, then add the
+`ATTEMPT-FAILED:` line as usual:
 
 ```
 OPEN: OUT-OF-LANE — <repo-relative path> — <the change that path needs>
 ```
 
-`/work` validates the claim with `scripts/lane-check.sh` and escalates to the human on the **first**
-occurrence. Use it only for a path locked to both engineers. A path that belongs to the **other**
+`/work` validates the claim with `scripts/lane-check.sh` and then routes it. A path the
+`groundwork-engineer` role may write goes to that role, and the loop continues — **state the change
+that path needs exactly**, because that sentence is the whole instruction the executor receives. A
+path locked to **every** role — the plan tree, the pipeline definition, the pipeline guards,
+`AGENTS.md` — goes to the human on the first occurrence.
+
+Use the marker only for a path locked to both engineers. A path that belongs to the **other**
 engineer's lane is a plain `OPEN:`, because that work is in lane for them. Run
 `scripts/lane-check.sh <the other role> <path>` before you use this marker: an exit of 0 means the path
 is reachable in the pipeline and this marker is wrong.
