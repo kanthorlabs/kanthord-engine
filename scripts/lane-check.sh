@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: scripts/lane-check.sh <test-engineer|software-engineer|reviewer-engineer> <path>" >&2
+  echo "usage: scripts/lane-check.sh <test-engineer|software-engineer|reviewer-engineer|groundwork-engineer> <path>" >&2
   exit 2
 }
 
@@ -12,7 +12,7 @@ role=$1
 path=$2
 
 case $role in
-test-engineer | software-engineer | reviewer-engineer) ;;
+test-engineer | software-engineer | reviewer-engineer | groundwork-engineer) ;;
 *) usage ;;
 esac
 
@@ -38,15 +38,20 @@ case $path in
 scripts/lane-check.sh | scripts/turn-snapshot.sh | scripts/verify-handoff.mjs | scripts/memory-append-only.sh | scripts/*.test.sh)
   deny "the pipeline guards are locked"
   ;;
-package.json | package-lock.json) deny "the toolchain manifest is locked" ;;
-tsconfig*.json) deny "the toolchain config is locked" ;;
 AGENTS.md) deny "the architecture contract is locked" ;;
-Containerfile | compose.yaml | Makefile) deny "the build definition is locked" ;;
 esac
 
-case ${path##*/} in
-*.config.*) deny "the toolchain config is locked" ;;
-esac
+if [ "$role" != groundwork-engineer ]; then
+  case $path in
+  package.json | package-lock.json) deny "the toolchain manifest is locked" ;;
+  tsconfig*.json) deny "the toolchain config is locked" ;;
+  Containerfile | compose.yaml | Makefile) deny "the build definition is locked" ;;
+  esac
+
+  case ${path##*/} in
+  *.config.*) deny "the toolchain config is locked" ;;
+  esac
+fi
 
 if [ "$role" = reviewer-engineer ]; then
   deny "the reviewer-engineer edits nothing"
@@ -56,10 +61,10 @@ case $path in
 .agents/tdd/memory/*)
   rest=${path#.agents/tdd/memory/}
   case $rest in
-  test-engineer/* | software-engineer/* | reviewer-engineer/*)
+  test-engineer/* | software-engineer/* | reviewer-engineer/* | groundwork-engineer/*)
     [ "${rest%%/*}" = "$role" ] || deny "another role's journal"
     ;;
-  test-engineer | software-engineer | reviewer-engineer)
+  test-engineer | software-engineer | reviewer-engineer | groundwork-engineer)
     deny "a role journal name is a directory, not a file"
     ;;
   */*) deny "an unknown journal namespace" ;;
@@ -68,6 +73,15 @@ case $path in
   ;;
 .agents/tdd/*) exit 0 ;;
 esac
+
+if [ "$role" = groundwork-engineer ]; then
+  case $path in
+  src/* | test/* | docs/proposal/*) deny "the implementation tree is not the groundwork lane" ;;
+  scripts/*) deny "ordinary scripts are the software-engineer lane" ;;
+  *.test.ts | *.spec.ts) deny "a test file is not the groundwork lane" ;;
+  esac
+  exit 0
+fi
 
 is_test=no
 case $path in

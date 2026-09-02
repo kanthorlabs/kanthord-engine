@@ -85,6 +85,38 @@ implementation, a configuration budget, a contract registration, a proposal docu
 - The pair rule does not reach it, and it is never "too small" for holding no diagram.
 - It is proven by its own unit test and by the epic's gate, never by a trace.
 
+### The groundwork story, and the two lines that declare it
+
+`scripts/lane-check.sh` locks a path set to both TDD engineers: the toolchain manifest and config,
+the build definition, and every path that belongs to no engineer lane. An epic that needs such an
+edit collects **every** one of them into one `story-foundation`, named `00-groundwork.md` and first in
+dispatch order. That story declares two more lines:
+
+```text
+Kind: story-foundation
+Executor: groundwork-engineer
+Paths: package.json package-lock.json eslint.config.js
+```
+
+- **The kind does not change.** The kind axis is what a story draws, and groundwork draws nothing.
+  A third kind would put the executor on the drawing axis, where it does not belong.
+- **`Executor:` is the dispatch signal, and `Paths:` is the authorization.** The two stay separate, so
+  a foundation story that names paths never becomes a groundwork dispatch by accident.
+- **`Paths:` is authored, never derived from citations.** A new file holds no line, a rename and a
+  deletion hold no natural anchor, and an anchor often cites a line the story reads instead of a line
+  it writes. `/author` writes the set from its own edit list.
+- **Authority is the intersection of the ceiling and the grant.** `scripts/lane-check.sh` gives the
+  `groundwork-engineer` role its ceiling. The story's `Paths:` set, or the path set of one
+  `OPEN: OUT-OF-LANE` request, gives the grant. A role whose lane alone decided its writes is a write
+  hatch with an audit trail.
+- **It counts against the ten-story cap.** The arithmetic of an epic states that foundation work
+  taking a slot is the intent, and this story is foundation work.
+- **An epic that needs no locked path holds no such story.** Never manufacture an empty one.
+- **Its cases are build-only checks**, because a config edit opens no failing test. A test that proves
+  a groundwork edit belongs to a later story, because a test file stays in the test-engineer lane.
+- **`AGENTS.md`, the plan tree, the pipeline definition and the pipeline guards are never in
+  `Paths:`.** Each records a decision or judges the executor, and a human writes it.
+
 ### `story-implement`
 
 Work that changes one path of one operation.
@@ -342,6 +374,12 @@ invalid, and a human resolves it before implementation.
 - a story declares no kind, or a `story-foundation` carries a `Diagrams:`, `Baselines:` or `Seams:`
   line, or a `story-implement` declares no `Diagrams:` line. A `story-implement` that only composes
   declares `Diagrams:` and no `Seams:`, so the gate requires the first line and never the second;
+- a story declares `Executor:` and no `Paths:`, or `Paths:` and no `Executor:`, or either line on a
+  `story-implement`;
+- a path of a `Paths:` line is allowed to either engineer by `scripts/lane-check.sh`, or is denied to
+  the `groundwork-engineer` role by it, or appears in the `Paths:` line of two stories;
+- a story's `## Change` names a path both engineers are denied that no `Paths:` line of the epic
+  declares;
 - a cross-reference to a story carries an ordinal and no file stem, or a stem that resolves to no
   story of the named epic;
 - a citation names an absent file, a line that file does not hold, or a line that does not hold the
