@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 import { createTemporaryDatabase } from "../test/helpers/database.ts";
@@ -13,245 +14,359 @@ export type Column = Readonly<{
   hasDefault: boolean;
 }>;
 
-export type Schema = ReadonlyMap<string, readonly Column[]>;
+export type Statement = Readonly<{ sql: string; file: string; line: number }>;
 
 export type Finding = Readonly<{
   rule:
-    | "unknown-table"
-    | "unknown-column"
+    | "unsupported-write"
+    | "invalid-statement"
     | "omitted-not-null"
     | "null-into-not-null";
-  table: string;
-  column: string;
+  detail: string;
   file: string;
+  line: number;
+}>;
+
+export type Report = Readonly<{
+  statements: readonly Statement[];
+  findings: readonly Finding[];
+}>;
+
+export type Checker = Readonly<{
+  prepare: (sql: string) => void;
+  columnsOf: (table: string) => readonly Column[] | undefined;
+  close: () => void;
 }>;
 
 export type SchemaWritersDependencies = Readonly<{
   sourceRoot: string;
-  readSchema: () => Schema;
+  openChecker: () => Checker;
   readFile: (path: string) => string;
   listSources: (root: string) => readonly string[];
 }>;
 
 const CONSTANT =
   /^const\s+([A-Z_][A-Z0-9_]*)\s*=\s*\n?\s*"((?:[^"\\]|\\.)*)";/gm;
-const INSERT =
-  /INSERT\s+(?:OR\s+\w+\s+)?INTO\s+([a-z_]+)\s*\(([^)]*)\)\s*VALUES\s*\(([^)]*)\)/gis;
-const DO_UPDATE = /^\s*ON\s+CONFLICT[^)]*\)\s*DO\s+UPDATE\s+SET\s+([^;"`]*)/is;
-const UPDATE = /(?<!DO\s)UPDATE\s+([a-z_]+)\s+SET\s+([^;"`]*)/gis;
+/**
+ * SQL shape, not an English verb. `.description("update a node")` is prose, and
+ * a write always names its target with `INTO`, `SET` or `FROM`.
+ */
+const WRITE =
+  /^\s*(?:(?:INSERT|REPLACE)\s+(?:OR\s+\w+\s+)?INTO\s|UPDATE\s+[a-z_]+\s+SET\s|DELETE\s+FROM\s)/i;
+const INSERT_TABLE =
+  /^\s*(?:INSERT|REPLACE)\s+(?:OR\s+\w+\s+)?INTO\s+([a-z_]+)/i;
 
-export function readMigratedSchema(): Schema {
+/**
+ * Opens the migrated schema twice: `SqliteStorage` applies the migrations, and
+ * `node:sqlite` reopens the same file so every statement can be compiled by
+ * SQLite itself. Compilation is what proves a table, a column, a conflict
+ * target and an arity, in every clause and not only in an assignment target.
+ */
+export function openMigratedChecker(): Checker {
   const temporary = createTemporaryDatabase();
   const storage = new SqliteStorage({
     path: temporary.path,
     clock: createMockClock({ start: 1700000000000 }),
     migrations,
   });
-  try {
-    storage.migrate();
-    return storage.transact((transaction) => {
-      const tables = transaction.all(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-      ) as readonly Readonly<{ name: string }>[];
-      const schema = new Map<string, readonly Column[]>();
-      for (const { name } of tables) {
-        const info = transaction.all(
-          `PRAGMA table_info(${name})`,
-        ) as readonly Readonly<{
-          name: string;
-          notnull: number;
-          dflt_value: string | null;
-        }>[];
-        schema.set(
-          name,
-          info.map((column) => ({
-            name: column.name,
-            notNull: column.notnull === 1,
-            hasDefault: column.dflt_value !== null,
-          })),
-        );
-      }
-      return schema;
-    });
-  } finally {
-    storage.close();
-    temporary.dispose();
-  }
+  storage.migrate();
+  storage.close();
+
+  const database = new DatabaseSync(temporary.path);
+  return {
+    prepare: (sql) => {
+      database.prepare(sql);
+    },
+    columnsOf: (table) => {
+      const known = database
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+        )
+        .all(table);
+      if (known.length === 0) return undefined;
+      const info = database
+        .prepare(`PRAGMA table_info(${table})`)
+        .all() as unknown as readonly Readonly<{
+        name: string;
+        notnull: number;
+        dflt_value: string | null;
+      }>[];
+      return info.map((column) => ({
+        name: column.name,
+        notNull: column.notnull === 1,
+        hasDefault: column.dflt_value !== null,
+      }));
+    },
+    close: () => {
+      database.close();
+      temporary.dispose();
+    },
+  };
 }
 
 export function listSourceFiles(root: string): readonly string[] {
-  return readdirSync(root).flatMap((name) => {
-    const path = join(root, name);
-    if (statSync(path).isDirectory()) return listSourceFiles(path);
-    if (!path.endsWith(".ts")) return [];
-    if (path.endsWith(".test.ts")) return [];
-    if (name.startsWith("migration-")) return [];
-    return [path];
-  });
+  return readdirSync(root)
+    .sort()
+    .flatMap((name) => {
+      const path = join(root, name);
+      if (statSync(path).isDirectory()) return listSourceFiles(path);
+      if (!path.endsWith(".ts")) return [];
+      if (path.endsWith(".test.ts")) return [];
+      if (name.startsWith("migration-")) return [];
+      return [path];
+    });
 }
 
+/** A statement quoted inside a comment is text, not a write. */
+export function stripComments(source: string): string {
+  return source
+    .replaceAll(/\/\*[\s\S]*?\*\//g, (block) => block.replaceAll(/[^\n]/g, " "))
+    .replaceAll(/(^|[^:"'`\\])\/\/[^\n]*/g, (line, lead: string) =>
+      lead.concat(" ".repeat(line.length - lead.length)),
+    );
+}
+
+/**
+ * Splices a module-level string constant into the statements that name it, in
+ * both shapes this repository uses: `"… (" + NODE_COLUMNS + ") VALUES"` and
+ * `` `… RETURNING ${RUN_COLUMNS}` ``. What survives unresolved is reported as
+ * `unsupported-write`, so a statement is never skipped for being dynamic.
+ */
 export function resolveConcatenatedConstants(source: string): string {
   let resolved = source;
   for (const match of source.matchAll(CONSTANT)) {
     const [, name, value] = match;
-    resolved = resolved.replaceAll(
-      new RegExp(`"\\s*\\+\\s*${name}\\s*\\+\\s*"`, "g"),
-      value ?? "",
-    );
+    resolved = resolved
+      .replaceAll(
+        new RegExp(`"\\s*\\+\\s*${name}\\s*\\+\\s*"`, "g"),
+        value ?? "",
+      )
+      .replaceAll(`\${${name}}`, value ?? "");
   }
   return resolved;
 }
 
-function names(clause: string): readonly string[] {
-  return clause
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => entry.split(/[\s=]/)[0] ?? "")
-    .filter((name) => /^[a-z_]+$/.test(name));
+/** Every string, template and single-quoted literal, with its 1-based line. */
+export function extractLiterals(source: string): readonly Statement[] {
+  const literals: Statement[] = [];
+  let index = 0;
+  let line = 1;
+  while (index < source.length) {
+    const character = source[index] ?? "";
+    if (character === "\n") {
+      line += 1;
+      index += 1;
+      continue;
+    }
+    if (character !== '"' && character !== "'" && character !== "`") {
+      index += 1;
+      continue;
+    }
+    const opened = line;
+    let cursor = index + 1;
+    let text = "";
+    while (cursor < source.length && source[cursor] !== character) {
+      if (source[cursor] === "\\") {
+        text += source[cursor + 1] ?? "";
+        cursor += 2;
+        continue;
+      }
+      if (source[cursor] === "\n") line += 1;
+      text += source[cursor];
+      cursor += 1;
+    }
+    literals.push({ sql: text, file: "", line: opened });
+    index = cursor + 1;
+  }
+  return literals;
 }
 
-function assignedColumns(clause: string): readonly string[] {
-  return clause
-    .split(/,(?![^()]*\))/)
-    .map((entry) => entry.trim().split("=")[0]?.trim() ?? "")
-    .filter((name) => /^[a-z_]+$/.test(name));
-}
-
-function checkInsert(
-  schema: Schema,
-  file: string,
-  table: string,
-  columnClause: string,
-  valueClause: string,
-): readonly Finding[] {
-  const columns = schema.get(table);
-  if (!columns) return [{ rule: "unknown-table", table, column: "", file }];
-
-  const findings: Finding[] = [];
-  const known = new Set(columns.map((column) => column.name));
-  const written = names(columnClause);
-  const values = valueClause.split(",").map((value) => value.trim());
-  const valueOf = new Map(written.map((name, index) => [name, values[index]]));
-
-  for (const name of written) {
-    if (!known.has(name)) {
-      findings.push({ rule: "unknown-column", table, column: name, file });
+/** The balanced group that opens at or after `from`, contents only. */
+function balanced(sql: string, from: number): string | undefined {
+  const open = sql.indexOf("(", from);
+  if (open === -1) return undefined;
+  let depth = 0;
+  let quote = "";
+  for (let cursor = open; cursor < sql.length; cursor += 1) {
+    const character = sql[cursor] ?? "";
+    if (quote) {
+      if (character === quote) quote = "";
+      continue;
+    }
+    if (character === "'" || character === '"') quote = character;
+    else if (character === "(") depth += 1;
+    else if (character === ")") {
+      depth -= 1;
+      if (depth === 0) return sql.slice(open + 1, cursor);
     }
   }
+  return undefined;
+}
+
+/** Splits on top-level commas only, so `json_object('k', ?)` stays one entry. */
+export function splitTopLevel(clause: string): readonly string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote = "";
+  let current = "";
+  for (const character of clause) {
+    if (quote) {
+      current += character;
+      if (character === quote) quote = "";
+      continue;
+    }
+    if (character === "'" || character === '"') quote = character;
+    else if (character === "(") depth += 1;
+    else if (character === ")") depth -= 1;
+    else if (character === "," && depth === 0) {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += character;
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+/**
+ * The two rules SQLite cannot decide at compile time. Both are legal SQL that
+ * fails only when the statement runs, so they need the schema, not the parser.
+ */
+function checkInsertNulls(
+  columns: readonly Column[],
+  statement: Statement,
+): readonly Finding[] {
+  const columnClause = balanced(statement.sql, 0);
+  const valuesAt = statement.sql.search(/\bVALUES\b/i);
+  if (columnClause === undefined || valuesAt === -1) return [];
+  const valueClause = balanced(statement.sql, valuesAt);
+  if (valueClause === undefined) return [];
+
+  const written = splitTopLevel(columnClause).map((name) => name.trim());
+  const values = splitTopLevel(valueClause);
+  const valueOf = new Map(written.map((name, index) => [name, values[index]]));
+
+  const findings: Finding[] = [];
   for (const column of columns) {
-    if (!column.notNull || column.hasDefault) continue;
-    if (!valueOf.has(column.name)) {
+    if (!column.notNull) continue;
+    const value = valueOf.get(column.name);
+    if (value === undefined) {
+      if (column.hasDefault) continue;
       findings.push({
         rule: "omitted-not-null",
-        table,
-        column: column.name,
-        file,
+        detail: `${column.name} is NOT NULL with no default and is not written`,
+        file: statement.file,
+        line: statement.line,
       });
       continue;
     }
-    if ((valueOf.get(column.name) ?? "").toUpperCase() === "NULL") {
+    if (value.toUpperCase() === "NULL") {
       findings.push({
         rule: "null-into-not-null",
-        table,
-        column: column.name,
-        file,
+        detail: `${column.name} is NOT NULL and receives a literal NULL`,
+        file: statement.file,
+        line: statement.line,
       });
     }
   }
   return findings;
 }
 
-function checkAssignments(
-  schema: Schema,
-  file: string,
-  table: string,
-  clause: string,
-): readonly Finding[] {
-  const columns = schema.get(table);
-  if (!columns) return [{ rule: "unknown-table", table, column: "", file }];
-  const known = new Set(columns.map((column) => column.name));
-  return assignedColumns(clause)
-    .filter((name) => !known.has(name))
-    .map((name) => ({
-      rule: "unknown-column" as const,
-      table,
-      column: name,
-      file,
-    }));
-}
-
-export function findWriterDefects(
-  dependencies: SchemaWritersDependencies,
-): readonly Finding[] {
-  const schema = dependencies.readSchema();
+export function inspect(dependencies: SchemaWritersDependencies): Report {
+  const checker = dependencies.openChecker();
+  const statements: Statement[] = [];
   const findings: Finding[] = [];
 
-  for (const file of dependencies.listSources(dependencies.sourceRoot)) {
-    const source = resolveConcatenatedConstants(dependencies.readFile(file));
+  try {
+    for (const file of dependencies.listSources(dependencies.sourceRoot)) {
+      const source = resolveConcatenatedConstants(
+        stripComments(dependencies.readFile(file)),
+      );
+      for (const literal of extractLiterals(source)) {
+        if (!WRITE.test(literal.sql)) continue;
+        const statement: Statement = { ...literal, file };
+        statements.push(statement);
 
-    for (const match of source.matchAll(INSERT)) {
-      const [statement, table, columnClause, valueClause] = match;
-      findings.push(
-        ...checkInsert(
-          schema,
-          file,
-          table ?? "",
-          columnClause ?? "",
-          valueClause ?? "",
-        ),
-      );
-      const upsert = DO_UPDATE.exec(
-        source.slice((match.index ?? 0) + statement.length),
-      );
-      if (upsert) {
-        findings.push(
-          ...checkAssignments(schema, file, table ?? "", upsert[1] ?? ""),
-        );
+        if (statement.sql.includes("${")) {
+          findings.push({
+            rule: "unsupported-write",
+            detail:
+              "the statement is built by interpolation and cannot be checked",
+            file,
+            line: statement.line,
+          });
+          continue;
+        }
+        try {
+          checker.prepare(statement.sql);
+        } catch (error) {
+          findings.push({
+            rule: "invalid-statement",
+            detail: (error as Error).message,
+            file,
+            line: statement.line,
+          });
+          continue;
+        }
+        const table = INSERT_TABLE.exec(statement.sql)?.[1];
+        if (table === undefined) continue;
+        const columns = checker.columnsOf(table);
+        if (columns) findings.push(...checkInsertNulls(columns, statement));
       }
     }
-
-    for (const match of source.matchAll(UPDATE)) {
-      const [, table, clause] = match;
-      findings.push(
-        ...checkAssignments(schema, file, table ?? "", clause ?? ""),
-      );
-    }
+  } finally {
+    checker.close();
   }
-  return findings;
+
+  return {
+    statements,
+    findings: [...findings].sort(
+      (left, right) =>
+        left.file.localeCompare(right.file) ||
+        left.line - right.line ||
+        left.rule.localeCompare(right.rule) ||
+        left.detail.localeCompare(right.detail),
+    ),
+  };
 }
 
-const MESSAGE: Readonly<Record<Finding["rule"], string>> = {
-  "unknown-table": "writes a table the schema does not hold",
-  "unknown-column": "writes a column the table does not hold",
-  "omitted-not-null": "omits a NOT NULL column that has no default",
-  "null-into-not-null": "writes literal NULL into a NOT NULL column",
-};
-
-export function formatFindings(findings: readonly Finding[]): string {
+export function formatFindings(
+  findings: readonly Finding[],
+  root: string,
+): string {
   return findings
     .map(
       (finding) =>
-        `${finding.table}.${finding.column} — ${MESSAGE[finding.rule]} @ ${finding.file}`,
+        `${relative(root, finding.file)}:${finding.line} — ${finding.rule} — ${finding.detail}`,
     )
     .join("\n");
 }
 
 export const systemSchemaWritersDependencies: SchemaWritersDependencies = {
   sourceRoot: fileURLToPath(new URL("../src", import.meta.url)),
-  readSchema: readMigratedSchema,
+  openChecker: openMigratedChecker,
   readFile: (path) => readFileSync(path, "utf8"),
   listSources: listSourceFiles,
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const findings = findWriterDefects(systemSchemaWritersDependencies);
-  if (findings.length > 0) {
-    process.stdout.write(`${formatFindings(findings)}\n`);
+  const root = systemSchemaWritersDependencies.sourceRoot;
+  const report = inspect(systemSchemaWritersDependencies);
+  if (report.statements.length === 0) {
+    // A tree with a database always holds writes, so recognising none means the
+    // extractor broke. Refuse rather than report a parity nothing established.
+    process.stdout.write("schema-writer parity failed: no write recognised\n");
+    process.exit(1);
+  }
+  if (report.findings.length > 0) {
+    process.stdout.write(`${formatFindings(report.findings, root)}\n`);
     process.stdout.write(
-      `\nschema-writer parity failed: ${findings.length} defects\n`,
+      `\nschema-writer parity failed: ${report.findings.length} defects across ${report.statements.length} writes\n`,
     );
     process.exit(1);
   }
-  process.stdout.write("schema-writer parity ok\n");
+  process.stdout.write(
+    `schema-writer parity ok: ${report.statements.length} writes compiled\n`,
+  );
 }
