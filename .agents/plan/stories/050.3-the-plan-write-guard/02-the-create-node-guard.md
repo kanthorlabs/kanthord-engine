@@ -1,7 +1,7 @@
 # Story 2 — The create-node guard
 
 Epic: `.agents/plan/epics/050.3-the-plan-write-guard.md`
-Depends on: Story 1 (`plan.runCoversNode`), Story 8 (`subtree-busy` on `node.create`).
+Depends on: Story 1 (01-the-run-covers-node-rule), for `plan.runCoversNode`; Story 8 (08-subtree-busy-joins-the-plan-operations), for `subtree-busy` on `node.create`; EPIC 050.1 Story 6 (06-the-conformance-harness) and EPIC 050.1 Story 7 (07-the-conformance-runner), which this story's scenario file runs on.
 Kind: story-implement
 
 Diagrams: create-node-guard
@@ -34,13 +34,25 @@ sequenceDiagram
     note over Command: tail unchanged by EPIC 050.3
 ```
 
-Citations: `:84`, `:85`, `:97`. The project existence check at `:86` reads through the transaction
-object, which is not a dependency key, so it is no message.
+Citations, one per step: `src/commands/node/create-node.ts:84 — `storage.transact``,
+`src/commands/node/create-node.ts:85 — `clock.now``,
+`src/commands/node/create-node.ts:97 — `newestRevision``. The project existence check at `:87` reads
+through the transaction object, which is not a dependency key, so it is no message.
 
-The tail this note pins is `ids.mint` at `:113` and `:114`, `blobs.put` at `:116` and `:122`,
-`plan.readGraph` at `:128`, `plan.readValidationContext` at `:183`, `revision.render` at `:229`,
-`revision.record` at `:232`, `plan.mutateGraph` at `:260` and `events.append` at `:275`. None of them
-moves: this story inserts one read ahead of all of them and changes nothing after.
+Callee anchors, one per step: `src/services/storage/index.ts:33 — `transact``,
+`src/services/clock/index.ts:2 — `now``,
+`src/services/plan/index.ts:75 — `newestRevision``. Step 3 is reachable because the fixture holds a
+project with at least one recorded revision, which is what `newestRevision` reads; a project with
+none returns `null` and the command refuses `stale-revision` before step 3 returns a usable value.
+
+The tail this note pins holds every seam call after step 3: `ids.mint` at `:113` and `:114`,
+`blobs.put` at `:116` and `:122`, `plan.readGraph` at `:128`, `plan.readValidationContext` at `:184`,
+`graph.cycles` at `:221`, `revision.render` at `:232`, `revision.record` at `:235`, `ids.mint` at
+`:245`, `plan.mutateGraph` at `:263`, `graph.cycles` at `:274` and `events.append` at `:278`. None of
+them moves: this story inserts one read ahead of all of them and changes nothing after. `ids.mint`
+appears three times and `graph.cycles` twice, so the tail is pinned rather than drawn — no projection
+separates those calls, and adding one to a production interface for a diagram is what
+`.agents/plan/authoring.md` forbids.
 
 ### `create-node-guard`
 
@@ -72,7 +84,7 @@ Add `test/sequence/scenarios/create-node-guard.ts`.
 ## Change
 
 **`src/commands/node/create-node.ts` — insert one guard.** After the `stale-revision` throw at
-`:100-110` and before `const id = dependencies.ids.mint(...)` at `:113`:
+`:101-111` and before `const id = dependencies.ids.mint(...)` at `:113`:
 
 ```ts
 const covering = dependencies.plan.runCoversNode(
@@ -125,19 +137,19 @@ Add, each as a separate `it`:
 
 2. `"a create under a parent whose ancestor holds an active run refuses, naming the ancestor"` — run on `I`, create under `O`. Assert `relation === "ancestor"` and `nodeId === I`.
 
-3. `"a create under a parent whose sibling holds an active run succeeds"` — run on a second objective under `I`, create under `O`. The sibling is neither above nor below the parent.
+3. `"a create under a parent whose sibling holds an active run succeeds"` — run on a second objective under `I`, seeded by `test/helpers/rows.ts:206 — `seedSiblingObjective``, create under `O`. The sibling is neither above nor below the parent.
 
-3b. `"a create under a parent whose existing child holds an active run refuses, naming the descendant"` — run on task `T` under `O`, create a second task under `O`. Assert `relation === "descendant"`. This is a refusal `create-node` never had and the closure is symmetric on purpose: adding a sibling changes the child set of the objective the worker is executing under.
+4. `"a create under a parent whose existing child holds an active run refuses, naming the descendant"` — run on task `T` under `O`, create a second task under `O`. Assert `relation === "descendant"`. This is a refusal `create-node` never had and the closure is symmetric on purpose: adding a sibling changes the child set of the objective the worker is executing under.
 
-4. `"a create under a parent covered by an expired run succeeds"` — `expires_at: NOW - 1`.
+5. `"a create under a parent covered by an expired run succeeds"` — `expires_at: NOW - 1`.
 
-5. `"a create under a parent covered by an ended run succeeds"`.
+6. `"a create under a parent covered by an ended run succeeds"`.
 
-6. `"an initiative create is never refused by the guard"` — an active run on every other node, and a root create succeeds. The seed is empty.
+7. `"an initiative create is never refused by the guard"` — an active run on every other node, and a root create succeeds. The seed is empty.
 
-7. `"a subtree-busy refusal leaves the database byte-identical"` — assert `databaseBytes` deep-equals the snapshot. This is the case that fails if the guard is placed after `blobs.put` at `:116`.
+8. `"a subtree-busy refusal leaves the database byte-identical"` — assert `databaseBytes` deep-equals the snapshot. This is the case that fails if the guard is placed after `blobs.put` at `:116`.
 
-8. `"a stale revision beats a covering run"` — a covering run **and** a stale `fromRevision`. Assert `error.refusal === "stale-revision"`, proving the guard's position in the refusal order.
+9. `"the refusal precedence of node.create"` — one decision table over every pair of `project-not-found`, `stale-revision`, `subtree-busy`, `plan-invalid`, `illegal-transition` and `binding-in-use` that can trigger at once, with the winner named per pair and every unreachable pair marked unreachable with its reason. `stale-revision` beats `subtree-busy` is one row, and it is the row the drawn ordinal implies but does not prove.
 
 Add `test/sequence/scenarios/create-node-guard.ts`.
 

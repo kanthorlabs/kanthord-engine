@@ -1,14 +1,14 @@
 # Story 6 — The report drops the lease
 
 Epic: `.agents/plan/epics/050.4-the-node-lease-removal.md`
-Depends on: EPIC 050.2 Story 6 (the authority prelude) and Story 7 (the worker contract).
+Depends on: EPIC 050.2 Story 6 (`06-the-report-prelude`) and EPIC 050.2 Story 7 (`07-the-worker-contract`).
 Kind: story-implement
 
 Diagrams: report-lease-free
 
 Supersedes: EPIC 050.2 report-authority-prelude
 
-Seams: report-lease-free: +execution.attemptsOfRun, +execution.closeAttempt, +plan.setNodeState, +execution.stampRunHead, +execution.endRun, +events.append:outcome.reported, +plan.readAllNodes, -lease.release @src/commands/outcome/report-outcome.ts:282
+Seams: report-lease-free: +execution.attemptsOfRun:R, +execution.closeAttempt:A, +plan.setNodeState:T:outcome-accepted, +execution.stampRunHead:R, +execution.endRun:R, +events.append:outcome.reported:T, +plan.readAllNodes, -lease.release @src/commands/outcome/report-outcome.ts:282
 
 The superseded diagram pinned its tail, so the seven `+` tokens are tail calls entering a drawn prefix
 for the first time, not new calls. `lease.release` is a call the superseded diagram never drew, so its
@@ -16,14 +16,10 @@ removal carries a citation.
 
 **The sign on `lease.release` is a `-` with a citation, not a `~`.** `.agents/plan/authoring.md`
 requires a cited `~` for a seam call that leaves a tail pinned by
-`note over Command: tail unchanged by EPIC <nnn>` — the note for a tail **nobody else owns**, where
-the story asserts the rest of the trace is byte-identical. The superseded diagram carries the other
-note, `tail pinned by EPIC <nnn> <diagram-id>`, whose tail is owned by a named later diagram and is
-never compared. This story does not amend a pinned tail and leave it pinned; it draws the tail whole,
-so every token in it is measured over token sets against a prior set that holds none of them. That
-makes `lease.release` a removal from an undrawn path, and the citation rule is the one that applies.
-**A reviewer resolves this reading before dispatch**: if the `~` form is required, the line becomes
-`~lease.release @src/commands/outcome/report-outcome.ts:282` and nothing else in the story moves.
+`note over Command: tail unchanged by EPIC <nnn>` — the note for a tail **nobody else owns**. The
+superseded diagram carries the other note, `tail pinned by EPIC <nnn> <diagram-id>`, whose tail is
+owned by a named later diagram and is never compared, so `lease.release` is a removal from an undrawn
+path and the citation rule is the one that applies.
 
 ## Why this story draws the whole path
 
@@ -65,22 +61,36 @@ sequenceDiagram
     Command->>Storage: 1 storage.transact
     Command->>Clock: 2 clock.now
     Command->>Expiry: 3 expiry.expireRuns
-    Command->>Execution: 4 execution.runById:R
-    Command->>Plan: 5 plan.readSubtree
-    Command->>Execution: 6 execution.attemptsOfRun:R
-    Command->>Execution: 7 execution.closeAttempt:A
-    Command->>Plan: 8 plan.setNodeState:T:outcome-accepted
-    Command->>Execution: 9 execution.stampRunHead:R
-    Command->>Execution: 10 execution.endRun:R
-    Command->>Events: 11 events.append:outcome.reported:T
-    Command->>Plan: 12 plan.readAllNodes
+    Command->>Plan: 4 plan.readNode
+    Command->>Execution: 5 execution.runById:R
+    Command->>Plan: 6 plan.readSubtree
+    Command->>Execution: 7 execution.attemptsOfRun:R
+    Command->>Execution: 8 execution.closeAttempt:A
+    Command->>Plan: 9 plan.setNodeState:T:outcome-accepted
+    Command->>Execution: 10 execution.stampRunHead:R
+    Command->>Execution: 11 execution.endRun:R
+    Command->>Events: 12 events.append:outcome.reported:T
+    Command->>Plan: 13 plan.readAllNodes
     Command-->>Client: ok
 ```
 
-Steps 1 to 5 are the prelude EPIC 050.2 drew, unchanged. Step 6 is one read where the shipped path
-read twice. `lease.release` sat between step 10 and step 11 and is gone, so a report that released a
-lease fails the comparison. Step 12 is the sibling read that builds the objective projection of the
-response; it is a read after every write and it does not move.
+**Steps 1 to 6 are the pinned prefix, reproduced token for token and in its order.**
+EPIC 050.2 Story 6 (`06-the-report-prelude`) ends `report-authority-prelude` with
+`note over Command: tail pinned by EPIC 050.4 report-lease-free`, so this diagram is what that note
+names and its first six steps must be that prefix exactly: `storage.transact`, `clock.now`,
+`expiry.expireRuns`, `plan.readNode`, `execution.runById:R`, `plan.readSubtree`.
+
+**`plan.readNode` is step 4, ahead of the authority check, and that position is the prefix's.** That
+story states why: _"this command already read the node first, so `node-not-found` and
+`initiative-not-reportable` keep their shipped precedence with no reordering."_ It is a context token
+— the tail reads `node.kind` and `node.state` from it, `plan.readSubtree` is added **beside** it and
+replaces neither — so this story deletes the lease and no consumer of the node row, and no `Seams:`
+token governs the read. Drawing it after the authority check would move a shipped refusal's
+precedence, which no story of this epic decides.
+
+Step 7 is one read where the shipped path read twice. `lease.release` sat between step 11 and step 12
+and is gone, so a report that released a lease fails the comparison. Step 13 is the sibling read that
+builds the objective projection of the response; it is a read after every write and it does not move.
 
 Add `test/sequence/scenarios/report-lease-free.ts`.
 
@@ -117,37 +127,51 @@ five members of `nodeReportRequest` at `src/http/contract/outcome.ts:23-53`, in 
 schema and the handler change together. The `closed` member at `:49-52` never carried it. `runId` and
 `runFence` are on all six after EPIC 050.2 Story 7. Stop passing `lease` in `src/main.ts:306`.
 
+**3b — the handler, the two CLI commands and the derived fixture.**
+`src/http/server/node/report-node.ts:41-45` throws
+`toHttpError(error, body.report === "closed" ? undefined : { subject: id, fence: body.fence })`.
+Delete the whole second argument, leaving `toHttpError(error)`. In `src/cli/node/report.ts` delete
+the `--fence` option at `:47`, its parse and guard at `:65-72` and the `fence` member of both request
+bodies at `:114` and `:117`; in `src/cli/node/attest.ts` delete the `--fence` option at `:32`, its
+parse and guard at `:40-49` and the `fence` member at `:53`. `attest` sends the `attested` member of
+`nodeReportRequest`, which this story owns, so both CLI commands move here and not with Story 7.
+Carry the change into both tests. Then regenerate `src/http/contract/field-decisions.fixture.ts`,
+which pins one `fence` line per member of `node.report.request`.
+
 **4 — the refusal.** Delete `"lease-held"` from `ReportOutcomeRefusal` at `:85`, its branch in
 `src/http/server/node/refusals.ts`, its key from `node.report`'s `errors` record at
-`src/http/contract/outcome.ts:151`, and its `operationAdditions` entry. Replace the `lease-held`
+`src/http/contract/outcome.ts:152`, and its `operationAdditions` entry. Replace the `lease-held`
 literal of `nodeReportExamples` at `:75` with `run-ended` carrying `{ runId }`.
 
-Story 7 deletes the same field from `ReportObjectiveInput`, which reads it from this command's body.
-The two stories land together or `node.report`'s objective branch does not compile; Story 7 depends on
-this one.
+**The nested call's `fence` argument goes here, not in Story 7.** `report-outcome.ts:129` passes
+`fence: body.fence` into `reportObjective`. `body.fence` stops existing in this story, so the argument
+cannot outlive it: delete `fence` from the call at `:125-131` and from `ReportObjectiveInput` in
+`src/commands/outcome/report-objective.ts`. Story 7 then deletes the lease block that read it. Leaving
+either half to Story 7 leaves this story red, and every story here promises `pnpm run verify` exits 0.
 
 **`lease.read` at `:173` is already gone.** EPIC 050.2 Story 6 replaced it with `assertRunAuthority`.
 This story removes what that story left: one write call and the input field that fed it.
 
-**5 — the earlier tree.** In
-`.agents/plan/stories/050.2-the-run-renew-release-and-report/06-the-report-prelude.md`, add
-`Superseded by: EPIC 050.4 report-lease-free` under the ship diagram's `Supersedes:` line, and change
-its note from `tail pinned by EPIC 051 report-execution-checkpoint` to
-`tail pinned by EPIC 050.4 report-lease-free`. This epic owns that tail now.
+**5 — the earlier tree, already corrected.** Both edits are applied:
+`.agents/plan/stories/050.2-the-run-renew-release-and-report/06-the-report-prelude.md:50` reads
+`Superseded by: EPIC 050.4 report-lease-free` and `:67` reads
+`note over Command: tail pinned by EPIC 050.4 report-lease-free`. Verify both before editing, and
+report a divergence rather than re-applying.
 
 ## Constraints
 
 - Read the attempts once. Two reads of one run are two steps of one token, and the parser refuses that.
 - The accounting must see the closing outcome. Projecting `body.report` onto the open attempt is what makes the single read equivalent; dropping the projection would under-count and break the attempt limit.
 - Do not move `execution.endRun`, `execution.stampRunHead` or `events.append`. Deleting the call between them changes no order.
-- Do not touch the objective branch's dispatch at `:125-138`. Story 7 owns `report-objective.ts`.
+- Touch the objective branch's dispatch at `:125-138` only to drop the `fence` argument. Story 7 owns everything else in `report-objective.ts`.
 - Delete `input.fence` and the five schema members together. Splitting them across two stories leaves one story red.
 - Do not touch `errorStatuses`, `exitCodes` or `leaseHeldDetails`. Story 8 retires the code.
+- Regenerate `field-decisions.fixture.ts` in this story.
 
 ## Verify
 
 ```
-node --test src/commands/outcome/report-outcome.test.ts src/http/server/node/report-node.test.ts test/sequence/conformance.test.ts
+node --test src/commands/outcome/report-outcome.test.ts src/http/server/node/report-node.test.ts src/cli/node/report.test.ts src/cli/node/attest.test.ts src/http/contract/coverage.test.ts test/sequence/conformance.test.ts
 ```
 
 Add, each as a separate `it`:
@@ -167,6 +191,10 @@ Add, each as a separate `it`:
 7. `"a report refuses a stale run fence and writes nothing"` — assert `refusal === "fence-stale"` and `databaseBytes` deep-equals the snapshot.
 
 8. `"every shipped report case still passes"` — carry the file's cases across with `fence` removed from their inputs, including the four task outcomes and the two objective members.
+
+9. `"kanthord node report and kanthord node attest take no --fence"` — both commands in one case, so neither keeps the option while the other loses it.
+
+10. `"the derived field decisions hold no node.report fence line"` — the shipped `coverage.test.ts` harness over the regenerated fixture. Assert the count of removed lines is five, matching the five members that carried `fence`.
 
 Add `test/sequence/scenarios/report-lease-free.ts`.
 

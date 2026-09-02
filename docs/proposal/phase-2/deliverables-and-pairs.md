@@ -29,7 +29,7 @@ The table contains eight legal pairs and four illegal pairs. The illegal pairs a
 
 Every node declares a strict two-key `verify` object. `paths` is a sorted set of absolute paths. `commands` is an ordered sequence of shell strings.
 
-An empty `commands` list asserts nothing. For a parent initiative or objective, this list is the correct final value because no command runs. For an atomic node, this list declares no check and makes the node ineligible for claim. EPIC 049 records this ineligibility in the conversion report. EPIC 050 enforces the claim-time rule. EPIC 047 stores the value and draws no eligibility conclusion.
+An empty `commands` list asserts nothing. For a parent initiative or objective, this list is the correct final value because no command runs. For an atomic node, this list declares no check and makes the node ineligible for claim. EPIC 049 records this ineligibility in the conversion report. EPIC 050.1 enforces the claim-time rule. EPIC 047 stores the value and draws no eligibility conclusion.
 
 ## Fixed pairs
 

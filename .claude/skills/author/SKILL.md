@@ -87,6 +87,34 @@ State in each story, in one sentence, that the drawn set is every branch of that
 path. A fixture proves no such thing, so the claim is prose a reviewer checks, and
 it must be visible to be checked.
 
+### The locked paths, and the story that holds them
+
+`scripts/lane-check.sh` locks a path set to both TDD engineers. Collect every edit the epic needs at
+such a path into **one** `story-foundation`, named `00-groundwork.md` and first in dispatch order. It
+declares `Executor: groundwork-engineer` and `Paths: <the exact set>`.
+
+Decide the set with the guard, never from memory:
+
+```bash
+scripts/lane-check.sh test-engineer '<path>'; scripts/lane-check.sh software-engineer '<path>'
+```
+
+A path both commands deny belongs in `Paths:`. A path either one allows does not, and putting it
+there hands an engineer's lane to another role.
+
+**The line is whitespace separated, so no path in it may hold a space.** `/work` splits the line to
+build the grant. A locked path that holds a space is a blocker for the human, not a `Paths:` entry.
+
+- **`AGENTS.md`, `.agents/plan/**`, `.claude/**`, `.opencode/**` and the pipeline guards never appear
+  in `Paths:`.** `scripts/lane-check.sh groundwork-engineer <path>` denies each one. An epic that
+  needs such an edit carries it as a **blocker** for the human, because no role may write it.
+- **An epic that needs no locked path holds no story `00`.** Never manufacture an empty one.
+- **The story counts against the ten-story cap.** An epic at ten stories that also needs groundwork is
+  a split, and you report it rather than exempting the story.
+- The set is a prediction, not a closure. `/work` requests an unforeseen path mid-loop, and it stops
+  before the **third** such request in one cycle: two unforeseen paths are ordinary, and a third means
+  this story under-predicted. The human then adds the path to `Paths:` and re-runs.
+
 ## Step 4 — Map the code surface, read-only and parallel
 
 Determinism needs real anchors. Dispatch a read-only explorer subagent per story
@@ -99,7 +127,15 @@ returns:
   `file:line`;
 - the **current ordered seam calls** of the path, quoted, one citation per call;
 - which seam calls this story adds, moves or removes;
+- per baseline step, the **caller anchor and the callee anchor**, and the fixture
+  state that makes that step reachable;
+- per removal, **what replaces the data the removed call supplied**;
+- the **consumers of every symbol this story deletes**, resolved against the
+  current tree — importers, exact import specifiers and literal values, tests and
+  helpers, generated artifacts and their generators;
 - every seam call the EPIC implies that no interface declares yet;
+- every path the story edits that `scripts/lane-check.sh` denies to **both** engineers, with the edit
+  each one needs;
 - the **test file** covering each site and its convention — framework, fakes
   against mocks, real SQLite or git, hermetic temp dirs — with the helper names
   and their lines;
@@ -110,6 +146,10 @@ finding before writing.
 
 The explorer's ordered seam calls are what separate a context token from a
 change. **Never sign a token from memory.**
+
+**Rerun the epic's consumer discovery against the current tree.** Code moves
+between planning and authoring, so the epic's closure is already stale at
+dispatch. A directory sweep is not a consumer set.
 
 ## Step 5 — Write the story files
 
@@ -155,6 +195,48 @@ Proof: PASS line delivered — <files> in `PASS EPIC-<nnn>`.
 It carries no `Diagrams:`, no `Baselines:` and no `Seams:` line. The pair rule
 does not reach it, and it is never "too small" for holding no diagram.
 
+### The groundwork story — `00-groundwork.md`
+
+The same template, plus two declared lines and a build-only `## Verify`.
+
+````
+# Story 0 — groundwork
+
+Epic: `.agents/plan/epics/<epic-slug>.md`
+Depends on: <nothing of this epic — it runs first>
+Kind: story-foundation
+Executor: groundwork-engineer
+Paths: <every locked path, space separated, none holding a space>
+
+## Change
+
+**`<path>` — <the edit>.** <the exact entry, key or value, stated>
+
+## Constraints
+
+- <what must not change in the locked file>
+
+## Verify
+
+```
+pnpm run lint
+```
+
+Add, each as a separate case:
+
+1. `"<the check name>"` — `pnpm run lint` exits 0, and <the exact observable>.
+2. ...
+
+`pnpm run verify` exits 0.
+
+Proof: PASS line delivered — <files> in `PASS EPIC-<nnn>`.
+````
+
+Every case of it states a build check and no test, because a config edit opens no failing test. A
+test that proves a groundwork edit belongs to a later story, since a test file stays in the
+test-engineer lane. State the edit exactly: this story's executor takes no design decision, and a
+choice left in it is a planning defect you report.
+
 ### `story-implement` template
 
 ````
@@ -188,7 +270,12 @@ sequenceDiagram
     Command-->>Client: ok
 ```
 
-Citations, one per step: `:<line>`, `:<line>`, ...
+Citations, one per step, each in the form the standard fixes:
+`<file>:<line> — `<identifier>``,
+`<file>:<line> — `<identifier>``, ...
+
+The identifier is a token the cited line holds, and the gate agrees all three. A bare `:<line>` is
+refused: a stale line number still points at a valid line, and only the identifier catches the drift.
 
 <the sentences that say what this baseline records, and which of its properties
 the story changes>
@@ -258,6 +345,9 @@ Proof: PASS line delivered — <files> in `PASS EPIC-<nnn>`.
   where a first change declares `Baselines:`. The two never appear together for
   one diagram, and drawing a baseline for a path an earlier epic owns claims that
   epic never landed.
+- **`Executor:` names the role that applies the story, and `Paths:` grants it the write set.** Only
+  `00-groundwork.md` carries them, they appear together or not at all, and a `story-implement` never
+  carries either. `Paths:` is authored from the edit list, never derived from a citation.
 - **`Seams:` is one line per live diagram**, prefixed by that diagram id. Every
   token carries one sign, and the token is exact, label included. A context token
   is not declared. A removal from a path no baseline draws cites its source as
@@ -345,7 +435,14 @@ perform its checks yourself over what you wrote, and report each result:
     stating its assertion by value;
 11. every `## Change` obligation is proven by a numbered case or by an assertion of the epic's gate,
     and no story carries a step-to-case mapping line;
-12. every edit names a concrete file and site; every behaviour a test depends on
+12. every baseline step names a caller anchor, a callee anchor and the fixture state
+    that reaches it, and every removal names what replaces the data the removed
+    call supplied. No syntax gate checks reachability, so this check is yours;
+13. `Executor:` and `Paths:` appear together or not at all, on `00-groundwork.md` alone; every path
+    of `Paths:` is denied to both engineers and allowed to `groundwork-engineer` by
+    `scripts/lane-check.sh`; no path appears in two `Paths:` lines; no other story's `## Change` names
+    a path both engineers are denied;
+14. every edit names a concrete file and site; every behaviour a test depends on
     is pinned; every `Verify` lists exact commands and its Proof line; no sentence
     asks the implementer to design, choose or decide at build time; no
     motivation, history or debate prose remains.
@@ -376,9 +473,17 @@ Do **not** commit — the human reviews and commits.
 - an unsigned `Seams:` token, and a context token declared as a change;
 - a `story-implement` that draws no pair for a shipped path, and a
   `story-foundation` that draws anything;
+- a `Paths:` line holding a path an engineer may write, a path
+  `scripts/lane-check.sh groundwork-engineer` denies, or `AGENTS.md`;
+- a `## Change` edit at a path both engineers are denied that no `Paths:` line declares;
+- a groundwork story exempted from the ten-story cap, and an empty one written for an epic that needs
+  no locked path;
 - a story with no kind;
 - a `## Verify` written as prose instead of a numbered case list;
 - a `## Change` obligation no case and no gate assertion proves;
+- a baseline step with no caller anchor, no callee anchor, or no fixture state
+  that reaches it;
+- a removal that names no replacement for the data the removed call supplied;
 - a gate bullet claiming a property the trace does not prove, in particular "the
   operation wrote nothing" and "every branch is drawn";
 - renaming or renumbering a live diagram id another epic references;

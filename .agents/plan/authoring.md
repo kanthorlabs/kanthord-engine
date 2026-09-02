@@ -36,14 +36,22 @@ An epic states **what was decided** and **how the result is proven**. Nothing el
 - **Two sections carry weight: `## Decisions` and `## Verification Gate`.** A decision states the
   ruling and the constraint it imposes, with the evidence that forced it. The gate states every
   assertion that proves the epic shipped what it decided, and **every assertion in it is owned by
-  exactly one story**.
+  exactly one story**. The hermetic-coverage list is a table with a `story` column, and every row
+  names one **proof owner**. Other stories contribute the implementation; the named story owns the
+  proof.
 - **Everything else is light.** `## Goal` is a short list of the properties that hold when the epic
   lands. `## Non-goals` names what a reader would otherwise expect here and where it went instead.
   `## Stories` is a list of names and outputs, one entry per story, and the story file carries the
   change, the tasks and the diagrams.
+- **A change and the repairs it forces are one epic. This rule outranks the story count.** A change
+  that makes shipped code invalid lands with the repair of that code. Name every file the change
+  invalidates before you split. Keep those files in one epic. A migration and every statement that
+  writes its changed columns are one epic. A required field and every site that constructs the type
+  are one epic. A removed method and its callers are one epic.
+
 - **An epic holds no more than ten stories.** Eleven is a split, not a judgement call. Number the new
   epic with a decimal when the whole numbers after it are already authored, so no cross-reference
-  moves.
+  moves. The count sees no coupling. Check a forced split against the rule above before you take it.
 
 ## The story, and its two kinds
 
@@ -56,6 +64,18 @@ slice of one operation and is not independently green. Every obligation of `## C
 numbered case or by an assertion of the epic's gate, and the numbering freezes when implementation
 starts.
 
+- **A cross-reference to a story names its file stem, not its ordinal alone**, as
+  `EPIC 050 Story 7 (07-the-proposal-records-the-run-model)`. A split renumbers the stories of the
+  epic it splits, and every pre-split ordinal still resolves — to the wrong story. The stem is what
+  makes the reference exact, and the gate resolves it.
+- **A citation is written ``<file>:<line> — `<identifier>` ``**, and the identifier is a token the
+  cited line holds. The gate agrees all three. A check that the file exists and holds that many lines
+  catches nearly nothing, because a stale citation still points at a valid line. The form is fixed
+  here so that check is implementable, and is never a decision its implementer takes. A `Seams:`
+  removal token carries the same anchor in its own `@<file>:<line>` form, and its key and method are
+  the identifier. The gate reads a citation only inside its range, per
+  `## Rollout, and what is grandfathered`.
+
 ### `story-foundation`
 
 Work that changes no drawn path: a migration, a schema, a pure function, a service interface and its
@@ -64,6 +84,38 @@ implementation, a configuration budget, a contract registration, a proposal docu
 - **It draws nothing.** It carries no `Diagrams:`, no `Baselines:` and no `Seams:` line.
 - The pair rule does not reach it, and it is never "too small" for holding no diagram.
 - It is proven by its own unit test and by the epic's gate, never by a trace.
+
+### The groundwork story, and the two lines that declare it
+
+`scripts/lane-check.sh` locks a path set to both TDD engineers: the toolchain manifest and config,
+the build definition, and every path that belongs to no engineer lane. An epic that needs such an
+edit collects **every** one of them into one `story-foundation`, named `00-groundwork.md` and first in
+dispatch order. That story declares two more lines:
+
+```text
+Kind: story-foundation
+Executor: groundwork-engineer
+Paths: package.json package-lock.json eslint.config.js
+```
+
+- **The kind does not change.** The kind axis is what a story draws, and groundwork draws nothing.
+  A third kind would put the executor on the drawing axis, where it does not belong.
+- **`Executor:` is the dispatch signal, and `Paths:` is the authorization.** The two stay separate, so
+  a foundation story that names paths never becomes a groundwork dispatch by accident.
+- **`Paths:` is authored, never derived from citations.** A new file holds no line, a rename and a
+  deletion hold no natural anchor, and an anchor often cites a line the story reads instead of a line
+  it writes. `/author` writes the set from its own edit list.
+- **Authority is the intersection of the ceiling and the grant.** `scripts/lane-check.sh` gives the
+  `groundwork-engineer` role its ceiling. The story's `Paths:` set, or the path set of one
+  `OPEN: OUT-OF-LANE` request, gives the grant. A role whose lane alone decided its writes is a write
+  hatch with an audit trail.
+- **It counts against the ten-story cap.** The arithmetic of an epic states that foundation work
+  taking a slot is the intent, and this story is foundation work.
+- **An epic that needs no locked path holds no such story.** Never manufacture an empty one.
+- **Its cases are build-only checks**, because a config edit opens no failing test. A test that proves
+  a groundwork edit belongs to a later story, because a test file stays in the test-engineer lane.
+- **`AGENTS.md`, the plan tree, the pipeline definition and the pipeline guards are never in
+  `Paths:`.** Each records a decision or judges the executor, and a human writes it.
 
 ### `story-implement`
 
@@ -234,6 +286,36 @@ Seams: claim-success-task: +plan.setNodeAssignment, ~lease.read, -execution.adop
   `-<key>.<method> @<file>:<line>`. A removal is never legal without evidence.
 - **A story that changes no drawn path carries none of the three lines.**
 
+## The evidence a change kind requires
+
+A change of one of these kinds carries the evidence of its row, at `file:line`. A story that carries
+less is not implementable.
+
+| change kind                          | required evidence                                                                                                 |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| a deletion                           | semantic consumers, exact imports and literal values, tests and helpers, generated artifacts and their generators |
+| a removed read                       | the replacement source of every field the surviving code still reads                                              |
+| an event introduced or changed       | the settled type, subject kind, subject id, payload and transaction                                               |
+| a fixture- or SQL-dependent path     | the reachable setup, and the complete key predicate of every table named                                          |
+| a proof whose only oracle is absence | a control case proving the assertion detects a nearby forbidden case                                              |
+
+Each row is forced by a shipped defect:
+
+- a lease-removal epic swept three `src/` directories. The sweep missed `src/cli/`, three
+  `src/http/server/` handlers, a typed `httpError("lease-held", …)` call two directories away, the
+  generated fixture `src/http/contract/field-decisions.fixture.ts` its own Proof pins, and
+  `test/helpers/lease.ts` with fourteen importers;
+- three ship diagrams deleted the only node read, while the surviving code still reads `node.kind`,
+  `node.parentId`, `node.revision` and `node.state`. The drawn path could not execute;
+- no story pinned the subject of `run.opened`, `run.renewed` or `run.ended`. Four epics inherited an
+  undecided value as a settled one, and drew the node alias where the code writes the run id;
+- a story joined `run_base` on `run_id` alone. Its primary key is `(run_id, repository_id)`, so the
+  sweep moved one node once per repository;
+- a harness stringified a missing field to `undefined`, and a scenario author wrote the alias
+  `undefined: "siblings"` to work around it.
+
+No gate checks this table. A reviewer checks it.
+
 ## What a diagram does not prove
 
 - **It does not prove a refusal code.** Two refusals that stop at the same step are one diagram, and
@@ -291,20 +373,36 @@ invalid, and a human resolves it before implementation.
 - a story holds no numbered case list under `## Verify`;
 - a story declares no kind, or a `story-foundation` carries a `Diagrams:`, `Baselines:` or `Seams:`
   line, or a `story-implement` declares no `Diagrams:` line. A `story-implement` that only composes
-  declares `Diagrams:` and no `Seams:`, so the gate requires the first line and never the second.
+  declares `Diagrams:` and no `Seams:`, so the gate requires the first line and never the second;
+- a story declares `Executor:` and no `Paths:`, or `Paths:` and no `Executor:`, or either line on a
+  `story-implement`;
+- a path of a `Paths:` line is allowed to either engineer by `scripts/lane-check.sh`, or is denied to
+  the `groundwork-engineer` role by it, or appears in the `Paths:` line of two stories;
+- a story's `## Change` names a path both engineers are denied that no `Paths:` line of the epic
+  declares;
+- a cross-reference to a story carries an ordinal and no file stem, or a stem that resolves to no
+  story of the named epic;
+- a citation names an absent file, a line that file does not hold, or a line that does not hold the
+  identifier the citation names;
+- an epic's hermetic-coverage list is not a table, or a row of it names no story or two.
 
 ## What makes this standard the default
 
 A skill produces a compliant story when it is invoked. It is not the mechanism that makes the story
-compliant. Three mechanisms carry that, and a repository holding only the first has an aspiration:
+compliant. Three mechanisms carry that, and each one states here whether it exists:
 
 1. **The range gate** — `scripts/verify-epic-sequence.ts` in `pnpm run verify`, refusing every
-   inconsistency listed above.
+   inconsistency listed above. **Not built.** It is EPIC 050.1 Story 8, so it lands after the epics
+   that already depend on it.
 2. **The declared kind** — every story states `story-foundation` or `story-implement` on the line
-   under its title. A story that draws nothing is a visible decision, never a silent omission, and the
-   gate refuses a story with no kind.
-3. **The consuming skills** — `/author` refuses to write a story with no kind, `/work` refuses to
-   implement one, and `/review` refuses to pass one.
+   under its title. A story that draws nothing is a visible decision, never a silent omission.
+   **In use since EPIC 050.** Nothing enforces it: the refusal belongs to the gate above.
+3. **The consuming skills** — `/author` writes the kind. `/review` reads it. **`/work` enforces
+   nothing.** Its skill file names no kind, no diagram and no `Seams:` line. A story with no diagram
+   runs on its `## Change` prose.
+
+Two of the three are absent. This file is a convention until the gate lands. Never cite a mechanism
+above as a reason a defect cannot reach `src/`.
 
 ## Rollout, and what is grandfathered
 

@@ -57,6 +57,47 @@ deny test-engineer .agents/tdd/memory/unknown/2026-08-05.md
 deny test-engineer .agents/tdd/memory/software-engineer-other/2026-08-05.md
 deny test-engineer .agents/tdd/memory/software-engineer
 
+allow groundwork-engineer package.json
+allow groundwork-engineer package-lock.json
+allow groundwork-engineer tsconfig.json
+allow groundwork-engineer tsconfig.build.json
+allow groundwork-engineer eslint.config.js
+allow groundwork-engineer prettier.config.mjs
+allow groundwork-engineer Containerfile
+allow groundwork-engineer compose.yaml
+allow groundwork-engineer Makefile
+allow groundwork-engineer README.md
+allow groundwork-engineer .github/workflows/ci.yaml
+allow groundwork-engineer .gitignore
+allow groundwork-engineer docs/brainstorm.md
+allow groundwork-engineer docs/diagrams/state-machine.svg
+allow groundwork-engineer .agents/tdd/history/2026-08-05-006-git-primitives.md
+allow groundwork-engineer .agents/tdd/memory/groundwork-engineer/2026-08-05.md
+deny groundwork-engineer .agents/tdd/memory/software-engineer/2026-08-05.md
+deny test-engineer .agents/tdd/memory/groundwork-engineer/2026-08-05.md
+deny groundwork-engineer AGENTS.md
+deny groundwork-engineer .agents/plan/stories/epic/story.md
+deny groundwork-engineer .claude/skills/work/SKILL.md
+deny groundwork-engineer .opencode/agents/groundwork-engineer.md
+deny groundwork-engineer scripts/lane-check.sh
+deny groundwork-engineer scripts/lane-check.test.sh
+deny groundwork-engineer scripts/turn-snapshot.sh
+deny groundwork-engineer scripts/verify-handoff.mjs
+deny groundwork-engineer scripts/memory-append-only.sh
+deny groundwork-engineer scripts/proof.sh
+deny groundwork-engineer src/main.ts
+deny groundwork-engineer src/services/git/url.ts
+deny groundwork-engineer src/services/git/url.test.ts
+deny groundwork-engineer src/domain/notes.md
+deny groundwork-engineer smoke.test.ts
+deny groundwork-engineer docs/examples/sample.spec.ts
+deny groundwork-engineer test/helpers/daemon.ts
+deny groundwork-engineer docs/proposal/api/README.md
+deny groundwork-engineer /etc/passwd
+deny groundwork-engineer ../outside.ts
+deny groundwork-engineer "package.json -> package5.json"
+usage groundwork-engineer ""
+
 for role in test-engineer software-engineer; do
   deny "$role" .agents/plan/stories/epic/story.md
   deny "$role" .claude/skills/work/SKILL.md

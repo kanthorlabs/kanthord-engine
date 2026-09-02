@@ -1,10 +1,10 @@
 # Story 9 — The proposal records the claim
 
 Epic: `.agents/plan/epics/050.1-the-claim.md`
-Depends on: every prior story of this epic, and EPIC 050 Story 9 (which creates the document). This document states what the code does; write it last.
+Depends on: every prior story of this epic, and EPIC 050 Story 7 (`07-the-proposal-records-the-run-model`), which creates the document. This document states what the code does; write it last.
 Kind: story-foundation
 
-EPIC 050 Story 9 created `docs/proposal/phase-2/runs-and-exclusion.md` and recorded the run model.
+EPIC 050 Story 7 (`07-the-proposal-records-the-run-model`) created `docs/proposal/phase-2/runs-and-exclusion.md` and recorded the run model.
 This story adds the claim half. EPIC 050.2 Story 9 adds the authority half. It draws no path.
 
 ## Change
@@ -32,7 +32,7 @@ numbered list with one owner per step. Insert each new section after
 
 - Extend the shipped document. Do not create a second one.
 - **Write no section this epic does not implement.** Run authority, the renew formula, the release and the one-terminal-event rule belong to EPIC 050.2 Story 9. A section written here that a later epic implements makes this story unprovable in dispatch order.
-- Do not restate the run kinds, the fence column, the exclusion rules, the base set, the provenance or the budgets. EPIC 050 Story 9 owns all seven sections.
+- Do not restate the run kinds, the fence column, the exclusion rules, the base set, the provenance or the budgets. EPIC 050 Story 7 (`07-the-proposal-records-the-run-model`) owns all seven sections.
 - Record no implementation detail: no file path, no dependency key, no SQL.
 - The document records the decision, not the search for it. A "why" sentence is admitted only where the rule is surprising without it, as in the refusal order and the review refusal above.
 - ASD-STE100 style, matching the sibling phase-2 documents: simple tenses, active voice, one instruction per sentence.
@@ -43,7 +43,7 @@ numbered list with one owner per step. Insert each new section after
 node --test test/helpers/proposal.test.ts
 ```
 
-Add both cases to `test/helpers/proposal.test.ts`, beside the three EPIC 050 Story 9 added.
+Add both cases to `test/helpers/proposal.test.ts`, beside the three EPIC 050 Story 7 (`07-the-proposal-records-the-run-model`) added.
 
 1. `"the run model document names every ordered claim refusal"` — read the file and assert it contains each member of the exported claim refusal list. Build the expected list by importing that list from `src/commands/node/claim-node.ts`, the same export Story 3 asserts against, rather than restating the twelve literals, so the document and the union cannot drift. Assert the count is twelve, so a thirteenth code added later fails until the document records it.
 

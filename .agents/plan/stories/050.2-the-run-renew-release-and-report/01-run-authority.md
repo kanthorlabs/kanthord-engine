@@ -1,12 +1,12 @@
 # Story 1 — Run authority
 
 Epic: `.agents/plan/epics/050.2-the-run-renew-release-and-report.md`
-Depends on: Story 3 (`RunRow` and its new fields). No storage dependency — this story adds a pure function.
+Depends on: EPIC 050 Story 2 (`02-the-run-row`), for `runRow` and its authority fields. No storage dependency — this story adds a pure function.
 Kind: story-foundation
 
 ## Change
 
-**Create `src/domain/run-authority.ts`** (greenfield).
+**Create `src/domain/run-authority.ts`** (greenfield). No file of that name exists under `src/domain/`, and `assertRunAuthority` appears nowhere in `src/`, `test/` or `scripts/`.
 
 ```ts
 export const runAuthorityRefusals = [
@@ -52,7 +52,7 @@ export function assertRunAuthority(
 
 1. `run-not-found` — `input.run === null`, or `input.run.id !== input.runId`.
 2. `run-ended` — `input.run.state !== "active"`.
-3. `run-expired` — `input.run.expiresAt !== null && input.run.expiresAt <= input.now`. A null `expiresAt` never expires, matching Story 5 and Story 7.
+3. `run-expired` — `input.run.expiresAt !== null && input.run.expiresAt <= input.now`. A null `expiresAt` never expires, and cases 6 to 8 pin all three boundaries.
 4. `run-caller-mismatch` — `input.run.worker !== input.caller`.
 5. `target-outside-run` — `input.targetNodeId !== input.run.nodeId` and `input.subtreeIds.includes(input.targetNodeId) === false`. `subtreeIds` is the descendant set of the run's node; the caller supplies it, and the run's own node is admitted whether or not it appears there.
 6. `fence-stale` — `input.run.fence !== input.fence`.
@@ -65,7 +65,7 @@ The order is what makes an ended run presented with its own last fence refuse `r
 
 - Pure. `now` and `caller` are inputs. No clock, no store.
 - The refusal object has exactly two keys. Do not add a `message`; the caller builds one.
-- Do not throw. The function returns a refusal or `null`; each command in Story 10 turns a refusal into its own error class.
+- Do not throw. The function returns a refusal or `null`; Story 3 (`03-the-renew`), Story 5 (`05-the-release`) and Story 6 (`06-the-report-prelude`) each turn a refusal into their own error class.
 - Do not mutate `input.subtreeIds`.
 
 ## Verify
@@ -76,7 +76,7 @@ node --test src/domain/run-authority.test.ts
 
 Create `src/domain/run-authority.test.ts`. Suite name `"src/domain/run-authority.test"`. `node:test`, `node:assert/strict`.
 
-Module-scope fixtures: `const NOW = 1700000000000;`, `const RUN_ID = "run_a";`, `const NODE_ID = "task_a";`, `const CALLER = "general@1";`, and one `validInput` const holding a passing input, with variants built by spread — the convention of `src/domain/run.test.ts:44-50`.
+Module-scope fixtures: `const NOW = 1700000000000;`, `const RUN_ID = "run_a";`, `const NODE_ID = "task_a";`, `const CALLER = "general@1";`, and one `validInput` const holding a passing input, with variants built by spread — the convention of `src/domain/run.test.ts:45` — `validRun`.
 
 Assert, each as a separate `it`:
 
@@ -128,4 +128,4 @@ Assert, each as a separate `it`:
 
 `pnpm run verify` exits 0.
 
-Proof: PASS line delivered — `src/domain/run-authority.test.ts` in `PASS EPIC-050`.
+Proof: PASS line delivered — `src/domain/run-authority.test.ts` in `PASS EPIC-050.2`.

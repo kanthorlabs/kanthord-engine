@@ -1,17 +1,17 @@
 # Story 3 — The objective-busy refusal drops the lease
 
 Epic: `.agents/plan/epics/050.4-the-node-lease-removal.md`
-Depends on: Story 1 (the deletion), EPIC 050.1 Story 5 (the refusal).
+Depends on: EPIC 050.4 Story 1 (`01-the-claim-of-a-task-drops-the-lease`) for the deletion, and EPIC 050.1 Story 5 (`05-the-objective-busy-refusal`) for the refusal.
 Kind: story-implement
 
 Diagrams: claim-lease-free-objective-busy
 
 Supersedes: EPIC 050.1 claim-refusal-objective-busy
 
-Seams: claim-lease-free-objective-busy: -lease.read
+Seams: claim-lease-free-objective-busy: -lease.read:T, -lease.read:O, -lease.read:S
 
-The prior set of this path is `claim-refusal-objective-busy`, the live refusal diagram EPIC 050 Story
-12 drew. Its signs are measured only over the tokens it holds: `lease.acquire` is a token the refusal
+The prior set of this path is `claim-refusal-objective-busy`, the live refusal diagram EPIC 050.1 Story
+5 drew. Its signs are measured only over the tokens it holds: `lease.acquire` is a token the refusal
 never reached, so its deletion is Story 1's and not this story's.
 
 ## The ship path

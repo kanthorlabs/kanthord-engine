@@ -1,7 +1,7 @@
 # Story 4 — The delete-node guard
 
 Epic: `.agents/plan/epics/050.3-the-plan-write-guard.md`
-Depends on: Story 1 (`plan.runCoversNode`), Story 8 (`subtree-busy` on `node.delete`).
+Depends on: Story 1 (01-the-run-covers-node-rule), for `plan.runCoversNode`; Story 8 (08-subtree-busy-joins-the-plan-operations), for `subtree-busy` on `node.delete`; EPIC 050.1 Story 6 (06-the-conformance-harness) and EPIC 050.1 Story 7 (07-the-conformance-runner), which this story's scenario file runs on.
 Kind: story-implement
 
 Diagrams: delete-node-guard
@@ -36,12 +36,23 @@ sequenceDiagram
     note over Command: tail unchanged by EPIC 050.3
 ```
 
-Citations: `:53`, `:54`, `:59`, `:75`, `:77`. This command reads the clock at `:75`, after two plan
-reads — the only one of the five that does not read it first.
+Citations, one per step: `src/commands/node/delete-node.ts:53 — `storage.transact``,
+`src/commands/node/delete-node.ts:54 — `readNode``,
+`src/commands/node/delete-node.ts:59 — `newestRevision``,
+`src/commands/node/delete-node.ts:75 — `clock.now``,
+`src/commands/node/delete-node.ts:77 — `readSubtree``. This command reads the clock at `:75`, after
+two plan reads — the only one of the five that does not read it first.
 
-The tail this note pins is `plan.readGraph` at `:80`, `plan.readSubtreeExecutionFacts` at `:105`,
-`ids.mint` at `:141`, `revision.render` at `:176`, `revision.record` at `:179`, `plan.mutateGraph` at
-`:193`, `plan.readValidationContext` at `:203` and `events.append` at `:236`.
+Callee anchors, one per step: `src/services/storage/index.ts:33 — `transact``,
+`src/services/plan/index.ts:73 — `readNode``, `src/services/plan/index.ts:75 — `newestRevision``,
+`src/services/clock/index.ts:2 — `now``, `src/services/plan/index.ts:101 — `readSubtree``. Steps 4 and
+5 are reachable because the fixture's `fromRevision` equals the newest revision, so the
+`stale-revision` throw between `:59` and `:75` does not fire.
+
+The tail this note pins holds every seam call after step 5: `plan.readGraph` at `:80`,
+`plan.readSubtreeExecutionFacts` at `:105`, `ids.mint` at `:141`, `revision.render` at `:176`,
+`revision.record` at `:179`, `plan.mutateGraph` at `:193`, `plan.readValidationContext` at `:203`,
+`graph.cycles` at `:225` and `events.append` at `:236`. None of them moves.
 
 ### `delete-node-guard`
 
@@ -68,7 +79,12 @@ sequenceDiagram
 
 Step 6 sits after the subtree read and before `plan.readGraph` at `:80`. It could sit immediately
 after step 4, because the closure supplies the subtree itself; it is drawn after step 5 so the
-`delete-set-empty` and containment refusals that read the subtree keep their shipped order.
+subtree read keeps its shipped position.
+
+**The guard therefore precedes two shipped refusals**, `illegal-transition` at `:96-103`, which
+refuses a subtree holding a node outside `deletableStates`, and `binding-in-use` at `:109-115`. Both
+are decided from `plan.readGraph` at `:80` and `plan.readSubtreeExecutionFacts` at `:105`, which the
+drawn guard precedes, so a covering run now wins against both. Case 8 asserts that pair.
 
 Add `test/sequence/scenarios/delete-node-guard.ts`.
 
@@ -95,11 +111,15 @@ would make the guard depend on a read whose position the epic does not pin.
 
 Add `"subtree-busy"` to the refusal union of `NodeWriteError` for this command.
 
-**The `lease` blocker of `readSubtreeExecutionFacts` stays.** `src/services/plan/sqlite.ts:349-353`
-puts a `lease` member in the closed `executionBlockers` list, and `delete-node.ts:105` refuses
-`binding-in-use` on any member. EPIC 050.4 swaps it for the run blocker with the rest of the
-mechanism. Until then `delete-node` refuses on a stale lease row as well as on an active run — a
-superset of the guard, never a gap. Do not remove it here.
+**Every member of `readSubtreeExecutionFacts` stays, and two of them matter here.**
+`src/services/plan/sqlite.ts:352 — `blocker: "lease"`` puts a `lease` member in the closed
+`executionBlockers` list and `src/services/plan/sqlite.ts:362 — `blocker: "run"`` puts a `run` member
+in it, and `delete-node.ts:105` refuses `binding-in-use` on any member. EPIC 050.5 Story 5 owns that list. Do not remove either here.
+
+Two consequences, and this story asserts both rather than letting an implementing agent find them:
+
+- **`delete-node` refuses on a stale lease row as well as on an active run** — a superset of the guard, never a gap.
+- **The `run` member carries no state filter.** `SELECT node_id FROM run WHERE node_id IN (...)` at `src/services/plan/sqlite.ts:363 — `FROM run`` matches an `ended` and an expired run as well as an active one, so `delete-node` refuses `binding-in-use` where the other four commands admit the write. `delete-node` cannot show the expired-run and ended-run boundaries the epic's gate states for the other four, and case 5 asserts `binding-in-use` there instead. Narrowing that member belongs with its producer, in EPIC 050.5.
 
 ## Constraints
 
@@ -123,17 +143,17 @@ Add, each as a separate `it`:
 
 3. `"a delete of a node whose ancestor holds an active run refuses, naming the ancestor"` — run on `I`, delete `O`.
 
-4. `"a delete of a node whose sibling holds an active run succeeds"`.
+4. `"a delete of a node whose sibling holds an active run succeeds"` — run on the objective `test/helpers/rows.ts:206 — `seedSiblingObjective`` adds, delete `O`.
 
-5. `"a delete of a node covered by an expired run succeeds"` — and assert no `binding-in-use` fires either, because the fixture holds no execution row.
+5. `"an expired run in the subtree refuses binding-in-use, not subtree-busy"` — `expires_at: NOW - 1` on `T`, delete `O`. Assert `error.refusal === "binding-in-use"` and that `blockers` names the `run` member. This is the one command where an expired run does not admit the write, because the `run` member of `executionBlockers` matches any run row; the Change names the reason and EPIC 050.5 narrows the member. Repeat the case with `state: 'ended'` and assert the same, so both boundaries are pinned.
 
 6. `"a subtree-busy refusal leaves the database byte-identical"`.
 
-7. `"a stale revision beats a covering run"`.
+7. `"the refusal precedence of node.delete"` — one decision table over every pair of `node-not-found`, `stale-revision`, `subtree-busy`, `illegal-transition`, `binding-in-use` and `plan-invalid` that can trigger at once, with the winner named per pair and every unreachable pair marked unreachable with its reason. `stale-revision` beats `subtree-busy`, and `subtree-busy` beats both `illegal-transition` and `binding-in-use`, are three of its rows.
 
-8. `"the lease blocker of binding-in-use still fires"` — seed a node lease row on `T`, no run, delete `O`. Assert `error.refusal === "binding-in-use"` and that `blockers` names the `lease` member. The superset guard is deliberate, and EPIC 050.4 inherits a known state.
+8. `"the lease blocker of binding-in-use still fires"` — seed a node lease row on `T` with `test/helpers/rows.ts:668 — `seedLeaseOnNode``, no run, delete `O`. Assert `error.refusal === "binding-in-use"` and that `blockers` names the `lease` member. The superset guard is deliberate, and EPIC 050.5 inherits a known state.
 
-9. `"a covering run beats binding-in-use"` — seed both an active run and a workspace row on `T`, delete `O`. Assert `subtree-busy`, proving the guard sits ahead of `readSubtreeExecutionFacts` at `:105`.
+9. `"a covering run beats binding-in-use and illegal-transition"` — seed an active run and a workspace row on `T`, delete `O`, and assert `subtree-busy`; then seed an active run on `T` with `T` in a non-deletable state and assert `subtree-busy` again. The guard sits ahead of `plan.readGraph` at `:80` and of `readSubtreeExecutionFacts` at `:105`, so it wins against both.
 
 Add `test/sequence/scenarios/delete-node-guard.ts`.
 

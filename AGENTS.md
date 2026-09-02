@@ -113,6 +113,7 @@ A query takes the same shape. `main.ts` binds the dependencies once and passes c
 - **Hermetic.** No network, no shared temporary directory, no ambient `git` configuration, no wall-clock dependency. A test that needs a remote uses the loopback fixture of EPIC 005. A test that needs a home uses its own `mktemp` directory and removes it.
 - **Real SQLite, faked everything else.** `node:sqlite` on a temporary file is fast, and it is the thing under test for much of phase 1. A fake for git, agent and clock is a small hand-written object implementing the interface.
 - **Fake against Mock.** A **Fake** returns a generic safe default. A **Mock** returns the deterministic value the story names. A story that names a value gets a Mock.
+- **A negative-only proof carries a control.** A proof whose only oracle is absence — no match, no row, no call, no diff — ships with a control case that proves the assertion detects a nearby forbidden case.
 - **A test is inside the boundary it covers, not outside the matrix.** A test imports any module under `src/`, `test/helpers/` and `node:` builtins. It never imports `src/main.ts`. The relaxation is deliberate: a handler test asserts the handler over its real query, and a query test asserts the query against the contract schema its response must satisfy. A fake substituted for either would assert the fake. `eslint.config.js` encodes exactly this — `default: "allow"` for a test, with the composition root disallowed — so the rule and the tree agree, and a reviewer does not decide it per file.
 
 ## Determinism

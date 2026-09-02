@@ -1,14 +1,14 @@
 # Story 1 — The external sweep scans runs
 
 Epic: `.agents/plan/epics/050.5-the-lease-table-removal.md`
-Depends on: EPIC 050.4, implemented. EPIC 050 Story 2 (`run.expires_at`, `run.driver`, `run_base`).
+Depends on: EPIC 050.4, implemented. EPIC 050.1 migration `12` (`run.expires_at`, `run.driver`, `run.fence`, `run_base`).
 Kind: story-implement
 
 Diagrams: sweep-external-runs
 
 Baselines: sweep-external-runs <- baseline-sweep-external-leases
 
-Seams: sweep-external-runs: -events.append:recovery.leaseRecovered, +events.append:recovery.runRecovered
+Seams: sweep-external-runs: -events.append:recovery.leaseRecovered:T, +events.append:recovery.runRecovered:T
 
 This story owns the shared candidate query and the two recovery event types. Story 2 consumes both.
 
@@ -38,7 +38,12 @@ sequenceDiagram
     Command-->>Caller: ok
 ```
 
-Citations, one per step: `:105`, `:112`, `:118`, `:129`, `:142`.
+Citations, one per step:
+`src/commands/startup/recover-expired-leases.ts:105 — `execution.attemptsOfRun``,
+`src/commands/startup/recover-expired-leases.ts:112 — `execution.closeAttempt``,
+`src/commands/startup/recover-expired-leases.ts:118 — `execution.endRun``,
+`src/commands/startup/recover-expired-leases.ts:129 — `plan.setNodeState``,
+`src/commands/startup/recover-expired-leases.ts:142 — `events.append``.
 
 No `Storage` participant appears: the command receives the transaction its caller opened. No `Lease`
 participant appears either — the `lease` key at `:64` is declared and never called, and both reaches
@@ -84,15 +89,31 @@ Add `test/sequence/scenarios/sweep-external-runs.ts`.
 ### 1 — the file and the export
 
 `git mv src/commands/startup/recover-expired-leases.ts src/commands/startup/recover-expired-runs.ts`
-and its test beside it. Rename `sweepExpiredExternalLeases` to `sweepExpiredExternalRuns`, with
+and its test beside it.
+
+**The write exemption for the renamed test is already in place, and it is not this story's to
+write.** The test seeds `node` rows with raw SQL, and `eslint.config.js:21` —
+`recover-expired-leases.test.ts` is what exempts it from `nodeEdgeWriteSelectors`. `eslint.config.js`
+matches `*.config.*`, so `scripts/lane-check.sh` denies it to both engineers, and EPIC 050.5 Story 0
+(`00-groundwork`) added the `recover-expired-runs.test.ts` entry before this loop started. Seed no
+new raw `node` write beyond what the shipped cases carry, and report a lint failure on that selector
+as a groundwork defect rather than editing the config.
+
+Rename `sweepExpiredExternalLeases` to `sweepExpiredExternalRuns`, with
 `SweepExpiredExternalLeasesDependencies`, `…Input` and `…Result` renamed to match. Story 2 renames the
 file's other export.
 
-Update the three call sites in `src/main.ts` — the closure at `:377-386` and its three injections at
+Update the three call sites in `src/main.ts` — the closure at `:377-385` and its three injections at
 `:515` (`node.list`), `:553` (`node.claim`) and `:634` (`project.nodes`) — and the dependency key on
-`src/queries/node/list-node.ts:9,19,35` and `src/queries/node/list-project-node.ts:23,43`. **EPIC 050
-Story 10 removed the call from `claim-node.ts` and left the key on its dependencies record**; delete
-the key there too, because after this story no claim path reads it.
+`src/queries/node/list-node.ts:9,19,35` and `src/queries/node/list-project-node.ts:23,43`.
+
+**`claim-node.ts` keeps the key and loses it here.** EPIC 050.1 Story 3
+(`03-the-claim-of-a-task`) replaced the **call** with the `expiry` capability — its `Seams:` line
+declares `-sweepExpiredExternalLeases.call` — and EPIC 050.4 Story 1
+(`01-the-claim-of-a-task-drops-the-lease`) states in its Constraints that the key stays and that this
+epic owns it. Delete `sweepExpiredExternalLeases` from `ClaimNodeDependencies` at
+`src/commands/node/claim-node.ts:58-61`, and confirm no invocation survives at `:107` before you do:
+a surviving call is an EPIC 050.1 defect and it is reported, not repaired here.
 
 ### 2 — the candidate query
 
@@ -104,8 +125,8 @@ SELECT r.node_id AS node_id, r.fence, r.id AS run_id, r.driver, n.kind,
        rb.oid AS base_oid, w.path, w.repository_id, n.revision AS revision
 FROM run r
 JOIN node n ON n.id = r.node_id
-LEFT JOIN run_base rb ON rb.run_id = r.id
 LEFT JOIN workspace w ON w.id = r.workspace_id
+LEFT JOIN run_base rb ON rb.run_id = r.id AND rb.repository_id = w.repository_id
 WHERE r.state = 'active'
   AND r.expires_at <= ?
   AND n.state = 'running'
@@ -122,6 +143,14 @@ run's. Three shipped columns change source and none changes meaning:
 | `base_oid` | `ra.base_oid` on the active run   | `rb.oid` on `run_base`                       |
 | `run_id`   | the active run of that node       | the candidate run itself                     |
 | `driver`   | `COALESCE(ra.driver, rl.driver)`  | `r.driver`, with no fallback to the last run |
+
+**`run_base` is joined on the repository too, and the order of the two `LEFT JOIN` clauses is part of
+the statement.** Its primary key is `(run_id, repository_id)`, so a run holds one base row per
+repository and a join on `run_id` alone returns one candidate row per base. Both consumers write once
+per row, so the sweep would move one node twice and the verdict would compare the worktree head
+against whichever base SQLite returned first. The recovery compares the head of `workspace.path`
+against the base of `workspace.repository_id`, and the composite key then yields at most one row.
+`workspace` is joined first because the `run_base` predicate reads `w.repository_id`.
 
 **The two `LEFT JOIN run` clauses are gone.** The shipped query joined the active run and, failing
 that, the newest run by id — a fallback that existed because the _lease_ was the candidate and its run
@@ -166,6 +195,7 @@ literals in it, because the type it names is gone otherwise.
 - Delete the `lease` dependency key from this command and from `claim-node.ts`. Do not leave a key nothing reads.
 - Do not touch `writeVerdict`'s logic. Two string literals only.
 - Do not rename `RECOVERY_STEP_ORDER`'s `leases` step or `RecoverHomeDependencies.leases`. Story 2 states why that rename is deferred.
+- Do not edit `eslint.config.js`. EPIC 050.5 Story 0 (`00-groundwork`) holds its exemption entry, and the file is outside both engineer lanes.
 - Do not touch the `lease` table. It survives this epic, empty, until EPIC 057's migration `17`.
 
 ## Verify
@@ -180,7 +210,9 @@ Add, each as a separate `it`:
 
 2. `"the sweep appends exactly one recovery.runRecovered event and no recovery.leaseRecovered"`.
 
-3. `"the sweep writes no lease row"` — seed one owned, unexpired lease row on `T`, run the sweep, and assert **all eight columns** deep-equal the seeded values. The table still exists after this epic, so the comparison is real and it stays green through EPIC 057.
+3. `"the sweep writes no lease row"` — seed one owned, unexpired lease row on `T` by raw SQL and assert **all eight columns** deep-equal the seeded values: `('node', T, 'daemon_test', 'daemon', 1, NOW, NOW, NOW + 300000)`. `test/helpers/rows.ts:668 seedLeaseOnNode` writes `expires_at: 2`, which is expired under this suite's clock, so it cannot serve this case. The table still exists after this epic, so the comparison is real and it stays green through EPIC 057.
+
+3b. `"a run holding two base rows produces one candidate row"` — seed the expired external run of case 1 with two `run_base` rows, one for the workspace's repository and one for another. Assert the sweep appends exactly one `recovery.runRecovered` event and raises the fence by exactly one. Without this case the `repository_id` predicate could be dropped and the suite would stay green on a one-repository fixture.
 
 4. `"a run one millisecond from expiry is untouched"` — `expires_at: NOW + 1`. Assert the node stays `running` and the run stays `active`. With case 1 the boundary is pinned from both sides.
 

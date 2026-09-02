@@ -8,13 +8,13 @@ Diagrams: recovery-verdict-run
 
 Baselines: recovery-verdict-run <- baseline-recovery-verdict
 
-Seams: recovery-verdict-run: +execution.attemptsOfRun, +execution.closeAttempt, +execution.endRun
+Seams: recovery-verdict-run: +execution.attemptsOfRun:R, +execution.closeAttempt:A, +execution.endRun:R, -events.append:recovery.leaseRecovered:T, +events.append:recovery.runRecovered:T
 
 ## The path this story draws, and the one it cannot
 
 `recoverExpiredLeases` calls `storage.transact` three times — `:218` for the candidate read, `:231`
 for the external sweep and `:328` for each per-node verdict. `storage.transact` has no projection in
-the harness of EPIC 050.1 Story 6, and a method with no projection admits one call per diagram, so the
+the harness of EPIC 050.1 Story 6 (`06-the-conformance-harness`), and a method with no projection admits one call per diagram, so the
 outer pass's trace needs `:#2` and `:#3` — tokens the parser refuses outside a `baseline-` id.
 
 **The cause cannot be removed.** The git worktree reads at `:277-281` must sit outside a transaction,
@@ -50,13 +50,13 @@ Shipped path: `src/commands/startup/recover-expired-leases.ts:317-361`, the priv
 Fixture: task `T` `running` with an expired node lease and an active `internal` run `R`, one open
 attempt `A`, a workspace whose worktree is clean at the recorded base, so the verdict is `ready`.
 
-The baseline records `writeVerdict` **as shipped**, before Story 1's edit. Story 1 renames the event
-this path appends, so by the time this story is implemented the emit site already reads
-`recovery.runRecovered`. The event token is therefore a **context token** of this pair — present in
-both diagrams at one label — and this story signs it in neither direction. Story 1 owns that rename,
-and it owns it for both emit sites because `eventPayloads` is typed
-`Readonly<Record<EventType, ZodType>>`: a type removed without its emit site does not compile, so the
-two cannot be split across stories.
+The baseline records `writeVerdict` **as shipped**, before Story 1's edit, so it draws
+`recovery.leaseRecovered` and this pair signs the rename. **Story 1 makes the edit and this story
+signs it**, because a sign is relative to the path and Story 1's declaration governs
+`sweep-external-runs` alone. Story 1 owns the edit for both emit sites because `eventPayloads` is
+typed `Readonly<Record<EventType, ZodType>>`: a type removed without its emit site does not compile,
+so the two literals cannot be split across stories. Neither baseline runs a scenario, so nothing
+compares the deleted literal.
 
 ```mermaid
 sequenceDiagram
@@ -72,7 +72,10 @@ sequenceDiagram
     Command-->>Caller: ok
 ```
 
-Citations, one per step: `:328`, `:329`, `:343`.
+Citations, one per step:
+`src/commands/startup/recover-expired-leases.ts:328 — `storage.transact``,
+`src/commands/startup/recover-expired-leases.ts:329 — `plan.setNodeState``,
+`src/commands/startup/recover-expired-leases.ts:343 — `events.append``.
 
 The `UPDATE lease` at `:339-342` sits between steps 2 and 3 and is raw SQL, so it is invisible at this
 seam. **The shipped verdict never ends the run**: the lease expiry was what freed the node, and no
@@ -121,8 +124,7 @@ Rename `recoverExpiredLeases` to `recoverExpiredRuns`, with `RecoverExpiredLease
 `src/commands/startup/recover-expired-runs.ts`. Update `src/main.ts:123` and the `leases:` step
 binding at `:340-344`.
 
-Extract `writeVerdict` at `:317-361` as an exported nested command `writeRecoveryVerdict` taking the
-caller's transaction as its second parameter, matching `sweepExpiredExternalRuns`:
+Extract `writeVerdict` at `:317-361` as an exported nested command `writeRecoveryVerdict`.
 
 Its dependencies are `storage`, `execution`, `plan` and `events`, and **it keeps the
 `storage.transact` at `:328`**, which is why step 1 of both diagrams is that call. One transaction per
@@ -170,7 +172,7 @@ is a state neither command can read.
 - `:227-228` still splits on `row.driver === "external"`, now reading `r.driver` with no `COALESCE` fallback.
 - `:248-256` still refuses a non-task candidate with the `lease-expired-on-non-task` finding. Rename its code to `run-expired-on-non-task`; `RecoveryFinding.code` is a free `string` at `src/domain/recovery.ts:33`, and the finding reaches only `process.stderr`.
 - `:258-272` still blocks on `row.path === null || row.base_oid === null` with `recovery-inputs-missing`. **`base_oid` now comes from `run_base`, which nothing writes until EPIC 051**, so before that epic every internal candidate takes this branch. That is the correct verdict for a run whose base is unknown, and it is why this epic can land before EPIC 051.
-- `:274-306` still reads the worktree and decides `ready` against `blocked` by `clean && head === row.base_oid`. Unchanged.
+- `:274-306` still reads the worktree and decides `ready` against `blocked` by `clean && head === row.base_oid`. Unchanged. **The base it compares is the run base of `workspace.repository_id`**, which is what Story 1's join predicate selects; a run holding a base row for a second repository contributes no second candidate row and no second verdict.
 
 ### 4 — the recovery step vocabulary is **not** renamed, and the reason is a seam
 
@@ -222,7 +224,9 @@ Add, each as a separate `it`:
 
 6. `"one blocked node does not fail the pass"` — two internal candidates, the first with an unreadable workspace and the second clean. Assert the first is `blocked`, the second is `ready`, and the pass returns both in its counts. This is what the per-candidate transaction buys.
 
-7. `"the verdict writes no lease row"` — seed one owned, unexpired lease row on `T` and assert **all eight columns** deep-equal the seeded values after the pass.
+7. `"the verdict writes no lease row"` — seed one owned, unexpired lease row on `T` by raw SQL, `('node', T, 'daemon_test', 'daemon', 1, NOW, NOW, NOW + 300000)`, and assert **all eight columns** deep-equal the seeded values after the pass. `test/helpers/rows.ts:668 seedLeaseOnNode` writes `expires_at: 2` and cannot serve this case.
+
+7b. `"a run holding a base row for a second repository yields one verdict"` — seed the internal candidate of case 1 with a second `run_base` row naming another repository. Assert exactly one finding and one node write. This is the `repository_id` predicate of Story 1's join, asserted on the internal half.
 
 8. `"an external candidate is delegated to the sweep and not to the verdict"` — assert the node comes back `ready` with no git call. `git.worktreeClean` on a mock that throws proves the internal path was not taken.
 
