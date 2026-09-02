@@ -5,29 +5,29 @@ Depends on: nothing in this epic. EPIC 050.3 Story 3 and Story 7 removed the las
 Kind: story-foundation
 
 This story changes one store method and two of its callers. It draws no path: `leaseHeld` is
-**private** at `src/services/plan/sqlite.ts:558`, reached only from `readContainmentFacts` at `:276`
-and `readSubtreeContainmentFacts` at `:306`. No command calls it, so no command's seam trace changes
+**private** at `src/services/plan/sqlite.ts:564`, reached only from `readContainmentFacts` at `:278`
+and `readSubtreeContainmentFacts` at `:308`. No command calls it, so no command's seam trace changes
 when it dies.
 
 ## Change
 
 **`src/services/plan/sqlite.ts` — delete three lease reaches.**
 
-**1 — the private method.** Delete `leaseHeld` at `:558-567` whole.
+**1 — the private method.** Delete `leaseHeld` at `:564-573` whole.
 
 **2 — the two `ContainmentFacts` producers.** Delete the `lease:` member from the object returned by
-`readContainmentFacts` at `:276` and by `readSubtreeContainmentFacts` at `:306`. Delete `lease` from
+`readContainmentFacts` at `:278` and by `readSubtreeContainmentFacts` at `:308`. Delete `lease` from
 the `ContainmentFacts` type in `src/services/plan/index.ts`, leaving `workspace`, `attemptCommit` and
 `retainedCommit`.
 
-**3 — the subtree blocker.** Delete the `{ blocker: "lease", sql: ... }` entry at `:349-353` from the
+**3 — the subtree blocker.** Delete the `{ blocker: "lease", sql: ... }` entry at `:351-356` from the
 `queries` list of `readSubtreeExecutionFacts`, and delete `"lease"` from `executionBlockers` at
-`src/domain/plan-graph.ts:37-45`, which is the closed list `SubtreeExecutionFact["blocker"]` derives
+`src/domain/plan-graph.ts:38-46`, which is the closed list `SubtreeExecutionFact["blocker"]` derives
 from. **The list keeps six members**: `workspace`, `run`, `attempt`, `commit`, `check-result` and
 `git-operation`, in that order. The two the shipped `queries` list carries beyond the first four —
-`check-result` at `:374-377` and `git-operation` at `:378-381` — are untouched.
+`check-result` at `:375-378` and `git-operation` at `:379-382` — are untouched.
 
-**The `run` blocker at `:359-361` is shipped and it stays.** It matches any run row on a subtree node,
+**The `run` blocker at `:361-364` is shipped and it stays.** It matches any run row on a subtree node,
 not only an active one, which is wider than the `lease` member it now replaces. This story does not
 narrow it: `delete-node`'s `binding-in-use` refusal is about a node that is bound to execution
 history, and a finished run is such a binding. EPIC 050.3 Story 4 drew that path and left both
@@ -40,6 +40,15 @@ members; this story removes one.
 conjunct, and it takes `ContainmentFacts` by type, so removing the field is a type-level change its
 body does not see.
 
+**One string it feeds is touched.** `src/domain/plan-choice.ts:97` returns the containment refusal
+reason `"the node or a descendant holds a lease, a workspace or a commit"`. The lease left that
+predicate at EPIC 050.3 Story 7 and its last producer dies here, so change the string to
+`"the node or a descendant holds a workspace or a commit"`. It is asserted verbatim at
+`src/domain/plan-choice.test.ts:157,321,337`, so those three sites move in the same edit.
+`src/cli/plan/import.test.ts:509,513` hold a shorter hand-written fixture reason,
+`"the node or a descendant holds a lease"`, which no production file produces; amend it to
+`"the node or a descendant holds a workspace"` so no fixture advertises a removed mechanism.
+
 ## Constraints
 
 - Delete exactly one member of the blocker list. Do not touch `workspace`, `run`, `attempt` or `commit`.
@@ -50,7 +59,7 @@ body does not see.
 ## Verify
 
 ```
-node --test src/services/plan/sqlite.test.ts src/commands/node/delete-node.test.ts src/commands/node/update-node.test.ts src/commands/plan/import-plan.test.ts
+node --test src/services/plan/sqlite.test.ts src/commands/node/delete-node.test.ts src/commands/node/update-node.test.ts src/commands/plan/import-plan.test.ts src/domain/plan-choice.test.ts src/cli/plan/import.test.ts
 ```
 
 Add, each as a separate `it`:
@@ -61,7 +70,9 @@ Add, each as a separate `it`:
 
 2b. `"readSubtreeExecutionFacts returns a blocker per binding"` — seed a node holding a workspace, a run, an attempt, a candidate, a check result and a git operation, and assert the returned `blocker` values, sorted, deep-equal the six.
 
-3. `"a live lease row produces no blocker"` — seed an owned, unexpired lease row on a node with no other binding, and assert `readSubtreeExecutionFacts` returns an empty list. The table still exists after this epic, so the row is real and this assertion stays green through EPIC 057.
+3. `"a live lease row produces no blocker"` — seed an unexpired lease row on a node with no other binding by raw SQL, `('node', T, 'daemon_test', 'daemon', 1, NOW, NOW, NOW + 300000)`, and assert `readSubtreeExecutionFacts` returns an empty list. `test/helpers/rows.ts:668 seedLeaseOnNode` writes `expires_at: 2` and cannot express a live lease. The table still exists after this epic, so the row is real and this assertion stays green through EPIC 057.
+
+3b. `"the containment refusal reason names no lease"` — assert the `plan-choice` reason string by value, and assert the CLI import fixture holds no `lease` substring.
 
 4. `"delete-node still refuses binding-in-use on a run row"` — seed a run and assert `blockers` deep-equals `[{ nodeId: T, blocker: "run" }]`.
 

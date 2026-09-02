@@ -8,8 +8,8 @@ This story records behaviour and moves the version. It draws no path.
 
 ## Change
 
-**Extend `docs/proposal/phase-2/runs-and-exclusion.md`** — created by EPIC 050 Story 9 and extended
-by EPIC 050.2 Story 9 — with the plan-write guard:
+**Extend `docs/proposal/phase-2/runs-and-exclusion.md`** — created by EPIC 050 Story 7 and extended
+by EPIC 050.1 Story 9 and EPIC 050.2 Story 9 — with the plan-write guard:
 
 - **A plan write refuses while an active run covers the affected graph.** State the closure: the seed the command names, every ancestor of it, and every descendant of it.
 - **The seed per command**, as the five-row table of the epic. A reader must be able to answer "does editing this node refuse right now" without reading a command.
@@ -24,9 +24,9 @@ the paths.
 field, response field, event type, operation id or capability name changes. Story 8 does add
 `subtree-busy` to five operations, which is **adding a member to an enum** — permitted inside `/v1`
 by `docs/proposal/api/README.md:96`, and a client must tolerate an unknown enum member by the same
-document. The code, its status and its details schema are EPIC 050's and are untouched, so nothing
+document. The code, its status and its details schema are EPIC 050.1's and are untouched, so nothing
 here changes what an error code means or the status it maps to, which is the forbidden case at
-`:105`. The compatibility record gains no row.
+`:106`. The compatibility record gains no row.
 
 ## Constraints
 
@@ -49,9 +49,9 @@ Add, each as a separate `it`:
 
 3. `"declaredCapabilities is unchanged"` — assert by value against EPIC 050.2's names. No capability is retired and none is declared, so the policy amendment EPIC 050.2 wrote is not reached.
 
-3b. `"the added error changes nothing but the operation's code set"` — assert `errorStatuses["subtree-busy"]` and the details schema are identical to the values EPIC 050.1 registered. That is what keeps the change inside the closed list rather than outside it.
+4. `"the added error changes nothing but the operation's code set"` — assert `errorStatuses["subtree-busy"]` and the details schema are identical to the values EPIC 050.1 registered. That is what keeps the change inside the closed list rather than outside it.
 
-4. `"the compatibility record gains no row"` — assert the row count is the one EPIC 050.2 left.
+5. `"the compatibility record gains no row"` — assert the row count is the one EPIC 050.2 left.
 
 `pnpm run verify` exits 0. It reads `docs/proposal/` for the parity and error-table comparisons, so a
 drift between this document and the contract fails there.

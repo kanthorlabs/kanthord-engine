@@ -8,7 +8,7 @@ Diagrams: release-success
 
 Baselines: release-success <- baseline-release-task
 
-Seams: release-success: +expiry.expireRuns, +execution.runById, +plan.readSubtree, +execution.endRun, +events.append:run.ended, ~execution.attemptsOfRun, -plan.readAllNodes, -lease.read, -execution.activeRunOfNode, -events.append:lease.released
+Seams: release-success: +expiry.expireRuns, +execution.runById:R, +plan.readSubtree, +plan.readNode, +execution.endRun:R, +events.append:run.ended:R, -plan.readAllNodes, -lease.assertHeld:T, -execution.activeRunOfNode:T, -execution.attemptsOfRun:R:#2, -events.append:lease.released:T
 
 ## The shipped path
 
@@ -33,7 +33,7 @@ sequenceDiagram
     Command->>Storage: 1 storage.transact
     Command->>Clock: 2 clock.now
     Command->>Plan: 3 plan.readAllNodes
-    Command->>Lease: 4 lease.read:T
+    Command->>Lease: 4 lease.assertHeld:T
     Command->>Execution: 5 execution.activeRunOfNode:T
     Command->>Execution: 6 execution.attemptsOfRun:R
     Command->>Execution: 7 execution.attemptsOfRun:R:#2
@@ -44,10 +44,11 @@ sequenceDiagram
     Command-->>Client: ok
 ```
 
-Citations: `:62`, `:63`, `:65`, `:215`, `:93`, `:101`, `:114`, `:166`, `:171`, `:180`, `:188`. Step 7
-repeats the token of step 6, so this path cannot be drawn as a live diagram until the two reads
-collapse into one. The shipped path ends no run on this branch, so `execution.endRun` is an addition
-and not a move.
+Citations: `:62`, `:63`, `:65`, `:310`, `:93`, `:101`, `:114`, `:166`, `:171`, `:180`, `:188`. Step 4
+is `assertHeld` at `:77`, which calls `lease.assertHeld` at `:310`; the `lease.read` at `:215` belongs
+to `releaseObjective` and this fixture never reaches it. Step 7 repeats the token of step 6, so this
+path cannot be drawn as a live diagram until the two reads collapse into one. The shipped path ends no
+run on this branch, so `execution.endRun` is an addition and not a move.
 
 ### `release-success`
 
@@ -73,19 +74,23 @@ sequenceDiagram
     Command->>Expiry: 3 expiry.expireRuns
     Command->>Execution: 4 execution.runById:R
     Command->>Plan: 5 plan.readSubtree
-    Command->>Execution: 6 execution.attemptsOfRun:R
-    Command->>Execution: 7 execution.closeAttempt:A
-    Command->>Plan: 8 plan.setNodeState:T:claim-released
-    Command->>Execution: 9 execution.endRun:R
-    Command->>Lease: 10 lease.release:T
-    Command->>Events: 11 events.append:run.ended:T
+    Command->>Plan: 6 plan.readNode
+    Command->>Execution: 7 execution.attemptsOfRun:R
+    Command->>Execution: 8 execution.closeAttempt:A
+    Command->>Plan: 9 plan.setNodeState:T:claim-released
+    Command->>Execution: 10 execution.endRun:R
+    Command->>Lease: 11 lease.release:T
+    Command->>Events: 12 events.append:run.ended:R
     Command-->>Client: ok
 ```
 
-Steps 6 to 8 are the shipped attempt close and state write, kept because a release that only ended
-the run would leave `T` running under no run, which no claim can take and no report can close. Step 6
+Steps 7 to 9 are the shipped attempt close and state write, kept because a release that only ended
+the run would leave `T` running under no run, which no claim can take and no report can close. Step 7
 is one read where the shipped path read twice. Steps 4 and 5 replace the lease proof and the
-node-scoped run lookup with the run proof.
+node-scoped run lookup with the run proof. Step 6 is the node read the shipped `plan.readAllNodes`
+served: `node.kind` picks the task branch at `:79` and `node.revision` fills `cause` at `:178`, and
+`plan.readSubtree` returns ids alone and supplies neither. Step 12 projects the run id, because
+`run.ended` is a run event.
 
 Add `test/sequence/scenarios/release-success.ts`.
 
@@ -96,9 +101,15 @@ existing `storage.transact` at `:62`:
 
 1. `const now = dependencies.clock.now();` — unchanged, at `:63`.
 2. `dependencies.expiry.expireRuns(transaction, { now });` — new.
-3. `execution.runById(transaction, input.runId)` — new, replacing `execution.activeRunOfNode` at `:93` and the whole-graph read at `:65`.
+3. `execution.runById(transaction, input.runId)` — new, replacing `execution.activeRunOfNode` at `:93`.
 4. `plan.readSubtree(transaction, run.nodeId)` — new.
-5. `assertRunAuthority(...)`, throwing `ReleaseNodeError(refusal.refusal, ..., { runId })`. This replaces `assertHeld` at `:77` and its `lease.read` at `:215`: the run proves the caller now.
+5. `assertRunAuthority(...)`, throwing `ReleaseNodeError(refusal.refusal, ..., { runId })`. This replaces `assertHeld` at `:77` and its `lease.assertHeld` at `:310`: the run proves the caller now.
+6. `plan.readNode(transaction, input.nodeId)` — new, replacing the whole-graph read at `:65`. It supplies `node.kind` for the branch at `:79` and `node.revision` for `cause` at `:178`, and it keeps `node-not-found` and `initiative-not-claimable`. `plan.readSubtree` returns ids alone and supplies neither.
+
+**The objective path is not this story's path.** `releaseObjective` at `:203-300` keeps its shipped
+shape, including the `plan.readAllNodes` at `:210`, the child `lease.read` at `:215` and the
+`execution.activeRunOfNode` at `:240`. This story draws the task path, and it deletes no call of the
+objective path. EPIC 050.4 Story 5 removes the child `lease.read`, citing `:215`.
 
 **Collapse the two attempt reads.** `:101` and `:114` call `attemptsOfRun` with one argument. Read
 once, and pass that list to both the open-attempt search and `accountAttempts`.
@@ -107,8 +118,10 @@ once, and pass that list to both the open-attempt search and `accountAttempts`.
 `ready` and cancels the open attempt. The exhausted branch at `:123-165` keeps its own shape:
 `blocked` with `attempt-limit`, which this story does not change.
 
-**Add `execution.endRun`** on the non-exhausted branch, which ended no run. The run ends, the fence
-rises, and exactly one `run.ended` event is appended with the release's `outcome`.
+**Add `execution.endRun`** on the non-exhausted branch, which ended no run. Write
+`outcome: "released"`, the value `releaseObjective` already writes at `:270`; the exhausted branch
+keeps `"blocked"` at `:140`. The run ends, the fence rises, and exactly one `run.ended` event is
+appended with that `outcome`.
 
 **Replace `lease.released` with `run.ended`** in both branches.
 
@@ -143,7 +156,7 @@ Add, each as a separate `it`:
 
 3. `"a release reads the attempts once"` — count the `attemptsOfRun` calls of the recorder and assert `1`.
 
-4. `"a release appends exactly one run.ended event and no lease.released"`.
+4. `"a release appends exactly one run.ended event and no lease.released"` — assert the event `outcome` is `"released"` on the ordinary branch.
 
 5. `"node.assignment is unchanged after a release"`.
 
@@ -156,6 +169,8 @@ Add, each as a separate `it`:
 9. `"a release refusal carries only the run id"` — assert the details key set is exactly `["runId"]` for each of the six authority refusals reachable through the command.
 
 10. `"the exhausted branch still blocks with attempt-limit"` — the shipped case, carried across and asserted to end the run and append one `run.ended`.
+
+11. `"node-not-found and initiative-not-claimable still fire"` — the `plan.readNode` of change step 6 keeps both shipped refusals; assert each by value.
 
 Add `test/sequence/scenarios/release-success.ts`.
 

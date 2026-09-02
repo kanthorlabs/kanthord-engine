@@ -25,7 +25,7 @@ Story 4 depends on Story 3 and Story 6. Story 5 depends on Story 3, Story 6 and 
 
 Story 7 depends on Story 6. Story 8 depends on Story 6.
 
-Story 9 depends on every prior story of this epic and on EPIC 050 Story 9, which creates the document it extends. It states what the code does, so write it last.
+Story 9 depends on every prior story of this epic and on EPIC 050 Story 7 (`07-the-proposal-records-the-run-model`), which creates the document it extends. It states what the code does, so write it last.
 
 A workable serial order: **1 → 6 → 2 → 3 → 4 → 5 → 7 → 8 → 9**.
 
@@ -47,7 +47,7 @@ No story depends on a story later than itself in that order.
 
 EPIC 050 held seventeen stories, and `.agents/plan/authoring.md` caps an epic at ten. The stories here are the claim half. The conformance machinery came with the claim, because the claim's scenarios are its first consumers. The run kind, migration `12`, the run row, the published `assignment`, the two exclusion rules, the budgets and the claim seams stayed in EPIC 050.
 
-**The proposal document is written in three parts, one per epic.** EPIC 050 Story 9 creates `docs/proposal/phase-2/runs-and-exclusion.md` and records the run model. Story 9 here adds the claim sections. EPIC 050.2 Story 9 adds the authority sections. A single story could not carry the whole document: it would state a rule two later epics implement, and no epic can prove a sentence about code it does not ship.
+**The proposal document is written in three parts, one per epic.** EPIC 050 Story 7 (`07-the-proposal-records-the-run-model`) creates `docs/proposal/phase-2/runs-and-exclusion.md` and records the run model. Story 9 here adds the claim sections. EPIC 050.2 Story 9 adds the authority sections. A single story could not carry the whole document: it would state a rule two later epics implement, and no epic can prove a sentence about code it does not ship.
 
 ## Decisions taken during authoring, and now recorded in the EPIC
 

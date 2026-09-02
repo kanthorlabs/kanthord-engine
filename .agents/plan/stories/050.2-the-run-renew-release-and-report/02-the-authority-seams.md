@@ -1,7 +1,7 @@
 # Story 2 — The authority seams
 
 Epic: `.agents/plan/epics/050.2-the-run-renew-release-and-report.md`
-Depends on: EPIC 050 Story 3 (`runRow`).
+Depends on: EPIC 050 Story 2 (`runRow`), and EPIC 050.1 Story 3 for the `RunRecord` shape below.
 Kind: story-foundation
 
 Two seam names the diagrams of Stories 3 to 6 draw do not exist yet. This story declares them and
@@ -24,6 +24,14 @@ renewRun(
 rather than null**, because the authority function refuses it with `run-ended` and a null would
 collapse that code into `run-not-found`. `activeRunOfNode` answers a different question — one node,
 its active run — and cannot answer this one.
+
+**`RunRecord` must already carry the authority fields when this story runs.** `RunRecord` at
+`src/services/execution/index.ts:7-19` carries `leaseFence` and `parentRunId` and carries no `fence`,
+`expiresAt`, `worker` or `maxLifetimeAt`, and `RunKind` at `:5` is `"objective" | "task"`. Story 1's
+`AuthorityRun` and Stories 3 and 4 read all four fields off this method's return. EPIC 050.1 Story 3
+rewrites `openRun` against migration `12` and is the first consumer, so it lands the new `RunRecord`
+and the new `RunKind`. If it did not, this story lands them here before it adds the two methods, and
+the implementing agent reports the gap.
 
 `renewRun` writes `UPDATE run SET expires_at = ? WHERE id = ?` and touches no other column. The
 `min(now + runTtlMs, max_lifetime_at)` arithmetic belongs to the command, and the write belongs here,

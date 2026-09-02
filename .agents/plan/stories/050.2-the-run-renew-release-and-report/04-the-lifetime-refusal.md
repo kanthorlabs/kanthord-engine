@@ -8,7 +8,7 @@ Diagrams: renew-refusal-lifetime-exceeded
 
 Baselines: renew-refusal-lifetime-exceeded <- baseline-renew-task
 
-Seams: renew-refusal-lifetime-exceeded: +expiry.expireRuns, +execution.runById, +plan.readSubtree, -plan.readAllNodes
+Seams: renew-refusal-lifetime-exceeded: +expiry.expireRuns, +execution.runById:R, +plan.readSubtree, -plan.readAllNodes
 
 The baseline of this path is `baseline-renew-task`, drawn in Story 3. A refusal diagram names the
 baseline of its path, and its signs are measured only over the tokens it holds: a baseline token the
@@ -38,8 +38,8 @@ sequenceDiagram
     Command-->>Client: refuse:lifetime-exceeded
 ```
 
-No lease step and no write step appears, so a renew that touched a lease before deciding the refusal
-fails the comparison. What the operation committed is a separate assertion, by the byte-identical
+No node read, no lease step and no write step appears, so a renew that read the node or touched a
+lease before deciding the refusal fails the comparison. What the operation committed is a separate assertion, by the byte-identical
 database comparison.
 
 Add `test/sequence/scenarios/renew-refusal-lifetime-exceeded.ts`.
@@ -47,7 +47,7 @@ Add `test/sequence/scenarios/renew-refusal-lifetime-exceeded.ts`.
 ## Change
 
 **Add `lifetime-exceeded` to `RenewRefusal`**, and evaluate it in `src/commands/run/renew-run.ts`
-immediately after `assertRunAuthority` and before the lease renewal:
+immediately after `assertRunAuthority` and before the node read of Story 3 step 6:
 
 ```ts
 if (now >= run.maxLifetimeAt) {
@@ -64,7 +64,7 @@ has no path back to an active run, and it releases or reports.
 ## Constraints
 
 - Evaluate the refusal after the authority check. A caller holding a stale fence learns `fence-stale`, not the lifetime of a run it does not hold.
-- Evaluate it before the first lease write. A refusal writes nothing.
+- Evaluate it before the node read and before the first lease write. A refusal writes nothing, and a read no refusal needs is not taken.
 - Do not clamp and succeed at the boundary. `now === max_lifetime_at` refuses.
 
 ## Verify

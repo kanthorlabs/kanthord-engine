@@ -75,6 +75,10 @@ Delete `leasesFenced: fenced.length` from the `actor.revoked` payload at `:116`.
 `lease: Lease` from `RevokeActorDependencies` at `:18` and the `services/lease/index.ts` import at
 `:4`. Stop passing `lease` in `src/main.ts:681`.
 
+**`src/cli/actor/revoke.ts:20`** describes the command as `"revoke an actor and fence its leases"`.
+Change it to `"revoke an actor"`. A command description that names a removed mechanism is a user-visible
+claim about behaviour this story deletes.
+
 **`actor.revoked` has a strict payload, and this story edits it.**
 `src/http/contract/event-payload.ts:78-85` declares it as `z.strictObject` with `leasesFenced:
 z.number().int()` **required**. Delete that field. `eventView.payload` is `z.unknown()` at
@@ -107,12 +111,14 @@ window rather than leaving it to be discovered.
 ## Verify
 
 ```
-node --test src/commands/actor/revoke-actor.test.ts src/http/server/actor/revoke-actor.test.ts test/sequence/conformance.test.ts
+node --test src/commands/actor/revoke-actor.test.ts src/http/server/actor/revoke-actor.test.ts src/cli/actor/revoke.test.ts test/sequence/conformance.test.ts
 ```
 
 Add, each as a separate `it`:
 
-1. `"a revocation writes no lease row"` — seed one owned, unexpired lease row owned by `A`, revoke, and assert **all eight columns** deep-equal the seeded values. The table still exists after this epic, so the comparison is real and it stays green through EPIC 057.
+1. `"a revocation writes no lease row"` — seed one unexpired lease row owned by `A` through raw SQL, `('node', T, A, 'actor', 1, NOW, NOW, NOW + 300000)`, revoke, and assert **all eight columns** deep-equal the seeded values. `test/helpers/rows.ts:668 seedLeaseOnNode` writes `owner_kind: 'daemon'`, owner `daemon_test` and `expires_at: 2`, so it cannot express an actor-owned live lease and cannot serve this case. The table still exists after this epic, so the comparison is real and it stays green through EPIC 057.
+
+1b. `"the CLI revoke description names no lease"` — assert the registered command's description by value.
 
 2. `"the actor.revoked payload schema holds no leasesFenced key"` — assert `Object.keys(eventPayloads["actor.revoked"].shape).sort()` by value, and assert one appended event parses against it. Two assertions, one case: the schema and the producer cannot drift apart.
 

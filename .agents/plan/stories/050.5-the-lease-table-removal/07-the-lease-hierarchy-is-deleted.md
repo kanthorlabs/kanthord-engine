@@ -13,7 +13,7 @@ a domain call is invisible at the seam the recorder wraps.
 `LeaseRelation`, `LiveLease`, `LeaseHierarchyInput`, `LeaseRefusal`, and the function `liveLeaseRefusal`
 with its two private helpers `relationOf` and `refusesAt`.
 
-**Its importers are gone by this point, and each was removed by a named story.** Verify all four before
+**Its importers are gone by this point, and each was removed by a named story.** Verify all five before
 deleting, and report a survivor rather than editing it here:
 
 | importer                             | site   | removed by           |
@@ -22,6 +22,7 @@ deleting, and report a survivor rather than editing it here:
 | `src/commands/node/claim-node.ts`    | `:3-5` | EPIC 050.4 Story 1   |
 | `src/services/lease/index.ts`        | `:2`   | Story 6 of this epic |
 | `src/services/lease/sqlite.ts`       | `:3-6` | Story 6 of this epic |
+| `test/helpers/lease.ts`              | `:2-6` | Story 6 of this epic |
 
 **`src/domain/lease.ts` survives, whole, and the reason is decided rather than left open.**
 `src/domain/rows.ts:10,33` registers `leaseRow` as the row schema of the `lease` table, and
@@ -38,7 +39,7 @@ epic asks for is that migration `17` **drops the table** rather than narrowing i
 ## Constraints
 
 - Delete the module, not selected exports. A surviving `LeaseRelation` is a type nothing produces.
-- Verify the four importers are gone before deleting. Report a survivor as a defect of the story that owed it; do not edit that file here.
+- Verify the five importers are gone before deleting. Report a survivor as a defect of the story that owed it; do not edit that file here.
 - Do not delete `src/domain/lease.ts` or `rows.lease`. Both are load-bearing for schema parity until EPIC 057's migration `17` drops the table.
 - Do not move `leaseOwnerKinds` out of `src/domain/lease.ts`. It is used by `leaseRow` in that file.
 

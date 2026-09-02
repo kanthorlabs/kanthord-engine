@@ -22,10 +22,13 @@ list in its shipped order and append.
 `node.release` and `node.report`, and EPIC 050.4 removes it from those four with the mechanism that
 raises it. A story that "replaced" `lease-held` here would delete a registration that does not exist.
 
-**Add the five rows to the error-code table** in `docs/proposal/api/README.md`, section `## Errors`.
-`src/http/contract/errors.test.ts:16-26` compares the key set and the status of every code against
-that table, so the code list and the document must agree. The code itself already has a row; the
-change is the per-operation column if the table carries one.
+**Change no row of the error-code table** in `docs/proposal/api/README.md`, section `## Errors`. That
+table is `| Status | Code | Meaning |` at `:241`, one row per code and no per-operation column, and
+`subtree-busy` already carries its single row from EPIC 050.1. `readErrorCodeMatrix` at
+`test/helpers/proposal.ts:89-107` keys it by code and takes exactly three cells, and
+`src/http/contract/errors.test.ts:16-26` asserts that key set equals `errorStatuses`, so a second row
+for one code fails the test. The per-operation declaration lives in the registry and in
+`operationAdditions`, and it is the whole of this story's change.
 
 ## Constraints
 
@@ -51,6 +54,10 @@ Add, each as a separate `it`:
 4. `"subtree-busy is a 409 precondition"` — assert `errorStatuses["subtree-busy"] === 409`, unchanged from EPIC 050.
 
 5. `"the subtree-busy details schema parses what a plan command throws"` — parse `{ relation: "ancestor", nodeId, runId, expiresAt }` and assert success; parse one omitting `runId` and assert failure.
+
+6. `"each of the five operations' error sets grows by exactly one member"` — pin the shipped set per operation as a literal, and assert the new set deep-equals that literal plus `"subtree-busy"`. Five comparisons, so an operation that gained a second code fails.
+
+7. `"no other operation's error set changes"` — assert every operation outside the five holds the set it shipped, so the four run operations in particular are untouched.
 
 `pnpm run verify` exits 0. It emits and validates the master OpenAPI document and every feature slice
 in a temporary directory, so a schema or component drift fails there too.

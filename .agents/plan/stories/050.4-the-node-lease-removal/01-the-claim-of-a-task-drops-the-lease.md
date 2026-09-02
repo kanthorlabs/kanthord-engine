@@ -8,7 +8,7 @@ Diagrams: claim-lease-free-task
 
 Supersedes: EPIC 050.1 claim-success-task
 
-Seams: claim-lease-free-task: -lease.read, -lease.acquire
+Seams: claim-lease-free-task: -lease.read:T, -lease.read:O, -lease.read:S, -lease.acquire:O, -lease.acquire:T
 
 This story owns the deletion. Story 2 owns the initiative path and Story 3 owns the `objective-busy`
 refusal; both draw paths through the command this story leaves.
@@ -100,12 +100,19 @@ the details EPIC 050.1 Story 1 registered. Delete `"lease-held"` from `node.clai
 `claimedLease`, the shared schema at `execution.ts:23-29`, is **not** deleted here: `nodeRenewResponse`
 still uses it. Story 4 deletes it as the second and last consumer.
 
-**4b — `objectiveRunId` goes with them.** `nodeClaimResponse.objectiveRunId` at `:44` is required, and
+**4b — `objectiveRunId` goes with them.** `nodeClaimResponse.objectiveRunId` at `:45` is required, and
 EPIC 050's `claim-success-task` opens one run where the baseline opened two, so this command can no
 longer populate it. EPIC 050.1 Story 1 lists what the response keeps, gains and loses and does not name
 it, which is a gap in that story. This story closes it rather than leaving a required field with no
 producer: delete `objectiveRunId` from the schema, from `ClaimNodeResult` and from the examples, and
 record it in the compatibility row Story 8 writes.
+
+**4c — the CLI and the derived fixture.** `src/cli/node/claim.ts:51` prints `body.lease.fence` and
+`:54` prints `body.objectiveRunId` and `body.objectiveLease.fence`. Delete all three from the two
+output lines, leaving `runId`, `fence`, `expiresAt`, `attemptNo` and `renewAfterMs`, and carry the
+change into `src/cli/node/claim.test.ts`. Then regenerate
+`src/http/contract/field-decisions.fixture.ts`, which pins one line per registry field and holds the
+`node.claim.response` lines this item deletes; `src/http/contract/coverage.test.ts` deep-equals it.
 
 **5 — the dependencies.** Delete `lease: Lease` and `leaseTtlMs: number` from
 `ClaimNodeDependencies` at `:53` and `:63`, and every `services/lease/index.ts` and
@@ -129,11 +136,12 @@ it deletes `leaseTtlMs` because nothing reads it.
 - Do not change the refusal order of what remains. The drawn ordinals are the contract.
 - Do not delete `claimedLease`. Story 4 is its last consumer.
 - Do not touch `errorStatuses`, `exitCodes` or `leaseHeldDetails`. Story 8 retires the code once no operation declares it.
+- Regenerate `field-decisions.fixture.ts` in this story. Deferring it to Story 8 leaves `coverage.test.ts` red for six stories.
 
 ## Verify
 
 ```
-node --test src/commands/node/claim-node.test.ts src/http/server/node/claim-node.test.ts src/main.claim.test.ts test/sequence/conformance.test.ts
+node --test src/commands/node/claim-node.test.ts src/http/server/node/claim-node.test.ts src/cli/node/claim.test.ts src/http/contract/coverage.test.ts src/main.claim.test.ts test/sequence/conformance.test.ts
 ```
 
 Add, each as a separate `it`:
@@ -155,6 +163,10 @@ Add, each as a separate `it`:
 8. `"a second claim by the same actor on a running node is refused, not replayed"` — the replay branch is deleted, so assert the refusal rather than a repeated success. Name the code the surviving guard raises.
 
 9. `"a claim leaves a seeded lease row byte-identical"` — seed one owned, unexpired `subject_kind = 'node'` row, claim, and assert **all eight columns** — `subject_kind`, `subject_id`, `owner`, `owner_kind`, `fence`, `acquired_at`, `renewed_at`, `expires_at` — deep-equal the seeded values. The claim must stop writing the table, not start cleaning it, and a selected-column assertion would miss a partial write.
+
+10. `"kanthord node claim prints no lease and no objective run"` — assert the two stdout lines by value against a stubbed client, so the CLI cannot keep reading a field the response no longer carries.
+
+11. `"the derived field decisions hold no node.claim lease line"` — the shipped `coverage.test.ts` harness over the regenerated fixture. Assert the fixture holds no line matching `node.claim.response#/properties/objectiveLease`, `.../lease` or `.../objectiveRunId`.
 
 Add `test/sequence/scenarios/claim-lease-free-task.ts`.
 

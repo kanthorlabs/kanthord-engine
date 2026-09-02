@@ -1,7 +1,7 @@
 # Story 1 — Run authority
 
 Epic: `.agents/plan/epics/050.2-the-run-renew-release-and-report.md`
-Depends on: Story 3 (`RunRow` and its new fields). No storage dependency — this story adds a pure function.
+Depends on: EPIC 050 Story 2 (`runRow` and its new fields). No storage dependency — this story adds a pure function.
 Kind: story-foundation
 
 ## Change
@@ -65,7 +65,7 @@ The order is what makes an ended run presented with its own last fence refuse `r
 
 - Pure. `now` and `caller` are inputs. No clock, no store.
 - The refusal object has exactly two keys. Do not add a `message`; the caller builds one.
-- Do not throw. The function returns a refusal or `null`; each command in Story 10 turns a refusal into its own error class.
+- Do not throw. The function returns a refusal or `null`; each command of Stories 3, 5 and 6 turns a refusal into its own error class.
 - Do not mutate `input.subtreeIds`.
 
 ## Verify
@@ -128,4 +128,4 @@ Assert, each as a separate `it`:
 
 `pnpm run verify` exits 0.
 
-Proof: PASS line delivered — `src/domain/run-authority.test.ts` in `PASS EPIC-050`.
+Proof: PASS line delivered — `src/domain/run-authority.test.ts` in `PASS EPIC-050.2`.

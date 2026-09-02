@@ -1,14 +1,14 @@
 # Story 3 — The renew
 
 Epic: `.agents/plan/epics/050.2-the-run-renew-release-and-report.md`
-Depends on: Story 1 (`assertRunAuthority`), Story 2 (`execution.runById`, `execution.renewRun`), Story 7 (`runId` and `runFence` on the request), EPIC 050 Story 7 (`runTtlMs` and `runMaxLifetimeMs`), EPIC 050.1 Story 2 (`expireRuns`).
+Depends on: Story 1 (`assertRunAuthority`), Story 2 (`execution.runById`, `execution.renewRun`), Story 7 (`runId` and `runFence` on the request), EPIC 050 Story 6 (`runTtlMs` and `runMaxLifetimeMs`), EPIC 050.1 Story 2 (`expireRuns`).
 Kind: story-implement
 
 Diagrams: renew-success
 
 Baselines: renew-success <- baseline-renew-task
 
-Seams: renew-success: +expiry.expireRuns, +execution.runById, +plan.readSubtree, +execution.renewRun, +events.append:run.renewed, -plan.readAllNodes, -events.append:lease.renewed
+Seams: renew-success: +expiry.expireRuns, +execution.runById:R, +plan.readSubtree, +plan.readNode, +execution.renewRun:R, +events.append:run.renewed:R, -plan.readAllNodes, -events.append:lease.renewed:T
 
 ## The shipped path
 
@@ -67,17 +67,22 @@ sequenceDiagram
     Command->>Expiry: 3 expiry.expireRuns
     Command->>Execution: 4 execution.runById:R
     Command->>Plan: 5 plan.readSubtree
-    Command->>Lease: 6 lease.renew:T
-    Command->>Lease: 7 lease.read:O
-    Command->>Lease: 8 lease.renew:O
-    Command->>Execution: 9 execution.renewRun:R
-    Command->>Events: 10 events.append:run.renewed:T
+    Command->>Plan: 6 plan.readNode
+    Command->>Lease: 7 lease.renew:T
+    Command->>Lease: 8 lease.read:O
+    Command->>Lease: 9 lease.renew:O
+    Command->>Execution: 10 execution.renewRun:R
+    Command->>Events: 11 events.append:run.renewed:R
     Command-->>Client: ok
 ```
 
 Steps 4 and 5 supply `assertRunAuthority` with the run and the subtree, replacing the whole-graph read
-of the baseline. Steps 6 to 8 are the shipped lease renewal, kept until EPIC 050.4. No fence write
-appears, and that absence is the assertion.
+of the baseline. Step 6 is the node read the shipped `plan.readAllNodes` served: `node.kind` picks the
+objective branch and `node.parentId` names the objective whose lease step 8 reads, and `plan.readSubtree`
+returns ids alone and can supply neither. It sits after the authority check and after the lifetime
+refusal of Story 4, because a read no refusal needs is not taken. Steps 7 to 9 are the shipped lease
+renewal, kept until EPIC 050.4. Step 11 projects the run id, because `run.renewed` is a run event. No
+fence write appears, and that absence is the assertion.
 
 Add `test/sequence/scenarios/renew-success.ts`.
 
@@ -98,7 +103,7 @@ test to `src/commands/run/renew-run.test.ts`. Rename every exported symbol:
 | `HeartbeatRefusal`          | `RenewRefusal`         |
 
 Update the importers: `src/http/server/node/heartbeat-node.ts` (move it to
-`src/http/server/node/renew-node.ts`), its test, `src/main.ts:560-573`, `src/main.test.ts:169-184`,
+`src/http/server/node/renew-node.ts`), its test, `src/main.ts:570-583`, the `node.heartbeat` fixture of `src/main.test.ts:176-180`,
 and `src/cli/node/heartbeat.ts` (move to `src/cli/node/renew.ts`, and change its Commander
 registration from `heartbeat` to `renew`; `src/cli/node/heartbeat.ts:27` carries the description
 "renew the lease of a node", and `:60` prints `kanthord: renewed …`, so the wording already fits).
@@ -117,9 +122,10 @@ beside it. Inside the one `storage.transact`:
 3. `execution.runById(transaction, input.runId)`. It returns an ended run rather than null, so the authority function can refuse it by code.
 4. `plan.readSubtree(transaction, run.nodeId)` for the subtree ids.
 5. `assertRunAuthority({ run, runId: input.runId, fence: input.runFence, targetNodeId: input.nodeId, subtreeIds, caller, now })`. On a refusal, throw `RenewRunError(refusal.refusal, ..., { runId: refusal.runId })`. Step 2 is what makes an expired run reach step 5 already `ended`, so it refuses `run-ended` rather than `run-expired`; both are refusals and the order in Story 1 governs whichever state the row is in.
-6. The shipped lease renewal, unchanged: `lease.renew` on the target, the objective lease read and the objective `lease.renew`.
-7. `execution.renewRun(transaction, { runId, expiresAt })` with `Math.min(now + dependencies.runTtlMs, run.max_lifetime_at)`.
-8. Append `run.renewed` where the command appended `lease.renewed`.
+6. `plan.readNode(transaction, input.nodeId)`, replacing the whole-graph read at `:67`. It supplies `node.kind` for the objective branch at `:79-91` and `node.parentId` for `objectiveScopeOf` at `:186`, and it keeps `node-not-found` and `initiative-not-claimable`. `plan.readSubtree` returns ids alone and supplies neither.
+7. The shipped lease renewal, unchanged: `lease.renew` on the target, the objective lease read and the objective `lease.renew`.
+8. `execution.renewRun(transaction, { runId, expiresAt })` with `Math.min(now + dependencies.runTtlMs, run.maxLifetimeAt)`.
+9. Append `run.renewed` where the command appended `lease.renewed`.
 
 **A renew never touches the fence.** The fence rises when a run ends, and nowhere else. A renew that
 rotated the fence would invalidate the run id and fence pair the worker already holds, which is the
@@ -167,7 +173,7 @@ Add, each as a separate `it`:
 
 8. `"a renew refusal carries only the run id"` — assert `assert.deepEqual(Object.keys(error.details!), ["runId"])`.
 
-9. `"node.heartbeat is not wired and node.renew is"` — in `src/main.test.ts`, assert the production handler map at `:169-184` names `node.renew` and does not name `node.heartbeat`.
+9. `"node.heartbeat is not wired and node.renew is"` — in `src/main.test.ts`, the shipped case `"no routed operation is left unbound"` at `:322` already walks the production handler map of `src/main.ts:570-583` against the registry; rename the `node.heartbeat` key of the `fixtures` map at `:176` to `node.renew` and add `runId` and `runFence` to its body, so the walk covers the renamed operation and fails on the old name.
 
 Add `test/sequence/scenarios/renew-success.ts`.
 

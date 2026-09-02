@@ -8,7 +8,7 @@ Diagrams: renew-lease-free
 
 Supersedes: EPIC 050.2 renew-success
 
-Seams: renew-lease-free: -lease.renew, -lease.read
+Seams: renew-lease-free: -lease.renew:T, -lease.read:O, -lease.renew:O
 
 EPIC 050.2 Story 3 renamed `heartbeat-node.ts` to `src/commands/run/renew-run.ts`, so the line numbers
 below name the shipped `heartbeat-node.ts` and locate the code by the symbol that survives the rename.
@@ -39,7 +39,7 @@ sequenceDiagram
     Command->>Execution: 4 execution.runById:R
     Command->>Plan: 5 plan.readSubtree
     Command->>Execution: 6 execution.renewRun:R
-    Command->>Events: 7 events.append:run.renewed:T
+    Command->>Events: 7 events.append:run.renewed:R
     Command-->>Client: ok
 ```
 
@@ -65,13 +65,13 @@ Add `test/sequence/scenarios/renew-lease-free.ts`.
 **3 — the response, in the command and in the contract.** Delete the command's local `ClaimedLease`
 at `:14-22`, `toClaimedLease` at `:193-202`, and the `lease` and `objectiveLease` members of
 `RenewRunResult`. Delete the same two fields from `nodeRenewResponse` at
-`src/http/contract/execution.ts:51-55`; `heartbeatIntervalMs` left in EPIC 050.2 Story 7, so the
+`src/http/contract/execution.ts:52-56`; `heartbeatIntervalMs` left in EPIC 050.2 Story 7, so the
 schema and the result are both `{ expiresAt, renewAfterMs }`.
 
 **3b — `claimedLease` is deleted here.** The shared contract schema at `execution.ts:23-29` had two
 consumers. Story 1 removed the first; this story removes the second and deletes the schema. Rewrite
-`nodeRenewExamples.success` at `:149-161`, which still holds `lease` and `objectiveLease`, and replace
-its `lease-held` error literal at `:165-176` with `fence-stale` carrying `{ runId }`.
+`nodeRenewExamples.success` at `:152-168`, which still holds `lease` and `objectiveLease`, and replace
+its `lease-held` error literal at `:169-179` with `fence-stale` carrying `{ runId }`.
 
 **4 — the dependencies and the input, in the command and in the contract.** Delete `lease: Lease` and
 `leaseTtlMs: number` from `RenewRunDependencies` at `:25` and `:28`, and the
@@ -80,11 +80,27 @@ its `lease-held` error literal at `:165-176` with `fence-stale` carrying `{ runI
 handler change together; `runId` and `runFence` are what the command reads. Stop passing `lease` and
 `leaseTtlMs` in `src/main.ts:576` and `:579`.
 
+**4b — the handler, the CLI and the derived fixture.** `src/http/server/node/renew-node.ts` — the
+shipped `heartbeat-node.ts` EPIC 050.2 Story 3 moves — reads `parsed.data.fence` twice, at `:31` into
+the command input and at `:37` into the `presented` argument of `toHttpError`. Delete both; the second
+leaves `toHttpError(error)`. In `src/cli/node/renew.ts` — the shipped `heartbeat.ts` — delete the
+`.requiredOption("--fence <n>", "lease fence")` at `:29`, the parse and guard at `:37-44`, the `fence`
+member of the request body at `:48` and `body.lease.fence` from the output line at `:60`, and carry
+the change into its test. Then regenerate `src/http/contract/field-decisions.fixture.ts`, which pins
+the `node.heartbeat.request` and `node.heartbeat.response` lines this story deletes.
+
 **5 — the refusal.** Delete `"lease-held"` from `RenewRefusal` at `:12`, leaving the six authority
 codes plus `lifetime-exceeded`, `node-not-found` and `initiative-not-claimable`. Delete its branch in
 `src/http/server/node/refusals.ts`, its key from `node.renew`'s `errors` record at
-`src/http/contract/execution.ts:321`, and its `operationAdditions` entry in
+`src/http/contract/execution.ts:322`, and its `operationAdditions` entry in
 `src/http/contract/coverage.test.ts`.
+
+**6 — the budget that loses its last reader.** `settings.leaseTtlMs` is read at `src/main.ts:555`,
+which Story 1 deletes, and at `:579`, which item 4 deletes. This story is its last reader, so it takes
+the setting: delete `leaseTtlMs` from `src/services/config/index.ts:35` and its schema entry at
+`src/services/config/convict.ts:242-245` with the `KANTHORD_LEASE_TTL_MS` environment binding, its
+row at `:372` and its read at `:538`. `runTtlMs` and `runMaxLifetimeMs` of EPIC 050 are the budgets
+that survive.
 
 **The hazard that justified keeping the objective lease is gone with it.** EPIC 050.2 Story 3 kept
 `lease.read:O` and `lease.renew:O` on this reasoning: _"a run on `runTtlMs` that outlived an objective
@@ -100,11 +116,13 @@ three calls go together rather than the objective pair surviving the target one.
 - The fence rises only when a run ends. No renew path writes `fence`.
 - Delete `input.fence` and the schema field together. Splitting them across two stories leaves one story red.
 - Do not touch `errorStatuses`, `exitCodes` or `leaseHeldDetails`. Story 8 retires the code once no operation declares it.
+- Take `leaseTtlMs` here. This story removes its last reader, and a budget nothing reads is a setting the daemon still validates.
+- Regenerate `field-decisions.fixture.ts` in this story.
 
 ## Verify
 
 ```
-node --test src/commands/run/renew-run.test.ts src/http/server/node/renew-node.test.ts src/main.test.ts test/sequence/conformance.test.ts
+node --test src/commands/run/renew-run.test.ts src/http/server/node/renew-node.test.ts src/cli/node/renew.test.ts src/http/contract/coverage.test.ts src/services/config/convict.test.ts src/main.test.ts test/sequence/conformance.test.ts
 ```
 
 Add, each as a separate `it`:
@@ -128,6 +146,12 @@ Add, each as a separate `it`:
 8. `"a renew still refuses lifetime-exceeded"` — the EPIC 050.2 Story 4 case, carried across unchanged, so this story cannot have moved that refusal while deleting around it.
 
 9. `"every shipped renew case still passes"` — carry the file's cases across with `fence` removed from their inputs.
+
+10. `"kanthord node renew takes no --fence and prints no lease"` — assert the command refuses an unknown `--fence` option and that its stdout line holds `expiresAt` and no fence.
+
+11. `"leaseTtlMs is absent from the settings"` — assert the config key set holds no `leaseTtlMs` and that `KANTHORD_LEASE_TTL_MS` sets nothing.
+
+12. `"the derived field decisions hold no node.heartbeat lease line and no node.renew fence line"` — the shipped `coverage.test.ts` harness over the regenerated fixture.
 
 Add `test/sequence/scenarios/renew-lease-free.ts`.
 
