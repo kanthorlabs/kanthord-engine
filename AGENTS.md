@@ -165,18 +165,19 @@ is their document, in the other direction, and the engine reads it.
 
 A rule with no mechanism is a rule a reviewer applies inconsistently. Each of these has one.
 
-| Rule                                             | Mechanism                                                                |
-| ------------------------------------------------ | ------------------------------------------------------------------------ |
-| the import matrix                                | `eslint-plugin-boundaries`                                               |
-| a test admitted to everything but `main.ts`      | the `src/**/*.test.ts` block of `eslint.config.js`                       |
-| `domain/` purity, and vendor packages by layer   | `no-restricted-imports` per glob                                         |
-| an unclassified `src/` file                      | an eslint file-pattern rule                                              |
-| a node or edge write outside the plan store      | `no-restricted-syntax`, with an enumerated exemption list                |
-| registry equals the proposal contract            | a test in `pnpm run verify`                                              |
-| a `stubbed` route answers 501 and writes nothing | an integration test that compares database state before and after        |
-| canonical serialization                          | exact-byte unit tests                                                    |
-| bytewise ordering                                | a test with non-ASCII paths, asserted through `Buffer.compare`           |
-| topological tie-break by ULID                    | an exact-order graph test                                                |
-| a constant-time token compare                    | `timingSafeEqual`, asserted by construction                              |
-| no domain branching in a handler                 | the handler signature admits only parse, invoke and format               |
-| no `node:` import in the Fetch-native core       | `src/http/server/core-purity.test.ts`, plus a no-restricted-imports glob |
+| Rule                                                            | Mechanism                                                                 |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| the import matrix                                               | `eslint-plugin-boundaries`                                                |
+| a test admitted to everything but `main.ts`                     | the `src/**/*.test.ts` block of `eslint.config.js`                        |
+| `domain/` purity, and vendor packages by layer                  | `no-restricted-imports` per glob                                          |
+| an unclassified `src/` file                                     | an eslint file-pattern rule                                               |
+| a node or edge write outside the plan store                     | `no-restricted-syntax`, with an enumerated exemption list                 |
+| registry equals the proposal contract                           | a test in `pnpm run verify`                                               |
+| a `stubbed` route answers 501 and writes nothing                | an integration test that compares database state before and after         |
+| canonical serialization                                         | exact-byte unit tests                                                     |
+| bytewise ordering                                               | a test with non-ASCII paths, asserted through `Buffer.compare`            |
+| a sequence diagram per changed path, and code conformance to it | `scripts/verify-epic-sequence.ts` and `test/sequence/conformance.test.ts` |
+| topological tie-break by ULID                                   | an exact-order graph test                                                 |
+| a constant-time token compare                                   | `timingSafeEqual`, asserted by construction                               |
+| no domain branching in a handler                                | the handler signature admits only parse, invoke and format                |
+| no `node:` import in the Fetch-native core                      | `src/http/server/core-purity.test.ts`, plus a no-restricted-imports glob  |

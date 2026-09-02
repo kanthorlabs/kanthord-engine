@@ -21,6 +21,7 @@ import type {
   PlanStore,
   RevisionRecord,
   SetNodeStateInput,
+  SetNodeAssignmentInput,
 } from "./index.ts";
 
 const NODE_COLUMNS =
@@ -559,6 +560,16 @@ export class SqlitePlanStore implements PlanStore {
       ]);
     }
     return transitions;
+  }
+
+  setNodeAssignment(
+    transaction: Transaction,
+    input: SetNodeAssignmentInput,
+  ): void {
+    transaction.run("UPDATE node SET assignment = ? WHERE id = ?", [
+      input.assignment,
+      input.id,
+    ]);
   }
 
   private leaseHeld(transaction: Transaction, ids: readonly string[]): boolean {

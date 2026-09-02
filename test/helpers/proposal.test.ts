@@ -8,6 +8,7 @@ import {
   objectiveBusy,
   subtreeExclusion,
 } from "../../src/domain/run-exclusion.ts";
+import { claimRefusalCodes } from "../../src/commands/node/claim-node.ts";
 
 const tables = [
   "agent_invocation",
@@ -152,5 +153,37 @@ describe("test/helpers/proposal.test", () => {
     assert.equal(objective?.refusal, "objective-busy");
     assert.ok(document.includes(subtree!.refusal));
     assert.ok(document.includes(objective!.refusal));
+  });
+
+  it("the run model document names every ordered claim refusal", () => {
+    const document = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../docs/proposal/phase-2/runs-and-exclusion.md",
+      ),
+      "utf8",
+    );
+
+    assert.equal(claimRefusalCodes.length, 12);
+    for (const refusal of claimRefusalCodes) {
+      assert.ok(document.includes(refusal), refusal);
+    }
+  });
+
+  it("the claim sections state the order and the one-path rule", () => {
+    const document = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../docs/proposal/phase-2/runs-and-exclusion.md",
+      ),
+      "utf8",
+    );
+
+    assert.ok(document.includes("## The refusal order is fixed"));
+    assert.ok(document.includes("## The claim has one path"));
+    assert.ok(
+      document.indexOf("node-not-found") <
+        document.indexOf("ancestor-not-startable"),
+    );
   });
 });

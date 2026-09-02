@@ -517,6 +517,10 @@ describe("src/http/contract/graph.test", () => {
       nodeShowResponse.safeParse({ ...base, assignment: null }).success,
       true,
     );
+    assert.equal(
+      nodeShowResponse.safeParse({ ...base, assignment: "General@1" }).success,
+      false,
+    );
     assert.equal(nodeShowResponse.safeParse(base).success, false);
   });
 

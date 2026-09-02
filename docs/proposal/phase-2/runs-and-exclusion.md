@@ -18,6 +18,49 @@ At most one active run covers a node. The `run_one_active` partial index defends
 
 The daemon refuses a second active run in one objective branch with `objective-busy`. The subtree rule refuses an active run over the claimed node with `subtree-busy`. The refusal names the sibling node id, its run id and that run's `expires_at`, so a client knows what it waits on and until when. The daemon holds no queue. A blocking wait would hold one request open for a run lifetime, and a queue would make the daemon a scheduler. The caller retries. One liveness predicate governs this rule and the subtree rule, so the two cannot disagree about an expired run.
 
+## A claim opens exactly one run
+
+At the first claim on an unassigned node, the daemon writes `node.assignment` and inserts the run in one storage transaction. One operation prevents a crash from leaving an assignment without a run, which would make the next claim read an assignment that nobody holds. The claim uses an immediate write transaction, so two sibling claims serialize and the loser sees the winner's run.
+
+## An unassigned node routes, and an assigned node compares
+
+An unassigned node routes to the first worker in the intersection of capable, authorized and available workers. An assigned node compares the assignment with the claiming worker. A mismatch refuses `assignment-held` and offers a human a worker switch. An ordinary failure never changes an assignment. The worker switch in EPIC 056 is the only operation that changes one.
+
+## The caller asserts availability, and the daemon never probes
+
+A worker runs a self health check before it claims. The claim request carries `available`. A false value refuses `unroutable` with `failedSet: "available"`. The daemon trusts a caller that asserts true when the worker is not available. The guarantees table records this trust.
+
+## The claim has one path
+
+A node with a null `deliverable` is refused `pair-illegal`. The column stays nullable until EPIC 057, and the claim dispatches on no other shape. A claim opens exactly one run covering the claimed node and every descendant, and it never adopts an existing run. A task claim opens no parent objective run. A second claim by the same worker on a node with an active run is refused with `subtree-busy`. Retrying a lost response is the transport's job.
+
+## The refusal order is fixed
+
+The claim uses one total refusal order:
+
+1. `node-not-found`
+2. `pair-illegal`
+3. `plan-incomplete`
+4. `assignment-held`
+5. `unroutable`
+6. `review-head-unavailable`
+7. `lease-held`
+8. `drive-mode-pinned`
+9. `objective-busy`
+10. `subtree-busy`
+11. `illegal-transition`
+12. `ancestor-not-startable`
+
+A claim that fails two conditions reports the earlier one, so a client sees the cause it can act on first. Every refusal is evaluated before the first mutation: before a lease is taken, a run is opened, an attempt is opened, a node state changes or an event is appended. A refusal writes nothing. A node whose deliverable is `expansion` is exempt from the completeness check for its own missing children, because producing those children is the work.
+
+## A review claim is refused until the workspace exists
+
+A review run records the commit it judges at claim time. This phase creates no workspace record, so no head can be pinned. The refusal is `review-head-unavailable`. A null pin is not an option: a value written later records a commit chosen after the claim, which is the retrospective choice that the pin prevents.
+
+## Every run operation evaluates expiry first
+
+Every run operation evaluates expiry first. The claim runs the expiry pass before anything else, inside its one transaction. Sweeping only at the next claim would leave an expired run able to renew itself back to life. The expiry is a conditional update, so two racing sweeps cannot raise the fence twice, and the transition and its event are one transaction. Expiry is transactional maintenance: a command that expires a run and then refuses rolls the expiry back with everything else, because a refusal writes nothing. The next operation sweeps the run again. Renew, release and report run the same pass in EPIC 050.2.
+
 ## base is a set qualified by repository
 
 The base set lives in `run_base`, keyed by run and repository. An `execution` run holds at most one row. A `structural` or `review` run holds none, because a structural run claims an initiative, which owns no repository. The lower bound rises to exactly one in the epic that writes the row. `graph_revision` is recorded on every run and compared only at the structural checkpoint.

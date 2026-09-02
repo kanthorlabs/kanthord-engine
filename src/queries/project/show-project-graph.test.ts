@@ -176,6 +176,9 @@ describe("src/queries/project/show-project-graph.test", () => {
     storage.transact((transaction) => {
       seedRegistry(transaction);
       seedGraph(transaction);
+      transaction.run("UPDATE node SET deliverable = NULL WHERE id = ?", [
+        fixtureIds.task,
+      ]);
     });
 
     const result = showProjectGraph(
@@ -438,6 +441,7 @@ describe("src/queries/project/show-project-graph.test", () => {
       insertRevision: plan.insertRevision,
       mutateGraph: plan.mutateGraph,
       setNodeState: plan.setNodeState,
+      setNodeAssignment: plan.setNodeAssignment,
     };
 
     showProjectGraph(

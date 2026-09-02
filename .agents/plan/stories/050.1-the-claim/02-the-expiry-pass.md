@@ -68,11 +68,11 @@ The signature takes the caller's `transaction` as its second parameter, matching
 
 ```sql
 UPDATE run SET state = 'ended', fence = fence + 1, ended_at = ?, outcome = 'expired'
- WHERE state = 'active' AND expires_at IS NOT NULL AND expires_at <= ?
+ WHERE state = 'active' AND expires_at <= ?
 RETURNING id, node_id, fence
 ```
 
-Bind `input.now` twice. The `state = 'active'` predicate in the `WHERE` is what makes the raise idempotent: two racing sweeps cannot both affect the same row, because the second sees `state = 'ended'`. `expires_at IS NOT NULL` protects a legacy row that carries no budget. `<=` makes the boundary instant expired, matching EPIC 050 Story 5.
+Bind `input.now` twice. The `state = 'active'` predicate in the `WHERE` is what makes the raise idempotent: two racing sweeps cannot both affect the same row, because the second sees `state = 'ended'`. `<=` makes the boundary instant expired, matching EPIC 050 Story 5.
 
 `RETURNING fence` yields the **raised** value, because SQLite's `RETURNING` on an `UPDATE` reports the new row.
 
@@ -129,17 +129,15 @@ Assert, each as a separate `it`:
 
 5. `"an already ended run is untouched"` — seed `state: "ended"`, `fence: 5`, `expires_at: NOW - 1000`. Assert the returned array is empty and `fence` is still `5`.
 
-6. `"a run with a null expires_at is untouched"` — assert the returned array is empty and the run stays `active`.
+6. `"one run.expired event is appended per expired run, carrying the raised fence"` — seed one run with `fence: 3`. After the pass, read the event log and assert exactly one `run.expired` event whose payload deep-equals `{ runId: "<id>", nodeId: "<node id>", fence: 4, expiredAt: NOW }`. The fence in the payload is the raised value, not the stale one.
 
-7. `"one run.expired event is appended per expired run, carrying the raised fence"` — seed one run with `fence: 3`. After the pass, read the event log and assert exactly one `run.expired` event whose payload deep-equals `{ runId: "<id>", nodeId: "<node id>", fence: 4, expiredAt: NOW }`. The fence in the payload is the raised value, not the stale one.
+7. `"two expired runs produce events in bytewise run id order"` — seed active runs `run_b` and `run_a`, both expired. Assert the returned array's `runId` values deep-equal `["run_a", "run_b"]` and the two `run.expired` events appear in that order.
 
-8. `"two expired runs produce events in bytewise run id order"` — seed active runs `run_b` and `run_a`, both expired. Assert the returned array's `runId` values deep-equal `["run_a", "run_b"]` and the two `run.expired` events appear in that order.
+8. `"a failure injected at the event append leaves the run active and the fence unchanged"` — build an `EventLog` whose `append` throws on the first call. Wrap the `storage.transact` in `assert.throws`. Then read the run row in a fresh transaction and assert `state === "active"` and `fence === 3`. Also assert `databaseBytes(storage)` deep-equals the snapshot taken before the call. This proves the transition and the event are one transaction.
 
-9. `"a failure injected at the event append leaves the run active and the fence unchanged"` — build an `EventLog` whose `append` throws on the first call. Wrap the `storage.transact` in `assert.throws`. Then read the run row in a fresh transaction and assert `state === "active"` and `fence === 3`. Also assert `databaseBytes(storage)` deep-equals the snapshot taken before the call. This proves the transition and the event are one transaction.
+9. `"expireRuns writes no node row"` — snapshot `SELECT id, state, assignment FROM node ORDER BY id` before and after a successful pass and assert deep equality. The assignment is unchanged after an expiry, which Story 3 asserts again at the command level.
 
-10. `"expireRuns writes no node row"` — snapshot `SELECT id, state, assignment FROM node ORDER BY id` before and after a successful pass and assert deep equality. The assignment is unchanged after an expiry, which Story 3 asserts again at the command level.
-
-11. `"expireRuns writes no lease row"` — snapshot `SELECT * FROM lease ORDER BY subject_kind, subject_id` before and after and assert deep equality.
+10. `"expireRuns writes no lease row"` — snapshot `SELECT * FROM lease ORDER BY subject_kind, subject_id` before and after and assert deep equality.
 
 `pnpm run verify` exits 0.
 

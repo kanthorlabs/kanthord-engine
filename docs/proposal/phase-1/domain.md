@@ -36,7 +36,7 @@ State tables hold state. Events are an audit trail. Every transition writes a ro
 
 `node:sqlite`. Tables:
 
-`actor`, `repository`, `project`, `project_binding`, `provider`, `provider_login`, `profile`, `blob`, `node`, `edge`, `plan_revision`, `workspace`, `lease`, `run`, `attempt`, `agent_invocation`, `candidate`, `check_result`, `git_operation`, `event`, plus the infrastructure table `migration`.
+`actor`, `repository`, `project`, `project_binding`, `provider`, `provider_login`, `profile`, `blob`, `node`, `edge`, `plan_revision`, `lease`, `run`, `run_base`, `workspace`, `attempt`, `agent_invocation`, `candidate`, `check_result`, `git_operation`, `event`, plus the infrastructure table `migration`.
 
 A credential is not a table. It is the encrypted secret of a `provider` row. A provider binding is not a table either. The global chain is the `set_default_at` column of `provider`, and a narrower scope binds on the entity that owns it: `project_binding` for a project, and `agent_binding` when agent-level binding is built.
 

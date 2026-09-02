@@ -110,7 +110,7 @@ sequenceDiagram
     Command->>Plan: 18 plan.setNodeState:T:claim-taken
     Command->>Plan: 19 plan.setNodeState:O:ancestor-started
     Command->>Plan: 20 plan.setNodeState:I:ancestor-started
-    Command->>Events: 21 events.append:run.opened:T
+    Command->>Events: 21 events.append:run.opened:R
     Command->>Events: 22 events.append:node.running:O:child-started
     Command->>Events: 23 events.append:node.running:I:child-started
     Command->>Events: 24 events.append:node.running:T:claim-taken
@@ -379,7 +379,7 @@ Add, each as a separate `it`:
 
 12. `"a claim on a node assigned to the claiming worker succeeds"`.
 
-13. `"a caller authorized for a worker outside the capable set refuses unroutable rather than throwing"` — assert `refusal === "unroutable"`, `failedSet === "capable"`, and that no `WorkerRoutingError` escapes. This proves the intersection happens before `routeWorker`.
+13. `"a caller authorized for a worker outside the capable set refuses unroutable rather than throwing"` — assert `refusal === "unroutable"`, `failedSet === "authorized"`, and that no `WorkerRoutingError` escapes. This proves the intersection happens before `routeWorker`: the filter empties the authorized set, and `routeWorker` classifies the empty set rather than throwing. `failedSet === "capable"` is reserved for an empty capable set, per `src/domain/worker-routing.ts:82-90`.
 
 14. `"a claim carrying available false refuses unroutable with failedSet available and writes no run row"` — both halves asserted.
 

@@ -114,6 +114,9 @@ export function createRecordingPlanStore(plan: PlanStore): Readonly<{
       calls.push({ method: "setNodeState", input, transitions });
       return transitions;
     },
+    setNodeAssignment(transaction, input) {
+      return plan.setNodeAssignment(transaction, input);
+    },
   };
   return { plan: wrapped, calls };
 }

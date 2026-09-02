@@ -170,7 +170,7 @@ const fixtures: Readonly<Record<string, Fixture>> = {
   "node.show": { parameters: { id: missing("node") }, expect: 404 },
   "node.claim": {
     parameters: { id: missing("node") },
-    body: {},
+    body: { available: true },
     expect: 404,
   },
   "node.heartbeat": {

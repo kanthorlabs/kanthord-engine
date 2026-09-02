@@ -265,7 +265,6 @@ test("registers every schema component in bytewise order", () => {
     "edge.list.response",
     "event.list.error",
     "event.list.response",
-    "lease.claimed",
     "lease.released",
     "lease.renewed",
     "node.awaitingApproval",
@@ -392,6 +391,8 @@ test("registers every schema component in bytewise order", () => {
     "repository.registered",
     "repository.show.error",
     "repository.show.response",
+    "run.expired",
+    "run.opened",
     "system.db.error",
     "system.db.response",
     "system.health.error",
@@ -413,7 +414,7 @@ test("carries the event payload catalogue in bytewise key order", () => {
     sortedBytewise(Object.keys(eventPayloads)),
   );
   assert.deepEqual(Object.keys(catalogue), sortedBytewise([...eventTypes]));
-  assert.equal(Object.keys(catalogue).length, 38);
+  assert.equal(Object.keys(catalogue).length, 39);
 });
 
 test("resolves every catalogue entry to a component of the same document", () => {
@@ -473,7 +474,7 @@ test("the master holds exactly the transitive closure of its own references", ()
     sortedBytewise([...reachableSchemaNames(document)]),
     sortedBytewise(Object.keys(schemas)),
   );
-  assert.equal(Object.keys(schemas).length, 157);
+  assert.equal(Object.keys(schemas).length, 158);
   for (const type of Object.keys(eventPayloads)) {
     assert.equal(Object.hasOwn(schemas, type), true, `${type} was pruned`);
   }

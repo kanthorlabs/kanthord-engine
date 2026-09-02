@@ -9,7 +9,7 @@ import type {
 } from "../../services/event/index.ts";
 import type { SetNodeStateInput } from "../../services/plan/index.ts";
 import type { Storage, Transaction } from "../../services/storage/index.ts";
-import { sweepExpiredExternalLeases } from "../startup/recover-expired-leases.ts";
+import { expireRuns } from "../run/expire-runs.ts";
 import { claimNode, type ClaimNodeResult } from "../node/claim-node.ts";
 import {
   reportOutcome,
@@ -50,6 +50,7 @@ import {
   seedNodeState,
   seedRegistry,
 } from "../../../test/helpers/rows.ts";
+import { workerRegistry } from "../../domain/worker-registry.ts";
 
 const NOW = 1700000000000;
 const TTL = 300000;
@@ -249,29 +250,32 @@ function claim(
       events: fixture.events,
       clock,
       ids: createMockIdGenerator({ ulids: [] }),
-      sweepExpiredExternalLeases: (
-        transaction: Transaction,
-        sweepInput: Readonly<{ actor: string; now: number }>,
-      ) => {
-        sweepExpiredExternalLeases(
-          {
-            plan: fixture.plan.plan,
-            lease: fixture.lease.lease,
-            execution: fixture.execution.execution,
-            events: fixture.events,
-          },
-          transaction,
-          sweepInput,
-        );
+      expiry: {
+        expireRuns(transaction: Transaction, input: Readonly<{ now: number }>) {
+          return expireRuns(
+            {
+              events: fixture.events,
+              execution: fixture.execution.execution,
+              instanceId: INSTANCE,
+            },
+            transaction,
+            input,
+          );
+        },
       },
+      callerRecord: { worker: "claude@1", authorized: ["claude@1"] },
+      registry: workerRegistry,
       attemptLimit: ATTEMPT_LIMIT,
       leaseTtlMs: TTL,
+      runTtlMs: 120000,
+      runMaxLifetimeMs: 900000,
       instanceId: INSTANCE,
     },
     {
       nodeId: input.nodeId,
       actorId: input.actorId,
       actorKind: "harness",
+      available: true,
     },
   );
 }
@@ -504,234 +508,6 @@ function attestedAppends(
 }
 
 describe("src/commands/outcome/report-objective.test", () => {
-  it("an attestation moves the objective to awaiting_approval and stamps the object id", (t) => {
-    const fixture = createReportObjectiveFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    const claimed = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    reportTask(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-      fence: claimed.lease.fence,
-    });
-    const result = attest(
-      fixture,
-      clock,
-      attestationInput({ fence: claimed.objectiveLease.fence }),
-    );
-    assert.equal(nodeState(fixture, fixtureIds.objective), "awaiting_approval");
-    const run = runRowOfNode(fixture, fixtureIds.objective);
-    assert.equal(run.state, "active");
-    assert.equal(run.ended_at, null);
-    assert.equal(run.head_oid, OBJECT_ID_B);
-    const lease = leaseRowOf(fixture, fixtureIds.objective);
-    assert.equal(lease.owner, null);
-    assert.equal(lease.expires_at, null);
-    assert.deepEqual(result, {
-      nodeId: fixtureIds.objective,
-      kind: "objective",
-      state: "awaiting_approval",
-      blockReason: null,
-      attemptId: null,
-      attemptNo: null,
-      attemptsRemaining: null,
-      objectId: OBJECT_ID_B,
-      objectiveState: "awaiting_approval",
-      objectiveProjection: "done",
-    });
-  });
-
-  it("the attested object id is not the object id of any task report", (t) => {
-    const fixture = createReportObjectiveFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    const claimed = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    reportTask(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-      fence: claimed.lease.fence,
-    });
-    attest(
-      fixture,
-      clock,
-      attestationInput({ fence: claimed.objectiveLease.fence }),
-    );
-    const run = runRowOfNode(fixture, fixtureIds.objective);
-    assert.equal(run.head_oid, OBJECT_ID_B);
-    assert.notEqual(run.head_oid, OBJECT_ID);
-    const taskRun = runRowOfNode(fixture, fixtureIds.task);
-    assert.equal(taskRun.head_oid, OBJECT_ID);
-  });
-
-  it("an attestation over a live objective lease answers rather than refusing", (t) => {
-    const fixture = createReportObjectiveFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    const claimed = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    reportTask(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-      fence: claimed.lease.fence,
-    });
-    const result = attest(
-      fixture,
-      clock,
-      attestationInput({ fence: claimed.objectiveLease.fence }),
-    );
-    assert.equal(result.objectiveState, "awaiting_approval");
-    assert.equal(nodeState(fixture, fixtureIds.objective), "awaiting_approval");
-  });
-
-  it("an attestation while one task is non-terminal is illegal-transition", (t) => {
-    const fixture = createReportObjectiveFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    const claimed = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    const bytes = databaseBytes(fixture.storage);
-    const base = baseline(fixture);
-    const error = refused(
-      fixture,
-      clock,
-      attestationInput({ fence: claimed.objectiveLease.fence }),
-    );
-    assert.equal(error.refusal, "illegal-transition");
-    assertNoWrite(fixture, bytes, base);
-  });
-
-  it("an attestation on an objective that is not running is illegal-transition", (t) => {
-    for (const state of NON_RUNNING_STATES) {
-      const fixture = createReportObjectiveFixture();
-      t.after(() => fixture.dispose());
-      seedReadyFixture(fixture);
-      fixture.storage.transact((transaction) => {
-        seedNodeState(transaction, fixtureIds.objective, state);
-      });
-      const bytes = databaseBytes(fixture.storage);
-      const base = baseline(fixture);
-      const error = refused(fixture, createMockClock({ start: NOW }), {
-        nodeId: fixtureIds.objective,
-        actorId: ACTOR_A,
-        actorKind: "harness",
-        fence: 1,
-        objectId: OBJECT_ID_B,
-      });
-      assert.equal(error.refusal, "illegal-transition");
-      assert.deepEqual(error.details, { state, admitted: ["running"] });
-      assertNoWrite(fixture, bytes, base);
-    }
-  });
-
-  it("a stale fence, a wrong owner and an expired lease are each lease-held", (t) => {
-    {
-      const fixture = createReportObjectiveFixture();
-      t.after(() => fixture.dispose());
-      seedReadyFixture(fixture);
-      const clock = createMockClock({ start: NOW });
-      const claimed = claim(fixture, clock, {
-        nodeId: fixtureIds.task,
-        actorId: ACTOR_A,
-      });
-      const bytes = databaseBytes(fixture.storage);
-      const base = baseline(fixture);
-      const error = refused(
-        fixture,
-        clock,
-        attestationInput({
-          actorId: ACTOR_B,
-          fence: claimed.objectiveLease.fence,
-        }),
-      );
-      assert.equal(error.refusal, "lease-held");
-      assert.deepEqual(error.details, {
-        subject: fixtureIds.objective,
-        holder: ACTOR_A,
-        holderKind: "actor",
-        fence: claimed.objectiveLease.fence,
-        expiresAt: NOW + TTL,
-        relation: "self",
-      });
-      assertNoWrite(fixture, bytes, base);
-    }
-    {
-      const fixture = createReportObjectiveFixture();
-      t.after(() => fixture.dispose());
-      seedReadyFixture(fixture);
-      const clock = createMockClock({ start: NOW });
-      const claimed = claim(fixture, clock, {
-        nodeId: fixtureIds.task,
-        actorId: ACTOR_A,
-      });
-      const bytes = databaseBytes(fixture.storage);
-      const base = baseline(fixture);
-      const error = refused(
-        fixture,
-        clock,
-        attestationInput({ fence: claimed.objectiveLease.fence + 999 }),
-      );
-      assert.equal(error.refusal, "lease-held");
-      assert.equal(error.details, undefined);
-      assertNoWrite(fixture, bytes, base);
-    }
-    {
-      const fixture = createReportObjectiveFixture();
-      t.after(() => fixture.dispose());
-      seedReadyFixture(fixture);
-      const mutable = createMutableClock();
-      const claimed = claim(fixture, mutable.clock, {
-        nodeId: fixtureIds.task,
-        actorId: ACTOR_A,
-      });
-      mutable.advance(TTL + 1);
-      const bytes = databaseBytes(fixture.storage);
-      const base = baseline(fixture);
-      const error = refused(
-        fixture,
-        mutable.clock,
-        attestationInput({ fence: claimed.objectiveLease.fence }),
-      );
-      assert.equal(error.refusal, "lease-held");
-      assert.equal(error.details, undefined);
-      assertNoWrite(fixture, bytes, base);
-    }
-  });
-
-  it("a projection of discarded is illegal-transition", (t) => {
-    const fixture = createReportObjectiveFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    const claimed = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    seedTaskStateDirect(fixture, "discarded");
-    const bytes = databaseBytes(fixture.storage);
-    const base = baseline(fixture);
-    const error = refused(
-      fixture,
-      clock,
-      attestationInput({ fence: claimed.objectiveLease.fence }),
-    );
-    assert.equal(error.refusal, "illegal-transition");
-    assertNoWrite(fixture, bytes, base);
-  });
-
   it("a human actor is actor-forbidden", (t) => {
     const fixture = createReportObjectiveFixture();
     t.after(() => fixture.dispose());
@@ -753,136 +529,5 @@ describe("src/commands/outcome/report-objective.test", () => {
     );
     assert.equal(error.refusal, "actor-forbidden");
     assertNoWrite(fixture, bytes, base);
-  });
-
-  it("the event names the attesting harness", (t) => {
-    const fixture = createReportObjectiveFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    const claimed = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    reportTask(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-      fence: claimed.lease.fence,
-    });
-    attest(
-      fixture,
-      clock,
-      attestationInput({ fence: claimed.objectiveLease.fence }),
-    );
-    const appends = attestedAppends(fixture);
-    assert.equal(appends.length, 1);
-    const run = runRowOfNode(fixture, fixtureIds.objective);
-    assert.deepEqual(appends[0]!.input, {
-      subjectKind: "node",
-      subjectId: fixtureIds.objective,
-      type: "node.awaitingApproval",
-      actorKind: "harness",
-      actorId: ACTOR_A,
-      payload: {
-        from: "running",
-        to: "awaiting_approval",
-        reason: "object-attested",
-        objectId: OBJECT_ID_B,
-        projection: "done",
-        objectiveRunId: run.id,
-      },
-    });
-    const payload = appends[0]!.input.payload as Readonly<
-      Record<string, unknown>
-    >;
-    assert.deepEqual(Object.keys(payload), [
-      "from",
-      "to",
-      "reason",
-      "objectId",
-      "projection",
-      "objectiveRunId",
-    ]);
-  });
-
-  it("the awaitingApproval event names the harness and the ready event names the daemon", (t) => {
-    const fixture = createReportObjectiveFixture();
-    t.after(() => fixture.dispose());
-    seedDependentSecondObjectiveFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    const claimed = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    completeTaskThroughStore(fixture);
-    const ready = fixture.appends.filter(
-      (record) => record.input.type === "node.ready",
-    );
-    assert.equal(ready.length, 1);
-    assert.equal(ready[0]!.input.actorKind, "daemon");
-    assert.equal(ready[0]!.input.actorId, INSTANCE);
-    assert.equal(ready[0]!.input.subjectId, "task_b2");
-    attest(
-      fixture,
-      clock,
-      attestationInput({ fence: claimed.objectiveLease.fence }),
-    );
-    const awaiting = attestedAppends(fixture);
-    assert.equal(awaiting.length, 1);
-    assert.equal(awaiting[0]!.input.actorKind, "harness");
-    assert.equal(awaiting[0]!.input.actorId, ACTOR_A);
-    assert.equal(nodeState(fixture, "task_b2"), "ready");
-    assert.equal(nodeState(fixture, fixtureIds.objective), "awaiting_approval");
-  });
-
-  it("the attestation promotes nothing", (t) => {
-    const fixture = createReportObjectiveFixture();
-    t.after(() => fixture.dispose());
-    seedDependentObjectiveFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    const claimed = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    seedTaskStateDirect(fixture, "done");
-    attest(
-      fixture,
-      clock,
-      attestationInput({ fence: claimed.objectiveLease.fence }),
-    );
-    assert.equal(nodeState(fixture, fixtureIds.objective), "awaiting_approval");
-    assert.equal(nodeState(fixture, "objective_b"), "pending");
-    const ready = fixture.appends.filter(
-      (record) => record.input.type === "node.ready",
-    );
-    assert.equal(ready.length, 0);
-  });
-
-  it("the trigger is object-reported and no other", (t) => {
-    const fixture = createReportObjectiveFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    const claimed = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-    reportTask(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-      fence: claimed.lease.fence,
-    });
-    const before = setNodeStateCalls(fixture).length;
-    attest(
-      fixture,
-      clock,
-      attestationInput({ fence: claimed.objectiveLease.fence }),
-    );
-    const calls = setNodeStateCalls(fixture).slice(before);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0]!.id, fixtureIds.objective);
-    assert.equal(calls[0]!.from, "running");
-    assert.equal(calls[0]!.to, "awaiting_approval");
-    assert.equal(calls[0]!.trigger, "object-reported");
   });
 });

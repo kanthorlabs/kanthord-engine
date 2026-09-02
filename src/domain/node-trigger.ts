@@ -47,7 +47,7 @@ export const internalTransitions: readonly InternalTransition[] = [
     trigger: "readiness-demoted",
   },
   {
-    levels: ["objective", "task"],
+    levels: ["initiative", "objective", "task"],
     from: "ready",
     to: "running",
     trigger: "claim-taken",

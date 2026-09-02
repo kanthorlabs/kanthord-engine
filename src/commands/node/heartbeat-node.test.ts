@@ -5,7 +5,7 @@ import type { Clock } from "../../services/clock/index.ts";
 import type { EventLog } from "../../services/event/index.ts";
 import { SqliteEventLog } from "../../services/event/sqlite.ts";
 import type { Storage, Transaction } from "../../services/storage/index.ts";
-import { sweepExpiredExternalLeases } from "../startup/recover-expired-leases.ts";
+import { expireRuns } from "../run/expire-runs.ts";
 import { claimNode, type ClaimNodeResult } from "./claim-node.ts";
 import {
   heartbeatNode,
@@ -37,6 +37,7 @@ import {
   seedNodeState,
   seedRegistry,
 } from "../../../test/helpers/rows.ts";
+import { workerRegistry } from "../../domain/worker-registry.ts";
 
 const NOW = 1700000000000;
 const TTL = 300000;
@@ -117,29 +118,32 @@ function claim(
       events: fixture.events,
       clock,
       ids: createMockIdGenerator({ ulids: [] }),
-      sweepExpiredExternalLeases: (
-        transaction: Transaction,
-        input: Readonly<{ actor: string; now: number }>,
-      ) => {
-        sweepExpiredExternalLeases(
-          {
-            plan: fixture.plan.plan,
-            lease: fixture.lease.lease,
-            execution: fixture.execution.execution,
-            events: fixture.events,
-          },
-          transaction,
-          input,
-        );
+      expiry: {
+        expireRuns(transaction: Transaction, input: Readonly<{ now: number }>) {
+          return expireRuns(
+            {
+              events: fixture.events,
+              execution: fixture.execution.execution,
+              instanceId: INSTANCE,
+            },
+            transaction,
+            input,
+          );
+        },
       },
+      callerRecord: { worker: "claude@1", authorized: ["claude@1"] },
+      registry: workerRegistry,
       attemptLimit: ATTEMPT_LIMIT,
       leaseTtlMs: TTL,
+      runTtlMs: 120000,
+      runMaxLifetimeMs: 900000,
       instanceId: INSTANCE,
     },
     {
       nodeId: fixtureIds.task,
       actorId,
       actorKind: "harness",
+      available: true,
     },
   );
 }

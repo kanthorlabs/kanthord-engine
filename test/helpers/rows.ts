@@ -120,64 +120,99 @@ export function seedGraph(transaction: Transaction): void {
     values,
   );
 
-  transaction.run(
-    "INSERT INTO node (id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, repository_id, state, block_reason, discard_reason, revision, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    [
-      fixtureIds.initiative,
-      fixtureIds.project,
-      "initiative",
-      null,
-      "Harden the verify CLI",
-      fixtureIds.instructionBlob,
-      null,
-      null,
-      null,
-      "pending",
-      null,
-      null,
-      fixtureIds.planRevision,
-      1,
-    ],
+  const nodeColumns = transaction.all(
+    "PRAGMA table_info(node)",
+  ) as readonly Readonly<Record<string, unknown>>[];
+  const carriesDeliverable = nodeColumns.some(
+    (column) => column.name === "deliverable",
   );
-
-  transaction.run(
-    "INSERT INTO node (id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, repository_id, state, block_reason, discard_reason, revision, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    [
-      fixtureIds.objective,
-      fixtureIds.project,
-      "objective",
-      fixtureIds.initiative,
-      "Harden the verify CLI",
-      fixtureIds.instructionBlob,
-      null,
-      null,
-      fixtureIds.repository,
-      "pending",
-      null,
-      null,
-      fixtureIds.planRevision,
-      1,
-    ],
+  const carriesVerifyJson = nodeColumns.some(
+    (column) => column.name === "verify_json",
   );
-
-  transaction.run(
-    "INSERT INTO node (id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, repository_id, state, block_reason, discard_reason, revision, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    [
-      fixtureIds.task,
+  const carriesAssignment = nodeColumns.some(
+    (column) => column.name === "assignment",
+  );
+  const insertNode = (
+    id: string,
+    kind: string,
+    parentId: string | null,
+    acceptanceBlob: string | null,
+    repositoryId: string | null,
+    deliverable: string,
+  ): void => {
+    const insertColumns = [
+      "id",
+      "project_id",
+      "kind",
+      "parent_id",
+      "title",
+      "instruction_blob",
+      "acceptance_blob",
+      "worker",
+      "repository_id",
+      "state",
+      "block_reason",
+      "discard_reason",
+      "revision",
+      "updated_at",
+    ];
+    const insertValues: (string | number | null)[] = [
+      id,
       fixtureIds.project,
-      "task",
-      fixtureIds.objective,
+      kind,
+      parentId,
       "Harden the verify CLI",
       fixtureIds.instructionBlob,
-      fixtureIds.acceptanceBlob,
+      acceptanceBlob,
       null,
-      null,
+      repositoryId,
       "pending",
       null,
       null,
       fixtureIds.planRevision,
       1,
-    ],
+    ];
+    if (carriesDeliverable) {
+      insertColumns.push("deliverable");
+      insertValues.push(deliverable);
+    }
+    if (carriesVerifyJson) {
+      insertColumns.push("verify_json");
+      insertValues.push(null);
+    }
+    if (carriesAssignment) {
+      insertColumns.push("assignment");
+      insertValues.push(null);
+    }
+    transaction.run(
+      `INSERT INTO node (${insertColumns.join(", ")}) VALUES (${insertColumns.map(() => "?").join(", ")})`,
+      insertValues,
+    );
+  };
+
+  insertNode(
+    fixtureIds.initiative,
+    "initiative",
+    null,
+    null,
+    null,
+    "expansion",
+  );
+  insertNode(
+    fixtureIds.objective,
+    "objective",
+    fixtureIds.initiative,
+    null,
+    fixtureIds.repository,
+    "expansion",
+  );
+  insertNode(
+    fixtureIds.task,
+    "task",
+    fixtureIds.objective,
+    fixtureIds.acceptanceBlob,
+    null,
+    "implementation",
   );
 }
 
@@ -243,24 +278,51 @@ export function seedSecondRevisionWithTask(transaction: Transaction): void {
     values,
   );
 
+  const nodeColumns = transaction.all(
+    "PRAGMA table_info(node)",
+  ) as readonly Readonly<Record<string, unknown>>[];
+  const carriesDeliverable = nodeColumns.some(
+    (column) => column.name === "deliverable",
+  );
+  const insertColumns = [
+    "id",
+    "project_id",
+    "kind",
+    "parent_id",
+    "title",
+    "instruction_blob",
+    "acceptance_blob",
+    "worker",
+    "repository_id",
+    "state",
+    "block_reason",
+    "discard_reason",
+    "revision",
+    "updated_at",
+  ];
+  const insertValues: (string | number | null)[] = [
+    "task_b",
+    fixtureIds.project,
+    "task",
+    fixtureIds.objective,
+    "Second task",
+    fixtureIds.instructionBlob,
+    fixtureIds.acceptanceBlob,
+    null,
+    null,
+    "pending",
+    null,
+    null,
+    "revision_b",
+    1,
+  ];
+  if (carriesDeliverable) {
+    insertColumns.push("deliverable");
+    insertValues.push("implementation");
+  }
   transaction.run(
-    "INSERT INTO node (id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, repository_id, state, block_reason, discard_reason, revision, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    [
-      "task_b",
-      fixtureIds.project,
-      "task",
-      fixtureIds.objective,
-      "Second task",
-      fixtureIds.instructionBlob,
-      fixtureIds.acceptanceBlob,
-      null,
-      null,
-      "pending",
-      null,
-      null,
-      "revision_b",
-      1,
-    ],
+    `INSERT INTO node (${insertColumns.join(", ")}) VALUES (${insertColumns.map(() => "?").join(", ")})`,
+    insertValues,
   );
 }
 
@@ -444,6 +506,15 @@ export function seedSecondProjectGraph(transaction: Transaction): void {
         1,
       ],
     );
+  }
+  const nodeColumns = transaction.all(
+    "PRAGMA table_info(node)",
+  ) as readonly Readonly<Record<string, unknown>>[];
+  if (nodeColumns.some((column) => column.name === "deliverable")) {
+    transaction.run("UPDATE node SET deliverable = ? WHERE id = ?", [
+      "implementation",
+      "task_pb",
+    ]);
   }
 }
 
@@ -693,25 +764,24 @@ export function seedRunRow(
     nodeId: string;
     parentRunId: string | null;
     workspaceId: string;
+    graphRevision?: string | null;
     state?: "active" | "ended";
   }>,
 ): void {
   transaction.run(
-    "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, ?, ?, 'internal', ?, ?, ?, ?, NULL, NULL, ?, '[]', 1700300000000, 1700300000000, ?, NULL, NULL)",
     [
       input.id,
-      input.kind,
+      input.kind === "objective" ? "structural" : "execution",
       input.nodeId,
-      input.parentRunId,
       input.workspaceId,
       "general@1",
       1,
       3,
-      "a".repeat(40),
-      null,
+      input.graphRevision === undefined
+        ? fixtureIds.planRevision
+        : input.graphRevision,
       input.state ?? "active",
-      null,
-      null,
     ],
   );
 }
@@ -852,40 +922,30 @@ export function seedExecution(transaction: Transaction): void {
   );
 
   transaction.run(
-    "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, ?, ?, 'internal', ?, ?, ?, ?, NULL, NULL, ?, '[]', 1700300000000, 1700300000000, 'active', NULL, NULL)",
     [
       fixtureIds.objectiveRun,
-      "objective",
+      "structural",
       fixtureIds.objective,
-      null,
       fixtureIds.workspace,
       "general@1",
       1,
       3,
-      "a".repeat(40),
-      null,
-      "active",
-      null,
-      null,
+      fixtureIds.planRevision,
     ],
   );
 
   transaction.run(
-    "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, ?, ?, 'internal', ?, ?, ?, ?, NULL, NULL, ?, '[]', 1700300000000, 1700300000000, 'active', NULL, NULL)",
     [
       fixtureIds.taskRun,
-      "task",
+      "execution",
       fixtureIds.task,
-      fixtureIds.objectiveRun,
       fixtureIds.workspace,
       "general@1",
       1,
       3,
-      "a".repeat(40),
-      null,
-      "active",
-      null,
-      null,
+      fixtureIds.planRevision,
     ],
   );
 

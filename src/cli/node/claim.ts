@@ -36,7 +36,7 @@ export function registerNodeClaim(input: NodeClaimCliInput): void {
       const idempotencyKey = input.randomBytes(16).toString("hex");
       const result = await input.client.call(
         "node.claim",
-        {},
+        { available: true },
         { id },
         { idempotencyKey },
       );
@@ -48,7 +48,7 @@ export function registerNodeClaim(input: NodeClaimCliInput): void {
 
       const body = nodeClaimResponse.parse(result.body);
       input.stdout(
-        `kanthord: claimed ${id} fence ${body.lease.fence} expires ${body.lease.expiresAt} heartbeat ${body.heartbeatIntervalMs}ms\n`,
+        `kanthord: claimed ${id} fence ${body.lease.fence} expires ${body.lease.expiresAt}\n`,
       );
       input.stdout(
         `kanthord: run ${body.runId} attempt ${body.attemptNo ?? "-"} objective-run ${body.objectiveRunId} objective-fence ${body.objectiveLease.fence}\n`,

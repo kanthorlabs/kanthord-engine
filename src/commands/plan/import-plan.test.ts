@@ -675,39 +675,31 @@ function seedAttemptCommitOnTask(storage: Storage): void {
       ],
     );
     transaction.run(
-      "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, ?, ?, 'internal', ?, ?, ?, ?, NULL, NULL, ?, '[]', 1700300000000, 1700300000000, ?, NULL, NULL)",
       [
         "run_att_parent",
-        "objective",
+        "structural",
         planFixtureIdentities.objective,
-        null,
         "workspace_att_parent",
         "general@1",
         1,
         3,
-        "a".repeat(40),
-        null,
+        fixtureIds.planRevision,
         "active",
-        null,
-        null,
       ],
     );
     transaction.run(
-      "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, ?, ?, ?, 'internal', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, ?, ?, 'internal', ?, ?, ?, ?, NULL, NULL, ?, '[]', 1700300000000, 1700300000000, ?, NULL, NULL)",
       [
         "run_att",
-        "task",
+        "execution",
         planFixtureIdentities.task,
-        "run_att_parent",
         "workspace_att",
         "general@1",
         1,
         3,
-        "a".repeat(40),
-        null,
+        fixtureIds.planRevision,
         "active",
-        null,
-        null,
       ],
     );
     transaction.run(

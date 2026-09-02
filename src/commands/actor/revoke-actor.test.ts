@@ -160,12 +160,26 @@ describe("src/commands/actor/revoke-actor.test", () => {
 
   function seedHarnessExecution(transaction: Transaction): void {
     transaction.run(
-      "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, 'objective', ?, NULL, 'external', NULL, NULL, ?, 3, NULL, NULL, 'active', NULL, NULL)",
-      [fixtureIds.objectiveRun, fixtureIds.objective, 3],
+      "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, 'structural', ?, 'external', NULL, ?, ?, 3, NULL, NULL, NULL, '[]', ?, ?, 'active', NULL, NULL)",
+      [
+        fixtureIds.objectiveRun,
+        fixtureIds.objective,
+        "general@1",
+        3,
+        NOW + TTL,
+        NOW + TTL,
+      ],
     );
     transaction.run(
-      "INSERT INTO run (id, kind, node_id, parent_run_id, driver, workspace_id, worker, lease_fence, attempt_limit, base_oid, head_oid, state, outcome, ended_at) VALUES (?, 'task', ?, ?, 'external', NULL, NULL, ?, 3, NULL, NULL, 'active', NULL, NULL)",
-      [fixtureIds.taskRun, fixtureIds.task, fixtureIds.objectiveRun, 1],
+      "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, 'execution', ?, 'external', NULL, ?, ?, 3, NULL, NULL, NULL, '[]', ?, ?, 'active', NULL, NULL)",
+      [
+        fixtureIds.taskRun,
+        fixtureIds.task,
+        "general@1",
+        1,
+        NOW + TTL,
+        NOW + TTL,
+      ],
     );
     transaction.run(
       "INSERT INTO attempt (id, run_id, driver, attempt_no, provider_id, provider_model, timeout_ms, base_oid, head_oid, outcome, ended_at) VALUES (?, ?, 'external', 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL)",

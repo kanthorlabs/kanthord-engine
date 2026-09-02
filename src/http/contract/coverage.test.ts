@@ -47,7 +47,17 @@ const operationAdditions: Readonly<Record<string, readonly string[]>> = {
     "illegal-transition",
     "binding-in-use",
   ],
-  "node.claim": ["illegal-transition", "lease-held", "plan-invalid"],
+  "node.claim": [
+    "illegal-transition",
+    "lease-held",
+    "plan-invalid",
+    "pair-illegal",
+    "assignment-held",
+    "unroutable",
+    "review-head-unavailable",
+    "objective-busy",
+    "subtree-busy",
+  ],
   "node.heartbeat": ["illegal-transition", "lease-held", "plan-invalid"],
   "node.release": ["illegal-transition", "lease-held", "plan-invalid"],
   "node.report": [

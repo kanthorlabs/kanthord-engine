@@ -289,7 +289,7 @@ const live = "INSERT INTO t (id) VALUES (?)";
 
     assert.equal(
       report.statements.length,
-      52,
+      54,
       "the recognised write count moved; update it deliberately, never to go green",
     );
     assert.ok(

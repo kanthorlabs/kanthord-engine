@@ -288,7 +288,7 @@ sequenceDiagram
     Command->>Plan: 17 plan.setNodeState:T:claim-taken
     Command->>Plan: 18 plan.setNodeState:O:ancestor-started
     Command->>Plan: 19 plan.setNodeState:I:ancestor-started
-    Command->>Events: 20 events.append:run.opened:T
+    Command->>Events: 20 events.append:run.opened:R
     Command->>Events: 21 events.append:node.running:O:child-started
     Command->>Events: 22 events.append:node.running:I:child-started
     Command->>Events: 23 events.append:node.running:T:claim-taken
@@ -368,7 +368,7 @@ sequenceDiagram
     Command->>Plan: 6 plan.setNodeState:T:claim-taken
     Command->>Plan: 7 plan.setNodeState:O:ancestor-started
     Command->>Plan: 8 plan.setNodeState:I:ancestor-started
-    Command->>Events: 9 events.append:run.opened:T
+    Command->>Events: 9 events.append:run.opened:R
     Command->>Events: 10 events.append:node.running:O:child-started
     Command->>Events: 11 events.append:node.running:I:child-started
     Command->>Events: 12 events.append:node.running:T:claim-taken

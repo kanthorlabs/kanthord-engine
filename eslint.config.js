@@ -116,7 +116,7 @@ export default [
     ],
   },
   {
-    files: ["src/**/*.ts", "test/**/*.ts"],
+    files: ["src/**/*.ts", "test/**/*.ts", "scripts/epic-sequence-range.ts"],
     languageOptions: {
       parser: tseslint.parser,
       ecmaVersion: "latest",
@@ -148,6 +148,11 @@ export default [
         },
         { type: "cli", pattern: "src/cli", partialMatch: false },
         { type: "test-helper", pattern: "test/helpers", partialMatch: false },
+        {
+          type: "sequence-scenario",
+          pattern: "test/sequence/scenarios",
+          partialMatch: false,
+        },
       ],
       "boundaries/files": [
         { category: "service-interface", pattern: "src/services/*/index.ts" },
@@ -155,6 +160,10 @@ export default [
         {
           category: "test",
           pattern: ["src/**/*.test.ts", "test/**/*.test.ts"],
+        },
+        {
+          category: "sequence-support",
+          pattern: "scripts/epic-sequence-range.ts",
         },
       ],
     },

@@ -81,7 +81,8 @@ import { showNode } from "./queries/node/show-node.ts";
 import { createNode } from "./commands/node/create-node.ts";
 import { updateNode } from "./commands/node/update-node.ts";
 import { deleteNode } from "./commands/node/delete-node.ts";
-import { claimNode } from "./commands/node/claim-node.ts";
+import { claimNode, type Expiry } from "./commands/node/claim-node.ts";
+import { expireRuns } from "./commands/run/expire-runs.ts";
 import { heartbeatNode } from "./commands/node/heartbeat-node.ts";
 import { releaseNode } from "./commands/node/release-node.ts";
 import { unblockNode } from "./commands/node/unblock-node.ts";
@@ -125,6 +126,7 @@ import {
 } from "./commands/startup/recover-expired-leases.ts";
 import { RecoveryError, renderFinding } from "./domain/recovery.ts";
 import { KANTHORD_VERSION } from "./domain/version.ts";
+import { workerRegistry } from "./domain/worker-registry.ts";
 import { declaredCapabilities } from "./http/contract/capability.ts";
 import { registry } from "./http/contract/registry.ts";
 import { registerProviderHandler } from "./http/server/credential/register-provider.ts";
@@ -383,6 +385,15 @@ async function serve(options: ServeOptions): Promise<void> {
           transaction,
           input,
         );
+      const expiry: Expiry = {
+        expireRuns(transaction, input) {
+          return expireRuns(
+            { execution, events, instanceId },
+            transaction,
+            input,
+          );
+        },
+      };
       const handlers = {
         "system.health": healthHandler({
           readHealth: () => readHealth(healthDependencies),
@@ -550,9 +561,16 @@ async function serve(options: ServeOptions): Promise<void> {
                 events,
                 clock,
                 ids,
-                sweepExpiredExternalLeases: sweepExternalLeases,
+                expiry,
+                callerRecord: {
+                  worker: "claude@1",
+                  authorized: ["claude@1"],
+                },
+                registry: workerRegistry,
                 attemptLimit: settings.attemptLimit,
                 leaseTtlMs: settings.leaseTtlMs,
+                runTtlMs: settings.runTtlMs,
+                runMaxLifetimeMs: settings.runMaxLifetimeMs,
                 instanceId,
               },
               input,

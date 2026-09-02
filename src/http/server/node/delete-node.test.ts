@@ -123,6 +123,7 @@ function seedRunAndAttemptOnTask(transaction: Transaction): void {
     nodeId: planFixtureIdentities.objective,
     parentRunId: null,
     workspaceId: "workspace_1",
+    graphRevision: null,
   });
   seedRunRow(transaction, {
     id: "run_2",
@@ -130,6 +131,7 @@ function seedRunAndAttemptOnTask(transaction: Transaction): void {
     nodeId: planFixtureIdentities.task,
     parentRunId: "run_1",
     workspaceId: "workspace_1",
+    graphRevision: null,
   });
   seedAttemptRow(transaction, { id: "attempt_1", runId: "run_2" });
 }

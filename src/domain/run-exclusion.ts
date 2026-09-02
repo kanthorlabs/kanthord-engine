@@ -13,9 +13,13 @@ export type SubtreeExclusionInput = Readonly<{
   now: number;
 }>;
 
+export const subtreeRelations = ["self", "ancestor", "descendant"] as const;
+
+export type SubtreeRelation = (typeof subtreeRelations)[number];
+
 export type SubtreeExclusionRefusal = Readonly<{
   refusal: "subtree-busy";
-  relation: "self" | "ancestor" | "descendant";
+  relation: SubtreeRelation;
   nodeId: string;
   runId: string;
   expiresAt: number | null;

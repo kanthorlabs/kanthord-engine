@@ -307,9 +307,11 @@ const responseFor = (request: RecordedRequest): unknown => {
         objectiveLease,
         runId: RUN_ID,
         objectiveRunId: RUN_ID,
+        fence: 1,
+        expiresAt: 1722800300000,
+        renewAfterMs: 1000,
         attemptId: ATTEMPT_ID,
         attemptNo: 1,
-        heartbeatIntervalMs: 1000,
         node: { ...node, state: "running" },
       };
     case "node.heartbeat":

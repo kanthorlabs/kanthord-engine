@@ -1,3 +1,6 @@
+import { nodePairLegality } from "../../domain/node-pair.ts";
+import { runKindFor } from "../../domain/run-kind.ts";
+import { objectiveBusy, subtreeExclusion } from "../../domain/run-exclusion.ts";
 import { objectiveDrivePin } from "../../domain/external-transition.ts";
 import {
   liveLeaseRefusal,
@@ -9,7 +12,10 @@ import {
   type CompletenessParent,
 } from "../../domain/plan-completeness.ts";
 import type { StoredNode } from "../../domain/plan-graph.ts";
+import type { Deliverable } from "../../domain/deliverable.ts";
 import type { NodeState } from "../../domain/state.ts";
+import { capableWorkers, routeWorker } from "../../domain/worker-routing.ts";
+import type { WorkerEntry } from "../../domain/worker-registry.ts";
 import type { Clock } from "../../services/clock/index.ts";
 import type { EventLog } from "../../services/event/index.ts";
 import type { Execution } from "../../services/execution/index.ts";
@@ -26,13 +32,32 @@ import type { Storage, Transaction } from "../../services/storage/index.ts";
 
 export type ClaimRefusal =
   | "node-not-found"
-  | "initiative-not-claimable"
+  | "pair-illegal"
   | "plan-incomplete"
-  | "drive-mode-pinned"
-  | "run-driver-mismatch"
+  | "assignment-held"
+  | "unroutable"
+  | "review-head-unavailable"
   | "lease-held"
+  | "drive-mode-pinned"
+  | "objective-busy"
+  | "subtree-busy"
   | "illegal-transition"
   | "ancestor-not-startable";
+
+export const claimRefusalCodes = [
+  "node-not-found",
+  "pair-illegal",
+  "plan-incomplete",
+  "assignment-held",
+  "unroutable",
+  "review-head-unavailable",
+  "lease-held",
+  "drive-mode-pinned",
+  "objective-busy",
+  "subtree-busy",
+  "illegal-transition",
+  "ancestor-not-startable",
+] as const satisfies readonly ClaimRefusal[];
 
 export type ClaimedLease = Readonly<{
   subjectId: string;
@@ -47,6 +72,18 @@ export type NodeView = Readonly<{
   state: NodeState;
 }>;
 
+export type Expiry = Readonly<{
+  expireRuns(
+    transaction: Transaction,
+    input: Readonly<{ now: number }>,
+  ): readonly unknown[];
+}>;
+
+export type ClaimCallerRecord = Readonly<{
+  worker: string;
+  authorized: readonly string[];
+}>;
+
 export type ClaimNodeDependencies = Readonly<{
   storage: Storage;
   plan: PlanStore;
@@ -55,12 +92,13 @@ export type ClaimNodeDependencies = Readonly<{
   events: EventLog;
   clock: Clock;
   ids: IdGenerator;
-  sweepExpiredExternalLeases: (
-    transaction: Transaction,
-    input: Readonly<{ actor: string; now: number }>,
-  ) => void;
+  expiry: Expiry;
+  callerRecord: ClaimCallerRecord;
+  registry: readonly WorkerEntry[];
   attemptLimit: number;
   leaseTtlMs: number;
+  runTtlMs: number;
+  runMaxLifetimeMs: number;
   instanceId: string;
 }>;
 
@@ -68,6 +106,7 @@ export type ClaimNodeInput = Readonly<{
   nodeId: string;
   actorId: string;
   actorKind: "human" | "harness";
+  available: boolean;
 }>;
 
 export type ClaimNodeResult = Readonly<{
@@ -77,7 +116,9 @@ export type ClaimNodeResult = Readonly<{
   objectiveRunId: string;
   attemptId: string | null;
   attemptNo: number | null;
-  heartbeatIntervalMs: number;
+  fence: number;
+  expiresAt: number;
+  renewAfterMs: number;
   node: NodeView;
 }>;
 
@@ -103,22 +144,29 @@ export function claimNode(
 ): ClaimNodeResult {
   return dependencies.storage.transact((transaction) => {
     const now = dependencies.clock.now();
-
-    dependencies.sweepExpiredExternalLeases(transaction, {
-      actor: dependencies.instanceId,
-      now,
-    });
+    dependencies.expiry.expireRuns(transaction, { now });
 
     const nodes = dependencies.plan.readAllNodes(transaction);
     const node = nodes.find((candidate) => candidate.id === input.nodeId);
     if (node === undefined) {
       throw new ClaimNodeError("node-not-found", `no node ${input.nodeId}`);
     }
-    if (node.kind === "initiative") {
+
+    if (node.deliverable === null) {
       throw new ClaimNodeError(
-        "initiative-not-claimable",
-        `an initiative is never claimed directly`,
-        { refusal: "initiative-not-claimable" },
+        "pair-illegal",
+        `the ${node.kind} carries no deliverable`,
+        { kind: node.kind, deliverable: null },
+      );
+    }
+
+    const deliverable = node.deliverable as Deliverable;
+    const pair = nodePairLegality(node.kind, deliverable);
+    if (!pair.legal) {
+      throw new ClaimNodeError(
+        "pair-illegal",
+        `the ${node.kind} cannot carry ${deliverable}`,
+        { kind: node.kind, deliverable },
       );
     }
 
@@ -128,15 +176,49 @@ export function claimNode(
       parents,
       children: completenessChildren(nodes, parents, node.id),
     });
-    if (findings.length > 0) {
+    const relevantFindings =
+      deliverable === "expansion"
+        ? findings.filter((finding) => finding.id !== node.id)
+        : findings;
+    if (relevantFindings.length > 0) {
       throw new ClaimNodeError(
         "plan-incomplete",
         `the claim of ${node.id} fails the completeness check`,
-        { findings },
+        { findings: relevantFindings },
       );
     }
 
-    const refusal = liveLeaseRefusal({
+    const caller = dependencies.callerRecord;
+    if (node.assignment !== null && node.assignment !== caller.worker) {
+      throw new ClaimNodeError(
+        "assignment-held",
+        `the node ${node.id} is assigned to ${node.assignment}`,
+        {
+          assignment: node.assignment,
+          claimant: caller.worker,
+          maySwitch: true,
+        },
+      );
+    }
+
+    const routedWorker =
+      node.assignment ??
+      routeClaimWorker(node, caller, input.available, dependencies.registry);
+    const runKind = runKindFor(deliverable);
+    if (runKind === "review") {
+      throw new ClaimNodeError(
+        "review-head-unavailable",
+        `the review head for ${node.id} is unavailable`,
+        { nodeId: node.id, runKind },
+      );
+    }
+
+    const graphRevision = dependencies.plan.newestRevision(
+      transaction,
+      node.projectId,
+    );
+    const relativeIds = relativesOf(nodes, node);
+    const leaseRefusal = liveLeaseRefusal({
       targetId: node.id,
       targetKind: node.kind,
       parentId: node.parentId,
@@ -157,63 +239,123 @@ export function claimNode(
       liveLeases: liveLeasesOf(
         dependencies.lease,
         transaction,
-        relativesOf(nodes, node),
+        relativeIds,
         now,
       ),
     });
-    if (refusal !== null) {
+    if (leaseRefusal !== null) {
       throw new ClaimNodeError(
         "lease-held",
         `the claim of ${node.id} conflicts with a lease held by another owner`,
         {
-          subject: refusal.subjectId,
-          holder: refusal.holder,
-          holderKind: refusal.holderKind,
-          fence: refusal.fence,
-          expiresAt: refusal.expiresAt,
-          relation: refusal.relation,
+          subject: leaseRefusal.subjectId,
+          holder: leaseRefusal.holder,
+          holderKind: leaseRefusal.holderKind,
+          fence: leaseRefusal.fence,
+          expiresAt: leaseRefusal.expiresAt,
+          relation: leaseRefusal.relation,
         },
       );
     }
 
-    const ownLease = dependencies.lease.read(transaction, {
-      subjectKind: "node",
-      subjectId: node.id,
+    const objectiveId = objectiveScopeId(node);
+    if (node.kind !== "initiative") {
+      const pin = objectiveDrivePin({
+        runDrivers: dependencies.execution.runDriversUnderObjective(
+          transaction,
+          objectiveId,
+        ),
+        claimDriver: "external",
+      });
+      if (pin !== null) {
+        throw new ClaimNodeError(
+          "drive-mode-pinned",
+          `the objective ${objectiveId} is pinned to driver ${pin.pinnedDriver}`,
+          { pinnedDriver: pin.pinnedDriver, claimDriver: pin.claimDriver },
+        );
+      }
+    }
+
+    if (node.kind === "task" && runKind === "execution") {
+      const objective = objectiveAncestor(nodes, node);
+      const siblingIds = nodes
+        .filter(
+          (candidate) =>
+            candidate.parentId === objective.id &&
+            candidate.kind === "task" &&
+            candidate.id !== node.id,
+        )
+        .map((candidate) => candidate.id);
+      const siblingRuns = dependencies.execution
+        .activeRunsOfNodes(transaction, siblingIds)
+        .map((run) => ({
+          runId: run.id,
+          nodeId: run.nodeId,
+          state: run.state,
+          expiresAt: run.expiresAt,
+        }));
+      const refusal = objectiveBusy({
+        objectiveId: objective.id,
+        siblingRuns,
+        now,
+      });
+      if (refusal !== null) {
+        throw new ClaimNodeError(
+          "objective-busy",
+          `the objective ${objective.id} has a busy sibling task`,
+          {
+            objectiveId: refusal.objectiveId,
+            siblingNodeId: refusal.siblingNodeId,
+            siblingRunId: refusal.siblingRunId,
+            expiresAt: refusal.expiresAt,
+          },
+        );
+      }
+    }
+
+    const subtreeIds = dependencies.plan.readSubtree(transaction, node.id);
+    const ancestorIds = ancestorChain(nodes, node).map(
+      (ancestor) => ancestor.id,
+    );
+    const runs = dependencies.execution
+      .activeRunsOfNodes(
+        transaction,
+        uniqueIds([node.id, ...ancestorIds, ...subtreeIds]),
+      )
+      .map((run) => ({
+        runId: run.id,
+        nodeId: run.nodeId,
+        state: run.state,
+        expiresAt: run.expiresAt,
+      }));
+    const exclusion = subtreeExclusion({
+      targetId: node.id,
+      ancestorIds,
+      descendantIds: subtreeIds.filter((id) => id !== node.id),
+      runs,
       now,
     });
-    if (
-      node.state === "running" &&
-      ownLease !== null &&
-      ownLease.owner === input.actorId &&
-      ownLease.expiresAt !== null &&
-      ownLease.expiresAt > now
-    ) {
-      return replayResult(
-        dependencies,
-        transaction,
-        input,
-        node,
-        ownLease,
-        now,
-      );
-    }
-
-    const objectiveId = objectiveScopeId(node);
-
-    const pin = objectiveDrivePin({
-      runDrivers: dependencies.execution.runDriversUnderObjective(
-        transaction,
-        objectiveId,
-      ),
-      claimDriver: "external",
-    });
-    if (pin !== null) {
+    if (exclusion !== null) {
       throw new ClaimNodeError(
-        "drive-mode-pinned",
-        `the objective ${objectiveId} is pinned to driver ${pin.pinnedDriver}`,
-        { pinnedDriver: pin.pinnedDriver, claimDriver: pin.claimDriver },
+        "subtree-busy",
+        `the subtree of ${node.id} is busy`,
+        {
+          relation: exclusion.relation,
+          nodeId: exclusion.nodeId,
+          runId: exclusion.runId,
+          expiresAt: exclusion.expiresAt,
+        },
       );
     }
+
+    if (node.state !== "ready") {
+      throw new ClaimNodeError(
+        "illegal-transition",
+        `the node ${node.id} is ${node.state}, not claimable`,
+        { state: node.state, admitted: ["ready", "running"] },
+      );
+    }
+    const cascade = cascadeVerdicts(nodes, node);
 
     const objectiveLease = acquireWithHierarchyRefusal(
       dependencies.lease,
@@ -227,55 +369,39 @@ export function claimNode(
         now,
       },
     );
-
-    const objectiveRunId = openOrAdoptRun(dependencies, transaction, {
-      kind: "objective",
-      nodeId: objectiveId,
-      parentRunId: null,
-      leaseFence: objectiveLease.record.fence,
+    const claimedLease =
+      node.kind === "task"
+        ? acquireWithHierarchyRefusal(dependencies.lease, transaction, {
+            subjectKind: "node",
+            subjectId: node.id,
+            owner: input.actorId,
+            ownerKind: "actor",
+            ttlMs: dependencies.leaseTtlMs,
+            now,
+          })
+        : objectiveLease;
+    dependencies.plan.setNodeAssignment(transaction, {
+      id: node.id,
+      assignment: routedWorker,
     });
-
-    let claimedLease: AcquireLeaseResult = objectiveLease;
-    let runId = objectiveRunId;
-    let attemptId: string | null = null;
-    let attemptNo: number | null = null;
-    if (node.kind === "task") {
-      const taskLease = acquireWithHierarchyRefusal(
-        dependencies.lease,
-        transaction,
-        {
-          subjectKind: "node",
-          subjectId: node.id,
-          owner: input.actorId,
-          ownerKind: "actor",
-          ttlMs: dependencies.leaseTtlMs,
-          now,
-        },
-      );
-      claimedLease = taskLease;
-      runId = openOrAdoptRun(dependencies, transaction, {
-        kind: "task",
-        nodeId: node.id,
-        parentRunId: objectiveRunId,
-        leaseFence: taskLease.record.fence,
-      });
-      const attempt = dependencies.execution.openAttempt(transaction, {
-        runId,
-      });
-      attemptId = attempt.id;
-      attemptNo = attempt.attemptNo;
-    }
-
-    if (node.state !== "ready") {
-      throw new ClaimNodeError(
-        "illegal-transition",
-        `the node ${node.id} is ${node.state}, not claimable`,
-        { state: node.state, admitted: ["ready", "running"] },
-      );
-    }
-
-    const cascade = cascadeVerdicts(nodes, node);
-
+    const run = dependencies.execution.openRun(transaction, {
+      nodeId: node.id,
+      kind: runKind,
+      workspaceId: null,
+      worker: routedWorker,
+      fence: 1,
+      attemptLimit: dependencies.attemptLimit,
+      judgedOid: null,
+      graphRevision,
+      agents: [],
+      expiresAt: now + dependencies.runTtlMs,
+      maxLifetimeAt: now + dependencies.runMaxLifetimeMs,
+    });
+    const fence = run.fence;
+    const attempt =
+      runKind === "execution"
+        ? dependencies.execution.openAttempt(transaction, { runId: run.id })
+        : null;
     dependencies.plan.setNodeState(transaction, {
       id: node.id,
       from: "ready",
@@ -296,23 +422,19 @@ export function claimNode(
         cause: { revision: entry.revision, importId: null },
       });
     }
-
     dependencies.events.append(transaction, {
-      subjectKind: "node",
-      subjectId: node.id,
-      type: "lease.claimed",
+      subjectKind: "run",
+      subjectId: run.id,
+      type: "run.opened",
       actorKind: input.actorKind,
       actorId: input.actorId,
       payload: {
-        subjectId: node.id,
-        objectiveId,
-        fence: claimedLease.record.fence,
-        objectiveFence: objectiveLease.record.fence,
-        expiresAt: claimedLease.record.expiresAt,
-        runId,
-        objectiveRunId,
-        attemptId,
-        attemptNo,
+        runId: run.id,
+        nodeId: node.id,
+        fence,
+        kind: runKind,
+        worker: routedWorker,
+        expiresAt: now + dependencies.runTtlMs,
       },
     });
     for (const entry of cascade) {
@@ -349,72 +471,54 @@ export function claimNode(
     return {
       lease: toClaimedLease(claimedLease.record),
       objectiveLease: toClaimedLease(objectiveLease.record),
-      runId,
-      objectiveRunId,
-      attemptId,
-      attemptNo,
-      heartbeatIntervalMs: Math.floor(dependencies.leaseTtlMs / 3),
+      runId: run.id,
+      objectiveRunId: run.id,
+      attemptId: attempt?.id ?? null,
+      attemptNo: attempt?.attemptNo ?? null,
+      fence,
+      expiresAt: now + dependencies.runTtlMs,
+      renewAfterMs: Math.floor(dependencies.runTtlMs / 3),
       node: { id: node.id, state: "running" },
     };
   });
 }
 
-function replayResult(
-  dependencies: ClaimNodeDependencies,
-  transaction: Transaction,
-  input: ClaimNodeInput,
+function routeClaimWorker(
   node: StoredNode,
-  ownLease: LeaseRecord,
-  now: number,
-): ClaimNodeResult {
-  const activeRun = dependencies.execution.activeRunOfNode(
-    transaction,
-    node.id,
-  );
-  const objectiveId = objectiveScopeId(node);
-  const activeObjectiveRun = dependencies.execution.activeRunOfNode(
-    transaction,
-    objectiveId,
-  );
-  const objectiveLease = dependencies.lease.read(transaction, {
-    subjectKind: "node",
-    subjectId: objectiveId,
-    now,
+  caller: ClaimCallerRecord,
+  available: boolean,
+  registry: readonly WorkerEntry[],
+): string {
+  const deliverable = node.deliverable as Deliverable;
+  const capable = capableWorkers(registry, {
+    kind: node.kind,
+    deliverable,
   });
-  if (
-    activeRun === null ||
-    activeObjectiveRun === null ||
-    objectiveLease === null
-  ) {
-    throw new Error(
-      `the running node ${node.id} holds an incomplete claim state`,
+  if (capable.length === 0) {
+    throw new ClaimNodeError("unroutable", `no worker can claim ${node.id}`, {
+      failedSet: "capable",
+    });
+  }
+  const authorized = caller.authorized.filter((id) => capable.includes(id));
+  const availableWorkers =
+    available && authorized.includes(caller.worker) ? [caller.worker] : [];
+  const result = routeWorker({
+    registry,
+    kind: node.kind,
+    deliverable,
+    authorized,
+    available: availableWorkers,
+  });
+  if (!result.routed) {
+    throw new ClaimNodeError(
+      "unroutable",
+      `no available worker can claim ${node.id}`,
+      {
+        failedSet: result.failedSet,
+      },
     );
   }
-  let attemptId: string | null = null;
-  let attemptNo: number | null = null;
-  if (node.kind === "task") {
-    const openAttempts = dependencies.execution
-      .attemptsOfRun(transaction, activeRun.id)
-      .filter((attempt) => attempt.outcome === null);
-    if (openAttempts.length > 1) {
-      throw new Error(`run ${activeRun.id} holds more than one open attempt`);
-    }
-    const open = openAttempts[0];
-    if (open !== undefined) {
-      attemptId = open.id;
-      attemptNo = open.attemptNo;
-    }
-  }
-  return {
-    lease: toClaimedLease(ownLease),
-    objectiveLease: toClaimedLease(objectiveLease),
-    runId: activeRun.id,
-    objectiveRunId: activeObjectiveRun.id,
-    attemptId,
-    attemptNo,
-    heartbeatIntervalMs: Math.floor(dependencies.leaseTtlMs / 3),
-    node: { id: node.id, state: node.state },
-  };
+  return result.worker.worker;
 }
 
 function acquireWithHierarchyRefusal(
@@ -446,42 +550,6 @@ function acquireWithHierarchyRefusal(
   }
 }
 
-function openOrAdoptRun(
-  dependencies: ClaimNodeDependencies,
-  transaction: Transaction,
-  input: Readonly<{
-    kind: "objective" | "task";
-    nodeId: string;
-    parentRunId: string | null;
-    leaseFence: number;
-  }>,
-): string {
-  const active = dependencies.execution.activeRunOfNode(
-    transaction,
-    input.nodeId,
-  );
-  if (active === null) {
-    return dependencies.execution.openRun(transaction, {
-      kind: input.kind,
-      nodeId: input.nodeId,
-      parentRunId: input.parentRunId,
-      leaseFence: input.leaseFence,
-      attemptLimit: dependencies.attemptLimit,
-    }).id;
-  }
-  if (active.driver !== "external") {
-    throw new ClaimNodeError(
-      "run-driver-mismatch",
-      `the active run of ${input.nodeId} is ${active.driver} and is never adopted`,
-      { runDriver: active.driver, claimDriver: "external" },
-    );
-  }
-  return dependencies.execution.adoptRun(transaction, {
-    runId: active.id,
-    leaseFence: input.leaseFence,
-  }).id;
-}
-
 function objectiveScopeId(node: StoredNode): string {
   if (node.kind === "task") {
     if (node.parentId === null) {
@@ -490,6 +558,19 @@ function objectiveScopeId(node: StoredNode): string {
     return node.parentId;
   }
   return node.id;
+}
+
+function objectiveAncestor(
+  nodes: readonly StoredNode[],
+  node: StoredNode,
+): StoredNode {
+  const objective = ancestorChain(nodes, node).find(
+    (ancestor) => ancestor.kind === "objective",
+  );
+  if (objective === undefined) {
+    throw new Error(`task ${node.id} has no objective ancestor`);
+  }
+  return objective;
 }
 
 function cascadeVerdicts(
@@ -643,6 +724,10 @@ function toClaimedLease(record: LeaseRecord): ClaimedLease {
     fence: record.fence,
     expiresAt: record.expiresAt,
   };
+}
+
+function uniqueIds(ids: readonly string[]): readonly string[] {
+  return [...new Set(ids)];
 }
 
 function compareIds(left: string, right: string): number {

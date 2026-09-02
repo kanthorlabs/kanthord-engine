@@ -7,9 +7,15 @@ import { compositions } from "../../domain/worker-registry.ts";
 import { action, parameter, resource, sub } from "./path.ts";
 import { baselineErrors } from "./error-baseline.ts";
 import {
+  assignmentHeldDetails,
   illegalTransitionDetails,
   leaseHeldDetails,
+  objectiveBusyDetails,
+  pairIllegalDetails,
   planInvalidDetails,
+  reviewHeadUnavailableDetails,
+  subtreeBusyDetails,
+  unroutableDetails,
 } from "./error-details.ts";
 import {
   EXAMPLE_AT as A,
@@ -28,7 +34,9 @@ const claimedLease = z.strictObject({
   expiresAt: epochMillis,
 });
 
-export const nodeClaimRequest = z.strictObject({});
+export const nodeClaimRequest = z.strictObject({
+  available: z.boolean(),
+});
 
 export const nodeHeartbeatRequest = z.strictObject({
   fence: z.int().min(1),
@@ -43,9 +51,11 @@ export const nodeClaimResponse = z.strictObject({
   objectiveLease: claimedLease,
   runId: identity("run"),
   objectiveRunId: identity("run"),
+  fence: z.int().min(1),
+  expiresAt: z.int(),
+  renewAfterMs: z.int().min(1),
   attemptId: identity("attempt").nullable(),
   attemptNo: z.int().nullable(),
-  heartbeatIntervalMs: z.int(),
   node: nodeShowResponse,
 });
 
@@ -107,7 +117,7 @@ const nodeRelease_node = {
 };
 
 export const nodeClaimExamples: OperationExamples = {
-  request: {},
+  request: { available: true },
   success: {
     lease: {
       subjectId: `task_${U}`,
@@ -125,9 +135,11 @@ export const nodeClaimExamples: OperationExamples = {
     },
     runId: `run_${U}`,
     objectiveRunId: `run_${U}`,
+    fence: 1,
+    expiresAt: 1722800300000,
+    renewAfterMs: 100000,
     attemptId: `attempt_${U}`,
     attemptNo: 1,
-    heartbeatIntervalMs: 100000,
     node: nodeClaim_node,
   },
   error: {
@@ -303,6 +315,12 @@ export const execution = operations([
       "lease-held": leaseHeldDetails,
       "illegal-transition": illegalTransitionDetails,
       "plan-invalid": planInvalidDetails,
+      "pair-illegal": pairIllegalDetails,
+      "assignment-held": assignmentHeldDetails,
+      unroutable: unroutableDetails,
+      "review-head-unavailable": reviewHeadUnavailableDetails,
+      "objective-busy": objectiveBusyDetails,
+      "subtree-busy": subtreeBusyDetails,
     },
     examples: nodeClaimExamples,
   },

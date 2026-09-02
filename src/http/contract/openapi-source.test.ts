@@ -14,13 +14,13 @@ function compareBytewise(a: string, b: string): number {
   return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 }
 
-test("emits seventeen component files", () => {
+test("emits eighteen component files", () => {
   const tree = buildOpenApiSourceTree();
   const componentKeys = [...tree.keys()]
     .filter((key) => key.startsWith("components/"))
     .sort(compareBytewise);
 
-  assert.equal(componentKeys.length, 17);
+  assert.equal(componentKeys.length, 18);
   assert.deepEqual(componentKeys, [
     "components/Error.yaml",
     "components/actor.yaml",
@@ -36,6 +36,7 @@ test("emits seventeen component files", () => {
     "components/provider.yaml",
     "components/recovery.yaml",
     "components/repository.yaml",
+    "components/run.yaml",
     "components/security.yaml",
     "components/system.yaml",
     "components/worker.yaml",
@@ -254,10 +255,10 @@ test("leaves no internal component pointer in a feature fragment", () => {
   );
 });
 
-test("emits one root, nineteen fragments and seventeen component files", () => {
+test("emits one root, nineteen fragments and eighteen component files", () => {
   const tree = buildOpenApiSourceTree();
 
-  assert.equal(tree.size, 37);
+  assert.equal(tree.size, 38);
   assert.equal(tree.has("openapi.yaml"), true);
 });
 
@@ -344,7 +345,7 @@ test("references a component from every schema and from the security scheme", ()
   });
 });
 
-test("carries the event payload catalogue as thirty-seven external references", () => {
+test("carries the event payload catalogue as thirty-nine external references", () => {
   const tree = buildOpenApiSourceTree();
   const text = tree.get("openapi.yaml");
   assert.notEqual(text, undefined);
@@ -359,7 +360,7 @@ test("carries the event payload catalogue as thirty-seven external references", 
   >;
 
   assert.ok(Object.hasOwn(root, eventPayloadCatalogueKey));
-  assert.equal(Object.keys(catalogue).length, 38);
+  assert.equal(Object.keys(catalogue).length, 39);
   assert.deepEqual(Object.keys(catalogue), Object.keys(masterCatalogue));
   assert.ok(
     text.includes(

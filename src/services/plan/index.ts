@@ -62,6 +62,11 @@ export type SetNodeStateInput = Readonly<{
   cause: ReadinessCause;
 }>;
 
+export type SetNodeAssignmentInput = Readonly<{
+  id: string;
+  assignment: string;
+}>;
+
 export interface PlanStore {
   readGraph(
     transaction: Transaction,
@@ -115,4 +120,8 @@ export interface PlanStore {
     transaction: Transaction,
     input: SetNodeStateInput,
   ): readonly ReadinessTransition[];
+  setNodeAssignment(
+    transaction: Transaction,
+    input: SetNodeAssignmentInput,
+  ): void;
 }

@@ -1,18 +1,24 @@
 import { z } from "zod";
 
 import { epochMillis } from "../../domain/column.ts";
-import { nodeIdentity } from "../../domain/identity.ts";
+import { deliverables } from "../../domain/deliverable.ts";
+import { identity, nodeIdentity } from "../../domain/identity.ts";
 import { leaseOwnerKinds } from "../../domain/lease.ts";
 import { leaseRelations } from "../../domain/lease-hierarchy.ts";
 import { choices } from "../../domain/plan-choice.ts";
 import { credentialFailures } from "../../domain/repository.ts";
 import { revisionGuardClasses } from "../../domain/revision-guard.ts";
 import { runDrivers } from "../../domain/run.ts";
+import { subtreeRelations } from "../../domain/run-exclusion.ts";
+import { runKinds } from "../../domain/run-kind.ts";
 import {
   blockReasons,
+  nodeKinds,
   nodeStates,
   unblockRefusals,
 } from "../../domain/state.ts";
+import { workerId } from "../../domain/worker-id.ts";
+import { routingFailedSets } from "../../domain/worker-routing.ts";
 import { planFinding } from "./plan-finding.ts";
 
 const objectId = z.string().regex(/^[0-9a-f]{40}$/);
@@ -137,4 +143,38 @@ export const leaseHeldDetails = z.discriminatedUnion("refusal", [
 export const nodeUnblockDetails = z.strictObject({
   refusal: z.enum(unblockRefusals),
   blockReason: z.enum(blockReasons).nullable(),
+});
+
+export const pairIllegalDetails = z.strictObject({
+  kind: z.enum(nodeKinds),
+  deliverable: z.enum(deliverables).nullable(),
+});
+
+export const assignmentHeldDetails = z.strictObject({
+  assignment: workerId,
+  claimant: workerId,
+  maySwitch: z.boolean(),
+});
+
+export const unroutableDetails = z.strictObject({
+  failedSet: z.enum(routingFailedSets),
+});
+
+export const reviewHeadUnavailableDetails = z.strictObject({
+  nodeId: nodeIdentity,
+  runKind: z.enum(runKinds),
+});
+
+export const objectiveBusyDetails = z.strictObject({
+  objectiveId: nodeIdentity,
+  siblingNodeId: nodeIdentity,
+  siblingRunId: identity("run"),
+  expiresAt: epochMillis,
+});
+
+export const subtreeBusyDetails = z.strictObject({
+  relation: z.enum(subtreeRelations),
+  nodeId: nodeIdentity,
+  runId: identity("run"),
+  expiresAt: epochMillis,
 });

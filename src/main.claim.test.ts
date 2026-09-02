@@ -33,7 +33,12 @@ const DOCUMENTS: readonly Readonly<{ path: string; content: string }>[] = [
     path: "plan/i--01/initiative.md",
     content: `---
 kind: initiative
+id: initiative_01ARZ3NDEKTSV4RRFFQ69G5FAV
 title: Ship kanthord
+deliverable: expansion
+verify:
+  paths: []
+  commands: []
 ---
 Bootstrap the daemon.
 `,
@@ -42,8 +47,13 @@ Bootstrap the daemon.
     path: "plan/i--01/o--02/objective.md",
     content: `---
 kind: objective
+id: objective_01BQZ3NDEKTSV4RRFFQ69G5FAV
 title: Harden the verify CLI
 repo: ${REPOSITORY_NAME}
+deliverable: implementation
+verify:
+  paths: []
+  commands: []
 ---
 Make it verifiable.
 `,
@@ -52,7 +62,12 @@ Make it verifiable.
     path: "plan/i--01/o--02/01-t.md",
     content: `---
 kind: task
+id: task_01DRZ3NDEKTSV4RRFFQ69G5FAV
 title: ${TASK_TITLE}
+deliverable: implementation
+verify:
+  paths: []
+  commands: []
 ---
 Build the renderer.
 
@@ -65,7 +80,12 @@ Build the renderer.
     path: "plan/i--01/o--02/02-t.md",
     content: `---
 kind: task
+id: task_01ERZ3NDEKTSV4RRFFQ69G5FAV
 title: ${TASK_TITLE}
+deliverable: implementation
+verify:
+  paths: []
+  commands: []
 ---
 Build the renderer.
 
@@ -95,7 +115,6 @@ type ClaimBody = Readonly<{
   objectiveRunId: string;
   attemptId: string | null;
   attemptNo: number | null;
-  heartbeatIntervalMs: number;
   node: Readonly<{
     id: string;
     state: string;
@@ -232,6 +251,9 @@ function expireBothLeases(taskId: string, objective: string): void {
         "UPDATE lease SET expires_at = 1 WHERE subject_kind = 'node' AND subject_id IN (?, ?) RETURNING subject_id",
       )
       .all(taskId, objective) as unknown as readonly { subject_id: string }[];
+    database
+      .prepare("UPDATE run SET expires_at = 1 WHERE node_id = ?")
+      .run(taskId);
     database.exec("COMMIT");
     assert.deepEqual(
       [...expired].map((row) => row.subject_id).sort(byBytes),
@@ -295,7 +317,7 @@ describe("src/main.claim.test", () => {
       body: {
         fromRevision: null,
         importId: IMPORT_ID,
-        documents: validation.documents,
+        documents: DOCUMENTS,
         choices: validation.choices.map((entry) => ({
           id: entry.id,
           take: entry.suggested,
@@ -374,12 +396,11 @@ describe("src/main.claim.test", () => {
     const claimed = await call(client(harnessTokenA), {
       operationId: "node.claim",
       parameters: { id: taskAId },
-      body: {},
+      body: { available: true },
     });
     assert.equal(claimed.status, 200, JSON.stringify(claimed));
     const body = bodyOf(claimed) as ClaimBody;
 
-    assert.equal(body.heartbeatIntervalMs, 100000);
     assert.equal(body.attemptNo, 1);
     assert.ok(body.attemptId !== null);
     assert.equal(body.lease.subjectId, taskAId);
@@ -388,6 +409,7 @@ describe("src/main.claim.test", () => {
     assert.equal(body.objectiveLease.subjectId, objectiveId);
     assert.equal(body.objectiveLease.fence, 1);
     assert.equal(body.node.state, "running");
+    assert.equal(body.node.id, taskAId);
     assert.equal(body.node.title, TASK_TITLE);
     assert.equal(body.node.parentId, objectiveId);
     claimFence = body.lease.fence;
@@ -398,20 +420,13 @@ describe("src/main.claim.test", () => {
     oldAttemptId = body.attemptId;
 
     const taskRun = readOne(
-      "SELECT kind, parent_run_id, driver, state FROM run WHERE id = ?",
+      "SELECT kind, driver, state FROM run WHERE id = ?",
       [body.runId],
     );
-    assert.equal(taskRun.kind, "task");
-    assert.equal(taskRun.parent_run_id, body.objectiveRunId);
+    assert.equal(taskRun.kind, "execution");
     assert.equal(taskRun.driver, "external");
     assert.equal(taskRun.state, "active");
-    const objectiveRun = readOne(
-      "SELECT kind, parent_run_id, driver, state FROM run WHERE id = ?",
-      [body.objectiveRunId],
-    );
-    assert.equal(objectiveRun.kind, "objective");
-    assert.equal(objectiveRun.parent_run_id, null);
-    assert.equal(objectiveRun.driver, "external");
+    assert.equal(body.objectiveRunId, body.runId);
 
     const task = await call(client(harnessTokenA), {
       operationId: "node.show",
@@ -434,7 +449,7 @@ describe("src/main.claim.test", () => {
     const sibling = await call(client(harnessTokenB), {
       operationId: "node.claim",
       parameters: { id: taskBId },
-      body: {},
+      body: { available: true },
     });
     assert.equal(sibling.status, 409, JSON.stringify(sibling));
     assert.equal(sibling.ok, false);
@@ -452,7 +467,7 @@ describe("src/main.claim.test", () => {
     const claimed = await call(client(harnessTokenB), {
       operationId: "node.claim",
       parameters: { id: objectiveId },
-      body: {},
+      body: { available: true },
     });
     assert.equal(claimed.status, 409, JSON.stringify(claimed));
     assert.equal(claimed.ok, false);
@@ -541,7 +556,7 @@ describe("src/main.claim.test", () => {
     const claimed = await call(client(harnessTokenB), {
       operationId: "node.claim",
       parameters: { id: taskAId },
-      body: {},
+      body: { available: true },
     });
     assert.equal(claimed.status, 200, JSON.stringify(claimed));
     const body = bodyOf(claimed) as ClaimBody;
@@ -586,10 +601,11 @@ describe("src/main.claim.test", () => {
   });
 
   it("the production composition root binds all three routes", async () => {
+    expireBothLeases(taskAId, objectiveId);
     const claimed = await call(client(harnessTokenB), {
       operationId: "node.claim",
       parameters: { id: taskBId },
-      body: {},
+      body: { available: true },
     });
     assert.notEqual(claimed.status, 501, "node.claim answered 501");
     assert.equal(claimed.status, 200, JSON.stringify(claimed));

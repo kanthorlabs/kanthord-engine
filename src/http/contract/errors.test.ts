@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   buildErrorEnvelope,
@@ -14,6 +15,18 @@ import { readErrorCodeMatrix } from "../../../test/helpers/proposal.ts";
 
 describe("src/http/contract/errors.test", () => {
   it("matches the proposal code table", () => {
+    const proposal = readErrorCodeMatrix();
+
+    assert.deepEqual(
+      Object.keys(proposal).sort(),
+      Object.keys(errorStatuses).sort(),
+    );
+    for (const [code, status] of Object.entries(errorStatuses)) {
+      assert.equal(proposal[code], status, `${code} status drifted`);
+    }
+  });
+
+  it("the error code table and the proposal agree", () => {
     const proposal = readErrorCodeMatrix();
 
     assert.deepEqual(
@@ -43,6 +56,12 @@ describe("src/http/contract/errors.test", () => {
       "choices-stale",
       "choices-changed",
       "host-key-mismatch",
+      "pair-illegal",
+      "assignment-held",
+      "unroutable",
+      "review-head-unavailable",
+      "objective-busy",
+      "subtree-busy",
       "plan-invalid",
       "choices-invalid",
       "identity-kind-mismatch",
@@ -115,6 +134,12 @@ describe("src/http/contract/errors.test", () => {
       "choices-stale",
       "choices-changed",
       "host-key-mismatch",
+      "pair-illegal",
+      "assignment-held",
+      "unroutable",
+      "review-head-unavailable",
+      "objective-busy",
+      "subtree-busy",
     ]);
     assert.deepEqual(groups[422], [
       "plan-invalid",
@@ -125,6 +150,48 @@ describe("src/http/contract/errors.test", () => {
     assert.deepEqual(groups[500], ["internal-error"]);
     assert.deepEqual(groups[501], ["not-implemented"]);
     assert.deepEqual(groups[503], ["service-unavailable"]);
+  });
+
+  it("every claim refusal code maps to 409", () => {
+    const claimRefusals = [
+      "pair-illegal",
+      "assignment-held",
+      "unroutable",
+      "review-head-unavailable",
+      "objective-busy",
+      "subtree-busy",
+    ] as const;
+    const statuses = errorStatuses as Readonly<
+      Record<string, number | undefined>
+    >;
+    for (const code of claimRefusals) {
+      assert.equal(statuses[code], 409, `${code} status drifted`);
+    }
+  });
+
+  it("initiative-not-claimable and run-driver-mismatch are absent from the error codes", () => {
+    const forbidden = ["initiative-not-claimable", "run-driver-mismatch"];
+    for (const code of forbidden) {
+      assert.equal(Object.hasOwn(errorStatuses, code), false);
+    }
+
+    const details = readFileSync(
+      new URL("./error-details.ts", import.meta.url),
+      "utf8",
+    );
+    assert.doesNotMatch(
+      details,
+      /initiative-not-claimable|run-driver-mismatch/,
+    );
+
+    const coverage = readFileSync(
+      new URL("./coverage.test.ts", import.meta.url),
+      "utf8",
+    );
+    assert.doesNotMatch(
+      coverage,
+      /initiative-not-claimable|run-driver-mismatch/,
+    );
   });
 
   it("service-unavailable is 503 and carries no details", () => {

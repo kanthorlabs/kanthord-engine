@@ -16,6 +16,8 @@ import { nodeClaimResponse } from "../../contract/execution.ts";
 const U = "01JQ8Z7G3HZZZZZZZZZZZZZZZZ";
 const TASK = `task_${U}`;
 const OBJECTIVE = `objective_${U}`;
+const SIBLING = "task_01JQ8Z7G3HZZZZZZZZZZZZZZY0";
+const RUN = `run_${U}`;
 const ACTOR = "actor_01JQ8ZAN9P0ABCDEFGHJKMNPQR";
 const HASH = `sha256:${"a".repeat(64)}`;
 
@@ -62,9 +64,11 @@ const successResult = {
   },
   runId: `run_${U}`,
   objectiveRunId: `run_${U}`,
+  fence: 1,
+  expiresAt: 1722800300000,
+  renewAfterMs: 100000,
   attemptId: `attempt_${U}`,
   attemptNo: 1,
-  heartbeatIntervalMs: 100000,
   node: fullNode,
 };
 
@@ -81,10 +85,15 @@ describe("src/http/server/node/claim-node.test", () => {
 
   it("a successful call answers 200 with the contract response shape", async (t) => {
     const app = await buildApp(() => successResult);
-    const response = await app.post(`/v1/node/${TASK}/claim`).send({});
+    const response = await app
+      .post(`/v1/node/${TASK}/claim`)
+      .send({ available: true });
     assert.equal(response.status, 200);
     assert.equal(nodeClaimResponse.safeParse(response.body).success, true);
-    assert.equal(response.body.heartbeatIntervalMs, 100000);
+    assert.equal(response.body.fence, 1);
+    assert.equal(response.body.expiresAt, 1722800300000);
+    assert.equal(response.body.renewAfterMs, 100000);
+    assert.equal(Object.hasOwn(response.body, "heartbeatIntervalMs"), false);
   });
 
   it("each refusal maps to its declared code", async (t) => {
@@ -95,17 +104,6 @@ describe("src/http/server/node/claim-node.test", () => {
         code: "not-found",
         status: 404,
         details: undefined,
-      },
-      {
-        refusal: "initiative-not-claimable" as const,
-        error: new ClaimNodeError(
-          "initiative-not-claimable",
-          "an initiative is never claimed directly",
-          { refusal: "initiative-not-claimable" },
-        ),
-        code: "invalid-request",
-        status: 400,
-        details: { refusal: "initiative-not-claimable" },
       },
       {
         refusal: "plan-incomplete" as const,
@@ -149,21 +147,6 @@ describe("src/http/server/node/claim-node.test", () => {
           refusal: "drive-mode-pinned",
           pinnedDriver: "internal",
           claimDriver: "external",
-        },
-      },
-      {
-        refusal: "run-driver-mismatch" as const,
-        error: new ClaimNodeError(
-          "run-driver-mismatch",
-          `the active run of ${TASK} is internal and is never adopted`,
-          { runDriver: "internal", claimDriver: "external" },
-        ),
-        code: "illegal-transition",
-        status: 409,
-        details: {
-          refusal: "run-driver",
-          runDriver: "internal",
-          expectedDriver: "external",
         },
       },
       {
@@ -227,12 +210,102 @@ describe("src/http/server/node/claim-node.test", () => {
           relation: "ancestor",
         },
       },
+      {
+        refusal: "pair-illegal" as const,
+        error: new ClaimNodeError(
+          "pair-illegal",
+          "the task carries no deliverable",
+          { kind: "task", deliverable: null },
+        ),
+        code: "pair-illegal",
+        status: 409,
+        details: { kind: "task", deliverable: null },
+      },
+      {
+        refusal: "assignment-held" as const,
+        error: new ClaimNodeError(
+          "assignment-held",
+          `the node ${TASK} is assigned to claude@1`,
+          { assignment: "claude@1", claimant: "opencode@1", maySwitch: true },
+        ),
+        code: "assignment-held",
+        status: 409,
+        details: {
+          assignment: "claude@1",
+          claimant: "opencode@1",
+          maySwitch: true,
+        },
+      },
+      {
+        refusal: "unroutable" as const,
+        error: new ClaimNodeError("unroutable", "the caller is not available", {
+          failedSet: "available",
+        }),
+        code: "unroutable",
+        status: 409,
+        details: { failedSet: "available" },
+      },
+      {
+        refusal: "review-head-unavailable" as const,
+        error: new ClaimNodeError(
+          "review-head-unavailable",
+          `the review head for ${TASK} is unavailable`,
+          { nodeId: TASK, runKind: "review" },
+        ),
+        code: "review-head-unavailable",
+        status: 409,
+        details: { nodeId: TASK, runKind: "review" },
+      },
+      {
+        refusal: "objective-busy" as const,
+        error: new ClaimNodeError(
+          "objective-busy",
+          `the objective ${OBJECTIVE} has a busy sibling task`,
+          {
+            objectiveId: OBJECTIVE,
+            siblingNodeId: SIBLING,
+            siblingRunId: RUN,
+            expiresAt: 1722800300000,
+          },
+        ),
+        code: "objective-busy",
+        status: 409,
+        details: {
+          objectiveId: OBJECTIVE,
+          siblingNodeId: SIBLING,
+          siblingRunId: RUN,
+          expiresAt: 1722800300000,
+        },
+      },
+      {
+        refusal: "subtree-busy" as const,
+        error: new ClaimNodeError(
+          "subtree-busy",
+          `the subtree of ${TASK} is busy`,
+          {
+            relation: "self",
+            nodeId: TASK,
+            runId: RUN,
+            expiresAt: 1722800300000,
+          },
+        ),
+        code: "subtree-busy",
+        status: 409,
+        details: {
+          relation: "self",
+          nodeId: TASK,
+          runId: RUN,
+          expiresAt: 1722800300000,
+        },
+      },
     ];
     for (const row of cases) {
       const app = await buildApp(() => {
         throw row.error;
       });
-      const response = await app.post(`/v1/node/${TASK}/claim`).send({});
+      const response = await app
+        .post(`/v1/node/${TASK}/claim`)
+        .send({ available: true });
       assert.equal(response.status, row.status, row.refusal);
       assert.equal(response.body.error.code, row.code, row.refusal);
       if (row.details === undefined) {
@@ -271,7 +344,9 @@ describe("src/http/server/node/claim-node.test", () => {
       calls += 1;
       return successResult;
     });
-    const response = await app.post(`/v1/node/${TASK}/claim`).send({});
+    const response = await app
+      .post(`/v1/node/${TASK}/claim`)
+      .send({ available: true });
     assert.equal(response.status, 200);
     assert.equal(calls, 1);
   });
@@ -282,10 +357,17 @@ describe("src/http/server/node/claim-node.test", () => {
       received.push(input);
       return successResult;
     });
-    const ok = await app.post(`/v1/node/${TASK}/claim`).send({});
+    const ok = await app
+      .post(`/v1/node/${TASK}/claim`)
+      .send({ available: true });
     assert.equal(ok.status, 200);
     assert.deepEqual(received, [
-      { nodeId: TASK, actorId: HARNESS_ACTOR_FIXTURE.id, actorKind: "harness" },
+      {
+        nodeId: TASK,
+        actorId: HARNESS_ACTOR_FIXTURE.id,
+        actorKind: "harness",
+        available: true,
+      },
     ]);
 
     const refused = await app

@@ -140,26 +140,32 @@ function claimRefusal(error: ClaimNodeError): HttpError {
   switch (error.refusal) {
     case "node-not-found":
       return httpError("not-found", error.message);
-    case "initiative-not-claimable":
-      return httpError("invalid-request", error.message, {
-        refusal: "initiative-not-claimable",
-      });
+    case "pair-illegal":
+      return httpError("pair-illegal", error.message, details(error));
     case "plan-incomplete":
       return httpError("plan-invalid", error.message, {
         findings: details(error).findings,
       });
+    case "assignment-held":
+      return httpError("assignment-held", error.message, details(error));
+    case "unroutable":
+      return httpError("unroutable", error.message, details(error));
+    case "review-head-unavailable":
+      return httpError(
+        "review-head-unavailable",
+        error.message,
+        details(error),
+      );
     case "drive-mode-pinned":
       return httpError("illegal-transition", error.message, {
         refusal: "drive-mode-pinned",
         pinnedDriver: details(error).pinnedDriver,
         claimDriver: details(error).claimDriver,
       });
-    case "run-driver-mismatch":
-      return httpError("illegal-transition", error.message, {
-        refusal: "run-driver",
-        runDriver: details(error).runDriver,
-        expectedDriver: details(error).claimDriver,
-      });
+    case "objective-busy":
+      return httpError("objective-busy", error.message, details(error));
+    case "subtree-busy":
+      return httpError("subtree-busy", error.message, details(error));
     case "illegal-transition":
       return httpError("illegal-transition", error.message, {
         refusal: "node-state",
