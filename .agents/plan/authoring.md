@@ -41,9 +41,15 @@ An epic states **what was decided** and **how the result is proven**. Nothing el
   lands. `## Non-goals` names what a reader would otherwise expect here and where it went instead.
   `## Stories` is a list of names and outputs, one entry per story, and the story file carries the
   change, the tasks and the diagrams.
+- **A change and the repairs it forces are one epic. This rule outranks the story count.** A change
+  that makes shipped code invalid lands with the repair of that code. Name every file the change
+  invalidates before you split. Keep those files in one epic. A migration and every statement that
+  writes its changed columns are one epic. A required field and every site that constructs the type
+  are one epic. A removed method and its callers are one epic.
+
 - **An epic holds no more than ten stories.** Eleven is a split, not a judgement call. Number the new
   epic with a decimal when the whole numbers after it are already authored, so no cross-reference
-  moves.
+  moves. The count sees no coupling. Check a forced split against the rule above before you take it.
 
 ## The story, and its two kinds
 
@@ -296,15 +302,20 @@ invalid, and a human resolves it before implementation.
 ## What makes this standard the default
 
 A skill produces a compliant story when it is invoked. It is not the mechanism that makes the story
-compliant. Three mechanisms carry that, and a repository holding only the first has an aspiration:
+compliant. Three mechanisms carry that, and each one states here whether it exists:
 
 1. **The range gate** — `scripts/verify-epic-sequence.ts` in `pnpm run verify`, refusing every
-   inconsistency listed above.
+   inconsistency listed above. **Not built.** It is EPIC 050.1 Story 8, so it lands after the epics
+   that already depend on it.
 2. **The declared kind** — every story states `story-foundation` or `story-implement` on the line
-   under its title. A story that draws nothing is a visible decision, never a silent omission, and the
-   gate refuses a story with no kind.
-3. **The consuming skills** — `/author` refuses to write a story with no kind, `/work` refuses to
-   implement one, and `/review` refuses to pass one.
+   under its title. A story that draws nothing is a visible decision, never a silent omission.
+   **In use since EPIC 050.** Nothing enforces it: the refusal belongs to the gate above.
+3. **The consuming skills** — `/author` writes the kind. `/review` reads it. **`/work` enforces
+   nothing.** Its skill file names no kind, no diagram and no `Seams:` line. A story with no diagram
+   runs on its `## Change` prose.
+
+Two of the three are absent. This file is a convention until the gate lands. Never cite a mechanism
+above as a reason a defect cannot reach `src/`.
 
 ## Rollout, and what is grandfathered
 
