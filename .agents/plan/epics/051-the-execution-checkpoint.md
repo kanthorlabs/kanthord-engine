@@ -80,7 +80,15 @@ An accepted commit is the checkpoint of an execution run:
 
 - **Two first claims are serialised by the claim transaction, not by a unique constraint alone.** `workspace.node_id` is `UNIQUE` at `migration-0003-execution-and-journal.ts:9`, and the claim runs inside the `BEGIN IMMEDIATE` transaction of EPIC 050. The loser therefore never reaches the ref creation. The epic asserts the concurrent case, not only the sequential one.
 
-- **The branch is cut from `repository.branch`, resolved in the bare home.** EPIC 029 left one branch field on the repository. The cut point is the oid that ref names at claim time, and it is recorded as `workspace_branch.origin_oid`.
+- **The branch is cut inside the claim, on the first claim that needs it.** `worker.md` section 7 states it: "The daemon initializes the workspace on the first claim that needs the branch. The daemon initializes it inside the claim, so two first claims never race." No readiness command cuts a branch, and a node reaching `ready` creates nothing. The cut point is the oid `repository.branch` names in the bare home at claim time, recorded as `workspace_branch.origin_oid`.
+
+- **The claim therefore becomes the journaled write, and its nested units are `claim.begin` and `claim.settle`.** `AGENTS.md:105` gives a journaled write exactly two transactions and gives no other command two. A claim that called a self-contained two-transaction `workspace.cut` and then opened its own transaction would open three, so the cut cannot be a nested command with its own journal pair. The claim's reads join the begin, the ref creation sits between, and the claim's writes join the settle beside `plan.writeWorkspaceBranch`.
+
+- **`git.resolveRef:branch` runs before the begin transaction, not inside it.** `AGENTS.md` forbids git I/O inside a storage transaction because the transaction holds the write lock across it. The branch tip is read first, and the value is carried into the begin.
+
+- **A claim that finds a branch record is one transaction, so the operation has two paths.** The first execution claim is the journaled write above. Every later claim reads the record and opens one transaction, exactly as EPIC 050.4 drew it. The two differ in seam set and in transaction count, so each is its own diagram, and the branch read is what selects between them.
+
+- **Two concurrent first claims both reach the ref creation, and the result is still correct.** The git write sits between the two transactions, so the begin transaction cannot serialise it, and `worker.md`'s claim that two first claims never race does not survive the journaled shape. It does not need to: both claims resolve the same `repository.branch` tip and create the same ref at the same oid, so the ref is correct whichever wins. The loser fails in its settle on the `workspace_branch` primary key, discards its journal row, and writes nothing. **The default if no ruling arrives: the loser refuses the claim and the caller retries**, which costs one wasted claim on the first claim of an objective only. A ruling that the loser instead re-reads the record and continues would make the claim retry inside itself, and no other command in this range does that.
 
 - **The branch record is its own table, `workspace_branch`, and the shipped `workspace` table is not touched.** `docs/proposal/database/workspace.md:3` answers "which clone do the tasks of this objective work in", and `:21` states a row exists for an internal run only, because an external harness owns its own working tree. This epic lands external candidates too, and an external run has no clone, so the branch facts cannot live on a row an external run never owns. `path`, `clone_base_oid`, `upstream_oid_at_clone`, `profile_blob`, `convention_version` and `state` are all `NOT NULL` at `migration-0003-execution-and-journal.ts:7-19`, and relaxing them would make `src/commands/startup/sweep-remnants.ts:45-47` assert `path: string` over a nullable column. Migration `13` therefore creates:
 
@@ -171,8 +179,10 @@ no sign.
 
 New method signatures, for cross-reference only; the stories carry the interface decisions.
 
-- `workspace.begin` / `workspace.settle` — nested unit functions injected into the readiness command;
-  their composed outer is `workspace-cut`.
+- `claim.begin` / `claim.settle` — nested unit functions injected into the claim; their composed
+  outer is `claim-first-execution`. They exist because the claim is a journaled write, not because a
+  workspace command does; there is no `workspace.cut` command.
+- `git.resolveRef` — `:branch` labels the read of `repository.branch` that gives the cut point.
 - `plan.readWorkspaceBranch(transaction, nodeId): WorkspaceBranchRow` — new method on `PlanStore`.
 - `plan.writeWorkspaceBranch(transaction, input): WorkspaceBranchRow` — new method on `PlanStore`.
 - `plan.setWorkspaceBranchHead(transaction, input: { nodeId, headOid }): void` — new method on `PlanStore`.
@@ -230,16 +240,20 @@ New method signatures, for cross-reference only; the stories carry the interface
 
 ### Invariant
 
-A ready node whose run kind will be `execution` always has a workspace row and a live branch ref.
-Startup reconciles a row left `open` before the node is marked ready, so the invariant holds before
-any claim runs. A ready node with no workspace is an invariant violation, not a drawn path.
+A `ready` node guarantees nothing about a branch. The record and the ref are created by the first
+execution claim, so a node can be `ready` for any length of time with neither. What is invariant is
+that an execution run always has a base row: the claim writes the branch record and the base row in
+one settle, so no execution run reaches acceptance without both. Startup reconciles a `cut` row left
+`open` by a crash between the claim's two transactions.
 
 ### `claim-success-task`
 
 Supersedes: EPIC 050.1 claim-success-task
 
 Fixture: initiative `I` holds objective `O`, which holds tasks `T` and `S`. Every node is `ready`,
-no node is assigned, no run is active, and a workspace row exists for `O` with `head_oid` = `A`.
+no node is assigned, no run is active, and a `workspace_branch` row already exists for `O` with
+`head_oid` = `A`. This is the path of every claim after the first; the first takes
+`claim-first-execution`.
 The target is `T`, whose deliverable is `implementation`, so the run kind is `execution` and the
 cascade covers `O` and `I`.
 
@@ -291,73 +305,105 @@ keyed on the objective and the claimed node may be a task under it. A structural
 makes no such read: EPIC 050 gives neither kind a base row. EPIC 050.1's
 `review-head-unavailable` guard is **not** lifted here. `workspace.openWorkspace` is removed: the workspace exists before the claim runs.
 
-### `workspace-cut-begin`
+### `claim-cut-begin`
 
-Fixture: objective `O` is linked to repository `R`. `R.branch` = `refs/heads/main`. No workspace
-row exists for `O`, and `O` is transitioning to `ready` with run kind `execution`.
+Fixture: initiative `I` holds objective `O`, which holds tasks `T` and `S`. `O` is linked to
+repository `R` with `R.branch` = `refs/heads/main`, which names oid `A`. No `workspace_branch` row
+exists for `O`. The target is `T`, whose deliverable is `implementation`, so the run kind is
+`execution`.
 
 ```mermaid
 sequenceDiagram
-    participant Caller
+    participant Client
     participant Command
+    participant Git
     participant Storage
+    participant Clock
+    participant Expiry
+    participant Plan
+    participant Execution
     participant Journal
-    Caller->>Command: workspace.begin
-    Command->>Storage: 1 storage.transact
-    Command->>Journal: 2 journal.open:cut
-    Command-->>Caller: ok
+    Client->>Command: claim.begin
+    Command->>Git: 1 git.resolveRef:branch
+    Command->>Storage: 2 storage.transact
+    Command->>Clock: 3 clock.now
+    Command->>Expiry: 4 expiry.expireRuns
+    Command->>Plan: 5 plan.readAllNodes
+    Command->>Plan: 6 plan.newestRevision
+    Command->>Execution: 7 execution.runDriversUnderObjective
+    Command->>Plan: 8 plan.readSubtree
+    Command->>Execution: 9 execution.activeRunsOfNodes:siblings
+    Command->>Execution: 10 execution.activeRunsOfNodes:subtree
+    Command->>Plan: 11 plan.readWorkspaceBranch
+    Command->>Journal: 12 journal.open:cut
+    Command-->>Client: ok
 ```
 
-The begin transaction reads the current branch head from `git.resolveRef:branch` and inserts the
-`open` journal row. No git write happens here. The transaction commits before control returns to the
-caller.
+Step 1 is outside every transaction, because a git read inside one holds the write lock across it.
+Step 11 returns null, and that is what selects this path over `claim-success-task`. Step 12 records
+the proposed head so startup can reconcile a crash before the settle. The transaction commits before
+control returns. No lease call appears: EPIC 050.4 removed them from the claim and EPIC 050.5
+deleted the service.
 
-### `workspace-cut-settle`
+### `claim-cut-settle`
 
-Fixture: `workspace-cut-begin` completed. The ref `refs/heads/main` was created at oid `A` by the
-caller between begin and settle.
+Fixture: `claim-cut-begin` completed, and `refs/heads/<O>` was created at oid `A` between the two
+transactions.
 
 ```mermaid
 sequenceDiagram
-    participant Caller
+    participant Client
     participant Command
     participant Storage
     participant Plan
+    participant Execution
+    participant Events
     participant Journal
-    Caller->>Command: workspace.settle
+    Client->>Command: claim.settle
     Command->>Storage: 1 storage.transact
     Command->>Plan: 2 plan.writeWorkspaceBranch
-    Command->>Journal: 3 journal.complete:cut
-    Command-->>Caller: ok
+    Command->>Plan: 3 plan.setNodeAssignment:T
+    Command->>Execution: 4 execution.openRun:T
+    Command->>Execution: 5 execution.openAttempt:T
+    Command->>Plan: 6 plan.setNodeState:T:claim-taken
+    Command->>Plan: 7 plan.setNodeState:O:ancestor-started
+    Command->>Plan: 8 plan.setNodeState:I:ancestor-started
+    Command->>Events: 9 events.append:run.opened:T
+    Command->>Events: 10 events.append:node.running:O:child-started
+    Command->>Events: 11 events.append:node.running:I:child-started
+    Command->>Events: 12 events.append:node.running:T:claim-taken
+    Command->>Journal: 13 journal.complete:cut
+    Command-->>Client: ok
 ```
 
-One transaction inserts the workspace row and completes the journal row. A crash after the begin
-transaction and before this settle leaves an `open` `cut` row; startup recovery compares the ref to
-`proposed_head_oid` and completes or discards it. The drawn set for the workspace cut settle is this
-success path only; startup recovery owns the discard path.
+One transaction writes the branch record, the run and its base row, the three node transitions, the
+four events, and completes the journal row. `origin_oid` and `head_oid` are both `A` at step 2, and
+the run's base oid is the same value, so `run_base` is written atomically with the run at step 4.
+The drawn set for this settle is the success path; the loser of two concurrent first claims fails at
+step 2 on the primary key, and the Decisions state what it does.
 
-### `workspace-cut`
+### `claim-first-execution`
 
-Fixture: `workspace-cut-begin` fixture.
+Fixture: `claim-cut-begin` fixture.
 
 ```mermaid
 sequenceDiagram
-    participant Caller
+    participant Client
     participant Command
-    participant Workspace
+    participant Claim
     participant Git
-    Caller->>Command: workspace.cut
-    Command->>Workspace: 1 workspace.begin
+    Client->>Command: node.claim
+    Command->>Claim: 1 claim.begin
     Command->>Git: 2 git.refUpdate:cut
-    Command->>Workspace: 3 workspace.settle
-    Command-->>Caller: ok
+    Command->>Claim: 3 claim.settle
+    Command-->>Client: ok
 ```
 
-The composed workspace-cut: begin opens the journal row, the git write creates the branch ref, and
-settle inserts the workspace row and closes the row. The two transactions are in `workspace.begin`
-and `workspace.settle`; no transaction wraps step 2. This is the one drawn path for `workspace.cut`;
-the readiness command that calls it has no separate diagram because `workspace.cut` is its only seam
-call.
+The composed first execution claim: the begin reads the state and opens the journal row, the git
+write creates `refs/heads/<O>` at the resolved tip, and the settle writes every database effect and
+closes the row. The two transactions are inside the nested units, and no transaction wraps step 2.
+This is the one drawn path for a first claim; a claim that finds a branch record takes
+`claim-success-task`, which opens one transaction and draws no journal call.
 
 ### `ingest-candidate-missing-ref`
 
@@ -778,16 +824,16 @@ the candidate ref. The scenario for this diagram drives `acceptExecution` direct
 
 3. **The workspace branch record.** Add `workspaceBranchRow` to `src/domain/workspace.ts` with `nodeId`, `originOid` and `headOid`, none nullable. Register `workspace_branch: workspaceBranchRow` in `src/domain/rows.ts`, which is what `src/services/storage/schema-parity.test.ts:90` then covers. Add `plan.readWorkspaceBranch`, `plan.writeWorkspaceBranch` and `plan.setWorkspaceBranchHead` to the plan store and assert a round trip. **`workspaceRow` at `src/domain/workspace.ts:7` is not changed**, and neither is the shipped `workspace` table. Add cases asserting the derived `ref` equals `refs/heads/<nodeId>` and that the repository id joins from `node`.
 
-4. **The workspace cut at readiness and the claim reads the base.**
+4. **The claim cuts the branch on the first execution claim.**
 
-   Diagrams: claim-success-task, workspace-cut-begin, workspace-cut-settle, workspace-cut
-   Seams: +plan.readWorkspaceBranch, +workspace.begin, +git.refUpdate:cut, +workspace.settle, +storage.transact, +journal.open:cut, +plan.writeWorkspaceBranch, +journal.complete:cut
+   Diagrams: claim-success-task, claim-cut-begin, claim-cut-settle, claim-first-execution
+   Seams: +plan.readWorkspaceBranch, +claim.begin, +git.resolveRef:branch, +git.refUpdate:cut, +claim.settle, +journal.open:cut, +plan.writeWorkspaceBranch, +journal.complete:cut
 
-   When a node transitions to `ready` and its run kind will be `execution`, the readiness command performs a journaled cut of `refs/heads/<objectiveId>` from `repository.branch`. The journaled cut is `workspace-cut`: the begin nested unit opens the journal row in one transaction, the git write creates the branch ref, and the settle nested unit inserts the workspace row and completes the journal row in a second transaction. Startup reconciles an `open` `cut` row left by a crash between the two transactions.
+   The first execution claim on an objective cuts `refs/heads/<objectiveId>` from `repository.branch` as a journaled write. `claim.begin` resolves the branch tip before it opens its transaction, reads the state the claim needs, finds no branch record, and opens the `cut` journal row. The git write creates the ref. `claim.settle` writes the branch record and every claim effect, and completes the row. **There is no readiness command and no `workspace.cut` command**: `AGENTS.md:105` gives a journaled write two transactions and no other command two, so a nested cut with its own pair plus the claim's own transaction would be three. Startup reconciles an `open` `cut` row left by a crash between the two.
 
    Extend `src/commands/node/claim-node.ts` to call `plan.readWorkspaceBranch` inside the claim transaction and pass its `head_oid` as the run's base oid, so `run_base` is inserted atomically with the run. An execution claim on a node with no branch record is an invariant violation; the claim does not guard it. The read is conditional on `runKindFor(node.deliverable) === "execution"` and takes `objectiveScopeId(node)` from `src/commands/node/claim-node.ts:201`. **This story does not touch `review-head-unavailable` and writes no `judged_oid`.** EPIC 053 owns the review claim: `.agents/plan/epics/053-the-review-checkpoint-and-state-ownership.md:25-27` selects the judged artifact from a caller-named checkpoint through `depends_on`, and copies `judged_oid` from that row at report time. A workspace head read at claim time is a bare oid that moves, so it cannot serve. Add a case asserting a review claim still refuses `review-head-unavailable`, and a case asserting a structural claim makes no branch read.
 
-   Add cases to `src/commands/node/claim-node.test.ts` asserting the run's base oid equals the workspace's `head_oid`. Add `src/commands/node/mark-node-ready.ts` (or the equivalent readiness command) performing the workspace cut, with cases asserting the ref exists in the loopback repository, asserting `origin_oid` equals the resolved branch oid, asserting `head_oid` equals `origin_oid` at creation, asserting the journal row is `complete`, asserting a second readiness transition finds the workspace and cuts no ref, and asserting two concurrent first transitions produce one workspace and one ref.
+   Add cases to `src/commands/node/claim-node.test.ts` asserting the run's base oid equals the branch record's `head_oid`; asserting a first claim creates the ref in the loopback repository; asserting `origin_oid` equals the resolved branch oid and `head_oid` equals `origin_oid` at creation; asserting the journal row is `open` before the git write and `complete` after; asserting a second claim on the same objective finds the record, cuts no ref, opens one transaction and writes no journal row; and asserting two concurrent first claims produce one branch record and one ref at the resolved tip, with the loser writing nothing.
 
 5. **Candidate delivery and ingestion.**
 
@@ -900,7 +946,8 @@ Hermetic coverage required beyond the Proof:
 - A ref the worker wrote outside `refs/kanthord/candidate/` changes no outcome. The case writes `refs/heads/<objectiveId>` directly, then reports, and asserts the daemon still lands by compare and swap from the recorded base. The assertion is that the daemon ignores the ref, not that the worker cannot write it.
 - The changed-path set comes from a name-only diff of the recorded base against the candidate. The assertion drives the real git service against the loopback fixture, so `declaredPathVerdict` is never fed a hand-built list in the end-to-end case.
 - The `origin_oid` trigger refuses an `UPDATE` that changes it, and the delete trigger refuses a `DELETE` while a checkpoint names the workspace. Both against real SQLite, by refusal message.
-- Two concurrent first readiness transitions on one objective produce exactly one workspace row and one ref. The sequential case is asserted separately and does not stand in for it.
+- Two concurrent first claims on one objective produce exactly one branch record and one ref, at the resolved branch tip, and the loser writes nothing. The sequential case is asserted separately and does not stand in for it. The ref is correct either way because both claims resolve the same tip; what the assertion pins is that only one record exists.
+- A second claim on an objective that already holds a branch record opens one transaction and writes no journal row. The control is the first claim on the same fixture, which opens two and writes one.
 - The `cut` journal row is `open` before the ref creation and `complete` after, asserted by reading the row at both points.
 - Two undeclared paths refuse `path-undeclared` and the refusal lists both, sorted with `comparePaths`.
 - A `verify.paths` entry naming a directory does not match a file beneath it, asserted by value.
@@ -930,5 +977,5 @@ Hermetic coverage required beyond the Proof:
 - The parser in `scripts/verify-epic-sequence.ts` (owned by EPIC 050) refuses this document if the `## Sequence` section is absent, if any diagram id repeats a live id from EPIC 050, if a `Supersedes` line names an id the target document does not declare, or if any `Seams:` token carries no sign. These refusals are asserted against fixture trees in `scripts/verify-epic-sequence.test.ts`.
 - The `claim-success-task` supersession is complete: EPIC 050.1's diagram carries `Superseded by: EPIC 051 claim-success-task`, this document's diagram carries `Supersedes: EPIC 050.1 claim-success-task`, and no scenario file exists for the EPIC 050.1 diagram. The gate asserts this triple.
 - `report-execution-checkpoint` draws the nested command `acceptExecution` at `:700`, so it supersedes no `node.report` diagram. EPIC 050.2's `report-authority-prelude` pins its tail to EPIC 050.4 `report-lease-free`. EPIC 050.4 Story 6 declares that id, so the note resolves outside this document. The successor of `report-lease-free` is the `node.report` diagram of story 12. The conversion declares that id and its `Supersedes` line, so this document declares neither yet.
-- The two paths of `workspace-cut-settle` (success) and the startup-recovery discard path are separated: startup reconciles an `open` `cut` row by comparing the ref to `proposed_head_oid`. The workspace settle path and the discard path are tested by `src/commands/startup/recover-journal.test.ts`.
+- The two paths of `claim-cut-settle` (success) and the startup-recovery discard path are separated: startup reconciles an `open` `cut` row by comparing the ref to `proposed_head_oid`. The settle path and the discard path are tested by `src/commands/startup/recover-journal.test.ts`.
 - The ordered short-circuit of `acceptExecution` is asserted across all six refusals by a decision table in `src/domain/execution-acceptance.test.ts`: each pair of conditions that can trigger simultaneously is asserted to report the earlier one.
