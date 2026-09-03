@@ -49,6 +49,14 @@ An epic states **what was decided** and **how the result is proven**. Nothing el
   writes its changed columns are one epic. A required field and every site that constructs the type
   are one epic. A removed method and its callers are one epic.
 
+- **An amendment asked of another epic lives until it is applied, and it is deleted when it is.**
+  `## Amendments this epic asks of other epics` is a queue of pending asks, never a register of
+  answered ones. When the target epic takes the ask, delete the bullet from the asking epic in the
+  same edit. Do not keep it as history, do not mark it applied, and do not summarise it. **The
+  amended epic is the record.** A bullet states its target epic and story, the ask with `file:line`
+  evidence, and the default if no ruling arrives, so shipping the asking epic never resolves the ask.
+  A kept bullet makes a reader diff every ask against its target to find the one that is still open.
+
 - **An epic holds no more than ten stories.** Eleven is a split, not a judgement call. Number the new
   epic with a decimal when the whole numbers after it are already authored, so no cross-reference
   moves. The count sees no coupling. Check a forced split against the rule above before you take it.
