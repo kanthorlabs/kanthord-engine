@@ -18,6 +18,7 @@ proves the deletion reached the initiative branch as well as the task one.
 ### `claim-lease-free-initiative`
 
 Supersedes: EPIC 050.1 claim-success-initiative
+Superseded by: EPIC 051.5 claim-initiative-reap
 
 Fixture: the fixture of `claim-success-initiative`. Initiative `I` is `ready`, unassigned, the root,
 and it declares `deliverable: expansion`, so the run kind is `structural`, no cascade exists, and the

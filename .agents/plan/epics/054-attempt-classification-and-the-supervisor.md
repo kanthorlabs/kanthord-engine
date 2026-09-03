@@ -153,7 +153,8 @@ Hermetic coverage required beyond the Proof:
 - Three infrastructure failures under an attempt limit of three leave `exhausted` false. Three semantic failures give true.
 - A contended land writes `termination = 'infrastructure'` and leaves `semanticCount` unchanged, in one case.
 - Every one of the seven failure paths writes a termination through `end-attempt`. One case each, asserting the stored value.
-- `end-attempt` deletes the candidate ref of the attempt it ends, asserted against the loopback fixture by reading the ref after the call.
+- `end-attempt` deletes **no** candidate ref, asserted against the loopback fixture by reading the ref after the call and finding it present. The control is the caller's own discard after the transaction commits, which deletes it in the same case, so the absence is not vacuous. The `## Decisions` ruling that `end-attempt` writes and does not discard is what this row proves.
+- The expiry path reaches no discard of its own, asserted by a `candidate` double whose call count is zero across an `expireRuns` pass that ends a run carrying a candidate ref. EPIC 051.5 owns the deletion and proves it.
 - `subject` equals `run.worker` and `caller` equals the authenticated principal, for an internal and an external run. Four assertions across two cases.
 - A missing `plan-document`, `agents-md` or `role-contract` refuses `authority-input-missing` naming it, and an internal attempt omitting `client-skill` succeeds.
 - `renderAuthorityPin` is byte-exact against a literal and refuses a duplicate name by error code.

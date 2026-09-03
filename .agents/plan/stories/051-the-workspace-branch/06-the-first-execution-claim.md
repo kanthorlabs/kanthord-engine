@@ -28,6 +28,8 @@ refusing arm reaches step 18.
 
 ### `claim-first-execution`
 
+Superseded by: EPIC 051.5 claim-first-execution-reap
+
 Fixture: the fixture of `claim-cut-begin` (Story 4). Initiative `I` holds objective `O`, which holds
 tasks `T` and `S`; every node is `ready`; no `workspace_branch` row exists; repository `repo_a` is
 the loopback bare repository whose `refs/heads/main` stands at `commit1` and which holds no

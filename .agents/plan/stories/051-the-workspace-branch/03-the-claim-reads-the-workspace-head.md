@@ -23,6 +23,7 @@ neither reads the branch record, so neither moves. The record-absent branch is S
 ### `claim-branch-base-task`
 
 Supersedes: EPIC 050.4 claim-lease-free-task
+Superseded by: EPIC 051.5 claim-branch-base-reap
 
 Fixture: the fixture of `claim-lease-free-task`. Initiative `I` holds objective `O`, which holds
 tasks `T` and `S`. Every node is `ready`, no node is assigned, no run is active, and `T` declares
