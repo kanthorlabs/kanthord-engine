@@ -267,7 +267,7 @@ w.repository_id`. A join on `run_id` alone returns one candidate row per base, a
 ## What this epic is not
 
 It is **not** wire-invisible. One response field, `system.status.leases[]`, leaves the contract. That
-is outside the closed list of `docs/proposal/api/README.md:100-106`, and the amended policy of EPIC 050.2 Story 8 (`08-the-policy-amendment-and-the-capability-swap`) makes it legal behind a recorded human ruling **and** a capability retirement.
+is outside the closed list of `docs/proposal/api/README.md:101-106`, and the amended policy of EPIC 050.2 Story 8 (`08-the-policy-amendment-and-the-capability-swap`) makes it legal behind a recorded human ruling **and** a capability retirement.
 `system.status` is covered by no capability, so there is no name to retire — the epic records the
 ruling, moves `KANTHORD_VERSION` to `30.0.0`, and writes a compatibility-record row whose "capability
 retired" cell reads **none**.
@@ -296,7 +296,7 @@ survive, empty and unreachable, until EPIC 057's migration `17`.
   reading is the correct one.
 
   **Migrating the six writes to `test/helpers/rows.ts` was considered and rejected on scope.** It is
-  the shape the config comment prefers, and `eslint.config.js:458` scopes the restriction to
+  the shape the config comment prefers, and `eslint.config.js:467` scopes the restriction to
   `files: ["src/**/*.ts"]`, so `test/**` is unrestricted and the helper is the right home for a _new_
   fixture. It does not fit here. Two of the six map cleanly — `UPDATE node SET state = 'running'` at
   `:495` and `:902` become `seedNodeState` (`test/helpers/rows.ts:267`), whose `block_reason` `CASE`
@@ -325,7 +325,7 @@ survive, empty and unreachable, until EPIC 057's migration `17`.
   completion line already names. Story 0 grants `eslint.config.js`, so a later turn for it is
   excluded by construction.
 
-  The residue is one inert line: an unmatched `files` pattern at `eslint.config.js:469` applies to
+  The residue is one inert line: an unmatched `files` pattern at `eslint.config.js:478` applies to
   nothing, and reclaiming the old pathname would take a reviewed source change. The epic asks EPIC
   057 to delete it with the rest of the lease cleanup.
 
@@ -335,7 +335,7 @@ survive, empty and unreachable, until EPIC 057's migration `17`.
   not wire-constrained — is true. `/author` does not edit an EPIC, so **a human moves both to `:26`**.
 
 - **The `system.status` policy hole.** **Ruled: the field leaves, and
-  Story 8 writes the policy clause that makes it legal.** `docs/proposal/api/README.md:100` —
+  Story 8 writes the policy clause that makes it legal.** `docs/proposal/api/README.md:103` —
   `remove or rename a response field` is forbidden inside `/v1`, and `:106` closes the list. EPIC
   050.2 Story 8 (`08-the-policy-amendment-and-the-capability-swap`) opened the one legalizing path,
   and its sentence pairs a human ruling with "the capability swap that announced it". `system.status`

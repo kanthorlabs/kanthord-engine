@@ -74,7 +74,7 @@ are equal, so it is red from that turn until this edit, and this edit is what cl
 reads both values and asserts nothing about who wrote them.
 
 **It is a major, not a patch.** Story 4 removes `leases[]` from the `system.status` response, and a
-response field removal is outside the closed list of `docs/proposal/api/README.md:100-106`.
+response field removal is outside the closed list of `docs/proposal/api/README.md:101-106`.
 
 **The policy gains one clause, and this story writes it.** The amended policy legalizes a change
 outside the closed list behind a human ruling plus the capability swap that announced it, and
