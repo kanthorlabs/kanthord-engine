@@ -2,8 +2,8 @@
 
 **The obligation.** `.agents/plan/authoring.md` now states that the hermetic coverage list of
 `## Verification Gate` is a table, and that every row names exactly one proof owner. The gate refuses
-any other form. Eleven epics satisfy it today: EPIC 050.2, EPIC 050.3, EPIC 050.4, EPIC 050.5, the five epics of
-the EPIC 051 family, EPIC 052 and EPIC 052.1. Seven do not, and each holds a bullet list instead:
+any other form. Thirteen epics satisfy it today: EPIC 050.2, EPIC 050.3, EPIC 050.4, EPIC 050.5, the five epics of
+the EPIC 051 family, EPIC 052, EPIC 052.1, EPIC 055 and EPIC 055.1. Six do not, and each holds a bullet list instead:
 
 | epic  | gate bullets | rows naming a story |
 | ----- | ------------ | ------------------- |
@@ -18,12 +18,14 @@ the EPIC 051 family, EPIC 052 and EPIC 052.1. Seven do not, and each holds a bul
 | 052.1 | done         | 34                  |
 | 053   | 14           | 0                   |
 | 054   | 18           | 0                   |
-| 055   | 17           | 0                   |
+| 055   | done         | 30                  |
+| 055.1 | done         | 30                  |
 | 056   | 17           | 0                   |
 | 057   | 16           | 0                   |
 
-EPIC 050 and EPIC 050.1 already name an owner per bullet, so those two are a form change. EPIC 053 to
-EPIC 057 name no owner at all, so each row needs a proof owner decided before it is written.
+EPIC 050 and EPIC 050.1 already name an owner per bullet, so those two are a form change. EPIC 053,
+EPIC 054, EPIC 056 and EPIC 057 name no owner at all, so each row needs a proof owner decided before
+it is written.
 
 **What the EPIC 050.2 conversion taught, on 2026-09-02.** Twenty-four bullets became forty-eight
 rows, and the same three effects appeared. One bullet stated nine cases over three commands and
@@ -83,3 +85,20 @@ the behaviour. Six bullets also became rows the old gate did not hold at all: th
 ordering controls of the lowering, the control that the snapshot comparison detects an injected write,
 the control that the create-existing verdict is not redundant, the `blob` table in the refusal
 snapshot, and the pre-raise fence on the checkpoint.
+
+**EPIC 055 is done, and it is the seventh measurement.** The split into EPIC 055 and EPIC 055.1 on
+2026-09-03 rewrote its gate as two tables. Seventeen bullets became sixty rows, and two effects were
+new. First, a bullet may become a row in the **other** epic of the split: the proof owner is the story
+that wires a behaviour, not the story that defines the function it calls, so every limit, scope,
+expiry and end-effect bullet moved to EPIC 055.1 while the pure functions they exercise stayed in
+EPIC 055. A retrofit that had kept each bullet beside its definition would have given EPIC 055 rows no
+story of EPIC 055 could satisfy. Second, the conversion deleted a refusal code: `human-only-operation`
+and its rows left the document, because the caller kind became registry data on `allowedActors` and
+the shipped `actor-forbidden` already proves the refusal — the same effect EPIC 052 showed, reached
+from the opposite direction, since here the duplicate was a code the epic proposed rather than one the
+tree already had. The split also exposed assertions no bullet held: the caller-kind tuple by value,
+the control that a grant id in the `Bearer` scheme is refused, the iteration proving EPIC 055 admits a
+grant caller on no operation at all, the replay proving no shipped claim, report or renew trace moved,
+the revocation race between authentication and the command transaction, the three-way refusal
+precedence case, and the control that every shipped external run still inserts a null `grant_id`. One
+decision had no assertion at all — `release` is not a granted operation — and it became a row.
