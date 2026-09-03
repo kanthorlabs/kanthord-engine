@@ -76,7 +76,8 @@ Step 8 projects the run id, because `run.ended` is a run event, and it is append
 
 The settle returns `ok`. A settle that refused would leave the outer with no way to distinguish a
 failed settle from a lost swap, and the contended outcome is expressed in the terminal of
-EPIC 051.4's `report-refusal-contended`.
+EPIC 051.4's `report-refusal-contended`. Its `result` is `null`, and the accepted arm's is the
+`NodeReportResult` — the two arms of one signature, per Story 4 (`04-the-accepted-settle`).
 
 Add `test/sequence/scenarios/land-settle-contended.ts`.
 
@@ -92,28 +93,32 @@ Inside the one `dependencies.storage.transact` callback:
    It supplies `node.revision` for the transition cause and `node.kind` for the invariant check
    above.
 2. `const clearedToken = dependencies.journal.discard(transaction, { id: input.journalRowId, outcome: "contended", completedAt: now });`
-   Return `{ clearedToken }` from the callback and from the unit, exactly as the accepted arm does.
-   The caller removes the file.
-3. `dependencies.execution.closeAttempt(transaction, { attemptId: input.attemptId, outcome: "cancelled", at: now })`.
-   `cancelled` is a member of the shipped `attempt.outcome` CHECK at
-   `src/services/storage/migration-0007-external-execution.ts:44` — `outcome`, and
-   `worker.md` section 9 classes a contended land as `infrastructure`, which consumes no attempt.
-   `headOid` is not passed, so `src/services/execution/sqlite.ts:287` — `closeAttempt` takes its
-   no-head branch and the attempt records no head for work that never landed.
-4. `dependencies.execution.endRun(transaction, { runId: input.runId, outcome: "cancelled", at: now })`.
-   The fence rises here. `.agents/plan/epics/050.5-the-lease-table-removal.md:115` records that the
-   raise belongs to EPIC 050.2 Story 2 (`02-the-authority-seams`); this story consumes it and does
-   not write it.
-5. `dependencies.plan.setNodeState(transaction, { id: input.nodeId, from: "running", to: "ready", trigger, blockReason: null, at: now, cause: { revision: node.revision, importId: null } })`,
-   with the trigger chosen by `node.kind`: `"land-contended"` for a task and
-   `"objective-land-contended"` for an objective. Both are added by section 3b.
+   Return `{ clearedToken, result: null }` from the callback and from the unit.
 
-   **`report-cancelled` is not reused.** `src/domain/external-transition.ts:180` —
-   `report-cancelled` is `actorKind: "harness"` and describes a worker that reported a cancellation.
-   A contention is a daemon verdict on a compare and swap the worker never saw, and
-   `src/domain/outcome-report.ts:41` — `taskReportEffect` reaches that trigger only from a
-   `cancelled` **report**. Recording a contention under it would make the audit log claim a report
-   that never arrived.
+**`result` is `null` on this arm, and that is what makes the outcome distinguishable.**
+`LandSettleResult` carries `result: NodeReportResult | null` — Story 4 (`04-the-accepted-settle`)
+declares it, because the accepted settle's transaction is the only one left on the path that can run
+the sibling scan `node.report`'s response needs. A contended land answers no report: EPIC 051.4's
+`acceptExecution` throws `contended` and the route never formats a body, so building one here would
+be a value nobody reads. This arm still runs no `plan.readAllNodes`, so its drawn set is unchanged.
+The caller removes the file. 3. `dependencies.execution.closeAttempt(transaction, { attemptId: input.attemptId, outcome: "cancelled", at: now })`.
+`cancelled` is a member of the shipped `attempt.outcome` CHECK at
+`src/services/storage/migration-0007-external-execution.ts:44` — `outcome`, and
+`worker.md` section 9 classes a contended land as `infrastructure`, which consumes no attempt.
+`headOid` is not passed, so `src/services/execution/sqlite.ts:287` — `closeAttempt` takes its
+no-head branch and the attempt records no head for work that never landed. 4. `dependencies.execution.endRun(transaction, { runId: input.runId, outcome: "cancelled", at: now })`.
+The fence rises here. `.agents/plan/epics/050.5-the-lease-table-removal.md:115` records that the
+raise belongs to EPIC 050.2 Story 2 (`02-the-authority-seams`); this story consumes it and does
+not write it. 5. `dependencies.plan.setNodeState(transaction, { id: input.nodeId, from: "running", to: "ready", trigger, blockReason: null, at: now, cause: { revision: node.revision, importId: null } })`,
+with the trigger chosen by `node.kind`: `"land-contended"` for a task and
+`"objective-land-contended"` for an objective. Both are added by section 3b.
+
+**`report-cancelled` is not reused.** `src/domain/external-transition.ts:180` —
+`report-cancelled` is `actorKind: "harness"` and describes a worker that reported a cancellation.
+A contention is a daemon verdict on a compare and swap the worker never saw, and
+`src/domain/outcome-report.ts:41` — `taskReportEffect` reaches that trigger only from a
+`cancelled` **report**. Recording a contention under it would make the audit log claim a report
+that never arrived.
 
 6. `dependencies.events.append(transaction, { subjectKind: "run", subjectId: input.runId, type: "run.ended", actorKind: "daemon", actorId: input.actorId, payload: { runId: input.runId, nodeId: input.nodeId, fence: ended.fence, outcome: "cancelled", reason: "contended" } })`.
    The shape is the one EPIC 050.2 Story 5 (`05-the-release`) registers. `ended.fence` is the fence
@@ -245,6 +250,11 @@ one level.
    `fence: 1`, and `deepEqual` the appended payload against
    `{ runId, nodeId, fence: 2, outcome: "cancelled", reason: "contended" }`. The fence value is what
    makes the ordering of steps 6 and 8 observable.
+
+10. `"a contended settle returns a null result"` — assert the returned `result` is `null` and that
+    `plan.readAllNodes` records zero calls on this arm. It is the control for Story 4
+    (`04-the-accepted-settle`) case 13, which asserts the accepted arm builds the full
+    `NodeReportResult`; without it that case passes for a settle that builds one on both arms.
 
 Add `test/sequence/scenarios/land-settle-contended.ts`, building the fixture the diagram names,
 running the real `landSettle` over real SQLite behind the recorder, and returning the recorder and

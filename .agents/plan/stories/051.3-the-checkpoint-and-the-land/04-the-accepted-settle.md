@@ -6,7 +6,7 @@ Kind: story-implement
 
 Diagrams: land-settle-accepted
 
-Seams: land-settle-accepted: +clock.now, +storage.transact, +plan.readNode, +execution.attemptsOfRun:R, +execution.writeCheckpoint:R, +plan.setWorkspaceBranchHead:O, +execution.closeAttempt:A, +execution.stampRunHead:R, +execution.endRun:R, +plan.setNodeState:T:outcome-accepted, +events.append:outcome.reported:T, +events.append:run.ended:R:landed, +journal.complete:landed
+Seams: land-settle-accepted: +clock.now, +storage.transact, +plan.readNode, +execution.attemptsOfRun:R, +execution.writeCheckpoint:R, +plan.setWorkspaceBranchHead:O, +execution.closeAttempt:A, +execution.stampRunHead:R, +execution.endRun:R, +plan.setNodeState:T:outcome-accepted, +events.append:outcome.reported:T, +events.append:run.ended:R:landed, +plan.readAllNodes, +journal.complete:landed
 
 This story leaves the contended half to Story 5 (`05-the-contended-settle`) and the composition to
 EPIC 051.4, whose `acceptExecution` injects this unit, orders it around the compare and swap and
@@ -52,7 +52,8 @@ sequenceDiagram
     Command->>Plan: 10 plan.setNodeState:T:outcome-accepted
     Command->>Events: 11 events.append:outcome.reported:T
     Command->>Events: 12 events.append:run.ended:R:landed
-    Command->>Journal: 13 journal.complete:landed
+    Command->>Plan: 13 plan.readAllNodes
+    Command->>Journal: 14 journal.complete:landed
     Command-->>Caller: ok
 ```
 
@@ -95,10 +96,19 @@ same one-read change to `reportOutcome`, which reads the list twice today.
 failure immediately after it and asserts the head, the node state and the event count are unchanged,
 which is the assertion that the nine writes are one transaction.
 
-Step 13 is last: the journal row records that the git write is settled, and settling it before the
+**Step 13 builds the response, and it is here because this is the last transaction of the path.**
+`src/commands/outcome/report-outcome.ts:310` — `readAllNodes` is the sibling scan that gives
+`NodeReportResult` its `objectiveState` and `objectiveProjection`, and it must sit inside a
+transaction. EPIC 051.4's `acceptExecution` opens none of its own — its gate row 9b asserts exactly
+two spans, and both are this unit's and `land.begin`'s — and `reportOutcome`'s prelude transaction
+closes before the git write. This unit already holds `plan: PlanStore`, so the read costs one seam
+token and no new dependency. It runs **after** step 10, so the projection sees the transition this
+settle just wrote.
+
+Step 14 is last: the journal row records that the git write is settled, and settling it before the
 database effects are written would make a crash between the two look reconciled. It returns the pid
 file the land recorded, and the unit hands it back to its caller; removing that file is git I/O and
-belongs outside every transaction, so it is EPIC 051.4's step and not one of these thirteen.
+belongs outside every transaction, so it is EPIC 051.4's step and not one of these fourteen.
 
 Add `test/sequence/scenarios/land-settle-accepted.ts`.
 
@@ -135,7 +145,10 @@ export type LandSettleInput = Readonly<{
   actorId: string;
 }>;
 
-export type LandSettleResult = Readonly<{ clearedToken: string | null }>;
+export type LandSettleResult = Readonly<{
+  clearedToken: string | null;
+  result: NodeReportResult | null;
+}>;
 
 export function landSettle(
   dependencies: LandSettleDependencies,
@@ -216,8 +229,21 @@ write inside it is one value. It is step 1 of the diagram. Inside one
    `reason` is `"landed"` and not `null`: EPIC 050.2 Story 5 (`05-the-release`) states that every
    release path writes `null` and that the report path supplies a value. The recorder appends
    `String(payload.reason)` as a third label, so the value is part of the drawn token.
-7. `const clearedToken = dependencies.journal.complete(transaction, { id: input.journalRowId, resultHeadOid: input.landedOid, outcome: "landed", completedAt: now });`
-   Return `{ clearedToken }` from the callback and from the unit.
+7. `const nodes = dependencies.plan.readAllNodes(transaction);` and build the `NodeReportResult` from
+   it exactly as `src/commands/outcome/report-outcome.ts:310` — `readAllNodes` does today: filter the
+   siblings of `node.parentId`, sort with `compareIds`, derive `objectiveState` and
+   `objectiveProjection`, and take `attemptId`, `attemptNo` and `attemptsRemaining` from the values
+   steps 1b and 4 already hold.
+8. `const clearedToken = dependencies.journal.complete(transaction, { id: input.journalRowId, resultHeadOid: input.landedOid, outcome: "landed", completedAt: now });`
+   Return `{ clearedToken, result }` from the callback and from the unit.
+
+**The accepted arm returns the response because nothing else on the path can build it.**
+`NodeReportResult` is `src/domain/outcome-report.ts:83` — `NodeReportResult`, the ten-field value
+`node.report` answers with. EPIC 051.4 Story 8 (`08-the-report-route-enforces-the-gate`) removes the
+accepted arm's `plan.readAllNodes` from `reportOutcome` along with its five writes, and it opens no
+second transaction to replace it: a repeated `storage.transact` token is refused by the parser, and
+`AGENTS.md` gives the journaled write two transactions and never a third. `result` is `null` on the
+contended arm, which Story 5 (`05-the-contended-settle`) states.
 
 **The settle ends the run and closes the attempt, and the epic's Decisions must be amended.** The
 epic states that `land-settle-accepted` never ends the run, and it gives one reason: Story 6
@@ -406,6 +432,12 @@ the old one.
     `externalTriggerConsumer["object-reported"]` deep-equals
     `["src/commands/outcome/report-objective.ts", "src/commands/checkpoint/land-execution.ts"]`,
     beside case 9's assertion for `outcome-accepted`.
+
+13. `"an accepted settle returns the node report result the route answers with"` — assert the returned
+    `result` deep-equals the full ten-field `NodeReportResult` by value, with `objectiveProjection`
+    computed over a fixture holding one terminal sibling and one non-terminal, and assert the read
+    happens **after** the transition by asserting `state` is `done` and not `running`. The control is
+    Story 5 (`05-the-contended-settle`) case 4, where `result` is `null`.
 
 Add `test/sequence/scenarios/land-settle-accepted.ts`, building the fixture the diagram names,
 running the real `landSettle` over real SQLite behind the recorder, and returning the recorder and

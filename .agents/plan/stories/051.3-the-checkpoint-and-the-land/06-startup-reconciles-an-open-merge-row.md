@@ -165,6 +165,11 @@ actor: this command passes `actorKind: "daemon"` and `input.actor`, where
 carry it on the event row. The recovery report's `completed` counter and its findings name the row as
 well. The other five verdicts keep `recovery.journalReconciled` unchanged.
 
+**The reconcile reads `clearedToken` and ignores `result`.** `LandSettleResult` carries
+`result: NodeReportResult | null` after Story 4 (`04-the-accepted-settle`); it exists so EPIC 051.4's
+route can answer a report, and a startup pass answers none. Discarding it changes no seam call, so
+this diagram is unaffected.
+
 Step 8 is the shipped pid-file removal, unchanged: `land.settle` returns the cleared token exactly as
 `journal.complete` did, and `removeClearedToken` removes the file outside every transaction.
 
