@@ -204,7 +204,11 @@ Add, each as a separate `it`:
 
 3. `"the loser refuses objective-busy"` — drive the composed `claimNode` over the same fixture and
    assert `error.refusal === "objective-busy"` and `error.details` deep-equals
-   `{ objectiveId: "objective_a" }`.
+   `{ objectiveId: "objective_a", siblingNodeId: null, siblingRunId: null, expiresAt: null }` — all
+   four keys, because `contendedObjectiveDetails` at `:144` — `contendedObjectiveDetails` returns all
+   four and the widened schema at `:130` — `nullable` makes each one required and nullable rather than
+   optional. `node:assert/strict` counts keys, so a one-key expectation fails against that value. Case
+   9 asserts the same value against the schema.
 
 4. `"a retry of the loser's claim succeeds on the one-transaction path"` — the control that the
    refusal is recoverable. Re-claim the same task, assert the claim returns, assert the storage
