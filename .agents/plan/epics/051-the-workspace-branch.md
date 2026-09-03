@@ -22,7 +22,7 @@ An objective owns a branch record, and the first execution claim creates it:
 - **No advance of `head_oid`.** The column is written once, at creation, by this epic. `plan.setWorkspaceBranchHead` is declared here and EPIC 051.3 is its only caller.
 - **No worker loop.** Nothing produces a commit here.
 - **No change to the shipped `workspace` table.** The branch facts live in their own table, and `workspaceRow` at `src/domain/workspace.ts:7` is untouched.
-- **No lift of `review-head-unavailable`.** EPIC 050.1's guard stays. EPIC 053 owns the review claim and the judged checkpoint.
+- **No lift of `review-head-unavailable`.** EPIC 050.1's guard stays. EPIC 053.1 owns the review claim and the judged checkpoint.
 - **No attempt-workspace disposal.** This range creates no attempt workspace, and no `Workspace` service exists to remove one. `src/commands/startup/sweep-remnants.ts` reports remnants and removes none, and this family declares no worker loop. **The epic that creates an attempt workspace owns its disposal.**
 
 ## Decisions

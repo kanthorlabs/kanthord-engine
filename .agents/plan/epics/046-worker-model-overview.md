@@ -118,15 +118,15 @@ Step 6 leaves the engine. The engine ships `plan convert`, which runs every gene
 
 `/author` writes only to `.agents/plan/stories/<epic-slug>/`, one directory per epic. Two authoring agents therefore never collide, even in one working tree. The limit is not the file system. **An epic is safely authorable when every existing file its stories edit is already in the tree.** A file the epic creates needs no anchor, and a symbol a sibling epic creates is pinned by that epic's own text. An epic authored before its predecessor ships gets stories grounded in prose instead of in `file:line`, which is the defect `/author` exists to prevent.
 
-| batch | epics         | may run in parallel | ready when                                                                                  |
-| ----- | ------------- | ------------------- | ------------------------------------------------------------------------------------------- |
-| A     | 047, 048, 049 | yes, all three      | now. Every file these three edit is shipped code from EPICs 001 to 045.                     |
-| B     | 050           | alone               | 047 and 048 are authored. It consumes `nodePairLegality` and `routeWorker`.                 |
-| C     | 051           | alone               | 050 is authored. It consumes `assertRunAuthority` and `run_base`.                           |
-| D     | 052, 053, 055 | yes, all three      | 051 is authored. Each depends on 051 or 050, and none depends on another in this batch.     |
-| E     | 054           | alone               | 052 and 053 are authored. It wires `end-attempt` into every accept path.                    |
-| F     | 056           | alone               | 053, 054 and 055 are authored. It consumes `closed_at`, `end-attempt` and the caller kinds. |
-| G     | 057           | alone               | every earlier epic is authored. It cites lines in files that 047 to 056 change.             |
+| batch | epics         | may run in parallel | ready when                                                                              |
+| ----- | ------------- | ------------------- | --------------------------------------------------------------------------------------- |
+| A     | 047, 048, 049 | yes, all three      | now. Every file these three edit is shipped code from EPICs 001 to 045.                 |
+| B     | 050           | alone               | 047 and 048 are authored. It consumes `nodePairLegality` and `routeWorker`.             |
+| C     | 051           | alone               | 050 is authored. It consumes `assertRunAuthority` and `run_base`.                       |
+| D     | 052, 053, 055 | yes, all three      | 051 is authored. Each depends on 051 or 050, and none depends on another in this batch. |
+| E     | 054           | alone               | 052 and 053 are authored. It wires `end-attempt` into every accept path.                |
+| F     | 056, 056.1    | 056 before 056.1    | 053, 054 and 055 are authored. Both consume `end-attempt` and the caller kinds.         |
+| G     | 057           | alone               | every earlier epic is authored. It cites lines in files that 047 to 056 change.         |
 
 Batch A and batch D are the two real parallel wins. Five of the eleven epics expand in two passes.
 

@@ -1,6 +1,6 @@
 # EPIC 054 — Attempt classification and the supervisor
 
-Status: **draft**. It follows EPIC 053 by sequence order. It depends on EPIC 051.1 for `candidate.discard`, and on EPIC 051.5 for the post-commit step the expiry path needs.
+Status: **draft**. It follows EPIC 053.1 by sequence order. It depends on EPIC 051.1 for `candidate.discard`, and on EPIC 051.5 for the post-commit step the expiry path needs.
 
 ## Goal
 
@@ -50,7 +50,7 @@ A failed attempt carries a class, and the class decides whether it costs a budge
 
 - **Contention is `infrastructure`, and this is a decision taken here.** `worker.md` section 9 lists an operator handoff and a provider-signed quota response as infrastructure sources, and section 8 states contention consumes no attempt and is not a worker failure. The source list is read as non-exhaustive, and contention takes the class whose budget effect the document already assigns it. A fourth class would carry no different behaviour.
 
-- **The ambiguous budget belongs to the node, not to the run, because a crash loop opens a new run each time.** `worker.md` section 9 states the budget bounds a crash loop. An unexplained expiry ends the run, so a per-run counter resets on the very event it must count. Migration `15` adds `node.ambiguous_used INTEGER`, nullable, incremented on every ambiguous termination under the node's current assignment. `ambiguousBudget` is configuration, not a column.
+- **The ambiguous budget belongs to the node, not to the run, because a crash loop opens a new run each time.** `worker.md` section 9 states the budget bounds a crash loop. An unexplained expiry ends the run, so a per-run counter resets on the very event it must count. Migration `16` adds `node.ambiguous_used INTEGER`, nullable, incremented on every ambiguous termination under the node's current assignment. `ambiguousBudget` is configuration, not a column.
 
 - **The counter resets when the assignment changes, and at nothing else.** A worker switch of EPIC 056 clears `ambiguous_used`, because the budget bounds one worker's crash loop and a new worker starts clean. `node.unblock` does not clear it.
 
