@@ -31,16 +31,16 @@ deleting, and report a survivor rather than editing it here:
 survive, so `leaseRow`, `leaseSubjectKinds` and `leaseOwnerKinds` must all survive with it. Deleting
 any of the three here fails schema parity, and deleting `rows.lease` instead fails it the other way.
 
-**EPIC 057's migration `17` is where all four go together**, and that epic already owns the lease rows:
+**EPIC 057's migration `18` is where all four go together**, and that epic already owns the lease rows:
 its Stories 6 and 7 delete the `subject_kind = 'node'` rows and narrow the CHECK. The amendment this
-epic asks for is that migration `17` **drops the table** rather than narrowing it, and deletes
+epic asks for is that migration `18` **drops the table** rather than narrowing it, and deletes
 `src/domain/lease.ts` and `rows.lease` in the same edit.
 
 ## Constraints
 
 - Delete the module, not selected exports. A surviving `LeaseRelation` is a type nothing produces.
 - Verify the five importers are gone before deleting. Report a survivor as a defect of the story that owed it; do not edit that file here.
-- Do not delete `src/domain/lease.ts` or `rows.lease`. Both are load-bearing for schema parity until EPIC 057's migration `17` drops the table.
+- Do not delete `src/domain/lease.ts` or `rows.lease`. Both are load-bearing for schema parity until EPIC 057's migration `18` drops the table.
 - Do not move `leaseOwnerKinds` out of `src/domain/lease.ts`. It is used by `leaseRow` in that file.
 
 ## Verify

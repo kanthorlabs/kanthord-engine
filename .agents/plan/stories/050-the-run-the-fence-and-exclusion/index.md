@@ -55,7 +55,7 @@ Two node changes left the drafts entirely. Migration `12` no longer drops `node.
 longer makes `node.deliverable` and `node.verify_json` `NOT NULL`, and its null-deliverable guard is
 gone. EPIC 047 keeps `node.worker` through EPIC 056, EPIC 049 keeps a plan document naming neither
 `worker` nor `deliverable` legal, `src/commands/node/create-node.ts:178` writes a null
-`deliverable`, and every node read path still selects `worker`. EPIC 057 migration `17` owns all
+`deliverable`, and every node read path still selects `worker`. EPIC 057 migration `18` owns all
 three changes and its preflight.
 
 ## Moved to EPIC 050.1

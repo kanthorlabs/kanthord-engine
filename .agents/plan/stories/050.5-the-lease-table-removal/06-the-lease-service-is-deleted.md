@@ -107,14 +107,14 @@ orphaned it: `src/services/lease/index.ts:2` and `sqlite.ts:3-6` are its last tw
 `src/domain/rows.ts:10,33` registers as the row schema of the `lease` table, and
 `src/services/storage/schema-parity.test.ts:90` asserts the migrated table set equals
 `Object.keys(rows)`. The table survives this epic, so `rows.lease` must survive with it, so
-`leaseRow` must too. EPIC 057's migration `17` drops the table, and that is the one edit that can
+`leaseRow` must too. EPIC 057's migration `18` drops the table, and that is the one edit that can
 remove all three at once.
 
 ## Constraints
 
 - Delete the directory, not selected exports. A surviving `LeaseRecord` type is a type nothing can produce.
 - Do not delete `src/domain/lease-hierarchy.ts` or `src/domain/lease.ts`. Story 7 owns both.
-- Do not touch the `lease` table, `src/domain/lease.ts` or `src/domain/rows.ts`. All three survive until EPIC 057's migration `17`.
+- Do not touch the `lease` table, `src/domain/lease.ts` or `src/domain/rows.ts`. All three survive until EPIC 057's migration `18`.
 - If a `LeaseError` catch survives anywhere, report it as an EPIC 050.4 defect rather than editing that command here.
 - Delete `test/helpers/lease.ts` whole. Do not keep `createBackedLeaseFake` against raw SQL: a lease row is seeded by `test/helpers/rows.ts`, which imports no lease module and survives to EPIC 057.
 - Take the `:101` count to twenty, not twenty-one. No story of this epic adds a capability.

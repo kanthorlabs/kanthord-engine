@@ -4,7 +4,7 @@ Epic: `.agents/plan/epics/050.5-the-lease-table-removal.md`
 Prereq: EPIC 050, EPIC 050.1, EPIC 050.2, EPIC 050.3 and EPIC 050.4, implemented. EPIC 050.1's migration `12` is what gives the rewritten candidate query `run.expires_at`, `run.fence` and `run_base`, and its Story 2 is what gives Story 3 the `expireRuns` pass. After EPIC 050.4 the `Lease` service has exactly three importers, and this epic removes all three.
 
 The lease table has no writer left. This epic moves its remaining readers onto the run and deletes the
-service and the domain module. **It drops no table**: EPIC 057's migration `17` already owns the lease
+service and the domain module. **It drops no table**: EPIC 057's migration `18` already owns the lease
 rows, and the drop belongs there.
 
 ## One story, one path
@@ -277,7 +277,7 @@ three after this epic, and its per-node verdict stays in its own transaction so 
 workspace blocks one node without failing the pass.
 
 It is **not** a schema change either. The `lease` table, `src/domain/lease.ts` and `rows.lease` all
-survive, empty and unreachable, until EPIC 057's migration `17`.
+survive, empty and unreachable, until EPIC 057's migration `18`.
 
 ## Still open
 
@@ -375,21 +375,9 @@ survive, empty and unreachable, until EPIC 057's migration `17`.
 
 None is applied here, and a human applies each before dispatch. Each is named in the epic.
 
-- **EPIC 057 Stories 5, 6 and 7** — migration `17` drops the `lease` table instead of narrowing it,
+- **EPIC 057 Stories 5, 6 and 7** — migration `18` drops the `lease` table instead of narrowing it,
   and deletes `src/domain/lease.ts`, `rows.lease` and `docs/proposal/database/lease.md` in the same
   edit; its preflight loses the live-node-lease clause; its gate loses the surviving-`lease`-column
   assertion; and its `lease-hierarchy` deletion becomes a no-op, because EPIC 050.4 and Story 7 here
-  already do it.
-
-- **EPIC 050.4 Story 8 (`08-lease-held-is-retired`)** — delete the `leaseOwnerKinds` import at `error-details.ts:5` with the
-  `leaseRelations` import at `:6`. Both serve only `leaseHeldDetails`, which that story deletes.
-
-- **EPIC 050.4, the `leaseTtlMs` configuration** — its Story 1 and Story 4 delete the last two readers
-  and no epic through EPIC 057 removes the setting. The default if no ruling arrives is that Story 6
-  here takes it.
-
-- **EPIC 050.2 Story 2 (`02-the-authority-seams`), the `endRun` fence raise** — gate rows 1 and 10b depend on it and no `## Change`
-  section in the family instructs the write. The default if no ruling arrives is that the implementing
-  agent reports a red row as an EPIC 050.2 defect rather than writing the execution service here.
-
-Nothing else blocks dispatch.
+  already do it. **The default if no ruling arrives: migration `18` narrows the table instead of
+  dropping it**, and the product ships an empty `lease` table.

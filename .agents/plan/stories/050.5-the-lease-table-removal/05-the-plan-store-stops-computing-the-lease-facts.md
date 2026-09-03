@@ -54,7 +54,7 @@ predicate at EPIC 050.3 Story 7 (`07-containment-stops-reading-the-lease`) and i
 - Delete exactly one member of the blocker list. Do not touch `workspace`, `run`, `attempt` or `commit`.
 - Do not narrow the `run` blocker to active runs. That is a behaviour change no story in this epic asked for.
 - Do not touch `containmentMovable` or `src/domain/plan-containment.ts`.
-- Do not touch the `lease` table. It survives this epic, empty, until EPIC 057's migration `17`.
+- Do not touch the `lease` table. It survives this epic, empty, until EPIC 057's migration `18`.
 
 ## Verify
 

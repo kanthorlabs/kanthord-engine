@@ -23,7 +23,7 @@ An objective owns a branch record, and the first execution claim creates it:
 - **No worker loop.** Nothing produces a commit here.
 - **No change to the shipped `workspace` table.** The branch facts live in their own table, and `workspaceRow` at `src/domain/workspace.ts:7` is untouched.
 - **No lift of `review-head-unavailable`.** EPIC 050.1's guard stays. EPIC 053 owns the review claim and the judged checkpoint.
-- **No attempt-workspace disposal.** This range creates no attempt workspace, and no `Workspace` service exists to remove one. See the blocker in `## Amendments this epic asks of other epics`.
+- **No attempt-workspace disposal.** This range creates no attempt workspace, and no `Workspace` service exists to remove one. `src/commands/startup/sweep-remnants.ts` reports remnants and removes none, and this family declares no worker loop. **The epic that creates an attempt workspace owns its disposal.**
 
 ## Decisions
 
@@ -118,18 +118,6 @@ Each entry is a name and the output it contributes. The story file holds the cha
 8. **Startup reconciles an open `cut` row.** Extend `src/commands/startup/reconcile-journal.ts` with an exported `reconcileCut` unit that reconciles a `cut` row by the ref's **existence**: a ref that exists completes the row, a missing one discards it. Neither applies a transition. It also appends `"051"` to `shippedEpics`. `story-implement`.
 
 9. **The proposal records the workspace branch.** Amend `docs/proposal/database/workspace.md` with the branch record, its two triggers, the derived `ref` and `repository_id`, and the journaled first claim. Amend `docs/proposal/database/git_operation.md` with the fifth intent, and add `historicalGitOperationStatement` to `src/services/storage/migration-0003-execution-and-journal.test.ts`, because that test deep-equals migration `3` against the document. `story-foundation`.
-
-## Amendments this epic asks of other epics
-
-None is applied here, and a human applies each before dispatch.
-
-- **EPIC 050.1 Story 2 (`02-the-expiry-pass`)** — `:98-100` delegates the fourth candidate-ref deletion to "EPIC 051". It now resolves to EPIC 051.1 Story 5. A human repoints the reference, because `/author` may not write outside its own epic's directory.
-
-- **EPIC 050.4 Story 1 (`01-the-claim-of-a-task-drops-the-lease`)** — its `claim-lease-free-task` diagram gains `Superseded by: EPIC 051 claim-branch-base-task`, and `test/sequence/scenarios/claim-lease-free-task.ts` is deleted. `/author` applies this as the standard supersession, and it is named here so a reviewer expects the edit.
-
-- **EPIC 050.5** — its gate rows 5b and 10b seed two `run_base` rows for one run. Those rows are query-isolation tests and not a claim that two bases are a valid product state; EPIC 051.1 tightens the refine to exactly one, so both rows need restating before that refine lands.
-
-- **A blocker, not an amendment: the attempt workspace has no owner.** The superseded draft carried a story removing a failed attempt's workspace directory. `src/services/` holds no `workspace` service, `src/commands/startup/sweep-remnants.ts` reports remnants and removes none, and this family's Non-goals state no worker loop, so nothing in this range creates an attempt workspace to remove. The story is dropped from the family, and the epic that creates an attempt workspace owns its disposal.
 
 ## Verification Gate
 

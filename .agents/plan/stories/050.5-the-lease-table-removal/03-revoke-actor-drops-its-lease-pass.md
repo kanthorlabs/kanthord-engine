@@ -110,7 +110,7 @@ window rather than leaving it to be discovered.
 - Do not change the three refusals, the `UPDATE actor`, or the position of the clock read.
 - Delete exactly one field from `eventPayloads["actor.revoked"]`. `actorId`, `kind`, `name`, `revokedBy` and `revokedAt` stay.
 - Do not change any other field of the `actor.revoked` payload.
-- Do not touch the `lease` table. It survives this epic, empty, until EPIC 057's migration `17`.
+- Do not touch the `lease` table. It survives this epic, empty, until EPIC 057's migration `18`.
 
 ## Verify
 

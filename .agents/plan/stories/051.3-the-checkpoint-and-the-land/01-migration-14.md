@@ -81,9 +81,9 @@ CREATE TABLE checkpoint (
   authenticated state. EPIC 057 tightens both.
 - **The review group is complete here, and EPIC 053 adds no column.** The epic's Goal says migration
   `14` creates the whole `checkpoint` table, and its Decisions require a CHECK "of the same shape for
-  the review group"; a review CHECK needs review columns. The column set is the one the epic's
-  `## Amendments this epic asks of other epics` enumerates — `verdict`, `judged_oid`, `reason_blob`
-  and `judged_checkpoint_id` — so nothing here is invented. **EPIC 053 becomes writer-only**: it
+  the review group"; a review CHECK needs review columns. The column set is the one
+  `.agents/plan/epics/051.3-the-checkpoint-and-the-land.md:29` — `every column is stated` enumerates
+  — `verdict`, `judged_oid`, `reason_blob` and `judged_checkpoint_id` — so nothing here is invented. **EPIC 053 becomes writer-only**: it
   gains the review acceptance path and adds no migration column, which is also what spares
   `checkpoint` a later rebuild, because SQLite cannot widen a CHECK in place.
 - **Two CHECKs bind the review group, not one.** `verdict` alone would admit a `kind = 'execution'`

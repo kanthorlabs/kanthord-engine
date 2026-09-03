@@ -202,7 +202,7 @@ than the mechanism, and they do not change either.
 - Do not rename `RECOVERY_STEP_ORDER`'s `leases` step, `LeasesStep`, `LeasesResultLike` or `RecoverHomeDependencies.leases`. Each rename is a seam change on a path with no diagram.
 - Do not change `RecoveryReport`'s field names.
 - Do not change the git verdict. `clean && head === base` decides `ready` against `blocked`, and this story changes only where the base comes from.
-- Do not touch the `lease` table. It survives this epic, empty, until EPIC 057's migration `17`.
+- Do not touch the `lease` table. It survives this epic, empty, until EPIC 057's migration `18`.
 
 ## Verify
 

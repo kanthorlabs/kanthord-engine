@@ -80,14 +80,6 @@ Each entry is a name and the output it contributes. The story file holds the cha
 
 5. **The seams the acceptance needs.** Add optional `deliverable` and `verifyJson` to `NodeWrite` at `src/services/plan/index.ts:25`, and add the structural checkpoint write and `hasAcceptedCheckpoint` to `src/services/execution/index.ts` and its SQLite implementation. `story-foundation`.
 
-## Amendments this epic asks of other epics
-
-None is applied here, and a human applies each before dispatch.
-
-- **EPIC 050.1** — applied. Its Decision at `:114` now names the shipped mechanism, `src/commands/node/claim-node.ts:179-182`, and records that `src/domain/plan-completeness.ts` takes no parameter and that the two import construction sites exempt nothing. Nothing further is asked of it.
-
-- **EPIC 053** — its gate already asserts that a `structural` run accepted against an initiative leaves `node.state` unchanged, at `:75` and `:111`. That assertion is the reason EPIC 052.1 writes no node transition, and it stays where it is.
-
 ## Verification Gate
 
 Gates: `pnpm run verify`

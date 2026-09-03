@@ -315,9 +315,9 @@ Each fact was read out of the tree before a story was written, and each one chan
   of that story agrees; its case 3 asserts `deepEqual({ objectiveId: "objective_a" })`, which
   `node:assert/strict` refuses against a four-key object. **Aelita's first reading had this backwards**
   and rewrote gate row 15 to assert invariance instead; row 15's original "four-field" was right, and
-  it is restored. Story 9 case 1 now asserts the literal, and the epic's
-  `## Amendments this epic asks of other epics` carries the one-line fix to EPIC 051. See
-  `09-the-contended-cut-reaps-before-it-refuses.md`.
+  it is restored. Story 9 case 1 now asserts the literal, and the one-line fix to EPIC 051 is applied
+  at `.agents/plan/stories/051-the-workspace-branch/07-the-loser-of-two-first-claims-refuses.md:144`
+  — `contendedObjectiveDetails`. See `09-the-contended-cut-reaps-before-it-refuses.md`.
 
 - **The snapshot race EPIC 051.1 delegates here is closed by construction, and Story 5 proves it.**
   `.agents/plan/stories/051.1-the-candidate-and-the-git-primitives/08-the-candidate-namespace-is-enumerated.md:153` —

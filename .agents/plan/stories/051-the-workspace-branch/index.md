@@ -277,36 +277,14 @@ epic.
 None is applied here, and a human applies each before dispatch.
 
 - **EPIC 051.1 Story 4 (`04-the-candidate-ref-is-deleted`)** — its `## Change` step 3 declares a
-  `refNamespace` projection for `git.resolveRef`, and its step 4 adds `"051.1"` to `authoredEpics`
-  "after `\"051\"`". EPIC 051 Story 3 lands the `"051"` entry, and EPIC 051 Story 6 lands
-  `git.resolveRef` projecting the **ref value**, not its namespace: `claim-first-execution` resolves
+  `refNamespace` projection for `git.resolveRef`, and `04-the-candidate-ref-is-deleted.md:127` still
+  projects it that way. EPIC 051 Story 6 lands `git.resolveRef` projecting the **ref value**, not its
+  namespace: `claim-first-execution` resolves
   two different refs, and a namespace projection would emit `git.resolveRef:branch` twice, which
   `test/helpers/sequence-conformance.ts:283` — `duplicate` refuses. **That story must alias its
-  candidate refs by value instead of introducing `refNamespace`.**
+  candidate refs by value instead of introducing `refNamespace`.** **The default if no ruling arrives: EPIC 051.1 Story 4 emits `git.resolveRef:branch` twice**, and its own conformance case is red.
 
 - **EPIC 051.3 Story 3 (`03-the-land-opens-its-journal-row`)** — its `## Change` step 3 declares the
   `journal.open` projection. EPIC 051 Story 4 lands it first, so that step becomes a no-op it must
-  restate.
-
-- **EPIC 051.3 Story 5 (`05-the-composed-successful-land`)** — its `## Change` step 3 declares the
-  `git.refUpdate` projection. EPIC 051 Story 6 lands it first, with the same body.
-
-- **EPIC 050.4 Story 1 (`01-the-claim-of-a-task-drops-the-lease`) — applied on 2026-09-03.** Its
-  `` ### `claim-lease-free-task` `` section carries
-  `Superseded by: EPIC 051 claim-branch-base-task`. **No role may write it**:
-  `scripts/lane-check.sh:36` — `deny` refuses `.agents/plan/*` to every role, `groundwork-engineer`
-  included, so Ulrich applied it. It landed **together with** the range entry, because neither half
-  is green alone: the line without the entry makes
-  `scripts/verify-epic-sequence.ts:505` — `supersession` throw
-  `supersession names an epic outside the authored set: EPIC 051`, and
-  `scripts/verify-epic-sequence.test.ts:880` — `it` runs the gate inside `pnpm test`. Both halves are
-  in the tree and the gate is green.
-  `test/sequence/scenarios/claim-lease-free-task.ts` never existed, so nothing was deleted.
-
-- **EPIC 050.1 Story 2 (`02-the-expiry-pass`)** — `:98-100` delegates the fourth candidate-ref
-  deletion to "EPIC 051". It resolves to EPIC 051.1 Story 5
-  (`05-the-candidate-namespace-has-a-reaper`), not to this epic. A human repoints the reference.
-
-- **EPIC 050.5** — its gate rows 5b and 10b seed two `run_base` rows for one run. Story 3 gives the
-  claim its first writer, so those rows now conflict with a product path; EPIC 051.1 tightens the
-  refine to exactly one, and both rows need restating before that refine lands.
+  restate. **The default if no ruling arrives: that story re-applies a projection the harness already
+  holds**, and its groundwork turn reports a no-op edit.
