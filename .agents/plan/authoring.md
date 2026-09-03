@@ -114,8 +114,12 @@ Paths: package.json package-lock.json eslint.config.js
 - **An epic that needs no locked path holds no such story.** Never manufacture an empty one.
 - **Its cases are build-only checks**, because a config edit opens no failing test. A test that proves
   a groundwork edit belongs to a later story, because a test file stays in the test-engineer lane.
-- **`AGENTS.md`, the plan tree, the pipeline definition and the pipeline guards are never in
-  `Paths:`.** Each records a decision or judges the executor, and a human writes it.
+- **The plan tree, the pipeline definition and the pipeline guards are never in `Paths:`.** Each
+  judges the executor, and a human writes it.
+- **`AGENTS.md` may appear in `Paths:`, and only with the exact text beside it.** The architecture
+  contract records a decision a human takes, so the story carries the sentence verbatim in its
+  `## Change` and the groundwork executor applies it unchanged. A `Paths:` line naming `AGENTS.md`
+  over a story that states an intent rather than the words is a planning defect.
 
 ### `story-implement`
 

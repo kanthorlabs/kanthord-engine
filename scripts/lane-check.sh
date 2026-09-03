@@ -38,11 +38,11 @@ case $path in
 scripts/lane-check.sh | scripts/turn-snapshot.sh | scripts/verify-handoff.mjs | scripts/memory-append-only.sh | scripts/*.test.sh)
   deny "the pipeline guards are locked"
   ;;
-AGENTS.md) deny "the architecture contract is locked" ;;
 esac
 
 if [ "$role" != groundwork-engineer ]; then
   case $path in
+  AGENTS.md) deny "the architecture contract is the groundwork lane" ;;
   package.json | package-lock.json) deny "the toolchain manifest is locked" ;;
   tsconfig*.json) deny "the toolchain config is locked" ;;
   Containerfile | compose.yaml | Makefile) deny "the build definition is locked" ;;

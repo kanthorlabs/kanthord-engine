@@ -85,7 +85,10 @@ RED is the test-engineer's. **GREEN** (the smallest correct change satisfying th
 - **Proposal documents:** `docs/proposal/**` is **yours to amend** when a story
   names a document edit as its work. A parity test binds a document note to a
   code note, so amend the document and the code in the same turn. The rest of
-  `docs/**` stays locked, and so does `AGENTS.md`.
+  `docs/**` stays locked. `AGENTS.md` is locked to you too, but it is the
+  **groundwork lane** and not a human-only file: an architecture change you need
+  is `OPEN: OUT-OF-LANE`, and it reaches the groundwork role like any other
+  locked path.
 - New files go where the `## Change` step's bold lead says.
 
 ## Idiom checklist (every edit)
@@ -160,8 +163,9 @@ OPEN: OUT-OF-LANE — <repo-relative path> — <the change that path needs>
 `/work` validates the claim with `scripts/lane-check.sh` and then routes it. A path the
 `groundwork-engineer` role may write goes to that role, and the loop continues — **state the change
 that path needs exactly**, because that sentence is the whole instruction the executor receives. A
-path locked to **every** role — the plan tree, the pipeline definition, the pipeline guards,
-`AGENTS.md` — goes to the human on the first occurrence.
+path locked to **every** role — the plan tree, the pipeline definition, the pipeline guards — goes to
+the human on the first occurrence. `AGENTS.md` is **not** one of those: it is the groundwork lane, so
+it routes to that role, and it reaches the human only when nobody has stated the exact text to write.
 
 Use the marker only for a path locked to both engineers. A path that belongs to the **other**
 engineer's lane is a plain `OPEN:`, because that work is in lane for them. Run
