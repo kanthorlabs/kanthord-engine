@@ -1,6 +1,6 @@
 # EPIC 054 — Attempt classification and the supervisor
 
-Status: **draft**. It follows EPIC 053 by sequence order.
+Status: **draft**. It follows EPIC 053 by sequence order. It depends on EPIC 051.1 for `candidate.discard`, and on EPIC 051.5 for the post-commit step the expiry path needs.
 
 ## Goal
 
@@ -60,9 +60,23 @@ A failed attempt carries a class, and the class decides whether it costs a budge
 
 - **One command ends an attempt, and the read, the conversion and the write are one transaction.** `src/commands/attempt/end-attempt.ts` reads `node.ambiguous_used`, classifies, converts, writes `attempt.termination`, increments the counter conditionally, and appends its event, inside one `storage.transact`. Two concurrent endings would otherwise read the same count and both stay under budget. The increment is `UPDATE node SET ambiguous_used = ambiguous_used + 1 WHERE id = ? AND ambiguous_used = ?`, and a zero-row result restarts the classification.
 
-- **`end-attempt` deletes the candidate ref of the attempt it ends.** EPIC 051 deletes it on acceptance, on rejection and on contention, and EPIC 050 deletes it on an expiry. An operator handoff is the remaining path. The delete happens after the transaction commits, because a git write cannot join a SQLite transaction.
+- **`end-attempt` writes and does not discard, and the caller discards after its own transaction commits.** `end-attempt` is one `storage.transact` by the decision above, and a git write cannot join a SQLite transaction, so the discard cannot be inside it. Making `end-attempt` asynchronous and giving it a second transaction would make it a journaled write with no journal row. The discard is therefore the caller's, and each path names its owner:
+
+  | path                                                                  | who ends the attempt                           | who discards the candidate ref                        |
+  | --------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------- |
+  | rejection in `accept-execution`, `accept-structural`, `accept-review` | `end-attempt`                                  | EPIC 051.4, after the accept transaction commits      |
+  | contention in `land-execution`                                        | `end-attempt`                                  | EPIC 051.4, after the land transaction commits        |
+  | explicit failure report                                               | `end-attempt`                                  | this epic, after the report transaction commits       |
+  | **a run expiry in `expire-runs`**                                     | `end-attempt`, inside the caller's transaction | **EPIC 051.5's post-commit step**                     |
+  | human cancellation                                                    | `end-attempt`                                  | this epic, after the cancellation transaction commits |
+
+  Every discard calls `candidate.discard` of EPIC 051.1 Story 4 (`04-the-candidate-ref-is-deleted`) and never `git.deleteRef` directly, because `candidate.discard` is the only site that calls it.
+
+  **This epic audits every one of those discards against the six conditions of `AGENTS.md` `### Rules the import matrix cannot express`**: a deletion whose success must sequence with a database effect is a journaled write, not an exempt one. None of these does — the attempt is already written when the discard runs, and EPIC 051.1's startup reaper is the guaranteed retry that condition 5 requires.
 
 - **Every failure path calls `end-attempt`, and none writes a termination itself.** The paths are: a daemon rejection in `accept-execution`, `accept-structural` and `accept-review`; an explicit failure report; a contention in `land-execution`; a run expiry in `expire-runs`; and a human cancellation. `attempt.show` therefore has no field that no path populates.
+
+- **The expiry path is the one that cannot discard for itself, and this is why.** `expireRuns` takes the caller's transaction (`src/commands/run/expire-runs.ts:25 — `expireRuns``) and is synchronous, and its only production caller runs it inside `claimNode`'s transaction (`src/commands/node/claim-node.ts:147 — `expireRuns``). It therefore has no "after the transaction commits" of its own: the transaction belongs to a command that has not finished. `end-attempt` still runs there — it is a database write and it joins that transaction legally. The discard is handed to EPIC 051.5, which carries the ended run ids out of the claim and acts on them after the commit. **Do not make `expireRuns` asynchronous and do not give it a `Git`**; either would put git I/O inside a storage transaction.
 
 - **`accountAttempts` counts semantic terminations, and the limit stops reading the raw counter.** `src/domain/attempt-accounting.ts:32` gains `termination` on `AttemptRecord` and returns `semanticCount`, `ambiguousCount` and `exhausted`, where `exhausted` is `semanticCount >= limit`. An infrastructure failure no longer advances the limit. This is a behaviour change to shipped code, and the shipped cases are updated rather than kept.
 
@@ -88,7 +102,7 @@ A failed attempt carries a class, and the class decides whether it costs a budge
 
 6. **End attempt.** Add `src/commands/attempt/end-attempt.ts` performing the read, the classification, the conversion, the write, the conditional increment and the event in one transaction. Add its test asserting: the stored value after a conversion is `semantic`; the conditional increment restarts on a zero-row result; two sequential ambiguous endings leave `ambiguous_used` at exactly two; and a failure injected at the event append leaves the attempt and the counter unchanged.
 
-7. **Every failure path calls it.** Wire `end-attempt` into `accept-execution`, `accept-structural`, `accept-review`, the explicit failure report, `land-execution` contention, `expire-runs` and human cancellation. Add one case per path asserting the stored `termination` value, so no path writes a class of its own.
+7. **Every failure path calls it.** Wire `end-attempt` into `accept-execution`, `accept-structural`, `accept-review`, the explicit failure report, `land-execution` contention, `expire-runs` and human cancellation. Add one case per path asserting the stored `termination` value, so no path writes a class of its own. **The `expire-runs` wiring is the write only**: `end-attempt` joins the caller's transaction there, and the candidate discard for that path belongs to EPIC 051.5, so this story adds no git call to `expire-runs` and no `Git` to `ExpireRunsDependencies`. Add one case asserting a git service double's call count is zero across an expiry pass that ends an attempt.
 
 8. **Caller and subject are derived.** Extend the attempt write path to read `subject` from `run.worker` and `caller` from the authenticated principal. Add cases asserting a request body carrying `caller` or `termination` is refused by the strict schema, asserting `subject` equals `run.worker` for an internal and an external run, and asserting `caller` equals the authenticated principal in both.
 
