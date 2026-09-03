@@ -130,7 +130,7 @@ Each fact was read out of the tree before a story was written, and each one chan
   (`06-startup-reconciles-an-open-merge-row`) draws `land.settle:accepted` and EPIC 051 draws the branch cut.
 
 - **The caller removes the token the settle returned, not the one the begin returned.**
-  `.agents/plan/stories/051.3-the-checkpoint-and-the-land/04-the-accepted-settle.md:157` —
+  `.agents/plan/stories/051.3-the-checkpoint-and-the-land/04-the-accepted-settle.md:170` —
   `The unit returns the pid-file token` states that `journal.complete` and `journal.discard` each
   return the row's `child_token` before clearing it, and
   `src/commands/startup/reconcile-journal.ts:233` — `removeClearedToken` is the shipped pattern.
@@ -158,9 +158,9 @@ Each fact was read out of the tree before a story was written, and each one chan
   with a verify-before-editing clause, because EPIC 051 draws the family's first `async` path and may
   land it first.
 
-- **The conformance range stops at EPIC 050.5.**
-  `scripts/epic-sequence-range.ts:1` — `authoredEpics` ends at `"050.5"`, so no diagram of this epic
-  is discovered and gate row 22 asserts nothing. Story 9 carries the range edit and the pin at
+- **The conformance range already reaches this epic.** **Amended: the whole authored range is already applied.** `scripts/epic-sequence-range.ts:1` — `authoredEpics` holds every id of the family, and `test/sequence/conformance.test.ts:255` — `assert.deepEqual` pins the matching literal. A human applied the range whole rather than one id per epic, and `scripts/verify-epic-sequence.test.ts:880` — `the real plan tree passes the range gate` is green over it. `"051.4"` is in it, so
+  every diagram of this epic is discovered and gate row 22 asserts over them. Story 9 no longer
+  carries a range edit; it verifies the entry and the pin at
   `test/sequence/conformance.test.ts:254` — `shippedEpics is a prefix of authoredEpics`.
 
 - **A new proposal document turns a shipped test red on its own.**
@@ -172,7 +172,7 @@ Each fact was read out of the tree before a story was written, and each one chan
   `docs/proposal/api/README.md:243` — `Status`,
   `src/http/contract/errors.ts:7` — `errorStatuses`,
   `src/cli/exit-code.ts:13` — `exitCodes`, and the operation's `errors` record, and it is pinned three
-  more times: the ordered list at `src/http/contract/errors.test.ts:42` — `it`, the per-status group
+  more times: the ordered list at `src/http/contract/errors.test.ts:41` — `it`, the per-status group
   at `src/http/contract/errors.test.ts:113` — `it`, and the mirror plus two hard-coded counts at
   `src/cli/exit-code.test.ts:17` — `expected`, `src/cli/exit-code.test.ts:70` — `29` and
   `src/cli/exit-code.test.ts:87` — `29`. The epic names two of the seven sites.
@@ -308,13 +308,12 @@ two below blocks a story of this tree.
 | 1   | EPIC 051.1 names this epic the owner of the per-command worktree sweeper | Ulrich | nothing in this tree |
 | 2   | the range gate cannot reach this tree until the whole family is expanded | Ulrich | gate row 22, Story 9 |
 
-**2 — the range gate cannot reach this tree yet.** `scripts/verify-epic-sequence.ts` exists and runs
-green today, and `scripts/epic-sequence-range.ts:1` — `authoredEpics` ends at `"050.5"`. Adding
-`"051.4"` to it requires `"050.6"`, `"051"`, `"051.1"`, `"051.2"` and `"051.3"` beside it, and none of
-those five has a story tree — so the gate would land red, which
-`.agents/plan/authoring.md` refuses: "The gate enters `pnpm run verify` only when every epic in its
-range satisfies it." **The supersession on EPIC 050.4 Story 6 (`06-the-report-drops-the-lease`) is therefore not
-applied**, because
+**2 — resolved: the range gate reaches this tree.** **Amended: the whole authored range is already applied.** `scripts/epic-sequence-range.ts:1` — `authoredEpics` holds every id of the family, and `test/sequence/conformance.test.ts:255` — `assert.deepEqual` pins the matching literal. A human applied the range whole rather than one id per epic, and `scripts/verify-epic-sequence.test.ts:880` — `the real plan tree passes the range gate` is green over it. `"050.6"`, `"051"`,
+`"051.1"`, `"051.2"`, `"051.3"`, `"051.5"` and `"051.6"` are all present beside `"051.4"`, every one
+of them has a story tree, and the gate is green over the whole range — so
+`.agents/plan/authoring.md`'s rule that "The gate enters `pnpm run verify` only when every epic in its
+range satisfies it" is satisfied. **The supersession on EPIC 050.4 Story 6 (`06-the-report-drops-the-lease`) may now be
+applied**, where it previously could not be, because
 `Superseded by: EPIC 051.4 …` makes the gate fail with `supersession names an epic outside the
 authored set`, verified by running it. Story 8 carries that edit and Story 9 carries the range, and
 both wait on the rest of the family being expanded.

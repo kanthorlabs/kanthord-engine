@@ -113,12 +113,10 @@ Add `test/sequence/scenarios/report-checkpoint-gate.ts`.
 `### \`report-lease-free\``section gains`Superseded by: EPIC 051.4 report-checkpoint-gate`on the
 line after its`Supersedes:` line.
 
-**That edit turns `scripts/verify-epic-sequence.ts` red on its own**, with
-`supersession names an epic outside the authored set: EPIC 051.4` at
-`scripts/verify-epic-sequence.ts:507` — `supersession names an epic outside the authored set`, because
-`scripts/epic-sequence-range.ts:1` — `authoredEpics` ends at `"050.5"`. It therefore lands **after**
-Story 9 has extended the range, and Story 9 dispatches first for that reason as well as for the
-contract coupling. Verify before editing, and report a divergence rather than re-applying.
+**Amended: the whole authored range is already applied.** `scripts/epic-sequence-range.ts:1` — `authoredEpics` holds every id of the family, and `test/sequence/conformance.test.ts:255` — `assert.deepEqual` pins the matching literal. A human applied the range whole rather than one id per epic, and `scripts/verify-epic-sequence.test.ts:880` — `the real plan tree passes the range gate` is green over it. `"051.4"` is in it, so
+`scripts/verify-epic-sequence.ts:505` — `knownEpicIds` accepts this supersession and the edit no
+longer needs Story 9 to precede it. Story 9 still dispatches first, for the contract coupling alone.
+Verify before editing, and report a divergence rather than re-applying.
 
 Delete `test/sequence/scenarios/report-lease-free.ts` in this story.
 `test/sequence/conformance.test.ts:115` — `superseded` refuses a scenario naming a superseded live

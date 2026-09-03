@@ -133,13 +133,13 @@ Add `src/http/contract/proposal-amendment-checkpoints.test.ts`, following the co
 
 ### 7 — `scripts/epic-sequence-range.ts`
 
-`scripts/epic-sequence-range.ts:1` — `authoredEpics` ends at `"050.5"`, so
-`test/sequence/conformance.test.ts:38` — `authoredLiveDiagrams` discovers no diagram of this epic and
-the epic's gate row 22 asserts nothing. Append `"050.6"`, `"051"`, `"051.1"`, `"051.2"`, `"051.3"` and
-`"051.4"`, and append the same to `shippedEpics` as far as this epic. Update the pin at
-`test/sequence/conformance.test.ts:254` — `shippedEpics is a prefix of authoredEpics` to match. **Each preceding epic of the family
-appends itself**; this story appends only `"051.4"` if the others are already there, and adds the
-missing ones if they are not.
+**Amended: the whole authored range is already applied.** `scripts/epic-sequence-range.ts:1` — `authoredEpics` holds every id of the family, and `test/sequence/conformance.test.ts:255` — `assert.deepEqual` pins the matching literal. A human applied the range whole rather than one id per epic, and `scripts/verify-epic-sequence.test.ts:880` — `the real plan tree passes the range gate` is green over it. `"050.6"`, `"051"`, `"051.1"`, `"051.2"`, `"051.3"` and `"051.4"` are all present,
+so `test/sequence/conformance.test.ts:38` — `authoredLiveDiagrams` discovers every diagram of this
+epic and the epic's gate row 22 asserts over them. **This story appends nothing to `authoredEpics`:
+verify the entries and report a divergence rather than re-applying.** `shippedEpics` is a separate
+list and is unchanged by that application, so append `"051.4"` to it as far as this epic, and update
+the pin at `test/sequence/conformance.test.ts:254` — `shippedEpics is a prefix of authoredEpics` to
+match.
 
 ## Constraints
 
@@ -201,7 +201,9 @@ Add, each as a separate case:
     `test/helpers/proposal.test.ts:71` case, now including `checkpoints.md`.
 
 11. `"the conformance range names this epic"` — assert `authoredEpics` contains `"051.4"` and that
-    `shippedEpics` is a prefix of `authoredEpics`.
+    `shippedEpics` is a prefix of `authoredEpics`. The first assertion is a **regression guard**: the
+    entry is already applied, so the case asserts the state rather than a change this story makes. The
+    second proves this story's own `shippedEpics` append.
 
 `pnpm run verify` exits 0.
 

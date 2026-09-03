@@ -85,10 +85,13 @@ Citations: `scripts/e2e/remote.ts:68` — `createGitRunner`, `scripts/e2e/007/ru
 
 ### 4 — The range, which every epic appends its own id to
 
-**Append `"050.6"` to `authoredEpics` of `scripts/epic-sequence-range.ts`, directly after `"050.5"`
-and before `"051"`, and add the same string in the same position to the literal at
-`test/sequence/conformance.test.ts:255` — `assert.deepEqual`.** The two must move together: that case
-deep-equals the exported array against a written-out list, so a one-sided edit fails it.
+**Amended: the whole authored range is already applied, so this story edits neither file.**
+`scripts/epic-sequence-range.ts:1` — `authoredEpics` already holds `"050.6"` directly after `"050.5"`
+and before `"051"`, and `test/sequence/conformance.test.ts:255` — `assert.deepEqual` already pins the
+matching literal. A human applied the whole range ahead of implementation rather than one id per epic.
+**Verify both entries are present and report a divergence rather than re-applying either.** The two
+still must move together, because that case deep-equals the exported array against a written-out list,
+so a one-sided edit fails it.
 
 **The append is what makes the range gate read this epic's stories.**
 `scripts/epic-sequence-range.ts:1` — `authoredEpics` names every epic whose stories exist, and
@@ -98,7 +101,7 @@ directory of each. Without the entry the gate reads nothing of EPIC 050.6, and
 range appends its own id.
 
 **`shippedEpics` does not change.** It names every epic whose code exists and gates whether a diagram
-is due; `test/sequence/conformance.test.ts:267` — `slice` asserts it stays a prefix, and
+is due; `test/sequence/conformance.test.ts:272` — `slice` asserts it stays a prefix, and
 `"050.6"` appended to the longer list keeps that true. This epic declares no diagram, so the walk
 finds no `Diagrams:` line and asks for no scenario file.
 
@@ -120,8 +123,10 @@ a human runs it, and EPIC 011 owns the acceptance run.
   real clock, and no e2e file arms a fake schedule.
 - Change no behaviour of any e2e scenario. Each edit is one import, one construction and one argument
   per call site.
-- Append `"050.6"` and nothing else to `authoredEpics`. Do not add `051.1`, `051.4` or `051.5`: those
-  belong to their own epics, and the range currently fails on them for reasons outside this epic.
+- Add nothing to `authoredEpics`. It already holds `"050.6"`, and it already holds `"051.1"`,
+  `"051.4"`, `"051.5"` and `"051.6"` as well: the range was applied whole rather than one id per epic,
+  and `scripts/verify-epic-sequence.test.ts:880` — `the real plan tree passes the range gate` is green
+  over it. Removing any of those four turns that test red.
 - Do not touch `shippedEpics`. EPIC 050.6 ships no diagram, and the prefix assertion must stay true.
 - This story adds no configuration key. `agent.timeoutMs`, `agent.path` and `check.path` belong to
   EPIC 106 and EPIC 107, and no file under `src/services/config/` is touched.
@@ -152,13 +157,14 @@ Add, each as a separate `it`:
    `src/main.ts` holds four occurrences of the token today, at `:29`, `:193`, `:270` and `:728`, and
    this story moves the first from one module to another without changing the count.
 
-3. `"the range names this epic and the two lists agree"` —
-   `node --test test/sequence/conformance.test.ts` exits `0`, and its case
-   `"shippedEpics is a prefix of authoredEpics"` passes over an `authoredEpics` whose value
-   deep-equals `["050", "050.1", "050.2", "050.3", "050.4", "050.5", "050.6", "051", "051.2", "051.3"]`.
-   In the same case, `node scripts/verify-epic-sequence.ts` reads the six story files of this epic and
-   reports no error about `050.6`. The control: the same runner over an `authoredEpics` missing the
-   entry reports nothing at all about `050.6`, which is the state this case exists to leave behind.
+3. `"the range names this epic and the two lists agree"` — `node --test test/sequence/conformance.test.ts`
+   exits `0`, and its case `"shippedEpics is a prefix of authoredEpics"` passes over an `authoredEpics`
+   whose value deep-equals
+   `["050", "050.1", "050.2", "050.3", "050.4", "050.5", "050.6", "051", "051.1", "051.2", "051.3", "051.4", "051.5", "051.6"]`.
+   In the same case, `verifyEpicSequence` reads the six story files of this epic and reports no error
+   about `050.6`. The control: the same runner over an `authoredEpics` missing the entry reports
+   nothing at all about `050.6`. **This case is a regression guard, not the proof of an edit**: the
+   range already holds the entry, so the case asserts the state rather than a change this story makes.
 
 4. `"the harness type-checks at the new arity"` — a build-only check. `pnpm run typecheck` exits `0`,
    and `grep -rn 'createGitRunner(paths)' scripts/` prints no line.

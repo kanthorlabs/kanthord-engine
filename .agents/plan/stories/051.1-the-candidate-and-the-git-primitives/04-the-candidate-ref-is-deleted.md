@@ -137,12 +137,10 @@ and one table that already answers both epics cannot be written two ways.
 
 ### 4 — the epic joins the authored range
 
-Add `"051.1"` to `authoredEpics` at `scripts/epic-sequence-range.ts:1 — `authoredEpics``, **between
-`"051"` and `"051.2"`**. The list is in sequence order and it reads
-`050, 050.1, 050.2, 050.3, 050.4, 050.5, 051, 051.2, 051.3` — `"051"` is present and `"051.1"` is the
-gap. If `"051"` is absent when this story runs, that is a dependency violation: raise `OPEN:` naming
-it rather than adding it here, because `test/sequence/conformance.test.ts:41 — `authoredEpics`` throws
-for a listed epic whose story directory is absent, and only EPIC 051 knows when its own tree is ready.
+**Amended: the whole authored range is already applied.** `scripts/epic-sequence-range.ts:1` — `authoredEpics` holds every id of the family, and `test/sequence/conformance.test.ts:255` — `assert.deepEqual` pins the matching literal. A human applied the range whole rather than one id per epic, and `scripts/verify-epic-sequence.test.ts:880` — `the real plan tree passes the range gate` is green over it. `"051.1"` already sits between `"051"` and `"051.2"`, in sequence order, so
+**this story adds nothing to `authoredEpics`: verify the entry and report a divergence rather than
+re-applying it.** `test/sequence/conformance.test.ts:41 — `authoredEpics`` throws for a listed epic
+whose story directory is absent, and every listed id has one.
 
 **These two files are edited by other epics in parallel, so treat the line numbers above as of the
 day this story was written.** Re-read `scripts/epic-sequence-range.ts` and the pinned literal in
@@ -207,10 +205,11 @@ returning `{ recorder, result }` where `result` is `undefined` — `resultTermin
 `finally`.
 
 5. `"the conformance runner replays discard-candidate"` — the shipped case
-   `"every due scenario conforms"` at `test/sequence/conformance.test.ts:270 — `conforms`` covers it
+   `"every due scenario conforms"` at `test/sequence/conformance.test.ts:275 — `conforms`` covers it
    once `"051.1"` is in both range lists. Assert here only that
    `authoredEpics` holds `"051.1"` and that `shippedEpics` does not, so this story cannot silently
-   mark the epic shipped.
+   mark the epic shipped. The first assertion is a **regression guard**, because the `authoredEpics`
+   entry is already applied; the second is this story's own constraint.
 
 `pnpm run verify` exits 0.
 
