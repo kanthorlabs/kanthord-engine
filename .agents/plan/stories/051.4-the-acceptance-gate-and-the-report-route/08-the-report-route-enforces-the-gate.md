@@ -100,7 +100,7 @@ equivalent writes inside the transaction that writes the checkpoint. Two writers
 defect this avoids.
 
 **Step 9 sits outside the transaction of step 1.** `accept.execution` writes git, and `AGENTS.md`
-forbids git I/O inside a storage transaction. The prelude's transaction closes before step 7 runs, and
+forbids git I/O inside a storage transaction. The prelude's transaction closes before step 9 runs, and
 the diagram still holds one `storage.transact` token, which is what the parser requires.
 
 Add `test/sequence/scenarios/report-checkpoint-gate.ts`.
