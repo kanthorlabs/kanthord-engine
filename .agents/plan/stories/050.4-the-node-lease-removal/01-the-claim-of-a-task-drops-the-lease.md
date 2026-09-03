@@ -26,6 +26,7 @@ superseded diagram, not a line number.
 ### `claim-lease-free-task`
 
 Supersedes: EPIC 050.1 claim-success-task
+Superseded by: EPIC 051 claim-branch-base-task
 
 Fixture: the fixture of `claim-success-task`. Initiative `I` holds objective `O`, which holds tasks
 `T` and `S`. Every node is `ready`, no node is assigned, no run is active, and `T` declares
