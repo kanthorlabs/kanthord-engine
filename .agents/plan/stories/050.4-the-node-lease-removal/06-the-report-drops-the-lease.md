@@ -163,6 +163,7 @@ report a divergence rather than re-applying.
 - Read the attempts once. Two reads of one run are two steps of one token, and the parser refuses that.
 - The accounting must see the closing outcome. Projecting `body.report` onto the open attempt is what makes the single read equivalent; dropping the projection would under-count and break the attempt limit.
 - Do not move `execution.endRun`, `execution.stampRunHead` or `events.append`. Deleting the call between them changes no order.
+- `execution.stampRunHead` needs a projection entry, or step 10 draws a token the recorder cannot emit. `test/helpers/sequence-conformance.ts:50` — `projections` holds no entry for it, so the recorder pushes a bare `execution.stampRunHead` and this diagram's `execution.stampRunHead:R` never matches. Add `"execution.stampRunHead": (input, context) => [field(input, "runId", context)]` beside the other run-scoped entries; its input is an object, so no other change is needed. EPIC 050.2 Story 2 (`02-the-authority-seams`) makes the separate repair that a **primitive** argument needs.
 - Touch the objective branch's dispatch at `:125-138` only to drop the `fence` argument. Story 7 owns everything else in `report-objective.ts`.
 - Delete `input.fence` and the five schema members together. Splitting them across two stories leaves one story red.
 - Do not touch `errorStatuses`, `exitCodes` or `leaseHeldDetails`. Story 8 retires the code.
