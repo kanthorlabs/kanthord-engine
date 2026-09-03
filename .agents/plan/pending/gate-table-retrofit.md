@@ -2,8 +2,8 @@
 
 **The obligation.** `.agents/plan/authoring.md` now states that the hermetic coverage list of
 `## Verification Gate` is a table, and that every row names exactly one proof owner. The gate refuses
-any other form. Nine epics satisfy it today: EPIC 050.2, EPIC 050.3, EPIC 050.4, EPIC 050.5 and the five epics of
-the EPIC 051 family. Four do not, and each holds a bullet list instead:
+any other form. Eleven epics satisfy it today: EPIC 050.2, EPIC 050.3, EPIC 050.4, EPIC 050.5, the five epics of
+the EPIC 051 family, EPIC 052 and EPIC 052.1. Seven do not, and each holds a bullet list instead:
 
 | epic  | gate bullets | rows naming a story |
 | ----- | ------------ | ------------------- |
@@ -14,14 +14,15 @@ the EPIC 051 family. Four do not, and each holds a bullet list instead:
 | 051.2 | done         | 14                  |
 | 051.3 | done         | 24                  |
 | 051.4 | done         | 23                  |
-| 052   | 18           | 0                   |
+| 052   | done         | 25                  |
+| 052.1 | done         | 34                  |
 | 053   | 14           | 0                   |
 | 054   | 18           | 0                   |
 | 055   | 17           | 0                   |
 | 056   | 17           | 0                   |
 | 057   | 16           | 0                   |
 
-EPIC 050 and EPIC 050.1 already name an owner per bullet, so those two are a form change. EPIC 052 to
+EPIC 050 and EPIC 050.1 already name an owner per bullet, so those two are a form change. EPIC 053 to
 EPIC 057 name no owner at all, so each row needs a proof owner decided before it is written.
 
 **What the EPIC 050.2 conversion taught, on 2026-09-02.** Twenty-four bullets became forty-eight
@@ -68,3 +69,17 @@ the split exposed four assertions no bullet held — the `git_operation` rebuild
 `13`, the loser's `objective-busy` refusal, the `PRAGMA` restoration, and the control that
 EPIC 051.4 retires no capability. The retrofit's own count of thirty bullets for EPIC 051 was wrong: the file held
 fifty.
+
+**EPIC 052 is done, and it is the sixth measurement.** The split into EPIC 052 and EPIC 052.1 on
+2026-09-03 rewrote its gate as two tables. Eighteen bullets became fifty-nine rows, and two effects
+were new. First, the conversion deleted work rather than only redistributing it: three refusal codes
+of the old gate — `patch-id-invalid`, `patch-hierarchy-invalid` and `patch-dependency-invalid` —
+duplicated findings the shipped `validateCandidateStructural` already returns, and a fourth,
+`graph-contended`, duplicated the shipped `stale-revision`, so four codes and their rows left the
+document. Second, two whole stories left with them: the old Story 10 and Story 14 gave EPIC 052 the
+completeness exemption that `.agents/plan/epics/050.1-the-claim.md:114` already owns. The table is
+what exposed both, because a row demanding one proof owner forces the question of which epic ships
+the behaviour. Six bullets also became rows the old gate did not hold at all: the two foreign-key
+ordering controls of the lowering, the control that the snapshot comparison detects an injected write,
+the control that the create-existing verdict is not redundant, the `blob` table in the refusal
+snapshot, and the pre-raise fence on the checkpoint.
