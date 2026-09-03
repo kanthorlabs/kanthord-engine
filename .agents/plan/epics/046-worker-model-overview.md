@@ -67,7 +67,7 @@ Sequence order. Epic N depends on epic N-1, per `AGENTS.md`. Two couplings are s
 
 ## The `/v1` compatibility policy is amended in place
 
-`023-version-compatibility-policy.md` D1 and `docs/proposal/api/README.md:93` give a closed list of four changes legal inside `/v1`. This block makes four changes outside it: `runId` and `fence` become required request fields, `node.heartbeat` becomes `node.renew`, `worker-unknown` leaves the published finding enum, and `worker` leaves the node projection.
+`023-version-compatibility-policy.md` D1 and `docs/proposal/api/README.md:93` give a closed list of the changes legal inside `/v1` — four when this block was written, five since a human moved `add a required request field` into it on 2026-09-03. This block makes three changes outside it: `node.heartbeat` becomes `node.renew`, `worker-unknown` leaves the published finding enum, and `worker` leaves the node projection. `runId` and `fence` becoming required request fields was the fourth, and the ruling made it legal.
 
 **A human ruled: there is no `/v2`, and the policy is amended in place.** The amendment does not open the list. It adds one bounded exception built on the mechanism EPIC 023 already shipped for exactly this question.
 

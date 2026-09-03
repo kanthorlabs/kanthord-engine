@@ -95,6 +95,7 @@ Inside `/v1` the daemon may:
 - add a response field;
 - add a member to an enum;
 - add an optional request field;
+- add a required request field;
 - add an operation.
 
 Inside `/v1` the daemon may never:
@@ -102,10 +103,11 @@ Inside `/v1` the daemon may never:
 - remove or rename a response field;
 - change the type of a response field;
 - remove a member from an enum;
-- add a required request field;
 - change what an error code means, or the status a code maps to.
 
 The list is closed. A change outside it is a `/v2`, and this product has no `/v2`.
+
+**Adding a required request field moved from the second list to the first on 2026-09-03, by a human ruling.** It was forbidden because a client that already sends a valid request starts sending an invalid one, with no signal that anything changed. This product has no deployment and no client the team does not control, so that cost has no bearer, and the rule was buying protection nobody needed against a wire that is still being designed. **The condition is explicit: the item returns to the second list when the first client outside this repository calls `/v1`**, and the epic that admits such a client moves it back. Nothing else about the two lists changed, and a removal of any kind is still forbidden.
 
 **A client must ignore an unknown response field, and it must tolerate an unknown enum member.** A client that refuses either is a client this policy cannot serve.
 

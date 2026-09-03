@@ -148,7 +148,7 @@ template. Every fact there holds here. These are the additions this authoring ve
   `src/commands/node/claim-node.ts:415`. It is not a config key; `src/services/config/index.ts:28` —
   `Settings` holds nine keys and none of them is it.
 - **`acceptExecution` exists nowhere in `src/`.** EPIC 051 draws it at
-  `.agents/plan/epics/051-the-execution-checkpoint.md:374` with `Caller->>Command`, so it is a nested
+  EPIC 051.4 with `Caller->>Command`, so it is a nested
   command on another path and `report-execution-checkpoint` never owned the report tail.
 - **No `PlanStore` method touches `node.assignment`.** The column is declared at
   `src/services/storage/migration-0011-deliverable.ts:26` — `assignment`, and `setNodeAssignment`
