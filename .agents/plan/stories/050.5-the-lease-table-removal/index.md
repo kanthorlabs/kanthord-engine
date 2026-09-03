@@ -189,12 +189,12 @@ Each was read out of the source before a story was written, and each one changed
 - **The `blocker` enum is open on the wire.** `src/http/contract/error-details.ts:36` is
   `blocker: z.string()`, so dropping the `lease` member changes no schema.
 
-- **Every migration version through `17` is already allocated.** `12` is EPIC 050's run model, `13` is
-  EPIC 051's `checkpoint` table (`epics/051-…md:70,686`), `14` is EPIC 053's (`:61,67`), `15` is EPIC
-  054's (`:26,79`), `16` is EPIC 055's (`:25`) and `17` is EPIC 057's (`:63`). An earlier draft of this
-  epic took `13`, which would have renumbered five authored epics and their tests.
+- **Every migration version through `18` is already allocated.** `12` is EPIC 050.1's run model, `13`
+  is EPIC 051's `workspace_branch` table, `14` is EPIC 051.3's `checkpoint` table, `15` is EPIC 053's,
+  `16` is EPIC 054's, `17` is EPIC 055's and `18` is EPIC 057's. An earlier draft of this epic took
+  `13`, which would have renumbered six authored epics and their tests.
 
-- **EPIC 057's migration `17` already owns the lease rows, and dropping the table under it would
+- **EPIC 057's migration `18` already owns the lease rows, and dropping the table under it would
   invalidate that migration.** `epics/057-…md:35` makes its preflight refuse while a live node lease
   exists, `:63` narrows the `subject_kind` CHECK and deletes the node rows, and `:105` asserts every
   surviving `lease` column is present afterwards. None of that is satisfiable against a dropped table.

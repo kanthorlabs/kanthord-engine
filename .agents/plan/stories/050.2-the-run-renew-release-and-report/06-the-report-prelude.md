@@ -13,7 +13,7 @@ Seams: report-authority-prelude: +expiry.expireRuns, +execution.runById:R, +plan
 This story changes the prelude of `node.report` and nothing after it. EPIC 050.4 Story 6
 (`06-the-report-drops-the-lease`) declares `report-lease-free` and owns the tail. EPIC 051 draws
 `acceptExecution` as a nested command on another path — `acceptExecution` exists nowhere in `src/`
-today, and `.agents/plan/epics/051-the-execution-checkpoint.md:374` draws it with
+today, and EPIC 051.4 draws it with
 `Caller->>Command` — so `report-execution-checkpoint` never owned this tail.
 
 **The drawn set is every branch of this prelude.** One diagram covers it, because every one of the six

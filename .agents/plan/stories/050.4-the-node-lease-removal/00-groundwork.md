@@ -16,10 +16,13 @@ It carries one edit, and the edit is one value.
 entry, no `bin` entry, no `files` entry.
 
 The major bump is the ruling EPIC 050.4 records. Three response fields and three required request
-fields leave four worker operations and `lease-held` is retired. `docs/proposal/api/README.md:102` —
-`remove or rename a response field` and `docs/proposal/api/README.md:104` —
-`add a required request field` put both kinds outside the closed list, so the change is legal only
-behind a recorded human ruling plus a capability retirement. EPIC 050.4 Story 8
+fields leave four worker operations and `lease-held` is retired. `docs/proposal/api/README.md:103` —
+`remove or rename a response field` forbids the first kind outright, and the second kind is outside
+the closed list because `docs/proposal/api/README.md:108` — `closed` permits only what the first list
+names and no item of it removes a request field. The 2026-09-03 ruling that permitted **adding** a
+required request field does not reach either: it added one item to the first list and moved nothing
+out of the second. So the change is legal only behind a recorded human ruling plus a capability
+retirement. EPIC 050.4 Story 8
 (`08-lease-held-is-retired`) writes the ruling, retires `worker-model` and declares `worker-run`.
 
 **The matching half is not in this story, and it cannot be.** `src/domain/version.ts:1` —

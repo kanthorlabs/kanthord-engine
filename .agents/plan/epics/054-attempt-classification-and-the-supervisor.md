@@ -76,7 +76,7 @@ A failed attempt carries a class, and the class decides whether it costs a budge
 
 ## Stories
 
-1. **Migration 15.** Add `src/services/storage/migration-0015-termination.ts` at version `15`, adding `attempt.termination`, `attempt.caller`, `attempt.subject`, `attempt.authority_json` and `node.ambiguous_used`, all nullable, with the three named CHECK constraints of the Decisions. Register it at `src/services/storage/migrations.ts:13`. Add its test asserting each CHECK by insert and by name, asserting an `accepted` attempt with a termination is refused, asserting a `failed` attempt with no termination is refused, and asserting every existing row is unchanged with the added columns null.
+1. **Migration 16.** Add `src/services/storage/migration-0016-termination.ts` at version `16`, adding `attempt.termination`, `attempt.caller`, `attempt.subject`, `attempt.authority_json` and `node.ambiguous_used`, all nullable, with the three named CHECK constraints of the Decisions. Register it at `src/services/storage/migrations.ts:13`. Add its test asserting each CHECK by insert and by name, asserting an `accepted` attempt with a termination is refused, asserting a `failed` attempt with no termination is refused, and asserting every existing row is unchanged with the added columns null.
 
 2. **The attempt row.** Extend `attemptRow` at `src/domain/attempt.ts:23` with the four fields and one refine per CHECK. Update `src/domain/attempt.test.ts` with a case per refine.
 
@@ -114,7 +114,7 @@ node --test \
   src/domain/termination.test.ts \
   src/domain/attempt-accounting.test.ts \
   src/domain/authority-pin.test.ts \
-  src/services/storage/migration-0015-termination.test.ts \
+  src/services/storage/migration-0016-termination.test.ts \
   src/services/supervisor/not-implemented.test.ts \
   src/services/config/config.test.ts \
   src/commands/attempt/end-attempt.test.ts \

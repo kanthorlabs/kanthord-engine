@@ -64,7 +64,7 @@ A verdict is evidence, and the pair selects who owns a node state:
 
 ## Stories
 
-1. **Migration 14.** Add `src/services/storage/migration-0014-attestation.ts` at version `14`: add `verdict`, `reason_blob`, `judged_checkpoint_id` and `judged_oid` to `checkpoint`, with the named CHECK constraints `checkpoint_review_verdict`, `checkpoint_review_judged` and `checkpoint_execution_no_verdict`; add `closed_at` and `closed_actor` to `node` with `CHECK ((closed_at IS NULL) = (closed_actor IS NULL))`. Register it at `src/services/storage/migrations.ts:13`. Add its test asserting each named CHECK by insert and by message, and asserting the foreign key refuses an unknown checkpoint id.
+1. **Migration 15.** Add `src/services/storage/migration-0015-attestation.ts` at version `15`: add `verdict`, `reason_blob`, `judged_checkpoint_id` and `judged_oid` to `checkpoint`, with the named CHECK constraints `checkpoint_review_verdict`, `checkpoint_review_judged` and `checkpoint_execution_no_verdict`; add `closed_at` and `closed_actor` to `node` with `CHECK ((closed_at IS NULL) = (closed_actor IS NULL))`. Register it at `src/services/storage/migrations.ts:13`. Add its test asserting each named CHECK by insert and by message, and asserting the foreign key refuses an unknown checkpoint id.
 
 2. **The checkpoint row.** Extend `checkpointRow` in `src/domain/checkpoint.ts` with the four fields and one refine per CHECK. Add cases asserting a review row requires `verdict` and `judged_checkpoint_id`, and an execution row refuses both.
 
@@ -94,7 +94,7 @@ node --test \
   src/domain/state-ownership.test.ts \
   src/domain/outcome.test.ts \
   src/domain/aggregation.test.ts \
-  src/services/storage/migration-0014-attestation.test.ts \
+  src/services/storage/migration-0015-attestation.test.ts \
   src/commands/checkpoint/accept-review.test.ts \
   src/commands/outcome/report-outcome.test.ts \
   && echo "PASS EPIC-053"

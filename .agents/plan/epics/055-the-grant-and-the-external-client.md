@@ -74,7 +74,7 @@ A human mints a grant, and the grant is the authority of every external write:
 
 1. **The identity kind.** Add `grant` to `identityKinds` at `src/domain/identity.ts:3` and to `identityPrefixes` at line 27, plus the `grant_h_` handle prefix. Update `src/domain/identity.test.ts` for the extended tuple.
 
-2. **Migration 16.** Add `src/services/storage/migration-0016-grant.ts` at version `16` creating `grant` with its columns and the three triggers, and adding `run.grant_id` with its CHECK. Register it at `src/services/storage/migrations.ts:13`. Add its test asserting the freeze trigger refuses an update to each of the nine frozen columns, asserting a decrease of `claims_used` is refused, asserting a change to a non-null `revoked_at` is refused, asserting an increase of `claims_used` and a first revocation succeed, and asserting an internal run carrying a `grant_id` is refused.
+2. **Migration 17.** Add `src/services/storage/migration-0017-grant.ts` at version `17` creating `grant` with its columns and the three triggers, and adding `run.grant_id` with its CHECK. Register it at `src/services/storage/migrations.ts:13`. Add its test asserting the freeze trigger refuses an update to each of the nine frozen columns, asserting a decrease of `claims_used` is refused, asserting a change to a non-null `revoked_at` is refused, asserting an increase of `claims_used` and a first revocation succeed, and asserting an internal run carrying a `grant_id` is refused.
 
 3. **The grant row.** Add `src/domain/grant.ts` with `grantRow`, `grantOperations`, `normalizeOperations` and one refine per invariant of the Decisions. Add `src/domain/grant.test.ts` with a case per invariant, a case asserting `close` in `operations` is refused, and a case asserting a duplicated, unsorted operation list normalises to the canonical order.
 
@@ -109,7 +109,7 @@ node --test \
   src/domain/identity.test.ts \
   src/domain/grant.test.ts \
   src/domain/grant-scope.test.ts \
-  src/services/storage/migration-0016-grant.test.ts \
+  src/services/storage/migration-0017-grant.test.ts \
   src/commands/grant/mint-grant.test.ts \
   src/commands/grant/revoke-grant.test.ts \
   src/commands/node/claim-node.test.ts \

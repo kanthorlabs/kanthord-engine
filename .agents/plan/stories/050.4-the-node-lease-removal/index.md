@@ -235,14 +235,16 @@ rather than re-applying.
 | story              | diagram                        | was                           | now                                          |
 | ------------------ | ------------------------------ | ----------------------------- | -------------------------------------------- |
 | EPIC 050.1 Story 3 | `claim-success-task`           | `EPIC 051 claim-success-task` | `EPIC 050.4 claim-lease-free-task`           |
+
+`claim-lease-free-task` is itself superseded by EPIC 051 `claim-branch-base-task`, and `report-lease-free` by EPIC 051.4's `node.report` diagram. Both edits belong to those epics' `/author` runs.
 | EPIC 050.1 Story 4 | `claim-success-initiative`     | absent                        | `EPIC 050.4 claim-lease-free-initiative`     |
 | EPIC 050.1 Story 5 | `claim-refusal-objective-busy` | absent                        | `EPIC 050.4 claim-lease-free-objective-busy` |
 | EPIC 050.2 Story 3 | `renew-success`                | absent                        | `EPIC 050.4 renew-lease-free`                |
 | EPIC 050.2 Story 5 | `release-success`              | absent                        | `EPIC 050.4 release-lease-free`              |
 | EPIC 050.2 Story 6 | `report-authority-prelude`     | absent                        | `EPIC 050.4 report-lease-free`               |
 
-EPIC 050.2 Story 6's ship diagram also re-pins its tail from `EPIC 051 report-execution-checkpoint`
-to `EPIC 050.4 report-lease-free`, because this epic now owns that tail. That re-pin is applied too,
+EPIC 050.2 Story 6's ship diagram also re-pins its tail from the superseded EPIC 051
+`report-execution-checkpoint` to `EPIC 050.4 report-lease-free`, because this epic now owns that tail. That re-pin is applied too,
 at `06-the-report-prelude.md:67`.
 
 ## Amendments the earlier epics needed, re-verified on 2026-09-02
@@ -260,7 +262,7 @@ here because an instruction to re-apply a landed edit is how a diagram gets pinn
   8; `:173` is the only Story 8 reference in the file, it is about `refusals.ts:83` — `lease-held`,
   and it is correct, because Story 8 retires that code.
 
-- **`.agents/plan/epics/051-the-execution-checkpoint.md:835` — APPLIED.** It reads _"EPIC 050.2's
+- **EPIC 051.4 — APPLIED.** Its predecessor read _"EPIC 050.2's
   `report-authority-prelude` pins its tail to EPIC 050.4 `report-lease-free`. EPIC 050.4 Story 6
   declares that id."_ The same line defers EPIC 051's own `Supersedes:` to the story-tree conversion
   that `.agents/plan/pending/051-the-story-tree-conversion.md` owns, so `node.report`'s chain
@@ -342,9 +344,9 @@ epic and triggered by EPIC 057.
 | 1   | `activeRunsOfNodes` has a projection its signature cannot supply     | EPIC 050.1 Story 6 (`06-the-conformance-harness`) | EPIC 050.1's first claim scenario         |
 | 2   | `run.opened` is node-subjected; every other `run.*` is run-subjected | EPIC 050.1 Story 1 (`01-the-claim-contract`)      | nothing                                   |
 | 3   | `system.status`'s `leases[]` removal has no covering capability      | EPIC 050.5, or the version policy                 | EPIC 050.5                                |
-| 4   | EPIC 051 declares no `Supersedes: report-lease-free`                 | the EPIC 051 story-tree conversion                | `node.report`'s chain after this epic     |
+| 4   | EPIC 051.4 declares no `Supersedes: report-lease-free`               | EPIC 051.4 Story 8                                | `node.report`'s chain after this epic     |
 | 5   | ten epics hold a gate bullet list where the standard wants a table   | Ulrich, per epic                                  | `pnpm run verify`, once the gate is wired |
-| 6   | EPIC 051 holds 22 mermaid blocks in the epic file                    | `/author`, invoked on EPIC 051                    | `pnpm run verify`, once the gate is wired |
+| 6   | EPIC 051 held 22 mermaid blocks in the epic file — DISCHARGED        | the split into EPIC 051 to EPIC 051.4             | nothing                                   |
 
 **1 — the projection. Fix it now, in EPIC 050.1.**
 `.agents/plan/stories/050.1-the-claim/06-the-conformance-harness.md:41` projects
@@ -370,7 +372,7 @@ so there is no name to retire. EPIC 050.5 carries the ruling with that gap state
 a clause for an operation outside every capability. Not this epic: the table still exists here, so the
 projection is truthful.
 
-**4 — EPIC 051's supersession.** `.agents/plan/epics/051-the-execution-checkpoint.md:835` resolves the
+**4 — EPIC 051.4's supersession.** EPIC 051.4 Story 8 resolves the
 pin correctly and then defers its own `Supersedes:` line: _"The successor of `report-lease-free` is the
 `node.report` diagram of story 12. The conversion declares that id and its `Supersedes` line, so this
 document declares neither yet."_ The chain therefore ends at this epic until item 6 lands. That is

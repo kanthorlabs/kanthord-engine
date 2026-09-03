@@ -60,9 +60,9 @@ The additive window closes and one model remains:
 
 5. **The lease and the candidate go.** Delete `src/domain/lease-hierarchy.ts`, its test and the call at `src/commands/node/claim-node.ts:139`. Delete `src/domain/candidate.ts`, its test and every non-migration reference to the `candidate` table.
 
-6. **Migration 17.** Add `src/services/storage/migration-0017-enforce.ts` at version `17`: the full preflight of the Decisions, including active runs and live node leases; `deliverable` and `verify_json` to `NOT NULL`; the four run columns to `NOT NULL`; `attempt.caller` and `attempt.subject` to `NOT NULL`; `run.kind` narrowed to the three new values; `node.worker`, `run.base_oid` and `run.lease_fence` dropped; the `candidate` table dropped; the `subject_kind = 'node'` lease rows deleted and the CHECK narrowed. Register it at `src/services/storage/migrations.ts:13`.
+6. **Migration 18.** Add `src/services/storage/migration-0018-enforce.ts` at version `18`: the full preflight of the Decisions, including active runs and live node leases; `deliverable` and `verify_json` to `NOT NULL`; the four run columns to `NOT NULL`; `attempt.caller` and `attempt.subject` to `NOT NULL`; `run.kind` narrowed to the three new values; `node.worker`, `run.base_oid` and `run.lease_fence` dropped; the `candidate` table dropped; the `subject_kind = 'node'` lease rows deleted and the CHECK narrowed. Register it at `src/services/storage/migrations.ts:13`.
 
-7. **The migration is proven both ways.** Add `src/services/storage/migration-0017-enforce.test.ts` asserting: the refusal for a null `deliverable`, for a null `verify_json`, for both together, for an active run, for a live node lease, and for two affected projects with the message listing both, projects sorted; that a refused run leaves the schema dump, the data dump and the migration version identical; that the success path drops each named column and table; that each surviving `node`, `run`, `attempt` and `lease` column, index and trigger is present afterwards with its data intact, compared field by field; and that an insert of a `subject_kind = 'node'` lease is refused by the narrowed CHECK.
+7. **The migration is proven both ways.** Add `src/services/storage/migration-0018-enforce.test.ts` asserting: the refusal for a null `deliverable`, for a null `verify_json`, for both together, for an active run, for a live node lease, and for two affected projects with the message listing both, projects sorted; that a refused run leaves the schema dump, the data dump and the migration version identical; that the success path drops each named column and table; that each surviving `node`, `run`, `attempt` and `lease` column, index and trigger is present afterwards with its data intact, compared field by field; and that an insert of a `subject_kind = 'node'` lease is refused by the narrowed CHECK.
 
 8. **The absence guard.** Add `src/domain/legacy-absence.ts` with `scanForIdentifiers(root, identifiers)` and `src/domain/legacy-absence.test.ts` with the two cases of the Decisions, over the identifiers `workerKinds`, `worker-unknown`, `candidateRow` and `lease-hierarchy`. Nothing in the tree keeps any of the four after this epic.
 
@@ -85,7 +85,7 @@ node --test \
   src/http/contract/plan-finding.test.ts \
   src/http/contract/capability.test.ts \
   src/http/contract/graph.test.ts \
-  src/services/storage/migration-0017-enforce.test.ts \
+  src/services/storage/migration-0018-enforce.test.ts \
   src/services/plan/sqlite.test.ts \
   src/commands/plan/import-plan.test.ts \
   src/queries/plan/export-plan.test.ts \
