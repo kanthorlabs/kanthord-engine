@@ -117,8 +117,8 @@ of the file, after `docs/proposal/api/README.md:299` — `## Identity`:
 
 Each row records one change outside the closed list of `## Versioning`, the epic whose human ruling made it legal, and the capability swap that announced it.
 
-| epic       | change outside the closed list                                                                                                                                       | capability retired | capability declared |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------- |
+| epic       | change outside the closed list                           | capability retired | capability declared |
+| ---------- | -------------------------------------------------------- | ------------------ | ------------------- |
 | EPIC 050.1 | `heartbeatIntervalMs` leaves the `node.claim` response   | `external-drive`   | `worker-model`      |
 | EPIC 050.2 | `node.heartbeat` is removed and replaced by `node.renew` | `external-drive`   | `worker-model`      |
 | EPIC 050.2 | `heartbeatIntervalMs` leaves the `node.renew` response   | `external-drive`   | `worker-model`      |

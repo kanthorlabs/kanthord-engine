@@ -232,16 +232,16 @@ Each chain must hold one live diagram. Six live diagrams gained or changed a `Su
 and every one of the six edits is **already in the tree**. Verify before editing; report a divergence
 rather than re-applying.
 
-| story              | diagram                        | was                           | now                                          |
-| ------------------ | ------------------------------ | ----------------------------- | -------------------------------------------- |
-| EPIC 050.1 Story 3 | `claim-success-task`           | `EPIC 051 claim-success-task` | `EPIC 050.4 claim-lease-free-task`           |
+| story              | diagram              | was                           | now                                |
+| ------------------ | -------------------- | ----------------------------- | ---------------------------------- |
+| EPIC 050.1 Story 3 | `claim-success-task` | `EPIC 051 claim-success-task` | `EPIC 050.4 claim-lease-free-task` |
 
 `claim-lease-free-task` is itself superseded by EPIC 051 `claim-branch-base-task`, and `report-lease-free` by EPIC 051.4's `node.report` diagram. Both edits belong to those epics' `/author` runs.
-| EPIC 050.1 Story 4 | `claim-success-initiative`     | absent                        | `EPIC 050.4 claim-lease-free-initiative`     |
-| EPIC 050.1 Story 5 | `claim-refusal-objective-busy` | absent                        | `EPIC 050.4 claim-lease-free-objective-busy` |
-| EPIC 050.2 Story 3 | `renew-success`                | absent                        | `EPIC 050.4 renew-lease-free`                |
-| EPIC 050.2 Story 5 | `release-success`              | absent                        | `EPIC 050.4 release-lease-free`              |
-| EPIC 050.2 Story 6 | `report-authority-prelude`     | absent                        | `EPIC 050.4 report-lease-free`               |
+| EPIC 050.1 Story 4 | `claim-success-initiative` | absent | `EPIC 050.4 claim-lease-free-initiative` |
+| EPIC 050.1 Story 5 | `claim-refusal-objective-busy` | absent | `EPIC 050.4 claim-lease-free-objective-busy` |
+| EPIC 050.2 Story 3 | `renew-success` | absent | `EPIC 050.4 renew-lease-free` |
+| EPIC 050.2 Story 5 | `release-success` | absent | `EPIC 050.4 release-lease-free` |
+| EPIC 050.2 Story 6 | `report-authority-prelude` | absent | `EPIC 050.4 report-lease-free` |
 
 EPIC 050.2 Story 6's ship diagram also re-pins its tail from the superseded EPIC 051
 `report-execution-checkpoint` to `EPIC 050.4 report-lease-free`, because this epic now owns that tail. That re-pin is applied too,
