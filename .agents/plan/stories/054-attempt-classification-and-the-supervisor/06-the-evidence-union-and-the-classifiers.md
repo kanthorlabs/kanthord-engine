@@ -41,7 +41,7 @@ export const terminations = [
 export type Termination = (typeof terminations)[number];
 
 export type TerminationEvidence =
-  | Readonly<{ kind: "daemon-rejected" }>
+  | Readonly<{ kind: "daemon-rejected"; refusal: string }>
   | Readonly<{ kind: "worker-reported-failure" }>
   | Readonly<{ kind: "operator-handoff" }>
   | Readonly<{

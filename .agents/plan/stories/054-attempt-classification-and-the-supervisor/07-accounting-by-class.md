@@ -157,15 +157,41 @@ EPIC 054.4 is the epic that gives `src/commands/node/release-node.ts:124` — `c
 termination it stores.
 
 4. **`src/commands/outcome/report-outcome.ts:241`** — the projection. Rewrite
-   `src/commands/outcome/report-outcome.ts:244` — `.map`:
+   `src/commands/outcome/report-outcome.ts:244` — `.map` **so the closing attempt projects the class
+   this arm charges**, exactly as site 3 does for the release:
 
 ```ts
-        .map((row) => ({
-          attemptNo: row.attemptNo,
-          outcome: row.outcome,
-          termination: row.termination,
-        })),
+      .map((row) =>
+        row.id === open.id
+          ? {
+              attemptNo: row.attemptNo,
+              outcome: body.report,
+              termination: "semantic" as const,
+            }
+          : {
+              attemptNo: row.attemptNo,
+              outcome: row.outcome,
+              termination: row.termination,
+            },
+      ),
 ```
+
+**The closing attempt is still open when this projection runs, and a pass-through would price it at
+zero.** EPIC 050.4 Story 6 (`06-the-report-drops-the-lease`) collapsed the two attempt reads into
+one taken **before** the close, so `row` is the open row and `row.termination` is `null` on it. With
+`exhausted` now `semanticCount >= limit`, a pass-through makes `semanticCount` blind to the charge
+the same statement is making, and the `attempt-limit` branch of
+`src/domain/outcome-report.ts:57` — `exhausted` becomes unreachable on the report route. This is
+the identical defect site 3 avoids by projecting `"infrastructure"` onto the released attempt.
+
+**The literal is `"semantic"` because the worker arm charges one class and one only.** The three
+worker-driven members reach this statement, all three carry
+`evidence: { kind: "worker-reported-failure" }`, and that kind maps to `semantic` for both drivers
+— the table of the epic's Decisions — and is not an `ambiguous` kind, so `convertOnExhaustion`
+never reaches it. The projection and the stored row are therefore provably equal, and
+EPIC 054.3 Story 2 (`02-the-worker-failure-pays-its-attempt`) asserts the equality by value once
+`end-attempt` is the closer. **Every other arm of the command projects `row.termination`
+unchanged**, because no other arm closes an attempt here.
 
 5. **`test/helpers/execution.ts:419`** — `accountAttempts` of `createBackedExecutionFake`, unchanged
    for the same structural reason as site 2.
@@ -291,6 +317,17 @@ ruling this case records.
    `"infrastructure"` attempts answers `3`, and a run with three stored `"semantic"` attempts answers
    `0`. The middle sub-case is the one the old `counter` arithmetic answered `0` for, and it is what
    makes this change visible. Assert each by value on `result.attemptsRemaining`.
+
+8a. `"a worker report charges the attempt it is closing, and the third one blocks the node"` — in
+`src/commands/outcome/report-outcome.test.ts`, over
+`src/commands/outcome/report-outcome.test.ts:509` — `driveOutcomeToLimit`, report `failed` three
+times under a limit of three and assert `result.attemptsRemaining` is `2`, then `1`, then `0`, and
+that the third report leaves the node `blocked` with `block_reason` `"attempt-limit"` through
+`src/commands/outcome/report-outcome.test.ts:530` — `assertBlockedAtLimit`. **The control is the
+same three reports with site 4's projection left as a pass-through**, where `semanticCount` stays
+`0`, `attemptsRemaining` answers `3` every time and the node never blocks. This is what proves the
+closing attempt is charged, and without it site 4's projection is unmeasured by this epic — the
+only other reader of the projection is the release, at cases 6 and 7.
 
 9. `"the accounting result declares exactly six members"` — assert
    `Object.keys(accountAttempts({ attempts: [], limit: 1 })).sort()` deep-equals

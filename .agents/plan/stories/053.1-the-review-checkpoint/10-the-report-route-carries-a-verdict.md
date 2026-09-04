@@ -139,6 +139,16 @@ judgedCheckpointId: body.judgedCheckpointId, reason: body.reason })` and return 
 (`07-the-attestation-with-a-reason`)'s, so the arm parses, invokes and returns — which is what
 `AGENTS.md` requires of a handler and, after EPIC 051.4, of this command's members.
 
+**A verdict of `reject` is an accepted attestation, and it charges no attempt.** Both verdict values
+deliver the node — `.agents/plan/epics/053.1-the-review-checkpoint.md:48` — `The verdict is evidence`
+rules it, and the command calls `taskReportEffect` with the literal `"accepted"` — so a `reject`
+verdict writes `outcome = 'accepted'` on the attempt row with a **null** `termination`, and it
+advances no attempt count. **Only the five refusals of `AcceptReviewRefusal` charge an attempt**, four
+of them `judged-` and one `reason-too-large`, and EPIC 054.3 Story 5
+(`05-a-review-rejection-pays-its-attempt`) is where each stores
+`termination = 'semantic'`. The two have opposite budget effects, and a reader who takes a `reject`
+verdict for a rejected attempt gets the budget backwards.
+
 **Refuse `body-kind-mismatch` in both directions.** A `review` member naming a run whose kind is not
 `review` refuses it, and an `accepted` member naming a `review` run refuses it too. The shipped code
 at `src/commands/outcome/report-outcome.ts:82` — `body-kind-mismatch` already carries a

@@ -197,7 +197,7 @@ dependencies.storage.transact((transaction) => {
     at: input.at,
     attemptLimit: input.attemptLimit,
     outcome: "rejected",
-    evidence: { kind: "daemon-rejected" },
+    evidence: { kind: "daemon-rejected", refusal: "candidate-unreachable" },
   });
 });
 return { ok: false, refusal: "candidate-unreachable", details };
@@ -308,8 +308,11 @@ unchanged apart from that literal.
 - Do not change `report-refusal-contended`. Its nine steps and its `refuse:contended` terminal are
   EPIC 051.4 Story 6 (`06-the-gate-refuses-a-contended-land`)'s and the returned shape reproduces both.
 - Do not wrap `accept.execution` in a `try`. An untyped throw must propagate past the reap.
-- The evidence is `{ kind: "daemon-rejected" }` on all five gate arms. Do not invent a field for the
-  refusal code.
+- The evidence is `{ kind: "daemon-rejected", refusal: <this arm's code> }` on all five gate arms.
+  The kind carries the code per
+  `.agents/plan/epics/054-attempt-classification-and-the-supervisor.md:65` — `daemon-rejected`
+  carries, which EPIC 054.3 asked for so twenty daemon verdicts stay distinguishable in the audit
+  row. Pass the arm's own refusal and invent no second field.
 - Do not add a `Clock` or an `Execution` key to `AcceptExecutionDependencies`. `at` and `attemptLimit`
   arrive on the input, and either key would put a token on all five diagrams or a span past the
   ceiling.
@@ -334,7 +337,10 @@ Add, each as a separate `it`:
    `attempt` row and assert `outcome === "rejected"`, `termination === "semantic"` and
    `endedAt === 1_700_000_000_000` by value; assert the one
    appended `attempt.ended` event has `subjectKind === "attempt"`, `subjectId === attemptId`, and a
-   payload whose `evidence` deep-equals `{ kind: "daemon-rejected" }`. This is the epic's gate row 1.
+   payload whose `evidence` deep-equals
+   `{ kind: "daemon-rejected", refusal: "candidate-unreachable" }`. **The control is any other gate
+   arm of Stories 2 to 5**, whose `evidence.refusal` is that arm's own code; without it the assertion
+   passes for a command that hard-codes one code. This is the epic's gate row 1.
 
 2. `"the missing-ref refusal answers candidate-unreachable over the route"` — in
    `src/http/server/node/report-node.test.ts`, build the handler with

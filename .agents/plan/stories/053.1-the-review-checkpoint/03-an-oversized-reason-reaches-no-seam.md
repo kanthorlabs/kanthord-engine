@@ -72,6 +72,8 @@ export type AcceptReviewInput = Readonly<{
   verdict: "accept" | "reject";
   judgedCheckpointId: string;
   reason?: string;
+  attemptNo: number;
+  subject: string;
 }>;
 
 export function acceptReview(
@@ -150,6 +152,33 @@ an accepted checkpoint —
 `.agents/plan/stories/052-the-graph-patch-and-its-policies/05-the-seams-the-acceptance-needs.md:138`
 — `accepted` — and `checkpoint_execution_accepted_oid` forces `accepted_oid IS NOT NULL` for every
 execution row, so a real-SQLite fixture cannot seed the row the code would name.
+
+**From EPIC 054.3 on the command returns its refusal and does not throw it.** EPIC 054.3 Story 5
+(`05-a-review-rejection-pays-its-attempt`) adds
+
+```ts
+export type AcceptReviewRejection = Readonly<{
+  ok: false;
+  refusal: AcceptReviewRefusal;
+  details: Readonly<Record<string, unknown>>;
+}>;
+
+export type AcceptReviewResult = NodeReportResult | AcceptReviewRejection;
+```
+
+and rewrites all five refusal sites as a `return` of that shape, so `reportOutcome` can write the
+attempt's termination in the prelude transaction and commit before it raises. `AcceptReviewError`
+survives with `reportOutcome` as its only thrower, and the five codes, their statuses, their details
+schemas and the mapping of Story 10 (`10-the-report-route-carries-a-verdict`) are unchanged.
+`test/helpers/sequence-conformance.ts:303` — `resultTerminal` reads a returned rejection as well as a
+thrown error, so none of the four refusal diagrams of this epic moves. **Only `AcceptReviewError`
+becomes a return.** The staging placeholder below is a plain `Error` and stays a throw.
+
+**`attemptNo` and `subject` are input fields and never reads.** `attemptNo` is the open attempt's
+number, which the route's prelude already holds and which the `outcome.reported` payload needs once
+`end-attempt` is the closer and no closed record is returned; `subject` is the run's worker, which the
+`checkpoint` row records from EPIC 054.3 Story 9 (`09-the-checkpoint-pair-is-derived`) on. This
+command reads no run row, so both arrive from the caller and no drawn path gains a token.
 
 **`details` is required, not optional.** Every one of the five refusals carries an object, so the
 field is non-optional and Story 9 (`09-the-contract-the-cli-and-the-proposal`) declares a schema for

@@ -136,14 +136,39 @@ It takes no input. Everything it needs is in the database.
    - `runId === null` → push
      `{ step: "candidates", code: "candidate-ref-unparsed", repositoryId: home.id, detail: ref }`
      onto `findings` and continue. Delete nothing.
-   - `active.has(runId)` → continue. Delete nothing.
+   - `const attemptNo = candidateRefAttemptNo(ref);` — `attemptNo === null` → push the
+     `candidate-ref-unparsed` finding and continue.
+   - `active.has(runId)` **and** `attemptNo >= openAttemptNo.get(runId)` → continue. Delete nothing.
+     An active run's **current** attempt may still push, so its ref is not eligible.
    - otherwise `await dependencies.candidate.discard({ gitDir: home.home_path, ref });` and push `ref`
-     onto `deleted`.
+     onto `deleted`. **An active run's superseded attempt is deleted**: an attempt below the run's open
+     attempt is closed, and a closed attempt never pushes again.
 
 5. Return `{ deleted, findings }`, `deleted` in the order the deletions happened.
 
 A run id that matches no `run` row is not in `active`, so its ref is deleted. That is the orphan from
 a worker that pushed and never reported, and Story 5 proves it.
+
+**An active run's superseded attempt is deleted too, and EPIC 054.3 is why.**
+`.agents/plan/epics/054.3-the-report-members-pay-their-attempt.md:46` —
+`The failure report discards its candidate ref` gives a below-limit worker failure its own
+attempt-scoped discard, and that report **leaves the run `active`**, because the limit is not reached.
+A sweep keyed on the run state alone would therefore never retry a failed deletion of
+`refs/kanthord/candidate/<runId>/<n>` while the run kept claiming attempts, and conditions 3 and 5 of
+the six-condition rule of `AGENTS.md` would fail for that caller — making its deletion a journaled
+write. Keying on the attempt number repairs both: an attempt below the run's open attempt is committed
+closed, which is the monotonic state condition 3 requires, and this sweep is the guaranteed retry
+condition 5 requires.
+
+**The transaction of step 1 therefore reads two maps and not one.** Beside `active` it builds
+`openAttemptNo` — the `attempt_no` of the one open attempt of each active run — from the same
+`attempt` rows, in the same transaction. A run holding no open attempt maps to `Infinity`, so every
+ref of it is eligible.
+
+**`candidateRefAttemptNo` is the second reader of the ref shape.** Declare it beside
+`.agents/plan/stories/051.1-the-candidate-and-the-git-primitives/08-the-candidate-namespace-is-enumerated.md:56`
+— `candidateRefRunId`, returning the trailing segment as an integer and `null` for anything else, so
+`<runId>/<attemptNo>` is parsed by one module and not by a caller.
 
 **One transaction, and no git call inside it.** Two would make this a journaled write, and it has no
 journal row. The deletion itself opens none: `AGENTS.md` `### Rules the import matrix cannot express`

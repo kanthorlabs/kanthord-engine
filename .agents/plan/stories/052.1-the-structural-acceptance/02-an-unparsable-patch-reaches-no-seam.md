@@ -115,7 +115,8 @@ export type AcceptStructuralRefusal =
   | "patch-project-invalid"
   | "plan-invalid"
   | "pair-fixed"
-  | "expansion-empty";
+  | "expansion-empty"
+  | "patch-delete-ineligible";
 
 export class AcceptStructuralError extends Error {
   readonly refusal: AcceptStructuralRefusal;
@@ -127,6 +128,32 @@ export class AcceptStructuralError extends Error {
 `test/helpers/sequence-conformance.ts:305` — `refusal` is what the harness reads to derive a diagram's
 terminal. A field named anything else makes every refusal diagram of this epic read `refuse:error`.
 `src/commands/outcome/report-outcome.ts:88` — `refusal` is the shipped precedent.
+
+**From EPIC 054.3 on the command returns its refusal and does not throw it.** EPIC 054.3 Story 4
+(`04-a-structural-rejection-pays-its-attempt`) adds
+
+```ts
+export type AcceptStructuralRejection = Readonly<{
+  ok: false;
+  refusal: AcceptStructuralRefusal;
+  details: Readonly<Record<string, unknown>> | undefined;
+}>;
+
+export type AcceptStructuralResult =
+  NodeReportResult | AcceptStructuralRejection;
+```
+
+and rewrites all ten refusal sites of this command as a `return` of that shape. `AcceptStructuralError`
+survives the change, and `reportOutcome` becomes its only thrower: it writes the attempt's termination
+in the prelude transaction, commits, reaps, and then raises the error. The class, the `refusal` field,
+the `details` field, every code and the whole refusal mapping of
+`src/http/server/node/refusals.ts:12` — `toHttpError` are unchanged, and
+`test/helpers/sequence-conformance.ts:303` — `resultTerminal` derives `refuse:<code>` from a returned
+`{ ok: false, refusal }` as well as from a thrown error, so no diagram of this epic moves.
+
+**The union holds ten codes, and `patch-delete-ineligible` is the tenth.** Story 8
+(`08-an-ineligible-delete-refuses`) throws it, and an earlier draft of the union listed nine and
+omitted it.
 
 ### 3 — the two pure refusals, before anything else
 
@@ -149,6 +176,10 @@ Nothing precedes these two statements. No read, no write and no seam call.
 
 ## Constraints
 
+- Every refusal site is a `return` from EPIC 054.3 on, and never a `throw`. EPIC 054.3 Story 4
+  (`04-a-structural-rejection-pays-its-attempt`) converts all ten, so `reportOutcome` can write the
+  attempt's termination in its own transaction and commit before it raises the refusal. `throw`
+  inside the caller's transaction would roll the settlement back with it.
 - The command opens no transaction, and its dependency object holds no `storage` key. A later story
   adding one is a defect.
 - The two refusals raise before any use of `transaction`.

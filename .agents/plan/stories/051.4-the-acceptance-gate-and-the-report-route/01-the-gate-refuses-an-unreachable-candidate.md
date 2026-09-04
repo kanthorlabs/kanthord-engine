@@ -78,6 +78,11 @@ family and it holds exactly two transaction spans, both opened inside `land.begi
 gate row 9b asserts the count. Every value the gate needs before the land arrives on the input, read
 by `reportOutcome` inside its own prelude transaction.
 
+**`AcceptExecutionInput` therefore carries `subject: string` too, and this command never reads it.**
+EPIC 054.3 Story 9 (`09-the-checkpoint-pair-is-derived`) fills the `checkpoint` table's two audit
+columns, `subject` is the run's worker, and this command holds no `execution` key with which to read
+a run. It receives the value and forwards it to `land.settle`, which is the writer.
+
 **The command is `async`.** It writes git, and `AGENTS.md` forbids git I/O inside a storage
 transaction.
 

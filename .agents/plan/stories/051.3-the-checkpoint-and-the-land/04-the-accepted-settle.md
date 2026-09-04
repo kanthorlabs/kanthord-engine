@@ -143,6 +143,7 @@ export type LandSettleInput = Readonly<{
   landedOid: string;
   actorKind: "human" | "harness" | "daemon";
   actorId: string;
+  subject: string;
 }>;
 
 export type LandSettleResult = Readonly<{
@@ -187,7 +188,13 @@ write inside it is one value. It is step 1 of the diagram. Inside one
    1b. `const attempts = dependencies.execution.attemptsOfRun(transaction, input.runId);` — one read,
    kept for the accounting of step 5.
 2. `dependencies.execution.writeCheckpoint(transaction, { kind: "execution", nodeId: input.nodeId, runId: input.runId, attemptId: input.attemptId, fence: input.fence, createdAt: now, repositoryId: input.repositoryId, baseOid: input.baseOid, acceptedOid: input.acceptedOid, landedOid: input.landedOid })`.
-   `caller` and `subject` are not passed and the store writes both `null`.
+   `caller: input.actorId` and `subject: input.subject` are passed, and the store writes both.
+   **EPIC 054.3 Story 9 (`09-the-checkpoint-pair-is-derived`) is where they arrive**: it widens all
+   three members of `WriteCheckpointInput` and fills the two columns migration `14` created nullable.
+   `subject` is the run's worker, supplied on the input because this unit reads no run row —
+   `.agents/plan/stories/051.3-the-checkpoint-and-the-land/04-the-accepted-settle.md:167` —
+   `The unit derives the objective` is the same rule — and `caller` is the authenticated principal
+   the caller already carries as `actorId`.
 3. `dependencies.plan.setWorkspaceBranchHead(transaction, { nodeId: objectiveId, headOid: input.landedOid })`,
    where `objectiveId` is `node.kind === "objective" ? node.id : node.parentId`. The key is the
    **objective**, because `workspace_branch` is keyed on it, and the value is the oid the swap

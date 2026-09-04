@@ -257,7 +257,7 @@ Add, each as a separate `it`:
 
 11. `"a run that is active is not in the input, so the snapshot race does not exist here"` — the
     closure of the window
-    `.agents/plan/stories/051.1-the-candidate-and-the-git-primitives/08-the-candidate-namespace-is-enumerated.md:153` —
+    `.agents/plan/stories/051.1-the-candidate-and-the-git-primitives/08-the-candidate-namespace-is-enumerated.md:178` —
     `snapshot` delegates here. Assert `reapRunCandidates` reads no `run.state` and no active set: read
     `src/commands/checkpoint/reap-run-candidates.ts` with `fs.readFileSync` and assert it holds
     neither the substring `"active"` nor `"state"`. The control is the substring `"runBaseHomes"`,

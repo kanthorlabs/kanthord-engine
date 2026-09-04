@@ -106,7 +106,8 @@ Add, each as a separate `it`:
 1. `"a failed declared command stores a semantic termination"` — run `acceptExecution` over the
    fixture, read the `attempt` row and assert `outcome === "rejected"` and
    `termination === "semantic"`, and assert the appended `attempt.ended` payload's `evidence`
-   deep-equals `{ kind: "daemon-rejected" }`. This is the first half of the epic's gate row 7.
+   deep-equals `{ kind: "daemon-rejected", refusal: "command-failed" }`. This is the first half of the
+   epic's gate row 7.
 
 2. `"a command-failed refusal of a daemon fault stores the same class"` — substitute a `Commands`
    double that refuses `command-failed` with `details` naming a spawn failure rather than a non-zero
