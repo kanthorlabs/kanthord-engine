@@ -13,5 +13,7 @@ export const authoredEpics = [
   "051.4",
   "051.5",
   "051.6",
+  "052",
+  "052.1",
 ] as const;
 export const shippedEpics = ["050", "050.1"] as const;
