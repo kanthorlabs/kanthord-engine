@@ -57,7 +57,7 @@ The vocabulary of a failed attempt, and every statement that stores it, are writ
   | `human-cancellation`      | external | `infrastructure` |
   | `worker-released`         | both     | `infrastructure` |
   | `ancestor-ended`          | both     | `infrastructure` |
-  | `run-expired`             | external | `ambiguous`      |
+  | `run-expired`             | both     | `ambiguous`      |
   | `process-exit`            | internal | `ambiguous`      |
 
   `provider-quota` carries `{ providerId, responseHash }`, a value the provider transport produces from a signed response. A boolean would be a flag any caller could set. `ancestor-ended` carries `{ ancestorRunId }`, the run whose ending closed this attempt.
@@ -68,7 +68,9 @@ The vocabulary of a failed attempt, and every statement that stores it, are writ
 
 - **A cascade close is `ancestor-ended`, and it is `infrastructure`.** `src/commands/node/release-node.ts:262` — `closeAttempt` and `src/commands/startup/recover-expired-leases.ts:196` — `closeAttempt` close the open attempt of a **descendant** run while the command ends its ancestor. The descendant worker produced no failure and made no claim, so it pays neither an attempt nor an ambiguous budget. Propagating the ancestor's own kind was rejected: an ancestor expiry is `run-expired`, which is `ambiguous`, so propagation would charge a descendant's crash-loop budget for an event the descendant never caused.
 
-- **The classifier is two total functions over two evidence types.** `classifyInternal(evidence: InternalEvidence)` and `classifyExternal(evidence: ExternalEvidence)`, where the two types are disjoint subsets of the union above. `../docs/workflow/worker.md` section 9 states the two sources, and one function with a driver parameter would let an external value reach an internal rule.
+- **`run-expired` keeps the driver `both`, because the daemon's own clock produces it for either driver.** `src/services/execution/sqlite.ts:146` — `WHERE state = 'active' AND expires_at <= ?` carries no driver predicate, so `expireRuns` ends an `internal` run and an `external` run alike, and the startup recovery of EPIC 054.4 Story 4 (`04-the-startup-recovery-pays-its-attempt`) charges it over `src/commands/startup/recover-expired-leases.ts:229` — `internalRows`, which is an internal-only set. An `external`-only value would leave both paths with no legal evidence. **`process-exit` is not the internal substitute**: it names a termination the supervisor observed, and an expiry is precisely the case where the daemon observed nothing, which is what makes it `ambiguous`. The two kinds are therefore not alternatives, and `process-exit` stays `internal`.
+
+- **The classifier is two total functions over two evidence types.** `classifyInternal(evidence: InternalEvidence)` and `classifyExternal(evidence: ExternalEvidence)`, where the two types are overlapping subsets of the union above — seven kinds are in both. `../docs/workflow/worker.md` section 9 states the two sources, and one function with a driver parameter would let an external value reach an internal rule.
 
 - **The trust boundary is the transport schema, not a type signature.** A TypeScript signature is erased at runtime. `node.report` is a `z.strictObject` with no `termination` key and no `caller` key, so an unknown key is refused rather than stripped. An external termination is constructed by the daemon from its own facts.
 
