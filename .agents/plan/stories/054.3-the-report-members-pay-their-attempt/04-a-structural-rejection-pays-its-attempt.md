@@ -97,8 +97,8 @@ Citations, one per step, caller anchor then callee anchor, with the fixture stat
    — `Branch on`.
 
 The terminal:
-`.agents/plan/stories/052.1-the-structural-acceptance/02-an-unparsable-patch-reaches-no-seam.md:162`
-— `AcceptStructuralError` is thrown with the code at `:163` — `patch-unparsable`, and
+`.agents/plan/stories/052.1-the-structural-acceptance/02-an-unparsable-patch-reaches-no-seam.md:163`
+— `AcceptStructuralError` is thrown with the code at `:164` — `patch-unparsable`, and
 `test/helpers/sequence-conformance.ts:303` — `resultTerminal` reads `refuse:patch-unparsable` from
 the caught error.
 
@@ -237,7 +237,7 @@ export type AcceptStructuralResult =
 
 **Replace every `throw new AcceptStructuralError(...)` with a `return` of that shape.** Ten sites:
 
-- `.agents/plan/stories/052.1-the-structural-acceptance/02-an-unparsable-patch-reaches-no-seam.md:162` — `AcceptStructuralError`
+- `.agents/plan/stories/052.1-the-structural-acceptance/02-an-unparsable-patch-reaches-no-seam.md:163` — `AcceptStructuralError`
 - `.agents/plan/stories/052.1-the-structural-acceptance/03-a-stale-revision-refuses-before-any-graph-read.md:58` — `AcceptStructuralError`
 - `.agents/plan/stories/052.1-the-structural-acceptance/04-a-resolved-target-or-scope.md:110` — `AcceptStructuralError`
 - `.agents/plan/stories/052.1-the-structural-acceptance/04-a-resolved-target-or-scope.md:124` — `AcceptStructuralError`
@@ -387,7 +387,7 @@ rejection through as `result` instead of catching an error.** They are
 `accept-structural-refusal-shape-resolved.ts`, `accept-structural-refusal-shape-unresolved.ts`,
 `accept-structural-refusal-pair-fixed.ts`, `accept-structural-refusal-graph-invalid.ts` and
 `accept-structural-refusal-delete-ineligible.ts`. Each catches an `AcceptStructuralError` today —
-`.agents/plan/stories/052.1-the-structural-acceptance/02-an-unparsable-patch-reaches-no-seam.md:236`
+`.agents/plan/stories/052.1-the-structural-acceptance/02-an-unparsable-patch-reaches-no-seam.md:237`
 — `catching the` is the shape. Delete the `try`/`catch` and return the value.
 
 **The seven diagrams do not move**, because `test/helpers/sequence-conformance.ts:303` —

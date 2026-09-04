@@ -248,7 +248,7 @@ Add, each as a separate `it`:
 
 7. `"acceptStructural holds no storage key after this story"` — assert
    `Object.hasOwn(dependencies, "storage") === false`, in the shape of
-   `.agents/plan/stories/052.1-the-structural-acceptance/02-an-unparsable-patch-reaches-no-seam.md:226`
+   `.agents/plan/stories/052.1-the-structural-acceptance/02-an-unparsable-patch-reaches-no-seam.md:227`
    — `Object.hasOwn`. This is the ceiling EPIC 052.1 pinned, and this story must not break it.
 
 Add `test/sequence/scenarios/accept-structural-success-paid.ts`, building the fixture the diagram
