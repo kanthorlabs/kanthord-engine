@@ -21,7 +21,7 @@ and the disagreement is a defect to report.
 | the recorder     | `test/helpers/sequence-conformance.ts`, a proxy over the dependency object         |
 | a scenario       | `test/sequence/scenarios/<diagram-id>.ts`, exporting the fixture and the run       |
 | the runner       | `test/sequence/conformance.test.ts`, on `node:test`                                |
-| the range gate   | `scripts/verify-epic-sequence.ts`, in `pnpm run verify`                            |
+| the range gate   | `scripts/verify-epic-sequence.ts`, run by `scripts/verify-epic-sequence.test.ts`   |
 
 A command runs inside one `storage.transact` callback and is synchronous, so the trace is invocation
 order and invocation order is completion order. An asynchronous seam needs begin and end records; do
@@ -76,6 +76,11 @@ starts.
   `EPIC 050 Story 7 (07-the-proposal-records-the-run-model)`. A split renumbers the stories of the
   epic it splits, and every pre-split ordinal still resolves — to the wrong story. The stem is what
   makes the reference exact, and the gate resolves it.
+- **A `## Change` names a path it edits in an edit directive**, written as a bold instruction whose
+  first word is a verb, carrying the path in a code span: ``**Create `scripts/x.ts`**``,
+  ``**Add a row to `AGENTS.md`**``. A path in ordinary prose is a citation, and the gate reads no
+  path from it. The form is fixed here so the `Paths:` check is implementable, because no reader of
+  prose alone can tell an edit from a quotation.
 - **A citation is written ``<file>:<line> — `<identifier>` ``**, and the identifier is a token the
   cited line holds. The gate agrees all three. A check that the file exists and holds that many lines
   catches nearly nothing, because a stale citation still points at a valid line. The form is fixed
@@ -389,23 +394,48 @@ invalid, and a human resolves it before implementation.
 - a story declares `Executor:` and no `Paths:`, or `Paths:` and no `Executor:`, or either line on a
   `story-implement`;
 - a path of a `Paths:` line is allowed to either engineer by `scripts/lane-check.sh`, or is denied to
-  the `groundwork-engineer` role by it, or appears in the `Paths:` line of two stories;
-- a story's `## Change` names a path both engineers are denied that no `Paths:` line of the epic
-  declares;
-- a cross-reference to a story carries an ordinal and no file stem, or a stem that resolves to no
-  story of the named epic;
-- a citation names an absent file, a line that file does not hold, or a line that does not hold the
-  identifier the citation names;
-- an epic's hermetic-coverage list is not a table, or a row of it names no story or two.
+  the `groundwork-engineer` role by it, or appears in the `Paths:` line of two stories **of one
+  epic**. The scope is one epic, never the tree: EPIC 050.4 raises `package.json` to version `29` and
+  EPIC 050.5 raises it to `30`, and a tree-wide refusal would forbid maintaining a shared file twice;
+- a story's `## Change` names a path both engineers are denied, inside an **edit directive**, that no
+  `Paths:` line of the epic declares. A path `scripts/lane-check.sh` denies to `groundwork-engineer`
+  too is exempt, because no `Paths:` line may carry it;
+- a cross-reference to a story carries a stem that resolves to no story of the named epic, or an
+  ordinal that is not that stem's dispatch position in its epic;
+- a citation names an absent file, a line beyond the end of that file, or an identifier the file does
+  not hold anywhere;
+- an epic's hermetic-coverage list is not a table, or a row of it names no story or two. The table
+  heads either `| assertion | story |` or `| # | assertion | story |`; the check keys on the `story`
+  column and never on a `#` column.
+
+It **reports, and does not refuse**, a citation whose identifier has moved to another line of the
+same file. Editing `src/` shifts cited lines constantly — 1743 citations point into 202 files — and
+`scripts/lane-check.sh` denies the plan tree to the engineer whose edit moved the line, so a refusal
+would stop CI on a repair its own author may not make. An absent file, a line beyond end of file and
+an identifier the file does not hold anywhere are refusals, because no line shift produces them.
+
+Two obligations of this file are **stated and not enforced**, and each is rollout debt with a real
+cost, not a rule to ignore:
+
+- **a cross-reference carries a file stem, not an ordinal alone.** 1177 in-range references write an
+  ordinal alone. The gate cannot detect a wrong one, because an ordinal with no stem is unfalsifiable
+  — which is the reason to write the stem, not a reason to grandfather it.
+- **a citation into `src/`, `test/` or `scripts/` carries an identifier.** 367 in-range citations
+  write two parts. The gate resolves the three-part form and cannot check these.
+
+Write both forms in new text. The gate refuses neither yet.
 
 ## What makes this standard the default
 
 A skill produces a compliant story when it is invoked. It is not the mechanism that makes the story
 compliant. Three mechanisms carry that, and each one states here whether it exists:
 
-1. **The range gate** — `scripts/verify-epic-sequence.ts` in `pnpm run verify`, refusing every
-   inconsistency listed above. **Not built.** It is EPIC 050.1 Story 8, so it lands after the epics
-   that already depend on it.
+1. **The range gate** — `scripts/verify-epic-sequence.ts`, reaching CI through `pnpm test` by
+   `scripts/verify-epic-sequence.test.ts` — `the real plan tree passes the range gate`. **Built**, by
+   EPIC 050.1 Story 8 (`08-the-range-gate`), which carried the diagram, baseline and `Seams:`
+   refusals. The lane, edit-directive, stem, citation and gate-table refusals of the list above are
+   **specified and not yet in the script**; each lands with the repair it forces, and the `verify`
+   wiring lands last, when the range is clean.
 2. **The declared kind** — every story states `story-foundation` or `story-implement` on the line
    under its title. A story that draws nothing is a visible decision, never a silent omission.
    **In use since EPIC 050.** Nothing enforces it: the refusal belongs to the gate above.
@@ -413,8 +443,8 @@ compliant. Three mechanisms carry that, and each one states here whether it exis
    nothing.** Its skill file names no kind, no diagram and no `Seams:` line. A story with no diagram
    runs on its `## Change` prose.
 
-Two of the three are absent. This file is a convention until the gate lands. Never cite a mechanism
-above as a reason a defect cannot reach `src/`.
+One of the three is absent. The gate carries what it lists; two obligations above are rollout debt
+and no mechanism reads them. Never cite a mechanism above as a reason a defect cannot reach `src/`.
 
 ## Rollout, and what is grandfathered
 

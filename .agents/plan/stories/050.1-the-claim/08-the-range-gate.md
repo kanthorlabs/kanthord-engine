@@ -41,8 +41,8 @@ conformance to it, enforced by `scripts/verify-epic-sequence.ts` and `test/seque
 
 **Rollout.** The gate goes red the moment it lands unless every story of the range carries its
 diagrams. The script and its test land in this epic, and `package.json` is not touched. The `verify`
-wiring lands in the change that completes the last story of EPIC 050.5, and this epic does not merge
-a red gate.
+wiring lands in the change that makes every epic of the range satisfy the gate, per
+`.agents/plan/authoring.md`, and this epic does not merge a red gate.
 
 ## Constraints
 

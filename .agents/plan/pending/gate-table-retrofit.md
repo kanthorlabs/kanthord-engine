@@ -7,7 +7,7 @@ enforces it.** That refusal is bullet 25 of `.agents/plan/authoring.md:399`, and
 058 builds it. Until then this obligation is a convention, and nothing goes red when an epic breaks
 it.
 
-Twenty-two epics of the EPIC 050 to EPIC 058 family satisfy the form. Four do not, and each holds a
+Twenty-two epics of the EPIC 050 to EPIC 057 family satisfy the form. Four do not, and each holds a
 bullet list instead. Measured 2026-09-04:
 
 | epic  | gate list  | proof owner named |
@@ -27,8 +27,8 @@ and forty-seven of EPIC 050.3.
 
 **Only EPIC 050 and EPIC 050.1 are in the gate's range.** `authoredEpics` of
 `scripts/epic-sequence-range.ts` ends at `"052.2"`, so EPIC 054 and EPIC 057 are grandfathered until
-the epic that authors each adds its id. EPIC 058 converts the two in range and states EPIC 054 and
-EPIC 057 as a non-goal for exactly this reason.
+the epic that authors each adds its id. The change that builds bullet 25 converts the two in range;
+EPIC 054 and EPIC 057 wait for the epic that admits each to the range.
 
 **What the EPIC 050.2 conversion taught, on 2026-09-02.** Twenty-four bullets became forty-eight
 rows, and the same three effects appeared. One bullet stated nine cases over three commands and
@@ -51,17 +51,17 @@ against the finished table, in both directions, and budget all four for each of 
 **The owner.** Ulrich, per epic. A form change is mechanical; deciding the proof owner of an unowned
 row is not, and `.agents/plan/authoring.md` refuses a gate assertion owned by no story or by two.
 
-**The trigger.** EPIC 058, which builds bullet 25 and wires
+**The trigger.** The change that builds bullet 25 and wires
 `scripts/verify-epic-sequence.ts` into the `verify` script of `package.json`. Two earlier statements
-named a different change and both are wrong.
-`.agents/plan/stories/050.1-the-claim/08-the-range-gate.md:44` defers the wiring to the last story of
-EPIC 050.5, and this document named EPIC 057. EPIC 058 takes it, because
-`.agents/plan/authoring.md:426` lets only the change that makes the range clean wire the gate.
+named a specific epic and both were wrong:
+`.agents/plan/stories/050.1-the-claim/08-the-range-gate.md` deferred the wiring to the last story of
+EPIC 050.5, and this document named EPIC 057. Neither can hold, because
+`.agents/plan/authoring.md` lets only the change that makes the range clean wire the gate.
 
 **What breaks if the answer arrives late.** EPIC 050 and EPIC 050.1 are the two in the gate's range,
-so `pnpm run verify` fails on those two the moment bullet 25 and the wiring land together. EPIC 058
-converts both in its own gate-table story for that reason. EPIC 054 and EPIC 057 break nothing until
-the epic that authors each adds its id to `authoredEpics`.
+so `pnpm run verify` fails on those two the moment bullet 25 and the wiring land together. Both are
+converted in the same change for that reason. EPIC 054 and EPIC 057 break nothing until the epic that
+authors each adds its id to `authoredEpics`.
 
 **This document previously claimed the gate already refuses a non-table list. It does not.** Bullet
 25 was written into `.agents/plan/authoring.md` by commit `bf633f5` and never implemented, so the
