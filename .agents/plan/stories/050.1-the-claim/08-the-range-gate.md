@@ -1,8 +1,10 @@
 # Story 8 — The range gate
 
 Epic: `.agents/plan/epics/050.1-the-claim.md`
-Depends on: Story 6 (the parser).
+Depends on: Story 6 (`06-the-conformance-harness`), for the parser.
 Kind: story-foundation
+Executor: groundwork-engineer
+Paths: AGENTS.md
 
 This story enforces `.agents/plan/authoring.md` over the plan tree. It draws no path.
 
