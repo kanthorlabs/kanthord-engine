@@ -99,14 +99,16 @@ node --test \
   && echo "PASS EPIC-050"
 ```
 
-Hermetic coverage required beyond the Proof:
+Hermetic coverage required beyond the Proof. **Every row names exactly one proof owner.**
 
-- `runKindFor` is asserted for all four deliverables by iterating the `deliverables` tuple, so a fifth deliverable fails the test. Story 1.
-- A `structural` run holding a `run_base` row is refused by the cardinality refine, a `review` run holding one is refused, and an `execution` run holding two is refused. An `execution` run holding none passes, because EPIC 051 writes the row. Every direction is asserted. Story 2.
-- `nodeRow` refuses an `assignment` value outside the worker id grammar, asserted by value. Story 3.
-- A second run on a node with an active run is refused by `subtreeExclusion` as a pure function. The index case is EPIC 050.1's. Story 4.
-- An expired run in the exclusion input does not refuse. Story 4.
-- No refusal object holds a fence value. The assertion scans the refusal details key set. Story 5.
-- `objectiveBusy` and `subtreeExclusion` agree on the liveness boundary, asserted over `now - 1`, `now` and `now + 1`, so the shared predicate cannot drift. Story 5.
-- `runTtlMs` below 1000, `runMaxLifetimeMs` below `runTtlMs`, and a non-integer are each refused at startup, asserted by value, and `runMaxLifetimeMs` equal to `runTtlMs` starts. Both directions of the boundary. Story 6.
-- The run model document names the `refusal` value of each exclusion rule, built by calling the two pure functions rather than restating a literal, so the document and the code cannot drift. The claim refusals are EPIC 050.1's and the authority refusals are EPIC 050.2's; this epic's gate asserts neither. Story 7.
+| #   | assertion                                                                                                                                                                                                                                                                                                        | story |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| 1   | `runKindFor` is asserted for all four deliverables by iterating the `deliverables` tuple, so a fifth deliverable fails the test.                                                                                                                                                                                 | 1     |
+| 2   | A `structural` run holding a `run_base` row is refused by the cardinality refine, a `review` run holding one is refused, and an `execution` run holding two is refused. An `execution` run holding none passes, because EPIC 051 writes the row. Every direction is asserted.                                    | 2     |
+| 3   | `nodeRow` refuses an `assignment` value outside the worker id grammar, asserted by value.                                                                                                                                                                                                                        | 3     |
+| 4   | A second run on a node with an active run is refused by `subtreeExclusion` as a pure function. The index case belongs to EPIC 050.1.                                                                                                                                                                             | 4     |
+| 5   | An expired run in the exclusion input does not refuse.                                                                                                                                                                                                                                                           | 4     |
+| 6   | No refusal object holds a fence value. The assertion scans the refusal details key set.                                                                                                                                                                                                                          | 5     |
+| 7   | `objectiveBusy` and `subtreeExclusion` agree on the liveness boundary, asserted over `now - 1`, `now` and `now + 1`, so the shared predicate cannot drift.                                                                                                                                                       | 5     |
+| 8   | `runTtlMs` below 1000, `runMaxLifetimeMs` below `runTtlMs`, and a non-integer are each refused at startup, asserted by value, and `runMaxLifetimeMs` equal to `runTtlMs` starts. Both directions of the boundary.                                                                                                | 6     |
+| 9   | The run model document names the `refusal` value of each exclusion rule, built by calling the two pure functions rather than restating a literal, so the document and the code cannot drift. The claim refusals belong to EPIC 050.1 and the authority refusals to EPIC 050.2; this epic's gate asserts neither. | 7     |
