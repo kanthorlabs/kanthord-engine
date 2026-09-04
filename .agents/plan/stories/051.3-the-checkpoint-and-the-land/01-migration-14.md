@@ -76,7 +76,7 @@ CREATE TABLE checkpoint (
 ```
 
 - **`caller` and `subject` are nullable, and they stay nullable.** Neither concept has a source yet:
-  `.agents/plan/epics/054-attempt-classification-and-the-supervisor.md:36` — `attempt.caller` adds `attempt.caller` and
+  `.agents/plan/epics/054-attempt-classification-and-the-supervisor.md:38` — `attempt.caller` adds `attempt.caller` and
   `attempt.subject` nullable in its own migration, and `:13` owns the rule that derives both from
   authenticated state. EPIC 057 tightens both.
 - **The review group is complete here, and EPIC 053 adds no column.** The epic's Goal says migration

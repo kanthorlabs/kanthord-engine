@@ -6,8 +6,11 @@ Prereq: EPIC 054 (sequence order). Story 1 (`01-a-semantic-ending-and-an-accepte
 from Story 3 (`03-the-close-writes-the-termination`), its `plan.readNodeAmbiguousUsed` from Story 4
 (`04-the-node-ambiguous-counter`), its evidence union, kind arrays, classifiers and
 `convertOnExhaustion` from Story 6 (`06-the-evidence-union-and-the-classifiers`), its
-`accountAttempts().semanticCount` from Story 7 (`07-accounting-by-class`), its `attempt.ended` type
-and payload variant from Story 8, and its `ambiguousBudget` from Story 9. Story 2
+`accountAttempts().semanticCount` from Story 7 (`07-accounting-by-class`), and its `ambiguousBudget`
+from Story 9 (`09-the-budget-and-the-supervisor`). **It reads no `attempt.ended` registration from
+EPIC 054**: that epic decides the type and the payload and ships no producer, so Story 1
+(`01-a-semantic-ending-and-an-accepted-one`) section 7 registers them beside the producer. EPIC 054
+holds no story 8 for that reason. Story 2
 (`02-an-ambiguous-ending-increments-the-counter`) reads its `plan.incrementNodeAmbiguousUsed`.
 Story 3 (`03-a-settlement-over-a-closed-attempt-writes-nothing`) reads its close, amended to answer
 `null`. Story 4 (`04-the-proposal-records-the-command`) amends its

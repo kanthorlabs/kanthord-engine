@@ -7,8 +7,9 @@ and `AttemptRecord.termination`; EPIC 054 Story 4 (`04-the-node-ambiguous-counte
 `Termination`, `TerminationEvidence`, `internalEvidenceKinds`, `externalEvidenceKinds`,
 `InternalEvidence`, `ExternalEvidence`, `classifyInternal`, `classifyExternal` and
 `convertOnExhaustion`; EPIC 054 Story 7 (`07-accounting-by-class`), for `AttemptRecord.termination` and
-`accountAttempts().semanticCount`; EPIC 054 Story 8, for the `attempt.ended` type and its payload
-variant; EPIC 054 Story 9, for `ambiguousBudget`.
+`accountAttempts().semanticCount`; EPIC 054 Story 9 (`09-the-budget-and-the-supervisor`), for
+`ambiguousBudget`. **It depends on no EPIC 054 story for the event type**: EPIC 054 decides the type,
+the subject and the payload, and section 7 of this story registers them.
 Kind: story-implement
 
 Diagrams: end-attempt-semantic
@@ -269,7 +270,7 @@ function isExternalEvidence(
 
 **The predicates are needed, and they live here rather than in `src/domain/`.**
 `InternalEvidence` and `ExternalEvidence` are `Extract` subsets —
-`.agents/plan/stories/054-attempt-classification-and-the-supervisor/06-the-evidence-union-and-the-classifiers.md:76`
+`.agents/plan/stories/054-attempt-classification-and-the-supervisor/06-the-evidence-union-and-the-classifiers.md:84`
 — `export type InternalEvidence` — so a `TerminationEvidence` is assignable to neither classifier and
 the command cannot compile without a narrowing. That story already exports
 `internalEvidenceKinds` and `externalEvidenceKinds` as run-time arrays, so no amendment to it is
@@ -306,7 +307,7 @@ attempt's driver can produce, and the command refuses to store a class no classi
 
 **That precondition is violated by an epic already authored, and the contradiction is a blocker, not
 a caveat.** EPIC 054.4 Story 1 (`01-the-expiry-pass-ends-the-attempt`) passes `run-expired`, which
-`.agents/plan/stories/054-attempt-classification-and-the-supervisor/06-the-evidence-union-and-the-classifiers.md:65`
+`.agents/plan/stories/054-attempt-classification-and-the-supervisor/06-the-evidence-union-and-the-classifiers.md:73`
 — `externalEvidenceKinds` lists and `internalEvidenceKinds` does not, on a pass that also ends an
 internal run's attempt. A path cannot be both outside this command's product set and reached by an
 intended product caller. **The resolution is EPIC 054.4's, not this story's**: the expiry pass selects
@@ -455,6 +456,87 @@ untouched; Story 4 appends it.
 `scripts/epic-sequence-range.ts` moves under it, so check whether `"054.1"` is already present before
 inserting, and never write a duplicate entry.
 
+### 7 — `attempt.ended` joins the two registers
+
+**This section moved here from EPIC 054**, whose Decisions decide the type, the subject and the
+payload and whose non-goals ship no producer.
+`src/http/contract/event-payload.test.ts:430` — `every declared type except the retired ones is produced` scans `src/commands` and `src/services` for the type literal, so a registration without a
+producer is a red `pnpm run verify`. This story writes the producer at section 5, so the registration
+lands with it.
+
+**Add one entry to `src/domain/event-type.ts:1`** — `eventTypes`, between
+`src/domain/event-type.ts:4` — `actor.tokenRotated` and `src/domain/event-type.ts:5` —
+`lease.released`. `src/domain/event-type.test.ts:7` — `eventTypes is sorted bytewise` requires that
+position: `"actor"` sorts before `"attempt"` on the third byte, and `"attempt"` before `"lease"` on
+the first. `src/domain/event-type.ts:45` — `retiredEventTypes` stays `[]`.
+
+**Add one variant to `src/http/contract/event-payload.ts:71`** — `eventPayloads`, keyed
+`"attempt.ended"` and placed in the same bytewise position, as the two-member union EPIC 054's
+Decisions state:
+
+```ts
+const attemptEndedCommon = {
+  attemptId: z.string(),
+  runId: z.string(),
+  nodeId: z.string(),
+  attemptNo: z.number().int(),
+  semanticCountAfter: z.number().int(),
+  attemptLimit: z.number().int(),
+  ambiguousUsedAfter: z.number().int(),
+  ambiguousBudget: z.number().int(),
+};
+
+const attemptEndedAccepted = z.strictObject({
+  ...attemptEndedCommon,
+  outcome: z.literal("accepted"),
+  headOid: objectId,
+});
+
+const attemptEndedFailed = z.strictObject({
+  ...attemptEndedCommon,
+  outcome: z.enum(["rejected", "failed", "timed-out", "cancelled"]),
+  termination: z.enum(terminations),
+  evidence: terminationEvidenceSchema,
+});
+```
+
+registered as `"attempt.ended": z.union([attemptEndedAccepted, attemptEndedFailed])`.
+
+**`z.union` and not `z.discriminatedUnion`.** Every multi-shape payload of that file is a plain
+union — `src/http/contract/event-payload.ts:125` — `node.done`,
+`src/http/contract/event-payload.ts:130` — `node.partial` and
+`src/http/contract/event-payload.ts:224` — `recovery.leaseRecovered` — and
+`src/http/contract/openapi.ts:60` — `eventPayloads` emits either form as a named component whose
+`$ref`s `src/http/contract/schema-reachability.ts` walks. A discriminated union here would diverge
+from three siblings and would add a `discriminator.mapping` no consumer reads.
+
+**Neither member holds a top-level `reason`.**
+`test/helpers/sequence-conformance.ts:81` — `reason` appends `payload.reason` to the compared token of
+`events.append`, so a top-level reason would put a value inside the seam token and split this story's
+one drawn path per reason. The accepted member carries `headOid` and no `termination` and no
+`evidence`; the non-accepted member carries both and no `headOid`.
+
+**`evidence` needs a zod schema, and EPIC 054 Story 6 (`06-the-evidence-union-and-the-classifiers`)
+declares none.** That story states the reason: the union is plain TypeScript because no value is ever
+parsed from the wire. This contract entry is a **serialization** schema, not a parse boundary, so
+declare `terminationEvidenceSchema` **in `src/http/contract/event-payload.ts`** as a
+`z.discriminatedUnion("kind", …)` over the ten kinds, with `providerId` and `responseHash` on
+`provider-quota` and `ancestorRunId` on `ancestor-ended`. Keeping it here and not in `src/domain/`
+holds EPIC 054's decision intact: `src/domain/termination.ts` still exports no schema, and
+`src/http/contract/` is where a wire shape belongs.
+
+**Add the `recordedPayloads` fixture.**
+`src/http/contract/event-payload.test.ts:499` — `assert.deepEqual(Object.keys(recordedPayloads), [...eventTypes])` requires an `"attempt.ended"` key in the same sorted position, and
+`:500` — `recordedPayloads["node.done"]?.length` is the precedent for a union carrying two recorded
+shapes. Record **two**: one accepted and one `provider-quota` failure.
+
+**Raise the two pinned catalogue counts from `39` to `40`.**
+`src/http/contract/openapi-source.test.ts:363` asserts the count by value and
+`src/http/contract/openapi-source.test.ts:348` spells "thirty-nine" in its `it` name;
+`scripts/publish-contract.source.test.ts:217` asserts the same value. All three move. Nothing else
+registers the type: `src/http/contract/openapi.ts:233` — `eventPayloadCatalogue` iterates
+`Object.keys(eventPayloads)`, so the catalogue and the component follow the one variant.
+
 ## Constraints
 
 - The command opens no transaction and holds no `Storage` key. A second `storage.transact` inside the
@@ -600,6 +682,32 @@ alias `{ attempt_a: "A" }` and passing `ambiguousBudget` and `instanceId` outsid
 `test/sequence/scenarios/expiry-pass-one-due.ts:75` — `instanceId` does, opening the transaction with
 `fixture.storage.transact` as `test/sequence/scenarios/expiry-pass-one-due.ts:70` — `transact` does,
 and returning the recorder and the result.
+
+15. `"eventTypes holds attempt.ended once, in bytewise order, and no second attempt-close type"` —
+    assert `eventTypes.includes("attempt.ended")`, assert `eventTypes.filter(...)` for any type
+    starting `"attempt."` deep-equals `["attempt.ended"]` by value, and assert
+    `retiredEventTypes` deep-equals `[]`. The bytewise sweep at
+    `src/domain/event-type.test.ts:7` — `eventTypes is sorted bytewise` already covers the position
+    and needs no new assertion. Extend `src/domain/event-type.test.ts`. **This case and case 16 moved
+    from EPIC 054 gate row 19.**
+
+16. `"each attempt.ended member parses its stated object and neither holds a top-level reason"` —
+    add the two `recordedPayloads` shapes, then four sub-cases: the accepted shape parses; the
+    `provider-quota` failure shape parses; the accepted shape with `termination` added is refused by
+    the `strictObject`; and the failure shape missing `semanticCountAfter` is refused with the issue
+    path `["semanticCountAfter"]`. Assert the key set of each recorded shape recursively holds no
+    `reason` key, in the idiom of
+    `src/http/contract/event-payload.test.ts:516` — `an outcome.reported payload with a tenth key fails`. Extend `src/http/contract/event-payload.test.ts`.
+
+17. `"the event payload catalogue holds forty entries and names attempt.ended"` — update the two
+    pinned counts and the `it` name at `src/http/contract/openapi-source.test.ts:348`, then assert
+    `Object.keys(catalogue).length` is `40`, assert
+    `catalogue["attempt.ended"]` deep-equals
+    `{ $ref: "./components/attempt.yaml#/schemas/attempt.ended" }`, and assert
+    `Object.hasOwn(document.components.schemas, "attempt.ended")` through
+    `src/http/contract/event-payload.test.ts:627` — `each payload schema emits as a named component`.
+    The control is that every `$ref` of the catalogue resolves inside the emitted document, which is
+    the transitive-closure claim. This is the epic's gate row 6d.
 
 `pnpm run verify` exits 0.
 
