@@ -52,6 +52,7 @@ import {
   seedRegistry,
   seedReleasedLeaseOnNode,
   seedRunRow,
+  seedSiblingObjective,
   seedWaivedEdge,
   seedWorkspaceOnNode,
 } from "../../../test/helpers/rows.ts";
@@ -374,6 +375,33 @@ function seedRunOnTask(
   });
 }
 
+function seedRunOnDescendant(storage: Storage): void {
+  storage.transact((transaction) => {
+    seedWorkspaceOnNode(transaction, {
+      id: "workspace_1",
+      nodeId: taskId,
+    });
+    seedRunRow(transaction, {
+      id: "run_2",
+      kind: "task",
+      nodeId: taskId,
+      parentRunId: null,
+      workspaceId: "workspace_1",
+      graphRevision: null,
+    });
+  });
+}
+
+function seedExpiredRunOnTask(storage: Storage, plan: PlanStore): void {
+  seedRunOnTask(storage, plan, (transaction) => {
+    transaction.run("UPDATE run SET expires_at = ? WHERE id IN (?, ?)", [
+      CLOCK_START - 1,
+      "run_1",
+      "run_2",
+    ]);
+  });
+}
+
 function runDelete(
   fixture: DeleteFixture,
   input: DeleteNodeInput,
@@ -395,6 +423,163 @@ function runDelete(
 
 function deleteInput(id: string, fromRevision: string): DeleteNodeInput {
   return { id, fromRevision, actor: HARNESS_ACTOR };
+}
+
+type DeleteDecisionRefusal =
+  | "node-not-found"
+  | "stale-revision"
+  | "subtree-busy"
+  | "illegal-transition"
+  | "binding-in-use"
+  | "plan-invalid";
+
+type DeleteDecisionRow =
+  | Readonly<{
+      pair: readonly [DeleteDecisionRefusal, DeleteDecisionRefusal];
+      winner: DeleteDecisionRefusal;
+    }>
+  | Readonly<{
+      pair: readonly [DeleteDecisionRefusal, DeleteDecisionRefusal];
+      unreachable: string;
+    }>;
+
+const DELETE_DECISION_REFUSALS = [
+  "node-not-found",
+  "stale-revision",
+  "subtree-busy",
+  "illegal-transition",
+  "binding-in-use",
+  "plan-invalid",
+] as const satisfies readonly DeleteDecisionRefusal[];
+
+const DELETE_DECISION_TABLE = [
+  {
+    pair: ["node-not-found", "stale-revision"],
+    unreachable: "a missing node has no revision to compare",
+  },
+  {
+    pair: ["node-not-found", "subtree-busy"],
+    unreachable: "a missing node has no covering run",
+  },
+  {
+    pair: ["node-not-found", "illegal-transition"],
+    unreachable: "a missing node has no state to inspect",
+  },
+  {
+    pair: ["node-not-found", "binding-in-use"],
+    unreachable: "a missing node has no execution facts",
+  },
+  {
+    pair: ["node-not-found", "plan-invalid"],
+    unreachable: "a missing node has no plan-invalid refusal",
+  },
+  { pair: ["stale-revision", "subtree-busy"], winner: "stale-revision" },
+  {
+    pair: ["stale-revision", "illegal-transition"],
+    winner: "stale-revision",
+  },
+  {
+    pair: ["stale-revision", "binding-in-use"],
+    winner: "stale-revision",
+  },
+  {
+    pair: ["stale-revision", "plan-invalid"],
+    unreachable: "delete-node has no plan-invalid refusal",
+  },
+  {
+    pair: ["subtree-busy", "illegal-transition"],
+    winner: "subtree-busy",
+  },
+  { pair: ["subtree-busy", "binding-in-use"], winner: "subtree-busy" },
+  {
+    pair: ["subtree-busy", "plan-invalid"],
+    unreachable: "delete-node has no plan-invalid refusal",
+  },
+  {
+    pair: ["illegal-transition", "binding-in-use"],
+    winner: "illegal-transition",
+  },
+  {
+    pair: ["illegal-transition", "plan-invalid"],
+    unreachable: "delete-node has no plan-invalid refusal",
+  },
+  {
+    pair: ["binding-in-use", "plan-invalid"],
+    unreachable: "delete-node has no plan-invalid refusal",
+  },
+] as const satisfies readonly DeleteDecisionRow[];
+
+function includesDeleteDecision(
+  pair: readonly [DeleteDecisionRefusal, DeleteDecisionRefusal],
+  refusal: DeleteDecisionRefusal,
+): boolean {
+  return pair[0] === refusal || pair[1] === refusal;
+}
+
+function deleteDecisionLabel(
+  pair: readonly [DeleteDecisionRefusal, DeleteDecisionRefusal],
+): string {
+  return `${pair[0]}|${pair[1]}`;
+}
+
+function prepareDeleteDecisionPair(
+  fixture: DeleteFixture,
+  pair: readonly [DeleteDecisionRefusal, DeleteDecisionRefusal],
+): DeleteNodeInput {
+  const has = (refusal: DeleteDecisionRefusal) =>
+    includesDeleteDecision(pair, refusal);
+
+  if (has("subtree-busy")) {
+    fixture.storage.transact((transaction) => {
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_delete_decision",
+        nodeId: objectiveId,
+      });
+      seedRunRow(transaction, {
+        id: "run_delete_decision",
+        kind: "objective",
+        nodeId: objectiveId,
+        parentRunId: null,
+        workspaceId: "workspace_delete_decision",
+        graphRevision: null,
+      });
+    });
+  }
+  if (has("illegal-transition")) {
+    fixture.storage.transact((transaction) =>
+      seedNodeState(transaction, taskId, "done"),
+    );
+  }
+  if (has("binding-in-use") && !has("subtree-busy")) {
+    fixture.storage.transact((transaction) =>
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_delete_decision",
+        nodeId: taskId,
+      }),
+    );
+  }
+
+  return deleteInput(
+    objectiveId,
+    has("stale-revision") ? "revision_stale" : nodeBaselineRevision,
+  );
+}
+
+function refusedDelete(
+  fixture: DeleteFixture,
+  input: DeleteNodeInput,
+): NodeWriteError {
+  let caught: unknown;
+  try {
+    runDelete(fixture, input);
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(
+    caught instanceof NodeWriteError,
+    `expected a NodeWriteError, got ${String(caught)}`,
+  );
+  return caught;
 }
 
 function assertNoOrphanedLease(fixture: DeleteFixture): void {
@@ -439,6 +624,260 @@ function blockerRefusal(
 }
 
 describe("src/commands/node/delete-node.test", () => {
+  it("a delete of a node covered by an active run refuses subtree-busy", (t) => {
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        seedRunOnTask(storage, plan);
+      },
+      [U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    let caught: unknown;
+    try {
+      runDelete(fixture, deleteInput(objectiveId, nodeBaselineRevision));
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "subtree-busy");
+    assert.deepEqual(caught.details, {
+      relation: "self",
+      nodeId: objectiveId,
+      runId: "run_1",
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("a delete of a node whose descendant holds an active run refuses, naming the descendant", (t) => {
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        seedRunOnDescendant(storage);
+      },
+      [U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    let caught: unknown;
+    try {
+      runDelete(fixture, deleteInput(objectiveId, nodeBaselineRevision));
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "subtree-busy");
+    assert.deepEqual(caught.details, {
+      relation: "descendant",
+      nodeId: taskId,
+      runId: "run_2",
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("a delete of a node whose ancestor holds an active run refuses, naming the ancestor", (t) => {
+    const runId = "run_delete_ancestor";
+    const workspaceId = "workspace_delete_ancestor";
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          seedWorkspaceOnNode(transaction, {
+            id: workspaceId,
+            nodeId: initiativeId,
+          });
+          seedRunRow(transaction, {
+            id: runId,
+            kind: "objective",
+            nodeId: initiativeId,
+            parentRunId: null,
+            workspaceId,
+            graphRevision: null,
+          });
+        });
+      },
+      [U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    let caught: unknown;
+    try {
+      runDelete(fixture, deleteInput(objectiveId, nodeBaselineRevision));
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "subtree-busy");
+    assert.deepEqual(caught.details, {
+      relation: "ancestor",
+      nodeId: initiativeId,
+      runId,
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("a delete of a node whose sibling holds an active run succeeds", (t) => {
+    const siblingObjectiveId = objectiveTwoId;
+    const runId = "run_delete_sibling";
+    const workspaceId = "workspace_delete_sibling";
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          seedSiblingObjective(transaction, initiativeId, siblingObjectiveId);
+          seedWorkspaceOnNode(transaction, {
+            id: workspaceId,
+            nodeId: siblingObjectiveId,
+          });
+          seedRunRow(transaction, {
+            id: runId,
+            kind: "objective",
+            nodeId: siblingObjectiveId,
+            parentRunId: null,
+            workspaceId,
+            graphRevision: null,
+          });
+        });
+      },
+      [U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    const result = runDelete(
+      fixture,
+      deleteInput(objectiveId, nodeBaselineRevision),
+    );
+
+    assert.equal(result.revision, `revision_${U_REV}`);
+    assert.deepEqual(result.deleted, [objectiveId, taskId]);
+    const sibling = fixture.storage.transact((transaction) =>
+      fixture.plan.readNode(transaction, siblingObjectiveId),
+    );
+    assert.ok(sibling !== null);
+  });
+
+  it("an expired run in the subtree refuses binding-in-use, not subtree-busy", (t) => {
+    for (const state of ["expired", "ended"] as const) {
+      const runId = `run_delete_${state}`;
+      const workspaceId = `workspace_delete_${state}`;
+      const fixture = build(
+        (storage, plan, blobs) => {
+          seedPlanFixture(storage, plan, blobs);
+          storage.transact((transaction) => {
+            seedWorkspaceOnNode(transaction, {
+              id: workspaceId,
+              nodeId: taskId,
+            });
+            seedRunRow(transaction, {
+              id: runId,
+              kind: "task",
+              nodeId: taskId,
+              parentRunId: null,
+              workspaceId,
+              graphRevision: null,
+              state: state === "ended" ? "ended" : "active",
+            });
+            if (state === "expired") {
+              transaction.run("UPDATE run SET expires_at = ? WHERE id = ?", [
+                CLOCK_START - 1,
+                runId,
+              ]);
+            }
+          });
+        },
+        [U_REV],
+      );
+      t.after(() => fixture.dispose());
+
+      let caught: unknown;
+      try {
+        runDelete(fixture, deleteInput(objectiveId, nodeBaselineRevision));
+      } catch (error) {
+        caught = error;
+      }
+      assert.ok(caught instanceof NodeWriteError, state);
+      assert.equal(caught.refusal, "binding-in-use", state);
+      const blockers = (
+        caught.details as Readonly<{
+          blockers: readonly Readonly<{ nodeId: string; blocker: string }>[];
+        }>
+      ).blockers;
+      assert.ok(
+        blockers.some(
+          (entry) => entry.nodeId === taskId && entry.blocker === "run",
+        ),
+        state,
+      );
+    }
+  });
+
+  it("a subtree-busy refusal leaves the database byte-identical", (t) => {
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        seedRunOnTask(storage, plan);
+      },
+      [U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    const before = databaseBytes(fixture.storage);
+    let caught: unknown;
+    try {
+      runDelete(fixture, deleteInput(objectiveId, nodeBaselineRevision));
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "subtree-busy");
+    assert.deepEqual(databaseBytes(fixture.storage), before);
+  });
+
+  it("the refusal precedence of node.delete", (t) => {
+    const pairs: Array<
+      readonly [DeleteDecisionRefusal, DeleteDecisionRefusal]
+    > = [];
+    for (let left = 0; left < DELETE_DECISION_REFUSALS.length; left++) {
+      for (
+        let right = left + 1;
+        right < DELETE_DECISION_REFUSALS.length;
+        right++
+      ) {
+        pairs.push([
+          DELETE_DECISION_REFUSALS[left]!,
+          DELETE_DECISION_REFUSALS[right]!,
+        ]);
+      }
+    }
+
+    assert.equal(DELETE_DECISION_TABLE.length, pairs.length);
+    assert.deepEqual(
+      new Set(
+        DELETE_DECISION_TABLE.map((row) => deleteDecisionLabel(row.pair)),
+      ),
+      new Set(pairs.map((pair) => deleteDecisionLabel(pair))),
+    );
+
+    for (const row of DELETE_DECISION_TABLE) {
+      const label = deleteDecisionLabel(row.pair);
+      if ("unreachable" in row) {
+        assert.ok(row.unreachable.length > 0, label);
+        continue;
+      }
+
+      const fixture = build(seedPlanFixture, [U_REV]);
+      t.after(() => fixture.dispose());
+      const error = refusedDelete(
+        fixture,
+        prepareDeleteDecisionPair(fixture, row.pair),
+      );
+      assert.equal(error.refusal, row.winner, label);
+    }
+  });
+
   it("deletes an objective and every task under it", (t) => {
     const fixture = build(seedPlanFixture, [U_REV]);
     t.after(() => fixture.dispose());
@@ -589,6 +1028,32 @@ describe("src/commands/node/delete-node.test", () => {
     blockerRefusal(fixture, "lease", [{ nodeId: taskId, blocker: "lease" }]);
   });
 
+  it("the lease blocker of binding-in-use still fires", (t) => {
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          seedLeaseOnNode(transaction, taskId);
+        });
+      },
+      [U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    let caught: unknown;
+    try {
+      runDelete(fixture, deleteInput(objectiveId, nodeBaselineRevision));
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "binding-in-use");
+    assert.deepEqual(caught.details, {
+      blockers: [{ nodeId: taskId, blocker: "lease" }],
+    });
+  });
+
   it("a workspace blocks the delete", (t) => {
     const fixture = build(
       (storage, plan, blobs) => {
@@ -613,7 +1078,7 @@ describe("src/commands/node/delete-node.test", () => {
     const fixture = build(
       (storage, plan, blobs) => {
         seedPlanFixture(storage, plan, blobs);
-        seedRunOnTask(storage, plan);
+        seedExpiredRunOnTask(storage, plan);
       },
       [U_REV],
     );
@@ -626,7 +1091,8 @@ describe("src/commands/node/delete-node.test", () => {
     const fixture = build(
       (storage, plan, blobs) => {
         seedPlanFixture(storage, plan, blobs);
-        seedRunOnTask(storage, plan, (transaction) => {
+        seedExpiredRunOnTask(storage, plan);
+        storage.transact((transaction) => {
           seedAttemptRow(transaction, { id: "attempt_1", runId: "run_2" });
         });
       },
@@ -641,7 +1107,8 @@ describe("src/commands/node/delete-node.test", () => {
     const fixture = build(
       (storage, plan, blobs) => {
         seedPlanFixture(storage, plan, blobs);
-        seedRunOnTask(storage, plan, (transaction) => {
+        seedExpiredRunOnTask(storage, plan);
+        storage.transact((transaction) => {
           seedCandidateRow(transaction, {
             id: "candidate_1",
             nodeId: taskId,
@@ -695,7 +1162,8 @@ describe("src/commands/node/delete-node.test", () => {
     const fixture = build(
       (storage, plan, blobs) => {
         seedPlanFixture(storage, plan, blobs);
-        seedRunOnTask(storage, plan, (transaction) => {
+        seedExpiredRunOnTask(storage, plan);
+        storage.transact((transaction) => {
           seedAttemptRow(transaction, { id: "attempt_1", runId: "run_2" });
         });
       },
@@ -716,6 +1184,39 @@ describe("src/commands/node/delete-node.test", () => {
         { nodeId: taskId, blocker: "run" },
         { nodeId: taskId, blocker: "attempt" },
       ],
+    });
+  });
+
+  it("a covering run beats binding-in-use and illegal-transition", (t) => {
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        seedRunOnTask(storage, plan);
+        storage.transact((transaction) => {
+          seedAttemptRow(transaction, {
+            id: "attempt_delete_active",
+            runId: "run_2",
+          });
+        });
+      },
+      [U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    let caught: unknown;
+    try {
+      runDelete(fixture, deleteInput(objectiveId, nodeBaselineRevision));
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "subtree-busy");
+    assert.deepEqual(caught.details, {
+      relation: "self",
+      nodeId: objectiveId,
+      runId: "run_1",
+      expiresAt: 1700300000000,
     });
   });
 

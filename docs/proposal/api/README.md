@@ -309,3 +309,14 @@ A path param therefore says what it points at, and a request that names the wron
 A name is unique where the proposal says so, and it is a query filter, never a path segment, so a rename never changes a URL. A body that references another resource carries its id, never its name, for the same reason.
 
 `blob.show` is the one exception: its path parameter is a content hash rather than a minted id.
+
+## Compatibility record
+
+Each row records one change outside the closed list of `## Versioning`, the epic whose human ruling made it legal, and the capability swap that announced it.
+
+| epic       | change outside the closed list                                                                                                                                       | capability retired | capability declared |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------- |
+| EPIC 050.1 | `available` becomes a required field of the `node.claim` request                                                                                                     | `external-drive`   | `worker-model`      |
+| EPIC 050.1 | `heartbeatIntervalMs` leaves the `node.claim` response                                                                                                               | `external-drive`   | `worker-model`      |
+| EPIC 050.2 | `node.heartbeat` is removed and replaced by `node.renew`                                                                                                             | `external-drive`   | `worker-model`      |
+| EPIC 050.2 | `runId` and `runFence` become required fields of the `node.renew`, `node.release` and `node.report` requests; `heartbeatIntervalMs` leaves the `node.renew` response | `external-drive`   | `worker-model`      |

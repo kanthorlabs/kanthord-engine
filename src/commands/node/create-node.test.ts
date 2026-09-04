@@ -35,10 +35,17 @@ import {
 } from "../../../test/helpers/plan.ts";
 import type { RecordedPlanCall } from "../../../test/helpers/plan.ts";
 import { createMigratedStorage } from "../../../test/helpers/database.ts";
-import { tableCounts } from "../../../test/helpers/database.ts";
+import { databaseBytes, tableCounts } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
-import { fixtureIds, seedRegistry } from "../../../test/helpers/rows.ts";
+import {
+  fixtureIds,
+  seedRegistry,
+  seedNodeState,
+  seedRunRow,
+  seedSiblingObjective,
+  seedWorkspaceOnNode,
+} from "../../../test/helpers/rows.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -61,6 +68,7 @@ const U_E_SORT3 = "01RRZ3NDEKTSV4RRFFQ69G5FCD";
 const U_DEDUPE = "01SRZ3NDEKTSV4RRFFQ69G5FCE";
 const U_REV_DEDUPE = "01TRZ3NDEKTSV4RRFFQ69G5FCF";
 const U_E_DEDUPE = "01VRZ3NDEKTSV4RRFFQ69G5FCG";
+const siblingObjectiveId = "objective_01MRZ3NDEKTSV4RRFFQ69G5FC9";
 
 const taskTwoId = planFixtureIdentities.taskTwo;
 const taskThreeId = "task_01FQZ3NDEKTSV4RRFFQ69G5FAV";
@@ -228,6 +236,158 @@ function createInput(
   };
 }
 
+type CreateDecisionRefusal =
+  | "project-not-found"
+  | "stale-revision"
+  | "subtree-busy"
+  | "plan-invalid"
+  | "illegal-transition"
+  | "binding-in-use";
+
+type CreateDecisionRow =
+  | Readonly<{
+      pair: readonly [CreateDecisionRefusal, CreateDecisionRefusal];
+      winner: CreateDecisionRefusal;
+    }>
+  | Readonly<{
+      pair: readonly [CreateDecisionRefusal, CreateDecisionRefusal];
+      unreachable: string;
+    }>;
+
+const CREATE_DECISION_REFUSALS = [
+  "project-not-found",
+  "stale-revision",
+  "subtree-busy",
+  "plan-invalid",
+  "illegal-transition",
+  "binding-in-use",
+] as const satisfies readonly CreateDecisionRefusal[];
+
+const CREATE_DECISION_TABLE = [
+  {
+    pair: ["project-not-found", "stale-revision"],
+    unreachable: "a missing project has no newest revision to compare",
+  },
+  {
+    pair: ["project-not-found", "subtree-busy"],
+    unreachable: "a missing project has no parent graph or covering run",
+  },
+  {
+    pair: ["project-not-found", "plan-invalid"],
+    unreachable: "a missing project has no graph to validate",
+  },
+  {
+    pair: ["project-not-found", "illegal-transition"],
+    unreachable: "a missing project has no ancestor state to inspect",
+  },
+  {
+    pair: ["project-not-found", "binding-in-use"],
+    unreachable: "create-node has no binding-in-use refusal",
+  },
+  { pair: ["stale-revision", "subtree-busy"], winner: "stale-revision" },
+  { pair: ["stale-revision", "plan-invalid"], winner: "stale-revision" },
+  {
+    pair: ["stale-revision", "illegal-transition"],
+    winner: "stale-revision",
+  },
+  {
+    pair: ["stale-revision", "binding-in-use"],
+    unreachable: "create-node has no binding-in-use refusal",
+  },
+  { pair: ["subtree-busy", "plan-invalid"], winner: "subtree-busy" },
+  { pair: ["subtree-busy", "illegal-transition"], winner: "subtree-busy" },
+  {
+    pair: ["subtree-busy", "binding-in-use"],
+    unreachable: "create-node has no binding-in-use refusal",
+  },
+  {
+    pair: ["plan-invalid", "illegal-transition"],
+    winner: "illegal-transition",
+  },
+  {
+    pair: ["plan-invalid", "binding-in-use"],
+    unreachable: "create-node has no binding-in-use refusal",
+  },
+  {
+    pair: ["illegal-transition", "binding-in-use"],
+    unreachable: "create-node has no binding-in-use refusal",
+  },
+] as const satisfies readonly CreateDecisionRow[];
+
+function includesCreateDecision(
+  pair: readonly [CreateDecisionRefusal, CreateDecisionRefusal],
+  refusal: CreateDecisionRefusal,
+): boolean {
+  return pair[0] === refusal || pair[1] === refusal;
+}
+
+function createDecisionLabel(
+  pair: readonly [CreateDecisionRefusal, CreateDecisionRefusal],
+): string {
+  return `${pair[0]}|${pair[1]}`;
+}
+
+function prepareCreateDecisionPair(
+  fixture: CreateFixture,
+  pair: readonly [CreateDecisionRefusal, CreateDecisionRefusal],
+): CreateNodeInput {
+  if (includesCreateDecision(pair, "subtree-busy")) {
+    fixture.storage.transact((transaction) => {
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_create_decision",
+        nodeId: planFixtureIdentities.objective,
+      });
+      seedRunRow(transaction, {
+        id: "run_create_decision",
+        kind: "objective",
+        nodeId: planFixtureIdentities.objective,
+        parentRunId: null,
+        workspaceId: "workspace_create_decision",
+        graphRevision: null,
+      });
+    });
+  }
+  if (includesCreateDecision(pair, "illegal-transition")) {
+    fixture.storage.transact((transaction) =>
+      seedNodeState(transaction, planFixtureIdentities.objective, "done"),
+    );
+  }
+
+  return createInput(
+    includesCreateDecision(pair, "stale-revision")
+      ? "revision_stale"
+      : nodeBaselineRevision,
+    {
+      kind: "task",
+      title: "Render the manifest",
+      parentId: planFixtureIdentities.objective,
+      instruction: "Build the renderer.\n",
+      acceptance: "## Acceptance criteria\n- The bytes match.\n",
+      worker: null,
+      dependsOn: includesCreateDecision(pair, "plan-invalid")
+        ? [planFixtureIdentities.initiative]
+        : [],
+    },
+  );
+}
+
+function refusedCreate(
+  fixture: CreateFixture,
+  input: CreateNodeInput,
+): NodeWriteError {
+  let caught: unknown;
+  try {
+    runCreate(fixture, input);
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(
+    caught instanceof NodeWriteError,
+    `expected a NodeWriteError, got ${String(caught)}`,
+  );
+  return caught;
+}
+
 function structuralRefusal(
   fixture: CreateFixture,
   input: CreateNodeInput,
@@ -261,12 +421,13 @@ function structuralRefusal(
 }
 
 describe("src/commands/node/create-node.test", () => {
-  it("nodeWriteRefusalCodes deep-equals the seven shared codes in order", () => {
+  it("nodeWriteRefusalCodes deep-equals the eight shared codes in order", () => {
     assert.deepEqual(nodeWriteRefusalCodes, [
       "project-not-found",
       "node-not-found",
       "kind-mismatch",
       "stale-revision",
+      "subtree-busy",
       "plan-invalid",
       "illegal-transition",
       "binding-in-use",
@@ -460,6 +621,452 @@ describe("src/commands/node/create-node.test", () => {
     assert.equal(after.node, before.node);
     assert.equal(after.edge, before.edge);
     assert.equal(after.plan_revision, before.plan_revision);
+  });
+
+  it("a create under a parent covered by an active run refuses subtree-busy", (t) => {
+    const runId = "run_create_guard";
+    const workspaceId = "workspace_create_guard";
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          seedWorkspaceOnNode(transaction, {
+            id: workspaceId,
+            nodeId: planFixtureIdentities.objective,
+          });
+          seedRunRow(transaction, {
+            id: runId,
+            kind: "objective",
+            nodeId: planFixtureIdentities.objective,
+            parentRunId: null,
+            workspaceId,
+            graphRevision: null,
+          });
+        });
+      },
+      [U_NODE, U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    let caught: unknown;
+    try {
+      runCreate(
+        fixture,
+        createInput(nodeBaselineRevision, {
+          kind: "task",
+          title: "Render the manifest",
+          parentId: planFixtureIdentities.objective,
+          instruction: "Build the renderer.\n",
+          acceptance: "## Acceptance criteria\n- The bytes match.\n",
+          worker: null,
+          dependsOn: [],
+        }),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "subtree-busy");
+    assert.deepEqual(caught.details, {
+      relation: "self",
+      nodeId: planFixtureIdentities.objective,
+      runId,
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("a create under a parent whose ancestor holds an active run refuses, naming the ancestor", (t) => {
+    const runId = "run_create_ancestor";
+    const workspaceId = "workspace_create_ancestor";
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          seedWorkspaceOnNode(transaction, {
+            id: workspaceId,
+            nodeId: planFixtureIdentities.initiative,
+          });
+          seedRunRow(transaction, {
+            id: runId,
+            kind: "objective",
+            nodeId: planFixtureIdentities.initiative,
+            parentRunId: null,
+            workspaceId,
+            graphRevision: null,
+          });
+        });
+      },
+      [U_NODE, U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    let caught: unknown;
+    try {
+      runCreate(
+        fixture,
+        createInput(nodeBaselineRevision, {
+          kind: "task",
+          title: "Render the manifest",
+          parentId: planFixtureIdentities.objective,
+          instruction: "Build the renderer.\n",
+          acceptance: "## Acceptance criteria\n- The bytes match.\n",
+          worker: null,
+          dependsOn: [],
+        }),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "subtree-busy");
+    assert.deepEqual(caught.details, {
+      relation: "ancestor",
+      nodeId: planFixtureIdentities.initiative,
+      runId,
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("a create under a parent whose sibling holds an active run succeeds", (t) => {
+    const runId = "run_create_sibling";
+    const workspaceId = "workspace_create_sibling";
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          seedSiblingObjective(
+            transaction,
+            planFixtureIdentities.initiative,
+            siblingObjectiveId,
+          );
+          seedWorkspaceOnNode(transaction, {
+            id: workspaceId,
+            nodeId: siblingObjectiveId,
+          });
+          seedRunRow(transaction, {
+            id: runId,
+            kind: "objective",
+            nodeId: siblingObjectiveId,
+            parentRunId: null,
+            workspaceId,
+            graphRevision: null,
+          });
+        });
+      },
+      [U_NODE, U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    const result = runCreate(
+      fixture,
+      createInput(nodeBaselineRevision, {
+        kind: "task",
+        title: "Render the manifest",
+        parentId: planFixtureIdentities.objective,
+        instruction: "Build the renderer.\n",
+        acceptance: "## Acceptance criteria\n- The bytes match.\n",
+        worker: null,
+        dependsOn: [],
+      }),
+    );
+
+    assert.equal(result.id, `task_${U_NODE}`);
+    assert.equal(result.revision, `revision_${U_REV}`);
+  });
+
+  it("a create under a parent whose existing child holds an active run refuses, naming the descendant", (t) => {
+    const runId = "run_create_descendant";
+    const workspaceId = "workspace_create_descendant";
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          seedWorkspaceOnNode(transaction, {
+            id: workspaceId,
+            nodeId: planFixtureIdentities.task,
+          });
+          seedRunRow(transaction, {
+            id: runId,
+            kind: "task",
+            nodeId: planFixtureIdentities.task,
+            parentRunId: null,
+            workspaceId,
+            graphRevision: null,
+          });
+        });
+      },
+      [U_NODE, U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    let caught: unknown;
+    try {
+      runCreate(
+        fixture,
+        createInput(nodeBaselineRevision, {
+          kind: "task",
+          title: "Render the manifest again",
+          parentId: planFixtureIdentities.objective,
+          instruction: "Build the renderer again.\n",
+          acceptance: "## Acceptance criteria\n- The bytes match.\n",
+          worker: null,
+          dependsOn: [],
+        }),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "subtree-busy");
+    assert.deepEqual(caught.details, {
+      relation: "descendant",
+      nodeId: planFixtureIdentities.task,
+      runId,
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("a create under a parent covered by an expired run succeeds", (t) => {
+    const runId = "run_create_expired";
+    const workspaceId = "workspace_create_expired";
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          seedWorkspaceOnNode(transaction, {
+            id: workspaceId,
+            nodeId: planFixtureIdentities.objective,
+          });
+          seedRunRow(transaction, {
+            id: runId,
+            kind: "objective",
+            nodeId: planFixtureIdentities.objective,
+            parentRunId: null,
+            workspaceId,
+            graphRevision: null,
+          });
+          transaction.run("UPDATE run SET expires_at = ? WHERE id = ?", [
+            CLOCK_START - 1,
+            runId,
+          ]);
+        });
+      },
+      [U_NODE, U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    const result = runCreate(
+      fixture,
+      createInput(nodeBaselineRevision, {
+        kind: "task",
+        title: "Render the manifest after expiry",
+        parentId: planFixtureIdentities.objective,
+        instruction: "Build the renderer after expiry.\n",
+        acceptance: "## Acceptance criteria\n- The bytes match.\n",
+        worker: null,
+        dependsOn: [],
+      }),
+    );
+
+    assert.equal(result.id, `task_${U_NODE}`);
+    assert.equal(result.revision, `revision_${U_REV}`);
+  });
+
+  it("a create under a parent covered by an ended run succeeds", (t) => {
+    const runId = "run_create_ended";
+    const workspaceId = "workspace_create_ended";
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          seedWorkspaceOnNode(transaction, {
+            id: workspaceId,
+            nodeId: planFixtureIdentities.objective,
+          });
+          seedRunRow(transaction, {
+            id: runId,
+            kind: "objective",
+            nodeId: planFixtureIdentities.objective,
+            parentRunId: null,
+            workspaceId,
+            graphRevision: null,
+            state: "ended",
+          });
+        });
+      },
+      [U_NODE, U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    const result = runCreate(
+      fixture,
+      createInput(nodeBaselineRevision, {
+        kind: "task",
+        title: "Render the manifest after the run ended",
+        parentId: planFixtureIdentities.objective,
+        instruction: "Build the renderer after the run ended.\n",
+        acceptance: "## Acceptance criteria\n- The bytes match.\n",
+        worker: null,
+        dependsOn: [],
+      }),
+    );
+
+    assert.equal(result.id, `task_${U_NODE}`);
+    assert.equal(result.revision, `revision_${U_REV}`);
+  });
+
+  it("an initiative create is never refused by the guard", (t) => {
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          const runs = [
+            {
+              id: "run_create_other_initiative",
+              workspaceId: "workspace_create_other_initiative",
+              kind: "objective" as const,
+              nodeId: planFixtureIdentities.initiative,
+            },
+            {
+              id: "run_create_other_objective",
+              workspaceId: "workspace_create_other_objective",
+              kind: "objective" as const,
+              nodeId: planFixtureIdentities.objective,
+            },
+            {
+              id: "run_create_other_task",
+              workspaceId: "workspace_create_other_task",
+              kind: "task" as const,
+              nodeId: planFixtureIdentities.task,
+            },
+          ] as const;
+          for (const run of runs) {
+            seedWorkspaceOnNode(transaction, {
+              id: run.workspaceId,
+              nodeId: run.nodeId,
+            });
+            seedRunRow(transaction, {
+              id: run.id,
+              kind: run.kind,
+              nodeId: run.nodeId,
+              parentRunId: null,
+              workspaceId: run.workspaceId,
+              graphRevision: null,
+            });
+          }
+        });
+      },
+      [U_NODE, U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    const result = runCreate(
+      fixture,
+      createInput(nodeBaselineRevision, {
+        kind: "initiative",
+        title: "Add another initiative",
+        instruction: "Start the next initiative.\n",
+        worker: null,
+        dependsOn: [],
+      }),
+    );
+
+    assert.equal(result.id, `initiative_${U_NODE}`);
+    assert.equal(result.revision, `revision_${U_REV}`);
+  });
+
+  it("a subtree-busy refusal leaves the database byte-identical", (t) => {
+    const runId = "run_create_unchanged";
+    const workspaceId = "workspace_create_unchanged";
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          seedWorkspaceOnNode(transaction, {
+            id: workspaceId,
+            nodeId: planFixtureIdentities.objective,
+          });
+          seedRunRow(transaction, {
+            id: runId,
+            kind: "objective",
+            nodeId: planFixtureIdentities.objective,
+            parentRunId: null,
+            workspaceId,
+            graphRevision: null,
+          });
+        });
+      },
+      [U_NODE, U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    const before = databaseBytes(fixture.storage);
+    let caught: unknown;
+    try {
+      runCreate(
+        fixture,
+        createInput(nodeBaselineRevision, {
+          kind: "task",
+          title: "Render the manifest without changing the database",
+          parentId: planFixtureIdentities.objective,
+          instruction: "Build the renderer without changing the database.\n",
+          acceptance: "## Acceptance criteria\n- The bytes match.\n",
+          worker: null,
+          dependsOn: [],
+        }),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "subtree-busy");
+    assert.deepEqual(databaseBytes(fixture.storage), before);
+  });
+
+  it("the refusal precedence of node.create", (t) => {
+    const pairs: Array<
+      readonly [CreateDecisionRefusal, CreateDecisionRefusal]
+    > = [];
+    for (let left = 0; left < CREATE_DECISION_REFUSALS.length; left++) {
+      for (
+        let right = left + 1;
+        right < CREATE_DECISION_REFUSALS.length;
+        right++
+      ) {
+        pairs.push([
+          CREATE_DECISION_REFUSALS[left]!,
+          CREATE_DECISION_REFUSALS[right]!,
+        ]);
+      }
+    }
+
+    assert.equal(CREATE_DECISION_TABLE.length, pairs.length);
+    assert.deepEqual(
+      new Set(
+        CREATE_DECISION_TABLE.map((row) => createDecisionLabel(row.pair)),
+      ),
+      new Set(pairs.map((pair) => createDecisionLabel(pair))),
+    );
+
+    for (const row of CREATE_DECISION_TABLE) {
+      const label = createDecisionLabel(row.pair);
+      if ("unreachable" in row) {
+        assert.ok(row.unreachable.length > 0, label);
+        continue;
+      }
+
+      const fixture = build(seedPlanFixture, [U_NODE, U_REV]);
+      t.after(() => fixture.dispose());
+      const error = refusedCreate(
+        fixture,
+        prepareCreateDecisionPair(fixture, row.pair),
+      );
+      assert.equal(error.refusal, row.winner, label);
+    }
   });
 
   it("refuses a task under an initiative as parent-missing", (t) => {

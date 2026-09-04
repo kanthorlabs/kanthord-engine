@@ -148,6 +148,15 @@ function logTail(logPath: string): string {
   }
 }
 
+function removeServerDirectory(serverDirectory: string): void {
+  fs.rmSync(serverDirectory, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 50,
+  });
+}
+
 function waitForListener(
   port: number,
   logPath: string,
@@ -379,7 +388,6 @@ export async function startSshRemote(
   seed: SeedRoot,
 ): Promise<SshRemote> {
   const serverDirectory = fs.mkdtempSync(join(tmpdir(), "kanthord-sshd-"));
-  fs.chmodSync(serverDirectory, 0o700);
 
   const hostEd25519Path = join(serverDirectory, "host_ed25519");
   const hostRsaPath = join(serverDirectory, "host_rsa");
@@ -392,6 +400,7 @@ export async function startSshRemote(
   let hostKeys: FixtureHostKey[];
   let wrongHostKey: FixtureHostKey;
   try {
+    fs.chmodSync(serverDirectory, 0o700);
     generateKey(tools, hostEd25519Path, ["-t", "ed25519"]);
     generateKey(tools, hostRsaPath, ["-t", "rsa", "-b", "2048"]);
     generateKey(tools, clientKeyPath, ["-t", "ed25519"]);
@@ -421,12 +430,7 @@ export async function startSshRemote(
       fingerprint: keyFingerprint(tools, `${wrongKeyPath}.pub`),
     };
   } catch (error) {
-    fs.rmSync(serverDirectory, {
-      recursive: true,
-      force: true,
-      maxRetries: 10,
-      retryDelay: 50,
-    });
+    removeServerDirectory(serverDirectory);
     throw error;
   }
 
@@ -462,12 +466,7 @@ export async function startSshRemote(
     }
   }
   if (sshd === null || lastError !== null) {
-    fs.rmSync(serverDirectory, {
-      recursive: true,
-      force: true,
-      maxRetries: 10,
-      retryDelay: 50,
-    });
+    removeServerDirectory(serverDirectory);
     throw new Error(
       `ssh fixture: failed to start sshd after 5 attempts; last error: ${lastError?.message ?? "unknown"}; log tail: ${logTail(logPath)}`,
     );
@@ -550,12 +549,7 @@ export async function startSshRemote(
         liveSshdRegistry.delete(sshd);
       }
       try {
-        fs.rmSync(serverDirectory, {
-          recursive: true,
-          force: true,
-          maxRetries: 10,
-          retryDelay: 50,
-        });
+        removeServerDirectory(serverDirectory);
       } catch (error) {
         if (disposeError === null) {
           disposeError =

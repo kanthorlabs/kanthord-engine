@@ -23,6 +23,7 @@ import type {
   SetNodeStateInput,
   SetNodeAssignmentInput,
 } from "./index.ts";
+import type { SubtreeExclusionRefusal } from "../../domain/run-exclusion.ts";
 
 const NODE_COLUMNS =
   "id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, assignment, repository_id, state, block_reason, discard_reason, revision, updated_at, deliverable, verify_json";
@@ -81,6 +82,15 @@ type RevisionRow = Readonly<{
   choices_blob: string | null;
   accepted_blob: string;
 }>;
+
+type RunCoverageRow = Readonly<{
+  run_id: string;
+  node_id: string;
+  expires_at: number;
+}>;
+
+const compareBytewise = (left: string, right: string): number =>
+  Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
 
 const toNode = (row: NodeRow, dependencies: readonly string[]): StoredNode => ({
   id: row.id,
@@ -181,6 +191,78 @@ export class SqlitePlanStore implements PlanStore {
       }
     }
     return toNode(row, dependencies);
+  }
+
+  runCoversNode(
+    transaction: Transaction,
+    seedIds: readonly string[],
+    now: number,
+  ): SubtreeExclusionRefusal | null {
+    if (seedIds.length === 0) {
+      return null;
+    }
+
+    const placeholders = seedIds.map(() => "?").join(", ");
+    const descendantRows = transaction.all(
+      "WITH RECURSIVE descendant(id) AS (SELECT id FROM node WHERE id IN (" +
+        placeholders +
+        ") UNION ALL SELECT n.id FROM node n JOIN descendant d ON n.parent_id = d.id) SELECT id FROM descendant",
+      seedIds,
+    ) as readonly Readonly<{ id: string }>[];
+    const ancestorRows = transaction.all(
+      "WITH RECURSIVE ancestor(id) AS (SELECT parent_id FROM node WHERE id IN (" +
+        placeholders +
+        ") AND parent_id IS NOT NULL UNION ALL SELECT n.parent_id FROM node n JOIN ancestor a ON n.id = a.id WHERE n.parent_id IS NOT NULL) SELECT id FROM ancestor",
+      seedIds,
+    ) as readonly Readonly<{ id: string }>[];
+
+    const closureIds = [
+      ...new Set([
+        ...descendantRows.map((row) => row.id),
+        ...ancestorRows.map((row) => row.id),
+      ]),
+    ].sort(compareBytewise);
+    if (closureIds.length === 0) {
+      return null;
+    }
+
+    const closurePlaceholders = closureIds.map(() => "?").join(", ");
+    const rows = [
+      ...(transaction.all(
+        "SELECT id AS run_id, node_id, expires_at FROM run WHERE node_id IN (" +
+          closurePlaceholders +
+          ") AND state = 'active' AND expires_at > ? ORDER BY node_id ASC, id ASC",
+        [...closureIds, now],
+      ) as readonly RunCoverageRow[]),
+    ].sort((left, right) => {
+      const byNode = compareBytewise(left.node_id, right.node_id);
+      return byNode === 0 ? compareBytewise(left.run_id, right.run_id) : byNode;
+    });
+    if (rows.length === 0) {
+      return null;
+    }
+
+    const seeds = new Set(seedIds);
+    const ancestors = new Set(ancestorRows.map((row) => row.id));
+    for (const relation of ["self", "ancestor", "descendant"] as const) {
+      const row = rows.find((candidate) => {
+        if (relation === "self") return seeds.has(candidate.node_id);
+        if (relation === "ancestor") return ancestors.has(candidate.node_id);
+        return (
+          !seeds.has(candidate.node_id) && !ancestors.has(candidate.node_id)
+        );
+      });
+      if (row !== undefined) {
+        return {
+          refusal: "subtree-busy",
+          relation,
+          nodeId: row.node_id,
+          runId: row.run_id,
+          expiresAt: row.expires_at,
+        };
+      }
+    }
+    return null;
   }
 
   readAllNodes(transaction: Transaction): readonly StoredNode[] {

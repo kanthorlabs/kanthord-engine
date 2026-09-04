@@ -31,11 +31,20 @@ import {
 } from "../../../test/helpers/plan.ts";
 import {
   createMigratedStorage,
+  databaseBytes,
   tableCounts,
 } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
-import { fixtureIds, seedRegistry } from "../../../test/helpers/rows.ts";
+import {
+  fixtureIds,
+  seedNodeState,
+  seedRegistry,
+  seedRunRow,
+  seedSecondProjectGraph,
+  seedLeaseOnNode,
+  seedWorkspaceOnNode,
+} from "../../../test/helpers/rows.ts";
 import type { Storage, Transaction } from "../../services/storage/index.ts";
 import type { PlanStore } from "../../services/plan/index.ts";
 import type { BlobStore } from "../../services/blob/index.ts";
@@ -675,7 +684,7 @@ function seedAttemptCommitOnTask(storage: Storage): void {
       ],
     );
     transaction.run(
-      "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, ?, ?, 'internal', ?, ?, ?, ?, NULL, NULL, ?, '[]', 1700300000000, 1700300000000, ?, NULL, NULL)",
+      "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, ?, ?, 'internal', ?, ?, ?, ?, NULL, NULL, ?, '[]', 1, 1, ?, NULL, NULL)",
       [
         "run_att_parent",
         "structural",
@@ -689,7 +698,7 @@ function seedAttemptCommitOnTask(storage: Storage): void {
       ],
     );
     transaction.run(
-      "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, ?, ?, 'internal', ?, ?, ?, ?, NULL, NULL, ?, '[]', 1700300000000, 1700300000000, ?, NULL, NULL)",
+      "INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at) VALUES (?, ?, ?, 'internal', ?, ?, ?, ?, NULL, NULL, ?, '[]', 1, 1, ?, NULL, NULL)",
       [
         "run_att",
         "execution",
@@ -1128,7 +1137,867 @@ function sixStateRows(
   return new Map(rows.map((row) => [row.id as string, { ...row }]));
 }
 
+type ImportDecisionRefusal =
+  | "project-not-found"
+  | "stale-revision"
+  | "choices-stale"
+  | "subtree-busy"
+  | "plan-invalid"
+  | "choices-invalid"
+  | "choices-changed"
+  | "idempotency-mismatch";
+
+type ImportDecisionRow =
+  | Readonly<{
+      pair: readonly [ImportDecisionRefusal, ImportDecisionRefusal];
+      winner: ImportDecisionRefusal;
+    }>
+  | Readonly<{
+      pair: readonly [ImportDecisionRefusal, ImportDecisionRefusal];
+      unreachable: string;
+    }>;
+
+const IMPORT_DECISION_REFUSALS = [
+  "project-not-found",
+  "stale-revision",
+  "choices-stale",
+  "subtree-busy",
+  "plan-invalid",
+  "choices-invalid",
+  "choices-changed",
+  "idempotency-mismatch",
+] as const satisfies readonly ImportDecisionRefusal[];
+
+const IMPORT_DECISION_TABLE = [
+  {
+    pair: ["project-not-found", "stale-revision"],
+    unreachable: "a missing project has no newest revision to compare",
+  },
+  {
+    pair: ["project-not-found", "choices-stale"],
+    unreachable: "a missing project has no validation revision to compare",
+  },
+  {
+    pair: ["project-not-found", "subtree-busy"],
+    unreachable: "a missing project has no graph or covering run",
+  },
+  {
+    pair: ["project-not-found", "plan-invalid"],
+    unreachable: "a missing project has no submission context to validate",
+  },
+  {
+    pair: ["project-not-found", "choices-invalid"],
+    unreachable: "a missing project has no candidate to validate",
+  },
+  {
+    pair: ["project-not-found", "choices-changed"],
+    unreachable: "a missing project has no choices to compare",
+  },
+  {
+    pair: ["project-not-found", "idempotency-mismatch"],
+    unreachable: "a missing project has no recorded import to replay",
+  },
+  { pair: ["stale-revision", "choices-stale"], winner: "stale-revision" },
+  { pair: ["stale-revision", "subtree-busy"], winner: "stale-revision" },
+  { pair: ["stale-revision", "plan-invalid"], winner: "stale-revision" },
+  { pair: ["stale-revision", "choices-invalid"], winner: "stale-revision" },
+  { pair: ["stale-revision", "choices-changed"], winner: "stale-revision" },
+  {
+    pair: ["stale-revision", "idempotency-mismatch"],
+    winner: "idempotency-mismatch",
+  },
+  { pair: ["choices-stale", "subtree-busy"], winner: "choices-stale" },
+  { pair: ["choices-stale", "plan-invalid"], winner: "choices-stale" },
+  { pair: ["choices-stale", "choices-invalid"], winner: "choices-stale" },
+  { pair: ["choices-stale", "choices-changed"], winner: "choices-stale" },
+  {
+    pair: ["choices-stale", "idempotency-mismatch"],
+    winner: "idempotency-mismatch",
+  },
+  { pair: ["subtree-busy", "plan-invalid"], winner: "subtree-busy" },
+  { pair: ["subtree-busy", "choices-invalid"], winner: "subtree-busy" },
+  { pair: ["subtree-busy", "choices-changed"], winner: "subtree-busy" },
+  {
+    pair: ["subtree-busy", "idempotency-mismatch"],
+    winner: "idempotency-mismatch",
+  },
+  { pair: ["plan-invalid", "choices-invalid"], winner: "plan-invalid" },
+  { pair: ["plan-invalid", "choices-changed"], winner: "plan-invalid" },
+  {
+    pair: ["plan-invalid", "idempotency-mismatch"],
+    winner: "idempotency-mismatch",
+  },
+  {
+    pair: ["choices-invalid", "choices-changed"],
+    winner: "choices-changed",
+  },
+  {
+    pair: ["choices-invalid", "idempotency-mismatch"],
+    winner: "idempotency-mismatch",
+  },
+  {
+    pair: ["choices-changed", "idempotency-mismatch"],
+    winner: "idempotency-mismatch",
+  },
+] as const satisfies readonly ImportDecisionRow[];
+
+function includesImportDecision(
+  pair: readonly [ImportDecisionRefusal, ImportDecisionRefusal],
+  refusal: ImportDecisionRefusal,
+): boolean {
+  return pair[0] === refusal || pair[1] === refusal;
+}
+
+function importDecisionLabel(
+  pair: readonly [ImportDecisionRefusal, ImportDecisionRefusal],
+): string {
+  return `${pair[0]}|${pair[1]}`;
+}
+
+function importDecisionIdentity(document: RenderedDocument): string {
+  const identity = document.content.match(/^id: "([^"]+)"/m)?.[1];
+  assert.ok(identity, document.path);
+  return identity;
+}
+
+function importDecisionChoices(
+  documents: readonly RenderedDocument[],
+  databaseOnlyIds: readonly string[] = [],
+): readonly Readonly<{ id: string; take: Choice }>[] {
+  return [
+    ...documents.map((document) => {
+      const id = importDecisionIdentity(document);
+      return {
+        id,
+        take: (id === planFixtureIdentities.task
+          ? "submitted"
+          : "database") as Choice,
+      };
+    }),
+    ...databaseOnlyIds.map((id) => ({ id, take: "database" as const })),
+  ];
+}
+
+function importDecisionInput(
+  fixture: ImportFixture,
+  documents: readonly Readonly<{ path: string; content: string }>[],
+  choices: readonly Readonly<{ id: string; take: Choice }>[],
+  overrides: Readonly<
+    Partial<
+      Pick<
+        ImportPlanInput,
+        "projectId" | "fromRevision" | "importId" | "validatedRevision"
+      >
+    >
+  > = {},
+): ImportPlanInput {
+  return {
+    projectId: fixtureIds.project,
+    fromRevision: fixtureIds.planRevision,
+    importId: "imp_decision",
+    documents,
+    choices,
+    validatedRevision: fixtureIds.planRevision,
+    documentsHash: planHash(fixture, documents, []),
+    actor: "human_1",
+    ...overrides,
+  };
+}
+
+function importDecisionChangedTask(
+  documents: readonly RenderedDocument[],
+): readonly RenderedDocument[] {
+  return documents.map((document) =>
+    document.content.includes("Do the task work.")
+      ? {
+          ...document,
+          content: document.content.replace("---\n", '---\nworker: "tdd@1"\n'),
+        }
+      : document,
+  );
+}
+
+function importDecisionCycleDocuments(
+  documents: readonly RenderedDocument[],
+): readonly RenderedDocument[] {
+  return documents
+    .filter(
+      (document) => !document.content.includes("Do the second task work."),
+    )
+    .map((document) =>
+      document.content.includes("Do the task work.")
+        ? {
+            ...document,
+            content: document.content.replace(
+              "---\n",
+              `---\ndepends_on:\n  - "${planFixtureIdentities.taskTwo}"\n`,
+            ),
+          }
+        : document,
+    );
+}
+
+function importDecisionInvalidDocuments(
+  documents: readonly RenderedDocument[],
+): readonly RenderedDocument[] {
+  return documents.map((document) =>
+    document.content.includes("Do the objective work.")
+      ? {
+          ...document,
+          content: document.content.replace('repo: "kanthord-verify"\n', ""),
+        }
+      : document,
+  );
+}
+
+function seedImportDecisionRun(fixture: ImportFixture): void {
+  fixture.storage.transact((transaction) => {
+    seedWorkspaceOnNode(transaction, {
+      id: "workspace_import_decision",
+      nodeId: planFixtureIdentities.task,
+    });
+    seedRunRow(transaction, {
+      id: "run_import_decision",
+      kind: "task",
+      nodeId: planFixtureIdentities.task,
+      parentRunId: null,
+      workspaceId: "workspace_import_decision",
+    });
+  });
+}
+
+function prepareImportDecisionPair(
+  fixture: ImportFixture,
+  pair: readonly [ImportDecisionRefusal, ImportDecisionRefusal],
+): ImportPlanInput {
+  const has = (refusal: ImportDecisionRefusal) =>
+    includesImportDecision(pair, refusal);
+
+  if (has("idempotency-mismatch")) {
+    const documents = fixtureDocuments(fixture);
+    runImport(
+      fixture,
+      importDecisionInput(
+        fixture,
+        documents,
+        importDecisionChoices(documents),
+        { importId: "imp_decision_replay" },
+      ),
+    );
+  }
+
+  if (has("choices-invalid")) {
+    seedTaskTwo(fixture.storage, fixture.plan, fixture.blobs, true);
+  }
+  if (has("choices-changed")) {
+    fixture.storage.transact((transaction) =>
+      seedNodeState(transaction, planFixtureIdentities.task, "done"),
+    );
+  }
+  if (has("subtree-busy")) {
+    seedImportDecisionRun(fixture);
+  }
+
+  let documents = fixtureDocuments(fixture);
+  if (has("choices-invalid")) {
+    documents = importDecisionCycleDocuments(documents);
+  }
+  if (has("plan-invalid")) {
+    documents = importDecisionInvalidDocuments(documents);
+  }
+  if (has("choices-changed")) {
+    documents = importDecisionChangedTask(documents);
+  }
+
+  const input = importDecisionInput(
+    fixture,
+    documents,
+    importDecisionChoices(
+      documents,
+      has("choices-invalid") ? [planFixtureIdentities.taskTwo] : [],
+    ),
+    {
+      fromRevision: has("stale-revision")
+        ? "revision_decision_stale"
+        : fixtureIds.planRevision,
+      validatedRevision: has("choices-stale")
+        ? "revision_decision_stale"
+        : fixtureIds.planRevision,
+    },
+  );
+  if (!has("idempotency-mismatch")) return input;
+  return {
+    ...input,
+    importId: "imp_decision_replay",
+    fromRevision: "revision_decision_mismatch",
+  };
+}
+
 describe("src/commands/plan/import-plan.test", () => {
+  it("an import submitting a node covered by an active run refuses subtree-busy", (t) => {
+    const fixture = build([U_REV]);
+    t.after(() => fixture.dispose());
+    seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+    seedWorkspaceOnTask(fixture.storage);
+    fixture.storage.transact((transaction) =>
+      seedRunRow(transaction, {
+        id: "run_import",
+        kind: "task",
+        nodeId: planFixtureIdentities.task,
+        parentRunId: null,
+        workspaceId: "workspace_import",
+      }),
+    );
+
+    const task = fixtureTaskDocument(fixture);
+    const documents = [
+      {
+        ...task,
+        content: task.content.replace(
+          'title: "Harden the verify CLI"',
+          'title: "Renamed task"',
+        ),
+      },
+    ];
+    const error = importRefusal(fixture, {
+      projectId: fixtureIds.project,
+      fromRevision: fixtureIds.planRevision,
+      importId: "imp_subtree_busy",
+      documents,
+      choices: [
+        { id: planFixtureIdentities.initiative, take: "database" },
+        { id: planFixtureIdentities.objective, take: "database" },
+        { id: planFixtureIdentities.task, take: "submitted" },
+      ],
+      validatedRevision: fixtureIds.planRevision,
+      documentsHash: planHash(fixture, documents, []),
+      actor: "human_1",
+    });
+
+    assert.equal(error.refusal, "subtree-busy");
+    assert.deepEqual(error.details, {
+      relation: "self",
+      nodeId: planFixtureIdentities.task,
+      runId: "run_import",
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("an import submitting a node whose ancestor holds an active run refuses, naming the ancestor", (t) => {
+    const fixture = build([U_REV]);
+    t.after(() => fixture.dispose());
+    seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+    seedWorkspaceOnTask(fixture.storage);
+    fixture.storage.transact((transaction) =>
+      seedRunRow(transaction, {
+        id: "run_import_ancestor",
+        kind: "objective",
+        nodeId: planFixtureIdentities.objective,
+        parentRunId: null,
+        workspaceId: "workspace_import",
+      }),
+    );
+
+    const task = fixtureTaskDocument(fixture);
+    const documents = [
+      {
+        ...task,
+        content: task.content.replace(
+          'title: "Harden the verify CLI"',
+          'title: "Renamed task"',
+        ),
+      },
+    ];
+    const error = importRefusal(fixture, {
+      projectId: fixtureIds.project,
+      fromRevision: fixtureIds.planRevision,
+      importId: "imp_subtree_busy_ancestor",
+      documents,
+      choices: [
+        { id: planFixtureIdentities.initiative, take: "database" },
+        { id: planFixtureIdentities.objective, take: "database" },
+        { id: planFixtureIdentities.task, take: "submitted" },
+      ],
+      validatedRevision: fixtureIds.planRevision,
+      documentsHash: planHash(fixture, documents, []),
+      actor: "human_1",
+    });
+
+    assert.equal(error.refusal, "subtree-busy");
+    assert.deepEqual(error.details, {
+      relation: "ancestor",
+      nodeId: planFixtureIdentities.objective,
+      runId: "run_import_ancestor",
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("an import deleting a node whose descendant holds an active run refuses, naming the descendant", (t) => {
+    const fixture = build([U_REV]);
+    t.after(() => fixture.dispose());
+    seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+    seedWorkspaceOnTask(fixture.storage);
+    fixture.storage.transact((transaction) =>
+      seedRunRow(transaction, {
+        id: "run_import_descendant",
+        kind: "task",
+        nodeId: planFixtureIdentities.task,
+        parentRunId: null,
+        workspaceId: "workspace_import",
+      }),
+    );
+
+    const documents = fixtureDocuments(fixture).filter(
+      (document) => !document.content.includes("Do the objective work."),
+    );
+    const error = importRefusal(fixture, {
+      projectId: fixtureIds.project,
+      fromRevision: fixtureIds.planRevision,
+      importId: "imp_subtree_busy_descendant",
+      documents,
+      choices: [
+        { id: planFixtureIdentities.initiative, take: "database" },
+        { id: planFixtureIdentities.task, take: "database" },
+      ],
+      validatedRevision: fixtureIds.planRevision,
+      documentsHash: planHash(fixture, documents, []),
+      actor: "human_1",
+    });
+
+    assert.equal(error.refusal, "subtree-busy");
+    assert.deepEqual(error.details, {
+      relation: "descendant",
+      nodeId: planFixtureIdentities.task,
+      runId: "run_import_descendant",
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("an import touching only unrelated nodes succeeds", (t) => {
+    const fixture = build([U_REV]);
+    t.after(() => fixture.dispose());
+    seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+    fixture.storage.transact((transaction) => {
+      seedSecondProjectGraph(transaction);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_project_b",
+        nodeId: "task_pb",
+      });
+      seedRunRow(transaction, {
+        id: "run_project_b",
+        kind: "task",
+        nodeId: "task_pb",
+        parentRunId: null,
+        workspaceId: "workspace_project_b",
+      });
+    });
+
+    const documents = fixtureDocuments(fixture);
+    const result = runImport(fixture, {
+      projectId: fixtureIds.project,
+      fromRevision: fixtureIds.planRevision,
+      importId: "imp_unrelated_project",
+      documents,
+      choices: documents.map((document) => ({
+        id: document.content.match(/^id: "([^"]+)"/m)![1]!,
+        take: "submitted" as const,
+      })),
+      validatedRevision: fixtureIds.planRevision,
+      documentsHash: planHash(fixture, documents, []),
+      actor: "human_1",
+    });
+
+    assert.equal(result.retried, false);
+    assert.equal(result.revision, `revision_${U_REV}`);
+    const otherProjectRun = fixture.storage.transact((transaction) =>
+      transaction.get("SELECT state FROM run WHERE id = ?", ["run_project_b"]),
+    ) as Readonly<{ state: string }>;
+    assert.equal(otherProjectRun.state, "active");
+  });
+
+  it("an import over an expired run succeeds", (t) => {
+    const cases = [
+      {
+        runId: "run_import_expired",
+        workspaceId: "workspace_import_expired",
+        state: "active" as const,
+        expired: true,
+      },
+      {
+        runId: "run_import_ended",
+        workspaceId: "workspace_import_ended",
+        state: "ended" as const,
+        expired: false,
+      },
+    ] as const;
+
+    for (const current of cases) {
+      const fixture = build([U_REV]);
+      t.after(() => fixture.dispose());
+      seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+      fixture.storage.transact((transaction) => {
+        seedWorkspaceOnNode(transaction, {
+          id: current.workspaceId,
+          nodeId: planFixtureIdentities.task,
+        });
+        seedRunRow(transaction, {
+          id: current.runId,
+          kind: "task",
+          nodeId: planFixtureIdentities.task,
+          parentRunId: null,
+          workspaceId: current.workspaceId,
+          state: current.state,
+        });
+        if (current.expired) {
+          transaction.run("UPDATE run SET expires_at = ? WHERE id = ?", [
+            1700000000000 - 1,
+            current.runId,
+          ]);
+        }
+      });
+
+      const documents = fixtureDocuments(fixture);
+      const result = runImport(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: fixtureIds.planRevision,
+        importId: current.runId,
+        documents,
+        choices: documents.map((document) => ({
+          id: document.content.match(/^id: "([^"]+)"/m)![1]!,
+          take: "submitted" as const,
+        })),
+        validatedRevision: fixtureIds.planRevision,
+        documentsHash: planHash(fixture, documents, []),
+        actor: "human_1",
+      });
+
+      assert.equal(result.retried, false, current.runId);
+      assert.equal(result.revision, `revision_${U_REV}`, current.runId);
+    }
+  });
+
+  it("a subtree-busy refusal leaves the database byte-identical", (t) => {
+    const fixture = build([U_REV]);
+    t.after(() => fixture.dispose());
+    seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+    seedWorkspaceOnTask(fixture.storage);
+    fixture.storage.transact((transaction) =>
+      seedRunRow(transaction, {
+        id: "run_import_unchanged",
+        kind: "task",
+        nodeId: planFixtureIdentities.task,
+        parentRunId: null,
+        workspaceId: "workspace_import",
+      }),
+    );
+
+    const task = fixtureTaskDocument(fixture);
+    const documents = [
+      {
+        ...task,
+        content: task.content.replace(
+          'title: "Harden the verify CLI"',
+          'title: "Renamed task without changing the database"',
+        ),
+      },
+    ];
+    const before = databaseBytes(fixture.storage);
+    const error = importRefusal(fixture, {
+      projectId: fixtureIds.project,
+      fromRevision: fixtureIds.planRevision,
+      importId: "imp_subtree_busy_unchanged",
+      documents,
+      choices: [
+        { id: planFixtureIdentities.initiative, take: "database" },
+        { id: planFixtureIdentities.objective, take: "database" },
+        { id: planFixtureIdentities.task, take: "submitted" },
+      ],
+      validatedRevision: fixtureIds.planRevision,
+      documentsHash: planHash(fixture, documents, []),
+      actor: "human_1",
+    });
+
+    assert.equal(error.refusal, "subtree-busy");
+    assert.deepEqual(databaseBytes(fixture.storage), before);
+  });
+
+  it("an idempotent replay is never refused by the guard", (t) => {
+    const fixture = build([U_REV]);
+    t.after(() => fixture.dispose());
+    seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+
+    const task = fixtureTaskDocument(fixture);
+    const documents = [
+      {
+        ...task,
+        content: task.content.replace(
+          'title: "Harden the verify CLI"',
+          'title: "Renamed task for replay"',
+        ),
+      },
+    ];
+    const input: ImportPlanInput = {
+      projectId: fixtureIds.project,
+      fromRevision: fixtureIds.planRevision,
+      importId: "imp_subtree_busy_replay",
+      documents,
+      choices: [
+        { id: planFixtureIdentities.initiative, take: "database" },
+        { id: planFixtureIdentities.objective, take: "database" },
+        { id: planFixtureIdentities.task, take: "submitted" },
+      ],
+      validatedRevision: fixtureIds.planRevision,
+      documentsHash: planHash(fixture, documents, []),
+      actor: "human_1",
+    };
+
+    const first = runImport(fixture, input);
+    seedWorkspaceOnTask(fixture.storage);
+    fixture.storage.transact((transaction) =>
+      seedRunRow(transaction, {
+        id: "run_import_replay",
+        kind: "task",
+        nodeId: planFixtureIdentities.task,
+        parentRunId: null,
+        workspaceId: "workspace_import",
+      }),
+    );
+
+    const replay = runImport(fixture, input);
+
+    assert.deepEqual(replay, {
+      revision: first.revision,
+      documents: first.documents,
+      absent: [],
+      retried: true,
+      completeness: first.completeness,
+    });
+  });
+
+  it("an idempotent replay reads no clock", (t) => {
+    const fixture = build([U_REV]);
+    t.after(() => fixture.dispose());
+    const counted = countingClock(fixture.clock);
+    const countedFixture = { ...fixture, clock: counted.clock };
+    seedPlanFixture(
+      countedFixture.storage,
+      countedFixture.plan,
+      countedFixture.blobs,
+    );
+
+    const task = fixtureTaskDocument(countedFixture);
+    const documents = [
+      {
+        ...task,
+        content: task.content.replace(
+          'title: "Harden the verify CLI"',
+          'title: "Renamed task for clock replay"',
+        ),
+      },
+    ];
+    const input: ImportPlanInput = {
+      projectId: fixtureIds.project,
+      fromRevision: fixtureIds.planRevision,
+      importId: "imp_subtree_busy_clock_replay",
+      documents,
+      choices: [
+        { id: planFixtureIdentities.initiative, take: "database" },
+        { id: planFixtureIdentities.objective, take: "database" },
+        { id: planFixtureIdentities.task, take: "submitted" },
+      ],
+      validatedRevision: fixtureIds.planRevision,
+      documentsHash: planHash(countedFixture, documents, []),
+      actor: "human_1",
+    };
+
+    runImport(countedFixture, input);
+    seedWorkspaceOnTask(countedFixture.storage);
+    countedFixture.storage.transact((transaction) =>
+      seedRunRow(transaction, {
+        id: "run_import_clock_replay",
+        kind: "task",
+        nodeId: planFixtureIdentities.task,
+        parentRunId: null,
+        workspaceId: "workspace_import",
+      }),
+    );
+
+    const beforeReplay = counted.count();
+    assert.equal(beforeReplay, 1);
+    runImport(countedFixture, input);
+
+    assert.equal(counted.count(), beforeReplay, "a replay reads no clock");
+  });
+
+  it("the deleted set is seeded from the graph read", (t) => {
+    const fixture = build([U_REV]);
+    t.after(() => fixture.dispose());
+    seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+    seedWorkspaceOnTask(fixture.storage);
+    fixture.storage.transact((transaction) =>
+      seedRunRow(transaction, {
+        id: "run_import_deleted_set",
+        kind: "task",
+        nodeId: planFixtureIdentities.task,
+        parentRunId: null,
+        workspaceId: "workspace_import",
+      }),
+    );
+
+    const documents = fixtureDocuments(fixture).filter(
+      (document) => !document.content.includes("Do the objective work."),
+    );
+    const error = importRefusal(fixture, {
+      projectId: fixtureIds.project,
+      fromRevision: fixtureIds.planRevision,
+      importId: "imp_deleted_set",
+      documents,
+      choices: [
+        { id: planFixtureIdentities.initiative, take: "database" },
+        { id: planFixtureIdentities.task, take: "database" },
+      ],
+      validatedRevision: fixtureIds.planRevision,
+      documentsHash: planHash(fixture, documents, []),
+      actor: "human_1",
+    });
+
+    assert.equal(error.refusal, "subtree-busy");
+    assert.deepEqual(error.details, {
+      relation: "descendant",
+      nodeId: planFixtureIdentities.task,
+      runId: "run_import_deleted_set",
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("the refusal precedence of plan.import", (t) => {
+    const pairs: Array<
+      readonly [ImportDecisionRefusal, ImportDecisionRefusal]
+    > = [];
+    for (let left = 0; left < IMPORT_DECISION_REFUSALS.length; left++) {
+      for (
+        let right = left + 1;
+        right < IMPORT_DECISION_REFUSALS.length;
+        right++
+      ) {
+        pairs.push([
+          IMPORT_DECISION_REFUSALS[left]!,
+          IMPORT_DECISION_REFUSALS[right]!,
+        ]);
+      }
+    }
+
+    assert.equal(IMPORT_DECISION_TABLE.length, pairs.length);
+    assert.deepEqual(
+      new Set(
+        IMPORT_DECISION_TABLE.map((row) => importDecisionLabel(row.pair)),
+      ),
+      new Set(pairs.map((pair) => importDecisionLabel(pair))),
+    );
+
+    for (const row of IMPORT_DECISION_TABLE) {
+      const label = importDecisionLabel(row.pair);
+      if ("unreachable" in row) {
+        assert.ok(row.unreachable.length > 0, label);
+        continue;
+      }
+
+      const fixture = build([U_REV]);
+      t.after(() => fixture.dispose());
+      seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+      const input = prepareImportDecisionPair(fixture, row.pair);
+      const before = databaseBytes(fixture.storage);
+      const recordedBefore = fixture.recorded.length;
+      const error = importRefusal(fixture, input);
+
+      assert.equal(error.refusal, row.winner, label);
+      assert.deepEqual(databaseBytes(fixture.storage), before, label);
+      assert.equal(fixture.recorded.length, recordedBefore, label);
+    }
+  });
+
+  it("a stale fromRevision beats a covering run", (t) => {
+    const fixture = build([U_REV]);
+    t.after(() => fixture.dispose());
+    seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+    seedWorkspaceOnTask(fixture.storage);
+    fixture.storage.transact((transaction) =>
+      seedRunRow(transaction, {
+        id: "run_import_stale_revision",
+        kind: "task",
+        nodeId: planFixtureIdentities.task,
+        parentRunId: null,
+        workspaceId: "workspace_import",
+      }),
+    );
+
+    const documents = fixtureDocuments(fixture);
+    const input = importDecisionInput(
+      fixture,
+      documents,
+      importDecisionChoices(documents),
+      { fromRevision: "revision_import_stale" },
+    );
+    const before = databaseBytes(fixture.storage);
+    const recordedBefore = fixture.recorded.length;
+    const error = importRefusal(fixture, input);
+
+    assert.equal(error.refusal, "stale-revision");
+    assert.deepEqual(error.details, {
+      guard: "project",
+      expected: "revision_import_stale",
+      actual: fixtureIds.planRevision,
+    });
+    assert.deepEqual(databaseBytes(fixture.storage), before);
+    assert.equal(fixture.recorded.length, recordedBefore);
+  });
+
+  it("the command reads the clock once", (t) => {
+    const fixture = build([U_REV]);
+    t.after(() => fixture.dispose());
+    const counted = countingClock(fixture.clock);
+    const countedFixture = { ...fixture, clock: counted.clock };
+    seedPlanFixture(
+      countedFixture.storage,
+      countedFixture.plan,
+      countedFixture.blobs,
+    );
+
+    const documents = fixtureDocuments(countedFixture);
+    const choices = documents.map((document) => ({
+      id: importDecisionIdentity(document),
+      take: "submitted" as const,
+    }));
+    const result = runImport(
+      countedFixture,
+      importDecisionInput(fixture, documents, choices, {
+        importId: "imp_clock_once",
+      }),
+    );
+
+    assert.equal(result.revision, `revision_${U_REV}`);
+    assert.equal(result.retried, false);
+    assert.deepEqual(result.absent, []);
+    assert.deepEqual(result.documents, documents);
+    assert.equal(counted.count(), 1);
+    const updatedAt = countedFixture.storage.transact((transaction) =>
+      (
+        transaction.all("SELECT DISTINCT updated_at FROM node") as readonly {
+          updated_at: number;
+        }[]
+      ).map((row) => ({ updated_at: row.updated_at })),
+    );
+    assert.deepEqual(updatedAt, [{ updated_at: 1700000000000 }]);
+    const revision = countedFixture.storage.transact((transaction) =>
+      transaction.get("SELECT id, parent_id FROM plan_revision WHERE id = ?", [
+        result.revision,
+      ]),
+    ) as Readonly<{ id: string; parent_id: string | null }> | undefined;
+    assert.ok(revision);
+    assert.equal(revision.id, result.revision);
+    assert.equal(revision.parent_id, fixtureIds.planRevision);
+  });
+
   it("refuses identities already bound to another project and writes nothing", (t) => {
     const fixture = build([
       "01MZ3NDEKTSV4RRFFQ69G5FC1",
@@ -2740,6 +3609,65 @@ Build the renderer.
       ) as Readonly<{ id: string }> | undefined;
       assert.ok(edge, "the new dependency commits");
       assert.equal(edge.id, `edge_${U_EDGE}`);
+    });
+
+    it("an import moving a node holding an orphan lease is admitted", (t) => {
+      const fixture = build([U_REV]);
+      t.after(() => fixture.dispose());
+      seedPlanFixture(fixture.storage, fixture.plan, fixture.blobs);
+      fixture.storage.transact((transaction) =>
+        seedLeaseOnNode(transaction, planFixtureIdentities.task),
+      );
+
+      const exported = fixtureDocuments(fixture);
+      const initiative = exported.find((document) =>
+        document.content.includes('kind: "initiative"'),
+      );
+      const task = fixtureTaskDocument(fixture);
+      assert.ok(initiative);
+      const parentDirectory = `${initiative.path.slice(0, initiative.path.lastIndexOf("/"))}/new-parent--${low(U_O2)}`;
+      const newParent = {
+        path: `${parentDirectory}/objective.md`,
+        content: `---
+id: "objective_${U_O2}"
+kind: "objective"
+title: "New parent"
+repo: "kanthord-verify"
+---
+New parent work.
+`,
+      };
+      const movedTask = {
+        ...task,
+        path: `${parentDirectory}/${task.path.slice(task.path.lastIndexOf("/") + 1)}`,
+      };
+      const documents = [
+        ...exported.filter((document) => document.path !== task.path),
+        newParent,
+        movedTask,
+      ];
+      const result = runImport(fixture, {
+        projectId: fixtureIds.project,
+        fromRevision: fixtureIds.planRevision,
+        importId: "imp_orphan_lease_move",
+        documents,
+        choices: [
+          { id: planFixtureIdentities.initiative, take: "database" },
+          { id: planFixtureIdentities.objective, take: "database" },
+          { id: `objective_${U_O2}`, take: "submitted" },
+          { id: planFixtureIdentities.task, take: "submitted" },
+        ],
+        validatedRevision: fixtureIds.planRevision,
+        documentsHash: planHash(fixture, documents, []),
+        actor: "human_1",
+      });
+
+      assert.equal(result.revision, `revision_${U_REV}`);
+      const storedTask = fixture.storage.transact((transaction) =>
+        fixture.plan.readNode(transaction, planFixtureIdentities.task),
+      );
+      assert.ok(storedTask);
+      assert.equal(storedTask.parentId, `objective_${U_O2}`);
     });
 
     it("an objective whose descendant task holds an attempt commit cannot change repo", (t) => {

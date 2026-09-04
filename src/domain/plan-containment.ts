@@ -5,10 +5,5 @@ export function containmentMovable(
   kind: NodeKind,
   facts: ContainmentFacts,
 ): boolean {
-  return (
-    !facts.lease &&
-    !facts.workspace &&
-    !facts.attemptCommit &&
-    !facts.retainedCommit
-  );
+  return !facts.workspace && !facts.attemptCommit && !facts.retainedCommit;
 }

@@ -55,5 +55,7 @@ function toHttpError(error: UnblockNodeError) {
         refusal: "block-reason-not-clearable",
         blockReason: error.details?.["blockReason"] ?? null,
       });
+    case "subtree-busy":
+      return httpError("subtree-busy", error.message, error.details ?? {});
   }
 }

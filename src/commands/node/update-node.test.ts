@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { updateNode } from "./update-node.ts";
 import type { UpdateNodeInput, UpdateNodeResult } from "./update-node.ts";
+import { claimNode } from "./claim-node.ts";
 import { NodeWriteError } from "./refusal.ts";
 import { canonicalDocumentsJson } from "../../domain/plan-hash.ts";
 import { nodeUpdateRequest } from "../../http/contract/graph.ts";
@@ -41,19 +42,26 @@ import {
   seedPlanFixture,
 } from "../../../test/helpers/plan.ts";
 import type { RecordedPlanCall } from "../../../test/helpers/plan.ts";
-import { createMigratedStorage } from "../../../test/helpers/database.ts";
+import {
+  createMigratedStorage,
+  databaseBytes,
+} from "../../../test/helpers/database.ts";
 import { tableCounts } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
 import { createBackedExecutionFake } from "../../../test/helpers/execution.ts";
+import { createBackedLeaseFake } from "../../../test/helpers/lease.ts";
+import { runConcurrentClaimAndUpdate } from "../../../test/helpers/concurrent-plan-writes.ts";
 import {
   fixtureIds,
+  seedNodeDeliverable,
   seedLeaseOnNode,
   seedNodeState,
-  seedRegistry,
+  seedRunRow,
   seedWaivedEdge,
   seedWorkspaceOnNode,
 } from "../../../test/helpers/rows.ts";
+import { workerRegistry } from "../../domain/worker-registry.ts";
 
 const encoder = new TextEncoder();
 
@@ -120,6 +128,7 @@ function createRecordingEventLog(): Readonly<{
 
 type UpdateFixture = Readonly<{
   storage: Storage;
+  path: string;
   plan: PlanStore;
   blobs: BlobStore;
   revision: Revision;
@@ -148,6 +157,7 @@ function build(
   const recording = createRecordingPlanStore(rawPlan);
   return {
     storage: temporary.storage,
+    path: temporary.path,
     plan: recording.plan,
     blobs,
     revision: createRevision(blobs, recording.plan),
@@ -395,6 +405,243 @@ function updateInput(
     node,
     actor: HARNESS_ACTOR,
   };
+}
+
+type UpdateDecisionRefusal =
+  | "node-not-found"
+  | "kind-mismatch"
+  | "stale-revision"
+  | "subtree-busy"
+  | "illegal-transition"
+  | "binding-in-use"
+  | "plan-invalid";
+
+type UpdateDecisionRow =
+  | Readonly<{
+      pair: readonly [UpdateDecisionRefusal, UpdateDecisionRefusal];
+      winner: UpdateDecisionRefusal;
+    }>
+  | Readonly<{
+      pair: readonly [UpdateDecisionRefusal, UpdateDecisionRefusal];
+      unreachable: string;
+    }>;
+
+const UPDATE_DECISION_REFUSALS = [
+  "node-not-found",
+  "kind-mismatch",
+  "stale-revision",
+  "subtree-busy",
+  "illegal-transition",
+  "binding-in-use",
+  "plan-invalid",
+] as const satisfies readonly UpdateDecisionRefusal[];
+
+const UPDATE_DECISION_TABLE = [
+  {
+    pair: ["node-not-found", "kind-mismatch"],
+    unreachable: "a missing node has no stored kind to compare",
+  },
+  {
+    pair: ["node-not-found", "stale-revision"],
+    unreachable: "a missing node has no revision to compare",
+  },
+  {
+    pair: ["node-not-found", "subtree-busy"],
+    unreachable: "a missing node has no covering run",
+  },
+  {
+    pair: ["node-not-found", "illegal-transition"],
+    unreachable: "a missing node has no state to inspect",
+  },
+  {
+    pair: ["node-not-found", "binding-in-use"],
+    unreachable: "a missing node has no containment facts",
+  },
+  {
+    pair: ["node-not-found", "plan-invalid"],
+    unreachable: "a missing node has no candidate graph",
+  },
+  { pair: ["kind-mismatch", "stale-revision"], winner: "kind-mismatch" },
+  { pair: ["kind-mismatch", "subtree-busy"], winner: "kind-mismatch" },
+  {
+    pair: ["kind-mismatch", "illegal-transition"],
+    winner: "kind-mismatch",
+  },
+  { pair: ["kind-mismatch", "binding-in-use"], winner: "kind-mismatch" },
+  { pair: ["kind-mismatch", "plan-invalid"], winner: "kind-mismatch" },
+  { pair: ["stale-revision", "subtree-busy"], winner: "stale-revision" },
+  { pair: ["stale-revision", "illegal-transition"], winner: "stale-revision" },
+  { pair: ["stale-revision", "binding-in-use"], winner: "stale-revision" },
+  { pair: ["stale-revision", "plan-invalid"], winner: "stale-revision" },
+  { pair: ["subtree-busy", "illegal-transition"], winner: "subtree-busy" },
+  { pair: ["subtree-busy", "binding-in-use"], winner: "subtree-busy" },
+  { pair: ["subtree-busy", "plan-invalid"], winner: "subtree-busy" },
+  {
+    pair: ["illegal-transition", "binding-in-use"],
+    winner: "illegal-transition",
+  },
+  {
+    pair: ["illegal-transition", "plan-invalid"],
+    winner: "illegal-transition",
+  },
+  { pair: ["binding-in-use", "plan-invalid"], winner: "binding-in-use" },
+] as const satisfies readonly UpdateDecisionRow[];
+
+function includesUpdateDecision(
+  pair: readonly [UpdateDecisionRefusal, UpdateDecisionRefusal],
+  refusal: UpdateDecisionRefusal,
+): boolean {
+  return pair[0] === refusal || pair[1] === refusal;
+}
+
+function updateDecisionLabel(
+  pair: readonly [UpdateDecisionRefusal, UpdateDecisionRefusal],
+): string {
+  return `${pair[0]}|${pair[1]}`;
+}
+
+function prepareUpdateDecisionPair(
+  fixture: UpdateFixture,
+  pair: readonly [UpdateDecisionRefusal, UpdateDecisionRefusal],
+): UpdateNodeInput {
+  const has = (refusal: UpdateDecisionRefusal) =>
+    includesUpdateDecision(pair, refusal);
+
+  fixture.storage.transact((transaction) => {
+    if (has("subtree-busy")) {
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_update_decision",
+        nodeId: taskId,
+      });
+      seedRunRow(transaction, {
+        id: "run_update_decision",
+        kind: "task",
+        nodeId: taskId,
+        parentRunId: null,
+        workspaceId: "workspace_update_decision",
+        graphRevision: null,
+      });
+    }
+    if (has("illegal-transition")) {
+      seedNodeState(transaction, taskId, "done");
+    }
+    if (has("binding-in-use") && !has("subtree-busy")) {
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_update_decision",
+        nodeId: taskId,
+      });
+    }
+  });
+
+  if (has("kind-mismatch")) {
+    return updateInput(
+      taskId,
+      has("stale-revision") ? "revision_stale" : nodeBaselineRevision,
+      objectiveBody({
+        dependsOn: has("plan-invalid")
+          ? [planFixtureIdentities.initiative]
+          : [],
+      }),
+    );
+  }
+
+  return updateInput(
+    taskId,
+    has("stale-revision") ? "revision_stale" : nodeBaselineRevision,
+    taskBody({
+      parentId: has("binding-in-use")
+        ? planFixtureIdentities.initiative
+        : planFixtureIdentities.objective,
+      worker:
+        has("illegal-transition") && !has("binding-in-use") ? "tdd@1" : null,
+      dependsOn: has("plan-invalid") ? [taskId] : [],
+    }),
+  );
+}
+
+function refusedUpdate(
+  fixture: UpdateFixture,
+  input: UpdateNodeInput,
+): NodeWriteError {
+  let caught: unknown;
+  try {
+    runUpdate(fixture, input);
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(
+    caught instanceof NodeWriteError,
+    `expected a NodeWriteError, got ${String(caught)}`,
+  );
+  return caught;
+}
+
+function seedClaimablePlanFixture(
+  storage: Storage,
+  plan: PlanStore,
+  blobs: BlobStore,
+): void {
+  seedPlanFixture(storage, plan, blobs);
+  storage.transact((transaction) => {
+    for (const id of [
+      planFixtureIdentities.initiative,
+      planFixtureIdentities.objective,
+      planFixtureIdentities.task,
+    ]) {
+      seedNodeState(transaction, id, "ready");
+    }
+    seedNodeDeliverable(
+      transaction,
+      planFixtureIdentities.task,
+      "implementation",
+      JSON.stringify({ paths: [], commands: [] }),
+    );
+  });
+}
+
+function claimForConcurrency(
+  fixture: UpdateFixture,
+): ReturnType<typeof claimNode> {
+  const execution = createBackedExecutionFake({
+    ids: createMockIdGenerator({
+      ulids: ["01GQZ3NDEKTSV4RRFFQ69G5FC1", "01GQZ3NDEKTSV4RRFFQ69G5FC2"],
+    }),
+  });
+  const lease = createBackedLeaseFake();
+  return claimNode(
+    {
+      storage: fixture.storage,
+      plan: fixture.plan,
+      lease: lease.lease,
+      execution: execution.execution,
+      events: fixture.events,
+      clock: createMockClock({ start: CLOCK_START, step: 1000 }),
+      ids: createMockIdGenerator({
+        ulids: ["01GQZ3NDEKTSV4RRFFQ69G5FC3"],
+      }),
+      expiry: {
+        expireRuns() {
+          return [];
+        },
+      },
+      callerRecord: {
+        worker: "claude@1",
+        authorized: ["claude@1"],
+      },
+      registry: workerRegistry,
+      attemptLimit: 3,
+      leaseTtlMs: 300000,
+      runTtlMs: 120000,
+      runMaxLifetimeMs: 900000,
+      instanceId: "daemon_test",
+    },
+    {
+      nodeId: planFixtureIdentities.task,
+      actorId: "actor_concurrent_claim",
+      actorKind: "harness",
+      available: true,
+    },
+  );
 }
 
 function titleEdit(
@@ -1022,7 +1269,10 @@ describe("src/commands/node/update-node.test", () => {
       seedPlanFixture(storage, plan, blobs);
       seedInitiative(storage, plan, blobs, initiativeTwoId);
       storage.transact((transaction) => {
-        seedLeaseOnNode(transaction, taskId);
+        seedWorkspaceOnNode(transaction, {
+          id: "workspace_objective_child",
+          nodeId: taskId,
+        });
       });
     }, []);
     t.after(() => fixture.dispose());
@@ -1043,7 +1293,73 @@ describe("src/commands/node/update-node.test", () => {
     assert.ok(caught instanceof NodeWriteError);
     assert.equal(caught.refusal, "binding-in-use");
     assert.deepEqual(caught.details, {
-      blockers: [{ nodeId: objectiveId, blocker: "lease" }],
+      blockers: [{ nodeId: objectiveId, blocker: "workspace" }],
+    });
+  });
+
+  it("the blocker list no longer holds a lease member", (t) => {
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        seedObjective(storage, plan, blobs, objectiveTwoId);
+        storage.transact((transaction) => {
+          seedLeaseOnNode(transaction, taskId);
+        });
+      },
+      [U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    const result = runUpdate(
+      fixture,
+      updateInput(
+        taskId,
+        nodeBaselineRevision,
+        taskBody({ parentId: objectiveTwoId }),
+      ),
+    );
+
+    assert.equal(result.revision, `revision_${U_REV}`);
+    const stored = fixture.storage.transact((transaction) =>
+      fixture.plan.readNode(transaction, taskId),
+    );
+    assert.equal(stored?.parentId, objectiveTwoId);
+  });
+
+  it("the blocker list still refuses on a workspace row", (t) => {
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        seedObjective(storage, plan, blobs, objectiveTwoId);
+        storage.transact((transaction) => {
+          seedWorkspaceOnNode(transaction, {
+            id: "workspace_update_workspace",
+            nodeId: taskId,
+          });
+        });
+      },
+      [U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    let caught: unknown;
+    try {
+      runUpdate(
+        fixture,
+        updateInput(
+          taskId,
+          nodeBaselineRevision,
+          taskBody({ parentId: objectiveTwoId }),
+        ),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "binding-in-use");
+    assert.deepEqual(caught.details, {
+      blockers: [{ nodeId: taskId, blocker: "workspace" }],
     });
   });
 
@@ -1582,6 +1898,352 @@ describe("src/commands/node/update-node.test", () => {
     t.after(() => fixture.dispose());
 
     assertMismatchedTriggerRefused(fixture, taskId);
+  });
+
+  it("a concurrent claim and plan write serialise", async (t) => {
+    for (const first of ["claim", "update"] as const) {
+      const fixture = build(seedClaimablePlanFixture, [U_REV]);
+      t.after(() => fixture.dispose());
+
+      const outcomes = await runConcurrentClaimAndUpdate(fixture.path, first);
+      assert.equal(outcomes.claim.status, "fulfilled");
+
+      const rows = fixture.storage.transact((transaction) => ({
+        task: transaction.get(
+          "SELECT title, state, revision FROM node WHERE id = ?",
+          [taskId],
+        ) as Readonly<{ title: string; state: string; revision: string }>,
+        objective: transaction.get("SELECT state FROM node WHERE id = ?", [
+          objectiveId,
+        ]) as Readonly<{ state: string }>,
+        initiative: transaction.get("SELECT state FROM node WHERE id = ?", [
+          planFixtureIdentities.initiative,
+        ]) as Readonly<{ state: string }>,
+        runs: transaction.all(
+          "SELECT id, node_id, state, graph_revision FROM run ORDER BY id",
+        ) as readonly Readonly<{
+          id: string;
+          node_id: string;
+          state: string;
+          graph_revision: string | null;
+        }>[],
+      }));
+
+      assert.equal(rows.runs.length, 1);
+      assert.equal(rows.task.state, "running");
+      assert.equal(rows.objective.state, "running");
+      assert.equal(rows.initiative.state, "running");
+      assert.deepEqual(
+        { ...rows.runs[0] },
+        {
+          id: "run_01GQZ3NDEKTSV4RRFFQ69G5FC1",
+          node_id: taskId,
+          state: "active",
+          graph_revision:
+            rows.task.title === "Concurrent title"
+              ? `revision_${U_REV}`
+              : nodeBaselineRevision,
+        },
+      );
+
+      if (rows.task.title === "Concurrent title") {
+        assert.equal(outcomes.update.status, "fulfilled");
+        assert.equal(rows.task.revision, `revision_${U_REV}`);
+      } else {
+        assert.equal(rows.task.title, "Harden the verify CLI");
+        assert.equal(rows.task.revision, nodeBaselineRevision);
+        assert.equal(outcomes.update.status, "rejected");
+        assert.equal(outcomes.update.error.name, "NodeWriteError");
+        assert.equal(outcomes.update.error.refusal, "subtree-busy");
+        assert.deepEqual(outcomes.update.error.details, {
+          relation: "self",
+          nodeId: taskId,
+          runId: "run_01GQZ3NDEKTSV4RRFFQ69G5FC1",
+          expiresAt: CLOCK_START + 120000,
+        });
+      }
+    }
+  });
+
+  it("an update on a node covered by an active run refuses subtree-busy", (t) => {
+    const fixture = build(seedClaimablePlanFixture, [U_REV]);
+    t.after(() => fixture.dispose());
+
+    claimForConcurrency(fixture);
+
+    let caught: unknown;
+    try {
+      runUpdate(
+        fixture,
+        titleEdit(taskId, nodeBaselineRevision, "Concurrent title"),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "subtree-busy");
+    assert.deepEqual(caught.details, {
+      relation: "self",
+      nodeId: taskId,
+      runId: "run_01GQZ3NDEKTSV4RRFFQ69G5FC1",
+      expiresAt: CLOCK_START + 120000,
+    });
+  });
+
+  it("an update on a node whose ancestor holds an active run refuses, naming the ancestor", (t) => {
+    const runId = "run_update_ancestor";
+    const workspaceId = "workspace_update_ancestor";
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedClaimablePlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          seedWorkspaceOnNode(transaction, {
+            id: workspaceId,
+            nodeId: objectiveId,
+          });
+          seedRunRow(transaction, {
+            id: runId,
+            kind: "objective",
+            nodeId: objectiveId,
+            parentRunId: null,
+            workspaceId,
+            graphRevision: null,
+          });
+        });
+      },
+      [U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    let caught: unknown;
+    try {
+      runUpdate(
+        fixture,
+        titleEdit(taskId, nodeBaselineRevision, "Concurrent title"),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "subtree-busy");
+    assert.deepEqual(caught.details, {
+      relation: "ancestor",
+      nodeId: objectiveId,
+      runId,
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("an update on an objective whose child holds an active run refuses, naming the descendant", (t) => {
+    const fixture = build(seedClaimablePlanFixture, [U_REV]);
+    t.after(() => fixture.dispose());
+
+    claimForConcurrency(fixture);
+
+    let caught: unknown;
+    try {
+      runUpdate(
+        fixture,
+        updateInput(
+          objectiveId,
+          nodeBaselineRevision,
+          objectiveBody({ title: "Concurrent objective" }),
+        ),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "subtree-busy");
+    assert.deepEqual(caught.details, {
+      relation: "descendant",
+      nodeId: taskId,
+      runId: "run_01GQZ3NDEKTSV4RRFFQ69G5FC1",
+      expiresAt: CLOCK_START + 120000,
+    });
+  });
+
+  it("an update on a node whose sibling holds an active run succeeds", (t) => {
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        seedTask(storage, plan, blobs, taskTwoId);
+        storage.transact((transaction) => {
+          seedWorkspaceOnNode(transaction, {
+            id: "workspace_update_sibling",
+            nodeId: taskTwoId,
+          });
+          seedRunRow(transaction, {
+            id: "run_update_sibling",
+            kind: "task",
+            nodeId: taskTwoId,
+            parentRunId: null,
+            workspaceId: "workspace_update_sibling",
+            graphRevision: null,
+          });
+        });
+      },
+      [U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    const result = runUpdate(
+      fixture,
+      titleEdit(taskId, nodeBaselineRevision, "Renamed task"),
+    );
+
+    assert.equal(result.revision, `revision_${U_REV}`);
+    const stored = fixture.storage.transact((transaction) =>
+      fixture.plan.readNode(transaction, taskId),
+    );
+    assert.equal(stored?.title, "Renamed task");
+  });
+
+  it("an update on a node covered by an expired run succeeds", (t) => {
+    const runId = "run_update_expired";
+    const workspaceId = "workspace_update_expired";
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          seedWorkspaceOnNode(transaction, {
+            id: workspaceId,
+            nodeId: taskId,
+          });
+          seedRunRow(transaction, {
+            id: runId,
+            kind: "task",
+            nodeId: taskId,
+            parentRunId: null,
+            workspaceId,
+            graphRevision: null,
+          });
+          transaction.run("UPDATE run SET expires_at = ? WHERE id = ?", [
+            CLOCK_START - 1,
+            runId,
+          ]);
+        });
+      },
+      [U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    const result = runUpdate(
+      fixture,
+      titleEdit(taskId, nodeBaselineRevision, "Renamed task"),
+    );
+
+    assert.equal(result.revision, `revision_${U_REV}`);
+    const stored = fixture.storage.transact((transaction) =>
+      fixture.plan.readNode(transaction, taskId),
+    );
+    assert.equal(stored?.title, "Renamed task");
+  });
+
+  it("an update on a node covered by an ended run succeeds", (t) => {
+    const runId = "run_update_ended";
+    const workspaceId = "workspace_update_ended";
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          seedWorkspaceOnNode(transaction, {
+            id: workspaceId,
+            nodeId: taskId,
+          });
+          seedRunRow(transaction, {
+            id: runId,
+            kind: "task",
+            nodeId: taskId,
+            parentRunId: null,
+            workspaceId,
+            graphRevision: null,
+            state: "ended",
+          });
+        });
+      },
+      [U_REV],
+    );
+    t.after(() => fixture.dispose());
+
+    const result = runUpdate(
+      fixture,
+      titleEdit(taskId, nodeBaselineRevision, "Renamed task"),
+    );
+
+    assert.equal(result.revision, `revision_${U_REV}`);
+    const stored = fixture.storage.transact((transaction) =>
+      fixture.plan.readNode(transaction, taskId),
+    );
+    assert.equal(stored?.title, "Renamed task");
+  });
+
+  it("a subtree-busy refusal leaves the database byte-identical", (t) => {
+    const fixture = build(seedClaimablePlanFixture, [U_REV]);
+    t.after(() => fixture.dispose());
+
+    claimForConcurrency(fixture);
+    const before = databaseBytes(fixture.storage);
+
+    let caught: unknown;
+    try {
+      runUpdate(
+        fixture,
+        titleEdit(taskId, nodeBaselineRevision, "Concurrent title"),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    assert.ok(caught instanceof NodeWriteError);
+    assert.equal(caught.refusal, "subtree-busy");
+    const after = databaseBytes(fixture.storage);
+    assert.deepEqual(after, before);
+  });
+
+  it("the refusal precedence of node.update", (t) => {
+    const pairs: Array<
+      readonly [UpdateDecisionRefusal, UpdateDecisionRefusal]
+    > = [];
+    for (let left = 0; left < UPDATE_DECISION_REFUSALS.length; left++) {
+      for (
+        let right = left + 1;
+        right < UPDATE_DECISION_REFUSALS.length;
+        right++
+      ) {
+        pairs.push([
+          UPDATE_DECISION_REFUSALS[left]!,
+          UPDATE_DECISION_REFUSALS[right]!,
+        ]);
+      }
+    }
+
+    assert.equal(UPDATE_DECISION_TABLE.length, pairs.length);
+    assert.deepEqual(
+      new Set(
+        UPDATE_DECISION_TABLE.map((row) => updateDecisionLabel(row.pair)),
+      ),
+      new Set(pairs.map((pair) => updateDecisionLabel(pair))),
+    );
+
+    for (const row of UPDATE_DECISION_TABLE) {
+      const label = updateDecisionLabel(row.pair);
+      if ("unreachable" in row) {
+        assert.ok(row.unreachable.length > 0, label);
+        continue;
+      }
+
+      const fixture = build(seedClaimablePlanFixture, [U_REV]);
+      t.after(() => fixture.dispose());
+      const error = refusedUpdate(
+        fixture,
+        prepareUpdateDecisionPair(fixture, row.pair),
+      );
+      assert.equal(error.refusal, row.winner, label);
+    }
   });
 });
 

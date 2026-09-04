@@ -36,7 +36,10 @@ import {
   seedNodeBlockReason,
   seedNodeState,
   seedRegistry,
+  seedRunRow,
   seedSecondRevisionWithTask,
+  seedSiblingTask,
+  seedWorkspaceOnNode,
 } from "../../../test/helpers/rows.ts";
 
 const NOW = 1700000000000;
@@ -242,7 +245,504 @@ function setNodeStateCalls(
     .map((call) => call.input as SetNodeStateInput);
 }
 
+type UnblockDecisionRefusal =
+  | "actor-forbidden"
+  | "not-found"
+  | "node-kind-invalid"
+  | "not-blocked"
+  | "block-reason-not-clearable"
+  | "subtree-busy"
+  | "illegal-transition";
+
+type UnblockDecisionRow =
+  | Readonly<{
+      pair: readonly [UnblockDecisionRefusal, UnblockDecisionRefusal];
+      winner: UnblockDecisionRefusal;
+    }>
+  | Readonly<{
+      pair: readonly [UnblockDecisionRefusal, UnblockDecisionRefusal];
+      unreachable: string;
+    }>;
+
+const UNBLOCK_DECISION_REFUSALS = [
+  "actor-forbidden",
+  "not-found",
+  "node-kind-invalid",
+  "not-blocked",
+  "block-reason-not-clearable",
+  "subtree-busy",
+  "illegal-transition",
+] as const satisfies readonly UnblockDecisionRefusal[];
+
+const UNBLOCK_DECISION_TABLE = [
+  { pair: ["actor-forbidden", "not-found"], winner: "actor-forbidden" },
+  {
+    pair: ["actor-forbidden", "node-kind-invalid"],
+    winner: "actor-forbidden",
+  },
+  { pair: ["actor-forbidden", "not-blocked"], winner: "actor-forbidden" },
+  {
+    pair: ["actor-forbidden", "block-reason-not-clearable"],
+    winner: "actor-forbidden",
+  },
+  { pair: ["actor-forbidden", "subtree-busy"], winner: "actor-forbidden" },
+  {
+    pair: ["actor-forbidden", "illegal-transition"],
+    unreachable: "unblock-node has no illegal-transition refusal",
+  },
+  {
+    pair: ["not-found", "node-kind-invalid"],
+    unreachable: "a missing node has no kind to validate",
+  },
+  {
+    pair: ["not-found", "not-blocked"],
+    unreachable: "a missing node has no state to inspect",
+  },
+  {
+    pair: ["not-found", "block-reason-not-clearable"],
+    unreachable: "a missing node has no block reason to inspect",
+  },
+  {
+    pair: ["not-found", "subtree-busy"],
+    unreachable: "a missing node has no covering run",
+  },
+  {
+    pair: ["not-found", "illegal-transition"],
+    unreachable: "unblock-node has no illegal-transition refusal",
+  },
+  {
+    pair: ["node-kind-invalid", "not-blocked"],
+    winner: "node-kind-invalid",
+  },
+  {
+    pair: ["node-kind-invalid", "block-reason-not-clearable"],
+    winner: "node-kind-invalid",
+  },
+  { pair: ["node-kind-invalid", "subtree-busy"], winner: "node-kind-invalid" },
+  {
+    pair: ["node-kind-invalid", "illegal-transition"],
+    unreachable: "unblock-node has no illegal-transition refusal",
+  },
+  {
+    pair: ["not-blocked", "block-reason-not-clearable"],
+    unreachable: "the node CHECK forbids a block reason on a non-blocked node",
+  },
+  { pair: ["not-blocked", "subtree-busy"], winner: "not-blocked" },
+  {
+    pair: ["not-blocked", "illegal-transition"],
+    unreachable: "unblock-node has no illegal-transition refusal",
+  },
+  {
+    pair: ["block-reason-not-clearable", "subtree-busy"],
+    winner: "block-reason-not-clearable",
+  },
+  {
+    pair: ["block-reason-not-clearable", "illegal-transition"],
+    unreachable: "unblock-node has no illegal-transition refusal",
+  },
+  {
+    pair: ["subtree-busy", "illegal-transition"],
+    unreachable: "unblock-node has no illegal-transition refusal",
+  },
+] as const satisfies readonly UnblockDecisionRow[];
+
+function includesUnblockDecision(
+  pair: readonly [UnblockDecisionRefusal, UnblockDecisionRefusal],
+  refusal: UnblockDecisionRefusal,
+): boolean {
+  return pair[0] === refusal || pair[1] === refusal;
+}
+
+function unblockDecisionLabel(
+  pair: readonly [UnblockDecisionRefusal, UnblockDecisionRefusal],
+): string {
+  return `${pair[0]}|${pair[1]}`;
+}
+
+function prepareUnblockDecisionPair(
+  fixture: UnblockFixture,
+  pair: readonly [UnblockDecisionRefusal, UnblockDecisionRefusal],
+): UnblockNodeInput {
+  const has = (refusal: UnblockDecisionRefusal) =>
+    includesUnblockDecision(pair, refusal);
+  const nodeId = has("node-kind-invalid")
+    ? fixtureIds.objective
+    : has("not-found")
+      ? "node_missing"
+      : fixtureIds.task;
+  const state = has("not-blocked") ? "ready" : "blocked";
+  const blockReason = has("block-reason-not-clearable")
+    ? "dependency-discarded"
+    : state === "blocked"
+      ? "attempt-limit"
+      : null;
+
+  seedTask(fixture, state, blockReason);
+
+  if (has("node-kind-invalid") && has("block-reason-not-clearable")) {
+    fixture.storage.transact((transaction) => {
+      seedNodeState(transaction, fixtureIds.objective, "blocked");
+      seedNodeBlockReason(
+        transaction,
+        fixtureIds.objective,
+        "dependency-discarded",
+      );
+    });
+  }
+  if (has("subtree-busy")) {
+    fixture.storage.transact((transaction) => {
+      const coveringNodeId =
+        nodeId === "node_missing" ? fixtureIds.task : nodeId;
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_unblock_decision",
+        nodeId: coveringNodeId,
+      });
+      seedRunRow(transaction, {
+        id: "run_unblock_decision",
+        kind: coveringNodeId === fixtureIds.objective ? "objective" : "task",
+        nodeId: coveringNodeId,
+        parentRunId: null,
+        workspaceId: "workspace_unblock_decision",
+        graphRevision: null,
+      });
+    });
+  }
+
+  return input(
+    has("actor-forbidden") ? HARNESS : HUMAN,
+    has("actor-forbidden") ? "harness" : "human",
+    nodeId,
+  );
+}
+
 describe("src/commands/node/unblock-node.test", () => {
+  it("an unblock on a node covered by an active run refuses subtree-busy", () => {
+    const fixture = createFixture();
+    try {
+      seedTask(fixture, "blocked", "attempt-limit");
+      fixture.storage.transact((transaction) => {
+        seedWorkspaceOnNode(transaction, {
+          id: "workspace_unblock",
+          nodeId: fixtureIds.task,
+        });
+        seedRunRow(transaction, {
+          id: "run_unblock",
+          kind: "task",
+          nodeId: fixtureIds.task,
+          parentRunId: null,
+          workspaceId: "workspace_unblock",
+          graphRevision: null,
+        });
+      });
+
+      const error = refused(fixture);
+
+      assert.equal(error.refusal, "subtree-busy");
+      assert.deepEqual(error.details, {
+        relation: "self",
+        nodeId: fixtureIds.task,
+        runId: "run_unblock",
+        expiresAt: 1700300000000,
+      });
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("an unblock on a node whose ancestor holds an active run refuses, naming the ancestor", () => {
+    const fixture = createFixture();
+    try {
+      seedTask(fixture, "blocked", "attempt-limit");
+      fixture.storage.transact((transaction) => {
+        seedWorkspaceOnNode(transaction, {
+          id: "workspace_unblock_ancestor",
+          nodeId: fixtureIds.objective,
+        });
+        seedRunRow(transaction, {
+          id: "run_unblock_ancestor",
+          kind: "objective",
+          nodeId: fixtureIds.objective,
+          parentRunId: null,
+          workspaceId: "workspace_unblock_ancestor",
+          graphRevision: null,
+        });
+      });
+
+      const error = refused(fixture);
+
+      assert.equal(error.refusal, "subtree-busy");
+      assert.deepEqual(error.details, {
+        relation: "ancestor",
+        nodeId: fixtureIds.objective,
+        runId: "run_unblock_ancestor",
+        expiresAt: 1700300000000,
+      });
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("an unblock on a node whose sibling holds an active run succeeds", () => {
+    const fixture = createFixture();
+    try {
+      seedTask(fixture, "blocked", "attempt-limit");
+      fixture.storage.transact((transaction) => {
+        seedSiblingTask(transaction);
+        seedWorkspaceOnNode(transaction, {
+          id: "workspace_unblock_sibling",
+          nodeId: "task_b",
+        });
+        seedRunRow(transaction, {
+          id: "run_unblock_sibling",
+          kind: "task",
+          nodeId: "task_b",
+          parentRunId: null,
+          workspaceId: "workspace_unblock_sibling",
+          graphRevision: null,
+        });
+      });
+
+      const result = run(fixture);
+
+      assert.deepEqual(result.node, {
+        id: fixtureIds.task,
+        state: "ready",
+      });
+      assert.equal(nodeState(fixture), "ready");
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("an unblock on a node whose descendant holds an active run", () => {
+    const fixture = createFixture();
+    try {
+      seedTask(fixture, "blocked", "attempt-limit");
+      fixture.storage.transact((transaction) => {
+        seedWorkspaceOnNode(transaction, {
+          id: "workspace_unblock_descendant",
+          nodeId: fixtureIds.task,
+        });
+        seedRunRow(transaction, {
+          id: "run_unblock_descendant",
+          kind: "task",
+          nodeId: fixtureIds.task,
+          parentRunId: null,
+          workspaceId: "workspace_unblock_descendant",
+          graphRevision: null,
+        });
+      });
+      const before = databaseBytes(fixture.storage);
+
+      const error = refused(
+        fixture,
+        input(HUMAN, "human", fixtureIds.objective),
+      );
+
+      assert.equal(error.refusal, "node-kind-invalid");
+      assert.deepEqual(databaseBytes(fixture.storage), before);
+      assert.equal(fixture.appends.length, 0);
+      assert.equal(setNodeStateCalls(fixture).length, 0);
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("an unblock on a node covered by an expired run succeeds", () => {
+    const fixture = createFixture();
+    try {
+      seedTask(fixture, "blocked", "attempt-limit");
+      fixture.storage.transact((transaction) => {
+        seedWorkspaceOnNode(transaction, {
+          id: "workspace_unblock_expired",
+          nodeId: fixtureIds.task,
+        });
+        seedRunRow(transaction, {
+          id: "run_unblock_expired",
+          kind: "task",
+          nodeId: fixtureIds.task,
+          parentRunId: null,
+          workspaceId: "workspace_unblock_expired",
+          graphRevision: null,
+        });
+        transaction.run("UPDATE run SET expires_at = ? WHERE id = ?", [
+          NOW - 1,
+          "run_unblock_expired",
+        ]);
+      });
+
+      const result = run(fixture);
+
+      assert.deepEqual(result.node, {
+        id: fixtureIds.task,
+        state: "ready",
+      });
+      assert.equal(nodeState(fixture), "ready");
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("an unblock on a node covered by an ended run succeeds", () => {
+    const fixture = createFixture();
+    try {
+      seedTask(fixture, "blocked", "attempt-limit");
+      fixture.storage.transact((transaction) => {
+        seedWorkspaceOnNode(transaction, {
+          id: "workspace_unblock_ended",
+          nodeId: fixtureIds.task,
+        });
+        seedRunRow(transaction, {
+          id: "run_unblock_ended",
+          kind: "task",
+          nodeId: fixtureIds.task,
+          parentRunId: null,
+          workspaceId: "workspace_unblock_ended",
+          graphRevision: null,
+          state: "ended",
+        });
+      });
+
+      const result = run(fixture);
+
+      assert.deepEqual(result.node, {
+        id: fixtureIds.task,
+        state: "ready",
+      });
+      assert.equal(nodeState(fixture), "ready");
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("the refusal precedence of node.unblock", (t) => {
+    const pairs: Array<
+      readonly [UnblockDecisionRefusal, UnblockDecisionRefusal]
+    > = [];
+    for (let left = 0; left < UNBLOCK_DECISION_REFUSALS.length; left++) {
+      for (
+        let right = left + 1;
+        right < UNBLOCK_DECISION_REFUSALS.length;
+        right++
+      ) {
+        pairs.push([
+          UNBLOCK_DECISION_REFUSALS[left]!,
+          UNBLOCK_DECISION_REFUSALS[right]!,
+        ]);
+      }
+    }
+
+    assert.equal(UNBLOCK_DECISION_TABLE.length, pairs.length);
+    assert.deepEqual(
+      new Set(
+        UNBLOCK_DECISION_TABLE.map((row) => unblockDecisionLabel(row.pair)),
+      ),
+      new Set(pairs.map((pair) => unblockDecisionLabel(pair))),
+    );
+
+    for (const row of UNBLOCK_DECISION_TABLE) {
+      const label = unblockDecisionLabel(row.pair);
+      if ("unreachable" in row) {
+        assert.ok(row.unreachable.length > 0, label);
+        continue;
+      }
+
+      const fixture = createFixture();
+      t.after(() => fixture.dispose());
+      const error = refused(
+        fixture,
+        prepareUnblockDecisionPair(fixture, row.pair),
+      );
+      assert.equal(error.refusal, row.winner, label);
+    }
+  });
+
+  it("not-blocked beats a covering run", () => {
+    const fixture = createFixture();
+    try {
+      seedTask(fixture, "ready", null);
+      fixture.storage.transact((transaction) => {
+        seedWorkspaceOnNode(transaction, {
+          id: "workspace_unblock_not_blocked",
+          nodeId: fixtureIds.task,
+        });
+        seedRunRow(transaction, {
+          id: "run_unblock_not_blocked",
+          kind: "task",
+          nodeId: fixtureIds.task,
+          parentRunId: null,
+          workspaceId: "workspace_unblock_not_blocked",
+          graphRevision: null,
+        });
+      });
+
+      const error = refused(fixture);
+
+      assert.equal(error.refusal, "not-blocked");
+      assert.deepEqual(error.details, { state: "ready" });
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("a harness actor beats a covering run", () => {
+    const fixture = createFixture();
+    try {
+      seedTask(fixture, "blocked", "attempt-limit");
+      fixture.storage.transact((transaction) => {
+        seedWorkspaceOnNode(transaction, {
+          id: "workspace_unblock_harness",
+          nodeId: fixtureIds.task,
+        });
+        seedRunRow(transaction, {
+          id: "run_unblock_harness",
+          kind: "task",
+          nodeId: fixtureIds.task,
+          parentRunId: null,
+          workspaceId: "workspace_unblock_harness",
+          graphRevision: null,
+        });
+      });
+
+      const error = refused(fixture, input(HARNESS, "harness"));
+
+      assert.equal(error.refusal, "actor-forbidden");
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("a subtree-busy refusal appends no event and leaves the database byte-identical", () => {
+    const fixture = createFixture();
+    try {
+      seedTask(fixture, "blocked", "attempt-limit");
+      fixture.storage.transact((transaction) => {
+        seedWorkspaceOnNode(transaction, {
+          id: "workspace_unblock_unchanged",
+          nodeId: fixtureIds.task,
+        });
+        seedRunRow(transaction, {
+          id: "run_unblock_unchanged",
+          kind: "task",
+          nodeId: fixtureIds.task,
+          parentRunId: null,
+          workspaceId: "workspace_unblock_unchanged",
+          graphRevision: null,
+        });
+      });
+      const before = databaseBytes(fixture.storage);
+
+      const error = refused(fixture);
+
+      assert.equal(error.refusal, "subtree-busy");
+      assert.equal(fixture.appends.length, 0);
+      assert.equal(setNodeStateCalls(fixture).length, 0);
+      assert.deepEqual(databaseBytes(fixture.storage), before);
+    } finally {
+      fixture.dispose();
+    }
+  });
+
   it("an unblock of an attempt-limit task returns it to the pool", () => {
     const fixture = createFixture();
     try {

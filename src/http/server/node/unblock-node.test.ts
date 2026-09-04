@@ -8,6 +8,8 @@ import {
   UnblockNodeError,
   type UnblockNodeInput,
 } from "../../../commands/node/unblock-node.ts";
+import { subtreeBusyDetails } from "../../contract/error-details.ts";
+import { findOperation } from "../../contract/registry.ts";
 import { unblockNodeHandler } from "./unblock-node.ts";
 
 const TASK = "task_01JQ8Z7G3HZZZZZZZZZZZZZZZZ";
@@ -34,6 +36,40 @@ function context(
 }
 
 describe("src/http/server/node/unblock-node.test", () => {
+  it("an unblock on a node covered by an active run refuses subtree-busy", async () => {
+    const details = {
+      relation: "self",
+      nodeId: TASK,
+      runId: "run_01JQ8Z7G3JZZZZZZZZZZZZZZZZ",
+      expiresAt: 1738368000001,
+    } as const;
+    const operation = findOperation("node.unblock");
+    assert.ok(operation?.errors !== undefined);
+    assert.equal(operation.errors["subtree-busy"], subtreeBusyDetails);
+
+    const handler = unblockNodeHandler({
+      unblockNode: (_input: UnblockNodeInput) => {
+        throw new UnblockNodeError(
+          "subtree-busy",
+          "an active run covers the node",
+          details,
+        );
+      },
+    });
+
+    await assert.rejects(
+      async () => await handler(context()),
+      (error: unknown) => {
+        assert.ok(error instanceof HttpError);
+        assert.equal(error.status, 409);
+        assert.equal(error.code, "subtree-busy");
+        assert.deepEqual(error.details, details);
+        assert.deepEqual(subtreeBusyDetails.parse(error.details), details);
+        return true;
+      },
+    );
+  });
+
   it("each refusal maps to its declared status", async () => {
     const cases = [
       {

@@ -3,6 +3,7 @@ export const nodeWriteRefusalCodes = [
   "node-not-found",
   "kind-mismatch",
   "stale-revision",
+  "subtree-busy",
   "plan-invalid",
   "illegal-transition",
   "binding-in-use",

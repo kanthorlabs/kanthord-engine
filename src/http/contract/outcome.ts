@@ -13,6 +13,7 @@ import {
   invalidRequestDetails,
   leaseHeldDetails,
   nodeUnblockDetails,
+  subtreeBusyDetails,
 } from "./error-details.ts";
 import { EXAMPLE_HASH as H, EXAMPLE_ULID as U } from "./example-literal.ts";
 import { nodeShowResponse } from "./graph.ts";
@@ -172,6 +173,7 @@ export const outcome = operations([
       ...baselineErrors,
       "invalid-request": nodeUnblockDetails,
       "illegal-transition": nodeUnblockDetails,
+      "subtree-busy": subtreeBusyDetails,
     },
     examples: nodeUnblockExamples,
   },

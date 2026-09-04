@@ -26,7 +26,11 @@ import {
 import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import { createMockIdGenerator } from "../../../test/helpers/ids.ts";
-import { fixtureIds, seedRegistry } from "../../../test/helpers/rows.ts";
+import {
+  fixtureIds,
+  seedLeaseOnNode,
+  seedRegistry,
+} from "../../../test/helpers/rows.ts";
 import type { Storage } from "../../services/storage/index.ts";
 import type { PlanStore } from "../../services/plan/index.ts";
 import type { BlobStore } from "../../services/blob/index.ts";
@@ -903,6 +907,78 @@ describe("src/queries/plan/validate-plan.test", () => {
       readContainmentFacts: 0,
       readSubtreeContainmentFacts: 0,
     });
+  });
+
+  it("plan.validate suggests the submitted document for a node holding an orphan lease", (t) => {
+    const { storage, plan, blobs, revision, reader, graph, dispose } = build();
+    t.after(() => dispose());
+    seedPlanFixture(storage, plan, blobs);
+    storage.transact((transaction) =>
+      seedLeaseOnNode(transaction, planFixtureIdentities.task),
+    );
+
+    const exported = exportPlan(
+      { storage, plan, revision },
+      { projectId: fixtureIds.project },
+    );
+    const initiative = exported.documents.find((document) =>
+      document.content.includes('kind: "initiative"'),
+    );
+    const task = exported.documents.find((document) =>
+      document.content.includes("Do the task work."),
+    );
+    assert.ok(initiative);
+    assert.ok(task);
+
+    const parentDirectory = `${initiative.path.slice(0, initiative.path.lastIndexOf("/"))}/new-parent--${low(U_NEW)}`;
+    const newParent = {
+      path: `${parentDirectory}/objective.md`,
+      content: `---
+id: "objective_${U_NEW}"
+kind: "objective"
+title: "New parent"
+repo: "kanthord-verify"
+---
+New parent work.
+`,
+    };
+    const movedTask = {
+      ...task,
+      path: `${parentDirectory}/${task.path.slice(task.path.lastIndexOf("/") + 1)}`,
+    };
+    const documents = [
+      ...exported.documents.filter((document) => document.path !== task.path),
+      newParent,
+      movedTask,
+    ];
+
+    const result = validatePlan(
+      {
+        storage,
+        plan,
+        blobs,
+        reader,
+        graph,
+        ids: createMockIdGenerator({ ulids: [] }),
+      },
+      {
+        projectId: fixtureIds.project,
+        fromRevision: null,
+        documents,
+      },
+    );
+
+    const taskEntry = result.choices.find(
+      (entry) => entry.id === planFixtureIdentities.task,
+    );
+    assert.ok(taskEntry);
+    assert.deepEqual(
+      {
+        containmentMovable: taskEntry.submitted.legal,
+        suggested: taskEntry.suggested,
+      },
+      { containmentMovable: true, suggested: "submitted" },
+    );
   });
 
   it("a structural edit to a node moved to running suggests database as illegal", (t) => {

@@ -13,6 +13,7 @@ import {
   planImportInvalidRequestDetails,
   planInvalidDetails,
   staleRevisionDetails,
+  subtreeBusyDetails,
 } from "../../contract/error-details.ts";
 import { baselineErrors } from "../../contract/error-baseline.ts";
 import { findOperation } from "../../contract/registry.ts";
@@ -23,6 +24,7 @@ const everyImportPlanRefusal: Readonly<Record<ImportPlanRefusal, true>> = {
   "choices-invalid": true,
   "choices-stale": true,
   "choices-changed": true,
+  "subtree-busy": true,
   "stale-revision": true,
   "idempotency-mismatch": true,
   "documents-hash-mismatch": true,
@@ -112,6 +114,25 @@ describe("src/http/server/plan/refusals.test", () => {
     assert.doesNotThrow(() => idempotencyMismatchDetails.parse(error.details));
   });
 
+  it("subtree-busy maps to the declared plan.import 409 response with details", () => {
+    const details = {
+      relation: "ancestor",
+      nodeId: "objective_01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
+      runId: "run_01JQ8Z7G3JZZZZZZZZZZZZZZZZ",
+      expiresAt: 1738368000001,
+    } as const;
+    const error = toHttpError(
+      new ImportPlanError("subtree-busy", "the subtree is busy", details),
+    );
+    const entry = findOperation("plan.import");
+
+    assert.equal(error.code, "subtree-busy");
+    assert.equal(error.status, 409);
+    assert.deepEqual(error.details, details);
+    assert.deepEqual(subtreeBusyDetails.parse(error.details), details);
+    assert.equal(entry?.errors?.["subtree-busy"], subtreeBusyDetails);
+  });
+
   it("documents-hash-mismatch maps to invalid-request and satisfies planImportInvalidRequestDetails", () => {
     const error = toHttpError(
       new ImportPlanError(
@@ -147,7 +168,7 @@ describe("src/http/server/plan/refusals.test", () => {
     }
   });
 
-  it("the codes toHttpError can emit beyond the baseline equal plan.import's declared additions", () => {
+  it("the codes toHttpError emits beyond the baseline are declared by plan.import", () => {
     const baselineCodes = new Set(Object.keys(baselineErrors));
     const collected = new Set<string>();
 

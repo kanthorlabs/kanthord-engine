@@ -7,6 +7,7 @@ import {
   declaredCapabilities,
 } from "./capability.ts";
 import { findOperation, registry } from "./registry.ts";
+import { KANTHORD_VERSION } from "../../domain/version.ts";
 
 const bytewise = (a: string, b: string): number =>
   Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
@@ -40,6 +41,19 @@ describe("src/http/contract/capability.test", () => {
   });
 
   it("the real registry declares the exact expected list", () => {
+    assert.deepEqual(declaredCapabilities(registry), [
+      "event-wait",
+      "external-drive",
+      "per-node-write",
+      "project-graph",
+    ]);
+  });
+
+  it("KANTHORD_VERSION is 28.0.1", () => {
+    assert.equal(KANTHORD_VERSION, "28.0.1");
+  });
+
+  it("declaredCapabilities is unchanged", () => {
     assert.deepEqual(declaredCapabilities(registry), [
       "event-wait",
       "external-drive",

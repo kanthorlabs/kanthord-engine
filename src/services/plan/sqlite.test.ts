@@ -20,12 +20,22 @@ import { canTransition } from "../../domain/transition.ts";
 import { workerKinds } from "../../domain/worker.ts";
 import type { StoredNode } from "../../domain/plan-graph.ts";
 import { executionBlockers } from "../../domain/plan-graph.ts";
+import {
+  assertRunAuthority,
+  type AuthorityRun,
+} from "../../domain/run-authority.ts";
+import {
+  subtreeExclusion,
+  type ExclusionRun,
+  type SubtreeExclusionInput,
+} from "../../domain/run-exclusion.ts";
 import { createMigratedStorage } from "../../../test/helpers/database.ts";
 import { createReadiness } from "../../../test/helpers/plan.ts";
 import {
   fixtureIds,
   seedRegistry,
   seedGraph,
+  seedSiblingTask,
   seedExecution,
   seedSecondRevisionWithTask,
   seedLeaseOnNode,
@@ -2409,6 +2419,825 @@ describe("src/services/plan/sqlite.test", () => {
       workspace: true,
       attemptCommit: false,
       retainedCommit: false,
+    });
+  });
+
+  it("a run on the seed refuses with relation self", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_run_self",
+        nodeId: fixtureIds.task,
+      });
+      seedRunRow(transaction, {
+        id: "run_self",
+        kind: "task",
+        nodeId: fixtureIds.task,
+        parentRunId: null,
+        workspaceId: "workspace_run_self",
+      });
+    });
+
+    const refusal = storage.transact((transaction) =>
+      store.runCoversNode(transaction, [fixtureIds.task], 1700290000000),
+    );
+
+    assert.deepEqual(refusal, {
+      refusal: "subtree-busy",
+      relation: "self",
+      nodeId: fixtureIds.task,
+      runId: "run_self",
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("a run on an ancestor refuses and names the ancestor", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_run_ancestor",
+        nodeId: fixtureIds.objective,
+      });
+      seedRunRow(transaction, {
+        id: "run_ancestor",
+        kind: "objective",
+        nodeId: fixtureIds.objective,
+        parentRunId: null,
+        workspaceId: "workspace_run_ancestor",
+      });
+    });
+
+    const refusal = storage.transact((transaction) =>
+      store.runCoversNode(transaction, [fixtureIds.task], 1700290000000),
+    );
+
+    assert.deepEqual(refusal, {
+      refusal: "subtree-busy",
+      relation: "ancestor",
+      nodeId: fixtureIds.objective,
+      runId: "run_ancestor",
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("a run on a grandparent refuses", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_run_grandparent",
+        nodeId: fixtureIds.initiative,
+      });
+      seedRunRow(transaction, {
+        id: "run_grandparent",
+        kind: "objective",
+        nodeId: fixtureIds.initiative,
+        parentRunId: null,
+        workspaceId: "workspace_run_grandparent",
+      });
+    });
+
+    const refusal = storage.transact((transaction) =>
+      store.runCoversNode(transaction, [fixtureIds.task], 1700290000000),
+    );
+
+    assert.deepEqual(refusal, {
+      refusal: "subtree-busy",
+      relation: "ancestor",
+      nodeId: fixtureIds.initiative,
+      runId: "run_grandparent",
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("a run on a descendant refuses and names the descendant", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_run_descendant",
+        nodeId: fixtureIds.task,
+      });
+      seedRunRow(transaction, {
+        id: "run_descendant",
+        kind: "task",
+        nodeId: fixtureIds.task,
+        parentRunId: null,
+        workspaceId: "workspace_run_descendant",
+      });
+    });
+
+    const refusal = storage.transact((transaction) =>
+      store.runCoversNode(transaction, [fixtureIds.objective], 1700290000000),
+    );
+
+    assert.deepEqual(refusal, {
+      refusal: "subtree-busy",
+      relation: "descendant",
+      nodeId: fixtureIds.task,
+      runId: "run_descendant",
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("a run on an unrelated node admits", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedSiblingTask(transaction);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_run_unrelated",
+        nodeId: "task_b",
+      });
+      seedRunRow(transaction, {
+        id: "run_unrelated",
+        kind: "task",
+        nodeId: "task_b",
+        parentRunId: null,
+        workspaceId: "workspace_run_unrelated",
+      });
+    });
+
+    const refusal = storage.transact((transaction) =>
+      store.runCoversNode(transaction, [fixtureIds.task], 1700290000000),
+    );
+
+    assert.equal(refusal, null);
+  });
+
+  it("an ended run admits", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_run_ended",
+        nodeId: fixtureIds.task,
+      });
+      seedRunRow(transaction, {
+        id: "run_ended",
+        kind: "task",
+        nodeId: fixtureIds.task,
+        parentRunId: null,
+        workspaceId: "workspace_run_ended",
+        state: "ended",
+      });
+    });
+
+    const refusal = storage.transact((transaction) =>
+      store.runCoversNode(transaction, [fixtureIds.task], 1700290000000),
+    );
+
+    assert.equal(refusal, null);
+  });
+
+  it("a run expiring exactly at now admits", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_run_expiry_boundary",
+        nodeId: fixtureIds.task,
+      });
+      seedRunRow(transaction, {
+        id: "run_expiry_boundary",
+        kind: "task",
+        nodeId: fixtureIds.task,
+        parentRunId: null,
+        workspaceId: "workspace_run_expiry_boundary",
+      });
+    });
+
+    const refusal = storage.transact((transaction) =>
+      store.runCoversNode(transaction, [fixtureIds.task], 1700300000000),
+    );
+
+    assert.equal(refusal, null);
+  });
+
+  it("a run expiring one millisecond after now refuses", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_run_expiry_after",
+        nodeId: fixtureIds.task,
+      });
+      seedRunRow(transaction, {
+        id: "run_expiry_after",
+        kind: "task",
+        nodeId: fixtureIds.task,
+        parentRunId: null,
+        workspaceId: "workspace_run_expiry_after",
+      });
+    });
+
+    const refusal = storage.transact((transaction) =>
+      store.runCoversNode(transaction, [fixtureIds.task], 1700299999999),
+    );
+
+    assert.deepEqual(refusal, {
+      refusal: "subtree-busy",
+      relation: "self",
+      nodeId: fixtureIds.task,
+      runId: "run_expiry_after",
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("the bytewise-first covering node of the winning class wins", (t) => {
+    for (const [firstNodeId, secondNodeId] of [
+      [fixtureIds.initiative, fixtureIds.objective],
+      [fixtureIds.objective, fixtureIds.initiative],
+    ] as const) {
+      const { storage, store, dispose } = build();
+      t.after(() => dispose());
+      storage.transact((transaction) => {
+        seedRegistry(transaction);
+        seedGraph(transaction);
+        for (const nodeId of [firstNodeId, secondNodeId]) {
+          seedWorkspaceOnNode(transaction, {
+            id: `workspace_run_${nodeId}`,
+            nodeId,
+          });
+          seedRunRow(transaction, {
+            id: `run_${nodeId}`,
+            kind: "objective",
+            nodeId,
+            parentRunId: null,
+            workspaceId: `workspace_run_${nodeId}`,
+          });
+        }
+      });
+
+      const refusal = storage.transact((transaction) =>
+        store.runCoversNode(transaction, [fixtureIds.task], 1700290000000),
+      );
+
+      assert.deepEqual(refusal, {
+        refusal: "subtree-busy",
+        relation: "ancestor",
+        nodeId: fixtureIds.initiative,
+        runId: `run_${fixtureIds.initiative}`,
+        expiresAt: 1700300000000,
+      });
+    }
+  });
+
+  it("a self run beats a bytewise-earlier ancestor run", (t) => {
+    for (const [first, second] of [
+      [
+        { nodeId: fixtureIds.initiative, kind: "objective" },
+        { nodeId: fixtureIds.task, kind: "task" },
+      ],
+      [
+        { nodeId: fixtureIds.task, kind: "task" },
+        { nodeId: fixtureIds.initiative, kind: "objective" },
+      ],
+    ] as const) {
+      const { storage, store, dispose } = build();
+      t.after(() => dispose());
+      storage.transact((transaction) => {
+        seedRegistry(transaction);
+        seedGraph(transaction);
+        for (const run of [first, second]) {
+          seedWorkspaceOnNode(transaction, {
+            id: `workspace_run_${run.nodeId}`,
+            nodeId: run.nodeId,
+          });
+          seedRunRow(transaction, {
+            id: `run_${run.nodeId}`,
+            kind: run.kind,
+            nodeId: run.nodeId,
+            parentRunId: null,
+            workspaceId: `workspace_run_${run.nodeId}`,
+          });
+        }
+      });
+
+      const refusal = storage.transact((transaction) =>
+        store.runCoversNode(transaction, [fixtureIds.task], 1700290000000),
+      );
+
+      assert.deepEqual(refusal, {
+        refusal: "subtree-busy",
+        relation: "self",
+        nodeId: fixtureIds.task,
+        runId: `run_${fixtureIds.task}`,
+        expiresAt: 1700300000000,
+      });
+    }
+  });
+
+  it("a tie on node id breaks by run id", (t) => {
+    for (const [firstRunId, secondRunId] of [
+      ["run_same_node_z", "run_same_node_a"],
+      ["run_same_node_a", "run_same_node_z"],
+    ] as const) {
+      const { storage, store, dispose } = build();
+      t.after(() => dispose());
+      storage.transact((transaction) => {
+        seedRegistry(transaction);
+        seedGraph(transaction);
+        transaction.run("DROP INDEX run_one_active");
+        seedWorkspaceOnNode(transaction, {
+          id: "workspace_same_node",
+          nodeId: fixtureIds.task,
+        });
+        for (const runId of [firstRunId, secondRunId]) {
+          seedRunRow(transaction, {
+            id: runId,
+            kind: "task",
+            nodeId: fixtureIds.task,
+            parentRunId: null,
+            workspaceId: "workspace_same_node",
+          });
+        }
+      });
+
+      const refusal = storage.transact((transaction) =>
+        store.runCoversNode(transaction, [fixtureIds.task], 1700290000000),
+      );
+
+      assert.deepEqual(refusal, {
+        refusal: "subtree-busy",
+        relation: "self",
+        nodeId: fixtureIds.task,
+        runId: "run_same_node_a",
+        expiresAt: 1700300000000,
+      });
+    }
+  });
+
+  it("two seed orders give a deep-equal result", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedSiblingTask(transaction);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_seed_order",
+        nodeId: fixtureIds.objective,
+      });
+      seedRunRow(transaction, {
+        id: "run_seed_order",
+        kind: "objective",
+        nodeId: fixtureIds.objective,
+        parentRunId: null,
+        workspaceId: "workspace_seed_order",
+      });
+    });
+
+    const results = storage.transact((transaction) => ({
+      forward: store.runCoversNode(
+        transaction,
+        [fixtureIds.task, "task_b"],
+        1700290000000,
+      ),
+      reverse: store.runCoversNode(
+        transaction,
+        ["task_b", fixtureIds.task],
+        1700290000000,
+      ),
+    }));
+
+    assert.deepEqual(results.forward, results.reverse);
+  });
+
+  it("an empty seed returns null", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+
+    const result = storage.transact((transaction) => {
+      const recorder = recordingTransaction(transaction);
+      const refusal = store.runCoversNode(
+        recorder.transaction,
+        [],
+        1700290000000,
+      );
+      return { refusal, statements: recorder.statements };
+    });
+
+    assert.equal(result.refusal, null);
+    assert.deepEqual(result.statements, []);
+  });
+
+  it("runCoversNode reads no lease row", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedLeaseOnNode(transaction, fixtureIds.task);
+    });
+
+    const result = storage.transact((transaction) => {
+      const recorder = recordingTransaction(transaction);
+      const refusal = store.runCoversNode(
+        recorder.transaction,
+        [fixtureIds.task],
+        1700290000000,
+      );
+      return { refusal, statements: recorder.statements };
+    });
+
+    assert.equal(result.refusal, null);
+    assert.ok(
+      result.statements.some((statement) => /\bFROM run\b/.test(statement.sql)),
+    );
+    assert.equal(
+      result.statements.some((statement) => /\blease\b/i.test(statement.sql)),
+      false,
+    );
+  });
+
+  it("self beats ancestor for a multi-id seed", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_multi_self",
+        nodeId: fixtureIds.objective,
+      });
+      seedRunRow(transaction, {
+        id: "run_multi_self",
+        kind: "objective",
+        nodeId: fixtureIds.objective,
+        parentRunId: null,
+        workspaceId: "workspace_multi_self",
+      });
+    });
+
+    const refusal = storage.transact((transaction) =>
+      store.runCoversNode(
+        transaction,
+        [fixtureIds.objective, fixtureIds.task],
+        1700290000000,
+      ),
+    );
+
+    assert.deepEqual(refusal, {
+      refusal: "subtree-busy",
+      relation: "self",
+      nodeId: fixtureIds.objective,
+      runId: "run_multi_self",
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("ancestor beats descendant for a multi-id seed", (t) => {
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_multi_ancestor",
+        nodeId: fixtureIds.objective,
+      });
+      seedRunRow(transaction, {
+        id: "run_multi_ancestor",
+        kind: "objective",
+        nodeId: fixtureIds.objective,
+        parentRunId: null,
+        workspaceId: "workspace_multi_ancestor",
+      });
+    });
+
+    const refusal = storage.transact((transaction) =>
+      store.runCoversNode(
+        transaction,
+        [fixtureIds.task, fixtureIds.initiative],
+        1700290000000,
+      ),
+    );
+
+    assert.deepEqual(refusal, {
+      refusal: "subtree-busy",
+      relation: "ancestor",
+      nodeId: fixtureIds.objective,
+      runId: "run_multi_ancestor",
+      expiresAt: 1700300000000,
+    });
+  });
+
+  it("runCoversNode and subtreeExclusion return the same refusal", (t) => {
+    const NOW = 1700299999999;
+    const scenarios: readonly Readonly<{
+      label: string;
+      run: ExclusionRun | null;
+    }>[] = [
+      {
+        label: "self",
+        run: {
+          runId: "run_agreement_self",
+          nodeId: fixtureIds.task,
+          state: "active",
+          expiresAt: NOW + 1,
+        },
+      },
+      {
+        label: "ancestor",
+        run: {
+          runId: "run_agreement_ancestor",
+          nodeId: fixtureIds.objective,
+          state: "active",
+          expiresAt: NOW + 1,
+        },
+      },
+      {
+        label: "grandparent",
+        run: {
+          runId: "run_agreement_grandparent",
+          nodeId: fixtureIds.initiative,
+          state: "active",
+          expiresAt: NOW + 1,
+        },
+      },
+      {
+        label: "unrelated",
+        run: {
+          runId: "run_agreement_unrelated",
+          nodeId: "task_b",
+          state: "active",
+          expiresAt: NOW + 1,
+        },
+      },
+      { label: "none", run: null },
+      {
+        label: "ended",
+        run: {
+          runId: "run_agreement_ended",
+          nodeId: fixtureIds.task,
+          state: "ended",
+          expiresAt: NOW + 1,
+        },
+      },
+      {
+        label: "expires now",
+        run: {
+          runId: "run_agreement_expires_now",
+          nodeId: fixtureIds.task,
+          state: "active",
+          expiresAt: NOW,
+        },
+      },
+      {
+        label: "expires after now",
+        run: {
+          runId: "run_agreement_expires_after",
+          nodeId: fixtureIds.task,
+          state: "active",
+          expiresAt: NOW + 1,
+        },
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const { storage, store, dispose } = build();
+      t.after(() => dispose());
+      storage.transact((transaction) => {
+        seedRegistry(transaction);
+        seedGraph(transaction);
+        if (scenario.run?.nodeId === "task_b") {
+          seedSiblingTask(transaction);
+        }
+        if (scenario.run !== null) {
+          const workspaceId = `workspace_${scenario.run.runId}`;
+          seedWorkspaceOnNode(transaction, {
+            id: workspaceId,
+            nodeId: scenario.run.nodeId,
+          });
+          seedRunRow(transaction, {
+            id: scenario.run.runId,
+            kind:
+              scenario.run.nodeId === fixtureIds.initiative ||
+              scenario.run.nodeId === fixtureIds.objective
+                ? "objective"
+                : "task",
+            nodeId: scenario.run.nodeId,
+            parentRunId: null,
+            workspaceId,
+            state: scenario.run.state,
+          });
+          transaction.run("UPDATE run SET expires_at = ? WHERE id = ?", [
+            scenario.run.expiresAt,
+            scenario.run.runId,
+          ]);
+        }
+      });
+
+      const results = storage.transact((transaction) => {
+        const graph = store.readGraph(transaction, fixtureIds.project);
+        const nodesById = new Map(
+          graph.nodes.map((node) => [node.id, node] as const),
+        );
+        const target = nodesById.get(fixtureIds.task);
+        assert.ok(target);
+
+        const ancestorIds: string[] = [];
+        let parentId = target.parentId;
+        while (parentId !== null) {
+          ancestorIds.push(parentId);
+          const parent = nodesById.get(parentId);
+          assert.ok(parent);
+          parentId = parent.parentId;
+        }
+
+        const descendantIds = graph.nodes
+          .filter((node) => {
+            let currentId = node.parentId;
+            while (currentId !== null) {
+              if (currentId === target.id) {
+                return true;
+              }
+              const parent = nodesById.get(currentId);
+              assert.ok(parent);
+              currentId = parent.parentId;
+            }
+            return false;
+          })
+          .map((node) => node.id);
+
+        const runRows = transaction.all(
+          "SELECT id, node_id, state, expires_at FROM run ORDER BY id ASC",
+        ) as readonly Readonly<{
+          id: string;
+          node_id: string;
+          state: "active" | "ended";
+          expires_at: number | null;
+        }>[];
+        const runs: readonly ExclusionRun[] = runRows.map((row) => ({
+          runId: row.id,
+          nodeId: row.node_id,
+          state: row.state,
+          expiresAt: row.expires_at,
+        }));
+        const input: SubtreeExclusionInput = {
+          targetId: target.id,
+          ancestorIds,
+          descendantIds,
+          runs,
+          now: NOW,
+        };
+
+        return {
+          store: store.runCoversNode(transaction, [target.id], NOW),
+          domain: subtreeExclusion(input),
+        };
+      });
+
+      assert.deepEqual(results.store, results.domain, scenario.label);
+    }
+  });
+
+  it("runCoversNode and assertRunAuthority share one liveness boundary", (t) => {
+    const NOW = 1700299999999;
+    const runId = "run_liveness_boundary";
+    const expiries = [NOW - 1, NOW, NOW + 1] as const;
+
+    for (const expiresAt of expiries) {
+      const { storage, store, dispose } = build();
+      t.after(() => dispose());
+      storage.transact((transaction) => {
+        seedRegistry(transaction);
+        seedGraph(transaction);
+        seedWorkspaceOnNode(transaction, {
+          id: `workspace_${expiresAt}`,
+          nodeId: fixtureIds.task,
+        });
+        seedRunRow(transaction, {
+          id: runId,
+          kind: "task",
+          nodeId: fixtureIds.task,
+          parentRunId: null,
+          workspaceId: `workspace_${expiresAt}`,
+        });
+        transaction.run("UPDATE run SET expires_at = ? WHERE id = ?", [
+          expiresAt,
+          runId,
+        ]);
+      });
+
+      const results = storage.transact((transaction) => {
+        const run: AuthorityRun = {
+          id: runId,
+          nodeId: fixtureIds.task,
+          state: "active",
+          fence: 1,
+          expiresAt,
+          worker: "general@1",
+        };
+        return {
+          coverage: store.runCoversNode(transaction, [fixtureIds.task], NOW),
+          authority: assertRunAuthority({
+            run,
+            runId,
+            fence: 1,
+            targetNodeId: fixtureIds.task,
+            subtreeIds: [],
+            caller: "general@1",
+            now: NOW,
+          }),
+        };
+      });
+
+      if (expiresAt <= NOW) {
+        assert.equal(results.coverage, null);
+        assert.deepEqual(results.authority, {
+          refusal: "run-expired",
+          runId,
+        });
+      } else {
+        assert.deepEqual(results.coverage, {
+          refusal: "subtree-busy",
+          relation: "self",
+          nodeId: fixtureIds.task,
+          runId,
+          expiresAt,
+        });
+        assert.equal(results.authority, null);
+      }
+    }
+  });
+
+  it("a node left running behind an expired run is still editable", (t) => {
+    const NOW = 1700299999999;
+    const runId = "run_expired_running_node";
+    const expiresAt = NOW - 1;
+    const { storage, store, dispose } = build();
+    t.after(() => dispose());
+
+    storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      transaction.run("UPDATE node SET state = 'running' WHERE id = ?", [
+        fixtureIds.task,
+      ]);
+      seedWorkspaceOnNode(transaction, {
+        id: "workspace_expired_running_node",
+        nodeId: fixtureIds.task,
+      });
+      seedRunRow(transaction, {
+        id: runId,
+        kind: "task",
+        nodeId: fixtureIds.task,
+        parentRunId: null,
+        workspaceId: "workspace_expired_running_node",
+      });
+      transaction.run("UPDATE run SET expires_at = ? WHERE id = ?", [
+        expiresAt,
+        runId,
+      ]);
+    });
+
+    const results = storage.transact((transaction) => {
+      const run: AuthorityRun = {
+        id: runId,
+        nodeId: fixtureIds.task,
+        state: "active",
+        fence: 1,
+        expiresAt,
+        worker: "general@1",
+      };
+      return {
+        coverage: store.runCoversNode(transaction, [fixtureIds.task], NOW),
+        authority: assertRunAuthority({
+          run,
+          runId,
+          fence: 1,
+          targetNodeId: fixtureIds.task,
+          subtreeIds: [],
+          caller: "general@1",
+          now: NOW,
+        }),
+      };
+    });
+
+    assert.equal(results.coverage, null);
+    assert.deepEqual(results.authority, {
+      refusal: "run-expired",
+      runId,
     });
   });
 
