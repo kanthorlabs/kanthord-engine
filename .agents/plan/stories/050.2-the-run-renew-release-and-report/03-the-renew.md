@@ -178,10 +178,10 @@ The importers, each resolved against the current tree:
   `src/main.ts:161` — `heartbeatNodeHandler` (the handler import), and the handler map entry at
   `src/main.ts:570` — `node.heartbeat` through `src/main.ts:583`.
 - `src/main.test.ts:176` — `node.heartbeat`, the key of the `fixtures` map.
-- `src/commands/node/release-node.test.ts:16` — `heartbeatNode`, called at
-  `src/commands/node/release-node.test.ts:749` — `heartbeatNode` to build mid-lifecycle state. That
-  file is the test-engineer lane and this one is not, so the two halves land in separate turns of
-  this story.
+- `src/commands/node/release-node.test.ts:17` — `heartbeatNode`, now an **unused import**: commit
+  `04376fb` removed the call that built mid-lifecycle state, and left the import. Delete the import.
+  That file is the test-engineer lane and this one is not, so the two halves land in separate turns
+  of this story.
 - `src/cli/node/heartbeat.ts:20` — `registerNodeHeartbeat`. Move it to `src/cli/node/renew.ts` and
   change the Commander registration from `heartbeat` to `renew`. Its wording already fits:
   `src/cli/node/heartbeat.ts:27` — `renew` carries the description "renew the lease of a node", and

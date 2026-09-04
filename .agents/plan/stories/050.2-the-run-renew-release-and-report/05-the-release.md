@@ -353,9 +353,12 @@ Add, each as a separate `it`:
 10. `"a release on an unknown node refuses node-not-found, not target-outside-run"` — present a valid
     `runId` and `runFence` with `nodeId: "task_zzz"`. Assert `refusal === "node-not-found"`.
 
-11. `"a release on an initiative refuses initiative-not-claimable, not target-outside-run"` — the
-    shipped case at `src/commands/node/release-node.test.ts:667` — `it`, carried across with a valid
-    `runId` and `runFence`, plus the added assertion that the code is not `"target-outside-run"`.
+11. `"a release on an initiative refuses initiative-not-claimable, not target-outside-run"` —
+    **written fresh.** The shipped case this story planned to carry across,
+    `"an initiative release is refused initiative-not-claimable and writes nothing"`, was removed by
+    commit `04376fb` and exists nowhere in the tree. Seed an initiative from
+    `test/helpers/rows.ts:184` — `seedSiblingTask`'s sibling fixture, present a valid `runId` and
+    `runFence`, and assert the code is `"initiative-not-claimable"` and not `"target-outside-run"`.
     Cases 10 and 11 are the pair that proves the node read precedes the authority check.
 
 12. `"a release refuses a target outside the run"` — an existing sibling task from
@@ -369,12 +372,14 @@ Add, each as a separate `it`:
     case at `src/commands/node/release-node.test.ts:417` — `it`, carried across, plus assertions that
     the run `outcome` is `"blocked"` and exactly one `run.ended` event carries it.
 
-15. `"an objective release appends run.ended and no lease.released"` — the shipped case at
-    `src/commands/node/release-node.test.ts:609` — `it`, carried across, plus an assertion on the
-    event type. It proves the third producer moved.
+15. `"an objective release appends run.ended and no lease.released"` — **written fresh.** The
+    shipped case this story planned to carry across,
+    `"an objective release after every task release frees the objective lease and ends the objective run released"`,
+    was removed by commit `04376fb` and exists nowhere in the tree. Release every task, then the
+    objective, and assert the appended event type. It proves the third producer moved.
 
 16. `"an objective release still refuses lease-held while a child lease is live"` — the shipped case
-    at `src/commands/node/release-node.test.ts:590` — `it`, carried across unchanged. It is the
+    at `src/commands/node/release-node.test.ts:386` — `it`, carried across unchanged. It is the
     control proving this story left the objective path's reads alone.
 
 17. `"a release whose run has no open attempt is refused no-open-attempt"` — the shipped case at
