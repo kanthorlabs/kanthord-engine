@@ -82,6 +82,15 @@ there and an argument cannot outlive its value.
 
 Story 8 follows Stories 1, 4, 5 and 6. Story 9 follows every prior story.
 
+**Stories 1 to 6 each delete their predecessor's scenario file, and one upstream story is what makes
+that legal.** Six stories of this tree supersede a shipped, replayed diagram, and both discovery rules
+decide dueness from `shippedEpics`, which `"050.4"` reaches only in Story 9 — so a predecessor stays
+due while the change moves its trace, and neither keeping nor deleting its scenario is green.
+`.agents/plan/stories/050.3-the-plan-write-guard/10-the-conformance-harness-admits-an-incremental-supersession.md`
+repairs both rules one epic earlier; this tree consumes it and repeats none of it. **Report a tree in
+which that story is absent rather than repairing the harness here**: this epic holds ten story files,
+which `scripts/verify-epic-sequence.ts:466` — `holds more than ten stories` caps.
+
 The serial order is the numeric order: **0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9**. No story depends on a later one.
 
 ## Stories
@@ -313,7 +322,7 @@ both resolve by that rule rather than by an amendment.
 | 1 (`01-the-claim-of-a-task-drops-the-lease`)        | `claim-lease-free-task`           | 9    | `execution.activeRunsOfNodes:subtree`  | EPIC 050.1 `claim-success-task`           |
 | 1 (`01-the-claim-of-a-task-drops-the-lease`)        | `claim-lease-free-task`           | 16   | `events.append:run.opened:T`           | EPIC 050.1 `claim-success-task`           |
 | 2 (`02-the-claim-of-an-initiative-drops-the-lease`) | `claim-lease-free-initiative`     | 7    | `execution.activeRunsOfNodes:subtree`  | EPIC 050.1 `claim-success-initiative`     |
-| 2 (`02-the-claim-of-an-initiative-drops-the-lease`) | `claim-lease-free-initiative`     | 11   | `events.append:run.opened:I`           | EPIC 050.1 `claim-success-initiative`     |
+| 2 (`02-the-claim-of-an-initiative-drops-the-lease`) | `claim-lease-free-initiative`     | 12   | `events.append:run.opened:I`           | EPIC 050.1 `claim-success-initiative`     |
 | 3 (`03-the-objective-busy-refusal-drops-the-lease`) | `claim-lease-free-objective-busy` | 7    | `execution.activeRunsOfNodes:siblings` | EPIC 050.1 `claim-refusal-objective-busy` |
 
 `renew-lease-free` and `release-lease-free` are **not** in doubt. They draw

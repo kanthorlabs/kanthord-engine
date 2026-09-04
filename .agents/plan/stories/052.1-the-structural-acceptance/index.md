@@ -180,7 +180,9 @@ line.
   a structural run claims an initiative or a parent objective, which has no objective above it to
   project. All three fields are nullable at `src/http/contract/outcome.ts:62` — `attemptsRemaining` and
   `:64` — `objectiveState`, and none of them costs a seam call, so the command never reads
-  `plan.readAllNodes`. See `09-the-accepted-patch.md`.
+  `plan.readAllNodes`. **The `outcome.reported` payload is the exception, and it carries a number**:
+  `src/http/contract/event-payload.ts:168` — `attemptsRemaining` admits no null. See
+  `09-the-accepted-patch.md`.
 - **The `authoredEpics` entry lands in Story 1 and the `shippedEpics` entry in Story 9.**
   `.agents/plan/epics/053-node-state-ownership.md:5` — `authoredEpics` records that EPIC 052.1 owns
   its own insert. The two lists are split across the first story and the last drawing story because

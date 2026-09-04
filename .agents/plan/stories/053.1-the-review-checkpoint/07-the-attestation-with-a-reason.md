@@ -219,7 +219,7 @@ dependencies.events.append(transaction, {
     outcome: "accepted",
     reason: null,
     objectId: null,
-    attemptsRemaining: null,
+    attemptsRemaining: Math.max(0, input.attemptLimit - accounting.counter),
     fromState: "running",
     toState: effect.nodeState,
   },
@@ -269,10 +269,16 @@ literals would put a domain rule in a command. `outcome` is the literal `"accept
 `input.verdict`: the narrowing at `src/commands/outcome/report-outcome.ts:147` — `switch` admits only the four
 `TaskReportOutcome` values, and the verdict decides nothing.
 
-**`attemptsRemaining` is `null`, and no attempt read pays for it.** EPIC 052.1 Story 9
-(`09-the-accepted-patch`) returns `null` for the same reason — the run ends in this transaction, so no
-further attempt of it can open — and `src/http/contract/outcome.ts:62` — `attemptsRemaining` is
-nullable. The payload carries the same `null`.
+**`attemptsRemaining` is `null` in the result and a number in the payload, and the two schemas force
+the split.** The result carries `null` because the run ends in this transaction, so no further attempt
+of it can open, and `src/http/contract/outcome.ts:62` — `attemptsRemaining` is nullable. **The payload
+cannot carry `null`**: `src/http/contract/event-payload.ts:168` — `attemptsRemaining` is
+`z.number().int()` and admits none, and `.agents/plan/epics/054-attempt-classification-and-the-supervisor.md:93`
+keeps that type, so no later epic widens it. The payload therefore carries
+`Math.max(0, input.attemptLimit - accounting.counter)` over the list the route already read, which is
+the value `.agents/plan/stories/051.3-the-checkpoint-and-the-land/04-the-accepted-settle.md:227` —
+`attemptsRemaining` computes for the same event on the accepted land. No attempt read pays for it:
+`accountAttempts` is pure over `input.attempts`.
 
 **`headOid: null` is present and null, never omitted.**
 `src/services/execution/sqlite.ts:291` — `writesHeadOid` flags on `!== undefined`, so passing `null`
@@ -369,10 +375,13 @@ Add, each as a separate `it`:
 
 3. `"an accepted review delivers the node and returns the post-aggregation result"` — assert the
    returned `NodeReportResult` deep-equals a stated literal in which `state` is `"done"`,
-   `objectId` is `null`, `attemptId` is the fixture attempt, `attemptsRemaining` is `2`, and
+   `objectId` is `null`, `attemptId` is the fixture attempt, `attemptsRemaining` is `null`, and
    `objectiveState` is `"awaiting_approval"` — the value the aggregation writes for a single `done`
    task. Reading before the aggregation yields `"running"`, so this case is what pins step 12 after
-   step 11.
+   step 11. Assert in the same case that the appended `outcome.reported` payload carries
+   `attemptsRemaining` of `2` and parses against `src/http/contract/event-payload.ts`, so the split
+   between the nullable result field and the non-nullable payload field is asserted once and in one
+   place. This is the epic's gate row 11a.
 
 4. `"a reject verdict writes the same row with verdict reject and the same node state"` — the same
    fixture with `verdict` of `"reject"`, asserting `verdict` is `"reject"`, that every other

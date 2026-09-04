@@ -94,7 +94,7 @@ export type WriteCheckpointInput =
 
 `writeCheckpoint(transaction, input): CheckpointRecord` keeps its name and its signature. EPIC 052.1
 draws one `execution.writeCheckpoint` step, at
-`.agents/plan/epics/052.1-the-structural-acceptance.md:162` — `execution.writeCheckpoint`, so a
+`.agents/plan/epics/052.1-the-structural-acceptance.md:163` — `execution.writeCheckpoint`, so a
 second method would give that path a second token.
 
 **The structural member carries no `repositoryId`, no `baseOid`, no `acceptedOid` and no
@@ -138,7 +138,7 @@ The bare-scalar form matches `src/services/execution/index.ts:101` — `activeRu
 **Every checkpoint row is an accepted checkpoint, so the predicate is a bare existence test.** The
 `checkpoint` table has no `accepted` column: `accepted_oid` is non-null only for the `execution`
 kind, `verdict` only for the `review` kind, and a `structural` row carries neither. A checkpoint is
-written only on an acceptance, and `../docs/workflow/worker.md:447` states a review verdict of `reject` is still a
+written only on an acceptance, and `../docs/workflow/worker.md:449` states a review verdict of `reject` is still a
 delivered verdict, so a rejected review checkpoint counts. The query is
 
 ```sql

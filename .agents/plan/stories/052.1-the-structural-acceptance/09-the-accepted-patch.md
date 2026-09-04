@@ -6,7 +6,9 @@ Depends on: Story 1 (`01-the-lowering`), for `lowerPatch`; Story 8
 EPIC 051.3 Story 2 (`02-the-checkpoint-row`), for the `checkpoint` table and its structural columns;
 EPIC 052 Story 5 (`05-the-seams-the-acceptance-needs`), for `execution.writeCheckpoint` and for the
 `deliverable` and `verifyJson` fields of `NodeWrite`; EPIC 050.2 Story 5 (`05-the-release`), for an
-`execution.endRun` that raises the fence and for the `run.ended` event type.
+`execution.endRun` that raises the fence and for the `run.ended` event type; EPIC 050.4 Story 2
+(`02-the-claim-of-an-initiative-drops-the-lease`), for the attempt a structural claim opens, which is
+the row `checkpoint.attempt_id` names.
 Kind: story-implement
 
 Diagrams: accept-structural-success
@@ -233,7 +235,7 @@ dependencies.events.append(transaction, {
     outcome: "accepted",
     reason: null,
     objectId: patchBlob,
-    attemptsRemaining: null,
+    attemptsRemaining: Math.max(0, input.run.attemptLimit - input.attemptNo),
     fromState: input.node.state,
     toState: input.node.state,
   },
@@ -261,6 +263,8 @@ dependencies.events.append(transaction, {
 `src/commands/outcome/report-outcome.ts:297` — `payload`. `objectId` is the patch blob hash, because a
 consumer reads `objectId` and joins the `checkpoint` table, and the patch is the object a structural
 run produced. `fromState` equals `toState`, because a structural run moves no node state.
+`attemptsRemaining` is the one key whose value differs from the result's: the payload schema admits no
+null, and the paragraph above states the arithmetic.
 
 **`run.ended` keeps EPIC 050.2's five keys**, with `reason: "accepted"`. It is `subjectKind` `run` and
 `subjectId` the run id, matching `.agents/plan/stories/050.2-the-run-renew-release-and-report/05-the-release.md:137`
@@ -287,8 +291,15 @@ return {
 };
 ```
 
-`attemptsRemaining` is `null` because the run ends in this transaction, so no further attempt of it
-can open, and `src/http/contract/outcome.ts:62` — `attemptsRemaining` is nullable.
+`attemptsRemaining` is `null` **in the result** because the run ends in this transaction, so no
+further attempt of it can open, and `src/http/contract/outcome.ts:62` — `attemptsRemaining` is
+nullable. **The payload carries a number, because its schema admits no null**:
+`src/http/contract/event-payload.ts:168` — `attemptsRemaining` is `z.number().int()`, and
+`.agents/plan/epics/054-attempt-classification-and-the-supervisor.md:93` keeps that type. The value is
+`Math.max(0, input.run.attemptLimit - input.attemptNo)`. `input.attemptNo` is the counter the shipped
+command computes: `src/services/execution/sqlite.test.ts:397` — `openAttempt reads the number from the rows`
+mints each attempt at one above the highest, so the one open attempt of a run carries the highest
+number, and this command closes exactly that attempt.
 `objectiveState` and `objectiveProjection` are `null` because a structural run claims an initiative or
 a parent objective, which has no objective above it to project; `src/http/contract/outcome.ts:64` —
 `objectiveState` is nullable. Neither field costs a seam call, so this command never reads
@@ -336,6 +347,13 @@ Add, each as a separate `it`:
    — all three in one case: assert the attempt `outcome` is `"accepted"`, the run `state` is `"ended"`
    with `outcome` `"done"`, and the run `fence` is exactly one greater than before. This is the epic's
    gate row 24.
+
+5a. `"the outcome.reported payload carries a numeric attemptsRemaining"` — assert the appended
+payload deep-equals a stated literal whose `attemptsRemaining` is `input.run.attemptLimit` minus
+the closing attempt's number, and assert the same payload parses against
+`src/http/contract/event-payload.ts` — `outcome.reported`. The returned result's
+`attemptsRemaining` is `null` in the same case, so the split between the two schemas is asserted
+once and in one place. This is the epic's gate row 24a.
 
 6. `"a successful acceptance makes zero git and zero commands.run calls"` — extend the dependency
    object with a `git` double and a `commands` double, record the whole object with `recordSeams` at

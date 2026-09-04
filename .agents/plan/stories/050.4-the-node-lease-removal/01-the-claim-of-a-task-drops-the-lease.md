@@ -171,7 +171,7 @@ Add, each as a separate `it`:
 
 11. `"the derived field decisions hold no node.claim lease line"` — the shipped `coverage.test.ts` harness over the regenerated fixture. Assert the fixture holds no line matching `node.claim.response#/properties/objectiveLease`, `.../lease` or `.../objectiveRunId`.
 
-Add `test/sequence/scenarios/claim-lease-free-task.ts`.
+Add `test/sequence/scenarios/claim-lease-free-task.ts`. **Delete `test/sequence/scenarios/claim-success-task.ts` in the same commit**, because this replacement makes EPIC 050.1's `claim-success-task` superseded the moment it exists, and a scenario naming a superseded diagram is refused at `test/sequence/conformance.test.ts:115` — `names a superseded live diagram`. EPIC 050.3 Story 10 (`10-the-conformance-harness-admits-an-incremental-supersession`) lands that rule one epic earlier, and this epic repeats none of it.
 
 `pnpm run verify` exits 0.
 

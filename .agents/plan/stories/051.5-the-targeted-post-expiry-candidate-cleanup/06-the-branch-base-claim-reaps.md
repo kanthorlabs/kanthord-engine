@@ -211,14 +211,14 @@ bound to Story 5's command and its inner `candidate.discard` to EPIC 051.1 Story
 `claim-branch-base-task` is not the only diagram that runs through the `begun.kind === "claimed"`
 return. `claim-lease-free-initiative` of EPIC 050.4 Story 2
 (`02-the-claim-of-an-initiative-drops-the-lease`) takes the same arm: an initiative claim reads no
-workspace branch and never reaches the cut. **Step 3's statement therefore adds a thirteenth step to
+workspace branch and never reaches the cut. **Step 3's statement therefore adds a fourteenth step to
 that path too, in this story.**
 
 Its scenario cannot stay. `"050.4"` is shipped, and under Story 10's rule
 (`10-the-conformance-harness-admits-an-incremental-supersession`)
 `claim-lease-free-initiative` is superseded only once `claim-initiative-reap.ts` exists — which Story
-8 (`08-the-initiative-claim-reaps`) adds. Left in place, the runner would replay a twelve-step trace
-against a thirteen-step claim and this story could not keep its `pnpm run verify` promise.
+8 (`08-the-initiative-claim-reaps`) adds. Left in place, the runner would replay a thirteen-step trace
+against a fourteen-step claim and this story could not keep its `pnpm run verify` promise.
 
 **Delete `test/sequence/scenarios/claim-lease-free-initiative.ts` here.** Story 10's third
 supersession clause — a predecessor whose own scenario file is already gone is retired — is what makes
@@ -279,7 +279,7 @@ is a Fake that returns the safe empty result. A case that names a value passes a
   `Superseded by:` lines are already applied, at
   `.agents/plan/stories/051-the-workspace-branch/03-the-claim-reads-the-workspace-head.md:26` —
   `Superseded` and
-  `.agents/plan/stories/050.4-the-node-lease-removal/02-the-claim-of-an-initiative-drops-the-lease.md:21` —
+  `.agents/plan/stories/050.4-the-node-lease-removal/02-the-claim-of-an-initiative-drops-the-lease.md:25` —
   `Superseded`, and one statement changes both traces.
 - Do not delete `test/sequence/scenarios/claim-lease-free-objective-busy.ts`. That diagram is
   superseded by nothing in this epic; it is widened, not retired.

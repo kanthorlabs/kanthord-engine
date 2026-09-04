@@ -24,7 +24,7 @@ Supersedes: EPIC 050.4 claim-lease-free-initiative
 
 Fixture: the fixture of `claim-lease-free-initiative`, unchanged. Initiative `I` is `ready`,
 unassigned, the root, and it declares `deliverable: expansion`, so the run kind is `structural`, no
-cascade exists, and the run holds no `run_base` row and no attempt. **No run is due**, so the expiry
+cascade exists, and the run holds no `run_base` row and exactly one attempt. **No run is due**, so the expiry
 pass ends nothing and the reap receives an empty list.
 
 ```mermaid
@@ -48,18 +48,19 @@ sequenceDiagram
     Command->>Execution: 7 execution.activeRunsOfNodes:subtree
     Command->>Plan: 8 plan.setNodeAssignment:I
     Command->>Execution: 9 execution.openRun:I
-    Command->>Plan: 10 plan.setNodeState:I:claim-taken
-    Command->>Events: 11 events.append:run.opened:R
-    Command->>Events: 12 events.append:node.running:I:claim-taken
-    Command->>Candidate: 13 candidate.reap
+    Command->>Execution: 10 execution.openAttempt:R
+    Command->>Plan: 11 plan.setNodeState:I:claim-taken
+    Command->>Events: 12 events.append:run.opened:R
+    Command->>Events: 13 events.append:node.running:I:claim-taken
+    Command->>Candidate: 14 candidate.reap
     Command-->>Client: ok
 ```
 
 **The drawn set is every branch of the initiative claim that ends `ok`.** EPIC 050.4 Story 2 fixed
-that set for the twelve steps and this story adds one step to it. An initiative claim reads no
+that set for the thirteen steps and this story adds one step to it. An initiative claim reads no
 workspace branch and never reaches the cut, so it takes the record-present arm Story 6 wired.
 
-**This diagram differs from `claim-lease-free-initiative` at step 13 and nowhere else.** Steps 1 to 12
+**This diagram differs from `claim-lease-free-initiative` at step 14 and nowhere else.** Steps 1 to 13
 are context tokens.
 
 **The reap appears even though this fixture expires nothing.** The call is unconditional in
@@ -93,16 +94,16 @@ Add `test/sequence/scenarios/claim-initiative-reap.ts`.
 
 **Do not delete `test/sequence/scenarios/claim-lease-free-initiative.ts` — Story 6
 (`06-the-branch-base-claim-reaps`) already did.** The `Superseded by:` line at
-`.agents/plan/stories/050.4-the-node-lease-removal/02-the-claim-of-an-initiative-drops-the-lease.md:21` —
+`.agents/plan/stories/050.4-the-node-lease-removal/02-the-claim-of-an-initiative-drops-the-lease.md:25` —
 `Superseded` is already applied, and Story 6's statement changed this path's trace, so the predecessor
 could not survive that story. Story 10's third supersession clause retires a predecessor whose own
 scenario is gone, so between Story 6 and this story the diagram is retired and this path carries no
-scenario. Adding the replacement here is what restores its coverage, and case 3 asserts the thirteen
+scenario. Adding the replacement here is what restores its coverage, and case 3 asserts the fourteen
 steps.
 
 ## Constraints
 
-- Steps 1 to 12 must stay token-identical to `claim-lease-free-initiative`. A step that appears on one
+- Steps 1 to 13 must stay token-identical to `claim-lease-free-initiative`. A step that appears on one
   and not the other means the initiative claim's shape changed, which this story must not do.
 - Write no production code. If the initiative claim does not reach step 13 without an edit, the reap
   is on the wrong arm and Story 6 is the defect to report — not a second call site to add here.

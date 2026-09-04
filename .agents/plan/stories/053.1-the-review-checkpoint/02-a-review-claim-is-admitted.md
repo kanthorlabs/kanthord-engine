@@ -6,7 +6,8 @@ story's diagram legal to the range gate; EPIC 050.4 Story 1
 (`01-the-claim-of-a-task-drops-the-lease`), for the lease-free claim; EPIC 051 Story 3
 (`03-the-claim-reads-the-workspace-head`), for the branch read a review claim does not make and for
 the `run_base` writer this story's control needs; EPIC 051.5 Story 6
-(`06-the-branch-base-claim-reaps`), for the `candidate.reap` tail of every claim.
+(`06-the-branch-base-claim-reaps`), for the `candidate.reap` tail of every claim; EPIC 050.4 Story 2
+(`02-the-claim-of-an-initiative-drops-the-lease`), for the attempt an admitted run of any kind opens.
 Kind: story-implement
 
 Diagrams: claim-success-review
@@ -19,13 +20,12 @@ writes no checkpoint.
 **It depends on one upstream repair, and it does not perform that repair.** A review checkpoint needs
 `attempt_id`, which `.agents/plan/stories/051.3-the-checkpoint-and-the-land/01-migration-14.md:49` —
 `attempt_id` declares `NOT NULL` under a composite foreign key, and Story 7
-(`07-the-attestation-with-a-reason`) closes that attempt. `src/commands/node/claim-node.ts:402` —
-`runKind` opens an attempt only for the `execution` kind today. **The repair is that an admitted run
-opens an attempt whatever its kind**, and it belongs to the family that asserted the opposite:
-`.agents/plan/epics/050.1-the-claim.md:235` — `openAttempt` states a structural run that opened an
-attempt fails, EPIC 050.4 Story 2 (`02-the-claim-of-an-initiative-drops-the-lease`) repeats it, and
-EPIC 052.1 Story 9 (`09-the-accepted-patch`) already closes an attempt on a structural run that no
-claim opens. This story draws the trace the repair produces and edits no gate itself.
+(`07-the-attestation-with-a-reason`) closes that attempt. **The repair is that an admitted run opens
+exactly one attempt whatever its kind, and EPIC 050.4 Story 2
+(`02-the-claim-of-an-initiative-drops-the-lease`) carries it** — the epic's Decision at
+`.agents/plan/epics/050.4-the-node-lease-removal.md:62` — `openAttempt` rules it, and that story is
+the one that redraws the trace the change moves. EPIC 050.4 ships long before this epic. This story
+draws the trace the repair produces and edits no gate itself.
 
 ## The path
 
@@ -87,10 +87,11 @@ fails.** Measured against EPIC 051.5 Story 6 (`06-the-branch-base-claim-reaps`)
   (`03-the-claim-reads-the-workspace-head`) makes the branch read conditional on the `execution`
   kind, and a review run passes `base: null`.
 
-**`execution.openAttempt:R` is present, and it is not this story's edit.** It arrives from the
-upstream repair stated above. If that repair instead makes `checkpoint.attempt_id` nullable, this
-diagram loses step 11 and Stories 7 and 8 lose their `execution.closeAttempt:A` step; the story is
-then re-authored, not patched.
+**`execution.openAttempt:R` is present, and it is not this story's edit.** It arrives from EPIC
+050.4 Story 2 (`02-the-claim-of-an-initiative-drops-the-lease`), which made the open unconditional.
+If a later epic instead makes `checkpoint.attempt_id` nullable, this diagram loses step 11 and
+Stories 7 and 8 lose their `execution.closeAttempt:A` step; the story is then re-authored, not
+patched.
 
 **The drawn set is every branch of the review-task claim.** `src/domain/node-pair.ts:43` — `review`
 also legalises `(objective, review)` with the state owner `attestation-then-human`, and the lift
@@ -135,9 +136,10 @@ all three of which the surrounding code already holds at
 `src/commands/node/claim-node.ts:207` — `runKind`,
 `src/commands/node/claim-node.ts:222` — `targetId` and the node view.
 
-**Do not touch `src/commands/node/claim-node.ts:402` — `runKind`.** The attempt gate is the upstream
-repair's edit, not this story's. A story that widens it here takes a decision three other epics
-assert the opposite of.
+**Do not touch the attempt open at `src/commands/node/claim-node.ts:401` — `attempt`.** EPIC 050.4
+Story 2 (`02-the-claim-of-an-initiative-drops-the-lease`) already made it unconditional. A claim that
+reaches this story still gated on the run kind is an EPIC 050.4 defect to report, not a change to
+make here.
 
 ### 2 — the refusal code stays wired, and stays unreachable from the task pair
 

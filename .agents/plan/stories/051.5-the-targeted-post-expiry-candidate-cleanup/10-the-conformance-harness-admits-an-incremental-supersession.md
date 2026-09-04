@@ -10,8 +10,18 @@ without which `scripts/verify-epic-sequence.ts` refuses this epic's first scenar
 
 ## Change
 
-Two implementations of one rule live in the tree, and both apply it keyed on `shippedEpics`. Both
-change here, identically.
+**Amended: the rule is landed, and this story verifies it rather than applying it.**
+`.agents/plan/stories/050.3-the-plan-write-guard/10-the-conformance-harness-admits-an-incremental-supersession.md`
+lands both predicates, in both files, together with the fixture-tree extraction — because EPIC 050.4 is
+the first epic to supersede a shipped, replayed diagram and is red without them. **Read every section
+below as the specification of what must already be true.** Verify each and raise `OPEN:` naming the
+divergence rather than re-applying it; a second application of one predicate is what makes the two
+implementations diverge. What remains this story's own is case 6 and case 8 of `## Verify`, which
+assert the rule over **this** epic's three supersessions and over the real tree at this range
+boundary.
+
+Two implementations of one rule live in the tree, and both applied it keyed on `shippedEpics`. Both
+changed identically.
 
 ### 1 — `scripts/epic-sequence-range.ts` — `"051.5"` is already in `authoredEpics`
 
@@ -24,7 +34,7 @@ A human already applied the three `Superseded by: EPIC 051.5 …` lines, at
 `.agents/plan/stories/051-the-workspace-branch/03-the-claim-reads-the-workspace-head.md:26` —
 `Superseded`,
 `.agents/plan/stories/051-the-workspace-branch/06-the-first-execution-claim.md:31` — `Superseded` and
-`.agents/plan/stories/050.4-the-node-lease-removal/02-the-claim-of-an-initiative-drops-the-lease.md:21` —
+`.agents/plan/stories/050.4-the-node-lease-removal/02-the-claim-of-an-initiative-drops-the-lease.md:25` —
 `Superseded`. `scripts/verify-epic-sequence.ts:505` — `knownEpicIds` refuses a supersession naming an
 epic outside `authoredEpics`, so `scripts/verify-epic-sequence.test.ts:882` — `doesNotThrow` fails
 until the entry lands. The epic assigns the insert to Story 3; every story of this epic promises
@@ -62,8 +72,8 @@ writes, and Story 6 needs it.** One `claimNode` statement serves both `claim-bra
 `claim-lease-free-initiative`, so Story 6 (`06-the-branch-base-claim-reaps`) changes both traces and
 must retire both scenarios — while `claim-initiative-reap.ts` does not arrive until Story 8
 (`08-the-initiative-claim-reaps`). Without the clause `claim-lease-free-initiative` stays due at
-Story 6, because `"050.4"` is shipped, and the runner replays a twelve-step trace against a
-thirteen-step claim.
+Story 6, because `"050.4"` is shipped, and the runner replays a thirteen-step trace against a
+fourteen-step claim.
 
 **The clause weakens nothing.** A retirement still requires an authored `Superseded by:` naming a
 diagram some story declares; `scripts/verify-epic-sequence.ts` still refuses a `Supersedes:` that
@@ -155,11 +165,14 @@ never imports from `test/`, and the reverse direction is already used at
 node --test test/sequence/conformance.test.ts scripts/verify-epic-sequence.test.ts
 ```
 
-Extend `test/sequence/conformance.test.ts` for cases 1 to 6 and
-`scripts/verify-epic-sequence.test.ts` for cases 7 and 8, each over a fixture plan tree in its own
-`mkdtemp` directory.
+**Cases 1 to 5 and case 7 are EPIC 050.3 Story 10's, and they are already in the tree.** Verify each
+by name and report a divergence rather than writing it again. This story adds **case 6 and case 8**,
+which are the only two keyed to this epic's own supersessions and to this range boundary.
 
-Add, each as a separate `it`:
+Extend `test/sequence/conformance.test.ts` for case 6, over a fixture plan tree in its own `mkdtemp`
+directory.
+
+The cases, each a separate `it`:
 
 1. `"a diagram superseded by an authored epic is due while the superseding scenario is absent"` — a
    fixture story in a shipped epic declaring `superseded-live` with

@@ -167,7 +167,7 @@ Add, each as a separate `it`:
 
 11. `"the derived field decisions hold no node.release fence line"` — the shipped `coverage.test.ts` harness over the regenerated fixture.
 
-Add `test/sequence/scenarios/release-lease-free.ts`.
+Add `test/sequence/scenarios/release-lease-free.ts`. **Delete `test/sequence/scenarios/release-success.ts` in the same commit**, because this replacement makes EPIC 050.2's `release-success` superseded the moment it exists, and a scenario naming a superseded diagram is refused at `test/sequence/conformance.test.ts:115` — `names a superseded live diagram`. EPIC 050.3 Story 10 (`10-the-conformance-harness-admits-an-incremental-supersession`) lands that rule one epic earlier, and this epic repeats none of it.
 
 `pnpm run verify` exits 0.
 

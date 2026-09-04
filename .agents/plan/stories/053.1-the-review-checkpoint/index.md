@@ -162,10 +162,12 @@ line is legal and none is written.
 
 ## Decisions taken during authoring, and now recorded in the EPIC
 
-Every ruling below is applied to `.agents/plan/epics/053.1-the-review-checkpoint.md`. Two asks
-remain open against other epics, and the epic's `## Amendments this epic asks of other epics`
-carries both: the attempt-lifecycle repair of EPIC 050.1 and EPIC 050.4, and EPIC 053.2 for the
-objective review path.
+Every ruling below is applied to `.agents/plan/epics/053.1-the-review-checkpoint.md`. One ask remains
+open against another epic, and the epic's `## Amendments this epic asks of other epics` carries it:
+the EPIC 050.1 `judged_oid` decision, whose pin this epic moves to the attestation. Two asks are
+resolved: the attempt-lifecycle repair is applied to EPIC 050.4 Story 2
+(`02-the-claim-of-an-initiative-drops-the-lease`), and the objective review path is authored as
+EPIC 053.2.
 
 - **`judged-checkpoint-unaccepted` is dropped, and the epic carries five new codes.** EPIC 052 Story 5
   (`05-the-seams-the-acceptance-needs`) settled that every checkpoint row is an accepted checkpoint —
@@ -218,9 +220,10 @@ objective review path.
   argument, so the second path moves to a sibling epic together with the objective attestation
   lifecycle. See `02-a-review-claim-is-admitted.md`.
 - **The attempt gate is repaired upstream, and Story 2 does not repair it.** A review checkpoint needs
-  `attempt_id`, which no claim writes for a non-execution run. The repair — an admitted run opens an
-  attempt whatever its kind — belongs to EPIC 050.1, EPIC 050.4 and the family that asserted the
-  opposite, and EPIC 052.1 is already unexecutable without it. Story 2 draws the trace the repair
+  `attempt_id`, which no claim wrote for a non-execution run. The repair — an admitted run opens
+  exactly one attempt whatever its kind — is applied to EPIC 050.4 Story 2
+  (`02-the-claim-of-an-initiative-drops-the-lease`), which is the story that already redraws the one
+  trace the change moves. EPIC 052.1 was unexecutable without it. Story 2 draws the trace the repair
   produces and edits no gate. See `02-a-review-claim-is-admitted.md`.
 - **`nodeReportRequest`'s review member carries `runId` and `runFence`, and no `fence`.** See
   `09-the-contract-the-cli-and-the-proposal.md`.

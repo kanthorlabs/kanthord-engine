@@ -34,7 +34,14 @@ Story 7 depends on Story 3, which removes the other reader of `facts.lease` in t
 
 Story 9 depends on every prior story.
 
-A workable serial order: **1 → 8 → 2 → 3 → 4 → 5 → 6 → 7 → 9**. No story in it depends on a later
+Story 10 (`10-the-conformance-harness-admits-an-incremental-supersession`) stands outside that
+reasoning. No story of this epic depends on it and it depends on none, so it may run at any position;
+it is listed last. **It is here because EPIC 050.4 needs it and cannot hold it**: that epic is the
+first to supersede a shipped, replayed diagram, and it already holds ten story files, which
+`scripts/verify-epic-sequence.ts:466` — `holds more than ten stories` caps. Its own case 8 asserts the
+change is inert on the tree this epic leaves.
+
+A workable serial order: **1 → 8 → 2 → 3 → 4 → 5 → 6 → 7 → 9 → 10**. No story in it depends on a later
 one: Story 1 and Story 8 read nothing of this epic, Stories 2 to 6 read both of them, Story 7 reads
 Story 3 and Story 6, and Story 9 reads all eight.
 
@@ -49,6 +56,7 @@ Story 3 and Story 6, and Story 9 reads all eight.
 - 7 — Containment stops reading the lease → `07-containment-stops-reading-the-lease.md`
 - 8 — `subtree-busy` joins the plan operations → `08-subtree-busy-joins-the-plan-operations.md`
 - 9 — The proposal records one guard → `09-the-proposal-records-one-guard.md`
+- 10 — The conformance harness admits an incremental supersession → `10-the-conformance-harness-admits-an-incremental-supersession.md` — draws nothing; it serves EPIC 050.4 and is inert here
 
 ## Facts, verified against the source
 

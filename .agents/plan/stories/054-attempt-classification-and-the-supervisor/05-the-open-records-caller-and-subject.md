@@ -75,15 +75,17 @@ service would be a refusal the database does not state and no case could reach t
 **Rewrite the call at `src/commands/node/claim-node.ts:401`** — `attempt`:
 
 ```ts
-const attempt =
-  runKind === "execution"
-    ? dependencies.execution.openAttempt(transaction, {
-        runId: run.id,
-        caller: input.actorId,
-        subject: run.worker,
-      })
-    : null;
+const attempt = dependencies.execution.openAttempt(transaction, {
+  runId: run.id,
+  caller: input.actorId,
+  subject: run.worker,
+});
 ```
+
+**The call is unconditional, and it was unconditional before this story.** EPIC 050.4 Story 2
+(`02-the-claim-of-an-initiative-drops-the-lease`) removed the `runKind === "execution"` arm, because
+`checkpoint.attempt_id` is `NOT NULL` for a structural and a review checkpoint alike. This story adds
+two fields to that one call and re-introduces no branch on the run kind.
 
 **`caller` is `input.actorId` and comes from the middleware, never from a body.**
 `src/http/server/node/claim-node.ts:31` — `actorId: context.actor.id` is the one producer, and
@@ -175,10 +177,11 @@ Add, each as a separate `it`:
    `(actor, worker)` pairs is the pair with content, and it delivers the row's four assertions. This
    is the epic's gate row 9.
 
-3. `"a claim on a structural node opens no attempt and stores no caller"` — claim a node whose
-   `runKind` is not `execution`, assert `result.attemptId` is `null`, and assert
-   `SELECT COUNT(*) FROM attempt WHERE run_id = ?` is `0`. This is the control that the derivation
-   sits inside the `runKind === "execution"` arm and did not become unconditional.
+3. `"a claim on a structural node opens one attempt carrying caller and subject"` — claim a node
+   whose `runKind` is not `execution`, assert `SELECT COUNT(*) FROM attempt WHERE run_id = ?` is `1`,
+   and assert that row's `caller` and `subject` by value. EPIC 050.4 Story 2
+   (`02-the-claim-of-an-initiative-drops-the-lease`) made the open unconditional, so this is the
+   control that the derivation is not gated on the run kind and that no claim path stores a null pair.
 
 4. `"the re-claim case passes the derived pair through the fake"` — update
    `src/commands/node/claim-node.test.ts:2222` — `a re-claim on the same run numbers the next attempt 2`, whose direct `openAttempt` call at `:2267` now names `caller` and `subject`, and add an

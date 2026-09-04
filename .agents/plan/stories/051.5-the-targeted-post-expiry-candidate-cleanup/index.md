@@ -51,7 +51,7 @@ the `test-engineer` and the `software-engineer`. There is no locked path, so the
 | 5     | `reap-candidates-one-ref`        | 4     | empty                                    | `ok`     |
 | 6     | `claim-branch-base-reap`         | 21    | EPIC 051 `claim-branch-base-task`        | `ok`     |
 | 7     | `claim-first-execution-reap`     | 19    | EPIC 051 `claim-first-execution`         | `ok`     |
-| 8     | `claim-initiative-reap`          | 13    | EPIC 050.4 `claim-lease-free-initiative` | `ok`     |
+| 8     | `claim-initiative-reap`          | 14    | EPIC 050.4 `claim-lease-free-initiative` | `ok`     |
 
 Story 3's diagram holds zero steps, and that is the strongest statement available about it: any seam
 the implementation reaches on an empty expired list fails the comparison. It is also why Story 3
@@ -76,6 +76,15 @@ reaches no reap. Story 6 case 8 asserts that.
 swap one scenario each and stay green, and it inserts `"051.5"` into `authoredEpics`, which
 `scripts/verify-epic-sequence.ts:505` — `knownEpicIds` needs before any story of this epic can add a
 scenario file or declare a supersession.
+
+**Amended: the rule and the range entry are both landed upstream, and Story 10 verifies them.** Both
+predicates, in both files, are landed by
+`.agents/plan/stories/050.3-the-plan-write-guard/10-the-conformance-harness-admits-an-incremental-supersession.md`,
+because EPIC 050.4 supersedes six shipped, replayed diagrams and is red without them. Every sentence
+below that describes Story 10 as _making_ the change now reads as the specification of what must
+already be true; what remains Story 10's own is the pair of cases that assert the rule over this
+epic's three supersessions and over the real tree at this range boundary. Story 10 stays first, and it
+re-applies nothing.
 
 **Story 9 is last.** It appends `"051.5"` to `shippedEpics`, which makes all six diagrams due, so
 every scenario file must already be on disk.

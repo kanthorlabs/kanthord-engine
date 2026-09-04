@@ -84,7 +84,7 @@ Add, each as a separate `it`:
 
 4. `"objective-busy still beats subtree-busy"` — seed both an active sibling run and an active subtree run, and assert the refusal is `objective-busy`. Precedence is decided by pure predicates the diagram cannot see, so it needs its own case.
 
-Add `test/sequence/scenarios/claim-lease-free-objective-busy.ts`.
+Add `test/sequence/scenarios/claim-lease-free-objective-busy.ts`. **Delete `test/sequence/scenarios/claim-refusal-objective-busy.ts` in the same commit**, because this replacement makes EPIC 050.1's `claim-refusal-objective-busy` superseded the moment it exists, and a scenario naming a superseded diagram is refused at `test/sequence/conformance.test.ts:115` — `names a superseded live diagram`. EPIC 050.3 Story 10 (`10-the-conformance-harness-admits-an-incremental-supersession`) lands that rule one epic earlier, and this epic repeats none of it.
 
 `pnpm run verify` exits 0.
 
