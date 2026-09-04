@@ -339,7 +339,7 @@ Add, each as a separate `it`:
    and exposes no argument, so an accepting control at the command level, behind the same double, is
    what the comparison needs. **The token-list equality is what the undrawn refusing arm costs**, and
    it is the instrument
-   `.agents/plan/epics/051.5-the-targeted-post-expiry-candidate-cleanup.md:145` — `same nineteen recorded steps`
+   `.agents/plan/epics/051.5-the-targeted-post-expiry-candidate-cleanup.md:138` — `same nineteen recorded steps`
    uses for the same reason on the claim's contended cut. Without it an extra seam call on the refusing
    arm alone reaches no oracle, because that arm has no diagram. Then add the control as a second `it`,
    `"a report whose acceptExecution throws an untyped error reaps nothing"`, where the double throws a
@@ -421,7 +421,7 @@ Add, each as a separate `it`:
     file under the real `test/sequence/scenarios/` would leave the repository dirty on a failure and
     would race a parallel test, which
     `AGENTS.md` `## Tests` forbids: a test is hermetic and uses its own `mktemp` directory.
-    `.agents/plan/epics/051.5-the-targeted-post-expiry-candidate-cleanup.md:148` —
+    `.agents/plan/epics/051.5-the-targeted-post-expiry-candidate-cleanup.md:141` —
     `over the same fixture tree` is the sibling precedent for the same technique. Gate row 19.
 
 11. `"shippedEpics holds 051.6 at its position in authoredEpics"` — extend

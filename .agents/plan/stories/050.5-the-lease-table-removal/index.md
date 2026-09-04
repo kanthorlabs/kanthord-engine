@@ -351,10 +351,10 @@ survive, empty and unreachable, until EPIC 057's migration `18`.
   the thing the constraint exists to avoid.
 
 - **The dashboard types the field, and no `HANDOFF.md` entry asks it to drop it.**
-  `apps/apps/dashboard/src/api/types.ts:440` — `leases: SystemStatusLease[]`, a fixture at
-  `apps/apps/dashboard/src/api/fixtures/system.ts:23`, and a contract copy at
+  `../apps/apps/dashboard/src/api/types.ts:440` — `leases: SystemStatusLease[]`, a fixture at
+  `../apps/apps/dashboard/src/api/fixtures/system.ts:23`, and a contract copy at
   `apps/docs/api/contract/source/components/system.yaml:617` with `leases` in the **required** list at
-  `:656`. No file under `apps/apps/dashboard/src` reads `.leases`, so this is a contract and type
+  `:656`. No file under `../apps/apps/dashboard/src` reads `.leases`, so this is a contract and type
   divergence rather than a runtime break, and the contract copy regenerates from the engine's
   publication. `types.ts` and `fixtures/system.ts` are hand-written and do not. `AGENTS.md` puts an
   obligation the dashboard must take on in `HANDOFF.md`, and no story of the 050 family writes that

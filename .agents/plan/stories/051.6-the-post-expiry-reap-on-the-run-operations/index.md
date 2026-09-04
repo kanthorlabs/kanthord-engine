@@ -221,7 +221,7 @@ already in `authoredEpics` and already pinned by
   `ok` — is not the refusing arm's oracle, and an extra seam call on that arm alone would reach none.
   The case therefore compares the two arms' full recorded token lists for equality, which is the
   instrument
-  `.agents/plan/epics/051.5-the-targeted-post-expiry-candidate-cleanup.md:145` —
+  `.agents/plan/epics/051.5-the-targeted-post-expiry-candidate-cleanup.md:138` —
   `same nineteen recorded steps` uses for the same reason on the claim's contended cut. The epic's
   `## Decisions` settled that no second diagram is drawn, and the one-pair rule of
   `.agents/plan/authoring.md:128` — `It draws exactly one pair` forbids Story 3 owning two live

@@ -102,7 +102,7 @@ Add, each as a separate `it`:
    migration `13` does not create it; assert it appears in the fence and not in the comparison.
 
 3. `"the first fence of workspace.md is unchanged"` — assert
-   `test/helpers/proposal.ts:8` — `proposalStatements("workspace")` still deep-equals migration `3`'s
+   `test/helpers/proposal.ts:8` — `proposalStatements` still deep-equals migration `3`'s
    `workspace` statement, which is the shipped case at
    `src/services/storage/migration-0003-execution-and-journal.test.ts:476` — `proposalStatements`.
    This is the control that the second fence is invisible to the helper.

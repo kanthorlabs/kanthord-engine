@@ -378,7 +378,7 @@ Add, each as a separate `it`:
     control proving this story left the objective path's reads alone.
 
 17. `"a release whose run has no open attempt is refused no-open-attempt"` — the shipped case at
-    `src/commands/node/release-node.test.ts:702` — `it`, carried across, and extended with a
+    `src/commands/node/release-node.test.ts:425` — `it`, carried across, and extended with a
     `databaseBytes` snapshot the shipped case does not take.
 
 18. `"lease.released is absent from eventTypes and run.ended is present"` — in
