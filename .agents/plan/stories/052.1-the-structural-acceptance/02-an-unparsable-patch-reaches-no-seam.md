@@ -89,7 +89,7 @@ export function acceptStructural(
 **There is no `storage` key and no `clock` key.**
 `.agents/plan/epics/052.1-the-structural-acceptance.md:33` — `acceptStructural` rules that the command
 takes the caller's transaction and opens none, because it writes no git and runs no command.
-`.agents/plan/epics/054.3-the-report-members-pay-their-attempt.md:24` — `acceptStructural` cites
+`.agents/plan/epics/054.3-the-report-members-pay-their-attempt.md:26` — `acceptStructural` cites
 that ruling and depends on it. The transaction is the second positional parameter, exactly as
 `reportObjective` at `src/commands/outcome/report-outcome.ts:59` — `reportObjective` takes it.
 

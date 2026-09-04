@@ -147,7 +147,7 @@ line.
 - **`acceptStructural` holds no `storage` key and no `clock` key, and no diagram of it draws
   `storage.transact`.** The epic's story-3 entry names `storage.transact` as step 1;
   `.agents/plan/epics/052.1-the-structural-acceptance.md:33` — `acceptStructural`, its gate row 8 and
-  `.agents/plan/epics/054.3-the-report-members-pay-their-attempt.md:24` — `acceptStructural` all say
+  `.agents/plan/epics/054.3-the-report-members-pay-their-attempt.md:26` — `acceptStructural` all say
   the opposite, and `src/commands/outcome/report-outcome.ts:107` — `transact` makes the entry
   unimplementable. Gate row 8 is discharged by the absence of the key and by the diagram comparison;
   gate row 7 by the zero-step diagram of Story 2. `clock` is absent because
