@@ -181,9 +181,9 @@ funnels every command error through that one function, and `body.report === "str
 
 ### 5 — `scripts/epic-sequence-range.ts` — append `"052.1"` to `shippedEpics`
 
-The list is at `scripts/epic-sequence-range.ts:18` — `shippedEpics`. Append the one element after
-`"052"`. `test/sequence/conformance.test.ts:272` — `assert.deepEqual` pins the matching literal;
-update it in the same edit. `test/sequence/conformance.test.ts:273` — `slice` asserts the shipped list
+The list is at `scripts/epic-sequence-range.ts:19` — `shippedEpics`. Append the one element after
+`"052"`. `test/sequence/conformance.test.ts:273` — `assert.deepEqual` pins the matching literal;
+update it in the same edit. `test/sequence/conformance.test.ts:274` — `slice` asserts the shipped list
 is a prefix of the authored one, so `"052"` must already be present.
 
 This is the last edit of the epic. It makes every diagram of EPIC 052.1 due, so it lands only when all
