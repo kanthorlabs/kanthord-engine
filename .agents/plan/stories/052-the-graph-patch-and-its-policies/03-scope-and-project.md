@@ -5,7 +5,7 @@ Depends on: Story 1 (`01-the-patch-shape-and-its-canonical-form`) for `GraphPatc
 Kind: story-foundation
 
 This story adds the second and third verdicts of the ordered chain. It has no caller: EPIC 052.1
-Story 4 (`04-an-illegal-target-scope-or-project`) is where both first
+Story 4 (`04-a-resolved-target-or-scope`) is where both first
 run. It changes no drawn path, so it draws nothing.
 
 ## Change
@@ -129,8 +129,8 @@ proves the ruling.
   them onto one node set.
 - `patchProjectVerdict` never reads `repositoryId`, and it never reads the pinned graph. Its only
   node source is `nodeProjects`.
-- Register `patch-scope-invalid` and `patch-project-invalid` nowhere. EPIC 052.1 Story 9
-  (`09-the-contract-and-the-proposal`) owns `src/http/contract/errors.ts:7` — `errorStatuses` and
+- Register `patch-scope-invalid` and `patch-project-invalid` nowhere. EPIC 052.2 Story 1
+  (`01-the-contract-carries-the-patch`) owns `src/http/contract/errors.ts:7` — `errorStatuses` and
   `src/cli/exit-code.ts:13` — `exitCodes`.
 - Do not add a chain runner here. The nine-step refusal order is EPIC 052.1's, at
   `.agents/plan/epics/052.1-the-structural-acceptance.md:44` — `patch-target-invalid`. Case 9 below

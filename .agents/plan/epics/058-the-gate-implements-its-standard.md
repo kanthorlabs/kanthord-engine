@@ -162,28 +162,29 @@ node --test \
 
 Hermetic coverage required beyond the Proof. **Every row names exactly one proof owner.**
 
-| #   | assertion                                                                                                                                                                                      | story |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| 1   | `pnpm run verify` runs `node scripts/verify-epic-sequence.ts` as its own step, asserted by reading the `verify` script of `package.json` for the exact token.                                  | 1     |
-| 2   | A story declaring `Executor:` and no `Paths:` is refused, and a story declaring `Paths:` and no `Executor:` is refused. Both directions, one fixture each.                                     | 2     |
-| 3   | A `story-implement` carrying `Executor:` is refused, and one carrying `Paths:` is refused. A `story-foundation` carrying both passes, so the refusal is not a blanket ban.                     | 2     |
-| 4   | A `Paths:` path that `scripts/lane-check.sh` allows to `test-engineer` is refused, and one it allows to `software-engineer` is refused.                                                        | 2     |
-| 5   | A `Paths:` path that `scripts/lane-check.sh` denies to `groundwork-engineer` is refused, and one it allows passes. The control proves the check reads the role and not the path alone.         | 2     |
-| 6   | A path in the `Paths:` line of two stories is refused, and the same path in one story passes.                                                                                                  | 2     |
-| 7   | The real tree holds no `Paths:` path in two stories after the repair, and the pre-repair tree fails the same assertion. The control that it detects the duplicate.                             | 2     |
-| 8   | A hermetic-coverage list that is a bullet list is refused, and one that is a table with a `story` column passes.                                                                               | 3     |
-| 9   | A gate table row whose `story` cell names two stories is refused, and a row naming none is refused. Both directions.                                                                           | 3     |
-| 10  | Every gate assertion of `epics/050-the-run-the-fence-and-exclusion.md` and `epics/050.1-the-claim.md` survives the conversion, asserted by comparing the assertion set before and after.       | 3     |
-| 11  | A `## Change` edit directive naming a both-denied path that no `Paths:` line declares is refused.                                                                                              | 4     |
-| 12  | A `## Change` that cites the same path in ordinary prose passes. The control that separates naming from quoting.                                                                               | 4     |
-| 13  | A `## Change` edit directive naming a path `scripts/lane-check.sh` denies to `groundwork-engineer` is not refused, because `.agents/plan/authoring.md:125` forbids the remedy.                 | 4     |
-| 14  | A reference whose stem names no story of the named epic is refused, and one whose stem resolves passes.                                                                                        | 5     |
-| 15  | A reference whose ordinal is the dispatch position of a `00-groundwork` epic passes, over a fixture holding `00-groundwork.md` and `01-*.md`. The control against comparing ordinal to prefix. | 5     |
-| 16  | Every stemmed reference of the real tree resolves after the repair, and the pre-repair tree fails on 20 of them.                                                                               | 5     |
-| 17  | A citation naming an absent file is refused, one naming a line beyond end of file is refused, and one naming a line that does not hold its identifier is refused. Three directions.            | 6     |
-| 18  | A three-part citation whose line holds its identifier passes, over a target under `src/`, `test/`, `scripts/`, `docs/` and `.agents/`. The control that the refusal is not a ban on citations. | 6     |
-| 19  | A two-part citation is not refused, in every one of the five trees. The boundary of the detection-only half, asserted so the conversion half cannot land by accident.                          | 6     |
-| 20  | Every three-part citation of the real tree resolves after the repair, and the pre-repair tree fails on 181 of them.                                                                            | 6     |
-| 21  | `.agents/plan/authoring.md` holds no `Not built.` token for the gate, and marks exactly two refusal halves unbuilt, asserted by value.                                                         | 7     |
-| 22  | `.agents/plan/pending/gate-table-retrofit.md` names only the epics that still hold a bullet list, asserted against the gate's own bullet 25 output over the whole plan tree.                   | 7     |
-| 23  | `authoredEpics` holds `"058"`, and the gate passes over the range that includes this epic's own stories.                                                                                       | 7     |
+| #   | assertion                                                                                                                                                                                          | story |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| 1   | `pnpm run verify` runs `node scripts/verify-epic-sequence.ts` as its own step, asserted by reading the `verify` script of `package.json` for the exact token.                                      | 1     |
+| 2   | A story declaring `Executor:` and no `Paths:` is refused, and a story declaring `Paths:` and no `Executor:` is refused. Both directions, one fixture each.                                         | 2     |
+| 3   | A `story-implement` carrying `Executor:` is refused, and one carrying `Paths:` is refused. A `story-foundation` carrying both passes, so the refusal is not a blanket ban.                         | 2     |
+| 4   | A `Paths:` path that `scripts/lane-check.sh` allows to `test-engineer` is refused, and one it allows to `software-engineer` is refused.                                                            | 2     |
+| 5   | A `Paths:` path that `scripts/lane-check.sh` denies to `groundwork-engineer` is refused, and one it allows passes. The control proves the check reads the role and not the path alone.             | 2     |
+| 6   | A path in the `Paths:` line of two stories is refused, and the same path in one story passes.                                                                                                      | 2     |
+| 7   | The real tree holds no `Paths:` path in two stories after the repair, and the pre-repair tree fails the same assertion. The control that it detects the duplicate.                                 | 2     |
+| 8   | A hermetic-coverage list that is a bullet list is refused, and one that is a table with a `story` column passes.                                                                                   | 3     |
+| 9   | A gate table row whose `story` cell names two stories is refused, and a row naming none is refused. Both directions.                                                                               | 3     |
+| 10  | Every gate assertion of `epics/050-the-run-the-fence-and-exclusion.md` and `epics/050.1-the-claim.md` survives the conversion, asserted by comparing the assertion set before and after.           | 3     |
+| 11  | A `## Change` edit directive naming a both-denied path that no `Paths:` line declares is refused.                                                                                                  | 4     |
+| 12  | A `## Change` that cites the same path in ordinary prose passes. The control that separates naming from quoting.                                                                                   | 4     |
+| 13  | A `## Change` edit directive naming a path `scripts/lane-check.sh` denies to `groundwork-engineer` is not refused, because `.agents/plan/authoring.md:125` forbids the remedy.                     | 4     |
+| 14  | A reference whose stem names no story of the named epic is refused, and one whose stem resolves passes.                                                                                            | 5     |
+| 15  | A reference whose ordinal is the dispatch position of a `00-groundwork` epic passes, over a fixture holding `00-groundwork.md` and `01-*.md`. The control against comparing ordinal to prefix.     | 5     |
+| 16  | Every stemmed reference of the real tree resolves after the repair, and the pre-repair tree fails on 20 of them.                                                                                   | 5     |
+| 17  | A citation naming an absent file, a line beyond end of file, or a line that does not hold its identifier is reported. Three directions, over the report's returned list.                           | 6     |
+| 18  | A three-part citation whose line holds its identifier is not reported, over a target under `src/`, `test/`, `scripts/`, `docs/` and `.agents/`. The control that the report is not a blanket flag. | 6     |
+| 19  | A two-part citation is not reported, in every one of the five trees. The boundary of the detection-only half, asserted so the conversion half cannot land by accident.                             | 6     |
+| 20  | The citation report exits 0 over a tree holding a stale citation, and `verify` stays green. The control that separates this report from the twenty-four refusals.                                  | 6     |
+| 21  | Every three-part citation of the real tree resolves after the repair, and the pre-repair tree reports 181 of them.                                                                                 | 6     |
+| 22  | `.agents/plan/authoring.md` holds no `Not built.` token for the gate, and marks exactly two refusal halves unbuilt, asserted by value.                                                             | 7     |
+| 23  | `.agents/plan/pending/gate-table-retrofit.md` names only the epics that still hold a bullet list, asserted against the gate's own bullet 25 output over the whole plan tree.                       | 7     |
+| 24  | `authoredEpics` holds `"058"`, and the gate passes over the range that includes this epic's own stories.                                                                                           | 7     |

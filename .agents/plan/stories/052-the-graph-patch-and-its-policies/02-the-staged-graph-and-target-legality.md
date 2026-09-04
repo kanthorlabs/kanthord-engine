@@ -6,7 +6,7 @@ Kind: story-foundation
 
 This story adds the staging function and the first verdict of the ordered chain. It declares the two
 graph types Stories 3 and 4 read. It has no caller: EPIC 052.1 Story 4
-(`04-an-illegal-target-scope-or-project`) is where `patchTargetVerdict`
+(`04-a-resolved-target-or-scope`) is where `patchTargetVerdict`
 first runs. It changes no drawn path, so it draws nothing.
 
 ## Change
@@ -65,8 +65,8 @@ this epic's legality questions read, and they are exactly the fields
 `src/domain/plan-candidate.ts:257` — `dependency-cross-parent` and
 `src/domain/plan-candidate.ts:294` — `dependency-cycle`. Nothing structural reads `title`,
 `instructionBlob` or `acceptanceBlob`, so the staged graph carries none of them and **this epic
-therefore builds no `Candidate`**. EPIC 052.1 Story 5
-(`05-an-invalid-staged-graph-refuses`) expresses the staged graph as a
+therefore builds no `Candidate`**. EPIC 052.1 Story 7
+(`07-an-invalid-staged-graph-or-an-empty-expansion`) expresses the staged graph as a
 `Candidate`, and it owns the blob fields the validator ignores.
 
 `StoredNode` is assignable to `StagedNode` field by field, so a pinned node stages by projection and
@@ -163,7 +163,7 @@ formed. Case 3 below is the control that proves it.
   minting.
 - `patchTargetVerdict` reads only the pinned graph. Judging it against the staged graph is vacuous,
   because staging is what makes both conditions well formed.
-- Register `patch-target-invalid` nowhere. EPIC 052.1 Story 9 (`09-the-contract-and-the-proposal`)
+- Register `patch-target-invalid` nowhere. EPIC 052.2 Story 1 (`01-the-contract-carries-the-patch`)
   owns `src/http/contract/errors.ts:7` — `errorStatuses` and
   `src/cli/exit-code.ts:13` — `exitCodes`.
 

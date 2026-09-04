@@ -207,8 +207,8 @@ destructuring and rebuilding a known shape.
   transaction. Its only vendor import is `zod`.
 - **Register none of the new codes on the wire.** `patch-unparsable` and `patch-id-duplicate` stay
   string literals inside this module. `src/http/contract/errors.ts:7` — `errorStatuses` and
-  `src/cli/exit-code.ts:13` — `exitCodes` are edited by EPIC 052.1 Story 9
-  (`09-the-contract-and-the-proposal`), which is the story that makes the codes reachable over the
+  `src/cli/exit-code.ts:13` — `exitCodes` are edited by EPIC 052.2 Story 1
+  (`01-the-contract-carries-the-patch`), which is the story that makes the codes reachable over the
   wire. `src/domain/node-write-legality.ts:3` — `nodeWriteRefusals` is the shipped precedent for a
   refusal tuple that no registry holds.
 - **Add nothing to `findingCodes`.** `src/domain/plan-finding.ts:44` — `findingScope` is a

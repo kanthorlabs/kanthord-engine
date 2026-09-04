@@ -5,8 +5,9 @@ Depends on: Story 2 (`02-the-staged-graph-and-target-legality`) for `PatchGraph`
 Kind: story-foundation
 
 This story adds the last two verdicts of the ordered chain. Neither has a caller: EPIC 052.1 Story 6
-(`06-a-fixed-pair-or-an-empty-expansion`) is where both first run. It changes no drawn
-path, so it draws nothing.
+(`06-a-fixed-pair-refuses-before-the-validator`) is where `pairChangeVerdict` first runs, and
+EPIC 052.1 Story 7 (`07-an-invalid-staged-graph-or-an-empty-expansion`) is where `expansionVerdict`
+first runs. It changes no drawn path, so it draws nothing.
 
 It leaves the checkpoint read to Story 5 (`05-the-seams-the-acceptance-needs`), which declares
 `execution.hasAcceptedCheckpoint`. `pairChangeVerdict` takes the boolean; it never reads a store.
@@ -116,8 +117,8 @@ function's. `src/domain/plan-graph.ts:19` — `deliverable` is `string | null` a
   `worker.md:385` says child.
 - Add `pair-fixed` and `expansion-empty` to no registry. They are refusals, not findings, so
   `src/domain/plan-finding.ts:6` — `findingCodes` and
-  `src/domain/plan-finding.ts:44` — `findingScope` are untouched, and EPIC 052.1 Story 9
-  (`09-the-contract-and-the-proposal`) owns `src/http/contract/errors.ts:7` — `errorStatuses` and
+  `src/domain/plan-finding.ts:44` — `findingScope` are untouched, and EPIC 052.2 Story 1
+  (`01-the-contract-carries-the-patch`) owns `src/http/contract/errors.ts:7` — `errorStatuses` and
   `src/cli/exit-code.ts:13` — `exitCodes`.
 - This story does not own gate row 25. The eight-`nodeStates` delete belongs to Story 5
   (`05-the-seams-the-acceptance-needs`).

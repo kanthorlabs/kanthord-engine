@@ -5,8 +5,8 @@ Depends on: EPIC 051 Story 1 (`01-migration-13`) and EPIC 051.3 Story 1 (`01-mig
 Kind: story-foundation
 
 This story widens two service interfaces and their implementations. It has no caller: EPIC 052.1
-Story 7 (`07-the-accepted-patch`) writes the structural checkpoint and EPIC 052.1 Story 6
-(`06-a-fixed-pair-or-an-empty-expansion`) reads the predicate. It changes no drawn path,
+Story 9 (`09-the-accepted-patch`) writes the structural checkpoint and EPIC 052.1 Story 6
+(`06-a-fixed-pair-refuses-before-the-validator`) reads the predicate. It changes no drawn path,
 so it draws nothing.
 
 **The checkpoint half of this story is not buildable against the tree as it stands.** The highest

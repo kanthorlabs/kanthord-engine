@@ -150,7 +150,7 @@ everything.
 - **A pure-domain refusal needs no registration.** `src/domain/node-write-legality.ts:3` —
   `nodeWriteRefusals` appears in no registry. `src/http/contract/errors.ts:7` — `errorStatuses`
   drives `src/cli/exit-code.ts:13` — `exitCodes` through a `Record<ErrorCode, number>`, so a code
-  added there forces an exit code, and EPIC 052.1 Story 9 (`09-the-contract-and-the-proposal`) owns
+  added there forces an exit code, and EPIC 052.2 Story 1 (`01-the-contract-carries-the-patch`) owns
   both.
 - **The two-space, one-trailing-newline canonical form ships at**
   `src/services/home-lock/identity.ts:3` — `renderIdentity`, and its byte-exact test with a
