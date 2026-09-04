@@ -168,6 +168,14 @@ pair-illegal"` — a `create` of a task whose `deliverable` is `expansion`, whic
    recorder. Assert `recorder.tokens` deep-equals
    `["plan.newestRevision", "plan.readGraph", "plan.readValidationContext", "graph.cycles"]`.
 
+6. `"a task parented under an atomic objective refuses plan-invalid carrying pair-shape-violated"` —
+   an `update` that reparents an existing task under an objective whose `deliverable` is
+   `implementation`. Assert `error.refusal` is `"plan-invalid"` and the finding codes deep-equal
+   `["pair-shape-violated"]`. Then the same reparent under an objective whose `deliverable` is
+   `expansion` returns a result. This is the epic's gate row 14a, and the second half is the control
+   that proves the rule is not vacuous.
+   `docs/proposal/phase-2/deliverables-and-pairs.md:28` — `Shape and children` states the rule.
+
 Add `test/sequence/scenarios/accept-structural-refusal-plan-invalid.ts`, building the fixture the
 diagram names, running the real `acceptStructural` directly over real SQLite and the real
 `GraphologyGraph` behind the recorder, and catching the `AcceptStructuralError` and returning it as

@@ -113,7 +113,7 @@ its members are asserted by value, following
 
 ```ts
 export const graphPatch = z
-  .strictObject({ mutations: z.array(graphMutation) })
+  .strictObject({ version: z.literal(1), mutations: z.array(graphMutation) })
   .superRefine((patch, context) => {
     for (const [index, mutation] of patch.mutations.entries()) {
       if (mutation.op !== "update") continue;
@@ -157,7 +157,8 @@ export type PatchDuplicateVerdict =
 export function patchDuplicateVerdict(patch: GraphPatch): PatchDuplicateVerdict;
 ```
 
-It walks `patch.mutations` in submitted order and returns the **first** id a second mutation names.
+It returns every id `patch.mutations` names two or more times, bytewise sorted, each id once
+whatever its multiplicity. Submitted order is never the oracle.
 The verdict shape is the epic-wide one: `{ ok: true }` or `{ ok: false, refusal, <evidence> }`,
 matching `src/domain/execution-acceptance.ts` of EPIC 051.1 Story 6
 (`06-the-acceptance-verdicts`) and `src/domain/node-write-legality.ts:30` — `NodeWriteLegality`.
@@ -180,7 +181,8 @@ renderer builds an explicit object literal per `op` with its keys written in byt
 the idiom of `src/domain/plan-hash.ts:5` — `canonicalDocumentsJson`, which normalises key order by
 destructuring and rebuilding a known shape.
 
-- **The top level** is `{ "mutations": [ … ] }`.
+- **The top level** is `{ "version": 1, "mutations": [ … ] }`. `patch_blob` is immutable evidence,
+  so the grammar states its own version rather than leaving a future reader to infer it from shape.
 - **`create`** emits, in this order: `acceptance`, `deliverable`, `dependsOn`, `id`, `instruction`,
   `kind`, `op`, `parentId`, `repositoryId`, `title`, `verify`.
 - **`update`** emits only the keys the mutation names, in this order: `acceptance`, `deliverable`,

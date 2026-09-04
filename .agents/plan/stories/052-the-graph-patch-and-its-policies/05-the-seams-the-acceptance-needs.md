@@ -240,25 +240,23 @@ Add, each as a separate `it`:
    `task_c`. The second seeded node is what asserts the key predicate: a query missing its
    `WHERE node_id = ?` returns `true` for `task_c` too. Gate row 23.
 
-7. **BLOCKED — do not implement without a ruling.**
-   `"a checkpoint row survives the deletion of the node it names"` — the epic's gate row 24 asks for
-   this, and migration 14 as authored forbids it.
+7. `"a node named by a checkpoint row cannot be deleted"` — seed one node, one run, one attempt and
+   one `kind = 'structural'` checkpoint naming that node, then delete the node through
+   `mutateGraph`'s `nodeDeletes` and assert the call raises `FOREIGN KEY constraint failed`.
    `.agents/plan/stories/051.3-the-checkpoint-and-the-land/01-migration-14.md:47` — `node_id` declares
    `node_id TEXT NOT NULL REFERENCES node(id)` with no `ON DELETE` clause, and
-   `src/services/storage/connection.ts:8` — `foreign_keys` turns the pragma on at every open. SQLite
-   then applies `NO ACTION` immediately, so `DELETE FROM node` on a node a checkpoint names raises
-   `FOREIGN KEY constraint failed` and the row does not survive — the delete does not happen at all.
-   The epic's ruling that "a delete carries no state condition and no checkpoint condition" is
-   therefore unimplementable as the schema stands. Two resolutions exist and a human picks one; see
-   the report. Write no case for this row until then.
+   `src/services/storage/connection.ts:8` — `foreign_keys` turns the pragma on at every open, so
+   SQLite applies `NO ACTION` immediately. The control: the same node with its checkpoint removed
+   deletes. This is the schema fact the delete guard turns into a typed refusal. Gate row 24.
 
-8. `"a child in each of the eight nodeStates values deletes"` — iterate
+8. `"three nodeStates values delete and the other five refuse"` — iterate
    `src/domain/state.ts:7` — `nodeStates`, seeding one child per value under one objective with
-   `test/helpers/rows.ts:359` — `seedNode`, then delete all eight through `mutateGraph`'s
-   `nodeDeletes` and assert the node table holds only the objective. **Seed no run for any of the
-   eight.** `src/services/storage/migration-0007-external-execution.ts:15` — `node_id` makes
-   `run.node_id` a foreign key on `node(id)`, so a node carrying a run row cannot be deleted whatever
-   its state, and a fixture that seeds one turns a state test into a foreign-key test. Gate row 25.
+   `test/helpers/rows.ts:359` — `seedNode`. Assert the delete guard admits `pending`, `ready` and
+   `blocked`, and refuses the other five with `patch-delete-ineligible`. The split is exhaustive
+   because it is iterated from the tuple. **Seed no run for any of the eight.**
+   `src/services/storage/migration-0007-external-execution.ts:15` — `node_id` makes `run.node_id` a
+   foreign key on `node(id)`, so a node carrying a run row cannot be deleted whatever its state, and
+   a fixture that seeds one turns a state test into a foreign-key test. Gate row 25.
 
 9. `"a child carrying a run row is not deletable"` — the control for case 8. Seed one child in state
    `running` **with** a run row, attempt the same delete, and assert the foreign-key failure with

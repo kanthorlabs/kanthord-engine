@@ -25,6 +25,18 @@ The node kind and deliverable form one pair. The complete pair table is:
 
 The table contains eight legal pairs and four illegal pairs. The illegal pairs are `initiative` with `test`, `implementation` or `review`, and `task` with `expansion`.
 
+## Shape and children
+
+The `Shape` column is a rule, and the graph validator enforces it. A node with the shape `atomic` holds no child. A node with the shape `parent` holds children.
+
+The rule is stated over the parent edge. A child is illegal when its parent has a non-null `deliverable` and the pair of that parent is legal with the shape `atomic`. The finding is `pair-shape-violated`, its scope is structural, and it names the parent. One offending parent gives one finding, whatever the number of its children.
+
+Pair validation does not apply to a null `deliverable`, so a null parent has no shape and this rule does not reach it. `## Null deliverables` states that rule.
+
+Completeness follows the same shape. A parent with the shape `atomic` needs no child, so it gives no `objective-without-task` finding. Every other node keeps the kind rule: an `expansion` initiative needs an objective, and an `expansion` objective needs a task. A null parent keeps the kind rule.
+
+Both the structural patch and `plan import` ask the same question, because the rule describes the graph and not its writer. A stored graph that violates the rule refuses every patch whose staged graph still violates it. A patch that deletes the child repairs it, subject to the node delete rule. No migration repairs a stored violation, and none is necessary: `plan import` is the only writer that can make one, and this rule reaches it.
+
 ## Verify block
 
 Every node declares a strict two-key `verify` object. `paths` is a sorted set of absolute paths. `commands` is an ordered sequence of shell strings.
@@ -33,7 +45,7 @@ An empty `commands` list asserts nothing. For a parent initiative or objective, 
 
 ## Fixed pairs
 
-A pair becomes fixed when its node holds a child or an accepted checkpoint. In EPIC 047, no writer changes a pair in place. `deliverable` belongs to neither `proseFields` nor `structuralFields`. EPIC 052 enforces the rule at the structural patch.
+A pair becomes fixed when its node holds a child or an accepted checkpoint. A checkpoint of any kind fixes the pair, and the fix is permanent. A parent objective does not become atomic: an accepted expansion writes a structural checkpoint on the claimed node. A refusal names one reason for each fixed node. `has-accepted-checkpoint` precedes `has-child`, because a checkpoint never goes away and a child sometimes can. A refusal that names the child invites a deletion that cannot legalise the pair. In EPIC 047, no writer changes a pair in place. `deliverable` belongs to neither `proseFields` nor `structuralFields`. EPIC 052 enforces the rule at the structural patch.
 
 ## Null deliverables
 

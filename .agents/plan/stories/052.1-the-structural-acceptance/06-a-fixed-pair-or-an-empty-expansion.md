@@ -89,7 +89,8 @@ if (verdict !== null) {
 
 `hasChild` is read from the **pinned** graph, and `hasAcceptedCheckpoint` from the execution store.
 `.agents/plan/epics/052-the-graph-patch-and-its-policies.md:55` — `pairChangeVerdict` decides both.
-The two-patch sequence follows from it: patch one deletes every child, patch two changes the pair.
+The fix is permanent: an accepted expansion writes a structural checkpoint on the claimed node, so a
+parent objective never becomes atomic. `worker.md:94` states it.
 
 **A node whose pair does not change is never read.** The seam call belongs to the pair change, not to
 the mutation, so a patch that changes no pair reaches no `execution.hasAcceptedCheckpoint`. Story 7's
@@ -151,15 +152,14 @@ Add, each as a separate `it`:
 1. `"a pair change on a node holding an accepted checkpoint refuses pair-fixed"` — the diagram's
    fixture. Assert `error.refusal` is `"pair-fixed"` and that the message names `C`.
 
-2. `"the two-patch sequence succeeds where a single combined patch refuses"` — patch one deletes every
-   child of `C`, patch two changes `C`'s pair; assert both return a result. Then, against a fresh
-   fixture, submit one patch that both deletes the children and changes the pair, and assert
-   `error.refusal` is `"pair-fixed"`. Cases 1 and 2 are the epic's gate row 15.
+2. `"a pair change refuses on a node holding a child and passes on a node holding neither"` — one
+   fixture whose `C` holds a child and no checkpoint, asserting `error.refusal` is `"pair-fixed"`;
+   one fixture whose `C` holds neither, asserting the patch returns a result. Cases 1 and 2 are the
+   epic's gate row 15, and case 1 supplies its `structural` checkpoint.
 
-3. `"a childless expansion claim whose patch creates no surviving child refuses expansion-empty"` — a
-   claimed node with no child in the pinned graph, and a patch whose only `create` is reparented away
-   from it by a second mutation. Assert `error.refusal` is `"expansion-empty"`. This is the epic's
-   gate row 16.
+3. `"a childless expansion claim whose patch creates no direct child refuses expansion-empty"` — a
+   claimed node with no child in the pinned graph, and a patch whose only `create` is finally
+   parented on a node other than the claimed node. Assert `error.refusal` is `"expansion-empty"`.
 
 4. `"the control: the same patch leaving the created node under the claimed node passes"` — without
    it, case 3 passes for a command that refuses `expansion-empty` unconditionally.

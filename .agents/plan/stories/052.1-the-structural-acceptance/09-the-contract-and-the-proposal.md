@@ -46,13 +46,14 @@ files move together and in one order.
 
 Insert the five precondition codes directly after `"subtree-busy"`:
 
-| code                    | status |
-| ----------------------- | ------ |
-| `patch-target-invalid`  | 409    |
-| `patch-scope-invalid`   | 409    |
-| `patch-project-invalid` | 409    |
-| `pair-fixed`            | 409    |
-| `expansion-empty`       | 409    |
+| code                      | status |
+| ------------------------- | ------ |
+| `patch-target-invalid`    | 409    |
+| `patch-scope-invalid`     | 409    |
+| `patch-project-invalid`   | 409    |
+| `patch-delete-ineligible` | 409    |
+| `pair-fixed`              | 409    |
+| `expansion-empty`         | 409    |
 
 and the two request-shape codes directly after `"credential-rejected"`:
 
@@ -61,18 +62,18 @@ and the two request-shape codes directly after `"credential-rejected"`:
 | `patch-unparsable`   | 422    |
 | `patch-id-duplicate` | 422    |
 
-Each of the five 409 codes joins `PreconditionCode` at `src/http/contract/errors.ts:41` —
+Each of the six 409 codes joins `PreconditionCode` at `src/http/contract/errors.ts:41` —
 `PreconditionCode` by construction, so `httpError` demands a `details` argument for it. That is the
 intent: each names a specific mutation, and a refusal that does not say which mutation is unusable.
 
-The count moves from 29 to 36. `src/http/contract/errors.test.ts:41` — `pins` holds the ordered
+The count moves from 29 to 37. `src/http/contract/errors.test.ts:41` — `pins` holds the ordered
 literal, `src/http/contract/errors.test.ts:113` — `groups` holds the status grouping, and both take
-the seven new entries in the same positions.
+the eight new entries in the same positions.
 
-### 3 — `docs/proposal/api/README.md` — seven matrix rows
+### 3 — `docs/proposal/api/README.md` — eight matrix rows
 
 The table is read by `readErrorCodeMatrix` at `test/helpers/proposal.ts:89` — `readErrorCodeMatrix`,
-which takes every three-cell row whose first cell is an integer between 400 and 599. Insert five rows
+which takes every three-cell row whose first cell is an integer between 400 and 599. Insert six rows
 after `docs/proposal/api/README.md:266` — `subtree-busy` and two after
 `docs/proposal/api/README.md:270` — `credential-rejected`, in the order of section 2, each with its
 meaning:
@@ -80,19 +81,22 @@ meaning:
 - `patch-target-invalid` — a mutation names an id the pinned graph cannot mutate that way
 - `patch-scope-invalid` — a mutation leaves the claimed subtree
 - `patch-project-invalid` — a mutation names a node of another project
+- `patch-delete-ineligible` — a deleted node is not in a deletable state, or a durable row
+  names it
 - `pair-fixed` — the node holds a child or an accepted checkpoint, so its pair no longer moves
 - `expansion-empty` — the accepted patch leaves the claimed node with no child
 - `patch-unparsable` — the patch is not a graph patch
 - `patch-id-duplicate` — two mutations name one id
 
-### 4 — `src/cli/exit-code.ts` — seven exit codes
+### 4 — `src/cli/exit-code.ts` — eight exit codes
 
-`src/cli/exit-code.ts:13` — `exitCodes` gains the same seven keys. The key set must equal
+`src/cli/exit-code.ts:13` — `exitCodes` gains the same eight keys. The key set must equal
 `errorStatuses`' key set, asserted bytewise at `src/cli/exit-code.test.ts:53` — `bytewise`; the order
-is free, so append the seven after `"subtree-busy"` at `src/cli/exit-code.ts:39` — `subtree-busy`:
+is free, so append the eight after `"subtree-busy"` at `src/cli/exit-code.ts:39` — `subtree-busy`:
 
-`patch-target-invalid` 170, `patch-scope-invalid` 171, `patch-project-invalid` 172, `pair-fixed` 173,
-`expansion-empty` 174, `patch-unparsable` 175, `patch-id-duplicate` 176.
+`patch-target-invalid` 170, `patch-scope-invalid` 171, `patch-project-invalid` 172,
+`patch-delete-ineligible` 173, `pair-fixed` 174, `expansion-empty` 175, `patch-unparsable` 176,
+`patch-id-duplicate` 177.
 
 `src/cli/exit-code.test.ts:17` — `expected` holds the literal map and
 `src/cli/exit-code.test.ts:60` — `twenty-nine` asserts a count of 29; both move to 36, and the test
@@ -110,26 +114,75 @@ Add one details schema per new 409 code, shaped like `subtreeBusyDetails` at
 
 ```ts
 export const patchTargetInvalidDetails = z.strictObject({
-  mutationId: z.string(),
+  violations: z.array(z.strictObject({ mutationId: z.string() })).min(1),
 });
 export const patchScopeInvalidDetails = z.strictObject({
-  mutationId: z.string(),
   claimedNodeId: z.string(),
+  violations: z
+    .array(
+      z.strictObject({
+        mutationId: z.string(),
+        referenceId: z.string().nullable(),
+      }),
+    )
+    .min(1),
 });
 export const patchProjectInvalidDetails = z.strictObject({
-  mutationId: z.string(),
   projectId: z.string(),
+  violations: z
+    .array(
+      z.strictObject({
+        mutationId: z.string(),
+        referenceId: z.string().nullable(),
+      }),
+    )
+    .min(1),
+});
+export const patchDeleteIneligibleDetails = z.strictObject({
+  violations: z
+    .array(
+      z.discriminatedUnion("kind", [
+        z.strictObject({
+          kind: z.literal("node-state"),
+          nodeId: z.string(),
+          state: z.enum(nodeStates),
+          admitted: z.array(z.enum(nodeStates)).min(1),
+        }),
+        z.strictObject({
+          kind: z.literal("binding"),
+          nodeId: z.string(),
+          blocker: z.enum(structuralDeleteBindings),
+        }),
+      ]),
+    )
+    .min(1),
 });
 export const pairFixedDetails = z.strictObject({
-  nodeId: z.string(),
-  reason: z.enum(["has-child", "has-accepted-checkpoint"]),
+  violations: z
+    .array(
+      z.strictObject({
+        nodeId: z.string(),
+        reason: z.enum(["has-accepted-checkpoint", "has-child"]),
+      }),
+    )
+    .min(1),
 });
 export const expansionEmptyDetails = z.strictObject({
   claimedNodeId: z.string(),
 });
 ```
 
-`src/http/contract/outcome.ts:150` — `errors` gains nine entries: the seven new codes with those
+Every refusal reports each independent correction unit of its own group, never the first.
+`expansion-empty` is the one exception, and it is scalar because a patch has exactly one claimed
+node. Each `violations` list sorts by mutation id bytewise, then by the declared reason order, then
+by the offending reference id bytewise. **Submitted mutation order is never the oracle**:
+`renderGraphPatch` sorts mutations bytewise by id, so two submissions that differ only by permutation
+render to identical bytes, and evidence that moved with the permutation would contradict the
+determinism rule of `AGENTS.md`. `referenceId` is `null` when the offending thing is the mutation
+itself, and it names the `dependsOn` entry or the `parentId` when the mutation is legal and its
+reference is not.
+
+`src/http/contract/outcome.ts:150` — `errors` gains ten entries: the eight new codes with those
 schemas — `patch-unparsable` and `patch-id-duplicate` take `null` — **and** `stale-revision` with
 `staleRevisionDetails` at `src/http/contract/error-details.ts:26` — `staleRevisionDetails` and
 `plan-invalid` with `planInvalidDetails` at `src/http/contract/error-details.ts:90` —
@@ -164,15 +217,25 @@ per rule, each stating the rule and nothing about how it is implemented:
 - the mutation algebra: three operations, their field sets, and `update` as a partial replacement of
   named fields;
 - the staged-graph rule: every legality question is asked of the graph the patch would leave;
-- the three scope rules, for an `update` or `delete`, for a `create`'s final parent, and for a
-  `dependsOn` entry;
+- the three scope rules, named by role: mutation-subject authority over the pinned graph; written-
+  parent placement over the staged graph, for a `create` and for an `update` naming `parentId`
+  alike; and written-dependency reach over the staged graph. A null `parentId` on a node that is not
+  the claimed node is `parent-missing`, and so a graph finding rather than a scope refusal;
 - the project rule, and that it is decided before graph validation;
+- the reference classification: scope judges a reference that resolves, a reference the projection
+  holds and the staged graph does not is a project refusal, and a reference neither holds is a graph
+  finding — the same three-way rule decides an `update` or a `delete` target;
 - the fixed refusal order, as the nine groups of
   `.agents/plan/epics/052.1-the-structural-acceptance.md:35` — `The refusal order is fixed`;
 - the currentness guard, and that equality against the pinned `graph_revision` is the only comparison;
-- the at-least-one-child rule and its childless-node condition;
-- the pair-fixing rule and its two-patch sequence;
-- the delete rule: a child in any state deletes, and a `checkpoint` row survives the node it names;
+- the at-least-one-child rule, which is unconditional and reads the staged graph alone;
+- the pair-fixing rule, that a checkpoint of any kind fixes the pair, and that the fix is permanent;
+- the repository key space: a patch carries a repository id, validation compares in the id space, a
+  finding renders the registered name, and a failed lookup splits by provenance — a patch naming an
+  unknown id refuses, a document naming an unknown name is a finding, and a stored node naming a
+  missing repository row is an invariant failure;
+- the delete rule: a structural patch deletes a node only when the node is `pending`, `ready` or
+  `blocked` and no run, no checkpoint and no waived edge names it;
 - the canonical patch serialisation, and that `checkpoint.patch_blob` holds its bytes.
 
 `.agents/plan/authoring.md` and `AGENTS.md` both make `docs/proposal/` the source of truth for
