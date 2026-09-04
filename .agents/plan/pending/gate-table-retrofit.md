@@ -14,11 +14,13 @@ bullet list instead. Measured 2026-09-04:
 | ----- | ---------- | ----------------- |
 | 050   | 9 bullets  | one per bullet    |
 | 050.1 | 31 bullets | one per bullet    |
-| 054   | 25 bullets | none              |
+| 054   | converted  | one per row       |
 | 057   | 16 bullets | none              |
 
-EPIC 050 and EPIC 050.1 already name an owner per bullet, so those two are a form change. EPIC 054
-and EPIC 057 name no owner at all, so each row needs a proof owner decided before it is written.
+EPIC 050 and EPIC 050.1 already name an owner per bullet, so those two are a form change. EPIC 057
+names no owner at all, so each row needs a proof owner decided before it is written. **EPIC 054 is
+converted**, ahead of the range and of the mechanism, because its split rewrote the epic anyway; the
+eighth measurement below records what the conversion taught.
 
 **Two table shapes are in use, and both are valid.** EPIC 050.2 and EPIC 050.3 head their tables
 `| assertion | story |`; every later epic heads them `| # | assertion | story |`. Bullet 25 keys on
@@ -26,9 +28,11 @@ the `story` column and never on a `#` column, or it refuses forty-nine correct r
 and forty-seven of EPIC 050.3.
 
 **Only EPIC 050 and EPIC 050.1 are in the gate's range.** `authoredEpics` of
-`scripts/epic-sequence-range.ts` ends at `"052.2"`, so EPIC 054 and EPIC 057 are grandfathered until
-the epic that authors each adds its id. The change that builds bullet 25 converts the two in range;
-EPIC 054 and EPIC 057 wait for the epic that admits each to the range.
+`scripts/epic-sequence-range.ts` ends at `"052.2"`, so EPIC 054's family and EPIC 057 are
+grandfathered until the epic that authors each adds its id. The change that builds bullet 25 converts
+the two in range; EPIC 057 waits for the epic that admits it. **Each epic of EPIC 054's family admits
+itself in its own first story**, and each already satisfies the form, so bullet 25 finds nothing to
+refuse there.
 
 **What the EPIC 050.2 conversion taught, on 2026-09-02.** Twenty-four bullets became forty-eight
 rows, and the same three effects appeared. One bullet stated nine cases over three commands and
@@ -113,3 +117,31 @@ grant caller on no operation at all, the replay proving no shipped claim, report
 the revocation race between authentication and the command transaction, the three-way refusal
 precedence case, and the control that every shipped external run still inserts a null `grant_id`. One
 decision had no assertion at all — `release` is not a granted operation — and it became a row.
+
+**The EPIC 054 family is done, and it is the eighth measurement.** The split into EPIC 054, EPIC 054.1,
+EPIC 054.2, EPIC 054.3 and EPIC 054.4 on 2026-09-04 rewrote its gate as five tables. Twenty-five
+bullets became eighty-four rows, and three effects were new. First, the conversion **deleted a whole
+story and moved another epic's work back to its owner**: the old Story 11 routed `attempt.show`, which
+`.agents/plan/epics/111-inspection-and-manual-controls.md:25` — `attempt.show` already routes and
+`:30` — `showAttempt` already owns, so the read model left the family as an amendment ask and the
+sixth epic the split had drafted disappeared. A row demanding one proof owner is what exposed it: no
+story of this family could own a route another epic ships. Second, the table forced a ruling the
+bullets had hidden — the accounting of a **null** termination on a row migration `16` did not
+backfill. `exhausted` reads `semanticCount`, so every attempt closed before the migration prices at
+zero, and a live run's charged attempts restart at the upgrade. The old gate stated that effect for
+the read model alone, and no bullet asserted it for the live accounting; it is now one row with a
+proof owner. The split also exposed assertions no bullet held: the open-attempt row the draft's
+weaker CHECK admitted, the zero-row control of a second close, the byte-identical control of a
+structural rejection, the replay proving the returned disposition moved no trace of EPIC 052.1 or
+EPIC 053.1, and the control that a review verdict of `reject` charges no attempt.
+
+**A third effect of that conversion, on the same day.** The tables made one collision visible that no
+bullet stated: the epic declared one `attempt.ended` event while
+`.agents/plan/epics/110-scheduler-leases-and-the-general-worker.md:53` — `attempt.failed` declares
+four close types on the same subject. Resolving it moved the family's boundary rather than its
+wording. `attempt.ended` now covers **every** close, `end-attempt` became the only caller of
+`execution.closeAttempt`, and three accepted-arm diagrams that the split had declared out of scope —
+EPIC 053's `land-settle-aggregate`, EPIC 052.1's `accept-structural-success` and EPIC 053.1's
+`report-review-gate` — are superseded by three new stories. The lesson for the three conversions that
+remain: a row that must name one proof owner exposes a missing owner, and a **payload** that must
+name one event type exposes a missing vocabulary decision. Budget for both.
