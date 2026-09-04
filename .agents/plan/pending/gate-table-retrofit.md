@@ -1,31 +1,34 @@
-# The gate list becomes a table in six epics of the range
+# The gate list becomes a table in four epics
 
-**The obligation.** `.agents/plan/authoring.md` now states that the hermetic coverage list of
-`## Verification Gate` is a table, and that every row names exactly one proof owner. The gate refuses
-any other form. Thirteen epics satisfy it today: EPIC 050.2, EPIC 050.3, EPIC 050.4, EPIC 050.5, the five epics of
-the EPIC 051 family, EPIC 052, EPIC 052.1, EPIC 055 and EPIC 055.1. Six do not, and each holds a bullet list instead:
+**The obligation.** `.agents/plan/authoring.md` states that the hermetic coverage list of
+`## Verification Gate` is a table, and that every row names exactly one proof owner. **No mechanism
+enforces it.** That refusal is bullet 25 of `.agents/plan/authoring.md:399`, and
+`scripts/verify-epic-sequence.ts` was built before the bullet was written and never gained it. EPIC
+058 builds it. Until then this obligation is a convention, and nothing goes red when an epic breaks
+it.
 
-| epic  | gate bullets | rows naming a story |
-| ----- | ------------ | ------------------- |
-| 050   | 9            | 9                   |
-| 050.1 | 30           | 30                  |
-| 051   | done         | 25                  |
-| 051.1 | done         | 25                  |
-| 051.2 | done         | 14                  |
-| 051.3 | done         | 24                  |
-| 051.4 | done         | 23                  |
-| 052   | done         | 25                  |
-| 052.1 | done         | 34                  |
-| 053   | 14           | 0                   |
-| 054   | 18           | 0                   |
-| 055   | done         | 30                  |
-| 055.1 | done         | 30                  |
-| 056   | 17           | 0                   |
-| 057   | 16           | 0                   |
+Twenty-two epics of the EPIC 050 to EPIC 058 family satisfy the form. Four do not, and each holds a
+bullet list instead. Measured 2026-09-04:
 
-EPIC 050 and EPIC 050.1 already name an owner per bullet, so those two are a form change. EPIC 053,
-EPIC 054, EPIC 056 and EPIC 057 name no owner at all, so each row needs a proof owner decided before
-it is written.
+| epic  | gate list  | proof owner named |
+| ----- | ---------- | ----------------- |
+| 050   | 9 bullets  | one per bullet    |
+| 050.1 | 31 bullets | one per bullet    |
+| 054   | 25 bullets | none              |
+| 057   | 16 bullets | none              |
+
+EPIC 050 and EPIC 050.1 already name an owner per bullet, so those two are a form change. EPIC 054
+and EPIC 057 name no owner at all, so each row needs a proof owner decided before it is written.
+
+**Two table shapes are in use, and both are valid.** EPIC 050.2 and EPIC 050.3 head their tables
+`| assertion | story |`; every later epic heads them `| # | assertion | story |`. Bullet 25 keys on
+the `story` column and never on a `#` column, or it refuses forty-nine correct rows of EPIC 050.2
+and forty-seven of EPIC 050.3.
+
+**Only EPIC 050 and EPIC 050.1 are in the gate's range.** `authoredEpics` of
+`scripts/epic-sequence-range.ts` ends at `"052.2"`, so EPIC 054 and EPIC 057 are grandfathered until
+the epic that authors each adds its id. EPIC 058 converts the two in range and states EPIC 054 and
+EPIC 057 as a non-goal for exactly this reason.
 
 **What the EPIC 050.2 conversion taught, on 2026-09-02.** Twenty-four bullets became forty-eight
 rows, and the same three effects appeared. One bullet stated nine cases over three commands and
@@ -43,19 +46,27 @@ ended-run boundary for `node.update`, which the conversion added as a case rathe
 row; and it exposed the reverse, a decision with no assertion at all — `create-node` seeds nothing
 for an initiative — which became a forty-seventh row on Ulrich's ruling. The table is the contract
 for what proves the epic, so a decision missing from it makes its case deletable. Read `## Decisions`
-against the finished table, in both directions, and budget all four for each of the six that remain.
+against the finished table, in both directions, and budget all four for each of the four that remain.
 
 **The owner.** Ulrich, per epic. A form change is mechanical; deciding the proof owner of an unowned
 row is not, and `.agents/plan/authoring.md` refuses a gate assertion owned by no story or by two.
 
-**The trigger.** `scripts/verify-epic-sequence.ts` entering the `verify` script of `package.json`.
-`.agents/plan/stories/050.1-the-claim/08-the-range-gate.md` builds the script in EPIC 050.1 and defers
-that wiring to the change that completes the last story of the range. The range is EPIC 050 to
-EPIC 057, so EPIC 057 is the change that pulls the trigger.
+**The trigger.** EPIC 058, which builds bullet 25 and wires
+`scripts/verify-epic-sequence.ts` into the `verify` script of `package.json`. Two earlier statements
+named a different change and both are wrong.
+`.agents/plan/stories/050.1-the-claim/08-the-range-gate.md:44` defers the wiring to the last story of
+EPIC 050.5, and this document named EPIC 057. EPIC 058 takes it, because
+`.agents/plan/authoring.md:426` lets only the change that makes the range clean wire the gate.
 
-**What breaks if the answer arrives late.** The gate refuses a non-table gate list, so `pnpm run verify`
-fails on six epics the moment the wiring lands. The wiring change then either merges a red gate,
-which `.agents/plan/authoring.md` refuses, or reverts, which leaves the range unenforced.
+**What breaks if the answer arrives late.** EPIC 050 and EPIC 050.1 are the two in the gate's range,
+so `pnpm run verify` fails on those two the moment bullet 25 and the wiring land together. EPIC 058
+converts both in its own gate-table story for that reason. EPIC 054 and EPIC 057 break nothing until
+the epic that authors each adds its id to `authoredEpics`.
+
+**This document previously claimed the gate already refuses a non-table list. It does not.** Bullet
+25 was written into `.agents/plan/authoring.md` by commit `bf633f5` and never implemented, so the
+risk this entry recorded could not fire. The claim is corrected here rather than deleted, because it
+is the reason the entry understated its own urgency for two days.
 
 **Why the refusal was written before the retrofit.** The measurement that forced it: six epics of one
 family used four syntaxes for one obligation, and the single gate assertion of EPIC 050.2 that no
