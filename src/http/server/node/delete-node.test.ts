@@ -136,6 +136,15 @@ function seedRunAndAttemptOnTask(transaction: Transaction): void {
   seedAttemptRow(transaction, { id: "attempt_1", runId: "run_2" });
 }
 
+function seedExpiredRunAndAttemptOnTask(transaction: Transaction): void {
+  seedRunAndAttemptOnTask(transaction);
+  transaction.run("UPDATE run SET expires_at = ? WHERE id IN (?, ?)", [
+    CLOCK_START - 1,
+    "run_1",
+    "run_2",
+  ]);
+}
+
 describe("src/http/server/node/delete-node.test", () => {
   it("POST /v1/node/:id/delete with a valid body answers 200 and nodeDeleteResponse parses it", async (t) => {
     const fixture = await buildHandler([U_REV]);
@@ -202,8 +211,28 @@ describe("src/http/server/node/delete-node.test", () => {
     assert.deepEqual(tableCounts(fixture.storage), before);
   });
 
-  it("a subtree touched by a run and an attempt answers 409 binding-in-use with both blockers", async (t) => {
+  it("a subtree touched by an active run and an attempt answers 409 subtree-busy with the self covering run", async (t) => {
     const fixture = await buildHandler([U_REV], seedRunAndAttemptOnTask);
+    t.after(() => fixture.temporary.dispose());
+
+    const before = tableCounts(fixture.storage);
+    const response = await fixture.app
+      .post(`/v1/node/${planFixtureIdentities.task}/delete`)
+      .send({ fromRevision: nodeBaselineRevision });
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.error.code, "subtree-busy");
+    assert.deepEqual(response.body.error.details, {
+      relation: "self",
+      nodeId: planFixtureIdentities.task,
+      runId: "run_2",
+      expiresAt: 1700300000000,
+    });
+    assert.deepEqual(tableCounts(fixture.storage), before);
+  });
+
+  it("an expired run with a retained attempt answers 409 binding-in-use with both blockers", async (t) => {
+    const fixture = await buildHandler([U_REV], seedExpiredRunAndAttemptOnTask);
     t.after(() => fixture.temporary.dispose());
 
     const before = tableCounts(fixture.storage);
