@@ -21,7 +21,7 @@ and the disagreement is a defect to report.
 | the recorder     | `test/helpers/sequence-conformance.ts`, a proxy over the dependency object         |
 | a scenario       | `test/sequence/scenarios/<diagram-id>.ts`, exporting the fixture and the run       |
 | the runner       | `test/sequence/conformance.test.ts`, on `node:test`                                |
-| the range gate   | `scripts/verify-epic-sequence.ts`, run by `scripts/verify-epic-sequence.test.ts`   |
+| the range gate   | `scripts/verify-epic-sequence.ts`, in `pnpm run verify`                            |
 
 A command runs inside one `storage.transact` callback and is synchronous, so the trace is invocation
 order and invocation order is completion order. An asynchronous seam needs begin and end records; do
@@ -430,12 +430,10 @@ Write both forms in new text. The gate refuses neither yet.
 A skill produces a compliant story when it is invoked. It is not the mechanism that makes the story
 compliant. Three mechanisms carry that, and each one states here whether it exists:
 
-1. **The range gate** — `scripts/verify-epic-sequence.ts`, reaching CI through `pnpm test` by
-   `scripts/verify-epic-sequence.test.ts` — `the real plan tree passes the range gate`. **Built**, by
-   EPIC 050.1 Story 8 (`08-the-range-gate`), which carried the diagram, baseline and `Seams:`
-   refusals. The lane, edit-directive, stem, citation and gate-table refusals of the list above are
-   **specified and not yet in the script**; each lands with the repair it forces, and the `verify`
-   wiring lands last, when the range is clean.
+1. **The range gate** — `scripts/verify-epic-sequence.ts`, a step of `pnpm run verify` and also
+   asserted over the real tree by `scripts/verify-epic-sequence.test.ts`. **Built**, and it refuses
+   every inconsistency listed above except the two named as rollout debt and the relocated citation
+   it reports instead.
 2. **The declared kind** — every story states `story-foundation` or `story-implement` on the line
    under its title. A story that draws nothing is a visible decision, never a silent omission.
    **In use since EPIC 050.** Nothing enforces it: the refusal belongs to the gate above.
