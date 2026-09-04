@@ -269,6 +269,7 @@ describe("test/sequence/conformance", () => {
       "051.6",
       "052",
       "052.1",
+      "052.2",
     ]);
     assert.deepEqual(shippedEpics, ["050", "050.1"]);
     assert.deepEqual(authoredEpics.slice(0, shippedEpics.length), shippedEpics);

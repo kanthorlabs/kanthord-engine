@@ -195,7 +195,7 @@ everything.
   (`src/domain/node-write-legality.ts:30` — `NodeWriteLegality`), a refusal object or `null`
   (`src/domain/run-exclusion.ts:20` — `SubtreeExclusionRefusal`), and `ok` with a `reason`
   (`src/domain/origin.ts:11` — `OriginCanonicalization`). The five are one ordered chain in EPIC
-  052.1, at `.agents/plan/epics/052.1-the-structural-acceptance.md:40` — `patch-target-invalid`, and
+  052.1, at `.agents/plan/epics/052.1-the-structural-acceptance.md:44` — `patch-target-invalid`, and
   a chain that alternates `legal` and `ok` discriminants is a defect the type checker cannot catch
   because both are booleans. The chosen shape is the one EPIC 051.1 Story 6
   (`06-the-acceptance-verdicts`) already used for the same kind of ordered gate. It also resolves
@@ -225,7 +225,7 @@ everything.
 
 - **A patch is `{ mutations: [ … ] }` and not a bare array.** The epic requires keys sorted bytewise
   at every level and gives the document no top level. `checkpoint.patch_blob` stores it as standalone
-  evidence, and `.agents/plan/epics/052.1-the-structural-acceptance.md:63` — `nodeReportRequest`
+  evidence, and `.agents/plan/epics/052.1-the-structural-acceptance.md:70` — `nodeReportRequest`
   carries it as an opaque `patch` member, so a self-describing object is what a human reads back.
   See `01-the-patch-shape-and-its-canonical-form.md`.
 
@@ -250,7 +250,7 @@ everything.
   found for the project-versus-`plan-invalid` order. `src/services/plan/index.ts:79` — `readAllNodes`
   answers it in one call and `src/services/plan/index.ts:78` — `readNode` answers it per id. **This
   is a blocker against EPIC 052.1**, whose seam list at
-  `.agents/plan/epics/052.1-the-structural-acceptance.md:68` — `plan.newestRevision` names neither.
+  `.agents/plan/epics/052.1-the-structural-acceptance.md:79` — `plan.newestRevision` names neither.
   See `03-scope-and-project.md`.
 
 - **`hasAcceptedCheckpoint` is a bare existence test on `node_id`.** The `checkpoint` table has no
@@ -261,7 +261,7 @@ everything.
 
 - **`WriteCheckpointInput` widens to a discriminated union rather than gaining a second method.**
   EPIC 051.3 Story 2 (`02-the-checkpoint-row`) states that EPIC 052 widens the input, and
-  `.agents/plan/epics/052.1-the-structural-acceptance.md:140` — `execution.writeCheckpoint` draws one
+  `.agents/plan/epics/052.1-the-structural-acceptance.md:162` — `execution.writeCheckpoint` draws one
   step, so a second method would give that path a second token. See
   `05-the-seams-the-acceptance-needs.md`.
 

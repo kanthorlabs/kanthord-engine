@@ -1,9 +1,9 @@
-# Story 8 — The report route carries a patch
+# Story 2 — The report route carries a patch
 
-Epic: `.agents/plan/epics/052.1-the-structural-acceptance.md`
-Depends on: Story 7 (`07-the-accepted-patch`), for the complete command; Story 9
-(`09-the-contract-and-the-proposal`), for the seventh `nodeReportRequest` member and the seven error
-codes this story maps; EPIC 051.4 Story 8 (`08-the-report-route-enforces-the-gate`), for the
+Epic: `.agents/plan/epics/052.2-the-structural-report-route.md`
+Depends on: Story 1 (`01-the-contract-carries-the-patch`), for the seventh `nodeReportRequest` member
+and the ten error codes this story maps; EPIC 052.1 Story 9 (`09-the-accepted-patch`), for the
+complete command; EPIC 051.4 Story 8 (`08-the-report-route-enforces-the-gate`), for the
 `report-checkpoint-gate` prelude and the `accept` dependency key.
 Kind: story-implement
 
@@ -11,13 +11,14 @@ Diagrams: report-structural-gate
 
 Seams: report-structural-gate: +storage.transact, +clock.now, +expiry.expireRuns, +plan.readNode, +execution.runById:R, +plan.readSubtree, +execution.attemptsOfRun:R, +accept.structural
 
-This story is last in dispatch order, because it names Story 9's contract member and Story 7's
-command.
+This story is last in dispatch order, because it names Story 1
+(`01-the-contract-carries-the-patch`)'s contract member and EPIC 052.1 Story 9
+(`09-the-accepted-patch`)'s command.
 
 ## The path
 
 **The structural member is a seventh member and a wholly new path, so its prior set is empty.**
-`.agents/plan/epics/052.1-the-structural-acceptance.md:21` — `report-checkpoint-gate` rules it, and
+`.agents/plan/epics/052.2-the-structural-report-route.md:22` — `report-checkpoint-gate` rules it, and
 `.agents/plan/epics/053.1-the-review-checkpoint.md:46` — `report-checkpoint-gate` cites that ruling for
 the review member. This story therefore draws no `baseline-` diagram, declares no `Supersedes:` line,
 and every one of its eight tokens is `+`.
@@ -69,10 +70,10 @@ decides is proven by EPIC 050.2 Story 1 (`01-run-authority`) and by case 1 here.
 
 **Step 8 is one step, because `acceptStructural` is a nested command.** The scenario binds `accept` to
 unrecorded dependencies, so the fourteen seam calls inside it are invisible at this seam. They are
-Story 7's diagram.
+EPIC 052.1 Story 9 (`09-the-accepted-patch`)'s diagram.
 
 **The drawn set is every branch of this path.** The structural member has one success branch. Every
-refusal of `acceptStructural` stops inside step 8 and is drawn by Stories 2 to 6; every refusal of the
+refusal of `acceptStructural` stops inside step 8 and is drawn by EPIC 052.1 Stories 2 to 8; every refusal of the
 prelude is EPIC 050.2's and is unchanged by this story.
 
 Add `test/sequence/scenarios/report-structural-gate.ts`.
@@ -82,7 +83,8 @@ Add `test/sequence/scenarios/report-structural-gate.ts`.
 ### 1 — `src/commands/outcome/report-outcome.ts` — the injected callable
 
 `ReportOutcomeDependencies` at `src/commands/outcome/report-outcome.ts:52` —
-`ReportOutcomeDependencies` gains one member on the `accept` namespace EPIC 051.4 Story 8 created:
+`ReportOutcomeDependencies` gains one member on the `accept` namespace EPIC 051.4 Story 8
+(`08-the-report-route-enforces-the-gate`) created:
 
 ```ts
 accept: Readonly<{
@@ -109,8 +111,8 @@ passing `{ plan, blobs, graph, revision, execution, events, ids }` and nothing e
 `src/commands/outcome/report-outcome.ts:114` — `initiative` refuses every report on an initiative
 today, and `../docs/workflow/worker.md:365` — `structural` states an initiative's run is `structural`,
 so `(initiative, expansion)` is unrunnable while that guard stands.
-`.agents/plan/epics/052.1-the-structural-acceptance.md:20` — `initiative-not-reportable` takes the ask
-EPIC 053 raised, and gate row 35 proves it.
+`.agents/plan/epics/052.2-the-structural-report-route.md:31` — `initiative-not-reportable` takes the
+ask EPIC 053 raised, and gate row 35 proves it.
 
 Move `const body = input.body;` above the guard, then narrow it:
 
@@ -171,23 +173,26 @@ with its own total switch, shaped like `reportOutcomeRefusal` at
 | `pair-fixed`            | `pair-fixed`            | `{ nodeId, reason }`            |
 | `expansion-empty`       | `expansion-empty`       | `{ claimedNodeId }`             |
 
-The five 409 codes take a required `details` argument, because `src/http/contract/errors.ts:41` —
-`PreconditionCode` forces one for every code whose status is 409. Story 9 declares each details schema
-and adds each code to the operation's `errors` record.
+The six 409 codes take a required `details` argument, because `src/http/contract/errors.ts:41` —
+`PreconditionCode` forces one for every code whose status is 409. Story 1
+(`01-the-contract-carries-the-patch`) declares each details schema and adds each code to the
+operation's `errors` record.
 
 The handler at `src/http/server/node/report-node.ts:41` — `toHttpError` is unchanged: it already
 funnels every command error through that one function, and `body.report === "structural"` carries a
 `fence`, so the `presented` argument it builds at `:45` needs no branch.
 
-### 5 — `scripts/epic-sequence-range.ts` — append `"052.1"` to `shippedEpics`
+### 5 — `scripts/epic-sequence-range.ts` — append `"052.2"` to both lists
 
-The list is at `scripts/epic-sequence-range.ts:19` — `shippedEpics`. Append the one element after
-`"052"`. `test/sequence/conformance.test.ts:273` — `assert.deepEqual` pins the matching literal;
-update it in the same edit. `test/sequence/conformance.test.ts:274` — `slice` asserts the shipped list
-is a prefix of the authored one, so `"052"` must already be present.
+`scripts/epic-sequence-range.ts:1` — `authoredEpics` gains `"052.2"` after `"052.1"`, and
+`scripts/epic-sequence-range.ts:20` — `shippedEpics` gains it after `"052.1"`.
+`test/sequence/conformance.test.ts:255` and `:273` — `assert.deepEqual` pin the two matching
+literals; update both in the same edit. `test/sequence/conformance.test.ts:275` — `slice` asserts the
+shipped list is a prefix of the authored one, so `"052.1"` must already be present in both, which
+EPIC 052.1 Story 9 (`09-the-accepted-patch`) is what does.
 
-This is the last edit of the epic. It makes every diagram of EPIC 052.1 due, so it lands only when all
-seven scenario files exist.
+This is the last edit of the epic. It makes this epic's one diagram due, so it lands only when
+`test/sequence/scenarios/report-structural-gate.ts` exists.
 
 ## Constraints
 
@@ -228,40 +233,41 @@ Add, each as a separate `it`:
    assert its recorded token sequence equals the one `report-checkpoint-gate`'s sibling path yields
    today, by value. This epic adds a member and changes none. This is the epic's gate row 29.
 
-4. `"the authority prelude writes nothing when it refuses"` — snapshot the eight tables of Story 6
-   case 8 before and after a `run-caller-mismatch` refusal on a structural report and assert
-   `deepEqual`. This is the epic's gate row 18a, and `run-caller-mismatch` is the **one
-   representative** of the authority group, not all five of its codes: the row's unit is the group,
-   and Story 6 (`06-a-fixed-pair-or-an-empty-expansion`) case 8 takes one representative per group for
-   the other eight.
+4. `"the authority prelude writes nothing when it refuses"` — snapshot the eight tables of EPIC
+   052.1 Story 8 (`08-an-ineligible-delete-refuses`) case 6 before and after a `run-caller-mismatch`
+   refusal on a structural report and assert `deepEqual`. This is the epic's gate row 18a, and
+   `run-caller-mismatch` is the **one representative** of the authority group, not all five of its
+   codes: the row's unit is the group, and that case takes one representative per group for the other
+   nine.
 
-5. `"the conformance runner replays all seven diagrams of this epic by equality"` — run
-   `test/sequence/conformance.test.ts` after change 5 below and assert it passes over all seven
-   diagram ids. Assert the count of replayed ids of this epic is `7`, so a scenario dropped from the
-   tree fails rather than passing silently. Then assert the comparison fails when `execution.runBases`
-   is inserted into the structural arm, so the one step that separates this path from
-   `report-checkpoint-gate` is proven load-bearing. This is the epic's gate row 34, and this story
-   owns it whole: `test/sequence/conformance.test.ts:82` — `liveDiagrams` replays a diagram only once
-   its epic is in `shippedEpics`, which change 5 is what does.
+5. `"the conformance runner replays report-structural-gate by equality"` — run
+   `test/sequence/conformance.test.ts` after change 5 below and assert this epic's one diagram id
+   replays. Then assert the comparison fails when `execution.runBases` is inserted into the
+   structural arm, so the one step that separates this path from `report-checkpoint-gate` is proven
+   load-bearing, and again when `accept.structural` is removed. This is the epic's gate row 37, and
+   this story owns it whole: `test/sequence/conformance.test.ts:82` — `liveDiagrams` replays a
+   diagram only once its epic is in `shippedEpics`, which change 5 is what does. EPIC 052.1's eight
+   diagrams are that epic's gate row 34 and are not re-asserted here.
 
-6. `"each of the nine refusal groups maps to its own contract error over the wire"` — one case per
+6. `"each of the ten refusal groups maps to its own contract error over the wire"` — one case per
    group, driven through the real route in `src/http/server/node/report-node.test.ts`. Assert
    `response.status` and `response.body.error.code` by value for each of `fence-stale`,
    `patch-unparsable`, `patch-id-duplicate`, `stale-revision`, `patch-target-invalid`,
-   `patch-scope-invalid`, `patch-project-invalid`, `plan-invalid`, `pair-fixed` and `expansion-empty`.
+   `patch-scope-invalid`, `patch-project-invalid`, `pair-fixed`, `plan-invalid`,
+   `patch-delete-ineligible` and `expansion-empty`.
    **Parse every one of the ten response bodies against `reportErrorEnvelope()` at
    `src/http/server/node/report-node.test.ts:24` — `reportErrorEnvelope`, which builds the envelope
    from `operation.errors`.** `src/http/server/node/report-node.test.ts:324` — `reportErrorEnvelope`
    already does it for a shipped refusal. That parse is what makes an undeclared code mechanically
    red, and it is the only such mechanism in the tree: `src/http/contract/coverage.test.ts:536` —
    `errorStatuses` checks the reverse direction, that a declared code is a known code. Assert the case
-   count is `10`, so a dropped group fails rather than passing silently. This is the epic's gate
+   count is `11`, so a dropped group fails rather than passing silently. This is the epic's gate
    row 30.
 
-7. `"accept-structural.ts imports no other command"` — `pnpm run lint` exits 0, and the control is a
-   temporary import of `src/commands/node/create-node.ts` into that file, which
-   `eslint.config.js:221` — `command` must reject. This is the epic's gate row 31, and it is a build
-   check rather than a test.
+7. `"the authority prelude precedes the shape group"` — one request carrying both a stale fence and a
+   syntactically invalid patch. Assert `response.body.error.code` is `"fence-stale"`. This is the
+   epic's gate row 36, and it is the tenth-group half of EPIC 052.1 gate row 17, whose decision table
+   covers the nine groups the command itself decides.
 
 Add `test/sequence/scenarios/report-structural-gate.ts`, building the fixture the diagram names,
 running the real `reportOutcome` over real SQLite behind the recorder, binding `accept` and `expiry`
@@ -272,4 +278,4 @@ result.
 `pnpm run verify` exits 0.
 
 Proof: PASS line delivered — `src/commands/outcome/report-outcome.test.ts` and
-`src/http/server/node/report-node.test.ts` in `PASS EPIC-052.1`.
+`src/http/server/node/report-node.test.ts` in `PASS EPIC-052.2`.

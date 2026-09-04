@@ -94,7 +94,7 @@ export type WriteCheckpointInput =
 
 `writeCheckpoint(transaction, input): CheckpointRecord` keeps its name and its signature. EPIC 052.1
 draws one `execution.writeCheckpoint` step, at
-`.agents/plan/epics/052.1-the-structural-acceptance.md:140` — `execution.writeCheckpoint`, so a
+`.agents/plan/epics/052.1-the-structural-acceptance.md:162` — `execution.writeCheckpoint`, so a
 second method would give that path a second token.
 
 **The structural member carries no `repositoryId`, no `baseOid`, no `acceptedOid` and no

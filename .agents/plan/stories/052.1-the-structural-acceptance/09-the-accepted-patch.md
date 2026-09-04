@@ -1,8 +1,8 @@
-# Story 7 — The accepted patch
+# Story 9 — The accepted patch
 
 Epic: `.agents/plan/epics/052.1-the-structural-acceptance.md`
-Depends on: Story 1 (`01-the-lowering`), for `lowerPatch`; Story 6
-(`06-a-fixed-pair-or-an-empty-expansion`), for the complete refusal order that precedes every write;
+Depends on: Story 1 (`01-the-lowering`), for `lowerPatch`; Story 8
+(`08-an-ineligible-delete-refuses`), for the complete refusal order that precedes every write;
 EPIC 051.3 Story 2 (`02-the-checkpoint-row`), for the `checkpoint` table and its structural columns;
 EPIC 052 Story 5 (`05-the-seams-the-acceptance-needs`), for `execution.writeCheckpoint` and for the
 `deliverable` and `verifyJson` fields of `NodeWrite`; EPIC 050.2 Story 5 (`05-the-release`), for an
@@ -13,8 +13,15 @@ Diagrams: accept-structural-success
 
 Seams: accept-structural-success: +plan.newestRevision, +plan.readGraph, +plan.readValidationContext, +graph.cycles, +ids.mint, +blobs.put, +revision.render, +revision.record, +plan.mutateGraph, +execution.writeCheckpoint:R, +execution.closeAttempt:A, +execution.endRun:R, +events.append:outcome.reported:N:null, +events.append:run.ended:R:accepted
 
-This story completes `acceptStructural`. Story 8 wires it into `node.report`, and this story's
-scenario drives the command directly rather than over the route.
+This story completes `acceptStructural`, and it is last in the dispatch order of the drawing stories.
+EPIC 052.2 Story 2 (`02-the-report-route-carries-a-patch`) wires the command into `node.report`, and
+this story's scenario drives the command directly rather than over the route.
+
+**It registers the epic as shipped.** Append `"052.1"` to `shippedEpics` at
+`scripts/epic-sequence-range.ts:19` and to the pinned literal at
+`test/sequence/conformance.test.ts:273`. `test/sequence/conformance.test.ts:82` — `liveDiagrams`
+replays a diagram only once its epic sits there, so the registration lands in the story after which
+all eight scenario files exist, and never before.
 
 ## The path
 
@@ -32,10 +39,12 @@ revision equal to the newest, `N` **already holding one child `C`**, and the pat
 each may appear once. This patch puts one blob — the canonical patch bytes — and mints one id — the
 revision. A patch that creates a node also puts its `instruction` prose, and for a task its
 `acceptance` prose, and a patch that adds a dependency also mints an edge id; those longer patches are
-asserted by cases 2 and 3 and by Story 1 case 6, not by a trace.
+asserted by cases 2 and 3 and by Story 1 (`01-the-lowering`) case 6, not by a trace.
 
 The claimed node already holds a child, so `expansionVerdict` does not bind, and the `update` changes
-no pair, so `execution.hasAcceptedCheckpoint` is not read. Story 6's diagram is the path that reads
+no pair, so `execution.hasAcceptedCheckpoint` is not read, and it holds no `delete`, so
+`plan.structuralDeleteBindings` is not read either. Every id resolves, so `plan.nodeProjects` is not
+read. Story 6 (`06-a-fixed-pair-refuses-before-the-validator`)'s diagram is the path that reads
 it.
 
 ```mermaid
@@ -67,8 +76,13 @@ sequenceDiagram
     Command-->>Caller: ok
 ```
 
-**Steps 1 to 4 are the refusal prefix, unchanged.** This diagram differs from Story 5's at step 4 and
-nowhere before it: the ordered checks do not change shape when they pass.
+**Steps 1 to 4 are the refusal prefix, unchanged.** This diagram differs from Story 7
+(`07-an-invalid-staged-graph-or-an-empty-expansion`)'s at step 4 and nowhere before it: the ordered
+checks do not change shape when they pass.
+
+**A success whose patch changes a pair, holds a legal `delete`, or names a cross-project reference
+reaches a longer trace, and none is drawn.** Each is a reachable trace of the one terminal this
+diagram states, asserted by case 11 rather than drawn, per `.agents/plan/authoring.md:187`.
 
 **Step 6 sits after the checks and not before them.** `src/services/blob/index.ts:22` — `put` takes
 the transaction, and the whole acceptance is one transaction, so a refusal rolls the put back. The
@@ -86,7 +100,7 @@ nine keys of the shipped `outcome.reported` payload, and an accepted report carr
 epic registers no event type and changes no payload shape, so the label is `null` by construction.
 
 **The drawn set is every branch of this path.** This is the one path on which no check refuses. Every
-refusal has its own diagram in Stories 2 to 6.
+refusal has its own diagram in Stories 2 to 8.
 
 Add `test/sequence/scenarios/accept-structural-success.ts`.
 
@@ -111,7 +125,8 @@ identically.
 
 **A `create` puts its prose here too**, with `blobs.put` per `instruction` and, for a task, per
 `acceptance`, as `src/commands/node/create-node.ts:116` — `instructionBlob` does. Each put returns the
-hash Story 5's candidate already read through `blobs.hash`, because
+hash Story 7 (`07-an-invalid-staged-graph-or-an-empty-expansion`)'s candidate already read through
+`blobs.hash`, because
 `src/services/blob/sqlite.ts:24` — `put` is `INSERT ... ON CONFLICT(hash) DO NOTHING` over the same
 bytes. Collect the results into the `prose` map `lowerPatch` takes, keyed by mutation id. **The map is
 the only carrier of a blob hash**: `GraphPatch` holds prose, so it can carry none.
@@ -294,7 +309,7 @@ a parent objective, which has no objective above it to project; `src/http/contra
 node --test src/commands/checkpoint/accept-structural.test.ts test/sequence/conformance.test.ts
 ```
 
-Extend `src/commands/checkpoint/accept-structural.test.ts` with the fixture Stories 2 to 6 built.
+Extend `src/commands/checkpoint/accept-structural.test.ts` with the fixture Stories 2 to 8 built.
 
 Add, each as a separate `it`:
 
@@ -341,18 +356,31 @@ Add, each as a separate `it`:
 
 9. `"a patch adding one dependency mints one edge id through the injected function"` — assert the
    stored edge's `id` equals the id the mock generator yielded for the `"edge"` kind, which is the
-   `mintEdgeId` wiring of Story 1.
+   `mintEdgeId` wiring of Story 1 (`01-the-lowering`). Assert in the same case that the
+   `LoweredPatch` value is assigned to a `MutateGraphInput`-typed local with no cast, which is the
+   assignment half of the epic's gate row 6a.
 
 10. `"the success scenario conforms to its diagram by equality"` — call `assertConformance` at
     `test/helpers/sequence-conformance.ts:318` — `assertConformance` directly, over this story's own
     scenario. Then assert it **throws** when one token is removed from the recorder's list and again
     when two are swapped, so equality is proven to be equality.
 
-    **Do not assert this through `test/sequence/conformance.test.ts`.**
+11. `"the conformance runner replays all eight diagrams of this epic by equality"` — after appending
+    `"052.1"` to `shippedEpics` and to the pinned literal, run
+    `test/sequence/conformance.test.ts` and assert every one of the eight scenarios replays. Then
+    assert the comparison fails when one step is removed from the implementation and again when two
+    are reordered. This is the epic's gate row 34, and it is this story's because
     `test/sequence/conformance.test.ts:82` — `liveDiagrams` replays a diagram only once its epic sits
-    in `shippedEpics`, and Story 8 (`08-the-report-route-carries-a-patch`) is what puts `"052.1"`
-    there. Until then the runner replays none of this epic, so a case naming it would pass while
-    proving nothing. The epic's gate row 34 is Story 8's, for that reason.
+    in `shippedEpics` and this is the story that puts it there.
+
+12. `"a success whose patch changes a pair, deletes an eligible node and names a cross-project
+reference still returns a result"` — one longer patch behind the recorder. Assert the command
+    returns a result, and assert `recorder.tokens` deep-equals the diagram's list with exactly three
+    tokens inserted at their declared positions: `plan.nodeProjects` after `plan.readGraph`,
+    `execution.hasAcceptedCheckpoint` after it, and `plan.structuralDeleteBindings` after
+    `graph.cycles`. These are the reachable success traces this diagram does not draw, asserted per
+    `.agents/plan/authoring.md:187`, and this case is what makes the diagram's branch-coverage claim
+    checkable.
 
 Add `test/sequence/scenarios/accept-structural-success.ts`, building the fixture the diagram names,
 running the real `acceptStructural` directly over real SQLite, the real `GraphologyGraph` and the real

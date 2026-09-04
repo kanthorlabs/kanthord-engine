@@ -88,7 +88,7 @@ A failed attempt carries a class, and the class decides whether it costs a budge
 
   **A rejection is a returned value at the accept boundary, never a throw, wherever the write shares the refusal's transaction.** A throw inside `storage.transact` rolls the write back with it. `.agents/plan/epics/051.6-the-post-expiry-reap-on-the-run-operations.md:64` — `disposition` already records that a returned disposition and a thrown refusal are both legal shapes here. `reportOutcome` writes the termination, commits, and then raises the refusal the accept returned.
 
-  **`acceptStructural` and `acceptReview` reach no new transaction, so none of their refusal diagrams moves.** Both take the caller's transaction and open none — `.agents/plan/epics/052.1-the-structural-acceptance.md:31` — `acceptStructural` — so the termination write is one statement after the accept returns, and it appears in `reportOutcome`'s diagram. The nine refusal diagrams of EPIC 052.1 and EPIC 053.1 stay as drawn.
+  **`acceptStructural` and `acceptReview` reach no new transaction, so none of their refusal diagrams moves.** Both take the caller's transaction and open none — `.agents/plan/epics/052.1-the-structural-acceptance.md:33` — `acceptStructural` — so the termination write is one statement after the accept returns, and it appears in `reportOutcome`'s diagram. The nine refusal diagrams of EPIC 052.1 and EPIC 053.1 stay as drawn.
 
   **The execution arm holds one transaction on a rejection and two on an acceptance**, so the ceiling of the decision above is never crossed. The gate's git-dependent checks run outside every transaction, exactly as they do today, and a nested settlement unit opens the one transaction that records the verdict.
 

@@ -20,8 +20,8 @@ names no live diagram, and Story 2 adds the epic's first scenario file. Without 
 every scenario id of it resolves to nothing.
 
 `test/sequence/conformance.test.ts:255` — `assert.deepEqual` pins the matching literal. Add `"052.1"`
-to that array in the same position. Do **not** touch `shippedEpics`: Story 8
-(`08-the-report-route-carries-a-patch`) appends `"052.1"` to it, and the two lists are separate
+to that array in the same position. Do **not** touch `shippedEpics`: Story 9
+(`09-the-accepted-patch`) appends `"052.1"` to it, and the two lists are separate
 because `shippedEpics` is what makes a scenario due.
 
 **`src/domain/graph-patch-lower.ts` — add `lowerPatch`, a pure function that turns one patch into the
@@ -55,9 +55,30 @@ export type LowerPatchInput = Readonly<{
   updatedAt: number;
 }>;
 
+export type LoweredNode = Readonly<{
+  id: string;
+  projectId: string;
+  kind: string;
+  parentId: string | null;
+  title: string;
+  repositoryId: string | null;
+  instructionBlob: string;
+  acceptanceBlob: string | null;
+  revision: string;
+  updatedAt: number;
+  deliverable?: string | null;
+  verifyJson?: string | null;
+}>;
+
+export type LoweredEdge = Readonly<{
+  id: string;
+  fromNode: string;
+  toNode: string;
+}>;
+
 export type LoweredPatch = Readonly<{
-  nodes: readonly NodeWrite[];
-  insertEdges: readonly EdgeWrite[];
+  nodes: readonly LoweredNode[];
+  insertEdges: readonly LoweredEdge[];
   deleteEdgeIds: readonly string[];
   nodeDeletes: readonly string[];
 }>;
@@ -74,6 +95,15 @@ export function lowerPatch(
 `src/domain/plan-candidate.ts:304` — `validateCandidateStructural` is the shape precedent in this same
 directory: a `dependencies` object first, the input second. `acceptStructural` passes
 `() => dependencies.ids.mint("edge")`.
+
+**`LoweredNode` and `LoweredEdge` are domain twins of `NodeWrite` and `EdgeWrite`, and naming the
+service types here is an import-matrix violation.** `src/services/plan/index.ts:25` — `NodeWrite` and
+`MutateGraphInput` at `:45` live in a service interface, and `AGENTS.md` admits `domain/` to import
+`domain/` only, which `eslint.config.js` encodes. The two twins carry the identical member set, so
+`LoweredPatch` is structurally assignable to `MutateGraphInput` and `acceptStructural` passes the
+result through with **no cast and no mapping**. `deliverable` and `verifyJson` stay optional on
+`LoweredNode` for the reason EPIC 052 Story 5 (`05-the-seams-the-acceptance-needs`) states: key
+presence is the semantics of the upsert. Case 8 is what keeps the two shapes in step.
 
 `StagedGraph` is EPIC 052 Story 2's output. `lowerPatch` reads two things from it and nothing else:
 the final `parentId` of every surviving node, and the final dependency list of every surviving node.
@@ -144,7 +174,9 @@ yields the same id for the same edge on every run.
 ## Constraints
 
 - The function is pure. It reads no clock, opens no transaction and touches no store.
-- It imports from `src/domain/` and `zod` only. `eslint.config.js:315` — `no-restricted-imports`
+- It imports from `src/domain/` and `zod` only, and it names no type of `src/services/`.
+  `LoweredNode` and `LoweredEdge` are its own, and the twin-shape check of case 8a is what keeps them
+  equal to `NodeWrite` and `EdgeWrite`. `eslint.config.js:315` — `no-restricted-imports`
   enforces it.
 - It decides no legality. Every refusal of this epic is decided before the lowering runs, so
   `lowerPatch` may assume the patch is legal against the pinned graph.
@@ -185,7 +217,7 @@ Add, each as a separate `it`:
    the epic's gate row 3.
 
 4. `"an update naming only title resubmits every other field from the pinned row"` — assert the one
-   emitted `NodeWrite` field by field: `id`, `projectId`, `kind`, `parentId`, `title` (the new value),
+   emitted `LoweredNode` field by field: `id`, `projectId`, `kind`, `parentId`, `title` (the new value),
    `instructionBlob`, `acceptanceBlob`, `worker`, `repositoryId`, `revision` (the new revision id) and
    `updatedAt`. Assert `Object.hasOwn(node, "deliverable")` is `false` and
    `Object.hasOwn(node, "verifyJson")` is `false`, which is the has-flag path. This is the epic's
@@ -207,9 +239,19 @@ Add, each as a separate `it`:
    expected order, and assert the three ids in the exact order the stub generator yields them.
 
 8. `"a create takes both blob hashes from prose and never from the patch"` — a `create` whose
-   `prose` entry names two hashes. Assert the emitted `NodeWrite.instructionBlob` and
+   `prose` entry names two hashes. Assert the emitted `LoweredNode.instructionBlob` and
    `acceptanceBlob` equal those two by value, and assert a `create` whose id is absent from `prose`
    throws an `Error` naming the id.
+
+8a. `"the lowering names no service type and mints nothing"` — a build-only check plus one run.
+`pnpm run lint` exits 0, which is what asserts the `eslint-plugin-boundaries` rule of `AGENTS.md`
+over `src/domain/graph-patch-lower.ts`; and a `LoweredPatch` value is assigned to a
+`MutateGraphInput`-typed local in `src/commands/checkpoint/accept-structural.ts` with no cast, so
+the twin shapes are proven equal by the type checker rather than by prose. Assert in the same case
+that a run passing a `mintEdgeId` stub returning two fixed ids reads both back from
+`insertEdges`, so the ids demonstrably arrive as a parameter. This is the epic's gate row 6a. The
+assignment half lands with Story 9 (`09-the-accepted-patch`), which is the story that builds the
+`MutateGraphInput`; state it here and do not duplicate the case.
 
 9. `"an update naming deliverable emits the key, so the has-flag is set"` — assert
    `Object.hasOwn(node, "deliverable")` is `true` and the value equals the named one. This is the

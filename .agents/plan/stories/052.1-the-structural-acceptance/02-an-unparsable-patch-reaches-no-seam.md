@@ -11,7 +11,8 @@ Kind: story-implement
 Diagrams: accept-structural-refusal-unparsable
 
 This story creates the command, its dependency type, its error class and its two pure refusals.
-Stories 3 to 7 fill the body in refusal order, and Story 8 wires it into `reportOutcome`.
+Stories 3 to 9 fill the body in refusal order, and EPIC 052.2 Story 2
+(`02-the-report-route-carries-a-patch`) wires it into `reportOutcome`.
 
 ## The path
 
@@ -86,7 +87,7 @@ export function acceptStructural(
 ```
 
 **There is no `storage` key and no `clock` key.**
-`.agents/plan/epics/052.1-the-structural-acceptance.md:31` — `acceptStructural` rules that the command
+`.agents/plan/epics/052.1-the-structural-acceptance.md:33` — `acceptStructural` rules that the command
 takes the caller's transaction and opens none, because it writes no git and runs no command.
 `.agents/plan/epics/054-attempt-classification-and-the-supervisor.md:91` — `acceptStructural` cites
 that ruling and depends on it. The transaction is the second positional parameter, exactly as
@@ -194,6 +195,11 @@ Add, each as a separate `it`:
    command completed with no nested `BEGIN`: the dependency object holds no `storage` key, asserted by
    `assert.equal(Object.hasOwn(dependencies, "storage"), false)`, and the write of case 3's control is
    visible to the outer transaction before it commits. This is the epic's gate row 8.
+
+5. `"accept-structural.ts imports no other command"` — `pnpm run lint` exits 0, and the control is a
+   temporary import of `src/commands/node/create-node.ts` into that file, which
+   `eslint.config.js:221` — `command` must reject. This is the epic's gate row 31. It is owned here
+   because this is the story that creates the file, and it is a build check rather than a test.
 
 Add `test/sequence/scenarios/accept-structural-refusal-unparsable.ts`, building the fixture the
 diagram names, running the real `acceptStructural` **directly** over real SQLite behind the recorder —

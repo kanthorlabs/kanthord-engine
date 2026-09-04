@@ -133,7 +133,7 @@ proves the ruling.
   (`09-the-contract-and-the-proposal`) owns `src/http/contract/errors.ts:7` — `errorStatuses` and
   `src/cli/exit-code.ts:13` — `exitCodes`.
 - Do not add a chain runner here. The nine-step refusal order is EPIC 052.1's, at
-  `.agents/plan/epics/052.1-the-structural-acceptance.md:40` — `patch-target-invalid`. Case 9 below
+  `.agents/plan/epics/052.1-the-structural-acceptance.md:44` — `patch-target-invalid`. Case 9 below
   composes the three verdicts inside the test, not in production.
 
 ## Verify
