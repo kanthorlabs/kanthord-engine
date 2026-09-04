@@ -20,11 +20,11 @@ export function containmentMovable(
 }
 ```
 
-The signature does not change. Its three callers — `update-node.ts:178`, `import-plan.ts:320` and
+The signature does not change. Its three callers — `src/commands/node/update-node.ts:178`, `src/commands/plan/import-plan.ts:320` and
 `src/queries/plan/validate-plan.ts:230` — pass the same `ContainmentFacts`, and the run guard is a
 separate refusal ahead of the two write callers, so no caller changes shape.
 
-**The third caller is the `plan.validate` report, and it gains no run guard.** `validate-plan.ts:230`
+**The third caller is the `plan.validate` report, and it gains no run guard.** `src/queries/plan/validate-plan.ts:230`
 feeds `choiceVerdict`, so this one line changes that query's answer as well: a node holding a live
 node lease and no run reports `containmentMovable: true` and `suggested: "submitted"` where it
 reported `suggested: "database"`. The query reads no run, because a run is transient and a verdict
@@ -71,7 +71,7 @@ Cases 2 to 4 with case 1 prove the drop is exactly one conjunct.
 
 5. `"an import moving a node holding an orphan lease is admitted"` — in `src/commands/plan/import-plan.test.ts`, seed a live node lease on `T` with `test/helpers/rows.ts:668 — `seedLeaseOnNode`` and no run, submit a document moving `T` to a new parent, and assert the move is legal.
 
-6. `"plan.validate suggests the submitted document for a node holding an orphan lease"` — in `src/queries/plan/validate-plan.test.ts`, the same fixture, and assert the choice carries `containmentMovable: true` and `suggested: "submitted"` by value. `containmentMovable` has **three** callers — `update-node.ts:178`, `import-plan.ts:320` and `src/queries/plan/validate-plan.ts:230 — `containmentMovable`` — and Story 3 (03-the-update-node-guard) asserts only the first. All three are relaxed by this one-line change, and all three are asserted.
+6. `"plan.validate suggests the submitted document for a node holding an orphan lease"` — in `src/queries/plan/validate-plan.test.ts`, the same fixture, and assert the choice carries `containmentMovable: true` and `suggested: "submitted"` by value. `containmentMovable` has **three** callers — `src/commands/node/update-node.ts:178`, `src/commands/plan/import-plan.ts:320` and `src/queries/plan/validate-plan.ts:230 — `containmentMovable`` — and Story 3 (03-the-update-node-guard) asserts only the first. All three are relaxed by this one-line change, and all three are asserted.
 
 7. `"ContainmentFacts.lease is read by no production file"` — a tree assertion, not a single grep: enumerate every file under `src/` that is not a test, and assert none matches `facts.lease` or `.lease` on a `ContainmentFacts` value. The producer survives on purpose, and this assertion is what makes that interval safe. Write it in `src/domain/plan-containment.test.ts`, beside the four unit cases above.
 

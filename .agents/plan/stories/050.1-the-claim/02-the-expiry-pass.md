@@ -102,7 +102,7 @@ The update and every append sit in the caller's one transaction, so a failure at
 ## Constraints
 
 - `expireRuns` runs inside the caller's transaction. It never calls `storage.transact`.
-- `outcome = 'expired'` is the only outcome this story writes. `run.outcome` carries no CHECK (`migration-0007-external-execution.ts:25`), so the value is free; pin it to `'expired'`.
+- `outcome = 'expired'` is the only outcome this story writes. `run.outcome` carries no CHECK (`src/services/storage/migration-0007-external-execution.ts:25`), so the value is free; pin it to `'expired'`.
 - The fence rises by exactly one per run, once. Do not write a second `UPDATE`.
 - Do not read the clock. `now` is an input, and the caller reads `dependencies.clock.now()` once as the first statement inside its transaction, per `src/commands/node/claim-node.ts:105`.
 - `actorKind: "daemon"` and `actorId: dependencies.instanceId`, matching the ancestor `node.running` appends at `src/commands/node/claim-node.ts:319-333`.

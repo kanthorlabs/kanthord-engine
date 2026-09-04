@@ -138,7 +138,7 @@ The bare-scalar form matches `src/services/execution/index.ts:101` — `activeRu
 **Every checkpoint row is an accepted checkpoint, so the predicate is a bare existence test.** The
 `checkpoint` table has no `accepted` column: `accepted_oid` is non-null only for the `execution`
 kind, `verdict` only for the `review` kind, and a `structural` row carries neither. A checkpoint is
-written only on an acceptance, and `worker.md:447` states a review verdict of `reject` is still a
+written only on an acceptance, and `../docs/workflow/worker.md:447` states a review verdict of `reject` is still a
 delivered verdict, so a rejected review checkpoint counts. The query is
 
 ```sql

@@ -114,7 +114,7 @@ Add `"subtree-busy"` to the refusal union of `NodeWriteError` for this command.
 **Every member of `readSubtreeExecutionFacts` stays, and two of them matter here.**
 `src/services/plan/sqlite.ts:352 — `blocker: "lease"`` puts a `lease` member in the closed
 `executionBlockers` list and `src/services/plan/sqlite.ts:362 — `blocker: "run"`` puts a `run` member
-in it, and `delete-node.ts:105` refuses `binding-in-use` on any member. EPIC 050.5 Story 5 owns that list. Do not remove either here.
+in it, and `src/commands/node/delete-node.ts:105` refuses `binding-in-use` on any member. EPIC 050.5 Story 5 owns that list. Do not remove either here.
 
 Two consequences, and this story asserts both rather than letting an implementing agent find them:
 

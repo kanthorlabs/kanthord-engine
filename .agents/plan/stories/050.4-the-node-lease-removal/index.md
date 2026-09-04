@@ -105,7 +105,7 @@ was read out of the source before a story was written, and each one changed a st
 - **The repository lease does not exist.** `lease.acquire` has exactly one caller,
   `src/commands/node/claim-node.ts:426`, and it passes `subjectKind: "node"`. Every `lease.read`,
   `lease.renew`, `lease.release` and `lease.assertHeld` call site passes `"node"` too.
-  `lease.expireLeasesOfOwner` at `revoke-actor.ts:100` passes **no** `subjectKind` at all — its SQL
+  `lease.expireLeasesOfOwner` at `src/commands/actor/revoke-actor.ts:100` passes **no** `subjectKind` at all — its SQL
   filters on `owner` alone — so it is the one call that is not node-scoped by its argument, and it is
   node-scoped only by what the table happens to hold. The only `INSERT INTO lease` in production is
   `src/services/lease/sqlite.ts:160`. Five files under `src/commands/` hold
@@ -115,7 +115,7 @@ was read out of the source before a story was written, and each one changed a st
   repository half with "every column, every caller and its fence semantics"; there is no caller.
 
 - **`lease-held` has no surviving producer.** It is declared on `node.claim` (`execution.ts:302`),
-  `node.heartbeat` (`:321`), `node.release` (`:340`) and `node.report` (`outcome.ts:151`), and on no
+  `node.heartbeat` (`:321`), `node.release` (`:340`) and `node.report` (`src/http/contract/outcome.ts:151`), and on no
   repository operation. When Stories 1 to 7 land, nothing raises it. It is retired, not scoped, and
   `leaseHeldDetails` is deleted rather than left unreachable.
 
@@ -204,7 +204,7 @@ was read out of the source before a story was written, and each one changed a st
   story turns on.
 
 - **`system.status` exposes the lease table, and removing that projection is not free.**
-  `system.ts:71` types `leases[].subjectKind` as `z.enum(leaseSubjectKinds)`, and `read-status.ts:79`
+  `src/http/contract/system.ts:71` types `leases[].subjectKind` as `z.enum(leaseSubjectKinds)`, and `src/queries/system/read-status.ts:79`
   reads `dependencies.clock.now()` **inside** the lease query — the query's only clock read. Deleting
   the projection therefore moves the seam trace of `system.status`, which makes it an implement story
   needing a pair; and `readStatus`'s `health` dependency is function-valued, so its baseline token is
@@ -212,11 +212,11 @@ was read out of the source before a story was written, and each one changed a st
   still exists here, so the projection is truthful. EPIC 050.5 owns it with the table drop, and owns
   the `health.call` cause with it.
 
-- **The `blocker` enum is open on the wire.** `error-details.ts:36` is `blocker: z.string()`, so
+- **The `blocker` enum is open on the wire.** `src/http/contract/error-details.ts:36` is `blocker: z.string()`, so
   dropping the `lease` member of `executionBlockers` changes no schema. That is EPIC 050.5's story,
   and this fact is what lets it stay wire-invisible everywhere except `system.status`.
 
-- **`eventView.type` is `z.string()`** (`event.ts:25`), so the event catalogue is not wire-constrained
+- **`eventView.type` is `z.string()`** (`src/http/contract/event.ts:25`), so the event catalogue is not wire-constrained
   and `recovery.leaseRecovered` and `recovery.leaseBlocked` cost no capability when EPIC 050.5
   retires them.
 
@@ -245,7 +245,7 @@ rather than re-applying.
 
 EPIC 050.2 Story 6's ship diagram also re-pins its tail from the superseded EPIC 051
 `report-execution-checkpoint` to `EPIC 050.4 report-lease-free`, because this epic now owns that tail. That re-pin is applied too,
-at `06-the-report-prelude.md:67`.
+at `.agents/plan/stories/050.2-the-run-renew-release-and-report/06-the-report-prelude.md:67`.
 
 ## Amendments the earlier epics needed, re-verified on 2026-09-02
 
@@ -259,7 +259,7 @@ here because an instruction to re-apply a landed edit is how a diagram gets pinn
 - **`.agents/plan/stories/050.2-the-run-renew-release-and-report/06-the-report-prelude.md` — MOOT.**
   Its lines `:13`, `:120` and `:182` all name EPIC 050.4 Story 6 as the declarer of
   `report-lease-free`, and `:87` and `:107` carry the id. The earlier note claimed `:70` named Story
-  8; `:173` is the only Story 8 reference in the file, it is about `refusals.ts:83` — `lease-held`,
+  8; `:173` is the only Story 8 reference in the file, it is about `src/http/server/node/refusals.ts:83` — `lease-held`,
   and it is correct, because Story 8 retires that code.
 
 - **EPIC 051.4 — APPLIED.** Its predecessor read _"EPIC 050.2's

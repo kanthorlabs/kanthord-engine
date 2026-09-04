@@ -222,7 +222,7 @@ Each was read out of the source before a story was written, and each one changed
   used only at `:125` inside `leaseHeldDetails`. EPIC 050.4 Story 8 (`08-lease-held-is-retired`) deletes that schema, so it must
   delete this import in the same edit; the amendment is listed in the epic.
 
-- **`migration-0007-external-execution.ts:69` copies lease rows.** It is a shipped historical
+- **`src/services/storage/migration-0007-external-execution.ts:69` copies lease rows.** It is a shipped historical
   migration and no story here touches it.
 
 - **`test/helpers/lease.ts` imports all three modules this epic deletes**, and fourteen `*.test.ts`

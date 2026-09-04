@@ -149,7 +149,7 @@ which pins one `fence` line per member of `node.report.request`.
 `src/http/contract/outcome.ts:152`, and its `operationAdditions` entry. Replace the `lease-held`
 literal of `nodeReportExamples` at `:75` with `run-ended` carrying `{ runId }`.
 
-**The nested call's `fence` argument goes here, not in Story 7.** `report-outcome.ts:129` passes
+**The nested call's `fence` argument goes here, not in Story 7.** `src/commands/outcome/report-outcome.ts:129` passes
 `fence: body.fence` into `reportObjective`. `body.fence` stops existing in this story, so the argument
 cannot outlive it: delete `fence` from the call at `:125-131` and from `ReportObjectiveInput` in
 `src/commands/outcome/report-objective.ts`. Story 7 then deletes the lease block that read it. Leaving

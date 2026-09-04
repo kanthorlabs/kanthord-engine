@@ -22,7 +22,7 @@ in the epic that drops the table**, not here.
 
 The table index row for `lease` at `:26` and the polymorphic-column lists at `:80` and `:126` **keep
 their `lease` entries**, because the table and `lease.subject_id` both still exist. The `run` row of
-that index, at `:27`, is amended with `run.md:3`.
+that index, at `:27`, is amended with `docs/proposal/database/run.md:3`.
 
 **`docs/proposal/database/run.md`** — its question line at `:3` reads _"which worker ran it, under which
 lease generation, from which base commit"_. The generation is the run's own fence. Amend it, and amend

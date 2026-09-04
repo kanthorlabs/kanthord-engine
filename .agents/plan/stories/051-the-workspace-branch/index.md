@@ -277,7 +277,7 @@ epic.
 None is applied here, and a human applies each before dispatch.
 
 - **EPIC 051.1 Story 4 (`04-the-candidate-ref-is-deleted`)** — its `## Change` step 3 declares a
-  `refNamespace` projection for `git.resolveRef`, and `04-the-candidate-ref-is-deleted.md:127` still
+  `refNamespace` projection for `git.resolveRef`, and `.agents/plan/stories/051.1-the-candidate-and-the-git-primitives/04-the-candidate-ref-is-deleted.md:127` still
   projects it that way. EPIC 051 Story 6 lands `git.resolveRef` projecting the **ref value**, not its
   namespace: `claim-first-execution` resolves
   two different refs, and a namespace projection would emit `git.resolveRef:branch` twice, which

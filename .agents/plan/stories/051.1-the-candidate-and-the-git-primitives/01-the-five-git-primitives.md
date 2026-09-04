@@ -192,10 +192,10 @@ second call on the same home is a no-op and throws nothing.
 **Fifteen hand-written `GitPaths` builders gain the member**, or type checking fails. Fourteen are a
 local `function makePaths()`:
 
-`src/services/git/outside-writer.test.ts:100`, `binary.test.ts:24`, `seed.test.ts:63`,
-`environment.test.ts:23`, `run.test.ts:42`, `ref-update.test.ts:51`, `remote-info.test.ts:47`,
-`authenticated.test.ts:54`, `credential.test.ts:44`, `host-key.test.ts:57`, `ref-read.test.ts:38`,
-`preflight.test.ts:50`, `worktree.test.ts:34`, `fetch.test.ts:51`.
+`src/services/git/outside-writer.test.ts:100`, `src/services/git/binary.test.ts:24`, `seed.test.ts:63`,
+`src/services/git/environment.test.ts:23`, `run.test.ts:42`, `src/services/git/ref-update.test.ts:51`, `src/services/git/remote-info.test.ts:47`,
+`src/services/git/authenticated.test.ts:54`, `credential.test.ts:44`, `src/services/git/host-key.test.ts:57`, `src/services/git/ref-read.test.ts:38`,
+`preflight.test.ts:50`, `src/services/git/worktree.test.ts:34`, `src/services/git/fetch.test.ts:51`.
 
 The fifteenth is `makeHome()` at `src/services/git/clone.test.ts:49 — `makeHome``, which builds the
 object inline. Each one creates its own temporary directory set, so each adds a `worktrees` sibling

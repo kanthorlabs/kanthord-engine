@@ -64,9 +64,9 @@ A human ruled on each. The EPIC carries them; these stories implement them.
 
 Drawing the shipped claim before drawing its replacement produced four corrections. The EPIC carries them.
 
-- **The claim reads the lease of every relative, and the diagram draws one step per read.** `claim-node.ts:157` calls `liveLeasesOf` over `relativesOf`, which returns the target, the parent, the children and the siblings. The fixture takes three reads, not one.
-- **The own-lease read at `claim-node.ts:179` dies with the replay path.** Two reads of one subject carry one token twice, which the parser refuses. Deleting the replay path is what makes the path drawable.
-- **The expiry pass is a capability key, not a function-valued dependency.** `sweepExpiredExternalLeases` at `claim-node.ts:58` holds no `<key>.<method>` token, so `ClaimNodeDependencies` takes `expiry: Expiry` instead.
+- **The claim reads the lease of every relative, and the diagram draws one step per read.** `src/commands/node/claim-node.ts:157` calls `liveLeasesOf` over `relativesOf`, which returns the target, the parent, the children and the siblings. The fixture takes three reads, not one.
+- **The own-lease read at `src/commands/node/claim-node.ts:179` dies with the replay path.** Two reads of one subject carry one token twice, which the parser refuses. Deleting the replay path is what makes the path drawable.
+- **The expiry pass is a capability key, not a function-valued dependency.** `sweepExpiredExternalLeases` at `src/commands/node/claim-node.ts:58` holds no `<key>.<method>` token, so `ClaimNodeDependencies` takes `expiry: Expiry` instead.
 - **A run-scoped seam projects the run id.** `execution.openAttempt` receives a run id, so it renders `:R` and never `:T`. A projection nobody can compute is a step nobody can check.
 
 ## Still open
@@ -102,9 +102,9 @@ Nothing blocks dispatch once EPIC 050 lands.
 - `runtime-matrix.test.ts` reads `docs/proposal/phase-1/runtime-capability-matrix.md`, requires the rows in registry order, pins the count at 48, and requires exactly nine cells per row.
 - The harness operation list is duplicated in **three** places: `registry.test.ts:27-46`, `authorization.test.ts:17-36` and `system.test.ts:359-436`. All three move together.
 - `errorStatuses` at `errors.ts:7-31` is ordered by ascending HTTP status, and every 409 is a `PreconditionCode` whose `httpError` overload **requires** a `details` argument (`errors.ts:95-111`).
-- `eventPayloads` at `event-payload.ts:71` is typed `Readonly<Record<EventType, ZodType>>`, so a new event type without a payload fails type checking. The shared `fence` alias is at `:29-35`.
+- `eventPayloads` at `src/http/contract/event-payload.ts:71` is typed `Readonly<Record<EventType, ZodType>>`, so a new event type without a payload fails type checking. The shared `fence` alias is at `:29-35`.
 - `src/http/contract/system.ts:84` is already stale: it lists three capabilities where the live registry declares four.
-- `coverage.test.ts:273` asserts every `z.enum` in the contract traces to a `domain/` import, and `:355` requires a line in `field-decisions.fixture.ts` for every registry field.
+- `src/http/contract/coverage.test.ts:273` asserts every `z.enum` in the contract traces to a `domain/` import, and `:355` requires a line in `field-decisions.fixture.ts` for every registry field.
 
 ### Verify
 

@@ -106,14 +106,14 @@ Nothing blocks dispatch.
 - The abort message is wrapped by `src/services/storage/sqlite.ts:90-98` into `migration <version> <name> failed: <the RAISE text>`, with code `storage-migration-failed`.
 - `rebuild: true` sets `PRAGMA foreign_keys = OFF` and `PRAGMA legacy_alter_table = ON` for the batch (`sqlite.ts:76-79`). The `run` rename cycle needs both: `attempt`, `candidate`, `check_result` and `git_operation` all hold foreign keys into `run`.
 - The shipped `run` DDL is `migration-0007-external-execution.ts:12-32` verbatim. `run_one_active` at `:33` is `CREATE UNIQUE INDEX run_one_active ON run (node_id) WHERE state = 'active'` — a partial unique index that defends the same-node case only.
-- `attempt` carries `FOREIGN KEY (run_id, driver) REFERENCES run(id, driver)` at `migration-0007-external-execution.ts:52`, so `UNIQUE (id, driver)` on `run` must survive the rebuild.
-- `node.repository_id` is non-null **exactly** for an objective, by `CHECK ((kind = 'objective') = (repository_id IS NOT NULL))` at `migration-0002-graph-and-plan.ts:33`. That is what makes the `run_base` ancestor walk terminate at the objective.
+- `attempt` carries `FOREIGN KEY (run_id, driver) REFERENCES run(id, driver)` at `src/services/storage/migration-0007-external-execution.ts:52`, so `UNIQUE (id, driver)` on `run` must survive the rebuild.
+- `node.repository_id` is non-null **exactly** for an objective, by `CHECK ((kind = 'objective') = (repository_id IS NOT NULL))` at `src/services/storage/migration-0002-graph-and-plan.ts:33`. That is what makes the `run_base` ancestor walk terminate at the objective.
 - Every production run today is `driver = 'external'` with `base_oid` NULL: `openRun` at `src/services/execution/sqlite.ts:85-112` hardcodes them. `'internal'` appears only in the 0007 backfill and in test fixtures.
 - A new table must be added to `src/domain/rows.ts` (`run: runRow` is at `:43`) or `src/services/storage/schema-parity.test.ts:90-105` fails, and it needs a `docs/proposal/database/<table>.md` ` ```sql ` fence or the DDL parity test fails.
 
 ### Config
 
-- The `attemptLimit` template spans four sites: the `Settings` member (`index.ts:34`), the schema entry (`convict.ts:231-235`), the env-integer table row (`convict.ts:354`) and the projection (`convict.ts:516`). All four are required, and a numeric env var absent from the table stays a string.
+- The `attemptLimit` template spans four sites: the `Settings` member (`index.ts:34`), the schema entry (`convict.ts:231-235`), the env-integer table row (`src/services/config/convict.ts:354`) and the projection (`src/services/config/convict.ts:516`). All four are required, and a numeric env var absent from the table stays a string.
 - `positiveInteger` (`convict.ts:44-48`) admits `1`, so the `runTtlMs` floor of `1000` needs its own format.
 - A bad value is `config-invalid`; a legal-but-unstartable combination is `config-refused` and belongs in `src/services/config/refusals.ts`, not in a convict format.
 - `src/services/config/convict.test.ts:104-121` pins the `Settings` key order.
