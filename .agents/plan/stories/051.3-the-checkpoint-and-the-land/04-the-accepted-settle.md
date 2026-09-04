@@ -6,7 +6,7 @@ Kind: story-implement
 
 Diagrams: land-settle-accepted
 
-Seams: land-settle-accepted: +clock.now, +storage.transact, +plan.readNode, +execution.attemptsOfRun:R, +execution.writeCheckpoint:R, +plan.setWorkspaceBranchHead:O, +execution.closeAttempt:A, +execution.stampRunHead:R, +execution.endRun:R, +plan.setNodeState:T:outcome-accepted, +events.append:outcome.reported:T, +events.append:run.ended:R:landed, +plan.readAllNodes, +journal.complete:landed
+Seams: land-settle-accepted: +clock.now, +storage.transact, +plan.readNode, +execution.attemptsOfRun:R, +execution.writeCheckpoint:R, +plan.setWorkspaceBranchHead:O, +execution.closeAttempt:A, +execution.stampRunHead:R, +execution.endRun:R, +plan.setNodeState:T:outcome-accepted, +events.append:outcome.reported:T:null, +events.append:run.ended:R:landed, +plan.readAllNodes, +journal.complete:landed
 
 This story leaves the contended half to Story 5 (`05-the-contended-settle`) and the composition to
 EPIC 051.4, whose `acceptExecution` injects this unit, orders it around the compare and swap and
@@ -50,7 +50,7 @@ sequenceDiagram
     Command->>Execution: 8 execution.stampRunHead:R
     Command->>Execution: 9 execution.endRun:R
     Command->>Plan: 10 plan.setNodeState:T:outcome-accepted
-    Command->>Events: 11 events.append:outcome.reported:T
+    Command->>Events: 11 events.append:outcome.reported:T:null
     Command->>Events: 12 events.append:run.ended:R:landed
     Command->>Plan: 13 plan.readAllNodes
     Command->>Journal: 14 journal.complete:landed
@@ -229,6 +229,13 @@ write inside it is one value. It is step 1 of the diagram. Inside one
    `reason` is `"landed"` and not `null`: EPIC 050.2 Story 5 (`05-the-release`) states that every
    release path writes `null` and that the report path supplies a value. The recorder appends
    `String(payload.reason)` as a third label, so the value is part of the drawn token.
+
+   **The same rule reaches step 5, and the label there is `null`.**
+   `test/helpers/sequence-conformance.ts:81` — `reason` appends the label whenever the payload holds a
+   `reason` key, and it reads the key, never the value, so `reason: null` draws
+   `events.append:outcome.reported:T:null` and not a bare token. Dropping the label would make the
+   diagram disagree with the recorder on the first run of the scenario.
+
 7. `const nodes = dependencies.plan.readAllNodes(transaction);` and build the `NodeReportResult` from
    it exactly as `src/commands/outcome/report-outcome.ts:310` — `readAllNodes` does today: filter the
    siblings of `node.parentId`, sort with `compareIds`, derive `objectiveState` and

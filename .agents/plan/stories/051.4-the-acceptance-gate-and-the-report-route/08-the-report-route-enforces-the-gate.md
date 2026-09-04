@@ -10,7 +10,7 @@ Diagrams: report-checkpoint-gate
 
 Supersedes: EPIC 050.4 report-lease-free
 
-Seams: report-checkpoint-gate: +execution.runBases:R, +accept.execution, -execution.closeAttempt:A, -plan.setNodeState:T:outcome-accepted, -execution.stampRunHead:R, -execution.endRun:R, -events.append:outcome.reported:T, -plan.readAllNodes
+Seams: report-checkpoint-gate: +execution.runBases:R, +accept.execution, -execution.closeAttempt:A, -plan.setNodeState:T:outcome-accepted, -execution.stampRunHead:R, -execution.endRun:R, -events.append:outcome.reported:T:null, -plan.readAllNodes
 
 This story wires the gate to the wire and maps its refusals. Story 9 puts `repositoryId` and the six
 codes on the contract.

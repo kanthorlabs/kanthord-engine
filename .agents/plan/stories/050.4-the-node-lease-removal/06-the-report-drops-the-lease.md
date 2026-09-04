@@ -8,7 +8,7 @@ Diagrams: report-lease-free
 
 Supersedes: EPIC 050.2 report-authority-prelude
 
-Seams: report-lease-free: +execution.attemptsOfRun:R, +execution.closeAttempt:A, +plan.setNodeState:T:outcome-accepted, +execution.stampRunHead:R, +execution.endRun:R, +events.append:outcome.reported:T, +plan.readAllNodes, -lease.release @src/commands/outcome/report-outcome.ts:282
+Seams: report-lease-free: +execution.attemptsOfRun:R, +execution.closeAttempt:A, +plan.setNodeState:T:outcome-accepted, +execution.stampRunHead:R, +execution.endRun:R, +events.append:outcome.reported:T:null, +plan.readAllNodes, -lease.release @src/commands/outcome/report-outcome.ts:282
 
 The superseded diagram pinned its tail, so the seven `+` tokens are tail calls entering a drawn prefix
 for the first time, not new calls. `lease.release` is a call the superseded diagram never drew, so its
@@ -69,10 +69,16 @@ sequenceDiagram
     Command->>Plan: 9 plan.setNodeState:T:outcome-accepted
     Command->>Execution: 10 execution.stampRunHead:R
     Command->>Execution: 11 execution.endRun:R
-    Command->>Events: 12 events.append:outcome.reported:T
+    Command->>Events: 12 events.append:outcome.reported:T:null
     Command->>Plan: 13 plan.readAllNodes
     Command-->>Client: ok
 ```
+
+**Step 12 carries the label `null`, and the recorder is what puts it there.**
+`test/helpers/sequence-conformance.ts:81` — `reason` appends `String(payload.reason)` whenever the
+payload holds a `reason` key, and `src/commands/outcome/report-outcome.ts:302` — `reason` is one of
+the nine keys the shipped payload writes. An accepted report carries it as `null`, so the token is
+`events.append:outcome.reported:T:null`.
 
 **Steps 1 to 6 are the pinned prefix, reproduced token for token and in its order.**
 EPIC 050.2 Story 6 (`06-the-report-prelude`) ends `report-authority-prelude` with
