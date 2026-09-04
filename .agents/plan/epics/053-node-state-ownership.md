@@ -22,7 +22,7 @@ A parent state derives from its children, and a run never writes a parent termin
 - **No `closed_at` column, and no migration.** No epic builds `node.closed_at` or `node.closed_actor`. The precedence this epic needs comes from the state guard: `aggregateObjective` writes only from `running`, and `src/services/plan/index.ts:119` — `setNodeState` validates the declared `from`, so a closed objective is unreachable by a later aggregation. `.agents/plan/epics/056.1-the-close-and-the-human-boundary.md` records the same ruling for the close, and the event row carries the actor a provenance column would have held.
 - **No new initiative aggregation.** `src/commands/outcome/aggregate-initiative.ts:20` — `aggregateInitiative` ships, and this epic changes no line of it. It gains one caller.
 - **No initiative end-to-end result.** `initiativeOutcome` at `src/domain/outcome.ts:25` — `initiativeOutcome` keeps its `e2e` parameter and its `not-applicable` default.
-- **No initiative report.** `src/commands/outcome/report-outcome.ts:116` — `initiative-not-reportable` refuses every report on an initiative. The structural member and that guard belong to EPIC 052.1, and the Amendments section asks for both.
+- **No initiative report.** `src/commands/outcome/report-outcome.ts:116` — `initiative-not-reportable` refuses every report on an initiative. The structural member and that guard belong to EPIC 052.1, which lifts the guard for that member and asserts the initiative state is unchanged.
 - **No approval evidence bundle.** `node.approvalEvidence` stays `stubbed`. EPIC 112 owns it.
 
 ## Decisions
@@ -96,8 +96,6 @@ Each entry is a name and the output it contributes. The story file holds the cha
 ## Amendments this epic asks of other epics
 
 None is applied here, and a human applies each before dispatch.
-
-- **EPIC 052.1 Story 8 (`08-the-report-route-carries-a-patch`)** — the structural member cannot reach an initiative. `src/commands/outcome/report-outcome.ts:116` — `initiative-not-reportable` refuses every report on an initiative, and `worker.md:365` states an initiative's run is `structural`, so `(initiative, expansion)` is unrunnable while that guard stands. That epic owns the structural member and its prelude, so it lifts the guard for that member and takes the initiative-unchanged assertion its own `## Non-goals` at `.agents/plan/epics/052.1-the-structural-acceptance.md:20` — `053` currently delegates to this epic. **The default if no ruling arrives: the structural report path is unreachable for an initiative**, and no epic asserts the initiative stays `pending` or `ready`.
 
 - **EPIC 051.6 Story 3 (`03-the-report-reaps-on-every-settled-terminal`)** — it gains one `Superseded by:` line naming `report-checkpoint-aggregate`, at `.agents/plan/stories/051.6-the-post-expiry-reap-on-the-run-operations/03-the-report-reaps-on-every-settled-terminal.md:7` — `Diagrams`. The line must land after Story 1 has put `"053"` in `authoredEpics`, or `scripts/verify-epic-sequence.ts` refuses the supersession. The `Add \`test/sequence/scenarios/report-checkpoint-reap.ts\`.`line of that story stays: deleting it would leave EPIC 051.6 owning a live diagram with no scenario. The scenario-file deletion belongs to Story 7, because`test/sequence/scenarios/`is in the test-engineer lane. **The default if no ruling arrives:`report-checkpoint-reap`stays live with no scenario file**, and`test/sequence/conformance.test.ts` reports it as unsuperseded.
 
