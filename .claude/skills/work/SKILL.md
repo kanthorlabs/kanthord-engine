@@ -447,11 +447,10 @@ script**: `scripts/lane-check.sh <role> <path>` (exit 0 = in-lane).
   file under `test/**`**, test suffix or not (`test/helpers/daemon.ts`,
   `test/helpers/port.ts` and every fixture under `test/fixtures/**` and
   `test/e2e/fixtures/**` are test-engineer files); plus its draft files
-  under `.agents/tdd/` and its journal under
-  `.agents/tdd/memory/test-engineer/`.
+  under `.agents/tdd/`.
 - **software-engineer** lane: `src/**/*.ts` that is NOT a `*.test.ts` /
   `*.spec.ts`; plus `scripts/**` (helper/proof scripts its work needs — the
-  pipeline guards below stay locked); plus its draft files and journal as
+  pipeline guards below stay locked); plus its draft files as
   above. **`test/**` is not in this lane** — a helper or fixture the
   software-engineer needs is an `OPEN:` to the test-engineer, never an edit.
 - **Always forbidden to BOTH** (the lane script denies these for every role):
@@ -465,7 +464,7 @@ script**: `scripts/lane-check.sh <role> <path>` (exit 0 = in-lane).
   `Containerfile`, `compose.yaml`, `Makefile`. The reviewer-engineer edits
   nothing at all.
 
-Both roles may also write `.agents/tdd/` and their own `.agents/tdd/memory/<role>/` journal dir (under `<root>`).
+Both roles may also write `.agents/tdd/` (under `<root>`).
 
 Pass each path to the predicate one at a time, and read a path with `read -r`, never by word splitting — a path that contains a space is legal, and splitting it produces two arguments the predicate denies for the wrong reason:
 
@@ -492,20 +491,18 @@ request is the grant. Every path of `$TURN_FILES` must appear in `$GRANTED`, exc
 **protocol writes** the turn contract requires:
 
 - `<DRAFT_FILE>`, this turn's draft, by its exact path;
-- `<DISCUSSION_FILE>`, this turn's append, by its exact path;
-- `.agents/tdd/memory/groundwork-engineer/<today>.md`, the role's own journal entry.
+- `<DISCUSSION_FILE>`, this turn's append, by its exact path.
 
 Nothing else under `.agents/tdd/` is exempt. Exempting the whole subtree would let a groundwork turn
-rewrite another cycle's history or another role's journal with no request authority, which is the
+rewrite another cycle's history with no request authority, which is the
 opposite of an exact grant:
 
 ```bash
 perm_failed=0
-JOURNAL=.agents/tdd/memory/groundwork-engineer/$(date -u +%Y-%m-%d).md
 while IFS= read -r changed; do
   [ -n "$changed" ] || continue
   case $changed in
-  "${DRAFT_FILE#"$root/"}" | "${DISCUSSION_FILE#"$root/"}" | "$JOURNAL") continue ;;
+  "${DRAFT_FILE#"$root/"}" | "${DISCUSSION_FILE#"$root/"}") continue ;;
   esac
   if ! printf '%s\n' "$GRANTED" | grep -qxF -- "$changed"; then
     echo "permission violation: groundwork-engineer changed $changed, which the request does not grant" >&2

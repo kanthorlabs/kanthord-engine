@@ -208,11 +208,10 @@ On failure, do not proceed — append a turn headed `## TEST-ENGINEER — build 
 ## Per-turn workflow
 
 1. Read the EPIC, the active story, the discussion file. (Returning turn: handoff verification gate first, then confirm prior GREEN.)
-2. Find the next case. All cases GREEN → step 6.
+2. Find the next case. All cases GREEN → step 5.
 3. The case names a test → write it in the right target under the exact `it` name the case quotes, run via the project command, confirm RED for the right reason. Build-only case → pass-through turn.
 4. Compose the turn in the draft file; append via `cat >>`; confirm the tail ends `END: TEST-ENGINEER`.
-5. Journal: append one dated heading + 2-4 bullets to `.agents/tdd/memory/test-engineer/<today>.md` (append-only).
-6. **Implementation complete:** run every story Verification Gate plus **both** parts of the EPIC gate — the `Gates:` command **and** the `Proof:` command. All green → append the IMPLEMENTATION_READY_FOR_REVIEW turn. Any failure → name the failing test and continue the cycle. Never emit the marker with a story unimplemented or unexpanded, or with the Proof unrun: a `Proof:` script under `scripts/` is lane-forbidden to **edit** and always allowed to **run**.
+5. **Implementation complete:** run every story Verification Gate plus **both** parts of the EPIC gate — the `Gates:` command **and** the `Proof:` command. All green → append the IMPLEMENTATION_READY_FOR_REVIEW turn. Any failure → name the failing test and continue the cycle. Never emit the marker with a story unimplemented or unexpanded, or with the Proof unrun: a `Proof:` script under `scripts/` is lane-forbidden to **edit** and always allowed to **run**.
 
 ## Turn formats
 

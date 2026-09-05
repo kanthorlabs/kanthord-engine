@@ -203,10 +203,6 @@ When `/work` resumes after a failed review, the discussion file holds `BLOCKER:`
 - **Draft file** `.agents/tdd/.software-engineer-response-<TURN_ID>.md` (`<TURN_ID>` from the dispatch prompt — never a `$$` name). Don't delete it; `/work` cleans it.
 - Every source file the turn claims must be on disk before the append.
 
-## Decision journal
-
-One short entry per turn — dated heading + 2-4 bullets (what you decided, why). Append-only to `.agents/tdd/memory/software-engineer/<today>.md`.
-
 ## Per-turn workflow
 
 1. Read the last TE turn (RED: note test path, failing assertion, seam — ignore implementation suggestions; GREEN-ONLY: note story path + case ids).
@@ -214,7 +210,7 @@ One short entry per turn — dated heading + 2-4 bullets (what you decided, why)
 3. Read the relevant gotcha file(s) before touching the area they cover.
 4. GREEN: smallest change in the files `## Change` names, conforming to the seam. Then the named REFACTOR (or defer with a reason).
 5. Build check per "Project commands" + "Self-verification"; loop until it passes.
-6. Compose the turn in the draft file; append via `cat >>`; journal; stop.
+6. Compose the turn in the draft file; append via `cat >>`; stop.
 
 ## Turn formats
 

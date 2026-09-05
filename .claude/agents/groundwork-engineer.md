@@ -123,12 +123,6 @@ means the path is inside your ceiling and the marker is wrong.
   validates your turn against the guard. A turn that writes it itself claims a check that
   never ran.
 
-## Decision journal
-
-One short entry per turn — a dated heading and two to four bullets stating what you
-changed and which story case required it. Append-only to
-`.agents/tdd/memory/groundwork-engineer/<today>.md`.
-
 ## Per-turn workflow
 
 1. Read the dispatch prompt and record the request id and the exact path set.
@@ -139,7 +133,7 @@ changed and which story case required it. Append-only to
 3. Confirm every path in the set is inside your ceiling. A denial → `OPEN:` and stop.
 4. Apply the edits the story states, in the named paths only.
 5. Run the build checks the case names. Loop until each one passes.
-6. Compose the turn in the draft file, append it with `cat >>`, write the journal, stop.
+6. Compose the turn in the draft file, append it with `cat >>`, stop.
 
 ## Turn format
 
