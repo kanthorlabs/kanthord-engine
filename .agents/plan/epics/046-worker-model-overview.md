@@ -36,19 +36,19 @@ These epics restate earlier text. This block does not edit the earlier files. Ea
 
 ## Order
 
-| #   | Epic                                      | Capability at close                                                                                                      |
-| --- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| 047 | The deliverable and the node pair         | A node declares a deliverable and a `verify` block, and an illegal pair is refused.                                      |
-| 048 | The worker registry and routing           | Three eligible sets resolve to one worker, or the daemon answers `unroutable`.                                           |
-| 049 | Dual-read plan parsing and the conversion | Both frontmatter shapes parse, and the conversion emits a report and a document set.                                     |
-| 050 | The run, the fence and exclusion          | A task claim opens or reuses an objective run, opens a task run, writes the assignment, and a stale fence fails a write. |
-| 051 | The execution checkpoint                  | An ingested commit lands on the objective branch by compare and swap.                                                    |
-| 052 | The structural checkpoint                 | A staged graph patch lands against a graph revision, and creates a child.                                                |
-| 053 | The review checkpoint and state ownership | An attestation binds to a pinned commit, and aggregation owns a parent state.                                            |
-| 054 | Attempt classification and the supervisor | A termination is classified by the driver, and an ambiguous budget bounds a loop.                                        |
-| 055 | The grant and the external client         | A grant bounds a client to one root, one worker and its operation list.                                                  |
-| 056 | The worker switch and human controls      | A human switches a worker in one operation, and closes an objective.                                                     |
-| 057 | Non-null enforcement and legacy removal   | The nullable columns become mandatory, and the legacy fields are gone.                                                   |
+| #   | Epic                                      | Capability at close                                                                  |
+| --- | ----------------------------------------- | ------------------------------------------------------------------------------------ |
+| 047 | The deliverable and the node pair         | A node declares a deliverable and a `verify` block, and an illegal pair is refused.  |
+| 048 | The worker registry and routing           | Three eligible sets resolve to one worker, or the daemon answers `unroutable`.       |
+| 049 | Dual-read plan parsing and the conversion | Both frontmatter shapes parse, and the conversion emits a report and a document set. |
+| 050 | The run, the fence and exclusion          | A claim opens one run, writes the assignment, and a stale fence fails a write.       |
+| 051 | The execution checkpoint                  | An ingested commit lands on the objective branch by compare and swap.                |
+| 052 | The structural checkpoint                 | A staged graph patch lands against a graph revision, and creates a child.            |
+| 053 | The review checkpoint and state ownership | An attestation binds to a pinned commit, and aggregation owns a parent state.        |
+| 054 | Attempt classification and the supervisor | A termination is classified by the driver, and an ambiguous budget bounds a loop.    |
+| 055 | The grant and the external client         | A grant bounds a client to one root, one worker and its operation list.              |
+| 056 | The worker switch and human controls      | A human switches a worker in one operation, and closes an objective.                 |
+| 057 | Non-null enforcement and legacy removal   | The nullable columns become mandatory, and the legacy fields are gone.               |
 
 ## Dependencies
 
@@ -67,7 +67,7 @@ Sequence order. Epic N depends on epic N-1, per `AGENTS.md`. Two couplings are s
 
 ## The `/v1` compatibility policy is amended in place
 
-`023-version-compatibility-policy.md` D1 and `docs/proposal/api/README.md:93` give a closed list of four changes legal inside `/v1`. This block makes four changes outside it: `runId` and `fence` become required request fields, `node.heartbeat` becomes `node.renew`, `worker-unknown` leaves the published finding enum, and `worker` leaves the node projection.
+`023-version-compatibility-policy.md` D1 and `docs/proposal/api/README.md:93` give a closed list of the changes legal inside `/v1` — four when this block was written, five since a human moved `add a required request field` into it on 2026-09-03. This block makes three changes outside it: `node.heartbeat` becomes `node.renew`, `worker-unknown` leaves the published finding enum, and `worker` leaves the node projection. `runId` and `fence` becoming required request fields was the fourth, and the ruling made it legal.
 
 **A human ruled: there is no `/v2`, and the policy is amended in place.** The amendment does not open the list. It adds one bounded exception built on the mechanism EPIC 023 already shipped for exactly this question.
 
@@ -118,15 +118,15 @@ Step 6 leaves the engine. The engine ships `plan convert`, which runs every gene
 
 `/author` writes only to `.agents/plan/stories/<epic-slug>/`, one directory per epic. Two authoring agents therefore never collide, even in one working tree. The limit is not the file system. **An epic is safely authorable when every existing file its stories edit is already in the tree.** A file the epic creates needs no anchor, and a symbol a sibling epic creates is pinned by that epic's own text. An epic authored before its predecessor ships gets stories grounded in prose instead of in `file:line`, which is the defect `/author` exists to prevent.
 
-| batch | epics         | may run in parallel | ready when                                                                                  |
-| ----- | ------------- | ------------------- | ------------------------------------------------------------------------------------------- |
-| A     | 047, 048, 049 | yes, all three      | now. Every file these three edit is shipped code from EPICs 001 to 045.                     |
-| B     | 050           | alone               | 047 and 048 are authored. It consumes `nodePairLegality` and `routeWorker`.                 |
-| C     | 051           | alone               | 050 is authored. It consumes `assertRunAuthority` and `run_base`.                           |
-| D     | 052, 053, 055 | yes, all three      | 051 is authored. Each depends on 051 or 050, and none depends on another in this batch.     |
-| E     | 054           | alone               | 052 and 053 are authored. It wires `end-attempt` into every accept path.                    |
-| F     | 056           | alone               | 053, 054 and 055 are authored. It consumes `closed_at`, `end-attempt` and the caller kinds. |
-| G     | 057           | alone               | every earlier epic is authored. It cites lines in files that 047 to 056 change.             |
+| batch | epics         | may run in parallel | ready when                                                                              |
+| ----- | ------------- | ------------------- | --------------------------------------------------------------------------------------- |
+| A     | 047, 048, 049 | yes, all three      | now. Every file these three edit is shipped code from EPICs 001 to 045.                 |
+| B     | 050           | alone               | 047 and 048 are authored. It consumes `nodePairLegality` and `routeWorker`.             |
+| C     | 051           | alone               | 050 is authored. It consumes `assertRunAuthority` and `run_base`.                       |
+| D     | 052, 053, 055 | yes, all three      | 051 is authored. Each depends on 051 or 050, and none depends on another in this batch. |
+| E     | 054           | alone               | 052 and 053 are authored. It wires `end-attempt` into every accept path.                |
+| F     | 056, 056.1    | 056 before 056.1    | 053, 054 and 055 are authored. Both consume `end-attempt` and the caller kinds.         |
+| G     | 057           | alone               | every earlier epic is authored. It cites lines in files that 047 to 056 change.         |
 
 Batch A and batch D are the two real parallel wins. Five of the eleven epics expand in two passes.
 

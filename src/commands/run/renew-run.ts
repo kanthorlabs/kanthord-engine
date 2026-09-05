@@ -18,8 +18,7 @@ export type RenewRefusal =
   | "node-not-found"
   | "initiative-not-claimable"
   | "lease-held"
-  | "lifetime-exceeded"
-  | "objective-run-lost";
+  | "lifetime-exceeded";
 
 export type ClaimedLease = Readonly<{
   subjectId: string;
@@ -62,7 +61,6 @@ export type RenewRunResult = Readonly<{
   lease: ClaimedLease;
   objectiveLease: ClaimedLease;
   expiresAt: number;
-  objectiveExpiresAt: number;
   renewAfterMs: number;
 }>;
 
@@ -102,11 +100,16 @@ export function renewRun(
     }
 
     const run = dependencies.execution.runById(transaction, input.runId);
+    const subtreeIds =
+      run === null
+        ? []
+        : dependencies.plan.readSubtree(transaction, run.nodeId);
     const refusal = assertRunAuthority({
       run,
       runId: input.runId,
       fence: input.runFence,
       targetNodeId: input.nodeId,
+      subtreeIds,
       caller: dependencies.caller,
       now,
     });
@@ -126,18 +129,6 @@ export function renewRun(
     }
 
     const objectiveId = node.kind === "task" ? objectiveScopeOf(node) : node.id;
-    const objectiveRun =
-      node.kind === "task"
-        ? dependencies.execution.activeRunOfNode(transaction, objectiveId)
-        : null;
-    if (node.kind === "task" && objectiveRun === null) {
-      throw new RenewRunError(
-        "objective-run-lost",
-        `the objective ${objectiveId} holds no active run`,
-        { objectiveId },
-      );
-    }
-
     const renewed = renewLease(dependencies, transaction, input, node.id, now);
     const objectiveRenewed =
       node.kind === "task"
@@ -157,24 +148,10 @@ export function renewRun(
 
     appendRunRenewed(dependencies, transaction, input, renewedRun);
 
-    let objectiveExpiresAt = renewedRun.expiresAt;
-    if (objectiveRun !== null) {
-      const renewedObjectiveRun = dependencies.execution.renewRun(transaction, {
-        runId: objectiveRun.id,
-        expiresAt: Math.min(
-          now + dependencies.runTtlMs,
-          objectiveRun.maxLifetimeAt,
-        ),
-      });
-      appendRunRenewed(dependencies, transaction, input, renewedObjectiveRun);
-      objectiveExpiresAt = renewedObjectiveRun.expiresAt;
-    }
-
     return {
       lease: toClaimedLease(renewed),
       objectiveLease: toClaimedLease(objectiveRenewed),
       expiresAt: renewedRun.expiresAt,
-      objectiveExpiresAt,
       renewAfterMs: Math.floor(dependencies.runTtlMs / 3),
     };
   });

@@ -63,7 +63,6 @@ const operationAdditions: Readonly<Record<string, readonly string[]>> = {
     "illegal-transition",
     "lease-held",
     "lifetime-exceeded",
-    "objective-run-lost",
     "plan-invalid",
     "run-caller-mismatch",
     "run-ended",

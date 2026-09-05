@@ -12,7 +12,6 @@ export type HarnessTaskResult = Readonly<{
   runId: string;
   runFence: number;
   objectiveRunId: string;
-  objectiveRunFence: number;
   objectiveLeaseFence: number;
   attemptNo: number;
   objectId: string;
@@ -23,7 +22,6 @@ function parseClaim(stdout: string): Readonly<{
   runId: string;
   runFence: number;
   objectiveRunId: string;
-  objectiveRunFence: number;
   objectiveLeaseFence: number;
   attemptNo: number;
 }> {
@@ -32,7 +30,7 @@ function parseClaim(stdout: string): Readonly<{
       stdout,
     );
   const run =
-    /^kanthord: run (\S+) run-fence ([1-9][0-9]*) attempt ([1-9][0-9]*) objective-run (\S+) objective-run-fence ([1-9][0-9]*) objective-lease-fence ([1-9][0-9]*)$/m.exec(
+    /^kanthord: run (\S+) run-fence ([1-9][0-9]*) attempt ([1-9][0-9]*) objective-run (\S+) objective-lease-fence ([1-9][0-9]*)$/m.exec(
       stdout,
     );
   const leaseFenceText = lease?.[1];
@@ -40,15 +38,13 @@ function parseClaim(stdout: string): Readonly<{
   const runFenceText = run?.[2];
   const attemptText = run?.[3];
   const objectiveRunId = run?.[4];
-  const objectiveRunFenceText = run?.[5];
-  const objectiveLeaseFenceText = run?.[6];
+  const objectiveLeaseFenceText = run?.[5];
   if (
     leaseFenceText === undefined ||
     runId === undefined ||
     runFenceText === undefined ||
     attemptText === undefined ||
     objectiveRunId === undefined ||
-    objectiveRunFenceText === undefined ||
     objectiveLeaseFenceText === undefined
   ) {
     throw new Error("kanthord: unable to parse node claim output");
@@ -57,13 +53,11 @@ function parseClaim(stdout: string): Readonly<{
   const leaseFence = Number(leaseFenceText);
   const runFence = Number(runFenceText);
   const attemptNo = Number(attemptText);
-  const objectiveRunFence = Number(objectiveRunFenceText);
   const objectiveLeaseFence = Number(objectiveLeaseFenceText);
   if (
     !Number.isSafeInteger(leaseFence) ||
     !Number.isSafeInteger(runFence) ||
     !Number.isSafeInteger(attemptNo) ||
-    !Number.isSafeInteger(objectiveRunFence) ||
     !Number.isSafeInteger(objectiveLeaseFence)
   ) {
     throw new Error("kanthord: node claim output contains an unsafe number");
@@ -74,7 +68,6 @@ function parseClaim(stdout: string): Readonly<{
     runId,
     runFence,
     objectiveRunId,
-    objectiveRunFence,
     objectiveLeaseFence,
     attemptNo,
   };
@@ -157,7 +150,6 @@ export async function runHarnessTask(
     runId: parsed.runId,
     runFence: parsed.runFence,
     objectiveRunId: parsed.objectiveRunId,
-    objectiveRunFence: parsed.objectiveRunFence,
     objectiveLeaseFence: parsed.objectiveLeaseFence,
     attemptNo: parsed.attemptNo,
     objectId: input.objectId,

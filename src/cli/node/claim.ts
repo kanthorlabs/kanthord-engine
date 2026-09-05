@@ -51,7 +51,7 @@ export function registerNodeClaim(input: NodeClaimCliInput): void {
         `kanthord: claimed ${id} lease-fence ${body.lease.fence} expires ${body.lease.expiresAt}\n`,
       );
       input.stdout(
-        `kanthord: run ${body.runId} run-fence ${body.runFence} attempt ${body.attemptNo ?? "-"} objective-run ${body.objectiveRunId} objective-run-fence ${body.objectiveRunFence} objective-lease-fence ${body.objectiveLease.fence}\n`,
+        `kanthord: run ${body.runId} run-fence ${body.fence} attempt ${body.attemptNo ?? "-"} objective-run ${body.objectiveRunId} objective-lease-fence ${body.objectiveLease.fence}\n`,
       );
     });
 }

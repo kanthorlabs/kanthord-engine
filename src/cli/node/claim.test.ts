@@ -55,11 +55,10 @@ const claimedBody = (attemptNo: number | null) => ({
     expiresAt: 1722800300000,
   },
   runId: RUN,
-  runFence: 3,
   objectiveRunId: OBJECTIVE_RUN,
-  objectiveRunFence: 4,
   attemptId: ATTEMPT,
   attemptNo,
+  fence: 1,
   expiresAt: 1722800300000,
   renewAfterMs: 100000,
   node: NODE,
@@ -160,7 +159,7 @@ describe("src/cli/node/claim.test", () => {
     assert.equal(
       h.stdoutText(),
       `kanthord: claimed ${TASK} lease-fence 1 expires 1722800300000\n` +
-        `kanthord: run ${RUN} run-fence 3 attempt 1 objective-run ${OBJECTIVE_RUN} objective-run-fence 4 objective-lease-fence 2\n`,
+        `kanthord: run ${RUN} run-fence 1 attempt 1 objective-run ${OBJECTIVE_RUN} objective-lease-fence 2\n`,
     );
     assert.equal(h.stderrText(), "");
     assert.equal(h.failCalls(), 0);
@@ -179,7 +178,7 @@ describe("src/cli/node/claim.test", () => {
     assert.equal(
       h.stdoutText(),
       `kanthord: claimed ${TASK} lease-fence 1 expires 1722800300000\n` +
-        `kanthord: run ${RUN} run-fence 3 attempt - objective-run ${OBJECTIVE_RUN} objective-run-fence 4 objective-lease-fence 2\n`,
+        `kanthord: run ${RUN} run-fence 1 attempt - objective-run ${OBJECTIVE_RUN} objective-lease-fence 2\n`,
     );
     assert.equal(h.failCalls(), 0);
   });

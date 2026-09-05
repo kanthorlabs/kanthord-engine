@@ -222,10 +222,9 @@ function createFakeScenario(
               fence: takeoverFence,
               expiresAt: takeoverExpiry,
             },
-            runFence: takeoverFence,
+            fence: takeoverFence,
             runId: takeoverRunId,
             objectiveRunId: "objective-run-task-alpha-takeover",
-            objectiveRunFence: takeoverFence,
           }),
         };
       }
@@ -261,7 +260,7 @@ function createFakeScenario(
         (legacyHeartbeatOutput
           ? `kanthord: claimed ${id} lease-fence ${String(firstFence)} expires ${String(firstExpiry)} heartbeat 1000ms\n`
           : `kanthord: claimed ${id} lease-fence ${String(firstFence)} expires ${String(firstExpiry)}\n`) +
-          `kanthord: run ${firstRunId} run-fence ${String(firstFence)} attempt 1 objective-run objective-run-${id} objective-run-fence ${String(firstFence)} objective-lease-fence ${String(firstFence)}\n`,
+          `kanthord: run ${firstRunId} run-fence ${String(firstFence)} attempt 1 objective-run objective-run-${id} objective-lease-fence ${String(firstFence)}\n`,
       );
     }
     if (argv[0] === "node" && argv[1] === "report") {

@@ -112,7 +112,7 @@ function fakeDriver(
           (driverOptions.legacyHeartbeatOutput === true
             ? "kanthord: claimed task-1 lease-fence 7 expires 2026-08-17T00:00:00.000Z heartbeat 1000ms\n"
             : "kanthord: claimed task-1 lease-fence 7 expires 2026-08-17T00:00:00.000Z\n") +
-            "kanthord: run run-1 run-fence 5 attempt 1 objective-run objective-run-1 objective-run-fence 2 objective-lease-fence 3\n",
+            "kanthord: run run-1 run-fence 5 attempt 1 objective-run objective-run-1 objective-lease-fence 3\n",
         );
       }
       if (argv[1] === "renew") {
@@ -270,7 +270,6 @@ test("runHarnessTask returns both run authorities and the object id it parsed", 
     runId: "run-1",
     runFence: 5,
     objectiveRunId: "objective-run-1",
-    objectiveRunFence: 2,
     objectiveLeaseFence: 3,
     attemptNo: 1,
     objectId: "object-1",

@@ -63,9 +63,8 @@ const successResult = {
     expiresAt: 1722800300000,
   },
   runId: `run_${U}`,
-  runFence: 1,
   objectiveRunId: `run_${U}`,
-  objectiveRunFence: 1,
+  fence: 1,
   expiresAt: 1722800300000,
   renewAfterMs: 100000,
   attemptId: `attempt_${U}`,
@@ -91,8 +90,7 @@ describe("src/http/server/node/claim-node.test", () => {
       .send({ available: true });
     assert.equal(response.status, 200);
     assert.equal(nodeClaimResponse.safeParse(response.body).success, true);
-    assert.equal(response.body.runFence, 1);
-    assert.equal(response.body.objectiveRunFence, 1);
+    assert.equal(response.body.fence, 1);
     assert.equal(response.body.expiresAt, 1722800300000);
     assert.equal(response.body.renewAfterMs, 100000);
     assert.equal(Object.hasOwn(response.body, "heartbeatIntervalMs"), false);

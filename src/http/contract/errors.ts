@@ -34,7 +34,6 @@ export const errorStatuses = {
   "target-outside-run": 409,
   "fence-stale": 409,
   "lifetime-exceeded": 409,
-  "objective-run-lost": 409,
   "plan-invalid": 422,
   "choices-invalid": 422,
   "identity-kind-mismatch": 422,

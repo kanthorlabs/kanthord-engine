@@ -10,7 +10,7 @@ Baselines: attest-lease-free <- baseline-report-objective
 
 Seams: attest-lease-free: -lease.read:O, -lease.release:O
 
-`report-objective.ts` is a nested command. `report-outcome.ts:125` binds it to unrecorded dependencies
+`report-objective.ts` is a nested command. `src/commands/outcome/report-outcome.ts:125` binds it to unrecorded dependencies
 and it counts as one step there, so it carries its own pair and its own scenario. No epic has drawn
 it, so this story draws the baseline.
 

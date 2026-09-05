@@ -282,7 +282,7 @@ function claimOutput(id: string): string {
   const fence = claimFence(id);
   return (
     `kanthord: claimed ${id} lease-fence ${String(fence)} expires 2026-08-17T00:00:00.000Z\n` +
-    `kanthord: run run-${id} run-fence ${String(fence + 1000)} attempt 1 objective-run objective-run-${id} objective-run-fence ${String(fence + 200)} objective-lease-fence ${String(fence + 100)}\n`
+    `kanthord: run run-${id} run-fence ${String(fence + 1000)} attempt 1 objective-run objective-run-${id} objective-lease-fence ${String(fence + 100)}\n`
   );
 }
 
@@ -667,7 +667,7 @@ test("passes the objective run authority to both objective closes", async () => 
         "--run-id",
         `objective-run-${alphaFirstId}`,
         "--run-fence",
-        "211",
+        "111",
       ],
       [
         "node",
@@ -677,7 +677,7 @@ test("passes the objective run authority to both objective closes", async () => 
         "--run-id",
         `objective-run-${betaFirstId}`,
         "--run-fence",
-        "221",
+        "121",
       ],
     ],
   );

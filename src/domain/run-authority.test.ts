@@ -20,6 +20,7 @@ const validInput = {
   runId: RUN_ID,
   fence: 4,
   targetNodeId: NODE_ID,
+  subtreeIds: [] as readonly string[],
   caller: CALLER,
   now: NOW,
 };
@@ -109,33 +110,37 @@ describe("src/domain/run-authority.test", () => {
     assert.equal(result?.refusal, "run-caller-mismatch");
   });
 
-  it("target-outside-run when the target is not the run node", () => {
+  it("target-outside-run when the target is neither the run node nor in the subtree", () => {
     const result = assertRunAuthority({
       ...validInput,
       targetNodeId: "task_z",
+      subtreeIds: ["task_b"],
     });
 
     assert.equal(result?.refusal, "target-outside-run");
   });
 
-  it("the run's own node is the only node inside the run", () => {
+  it("the run's own node is always inside the run", () => {
     assert.equal(
       assertRunAuthority({
         ...validInput,
         targetNodeId: NODE_ID,
+        subtreeIds: [],
       }),
       null,
     );
   });
 
-  it("target-outside-run for a descendant of the run node", () => {
-    const result = assertRunAuthority({
-      ...validInput,
-      run: { ...validInput.run, nodeId: "objective_a" },
-      targetNodeId: NODE_ID,
-    });
-
-    assert.equal(result?.refusal, "target-outside-run");
+  it("a descendant in subtreeIds is inside the run", () => {
+    assert.equal(
+      assertRunAuthority({
+        ...validInput,
+        run: { ...validInput.run, nodeId: "objective_a" },
+        targetNodeId: NODE_ID,
+        subtreeIds: [NODE_ID],
+      }),
+      null,
+    );
   });
 
   it("fence-stale when the presented fence is behind", () => {
@@ -218,6 +223,15 @@ describe("src/domain/run-authority.test", () => {
       ],
     );
     assert.equal(runAuthorityRefusals.length, 6);
+  });
+
+  it("the subtree array is not mutated", () => {
+    const subtreeIds = ["task_b", "task_c"];
+    const before = [...subtreeIds];
+
+    assertRunAuthority({ ...validInput, subtreeIds });
+
+    assert.deepEqual(subtreeIds, before);
   });
 
   it("no refusal carries a fence value", () => {

@@ -22,6 +22,7 @@ export type RunAuthorityInput = Readonly<{
   runId: string;
   fence: number;
   targetNodeId: string;
+  subtreeIds: readonly string[];
   caller: string;
   now: number;
 }>;
@@ -48,7 +49,10 @@ export function assertRunAuthority(
   if (run.worker !== input.caller) {
     return { refusal: "run-caller-mismatch", runId: input.runId };
   }
-  if (input.targetNodeId !== run.nodeId) {
+  if (
+    input.targetNodeId !== run.nodeId &&
+    !input.subtreeIds.includes(input.targetNodeId)
+  ) {
     return { refusal: "target-outside-run", runId: input.runId };
   }
   if (run.fence !== input.fence) {

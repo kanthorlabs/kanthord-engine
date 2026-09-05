@@ -36,10 +36,11 @@ sequenceDiagram
     Command->>Storage: 1 storage.transact
     Command->>Clock: 2 clock.now
     Command->>Expiry: 3 expiry.expireRuns
-    Command->>Execution: 4 execution.runById:R
-    Command->>Plan: 5 plan.readNode
-    Command->>Execution: 6 execution.renewRun:R
-    Command->>Events: 7 events.append:run.renewed:R
+    Command->>Plan: 4 plan.readNode
+    Command->>Execution: 5 execution.runById:R
+    Command->>Plan: 6 plan.readSubtree
+    Command->>Execution: 7 execution.renewRun:R
+    Command->>Events: 8 events.append:run.renewed:R
     Command-->>Client: ok
 ```
 
@@ -47,11 +48,20 @@ Three steps leave the superseded diagram: the target renew, the objective read a
 renew. `Lease` leaves the participant list. No fence write appears, and that absence is still the
 assertion EPIC 050.2 made: the fence rises when a run ends and nowhere else.
 
-**`plan.readNode` at step 5 is a context token, and it stays.** It is the only node read of this
+**Amended: this story deletes lease seams and does not reorder the prelude.** The diagram above drew
+`4 execution.runById:R`, `5 plan.readSubtree`, `6 plan.readNode` — a transcription of the superseded
+diagram that moved three reads this story's `## Change` never touches. EPIC 050.2 Story 3 (`03-the-renew`) orders the
+callback with `plan.readNode` third, at `.agents/plan/stories/050.2-the-run-renew-release-and-report/03-the-renew.md:206` — `expireRuns`, and
+`.agents/plan/stories/050.2-the-run-renew-release-and-report/05-the-release.md:141` —
+`Step 4 precedes step 5, and that order is the ruling` states the rule for the family. The order above
+is corrected to match, the `Seams:` line is unchanged because a sign is decided over token presence
+and never over an ordinal, and the deletions this story makes are unaffected.
+
+**`plan.readNode` at step 4 is a context token, and it stays.** It is the only node read of this
 command, and it is not the lease's. EPIC 050.2 Story 3 (`03-the-renew`) states what it supplies:
 `node.kind` for the objective branch, `node.parentId` for `objectiveScopeOf`, and the
-`node-not-found` and `initiative-not-claimable` refusals — and the run row carries none of them.
-Item 5 below keeps both refusals in `RenewRefusal`, so deleting the read
+`node-not-found` and `initiative-not-claimable` refusals — and `plan.readSubtree` returns ids alone,
+so it replaces neither. Item 5 below keeps both refusals in `RenewRefusal`, so deleting the read
 would leave a path that cannot raise them. What the objective-lease deletion removes is the two
 **consumers** `node.kind` and `node.parentId` fed, not the read.
 
@@ -161,7 +171,7 @@ Add, each as a separate `it`:
 
 13. `"the derived field decisions hold no node.heartbeat lease line and no node.renew fence line"` — the shipped `coverage.test.ts` harness over the regenerated fixture.
 
-Add `test/sequence/scenarios/renew-lease-free.ts`.
+Add `test/sequence/scenarios/renew-lease-free.ts`. **Delete `test/sequence/scenarios/renew-success.ts` in the same commit**, because this replacement makes EPIC 050.2's `renew-success` superseded the moment it exists, and a scenario naming a superseded diagram is refused at `test/sequence/conformance.test.ts:115` — `names a superseded live diagram`. EPIC 050.3 Story 10 (`10-the-conformance-harness-admits-an-incremental-supersession`) lands that rule one epic earlier, and this epic repeats none of it.
 
 `pnpm run verify` exits 0.
 

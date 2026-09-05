@@ -105,9 +105,13 @@ there hands an engineer's lane to another role.
 **The line is whitespace separated, so no path in it may hold a space.** `/work` splits the line to
 build the grant. A locked path that holds a space is a blocker for the human, not a `Paths:` entry.
 
-- **`AGENTS.md`, `.agents/plan/**`, `.claude/**`, `.opencode/**` and the pipeline guards never appear
-  in `Paths:`.** `scripts/lane-check.sh groundwork-engineer <path>` denies each one. An epic that
-  needs such an edit carries it as a **blocker** for the human, because no role may write it.
+- **`.agents/plan/**`, `.claude/**`, `.opencode/**` and the pipeline guards never appear in
+  `Paths:`.** `scripts/lane-check.sh groundwork-engineer <path>` denies each one. An epic that needs
+  such an edit carries it as a **blocker** for the human, because no role may write it.
+- **`AGENTS.md` may appear in `Paths:`, and only when the story states the exact text.** The
+  `groundwork-engineer` role may write it, and the words are a human's decision. Write the sentence
+  verbatim in `## Change`. An epic that needs an architecture change it cannot quote carries it as a
+  blocker instead.
 - **An epic that needs no locked path holds no story `00`.** Never manufacture an empty one.
 - **The story counts against the ten-story cap.** An epic at ten stories that also needs groundwork is
   a split, and you report it rather than exempting the story.
@@ -473,8 +477,9 @@ Do **not** commit — the human reviews and commits.
 - an unsigned `Seams:` token, and a context token declared as a change;
 - a `story-implement` that draws no pair for a shipped path, and a
   `story-foundation` that draws anything;
-- a `Paths:` line holding a path an engineer may write, a path
-  `scripts/lane-check.sh groundwork-engineer` denies, or `AGENTS.md`;
+- a `Paths:` line holding a path an engineer may write, or a path
+  `scripts/lane-check.sh groundwork-engineer` denies;
+- a `Paths:` line holding `AGENTS.md` whose story does not quote the exact text to write;
 - a `## Change` edit at a path both engineers are denied that no `Paths:` line declares;
 - a groundwork story exempted from the ten-story cap, and an empty one written for an epic that needs
   no locked path;

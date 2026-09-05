@@ -248,16 +248,6 @@ describe("test/helpers/proposal.test", () => {
         declared: "worker-model",
       },
       {
-        epic: "EPIC 050.1",
-        retired: "external-drive",
-        declared: "worker-model",
-      },
-      {
-        epic: "EPIC 050.2",
-        retired: "external-drive",
-        declared: "worker-model",
-      },
-      {
         epic: "EPIC 050.2",
         retired: "external-drive",
         declared: "worker-model",

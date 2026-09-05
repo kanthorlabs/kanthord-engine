@@ -306,9 +306,8 @@ const responseFor = (request: RecordedRequest): unknown => {
         lease,
         objectiveLease,
         runId: RUN_ID,
-        runFence: 1,
+        fence: 1,
         objectiveRunId: RUN_ID,
-        objectiveRunFence: 1,
         expiresAt: 1722800300000,
         renewAfterMs: 1000,
         attemptId: ATTEMPT_ID,
@@ -320,7 +319,6 @@ const responseFor = (request: RecordedRequest): unknown => {
         lease,
         objectiveLease,
         expiresAt: 1722800300000,
-        objectiveExpiresAt: 1722800300000,
         renewAfterMs: 1000,
       };
     case "node.release":

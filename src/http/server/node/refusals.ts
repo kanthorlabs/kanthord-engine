@@ -209,8 +209,6 @@ function renewRefusal(
       });
     case "lease-held":
       return leaseHeld(error, presented);
-    case "objective-run-lost":
-      return httpError("objective-run-lost", error.message, details(error));
     case "run-not-found":
     case "run-ended":
     case "run-expired":

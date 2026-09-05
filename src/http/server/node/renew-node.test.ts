@@ -35,7 +35,6 @@ const successResult = {
     expiresAt: 1722800300000,
   },
   expiresAt: 1722800300000,
-  objectiveExpiresAt: 1722800300000,
   renewAfterMs: 100000,
 };
 

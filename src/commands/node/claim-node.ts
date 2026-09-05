@@ -113,9 +113,8 @@ export type ClaimNodeResult = Readonly<{
   lease: ClaimedLease;
   objectiveLease: ClaimedLease;
   runId: string;
-  runFence: number;
+  fence: number;
   objectiveRunId: string;
-  objectiveRunFence: number;
   attemptId: string | null;
   attemptNo: number | null;
   expiresAt: number;
@@ -202,18 +201,9 @@ export function claimNode(
       );
     }
 
-    const alreadyRunning =
-      node.kind === "objective" && node.state === "running";
     const routedWorker =
       node.assignment ??
-      (alreadyRunning
-        ? caller.worker
-        : routeClaimWorker(
-            node,
-            caller,
-            input.available,
-            dependencies.registry,
-          ));
+      routeClaimWorker(node, caller, input.available, dependencies.registry);
     const runKind = runKindFor(deliverable);
     if (runKind === "review") {
       throw new ClaimNodeError(
@@ -374,11 +364,11 @@ export function claimNode(
       );
     }
 
-    if (node.state !== "ready" && !alreadyRunning) {
+    if (node.state !== "ready") {
       throw new ClaimNodeError(
         "illegal-transition",
         `the node ${node.id} is ${node.state}, not claimable`,
-        { state: node.state, admitted: ["ready", "running"] },
+        { state: node.state, admitted: ["ready"] },
       );
     }
     const cascade = cascadeVerdicts(nodes, node);
@@ -451,17 +441,15 @@ export function claimNode(
       runKind === "execution"
         ? dependencies.execution.openAttempt(transaction, { runId: run.id })
         : null;
-    if (!alreadyRunning) {
-      dependencies.plan.setNodeState(transaction, {
-        id: node.id,
-        from: "ready",
-        to: "running",
-        trigger: "claim-taken",
-        blockReason: null,
-        at: now,
-        cause: { revision: node.revision, importId: null },
-      });
-    }
+    dependencies.plan.setNodeState(transaction, {
+      id: node.id,
+      from: "ready",
+      to: "running",
+      trigger: "claim-taken",
+      blockReason: null,
+      at: now,
+      cause: { revision: node.revision, importId: null },
+    });
     for (const entry of cascade) {
       dependencies.plan.setNodeState(transaction, {
         id: entry.id,
@@ -525,30 +513,27 @@ export function claimNode(
         },
       });
     }
-    if (!alreadyRunning) {
-      dependencies.events.append(transaction, {
-        subjectKind: "node",
-        subjectId: node.id,
-        type: "node.running",
-        actorKind: input.actorKind,
-        actorId: input.actorId,
-        payload: {
-          from: "ready",
-          to: "running",
-          reason: "claim-taken",
-          revision: node.revision,
-          importId: null,
-        },
-      });
-    }
+    dependencies.events.append(transaction, {
+      subjectKind: "node",
+      subjectId: node.id,
+      type: "node.running",
+      actorKind: input.actorKind,
+      actorId: input.actorId,
+      payload: {
+        from: "ready",
+        to: "running",
+        reason: "claim-taken",
+        revision: node.revision,
+        importId: null,
+      },
+    });
 
     return {
       lease: toClaimedLease(claimedLease.record),
       objectiveLease: toClaimedLease(objectiveLease.record),
       runId: run.id,
-      runFence: run.fence,
+      fence: run.fence,
       objectiveRunId: objectiveRun?.id ?? run.id,
-      objectiveRunFence: objectiveRun?.fence ?? run.fence,
       attemptId: attempt?.id ?? null,
       attemptNo: attempt?.attemptNo ?? null,
       expiresAt: now + dependencies.runTtlMs,

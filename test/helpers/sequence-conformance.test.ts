@@ -615,6 +615,58 @@ describe("test/helpers/sequence-conformance.test", () => {
     }
   });
 
+  it("a projection fires for a method taking a primitive last argument", () => {
+    const recorder = recordSeams(
+      {
+        execution: {
+          runById: (_transaction: unknown, runId: string) => runId,
+          attemptsOfRun: (_transaction: unknown, runId: string) => [runId],
+        },
+      },
+      { run_b: "R" },
+    );
+
+    recorder.dependencies.execution.runById(undefined, "run_b");
+    recorder.dependencies.execution.attemptsOfRun(undefined, "run_b");
+
+    assert.deepEqual(recorder.tokens, [
+      "execution.runById:R",
+      "execution.attemptsOfRun:R",
+    ]);
+  });
+
+  it("a method with no projection stays bare whatever its argument", () => {
+    const recorder = recordSeams(
+      { plan: { readNode: (_transaction: unknown, nodeId: string) => nodeId } },
+      { task_a: "T" },
+    );
+
+    recorder.dependencies.plan.readNode(undefined, "task_a");
+
+    assert.deepEqual(recorder.tokens, ["plan.readNode"]);
+  });
+
+  it("a no-argument method stays bare", () => {
+    const recorder = recordSeams({ clock: { now: () => 1 } }, {});
+
+    recorder.dependencies.clock.now();
+
+    assert.deepEqual(recorder.tokens, ["clock.now"]);
+  });
+
+  it("a function-argument method stays bare", () => {
+    const recorder = recordSeams(
+      { storage: { transact: (work: () => string) => work() } },
+      {},
+    );
+
+    assert.equal(
+      recorder.dependencies.storage.transact(() => "done"),
+      "done",
+    );
+    assert.deepEqual(recorder.tokens, ["storage.transact"]);
+  });
+
   it("a pure-domain call produces no token", () => {
     const recorder = recordSeams({ plan: { read: () => undefined } }, {});
     recorder.dependencies.plan.read();

@@ -26,6 +26,7 @@ superseded diagram, not a line number.
 ### `claim-lease-free-task`
 
 Supersedes: EPIC 050.1 claim-success-task
+Superseded by: EPIC 051 claim-branch-base-task
 
 Fixture: the fixture of `claim-success-task`. Initiative `I` holds objective `O`, which holds tasks
 `T` and `S`. Every node is `ready`, no node is assigned, no run is active, and `T` declares
@@ -52,17 +53,15 @@ sequenceDiagram
     Command->>Plan: 8 plan.readSubtree
     Command->>Execution: 9 execution.activeRunsOfNodes:subtree
     Command->>Plan: 10 plan.setNodeAssignment:T
-    Command->>Execution: 11 execution.openRun:O
-    Command->>Execution: 12 execution.openRun:T
-    Command->>Execution: 13 execution.openAttempt:R
-    Command->>Plan: 14 plan.setNodeState:T:claim-taken
-    Command->>Plan: 15 plan.setNodeState:O:ancestor-started
-    Command->>Plan: 16 plan.setNodeState:I:ancestor-started
-    Command->>Events: 17 events.append:run.opened:O
-    Command->>Events: 18 events.append:run.opened:R
-    Command->>Events: 19 events.append:node.running:O:child-started
-    Command->>Events: 20 events.append:node.running:I:child-started
-    Command->>Events: 21 events.append:node.running:T:claim-taken
+    Command->>Execution: 11 execution.openRun:T
+    Command->>Execution: 12 execution.openAttempt:R
+    Command->>Plan: 13 plan.setNodeState:T:claim-taken
+    Command->>Plan: 14 plan.setNodeState:O:ancestor-started
+    Command->>Plan: 15 plan.setNodeState:I:ancestor-started
+    Command->>Events: 16 events.append:run.opened:R
+    Command->>Events: 17 events.append:node.running:O:child-started
+    Command->>Events: 18 events.append:node.running:I:child-started
+    Command->>Events: 19 events.append:node.running:T:claim-taken
     Command-->>Client: ok
 ```
 
@@ -102,16 +101,19 @@ the details EPIC 050.1 Story 1 registered. Delete `"lease-held"` from `node.clai
 `claimedLease`, the shared schema at `execution.ts:23-29`, is **not** deleted here: `nodeRenewResponse`
 still uses it. Story 4 deletes it as the second and last consumer.
 
-**4b — `objectiveRunId` stays.** `nodeClaimResponse.objectiveRunId` at `:45` is required, and EPIC
-050.1's `claim-success-task` opens or reuses the structural objective run before it opens the task
-run, so this command continues to populate it. **This story does not delete it.** The objective run id
-is the authority reference for later objective attestation and closure. Keep it in the schema, in
-`ClaimNodeResult` and in the examples, and do not record it as a compatibility removal.
+**4b — `objectiveRunId` goes with them.** `nodeClaimResponse.objectiveRunId` at `:45` is required, and
+EPIC 050's `claim-success-task` opens one run where the baseline opened two, so this command can no
+longer populate it. **This story deletes it, unconditionally.** EPIC 050.1 Story 1
+(`01-the-claim-contract`) lists what the response keeps, gains and loses and never names the field, so
+that epic leaves it in place; verified against that story on 2026-09-02. Delete `objectiveRunId` from
+the schema, from `ClaimNodeResult` and from the examples, and record it in the compatibility row Story
+8 writes. Report a field already absent as an EPIC 050.1 change, and do not treat its absence as a
+reason to skip the compatibility row: the field left the wire either way.
 
 **4c — the CLI and the derived fixture.** `src/cli/node/claim.ts:51` prints `body.lease.fence` and
-`:54` prints `body.objectiveRunId` and `body.objectiveLease.fence`. Delete the two lease-fence reads
-from the output lines, keep `objectiveRunId`, and leave `runId`, `fence`, `expiresAt`, `attemptNo` and
-`renewAfterMs`. Carry the change into `src/cli/node/claim.test.ts`. Then regenerate
+`:54` prints `body.objectiveRunId` and `body.objectiveLease.fence`. Delete all three from the two
+output lines, leaving `runId`, `fence`, `expiresAt`, `attemptNo` and `renewAfterMs`, and carry the
+change into `src/cli/node/claim.test.ts`. Then regenerate
 `src/http/contract/field-decisions.fixture.ts`, which pins one line per registry field and holds the
 `node.claim.response` lines this item deletes; `src/http/contract/coverage.test.ts` deep-equals it.
 
@@ -159,17 +161,17 @@ Add, each as a separate `it`:
 
 6. `"node.claim declares no lease-held error"` — assert the operation's `errors` record by key set. `ClaimRefusal` is an erased TypeScript type with no runtime list, so the contract record is what carries this assertion at run time; the type-level removal is carried by `pnpm run typecheck`.
 
-7. `"the claim result and nodeClaimResponse hold no lease or objectiveLease and retain objectiveRunId"` — assert `Object.keys(result).sort()` and `Object.keys(nodeClaimResponse.shape).sort()` deep-equal the same pinned list, in one case. Two key sets, one literal, so the command and the schema cannot drift apart.
+7. `"the claim result and nodeClaimResponse hold no lease, objectiveLease or objectiveRunId"` — assert `Object.keys(result).sort()` and `Object.keys(nodeClaimResponse.shape).sort()` deep-equal the same pinned list, in one case. Two key sets, one literal, so the command and the schema cannot drift apart.
 
 8. `"a second claim by the same actor on a running node is refused, not replayed"` — the replay branch is deleted, so assert the refusal rather than a repeated success. Name the code the surviving guard raises.
 
 9. `"a claim leaves a seeded lease row byte-identical"` — seed one owned, unexpired `subject_kind = 'node'` row, claim, and assert **all eight columns** — `subject_kind`, `subject_id`, `owner`, `owner_kind`, `fence`, `acquired_at`, `renewed_at`, `expires_at` — deep-equal the seeded values. The claim must stop writing the table, not start cleaning it, and a selected-column assertion would miss a partial write.
 
-10. `"kanthord node claim prints no lease and its objective run"` — assert the two stdout lines by value against a stubbed client, so the CLI cannot keep reading a lease field while it retains the objective run id.
+10. `"kanthord node claim prints no lease and no objective run"` — assert the two stdout lines by value against a stubbed client, so the CLI cannot keep reading a field the response no longer carries.
 
-11. `"the derived field decisions hold no node.claim lease line"` — the shipped `coverage.test.ts` harness over the regenerated fixture. Assert the fixture holds no line matching `node.claim.response#/properties/objectiveLease` or `.../lease`, and assert its `.../objectiveRunId` line remains.
+11. `"the derived field decisions hold no node.claim lease line"` — the shipped `coverage.test.ts` harness over the regenerated fixture. Assert the fixture holds no line matching `node.claim.response#/properties/objectiveLease`, `.../lease` or `.../objectiveRunId`.
 
-Add `test/sequence/scenarios/claim-lease-free-task.ts`.
+Add `test/sequence/scenarios/claim-lease-free-task.ts`. **Delete `test/sequence/scenarios/claim-success-task.ts` in the same commit**, because this replacement makes EPIC 050.1's `claim-success-task` superseded the moment it exists, and a scenario naming a superseded diagram is refused at `test/sequence/conformance.test.ts:115` — `names a superseded live diagram`. EPIC 050.3 Story 10 (`10-the-conformance-harness-admits-an-incremental-supersession`) lands that rule one epic earlier, and this epic repeats none of it.
 
 `pnpm run verify` exits 0.
 

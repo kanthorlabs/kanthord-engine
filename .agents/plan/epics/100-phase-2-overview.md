@@ -29,7 +29,7 @@ Capability layers first, then the execution loop, then integration, then the sce
 | 103 | Repository profile and templates             | 10      | A repository carries a profile, canonically hashed, with one template.                 |
 | 104 | Instruction compiler                         | 10      | A prompt is composed from typed channels, with provenance and a budget refusal.        |
 | 105 | Ambient context channel                      | 8       | Ambient text is one untrusted channel, and it sets no structured field.                |
-| 106 | Agents on `pi-coding-agent`                  | 17      | `general@1` and `re@1` run under their tool sets and return complete evidence.         |
+| 106 | Agents on `pi-coding-agent`                  | 15      | `general@1` and `re@1` run under their tool sets and return complete evidence.         |
 | 107 | Verify service                               | 6       | A declared check runs under the operational limits and returns its result.             |
 | 108 | Freshness and reconciliation                 | 15      | A base is classified before a clone, and a divergence is reconciled by hand.           |
 | 109 | Profile verification                         | 9       | `profile verify` runs gate A and gate B, and blocks nothing.                           |
@@ -67,15 +67,16 @@ Total: 219 stories.
 
 ```
 101 ─> 102 ────────┐
-103 ─> 104 ─> 105 ─┴─> 106 ─> 107 ─> 108 ─┬─> 110 ─> 111 ─> 112 ─> 113 ─┐
-                              └─> 109 ─────┤                            │
-101, 103 ─> 114 ───────────────────────────┴────────────────────────────┴─> 115 ─> 116
+103 ─> 104 ─> 105 ─┴─> 106 ─────────────────────┐
+050.6 ─> 107 ─┬─> 108 ──────────────────────────┴─> 110 ─> 111 ─> 112 ─> 113 ─┐
+              └─> 109 ───────────────────────────────────────────────────────┤
+101, 103 ─> 114 ─────────────────────────────────────────────────────────────┴─> 115 ─> 116
 ```
 
 - 102 needs 101, because a call resolves a registration and 101 closes the resolution rules.
 - 104 needs 103, because the repository profile is one channel and it supplies the `checks` map. 105 needs 104, because the ambient channel is the compiler's last channel and the budget rule decides the drop.
 - 106 needs 102, 104 and 105: an agent calls a provider, with a rendered prompt, and with ambient loading disabled.
-- 107 needs 106, because 106 extracts the one supervised-run machine and a second copy of it is what the extraction exists to prevent.
+- 107 needs EPIC 050.6, not 106. EPIC 050.6 extracts the one supervised-run machine out of phase 2 so EPIC 051.2's command gate can consume a working `Verify`, and a second copy of that machine is what the extraction exists to prevent. 107 needs nothing else of 106, and it lands before it.
 - 108 needs 107 and 103, because reconciliation runs the unit check against the merge commit, and the `unit` command comes from the repository profile.
 - 109 needs 103, 104 and 105 for gate A, because gate A compiles every channel, and 107 for gate B. It needs neither 110 nor a provider account.
 - 110 needs 106, 107 and 108: the worker calls the agent, the diagnostic check calls the verify service, and every objective clone starts from a classified base.

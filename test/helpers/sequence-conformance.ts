@@ -16,7 +16,6 @@ function field(
   key: string,
   context: ProjectionContext,
 ): string {
-  if (key === "runId" && typeof input === "string") return input;
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     throw new Error(`${context.method} takes no input object to project`);
   }
@@ -55,13 +54,11 @@ const projections: Readonly<Record<string, Projection>> = {
   ],
   "plan.setNodeAssignment": (input, context) => [field(input, "id", context)],
   "execution.openRun": (input, context) => [field(input, "nodeId", context)],
-  "execution.runById": (input, context) => [field(input, "runId", context)],
+  "execution.runById": (input) => [String(input)],
   "execution.renewRun": (input, context) => [field(input, "runId", context)],
   "execution.endRun": (input, context) => [field(input, "runId", context)],
   "execution.openAttempt": (input, context) => [field(input, "runId", context)],
-  "execution.attemptsOfRun": (input, context) => [
-    field(input, "runId", context),
-  ],
+  "execution.attemptsOfRun": (input) => [String(input)],
   "execution.closeAttempt": (input, context) => [
     field(input, "attemptId", context),
   ],

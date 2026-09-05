@@ -403,7 +403,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
 
@@ -424,7 +424,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
 
@@ -450,7 +450,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
 
@@ -467,7 +467,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
 
@@ -508,7 +508,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
 
@@ -544,7 +544,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
 
@@ -597,7 +597,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
 
@@ -622,7 +622,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
 
@@ -640,7 +640,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: "task_zzz",
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
 
@@ -658,7 +658,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.initiative,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
 
@@ -680,24 +680,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: "task_b",
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
-      actorId: ACTOR_A,
-    });
-
-    assert.equal(error.refusal, "target-outside-run");
-  });
-
-  it("a release on a task presenting the objective run refuses target-outside-run", (t) => {
-    const fixture = createFixture();
-    t.after(() => fixture.dispose());
-    seedReadyGraph(fixture);
-    const claimed = claim(fixture, createMockClock({ start: NOW }), ACTOR_A);
-
-    const error = refused(fixture, createMockClock({ start: NOW }), {
-      nodeId: fixtureIds.task,
-      fence: claimed.lease.fence,
-      runId: claimed.objectiveRunId,
-      runFence: claimed.objectiveRunFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
 
@@ -732,7 +715,7 @@ describe("src/commands/node/release-node.test", () => {
           return {
             nodeId: fixtureIds.task,
             runId: "run_missing",
-            runFence: claimed.runFence,
+            runFence: claimed.fence,
           };
         },
       },
@@ -748,7 +731,7 @@ describe("src/commands/node/release-node.test", () => {
           return {
             nodeId: fixtureIds.task,
             runId: claimed.runId,
-            runFence: claimed.runFence,
+            runFence: claimed.fence,
           };
         },
       },
@@ -764,7 +747,7 @@ describe("src/commands/node/release-node.test", () => {
           return {
             nodeId: fixtureIds.task,
             runId: claimed.runId,
-            runFence: claimed.runFence,
+            runFence: claimed.fence,
             expiryPass: false,
           };
         },
@@ -775,7 +758,7 @@ describe("src/commands/node/release-node.test", () => {
           return {
             nodeId: fixtureIds.task,
             runId: claimed.runId,
-            runFence: claimed.runFence,
+            runFence: claimed.fence,
             caller: "opencode@1",
           };
         },
@@ -790,7 +773,7 @@ describe("src/commands/node/release-node.test", () => {
           return {
             nodeId: "task_b",
             runId: claimed.runId,
-            runFence: claimed.runFence,
+            runFence: claimed.fence,
           };
         },
       },
@@ -799,14 +782,14 @@ describe("src/commands/node/release-node.test", () => {
         prepare(fixture, claimed) {
           fixture.storage.transact((transaction) => {
             transaction.run("UPDATE run SET fence = ? WHERE id = ?", [
-              claimed.runFence + 1,
+              claimed.fence + 1,
               claimed.runId,
             ]);
           });
           return {
             nodeId: fixtureIds.task,
             runId: claimed.runId,
-            runFence: claimed.runFence,
+            runFence: claimed.fence,
           };
         },
       },
@@ -867,7 +850,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
 
@@ -952,64 +935,6 @@ describe("src/commands/node/release-node.test", () => {
     );
   });
 
-  it("an objective release appends one run.ended event for every ended run", (t) => {
-    const fixture = createFixture();
-    t.after(() => fixture.dispose());
-    seedReadyGraph(fixture);
-    fixture.storage.transact((transaction) => {
-      seedSiblingTask(transaction);
-      seedNodeState(transaction, fixtureIds.task, "running");
-      seedNodeState(transaction, "task_b", "running");
-    });
-    const objectiveRun = openObjectiveRun(fixture);
-    const taskRun = openTaskRun(fixture, fixtureIds.task);
-    const siblingRun = openTaskRun(fixture, "task_b");
-    const objectiveLease = fixture.storage.transact((transaction) =>
-      fixture.lease.lease.acquire(transaction, {
-        subjectKind: "node",
-        subjectId: fixtureIds.objective,
-        owner: ACTOR_A,
-        ownerKind: "actor",
-        ttlMs: TTL,
-        now: NOW,
-      }),
-    );
-
-    release(fixture, createMockClock({ start: NOW }), {
-      nodeId: fixtureIds.objective,
-      fence: objectiveLease.record.fence,
-      runId: objectiveRun.id,
-      runFence: objectiveRun.fence,
-      actorId: ACTOR_A,
-    });
-
-    const expectedEndedRunIds = [objectiveRun.id, taskRun.id, siblingRun.id];
-    const endedRuns = runRows(fixture).filter((row) => row.state === "ended");
-    assert.equal(endedRuns.length, 3);
-    assert.deepEqual(
-      new Set(endedRuns.map((run) => run.id)),
-      new Set(expectedEndedRunIds),
-    );
-    for (const runId of expectedEndedRunIds) {
-      const terminalEvents = fixture.events
-        .list({ subjectKind: "run", subject: runId })
-        .filter(
-          (event) => event.type === "run.ended" || event.type === "run.expired",
-        );
-      assert.equal(terminalEvents.length, 1);
-      const event = terminalEvents[0];
-      assert.ok(event !== undefined);
-      assert.equal(event.subjectKind, "run");
-      assert.equal(event.subjectId, runId);
-      const payload = event.payload as Readonly<{ runId?: string }>;
-      assert.equal(event.subjectId, payload.runId);
-    }
-    assert.equal(
-      fixture.events.list({ subjectKind: "node", type: "run.ended" }).length,
-      0,
-    );
-  });
-
   it("a task release with the current fence frees the task lease, moves the task to ready, and leaves the fence unchanged", (t) => {
     const fixture = createFixture();
     t.after(() => fixture.dispose());
@@ -1019,7 +944,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
     assert.equal(result.node.id, fixtureIds.task);
@@ -1046,7 +971,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
     const calls = setNodeStateCalls(fixture).slice(callsBefore);
@@ -1074,8 +999,7 @@ describe("src/commands/node/release-node.test", () => {
         nodeId: fixtureIds.task,
         fence: claimed.lease.fence,
         runId: claimed.runId,
-        runFence:
-          scenario === "fence" ? claimed.runFence - 1 : claimed.runFence,
+        runFence: scenario === "fence" ? claimed.fence - 1 : claimed.fence,
         actorId: ACTOR_A,
         caller: scenario === "caller" ? "opencode@1" : undefined,
       });
@@ -1116,7 +1040,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
 
@@ -1128,15 +1052,26 @@ describe("src/commands/node/release-node.test", () => {
     const fixture = createFixture();
     t.after(() => fixture.dispose());
     seedReadyGraph(fixture);
-    const claimed = claim(fixture, createMockClock({ start: NOW }), ACTOR_A);
-    const objectiveRun = runRows(fixture).find(
-      (run) => run.id === claimed.objectiveRunId,
-    );
-    assert.ok(objectiveRun !== undefined);
+    const objectiveRun = openObjectiveRun(fixture);
+    const objectiveLease = fixture.storage.transact((transaction) => {
+      const acquired = fixture.lease.lease.acquire(transaction, {
+        subjectKind: "node",
+        subjectId: fixtureIds.objective,
+        owner: ACTOR_A,
+        ownerKind: "actor",
+        ttlMs: TTL,
+        now: NOW,
+      });
+      transaction.run(
+        "INSERT INTO lease (subject_kind, subject_id, owner, owner_kind, fence, acquired_at, renewed_at, expires_at) VALUES ('node', ?, ?, 'actor', 1, ?, ?, ?)",
+        [fixtureIds.task, ACTOR_A, NOW, NOW, NOW + TTL],
+      );
+      return acquired;
+    });
     const before = databaseBytes(fixture.storage);
     const error = refused(fixture, createMockClock({ start: NOW }), {
       nodeId: fixtureIds.objective,
-      fence: claimed.objectiveLease.fence,
+      fence: objectiveLease.record.fence,
       runId: objectiveRun.id,
       runFence: objectiveRun.fence,
       actorId: ACTOR_A,
@@ -1158,7 +1093,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
     const terminalEventsBefore = fixture.events
@@ -1172,7 +1107,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
     assert.equal(error.refusal, "run-ended");
@@ -1206,7 +1141,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
     assert.equal(error.refusal, "no-open-attempt");
@@ -1222,7 +1157,7 @@ describe("src/commands/node/release-node.test", () => {
       nodeId: fixtureIds.task,
       fence: claimed.lease.fence,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       actorId: ACTOR_A,
     });
     assert.equal(result.node.id, fixtureIds.task);

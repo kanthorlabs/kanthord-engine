@@ -108,11 +108,9 @@ A lease appears as a field of a node and of a run: the owner, the expiry, and wh
 
 An external claim holds the objective. A task claim holds the objective and the task. Two actors never hold two sibling tasks of one objective.
 
-A claim on an objective is admitted when the objective is `ready`, and also when it is `running` and no live run remains under it. The second case is how a client recovers objective authority after the structural run reached its maximum lifetime and expired. It opens a fresh structural run and returns its id and fence. While any run under the objective is still live, the claim is refused `subtree-busy`, so a recovery cannot take authority away from live work.
-
 ## node.claim
 
-Claims a node for the authenticated actor. The request body is empty: the TTL is configuration and the owner is the authenticated actor. The response carries the task lease, the objective lease, the task run id and its fence, the objective run id and its fence, the open attempt id and number, the expiry, the renewal hint and the node view. A lease fence and a run fence are separate counters: a lease fence rises when a lease is taken again, and a run fence rises when a run ends. The response therefore names four values, `lease.fence`, `runFence`, `objectiveLease.fence` and `objectiveRunFence`, and a later write presents the run fence of the run it names. An objective claim opens no attempt, so `attemptId` and `attemptNo` are null.
+Claims a node for the authenticated actor. The request body is empty: the TTL is configuration and the owner is the authenticated actor. The response carries the task lease, the objective lease, the task run id and its fence, the objective run id, the open attempt id and number, the expiry, the renewal hint and the node view. An objective claim opens no attempt, so `attemptId` and `attemptNo` are null.
 
 The refusals are `404 not-found` for an unknown node, `400 invalid-request` with `refusal: "initiative-not-claimable"` for an initiative, `422 plan-invalid` with the completeness findings, `409 illegal-transition` for a drive-mode pin, a node state that is not claimable or an ancestor that is not startable, and `409 lease-held` when another actor holds the objective, the task or a sibling.
 
@@ -122,9 +120,7 @@ The request body is `{ fence, runId, runFence }`. `fence` is the node lease fenc
 
 The daemon first expires due runs, then proves that the run is active, unexpired, held by the caller, bound to the target, and at the presented fence. It renews every lease that the run holds, leaves the fence unchanged, and writes `run.expires_at = min(now + runTtlMs, maxLifetimeAt)`. At `now >= maxLifetimeAt`, it refuses `409 lifetime-exceeded`.
 
-The response also carries `objectiveExpiresAt`, the expiry of the structural run over the target's objective. A client reads it to see its objective authority expiring while it still holds that authority.
-
-The refusals are `404 not-found` for an unknown node, `400 invalid-request` with `refusal: "initiative-not-claimable"` for an initiative, `409 lease-held` for a stale node lease, `409 objective-run-lost` when the target task's objective holds no active run, and the run authority codes `run-not-found`, `run-ended`, `run-expired`, `run-caller-mismatch`, `target-outside-run`, `fence-stale` and `lifetime-exceeded`.
+The refusals are `404 not-found` for an unknown node, `400 invalid-request` with `refusal: "initiative-not-claimable"` for an initiative, `409 lease-held` for a stale node lease, and the run authority codes `run-not-found`, `run-ended`, `run-expired`, `run-caller-mismatch`, `target-outside-run`, `fence-stale` and `lifetime-exceeded`.
 
 On a request timeout or a network partition the harness retries at the same interval, and it stops all work once the run expiry passes since its last successful renew. On a run authority refusal the harness stops at once, because the run is no longer authorized, and it reports nothing. A daemon restart does not change a live run or its fence.
 

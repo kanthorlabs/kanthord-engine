@@ -134,6 +134,13 @@ standard.
 1. **<name>** — <the output, with the exact file or symbol it produces>. `story-foundation`.
 2. **<name>** — <the path it changes>. `story-implement`.
 
+## Amendments this epic asks of other epics
+
+None is applied here, and a human applies each before dispatch.
+
+- **<the target epic and its story, in bold>.** <the ask, with `file:line` evidence>. <the default if
+  no ruling arrives, and what it costs>
+
 ## Verification Gate
 
 Gates: `pnpm run verify`
@@ -171,6 +178,24 @@ Rules for the text you write:
   subject reaches every story as a settled one.
 - **The Proof passes on exit 0 and its sentinel.** A printed string alone is not
   a pass.
+- **An amendment section carries one bullet per ask, and every bullet states three
+  things**: the target epic and story, the ask with `file:line` evidence, and the
+  default if no ruling arrives. A bullet with no default is a blocker on the target
+  epic, and this skill does not write one. Omit the section when the epic asks
+  nothing.
+- **An inbound amendment is consumed atomically.** Before you write an epic, grep
+  `.agents/plan/epics/` for an amendment bullet that names it. For each bullet,
+  either incorporate every obligation into that epic's `## Decisions`, `## Stories`
+  and `## Verification Gate`, and delete the source bullet in the same run; or leave
+  the bullet intact and report it as a blocker. **Never copy without deleting, and
+  never delete without preserving the operative constraint and its evidence.**
+- **An amendment on a lane-locked path names the receiving epic's Story 0.** A path
+  `scripts/lane-check.sh` denies to both engineers and allows to `groundwork-engineer`
+  belongs to the receiving epic's groundwork story, and the bullet names that story and
+  the exact path. Story 0 counts against the ten-story cap, so an inbound locked-path
+  amendment is a sizing input, not a detail for `/author`. A path denied to
+  `groundwork-engineer` too, or one no epic entry can edit, names a human blocker or a
+  later receiving epic instead.
 - Cut motivation, history and background everywhere.
 
 ## Step 6 — Self-check
@@ -191,13 +216,18 @@ Confirm, per epic file you wrote:
 8. no sentence leaves a design choice to `/author` or to build time;
 9. every event type the epic introduces or changes carries its subject kind,
    subject id, payload and transaction in `## Decisions`.
+10. every amendment bullet you wrote names a target epic file that exists, a story of
+    it, and a default if no ruling arrives;
+11. no amendment bullet anywhere in `.agents/plan/epics/` still names an epic you wrote
+    in this run, unless you reported it as a blocker.
 
 A failure here is yours to fix before you report.
 
 ## Step 7 — Report
 
-Print the epic files you created, the story count and the implement-story count
-per epic, and every open item as a bullet list in the house format:
+Print the epic files you created **or amended**, the story count and the
+implement-story count per epic, and every open item as a bullet list in the house
+format:
 
 ```text
 <B1/S1> - status:<FIXED/OPEN> - action:<YES/NO> - <name> - <description> - fix:<recommended change> - why:<reason>
@@ -217,6 +247,8 @@ Do **not** commit — the human reviews and commits.
 - a hermetic-coverage list that is not a table, and a row owned by no story or by
   two;
 - a decision with no evidence;
+- an amendment bullet with no target story, no `file:line` evidence, or no default;
+- an inbound amendment copied into the epic it names and left standing in the asker;
 - an event type introduced or changed with no settled subject kind, subject id,
   payload and transaction;
 - writing a story file, a test, production code, or any document outside

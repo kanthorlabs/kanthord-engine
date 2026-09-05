@@ -75,7 +75,7 @@ allow groundwork-engineer .agents/tdd/history/2026-08-05-006-git-primitives.md
 allow groundwork-engineer .agents/tdd/memory/groundwork-engineer/2026-08-05.md
 deny groundwork-engineer .agents/tdd/memory/software-engineer/2026-08-05.md
 deny test-engineer .agents/tdd/memory/groundwork-engineer/2026-08-05.md
-deny groundwork-engineer AGENTS.md
+allow groundwork-engineer AGENTS.md
 deny groundwork-engineer .agents/plan/stories/epic/story.md
 deny groundwork-engineer .claude/skills/work/SKILL.md
 deny groundwork-engineer .opencode/agents/groundwork-engineer.md

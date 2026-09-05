@@ -196,7 +196,7 @@ literals in it, because the type it names is gone otherwise.
 - Do not touch `writeVerdict`'s logic. Two string literals only.
 - Do not rename `RECOVERY_STEP_ORDER`'s `leases` step or `RecoverHomeDependencies.leases`. Story 2 states why that rename is deferred.
 - Do not edit `eslint.config.js`. EPIC 050.5 Story 0 (`00-groundwork`) holds its exemption entry, and the file is outside both engineer lanes.
-- Do not touch the `lease` table. It survives this epic, empty, until EPIC 057's migration `17`.
+- Do not touch the `lease` table. It survives this epic, empty, until EPIC 057's migration `18`.
 
 ## Verify
 

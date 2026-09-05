@@ -555,7 +555,7 @@ function driveOutcomeToLimit(
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body:
         outcome === "cancelled"
           ? { report: outcome, fence: claimed.lease.fence }
@@ -637,7 +637,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: { report: "rejected", fence: claimed.lease.fence, reason: REASON },
     });
     assert.equal(error.refusal, "run-ended");
@@ -675,7 +675,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: { report: "rejected", fence: claimed.lease.fence, reason: REASON },
     });
 
@@ -703,7 +703,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: { report: "rejected", fence: claimed.lease.fence, reason: REASON },
     });
     assert.equal(error.refusal, "run-ended");
@@ -728,29 +728,8 @@ describe("src/commands/outcome/report-outcome.test", () => {
       nodeId: TASK_B,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: { report: "rejected", fence: 1, reason: REASON },
-    });
-
-    assert.equal(error.refusal, "target-outside-run");
-  });
-
-  it("a report on a task presenting the objective run refuses target-outside-run", (t) => {
-    const fixture = createReportFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const clock = createMockClock({ start: NOW });
-    const claimed = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-    });
-
-    const error = refused(fixture, clock, {
-      nodeId: fixtureIds.task,
-      actorId: ACTOR_A,
-      runId: claimed.objectiveRunId,
-      runFence: claimed.objectiveRunFence,
-      body: { report: "rejected", fence: claimed.lease.fence, reason: REASON },
     });
 
     assert.equal(error.refusal, "target-outside-run");
@@ -772,7 +751,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
       nodeId: "task_zzz",
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: {
         report: "rejected",
         fence: claimed.lease.fence,
@@ -801,7 +780,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
       nodeId: fixtureIds.initiative,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -841,7 +820,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
           return {
             nodeId: fixtureIds.task,
             runId: "run_missing",
-            runFence: claimed.runFence,
+            runFence: claimed.fence,
           };
         },
       },
@@ -857,7 +836,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
           return {
             nodeId: fixtureIds.task,
             runId: claimed.runId,
-            runFence: claimed.runFence,
+            runFence: claimed.fence,
           };
         },
       },
@@ -873,7 +852,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
           return {
             nodeId: fixtureIds.task,
             runId: claimed.runId,
-            runFence: claimed.runFence,
+            runFence: claimed.fence,
             expiryPass: false,
           };
         },
@@ -890,7 +869,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
           return {
             nodeId: fixtureIds.task,
             runId: claimed.runId,
-            runFence: claimed.runFence,
+            runFence: claimed.fence,
           };
         },
       },
@@ -904,7 +883,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
           return {
             nodeId: TASK_B,
             runId: claimed.runId,
-            runFence: claimed.runFence,
+            runFence: claimed.fence,
           };
         },
       },
@@ -913,14 +892,14 @@ describe("src/commands/outcome/report-outcome.test", () => {
         prepare(fixture, claimed) {
           fixture.storage.transact((transaction) => {
             transaction.run("UPDATE run SET fence = ? WHERE id = ?", [
-              claimed.runFence + 1,
+              claimed.fence + 1,
               claimed.runId,
             ]);
           });
           return {
             nodeId: fixtureIds.task,
             runId: claimed.runId,
-            runFence: claimed.runFence,
+            runFence: claimed.fence,
           };
         },
       },
@@ -977,7 +956,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
         actorId: ACTOR_A,
         actorKind: "human",
         runId: claimed.runId,
-        runFence: claimed.runFence,
+        runFence: claimed.fence,
         body: {
           report: "accepted",
           fence: claimed.lease.fence,
@@ -1002,7 +981,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
         runId: claimed.runId,
-        runFence: claimed.runFence,
+        runFence: claimed.fence,
         body: {
           report: "accepted",
           fence: claimed.lease.fence,
@@ -1029,7 +1008,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
       nodeId: fixtureIds.objective,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence - 1,
+      runFence: claimed.fence - 1,
       body: { report: "closed", acknowledgePartial: false },
     });
 
@@ -1058,7 +1037,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: { report: "rejected", fence: claimed.lease.fence, reason: REASON },
     });
 
@@ -1094,7 +1073,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
               nodeId: "task_zzz",
               actorId: ACTOR_A,
               runId: claimed.runId,
-              runFence: claimed.runFence,
+              runFence: claimed.fence,
               body: {
                 report: "rejected",
                 fence: claimed.lease.fence,
@@ -1116,7 +1095,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
               nodeId: fixtureIds.initiative,
               actorId: ACTOR_A,
               runId: claimed.runId,
-              runFence: claimed.runFence,
+              runFence: claimed.fence,
               body: {
                 report: "accepted",
                 fence: claimed.lease.fence,
@@ -1138,7 +1117,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
               nodeId: fixtureIds.objective,
               actorId: ACTOR_A,
               runId: claimed.runId,
-              runFence: claimed.runFence,
+              runFence: claimed.fence,
               body: {
                 report: "accepted",
                 fence: claimed.lease.fence,
@@ -1161,7 +1140,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
               actorId: ACTOR_A,
               actorKind: "human",
               runId: claimed.runId,
-              runFence: claimed.runFence,
+              runFence: claimed.fence,
               body: {
                 report: "accepted",
                 fence: claimed.lease.fence,
@@ -1184,7 +1163,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
               nodeId: fixtureIds.task,
               actorId: ACTOR_A,
               runId: claimed.runId,
-              runFence: claimed.runFence,
+              runFence: claimed.fence,
               body: {
                 report: "accepted",
                 fence: claimed.lease.fence,
@@ -1206,7 +1185,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
               nodeId: fixtureIds.task,
               actorId: ACTOR_A,
               runId: "run_missing",
-              runFence: claimed.runFence,
+              runFence: claimed.fence,
               body: {
                 report: "rejected",
                 fence: claimed.lease.fence,
@@ -1233,7 +1212,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
               nodeId: fixtureIds.task,
               actorId: ACTOR_A,
               runId: claimed.runId,
-              runFence: claimed.runFence,
+              runFence: claimed.fence,
               body: {
                 report: "rejected",
                 fence: claimed.lease.fence,
@@ -1262,7 +1241,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
               nodeId: fixtureIds.task,
               actorId: ACTOR_A,
               runId: claimed.runId,
-              runFence: claimed.runFence,
+              runFence: claimed.fence,
               body: {
                 report: "rejected",
                 fence: claimed.lease.fence,
@@ -1290,7 +1269,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
               nodeId: fixtureIds.task,
               actorId: ACTOR_A,
               runId: claimed.runId,
-              runFence: claimed.runFence,
+              runFence: claimed.fence,
               body: {
                 report: "rejected",
                 fence: claimed.lease.fence,
@@ -1316,7 +1295,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
               nodeId: TASK_B,
               actorId: ACTOR_A,
               runId: claimed.runId,
-              runFence: claimed.runFence,
+              runFence: claimed.fence,
               body: {
                 report: "rejected",
                 fence: 1,
@@ -1335,7 +1314,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
           });
           fixture.storage.transact((transaction) => {
             transaction.run("UPDATE run SET fence = ? WHERE id = ?", [
-              claimed.runFence + 1,
+              claimed.fence + 1,
               claimed.runId,
             ]);
           });
@@ -1344,7 +1323,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
               nodeId: fixtureIds.task,
               actorId: ACTOR_A,
               runId: claimed.runId,
-              runFence: claimed.runFence,
+              runFence: claimed.fence,
               body: {
                 report: "rejected",
                 fence: claimed.lease.fence,
@@ -1388,7 +1367,7 @@ describe("src/commands/outcome/report-outcome.test", () => {
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
         runId: claimed.runId,
-        runFence: claimed.runFence,
+        runFence: claimed.fence,
         body: { report: "rejected", fence: claimed.lease.fence, reason: "no" },
       });
       assert.equal(result.attemptsRemaining, 2);
@@ -1415,7 +1394,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
         runId: claimed.runId,
-        runFence: claimed.runFence,
+        runFence: claimed.fence,
         body: { report: "rejected", fence: claimed.lease.fence, reason: "no" },
       });
       assert.equal(result.attemptsRemaining, 0);
@@ -1442,7 +1421,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
         runId: claimed.runId,
-        runFence: claimed.runFence,
+        runFence: claimed.fence,
         body:
           outcome === "accepted"
             ? {
@@ -1469,7 +1448,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
         runId: first.runId,
-        runFence: first.runFence,
+        runFence: first.fence,
         body: {
           report: "accepted",
           fence: first.lease.fence,
@@ -1485,7 +1464,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
         nodeId: TASK_B,
         actorId: ACTOR_A,
         runId: second.runId,
-        runFence: second.runFence,
+        runFence: second.fence,
         body: {
           report: "accepted",
           fence: second.lease.fence,
@@ -1539,7 +1518,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
         runId: claimed.runId,
-        runFence: claimed.runFence,
+        runFence: claimed.fence,
         body: { report: "rejected", fence: 1, reason: "no" },
       });
       assert.equal(error.refusal, "run-caller-mismatch");
@@ -1561,7 +1540,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
         runId: claimed.runId,
-        runFence: claimed.runFence - 1,
+        runFence: claimed.fence - 1,
         body: { report: "rejected", fence: 999, reason: "no" },
       });
       assert.equal(error.refusal, "fence-stale");
@@ -1584,7 +1563,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
         runId: claimed.runId,
-        runFence: claimed.runFence,
+        runFence: claimed.fence,
         body: { report: "rejected", fence: 1, reason: "no" },
       });
       assert.equal(error.refusal, "run-ended");
@@ -1614,7 +1593,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       actorId: ACTOR_A,
       actorKind: "human",
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -1674,7 +1653,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       nodeId: fixtureIds.objective,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: {
         report: "attested",
         fence: claimed.objectiveLease.fence,
@@ -1710,7 +1689,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       nodeId: fixtureIds.objective,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: { report: "closed", acknowledgePartial: false },
     });
     assert.equal(fixture.closeCalls.length, 1);
@@ -1740,7 +1719,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -1764,7 +1743,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -1789,7 +1768,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -1865,7 +1844,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -1924,7 +1903,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
         runId: claimed.runId,
-        runFence: claimed.runFence,
+        runFence: claimed.fence,
         body:
           outcome === "cancelled"
             ? { report: outcome, fence: claimed.lease.fence }
@@ -1951,7 +1930,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -1987,7 +1966,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -2028,7 +2007,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: { report: "rejected", fence: claimed.lease.fence, reason: REASON },
     });
     const payload = reportedAppends(fixture)[0]!.input.payload as Readonly<
@@ -2053,7 +2032,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
       runId: claimed.runId,
-      runFence: claimed.runFence,
+      runFence: claimed.fence,
       body: { report: "cancelled", fence: claimed.lease.fence },
     });
     const payload = reportedAppends(fixture)[0]!.input.payload as Readonly<
@@ -2082,7 +2061,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
         runId: claimed.runId,
-        runFence: claimed.runFence,
+        runFence: claimed.fence,
         body:
           outcome === "accepted"
             ? {

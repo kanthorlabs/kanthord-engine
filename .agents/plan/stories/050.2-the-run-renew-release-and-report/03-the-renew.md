@@ -8,13 +8,13 @@ Diagrams: renew-success
 
 Baselines: renew-success <- baseline-renew-task
 
-Seams: renew-success: +expiry.expireRuns, +plan.readNode, +execution.runById:R, +execution.activeRunOfNode, +execution.renewRun:R, +events.append:run.renewed:R, +execution.renewRun:OR, +events.append:run.renewed:OR, -plan.readAllNodes, -events.append:lease.renewed:T
+Seams: renew-success: +expiry.expireRuns, +plan.readNode, +execution.runById:R, +plan.readSubtree, +execution.renewRun:R, +events.append:run.renewed:R, -plan.readAllNodes, -events.append:lease.renewed:T
 
 This story leaves the lifetime refusal to Story 4 (`04-the-lifetime-refusal`) and the three lease
 steps to EPIC 050.4 Story 4 (`04-the-renew-drops-the-lease`).
 
 **The drawn set is every branch of the task renew whose seam set differs.** The objective renew is not
-drawn: `src/commands/node/heartbeat-node.ts:83` — `node.kind` selects it, and it makes one
+drawn: `src/commands/run/renew-run.ts:83` — `node.kind` selects it, and it makes one
 `lease.renew` with no `lease.read`, so it is a strict subset of the task trace and its own case in
 `## Verify` asserts it. The refusal branches of this path stop where Story 4's diagram stops, and a
 refusal that stops at a step no drawn refusal stops at does not exist here.
@@ -25,8 +25,8 @@ refusal that stops at a step no drawn refusal stops at does not exist here.
 
 Superseded by: EPIC 050.2 renew-success
 
-Shipped path: `src/commands/node/heartbeat-node.ts:60` — `heartbeatNode`, through
-`src/commands/node/heartbeat-node.ts:115`. Fixture: `seedRegistry` then `seedGraph` from
+Shipped path: `src/commands/run/renew-run.ts:60` — `renewRun`, through
+`src/commands/run/renew-run.ts:115`. Fixture: `seedRegistry` then `seedGraph` from
 `test/helpers/rows.ts:21` — `seedRegistry` and `test/helpers/rows.ts:102` — `seedGraph`, giving
 initiative, objective `O` and task `T`; `T` driven to `running` by the real `claimNode`, so `T` holds
 a node lease at fence 1 and `O` holds an objective lease at fence 1, both owned by the caller.
@@ -53,39 +53,39 @@ sequenceDiagram
 
 Each step, with its caller anchor, its callee anchor and the fixture state that reaches it:
 
-1. `src/commands/node/heartbeat-node.ts:64` — `transact` → `src/services/storage/index.ts:33` —
+1. `src/commands/run/renew-run.ts:64` — `transact` → `src/services/storage/index.ts:33` —
    `transact`. Reached unconditionally.
-2. `src/commands/node/heartbeat-node.ts:65` — `now` → `src/services/clock/index.ts:2` — `now`.
+2. `src/commands/run/renew-run.ts:65` — `now` → `src/services/clock/index.ts:2` — `now`.
    Reached unconditionally.
-3. `src/commands/node/heartbeat-node.ts:67` — `readAllNodes` →
+3. `src/commands/run/renew-run.ts:67` (formerly `readAllNodes`) →
    `src/services/plan/index.ts:74` — `readAllNodes`. Reached unconditionally; the command then filters
-   in memory at `src/commands/node/heartbeat-node.ts:68` — `find`.
-4. `src/commands/node/heartbeat-node.ts:125` — `renew` → `src/services/lease/index.ts:93` — `renew`,
-   through the helper invoked at `src/commands/node/heartbeat-node.ts:81` — `renewLease`. Reached
+   in memory at `src/commands/run/renew-run.ts:68` (formerly `find`).
+4. `src/commands/run/renew-run.ts:125` — `renew` → `src/services/lease/index.ts:93` — `renew`,
+   through the helper invoked at `src/commands/run/renew-run.ts:81` — `renewLease`. Reached
    because `T` is not the initiative, so the guard at
-   `src/commands/node/heartbeat-node.ts:74` — `initiative-not-claimable` does not fire. It passes the
-   caller-presented `src/commands/node/heartbeat-node.ts:130` — `input.fence`.
-5. `src/commands/node/heartbeat-node.ts:152` — `read` → `src/services/lease/index.ts:100` — `read`,
-   through the helper invoked at `src/commands/node/heartbeat-node.ts:84` —
+   `src/commands/run/renew-run.ts:74` — `initiative-not-claimable` does not fire. It passes the
+   caller-presented `src/commands/run/renew-run.ts:130` — `input.fence`.
+5. `src/commands/run/renew-run.ts:152` — `read` → `src/services/lease/index.ts:100` — `read`,
+   through the helper invoked at `src/commands/run/renew-run.ts:84` —
    `renewObjectiveLease`. Reached **only** because the fixture's `T` is a task:
-   `src/commands/node/heartbeat-node.ts:83` — `node.kind` selects the branch.
-6. `src/commands/node/heartbeat-node.ts:175` — `renew` → `src/services/lease/index.ts:93` — `renew`.
+   `src/commands/run/renew-run.ts:83` — `node.kind` selects the branch.
+6. `src/commands/run/renew-run.ts:175` — `renew` → `src/services/lease/index.ts:93` — `renew`.
    Reached on the same task branch, and it passes the **stored**
-   `src/commands/node/heartbeat-node.ts:180` — `record.fence`, not the presented one.
-7. `src/commands/node/heartbeat-node.ts:93` — `append` → `src/services/event/index.ts:50` — `append`,
-   with `src/commands/node/heartbeat-node.ts:96` — `lease.renewed`. Reached after both renewals
+   `src/commands/run/renew-run.ts:180` — `record.fence`, not the presented one.
+7. `src/commands/run/renew-run.ts:93` — `append` → `src/services/event/index.ts:50` — `append`,
+   with `src/commands/run/renew-run.ts:96` (formerly `lease.renewed`). Reached after both renewals
    return.
 
 Steps 4 to 6 sit textually **below** step 7, because `renewLease` at
-`src/commands/node/heartbeat-node.ts:117` — `renewLease` and `renewObjectiveLease` at
-`src/commands/node/heartbeat-node.ts:145` — `renewObjectiveLease` are declared after the command.
+`src/commands/run/renew-run.ts:117` — `renewLease` and `renewObjectiveLease` at
+`src/commands/run/renew-run.ts:145` — `renewObjectiveLease` are declared after the command.
 The trace is invocation order, so the ordinals above are the runtime order and not the file order.
 
 Steps 5 and 6 survive the change: a run on `runTtlMs` that outlived an objective lease on
 `leaseTtlMs` would free a node that another claim then takes, under a run that still holds authority.
 
 This baseline records that the shipped command proves the caller by **attempting** the renew and
-catching `src/commands/node/heartbeat-node.ts:135` — `lease-fenced`, never by
+catching `src/commands/run/renew-run.ts:135` — `lease-fenced`, never by
 `src/services/lease/index.ts:101` — `assertHeld`. That proof is what this story replaces.
 
 ### `renew-success`
@@ -113,14 +113,12 @@ sequenceDiagram
     Command->>Expiry: 3 expiry.expireRuns
     Command->>Plan: 4 plan.readNode
     Command->>Execution: 5 execution.runById:R
-    Command->>Execution: 6 execution.activeRunOfNode
+    Command->>Plan: 6 plan.readSubtree
     Command->>Lease: 7 lease.renew:T
     Command->>Lease: 8 lease.read:O
     Command->>Lease: 9 lease.renew:O
     Command->>Execution: 10 execution.renewRun:R
     Command->>Events: 11 events.append:run.renewed:R
-    Command->>Execution: 12 execution.renewRun:OR
-    Command->>Events: 13 events.append:run.renewed:OR
     Command-->>Client: ok
 ```
 
@@ -130,33 +128,18 @@ life.
 
 **Step 4 precedes step 5, and that order is the ruling.** `plan.readNode` replaces the whole-graph
 read of the baseline and keeps the two shipped refusals in front of the authority check:
-`src/commands/node/heartbeat-node.ts:70` — `node-not-found` and
-`src/commands/node/heartbeat-node.ts:74` — `initiative-not-claimable`. Drawn the other way round, an
+`src/commands/run/renew-run.ts:70` — `node-not-found` and
+`src/commands/run/renew-run.ts:74` — `initiative-not-claimable`. Drawn the other way round, an
 absent node and an initiative would both satisfy condition 5 of `assertRunAuthority` and refuse
 `target-outside-run`, so both shipped refusals would become unreachable and two wire-visible codes
 would change meaning. The node row is also the only source of `node.kind` for the objective branch at
-`src/commands/node/heartbeat-node.ts:83` — `node.kind` and of `node.parentId` for
-`src/commands/node/heartbeat-node.ts:186` — `objectiveScopeOf`.
+`src/commands/run/renew-run.ts:83` — `node.kind` and of `node.parentId` for
+`src/commands/run/renew-run.ts:186` — `objectiveScopeOf`; `plan.readSubtree` returns ids alone
+and supplies neither.
 
-Step 5 supplies `assertRunAuthority` with the run, and the run row carries the only other value the
-check needs: `run.nodeId`. Steps 7 to 9 are the shipped lease renewal, kept until EPIC 050.4 Story 4
-(`04-the-renew-drops-the-lease`). Step 11 projects the run id, because `run.renewed` is a run event.
-
-**Step 6 is a read, and it precedes every write.** The objective run is read before the first lease
-write because Story 11 (`11-the-promised-expiry-and-the-explicit-recovery`) refuses
-`objective-run-lost` on its absence, and a refusal writes nothing. Read after the lease renewal, the
-refusal would roll back writes it had already made, and the diagram would admit an order the refusal
-cannot use.
-
-**Step 6 and steps 12 to 13 renew the structural objective run beside the task run.** A task claim opens or
-reuses one structural run over the objective, and only the task run carries the renew. A task run on
-`runTtlMs` that outlived its objective run would leave the objective run expired under a live task:
-the expiry pass ends it, raises its fence, and the later attest or close refuses `run-ended`. The
-argument is the one this story already makes for the objective lease, and it holds for the run row.
-Step 12 clamps to the objective run's own `max_lifetime_at`, which is that run's budget and not the
-task's, and no path renews past it. Step 13 is the second `run.renewed`, one per run whose
-`expires_at` moved. An objective renew takes step 6 and reaches neither step 12 nor step 13, because
-its own run is the run it named at step 5. **No fence write appears, and that absence is the
+Steps 5 and 6 supply `assertRunAuthority` with the run and the subtree. Steps 7 to 9 are the shipped
+lease renewal, kept until EPIC 050.4 Story 4 (`04-the-renew-drops-the-lease`). Step 11 projects the
+run id, because `run.renewed` is a run event. **No fence write appears, and that absence is the
 assertion.**
 
 Add `test/sequence/scenarios/renew-success.ts`.
@@ -165,7 +148,7 @@ Add `test/sequence/scenarios/renew-success.ts`.
 
 ### 1 — the rename
 
-Move `src/commands/node/heartbeat-node.ts` to `src/commands/run/renew-run.ts` with `git mv`, and its
+Move `src/commands/run/renew-run.ts` to `src/commands/run/renew-run.ts` with `git mv`, and its
 test to `src/commands/run/renew-run.test.ts`. `src/commands/run/` does not exist today; the
 directories under `src/commands/` are `actor`, `node`, `outcome`, `plan`, `project`, `provider`,
 `repository` and `startup`. `eslint.config.js` classifies the layer by the glob `src/commands/**`, so
@@ -173,38 +156,38 @@ a new subdirectory needs no configuration edit.
 
 Rename every exported symbol:
 
-| old                         | new                    |
-| --------------------------- | ---------------------- |
-| `heartbeatNode`             | `renewRun`             |
-| `HeartbeatNodeDependencies` | `RenewRunDependencies` |
-| `HeartbeatNodeInput`        | `RenewRunInput`        |
-| `HeartbeatNodeResult`       | `RenewRunResult`       |
-| `HeartbeatNodeError`        | `RenewRunError`        |
-| `HeartbeatRefusal`          | `RenewRefusal`         |
+| old                    | new                    |
+| ---------------------- | ---------------------- |
+| `renewRun`             | `renewRun`             |
+| `RenewRunDependencies` | `RenewRunDependencies` |
+| `RenewRunInput`        | `RenewRunInput`        |
+| `RenewRunResult`       | `RenewRunResult`       |
+| `RenewRunError`        | `RenewRunError`        |
+| `RenewRefusal`         | `RenewRefusal`         |
 
 The importers, each resolved against the current tree:
 
-- `src/http/server/node/heartbeat-node.ts:5` — `HeartbeatNodeInput`. Move the file to
+- `src/http/server/node/renew-node.ts:5` — `RenewRunInput`. Move the file to
   `src/http/server/node/renew-node.ts`, with its test.
-- `src/http/server/node/refusals.ts:4` — `HeartbeatNodeError`, the dispatch arm at
-  `src/http/server/node/refusals.ts:36` — `HeartbeatNodeError`, the mapper at
-  `src/http/server/node/refusals.ts:181` — `heartbeatRefusal`, and the two type unions at
-  `src/http/server/node/refusals.ts:234` — `HeartbeatNodeError` and
-  `src/http/server/node/refusals.ts:266` — `HeartbeatNodeError`.
-- `src/main.ts:85` — `heartbeatNode` (the command import),
-  `src/main.ts:161` — `heartbeatNodeHandler` (the handler import), and the handler map entry at
-  `src/main.ts:570` — `node.heartbeat` through `src/main.ts:583`.
+- `src/http/server/node/refusals.ts:4` — `RenewRunError`, the dispatch arm at
+  `src/http/server/node/refusals.ts:36` — `RenewRunError`, the mapper at
+  `src/http/server/node/refusals.ts:181` — `renewRefusal`, and the two type unions at
+  `src/http/server/node/refusals.ts:234` — `RenewRunError` and
+  `src/http/server/node/refusals.ts:266` — `RenewRunError`.
+- `src/main.ts:85` — `renewRun` (the command import),
+  `src/main.ts:161` — `renewNodeHandler` (the handler import), and the handler map entry at
+  `src/main.ts:570` (formerly `node.heartbeat`) through `src/main.ts:583`.
 - `src/main.test.ts:176` — `node.heartbeat`, the key of the `fixtures` map.
-- `src/commands/node/release-node.test.ts:16` — `heartbeatNode`, called at
-  `src/commands/node/release-node.test.ts:749` — `heartbeatNode` to build mid-lifecycle state. That
-  file is the test-engineer lane and this one is not, so the two halves land in separate turns of
-  this story.
-- `src/cli/node/heartbeat.ts:20` — `registerNodeHeartbeat`. Move it to `src/cli/node/renew.ts` and
+- `src/commands/node/release-node.test.ts:17` (formerly `renewRun`), now an **unused import**: commit
+  `04376fb` removed the call that built mid-lifecycle state, and left the import. Delete the import.
+  That file is the test-engineer lane and this one is not, so the two halves land in separate turns
+  of this story.
+- `src/cli/node/renew.ts:20` — `registerNodeRenew`. Move it to `src/cli/node/renew.ts` and
   change the Commander registration from `heartbeat` to `renew`. Its wording already fits:
-  `src/cli/node/heartbeat.ts:27` — `renew` carries the description "renew the lease of a node", and
-  `src/cli/node/heartbeat.ts:60` — `renewed` prints `kanthord: renewed …`. Update
-  `src/cli/program.ts:44` — `registerNodeHeartbeat` and `src/cli/program.ts:378` —
-  `registerNodeHeartbeat`.
+  `src/cli/node/renew.ts:27` — `renew` carries the description "renew the lease of a node", and
+  `src/cli/node/renew.ts:60` — `renewed` prints `kanthord: renewed …`. Update
+  `src/cli/program.ts:44` — `registerNodeRenew` and `src/cli/program.ts:378` —
+  `registerNodeRenew`.
 
 One vocabulary survives: `worker.md` names claim, report, close and renew.
 
@@ -213,66 +196,52 @@ stated meaning: a worker voluntarily ends its run with no checkpoint.
 
 ### 2 — the renew body
 
-`renewRun` keeps the shipped lease renewal at `src/commands/node/heartbeat-node.ts:81` — `renewLease`
-through `src/commands/node/heartbeat-node.ts:107`, and adds the run renewal beside it. `expiry` joins
-the dependency object at `src/commands/node/heartbeat-node.ts:22` —
-`HeartbeatNodeDependencies`, beside `execution`. Inside the one `storage.transact`:
+`renewRun` keeps the shipped lease renewal at `src/commands/run/renew-run.ts:81` — `renewLease`
+through `src/commands/run/renew-run.ts:107`, and adds the run renewal beside it. `expiry` joins
+the dependency object at `src/commands/run/renew-run.ts:22` —
+`RenewRunDependencies`, beside `execution`. Inside the one `storage.transact`:
 
 1. `const now = dependencies.clock.now();` — unchanged, at
-   `src/commands/node/heartbeat-node.ts:65` — `now`.
+   `src/commands/run/renew-run.ts:65` — `now`.
 2. `dependencies.expiry.expireRuns(transaction, { now });` — new, immediately after the clock read.
 3. `plan.readNode(transaction, input.nodeId)`, replacing the whole-graph read at
-   `src/commands/node/heartbeat-node.ts:67` — `readAllNodes` and the in-memory filter at
-   `src/commands/node/heartbeat-node.ts:68` — `find`. It keeps
-   `src/commands/node/heartbeat-node.ts:70` — `node-not-found` and
-   `src/commands/node/heartbeat-node.ts:74` — `initiative-not-claimable` **in front of the authority
+   `src/commands/run/renew-run.ts:67` (formerly `readAllNodes`) and the in-memory filter at
+   `src/commands/run/renew-run.ts:68` (formerly `find`). It keeps
+   `src/commands/run/renew-run.ts:70` — `node-not-found` and
+   `src/commands/run/renew-run.ts:74` — `initiative-not-claimable` **in front of the authority
    check**, and it supplies `node.kind` for
-   `src/commands/node/heartbeat-node.ts:83` — `node.kind` and `node.parentId` for
-   `src/commands/node/heartbeat-node.ts:186` — `objectiveScopeOf`.
+   `src/commands/run/renew-run.ts:83` — `node.kind` and `node.parentId` for
+   `src/commands/run/renew-run.ts:186` — `objectiveScopeOf`. `plan.readSubtree` returns ids
+   alone and supplies neither.
 4. `execution.runById(transaction, input.runId)`. It returns an ended run rather than null, so the
    authority function can refuse it by code.
-5. `assertRunAuthority({ run, runId: input.runId, fence: input.runFence, targetNodeId: input.nodeId, caller, now })`.
+5. `plan.readSubtree(transaction, run.nodeId)` for the subtree ids, from
+   `src/services/plan/index.ts:101` — `readSubtree`.
+6. `assertRunAuthority({ run, runId: input.runId, fence: input.runFence, targetNodeId: input.nodeId, subtreeIds, caller, now })`.
    On a refusal, throw `RenewRunError(refusal.refusal, …, { runId: refusal.runId })`. Step 2 is what
    makes an expired run reach this step already `ended`, so it refuses `run-ended` rather than
    `run-expired`; both are refusals and the order in Story 1 (`01-run-authority`) governs whichever
    state the row is in.
-6. The shipped lease renewal, unchanged: `lease.renew` on the target at
-   `src/commands/node/heartbeat-node.ts:125` — `renew`, the objective lease read at
-   `src/commands/node/heartbeat-node.ts:152` — `read`, and the objective `lease.renew` at
-   `src/commands/node/heartbeat-node.ts:175` — `renew`.
-7. `execution.renewRun(transaction, { runId, expiresAt })` with
+7. The shipped lease renewal, unchanged: `lease.renew` on the target at
+   `src/commands/run/renew-run.ts:125` — `renew`, the objective lease read at
+   `src/commands/run/renew-run.ts:152` — `read`, and the objective `lease.renew` at
+   `src/commands/run/renew-run.ts:175` — `renew`.
+8. `execution.renewRun(transaction, { runId, expiresAt })` with
    `Math.min(now + dependencies.runTtlMs, run.maxLifetimeAt)`.
-8. Append `run.renewed` where the command appended `lease.renewed` at
-   `src/commands/node/heartbeat-node.ts:96` — `lease.renewed`, with the payload of section 3.
-   5b. On the task branch only, and **before any write**: `execution.activeRunOfNode(transaction, objectiveId)`.
-   Story 11 (`11-the-promised-expiry-and-the-explicit-recovery`) refuses `objective-run-lost` when it
-   returns null. When it returns a run that is not the run of step 7, `execution.renewRun` on it with
-   `Math.min(now + dependencies.runTtlMs, objectiveRun.maxLifetimeAt)` and one more `run.renewed`.
-   The objective run is derived from the node, exactly as the objective lease is derived at step 6,
-   so no request field is added: the task run's own authority proves the caller holds a claim under
-   that objective.
-
-**A task renew moves two runs.** A task claim opens or reuses one structural run over the objective.
-A renew that moved the task run alone would leave the objective run expired under a live task run:
-the expiry pass ends it, raises its fence, and the later attest or close refuses `run-ended`. The
-claim carries the same hole on its reuse branch, and Story 10 (`10-the-reused-objective-run`) closes
-it there and draws that branch.
-
-**Each run clamps to its own `max_lifetime_at`.** An objective run that reaches its lifetime expires
-while its task runs continue. `runMaxLifetimeMs` bounds the whole objective attempt, and a budget a
-renew could extend is not a budget.
+9. Append `run.renewed` where the command appended `lease.renewed` at
+   `src/commands/run/renew-run.ts:96` (formerly `lease.renewed`), with the payload of section 3.
 
 **A renew never touches the fence.** The fence rises when a run ends, and nowhere else. A renew that
 rotated the fence would invalidate the run id and fence pair the worker already holds, which is the
 authority of that run.
 
 Add the six `RunAuthorityRefusalCode` values to `RenewRefusal` at
-`src/commands/node/heartbeat-node.ts:11` — `HeartbeatRefusal`. Story 4 (`04-the-lifetime-refusal`)
+`src/commands/run/renew-run.ts:11` — `RenewRefusal`. Story 4 (`04-the-lifetime-refusal`)
 adds `lifetime-exceeded`.
 
 `heartbeatIntervalMs` leaves `RenewRunResult`: delete the field at
-`src/commands/node/heartbeat-node.ts:41` — `heartbeatIntervalMs` and its producer at
-`src/commands/node/heartbeat-node.ts:112` — `heartbeatIntervalMs`, and return `expiresAt` and
+`src/commands/run/renew-run.ts:41` (formerly `heartbeatIntervalMs`) and its producer at
+`src/commands/run/renew-run.ts:112` (formerly `heartbeatIntervalMs`), and return `expiresAt` and
 `renewAfterMs` instead. Story 7 (`07-the-worker-contract`) owns both schema halves and the remaining
 sites.
 
@@ -285,12 +254,12 @@ producer, both by literal string scan over `src/commands` and `src/services`. De
 contract-only story would fail the second scan, and retiring `lease.renewed` there would fail the
 first while this command still writes it. The two edits and the producer move land together.
 
-- `src/domain/event-type.ts:7` — `lease.renewed`: remove the member. Add `"run.renewed"` in its
-  bytewise position among the 39 members of `src/domain/event-type.ts:1` — `eventTypes`.
+- `src/domain/event-type.ts:7` (formerly `lease.renewed`): remove the member. Add `"run.renewed"` in its
+  bytewise position among the 38 members of `src/domain/event-type.ts:1` — `eventTypes`.
 - `src/domain/event-type.ts:44` — `retiredEventTypes` stays empty. It is typed
   `readonly EventType[]`, so a removed member cannot be listed there at all; there are no
   deployments, so there is no stored event to keep readable.
-- `src/http/contract/event-payload.ts:109` — `lease.renewed`: remove the schema. Add `run.renewed` in
+- `src/http/contract/event-payload.ts:109` (formerly `lease.renewed`): remove the schema. Add `run.renewed` in
   the same bytewise position in `src/http/contract/event-payload.ts:71` — `eventPayloads`, which is
   typed `Readonly<Record<EventType, ZodType>>`, so omitting a member fails type checking:
 
@@ -307,14 +276,14 @@ first while this command still writes it. The two edits and the producer move la
 exactly what step 2.9 appends.
 
 - `src/http/contract/event-payload.test.ts:50` — `recordedPayloads`: replace the `lease.renewed`
-  fixture at `src/http/contract/event-payload.test.ts:94` — `lease.renewed` with a `run.renewed`
+  fixture at `src/http/contract/event-payload.test.ts:94` (formerly `lease.renewed`) with a `run.renewed`
   one in the same position. `src/http/contract/event-payload.test.ts:434` — `deepEqual` asserts the
   fixture key list equals `eventTypes` in order, so the position is not free.
 - `src/http/contract/event-payload.test.ts:459` — `it` reads all three `lease.*` schemas by name.
   Drop its `lease.renewed` arm and keep the other two; Story 5 (`05-the-release`) drops the rest.
-- `src/http/contract/openapi.test.ts:270` — `lease.renewed`: rename the component entry to
+- `src/http/contract/openapi.test.ts:270` (formerly `lease.renewed`): rename the component entry to
   `run.renewed` in its bytewise position. The count assertion at
-  `src/http/contract/openapi.test.ts:416` — `equal` stays at 39, because this is a replacement.
+  `src/http/contract/openapi.test.ts:416` — `equal` stays at 38, because this is a replacement.
 
 ## Constraints
 
@@ -328,11 +297,8 @@ exactly what step 2.9 appends.
 - `input.fence` is the **node lease** fence and keeps its meaning. `input.runFence` is the run fence.
   Do not overload one field with both. The task renewal passes the presented fence and the objective
   renewal passes the stored `record.fence`; do not swap them.
-- Keep the objective branch. `src/commands/node/heartbeat-node.ts:83` — `node.kind` makes an
-  objective renew the shorter path: it renews its own run once and reaches step 9 for no second run.
-- Step 9 runs on the task branch only, and it skips a run whose id is the run already renewed.
-- Append one `run.renewed` per run whose `expires_at` moved, never one for two runs and never two
-  for one.
+- Keep the objective branch. `src/commands/run/renew-run.ts:83` — `node.kind` makes an
+  objective renew a five-seam path, and it stays a five-seam path.
 - Register `run.renewed` and retire `lease.renewed` in this story, never in a contract-only story.
 
 ## Verify
@@ -341,16 +307,16 @@ exactly what step 2.9 appends.
 node --test src/commands/run/renew-run.test.ts src/http/server/node/renew-node.test.ts src/cli/node/renew.test.ts src/main.test.ts src/domain/event-type.test.ts src/http/contract/event-payload.test.ts src/http/contract/openapi.test.ts test/sequence/conformance.test.ts
 ```
 
-Carry all twelve shipped cases of `src/commands/node/heartbeat-node.test.ts` across to
+Carry all twelve shipped cases of `src/commands/run/renew-run.test.ts` across to
 `src/commands/run/renew-run.test.ts` unchanged apart from the renamed symbols and the added request
-fields, and change the suite name at `src/commands/node/heartbeat-node.test.ts:223` — `describe` to
+fields, and change the suite name at `src/commands/run/renew-run.test.ts:223` — `describe` to
 `"src/commands/run/renew-run.test"`. The file uses real SQLite through
 `test/helpers/database.ts:32` — `createMigratedStorage`, a real `SqliteEventLog`, a SQL-backed lease
 fake at `test/helpers/lease.ts:114` — `createBackedLeaseFake`, and it snapshots rows through
 `test/helpers/database.ts:117` — `databaseBytes`. Its local drivers are
-`src/commands/node/heartbeat-node.test.ts:71` — `createFixture`,
-`src/commands/node/heartbeat-node.test.ts:106` — `claim` and
-`src/commands/node/heartbeat-node.test.ts:147` — `beat`.
+`src/commands/run/renew-run.test.ts:71` — `createFixture`,
+`src/commands/run/renew-run.test.ts:106` — `claim` and
+`src/commands/run/renew-run.test.ts:147` — `beat`.
 
 Add, each as a separate `it`:
 
@@ -370,7 +336,7 @@ Add, each as a separate `it`:
    lease would free a node under a live run.
 
 5. `"an objective renew renews the objective lease only"` — the shipped case at
-   `src/commands/node/heartbeat-node.test.ts:318` — `it`, carried across, plus an assertion that the
+   `src/commands/run/renew-run.test.ts:318` — `it`, carried across, plus an assertion that the
    recorder saw one `lease.renew` and no `lease.read`. This is the branch the diagram does not draw.
 
 6. `"a renew refuses a stale fence"` — run `fence: 4`, presented `runFence: 3`. Assert
@@ -395,7 +361,7 @@ Add, each as a separate `it`:
    control is case 10, which proves the assertion distinguishes the two codes.
 
 10. `"a renew on an initiative refuses initiative-not-claimable, not target-outside-run"` — the
-    shipped case at `src/commands/node/heartbeat-node.test.ts:386` — `it`, carried across with a
+    shipped case at `src/commands/run/renew-run.test.ts:386` — `it`, carried across with a
     valid `runId` and `runFence`, plus the added assertion that the code is not
     `"target-outside-run"`. Cases 9 and 10 are the pair that proves the node read precedes the
     authority check.
@@ -410,40 +376,24 @@ Add, each as a separate `it`:
 13. `"the renew response carries expiresAt and renewAfterMs and no heartbeatIntervalMs"` — assert
     both values, `renewAfterMs === Math.floor(runTtlMs / 3)`, and that the result key set holds no
     `heartbeatIntervalMs`. It replaces the shipped case at
-    `src/commands/node/heartbeat-node.test.ts:450` — `it`.
+    `src/commands/run/renew-run.test.ts:450` — `it`.
 
 14. `"a renew appends exactly one run.renewed event and no lease.renewed"` — assert the appended
     type, that its payload holds `runId`, `nodeId`, `fence` and `expiresAt`, and that no event of
     type `lease.renewed` exists for the subject. It replaces the shipped case at
-    `src/commands/node/heartbeat-node.test.ts:345` — `it`.
+    `src/commands/run/renew-run.test.ts:345` — `it`.
 
 15. `"lease.renewed is absent from eventTypes and run.renewed is present"` — in
-    `src/domain/event-type.test.ts`, assert both, assert the list length is still 39, and assert the
+    `src/domain/event-type.test.ts`, assert both, assert the list length is still 38, and assert the
     list equals its own `Buffer.compare` sort. Both halves are asserted, so the replacement is
     complete rather than additive.
 
 16. `"node.heartbeat is not wired and node.renew is"` — in `src/main.test.ts`, the shipped case
     `"no routed operation is left unbound"` at `src/main.test.ts:322` — `it` already walks the
-    production handler map of `src/main.ts:570` — `node.heartbeat` against the registry. Rename the
+    production handler map of `src/main.ts:570` (formerly `node.heartbeat`) against the registry. Rename the
     `node.heartbeat` key of the `fixtures` map at `src/main.test.ts:176` — `node.heartbeat` to
     `node.renew` and add `runId` and `runFence` to its body, so the walk covers the renamed operation
     and fails on the old name.
-
-17. `"a renew on a task presenting the objective run refuses target-outside-run"` — seed the run on
-    the objective node and renew the task with it. Assert `"target-outside-run"`. The control is
-    `"a renew on the objective presenting the objective run is admitted"`, the same fixture with the
-    objective as the target.
-
-18. `"a task renew moves the objective run forward with the task run"` — seed a structural run on the
-    objective beside the task run. Assert both `expires_at` values equal `now + runTtlMs`.
-
-19. `"a task renew clamps the objective run to the objective run's own max_lifetime_at"` — seed the
-    objective run with a lifetime nearer than `now + runTtlMs`. Assert the task run reaches
-    `now + runTtlMs` and the objective run stops at its own lifetime.
-
-20. `"a task renew appends one run.renewed per run it moved"` — assert the subject id list is exactly
-    the task run then the objective run. The control is `"an objective renew moves its own run only"`,
-    whose list holds one id.
 
 Add `test/sequence/scenarios/renew-success.ts`, building the fixture the diagram names, running the
 real `renewRun` over real SQLite behind the recorder, and returning the recorder and the result.

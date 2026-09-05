@@ -69,7 +69,6 @@ describe("src/http/contract/errors.test", () => {
       "target-outside-run",
       "fence-stale",
       "lifetime-exceeded",
-      "objective-run-lost",
       "plan-invalid",
       "choices-invalid",
       "identity-kind-mismatch",
@@ -155,7 +154,6 @@ describe("src/http/contract/errors.test", () => {
       "target-outside-run",
       "fence-stale",
       "lifetime-exceeded",
-      "objective-run-lost",
     ]);
     assert.deepEqual(groups[422], [
       "plan-invalid",
@@ -194,7 +192,6 @@ describe("src/http/contract/errors.test", () => {
       "target-outside-run",
       "fence-stale",
       "lifetime-exceeded",
-      "objective-run-lost",
     ] as const;
     const statuses = errorStatuses as Readonly<
       Record<string, number | undefined>

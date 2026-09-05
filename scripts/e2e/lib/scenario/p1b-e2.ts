@@ -463,7 +463,7 @@ export async function runP1BE2(
     nodeId: graph.alphaId,
     fence: alphaFirstResult.objectiveLeaseFence,
     runId: alphaFirstResult.objectiveRunId,
-    runFence: alphaFirstResult.objectiveRunFence,
+    runFence: alphaFirstResult.objectiveLeaseFence,
     objectId: alphaAttestObjectId,
     label: "alpha",
   });
@@ -471,7 +471,7 @@ export async function runP1BE2(
     nodeId: graph.betaId,
     fence: betaFirstResult.objectiveLeaseFence,
     runId: betaFirstResult.objectiveRunId,
-    runFence: betaFirstResult.objectiveRunFence,
+    runFence: betaFirstResult.objectiveLeaseFence,
     objectId: betaAttestObjectId,
     label: "beta",
   });
@@ -517,7 +517,7 @@ export async function runP1BE2(
       {
         report: "closed",
         runId: alphaFirstResult.objectiveRunId,
-        runFence: alphaFirstResult.objectiveRunFence,
+        runFence: alphaFirstResult.objectiveLeaseFence,
         acknowledgePartial: false,
       },
     ),
@@ -536,7 +536,7 @@ export async function runP1BE2(
     "--run-id",
     alphaFirstResult.objectiveRunId,
     "--run-fence",
-    String(alphaFirstResult.objectiveRunFence),
+    String(alphaFirstResult.objectiveLeaseFence),
   ]);
   const alphaClosed = await driver.cliAs("client", [
     "node",
@@ -569,7 +569,7 @@ export async function runP1BE2(
     "--run-id",
     betaFirstResult.objectiveRunId,
     "--run-fence",
-    String(betaFirstResult.objectiveRunFence),
+    String(betaFirstResult.objectiveLeaseFence),
   ]);
   const betaClosed = await driver.cliAs("client", [
     "node",

@@ -4,7 +4,6 @@ import { z } from "zod";
 
 import { nodeClaimResponse, nodeRenewResponse } from "./execution.ts";
 import { buildErrorEnvelope } from "./errors.ts";
-import { fieldDecisions } from "./field-decisions.fixture.ts";
 import { nodeReportRequest } from "./outcome.ts";
 import { findOperation, registry } from "./registry.ts";
 
@@ -29,19 +28,16 @@ test("src/http/contract/example.test", async (t) => {
   );
 
   await t.test(
-    "nodeClaimResponse carries both run ids, both run fences, expiresAt and renewAfterMs",
+    "nodeClaimResponse carries runId, fence, expiresAt and renewAfterMs",
     () => {
       const response = nodeClaimResponse.parse(
         findOperation("node.claim")!.examples!.success,
       ) as Record<string, unknown>;
 
       assert.equal(typeof response.runId, "string");
-      assert.equal(typeof response.runFence, "number");
-      assert.equal((response.runFence as number) >= 1, true);
+      assert.equal(typeof response.fence, "number");
+      assert.equal((response.fence as number) >= 1, true);
       assert.equal(typeof response.objectiveRunId, "string");
-      assert.equal(typeof response.objectiveRunFence, "number");
-      assert.equal((response.objectiveRunFence as number) >= 1, true);
-      assert.equal(Object.hasOwn(nodeClaimResponse.shape, "fence"), false);
       assert.equal(typeof response.expiresAt, "number");
       assert.equal((response.renewAfterMs as number) > 0, true);
     },
@@ -103,66 +99,6 @@ test("src/http/contract/example.test", async (t) => {
       assert.equal(response.expiresAt, 1722800300000);
       assert.equal(response.renewAfterMs, 100000);
       assert.equal(Object.hasOwn(response, "heartbeatIntervalMs"), false);
-    },
-  );
-
-  await t.test(
-    "nodeRenewResponse carries objectiveExpiresAt and its example parses",
-    () => {
-      assert.equal(
-        Object.hasOwn(nodeRenewResponse.shape, "objectiveExpiresAt"),
-        true,
-      );
-
-      const response = nodeRenewResponse.parse(
-        findOperation("node.renew")!.examples!.success,
-      ) as Record<string, unknown>;
-
-      assert.equal(response.objectiveExpiresAt, 1722800300000);
-
-      const missing = nodeRenewResponse.safeParse({
-        ...(findOperation("node.renew")!.examples!.success as Record<
-          string,
-          unknown
-        >),
-        objectiveExpiresAt: undefined,
-      });
-      assert.equal(missing.success, false);
-      if (!missing.success) {
-        assert.deepEqual(missing.error.issues[0]?.path, ["objectiveExpiresAt"]);
-      }
-    },
-  );
-
-  await t.test(
-    "the node.renew objectiveExpiresAt field decision is published",
-    () => {
-      assert.equal(
-        fieldDecisions.includes(
-          "node.renew.response#/properties/objectiveExpiresAt required=true nullable=false enum=-",
-        ),
-        true,
-      );
-      assert.deepEqual(
-        fieldDecisions.filter((row) => row.startsWith("node.renew.response#")),
-        [
-          "node.renew.response#/properties/expiresAt required=true nullable=false enum=-",
-          "node.renew.response#/properties/lease required=true nullable=false enum=-",
-          "node.renew.response#/properties/lease/properties/expiresAt required=true nullable=false enum=-",
-          "node.renew.response#/properties/lease/properties/fence required=true nullable=false enum=-",
-          "node.renew.response#/properties/lease/properties/owner required=true nullable=false enum=-",
-          "node.renew.response#/properties/lease/properties/ownerKind required=true nullable=false enum=actor",
-          "node.renew.response#/properties/lease/properties/subjectId required=true nullable=false enum=-",
-          "node.renew.response#/properties/objectiveExpiresAt required=true nullable=false enum=-",
-          "node.renew.response#/properties/objectiveLease required=true nullable=false enum=-",
-          "node.renew.response#/properties/objectiveLease/properties/expiresAt required=true nullable=false enum=-",
-          "node.renew.response#/properties/objectiveLease/properties/fence required=true nullable=false enum=-",
-          "node.renew.response#/properties/objectiveLease/properties/owner required=true nullable=false enum=-",
-          "node.renew.response#/properties/objectiveLease/properties/ownerKind required=true nullable=false enum=actor",
-          "node.renew.response#/properties/objectiveLease/properties/subjectId required=true nullable=false enum=-",
-          "node.renew.response#/properties/renewAfterMs required=true nullable=false enum=-",
-        ],
-      );
     },
   );
 

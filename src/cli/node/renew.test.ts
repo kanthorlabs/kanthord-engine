@@ -27,7 +27,6 @@ const RENEWED = {
     expiresAt: 1722800900000,
   },
   expiresAt: 1722800900000,
-  objectiveExpiresAt: 1722800900000,
   renewAfterMs: 100000,
 };
 

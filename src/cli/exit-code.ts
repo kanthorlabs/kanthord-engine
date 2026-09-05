@@ -44,7 +44,6 @@ export const exitCodes: Readonly<Record<ErrorCode, number>> = {
   "target-outside-run": 174,
   "fence-stale": 175,
   "lifetime-exceeded": 176,
-  "objective-run-lost": 177,
   "internal-error": 210,
   "not-implemented": 220,
   "service-unavailable": 230,

@@ -345,11 +345,14 @@ function assertRunAuthorityForReport(
   now: number,
 ): RunRecord {
   const run = dependencies.execution.runById(transaction, input.runId);
+  const subtreeIds =
+    run === null ? [] : dependencies.plan.readSubtree(transaction, run.nodeId);
   const refusal = assertRunAuthority({
     run,
     runId: input.runId,
     fence: input.runFence,
     targetNodeId: input.nodeId,
+    subtreeIds,
     caller: dependencies.caller,
     now,
   });

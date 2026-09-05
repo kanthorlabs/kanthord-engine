@@ -33,6 +33,7 @@ export type RunAuthorityInput = Readonly<{
   runId: string;
   fence: number;
   targetNodeId: string;
+  subtreeIds: readonly string[];
   caller: string;
   now: number;
 }>;
@@ -53,7 +54,7 @@ export function assertRunAuthority(
 2. `run-ended` — `input.run.state !== "active"`.
 3. `run-expired` — `input.run.expiresAt !== null && input.run.expiresAt <= input.now`. A null `expiresAt` never expires, and cases 6 to 8 pin all three boundaries.
 4. `run-caller-mismatch` — `input.run.worker !== input.caller`.
-5. `target-outside-run` — `input.targetNodeId !== input.run.nodeId`. The binding is the run's own node and nothing wider. A structural objective run holds no task attempt, so admitting a descendant would let an objective run authorize a task release or a task report that no attempt can answer. The claim-time subtree rule of EPIC 050 governs exclusion, not authority, and the subtree-bound structural mutation of `docs/workflow/worker.md:412` is EPIC 052's: it declares its own admission and its own control case, and it never widens this condition in place.
+5. `target-outside-run` — `input.targetNodeId !== input.run.nodeId` and `input.subtreeIds.includes(input.targetNodeId) === false`. `subtreeIds` is the descendant set of the run's node; the caller supplies it, and the run's own node is admitted whether or not it appears there.
 6. `fence-stale` — `input.run.fence !== input.fence`.
 
 The order is what makes an ended run presented with its own last fence refuse `run-ended` rather than pass: condition 2 fires before condition 6 ever runs. A fence comparison alone would admit that row, because the daemon raises the fence when it ends a run, so the worker's stored fence is one behind and the check would only catch it by accident.
@@ -65,7 +66,7 @@ The order is what makes an ended run presented with its own last fence refuse `r
 - Pure. `now` and `caller` are inputs. No clock, no store.
 - The refusal object has exactly two keys. Do not add a `message`; the caller builds one.
 - Do not throw. The function returns a refusal or `null`; Story 3 (`03-the-renew`), Story 5 (`05-the-release`) and Story 6 (`06-the-report-prelude`) each turn a refusal into their own error class.
-- Take no subtree. The run row carries `nodeId`, and condition 5 needs nothing else.
+- Do not mutate `input.subtreeIds`.
 
 ## Verify
 
@@ -99,11 +100,11 @@ Assert, each as a separate `it`:
 
 10. `"run-caller-mismatch when the run worker is null"` — assert `refusal === "run-caller-mismatch"`.
 
-11. `"target-outside-run when the target is not the run node"` — `targetNodeId: "task_z"`. Assert `refusal === "target-outside-run"`.
+11. `"target-outside-run when the target is neither the run node nor in the subtree"` — `targetNodeId: "task_z"`, `subtreeIds: ["task_b"]`. Assert `refusal === "target-outside-run"`.
 
-12. `"the run's own node is the only node inside the run"` — `targetNodeId === run.nodeId`. Assert `null`.
+12. `"the run's own node is always inside the run"` — `targetNodeId === run.nodeId` with `subtreeIds: []`. Assert `null`.
 
-13. `"target-outside-run for a descendant of the run node"` — `run.nodeId: "objective_a"`, `targetNodeId: "task_a"`. Assert `refusal === "target-outside-run"`. This is the control for condition 5: a descendant of the run's node is outside the run's authority.
+13. `"a descendant in subtreeIds is inside the run"` — `targetNodeId: "task_b"`, `subtreeIds: ["task_b"]`. Assert `null`.
 
 14. `"fence-stale when the presented fence is behind"` — run `fence: 4`, input `fence: 3`. Assert `refusal === "fence-stale"`.
 
@@ -122,6 +123,8 @@ Assert, each as a separate `it`:
 21. `"the refusal order is exactly the pinned tuple"` — assert `assert.deepEqual([...runAuthorityRefusals], ["run-not-found","run-ended","run-expired","run-caller-mismatch","target-outside-run","fence-stale"])` and `assert.equal(runAuthorityRefusals.length, 6)`.
 
 22. `"no refusal carries a fence value"` — build one input per refusal code that produces it, collect the six refusal objects, and for each assert `assert.deepEqual(Object.keys(refusal).sort(), ["refusal", "runId"])`. The assertion scans the key set, per the EPIC's gate, rather than checking for one named key.
+
+23. `"the subtree array is not mutated"` — capture a copy before the call and assert deep equality after.
 
 `pnpm run verify` exits 0.
 

@@ -8,7 +8,7 @@ Diagrams: report-lease-free
 
 Supersedes: EPIC 050.2 report-authority-prelude
 
-Seams: report-lease-free: +execution.attemptsOfRun:R, +execution.closeAttempt:A, +plan.setNodeState:T:outcome-accepted, +execution.stampRunHead:R, +execution.endRun:R, +events.append:run.ended:R, +events.append:outcome.reported:T, +plan.readAllNodes, -lease.release @src/commands/outcome/report-outcome.ts:282
+Seams: report-lease-free: +execution.attemptsOfRun:R, +execution.closeAttempt:A, +plan.setNodeState:T:outcome-accepted, +execution.stampRunHead:R, +execution.endRun:R, +events.append:outcome.reported:T:null, +plan.readAllNodes, -lease.release @src/commands/outcome/report-outcome.ts:282
 
 The superseded diagram pinned its tail, so the seven `+` tokens are tail calls entering a drawn prefix
 for the first time, not new calls. `lease.release` is a call the superseded diagram never drew, so its
@@ -63,34 +63,39 @@ sequenceDiagram
     Command->>Expiry: 3 expiry.expireRuns
     Command->>Plan: 4 plan.readNode
     Command->>Execution: 5 execution.runById:R
-    Command->>Execution: 6 execution.attemptsOfRun:R
-    Command->>Execution: 7 execution.closeAttempt:A
-    Command->>Plan: 8 plan.setNodeState:T:outcome-accepted
-    Command->>Execution: 9 execution.stampRunHead:R
-    Command->>Execution: 10 execution.endRun:R
-    Command->>Events: 11 events.append:run.ended:R
-    Command->>Events: 12 events.append:outcome.reported:T
+    Command->>Plan: 6 plan.readSubtree
+    Command->>Execution: 7 execution.attemptsOfRun:R
+    Command->>Execution: 8 execution.closeAttempt:A
+    Command->>Plan: 9 plan.setNodeState:T:outcome-accepted
+    Command->>Execution: 10 execution.stampRunHead:R
+    Command->>Execution: 11 execution.endRun:R
+    Command->>Events: 12 events.append:outcome.reported:T:null
     Command->>Plan: 13 plan.readAllNodes
     Command-->>Client: ok
 ```
 
-**Steps 1 to 5 are the pinned prefix, reproduced token for token and in its order.**
+**Step 12 carries the label `null`, and the recorder is what puts it there.**
+`test/helpers/sequence-conformance.ts:81` — `reason` appends `String(payload.reason)` whenever the
+payload holds a `reason` key, and `src/commands/outcome/report-outcome.ts:302` — `reason` is one of
+the nine keys the shipped payload writes. An accepted report carries it as `null`, so the token is
+`events.append:outcome.reported:T:null`.
+
+**Steps 1 to 6 are the pinned prefix, reproduced token for token and in its order.**
 EPIC 050.2 Story 6 (`06-the-report-prelude`) ends `report-authority-prelude` with
 `note over Command: tail pinned by EPIC 050.4 report-lease-free`, so this diagram is what that note
-names and its first five steps must be that prefix exactly: `storage.transact`, `clock.now`,
-`expiry.expireRuns`, `plan.readNode`, `execution.runById:R`.
+names and its first six steps must be that prefix exactly: `storage.transact`, `clock.now`,
+`expiry.expireRuns`, `plan.readNode`, `execution.runById:R`, `plan.readSubtree`.
 
 **`plan.readNode` is step 4, ahead of the authority check, and that position is the prefix's.** That
 story states why: _"this command already read the node first, so `node-not-found` and
 `initiative-not-reportable` keep their shipped precedence with no reordering."_ It is a context token
-— the tail reads `node.kind` and `node.state` from it, and the run row carries neither — so this
-story deletes the lease and no consumer of the node row, and no `Seams:`
+— the tail reads `node.kind` and `node.state` from it, `plan.readSubtree` is added **beside** it and
+replaces neither — so this story deletes the lease and no consumer of the node row, and no `Seams:`
 token governs the read. Drawing it after the authority check would move a shipped refusal's
 precedence, which no story of this epic decides.
 
-Step 6 is one read where the shipped path read twice. `lease.release` sat between step 10 and step 11
-and is gone, so a report that released a lease fails the comparison. Step 11 is the terminal event
-for a report that ends a run. Step 13 is the sibling read that
+Step 7 is one read where the shipped path read twice. `lease.release` sat between step 11 and step 12
+and is gone, so a report that released a lease fails the comparison. Step 13 is the sibling read that
 builds the objective projection of the response; it is a read after every write and it does not move.
 
 Add `test/sequence/scenarios/report-lease-free.ts`.
@@ -101,11 +106,6 @@ Add `test/sequence/scenarios/report-lease-free.ts`.
 
 **1 — the release.** Delete `dependencies.lease.release` at `:282-289`. It sits between the
 `execution.endRun` block at `:265-277` and the `events.append` at `:291-306`, and neither moves.
-
-**1b — the terminal event.** Append `run.ended` immediately after `execution.endRun` in the same
-transaction. An accepted report with `runEnd: "done"` appends one event for the ended run, and an
-attempt-limit rejected report with `runEnd: "blocked"` appends one event for the ended run. A report
-with `runEnd: null` ends no run and appends zero `run.ended` events.
 
 **2 — the collapse.** `:213-215` reads the attempts to find the open one, and `:239-244` reads them
 again to build the accounting after `closeAttempt` at `:232`. Read once at `:213`, keep the list, and
@@ -148,10 +148,8 @@ which pins one `fence` line per member of `node.report.request`.
 `src/http/server/node/refusals.ts`, its key from `node.report`'s `errors` record at
 `src/http/contract/outcome.ts:152`, and its `operationAdditions` entry. Replace the `lease-held`
 literal of `nodeReportExamples` at `:75` with `run-ended` carrying `{ runId }`.
-This removes the `LeaseError("lease-fenced")` to `ReportOutcomeError("lease-held")` mapping retained
-by EPIC 050.2 together with the `lease.release` call.
 
-**The nested call's `fence` argument goes here, not in Story 7.** `report-outcome.ts:129` passes
+**The nested call's `fence` argument goes here, not in Story 7.** `src/commands/outcome/report-outcome.ts:129` passes
 `fence: body.fence` into `reportObjective`. `body.fence` stops existing in this story, so the argument
 cannot outlive it: delete `fence` from the call at `:125-131` and from `ReportObjectiveInput` in
 `src/commands/outcome/report-objective.ts`. Story 7 then deletes the lease block that read it. Leaving
@@ -171,12 +169,11 @@ report a divergence rather than re-applying.
 - Read the attempts once. Two reads of one run are two steps of one token, and the parser refuses that.
 - The accounting must see the closing outcome. Projecting `body.report` onto the open attempt is what makes the single read equivalent; dropping the projection would under-count and break the attempt limit.
 - Do not move `execution.endRun`, `execution.stampRunHead` or `events.append`. Deleting the call between them changes no order.
+- `execution.stampRunHead` needs a projection entry, or step 10 draws a token the recorder cannot emit. `test/helpers/sequence-conformance.ts:50` — `projections` holds no entry for it, so the recorder pushes a bare `execution.stampRunHead` and this diagram's `execution.stampRunHead:R` never matches. Add `"execution.stampRunHead": (input, context) => [field(input, "runId", context)]` beside the other run-scoped entries; its input is an object, so no other change is needed. EPIC 050.2 Story 2 (`02-the-authority-seams`) makes the separate repair that a **primitive** argument needs.
 - Touch the objective branch's dispatch at `:125-138` only to drop the `fence` argument. Story 7 owns everything else in `report-objective.ts`.
 - Delete `input.fence` and the five schema members together. Splitting them across two stories leaves one story red.
 - Do not touch `errorStatuses`, `exitCodes` or `leaseHeldDetails`. Story 8 retires the code.
 - Regenerate `field-decisions.fixture.ts` in this story.
-- Append `run.ended` only when the report ends a run. Keep it after `execution.endRun` and before
-  `outcome.reported`.
 
 ## Verify
 
@@ -206,16 +203,7 @@ Add, each as a separate `it`:
 
 10. `"the derived field decisions hold no node.report fence line"` — the shipped `coverage.test.ts` harness over the regenerated fixture. Assert the count of removed lines is five, matching the five members that carried `fence`.
 
-11. `"an accepted report appends run.ended"` — an accepted report with `runEnd: "done"` appends one
-    run-scoped `run.ended` event for the ended run.
-
-12. `"an attempt-limit rejected report appends run.ended"` — a rejected report with `runEnd: "blocked"`
-    appends one run-scoped `run.ended` event for the ended run.
-
-13. `"a report that ends no run appends no run.ended"` — a report with `runEnd: null` appends zero
-    `run.ended` events.
-
-Add `test/sequence/scenarios/report-lease-free.ts`.
+Add `test/sequence/scenarios/report-lease-free.ts`. **Delete `test/sequence/scenarios/report-authority-prelude.ts` in the same commit**, because this replacement makes EPIC 050.2's `report-authority-prelude` superseded the moment it exists, and a scenario naming a superseded diagram is refused at `test/sequence/conformance.test.ts:115` — `names a superseded live diagram`. EPIC 050.3 Story 10 (`10-the-conformance-harness-admits-an-incremental-supersession`) lands that rule one epic earlier, and this epic repeats none of it.
 
 `pnpm run verify` exits 0.
 

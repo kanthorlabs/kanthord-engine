@@ -4,7 +4,7 @@ Epic: `.agents/plan/epics/050.5-the-lease-table-removal.md`
 Prereq: EPIC 050, EPIC 050.1, EPIC 050.2, EPIC 050.3 and EPIC 050.4, implemented. EPIC 050.1's migration `12` is what gives the rewritten candidate query `run.expires_at`, `run.fence` and `run_base`, and its Story 2 is what gives Story 3 the `expireRuns` pass. After EPIC 050.4 the `Lease` service has exactly three importers, and this epic removes all three.
 
 The lease table has no writer left. This epic moves its remaining readers onto the run and deletes the
-service and the domain module. **It drops no table**: EPIC 057's migration `17` already owns the lease
+service and the domain module. **It drops no table**: EPIC 057's migration `18` already owns the lease
 rows, and the drop belongs there.
 
 ## One story, one path
@@ -189,12 +189,12 @@ Each was read out of the source before a story was written, and each one changed
 - **The `blocker` enum is open on the wire.** `src/http/contract/error-details.ts:36` is
   `blocker: z.string()`, so dropping the `lease` member changes no schema.
 
-- **Every migration version through `17` is already allocated.** `12` is EPIC 050's run model, `13` is
-  EPIC 051's `checkpoint` table (`epics/051-…md:70,686`), `14` is EPIC 053's (`:61,67`), `15` is EPIC
-  054's (`:26,79`), `16` is EPIC 055's (`:25`) and `17` is EPIC 057's (`:63`). An earlier draft of this
-  epic took `13`, which would have renumbered five authored epics and their tests.
+- **Every migration version through `18` is already allocated.** `12` is EPIC 050.1's run model, `13`
+  is EPIC 051's `workspace_branch` table, `14` is EPIC 051.3's `checkpoint` table, `15` is EPIC 053's,
+  `16` is EPIC 054's, `17` is EPIC 055's and `18` is EPIC 057's. An earlier draft of this epic took
+  `13`, which would have renumbered six authored epics and their tests.
 
-- **EPIC 057's migration `17` already owns the lease rows, and dropping the table under it would
+- **EPIC 057's migration `18` already owns the lease rows, and dropping the table under it would
   invalidate that migration.** `epics/057-…md:35` makes its preflight refuse while a live node lease
   exists, `:63` narrows the `subject_kind` CHECK and deletes the node rows, and `:105` asserts every
   surviving `lease` column is present afterwards. None of that is satisfiable against a dropped table.
@@ -222,7 +222,7 @@ Each was read out of the source before a story was written, and each one changed
   used only at `:125` inside `leaseHeldDetails`. EPIC 050.4 Story 8 (`08-lease-held-is-retired`) deletes that schema, so it must
   delete this import in the same edit; the amendment is listed in the epic.
 
-- **`migration-0007-external-execution.ts:69` copies lease rows.** It is a shipped historical
+- **`src/services/storage/migration-0007-external-execution.ts:69` copies lease rows.** It is a shipped historical
   migration and no story here touches it.
 
 - **`test/helpers/lease.ts` imports all three modules this epic deletes**, and fourteen `*.test.ts`
@@ -267,7 +267,7 @@ w.repository_id`. A join on `run_id` alone returns one candidate row per base, a
 ## What this epic is not
 
 It is **not** wire-invisible. One response field, `system.status.leases[]`, leaves the contract. That
-is outside the closed list of `docs/proposal/api/README.md:100-106`, and the amended policy of EPIC 050.2 Story 8 (`08-the-policy-amendment-and-the-capability-swap`) makes it legal behind a recorded human ruling **and** a capability retirement.
+is outside the closed list of `docs/proposal/api/README.md:101-106`, and the amended policy of EPIC 050.2 Story 8 (`08-the-policy-amendment-and-the-capability-swap`) makes it legal behind a recorded human ruling **and** a capability retirement.
 `system.status` is covered by no capability, so there is no name to retire — the epic records the
 ruling, moves `KANTHORD_VERSION` to `30.0.0`, and writes a compatibility-record row whose "capability
 retired" cell reads **none**.
@@ -277,7 +277,7 @@ three after this epic, and its per-node verdict stays in its own transaction so 
 workspace blocks one node without failing the pass.
 
 It is **not** a schema change either. The `lease` table, `src/domain/lease.ts` and `rows.lease` all
-survive, empty and unreachable, until EPIC 057's migration `17`.
+survive, empty and unreachable, until EPIC 057's migration `18`.
 
 ## Still open
 
@@ -296,7 +296,7 @@ survive, empty and unreachable, until EPIC 057's migration `17`.
   reading is the correct one.
 
   **Migrating the six writes to `test/helpers/rows.ts` was considered and rejected on scope.** It is
-  the shape the config comment prefers, and `eslint.config.js:458` scopes the restriction to
+  the shape the config comment prefers, and `eslint.config.js:467` scopes the restriction to
   `files: ["src/**/*.ts"]`, so `test/**` is unrestricted and the helper is the right home for a _new_
   fixture. It does not fit here. Two of the six map cleanly — `UPDATE node SET state = 'running'` at
   `:495` and `:902` become `seedNodeState` (`test/helpers/rows.ts:267`), whose `block_reason` `CASE`
@@ -325,7 +325,7 @@ survive, empty and unreachable, until EPIC 057's migration `17`.
   completion line already names. Story 0 grants `eslint.config.js`, so a later turn for it is
   excluded by construction.
 
-  The residue is one inert line: an unmatched `files` pattern at `eslint.config.js:469` applies to
+  The residue is one inert line: an unmatched `files` pattern at `eslint.config.js:478` applies to
   nothing, and reclaiming the old pathname would take a reviewed source change. The epic asks EPIC
   057 to delete it with the rest of the lease cleanup.
 
@@ -335,7 +335,7 @@ survive, empty and unreachable, until EPIC 057's migration `17`.
   not wire-constrained — is true. `/author` does not edit an EPIC, so **a human moves both to `:26`**.
 
 - **The `system.status` policy hole.** **Ruled: the field leaves, and
-  Story 8 writes the policy clause that makes it legal.** `docs/proposal/api/README.md:100` —
+  Story 8 writes the policy clause that makes it legal.** `docs/proposal/api/README.md:103` —
   `remove or rename a response field` is forbidden inside `/v1`, and `:106` closes the list. EPIC
   050.2 Story 8 (`08-the-policy-amendment-and-the-capability-swap`) opened the one legalizing path,
   and its sentence pairs a human ruling with "the capability swap that announced it". `system.status`
@@ -351,10 +351,10 @@ survive, empty and unreachable, until EPIC 057's migration `17`.
   the thing the constraint exists to avoid.
 
 - **The dashboard types the field, and no `HANDOFF.md` entry asks it to drop it.**
-  `apps/apps/dashboard/src/api/types.ts:440` — `leases: SystemStatusLease[]`, a fixture at
-  `apps/apps/dashboard/src/api/fixtures/system.ts:23`, and a contract copy at
+  `../apps/apps/dashboard/src/api/types.ts:440` — `leases: SystemStatusLease[]`, a fixture at
+  `../apps/apps/dashboard/src/api/fixtures/system.ts:23`, and a contract copy at
   `apps/docs/api/contract/source/components/system.yaml:617` with `leases` in the **required** list at
-  `:656`. No file under `apps/apps/dashboard/src` reads `.leases`, so this is a contract and type
+  `:656`. No file under `../apps/apps/dashboard/src` reads `.leases`, so this is a contract and type
   divergence rather than a runtime break, and the contract copy regenerates from the engine's
   publication. `types.ts` and `fixtures/system.ts` are hand-written and do not. `AGENTS.md` puts an
   obligation the dashboard must take on in `HANDOFF.md`, and no story of the 050 family writes that
@@ -375,21 +375,9 @@ survive, empty and unreachable, until EPIC 057's migration `17`.
 
 None is applied here, and a human applies each before dispatch. Each is named in the epic.
 
-- **EPIC 057 Stories 5, 6 and 7** — migration `17` drops the `lease` table instead of narrowing it,
+- **EPIC 057 Stories 5, 6 and 7** — migration `18` drops the `lease` table instead of narrowing it,
   and deletes `src/domain/lease.ts`, `rows.lease` and `docs/proposal/database/lease.md` in the same
   edit; its preflight loses the live-node-lease clause; its gate loses the surviving-`lease`-column
   assertion; and its `lease-hierarchy` deletion becomes a no-op, because EPIC 050.4 and Story 7 here
-  already do it.
-
-- **EPIC 050.4 Story 8 (`08-lease-held-is-retired`)** — delete the `leaseOwnerKinds` import at `error-details.ts:5` with the
-  `leaseRelations` import at `:6`. Both serve only `leaseHeldDetails`, which that story deletes.
-
-- **EPIC 050.4, the `leaseTtlMs` configuration** — its Story 1 and Story 4 delete the last two readers
-  and no epic through EPIC 057 removes the setting. The default if no ruling arrives is that Story 6
-  here takes it.
-
-- **EPIC 050.2 Story 2 (`02-the-authority-seams`), the `endRun` fence raise** — gate rows 1 and 10b depend on it and no `## Change`
-  section in the family instructs the write. The default if no ruling arrives is that the implementing
-  agent reports a red row as an EPIC 050.2 defect rather than writing the execution service here.
-
-Nothing else blocks dispatch.
+  already do it. **The default if no ruling arrives: migration `18` narrows the table instead of
+  dropping it**, and the product ships an empty `lease` table.

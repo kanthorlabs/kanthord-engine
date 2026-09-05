@@ -52,9 +52,8 @@ type ClaimBody = Readonly<{
     owner: string;
   }>;
   runId: string;
-  runFence: number;
+  fence: number;
   objectiveRunId: string;
-  objectiveRunFence: number;
   attemptId: string | null;
   attemptNo: number | null;
   node: Readonly<{ id: string; state: string }>;
@@ -645,7 +644,7 @@ async function acceptTask(
     report: "accepted",
     fence: claimed.lease.fence,
     runId: claimed.runId,
-    runFence: claimed.runFence,
+    runFence: claimed.fence,
     objectId,
   });
   assertStatus(result, 200);
@@ -662,7 +661,7 @@ async function rejectTask(
     report: "rejected",
     fence: claimed.lease.fence,
     runId: claimed.runId,
-    runFence: claimed.runFence,
+    runFence: claimed.fence,
     reason: "the harness rejected this attempt",
   });
   assertStatus(result, 200);
@@ -689,7 +688,7 @@ async function blockTask(
   for (let attempt = 0; attempt < limit; attempt++) {
     const claimed = await claim(fixture, actor, taskId);
     objectiveRunId = claimed.objectiveRunId;
-    objectiveRunFence = claimed.objectiveRunFence;
+    objectiveRunFence = claimed.objectiveLease.fence;
     objectiveLeaseFence = claimed.objectiveLease.fence;
     endedRunId = claimed.runId;
     await rejectTask(fixture, actor, taskId, claimed);
@@ -742,7 +741,7 @@ describe("src/main.report.test", () => {
           report: "attested",
           fence: first.claim.objectiveLease.fence,
           runId: first.claim.objectiveRunId,
-          runFence: first.claim.objectiveRunFence,
+          runFence: first.claim.objectiveLease.fence,
           objectId: OBJECT_ID_TWO,
         },
       );
@@ -767,7 +766,7 @@ describe("src/main.report.test", () => {
         {
           report: "closed",
           runId: first.claim.objectiveRunId,
-          runFence: first.claim.objectiveRunFence,
+          runFence: first.claim.objectiveLease.fence,
           acknowledgePartial: false,
         },
       );
@@ -801,7 +800,7 @@ describe("src/main.report.test", () => {
           report: "attested",
           fence: betaTask.claim.objectiveLease.fence,
           runId: betaTask.claim.objectiveRunId,
-          runFence: betaTask.claim.objectiveRunFence,
+          runFence: betaTask.claim.objectiveLease.fence,
           objectId: OBJECT_ID_ONE,
         },
       );
@@ -813,7 +812,7 @@ describe("src/main.report.test", () => {
         {
           report: "closed",
           runId: betaTask.claim.objectiveRunId,
-          runFence: betaTask.claim.objectiveRunFence,
+          runFence: betaTask.claim.objectiveLease.fence,
           acknowledgePartial: false,
         },
       );
@@ -862,7 +861,7 @@ describe("src/main.report.test", () => {
           report: "attested",
           fence: first.claim.objectiveLease.fence,
           runId: first.claim.objectiveRunId,
-          runFence: first.claim.objectiveRunFence,
+          runFence: first.claim.objectiveLease.fence,
           objectId: OBJECT_ID_TWO,
         },
       );
@@ -981,7 +980,7 @@ describe("src/main.report.test", () => {
           report: "accepted",
           fence: first.lease.fence + 1,
           runId: first.runId,
-          runFence: first.runFence,
+          runFence: first.fence,
           objectId: OBJECT_ID_ONE,
         },
       );
@@ -997,7 +996,7 @@ describe("src/main.report.test", () => {
           report: "accepted",
           fence: first.lease.fence + 1,
           runId: first.runId,
-          runFence: first.runFence,
+          runFence: first.fence,
           objectId: OBJECT_ID_ONE,
         },
       );
@@ -1016,7 +1015,7 @@ describe("src/main.report.test", () => {
         report: "accepted",
         fence: claimed.lease.fence,
         runId: claimed.runId,
-        runFence: claimed.runFence,
+        runFence: claimed.fence,
         objectId: OBJECT_ID_ONE,
       } as const;
       const first = await report(
@@ -1073,7 +1072,7 @@ describe("src/main.report.test", () => {
           report: "accepted",
           fence: claimed.lease.fence,
           runId: claimed.runId,
-          runFence: claimed.runFence,
+          runFence: claimed.fence,
           objectId: OBJECT_ID_ONE,
         },
       );
@@ -1088,7 +1087,7 @@ describe("src/main.report.test", () => {
           report: "accepted",
           fence: claimed.lease.fence,
           runId: claimed.runId,
-          runFence: claimed.runFence,
+          runFence: claimed.fence,
           objectId: OBJECT_ID_ONE,
         },
       );
@@ -1107,7 +1106,7 @@ describe("src/main.report.test", () => {
           report: "attested",
           fence: claimed.objectiveLease.fence,
           runId: claimed.objectiveRunId,
-          runFence: claimed.objectiveRunFence,
+          runFence: claimed.objectiveLease.fence,
           objectId: OBJECT_ID_TWO,
         },
       );
@@ -1122,7 +1121,7 @@ describe("src/main.report.test", () => {
         {
           report: "closed",
           runId: claimed.objectiveRunId,
-          runFence: claimed.objectiveRunFence,
+          runFence: claimed.objectiveLease.fence,
           acknowledgePartial: false,
         },
       );
@@ -1205,7 +1204,7 @@ describe("src/main.report.test", () => {
         report: "accepted",
         fence: rerun.lease.fence,
         runId: rerun.runId,
-        runFence: rerun.runFence,
+        runFence: rerun.fence,
         objectId: OBJECT_ID_ONE,
       }).then((result) => assertStatus(result, 200));
       const secondTask = await acceptTask(
@@ -1280,7 +1279,7 @@ describe("src/main.report.test", () => {
       assert.deepEqual(refused.details, {
         refusal: "node-state",
         state: "pending",
-        admitted: ["ready", "running"],
+        admitted: ["ready"],
       });
       assert.deepEqual(databaseSnapshot(fixture.home.path), beforeClaim);
     } finally {

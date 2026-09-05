@@ -57,31 +57,10 @@ const epic0502ScenarioCases = [
     ),
   },
   {
-    id: "claim-reuse-objective-run",
-    story: resolve(
-      storiesRoot,
-      "050.2-the-run-renew-release-and-report/10-the-reused-objective-run.md",
-    ),
-  },
-  {
     id: "report-authority-prelude",
     story: resolve(
       storiesRoot,
       "050.2-the-run-renew-release-and-report/06-the-report-prelude.md",
-    ),
-  },
-  {
-    id: "claim-recovers-objective-authority",
-    story: resolve(
-      storiesRoot,
-      "050.2.1-the-promised-expiry-and-the-explicit-recovery/02-the-explicit-recovery.md",
-    ),
-  },
-  {
-    id: "renew-refusal-objective-run-lost",
-    story: resolve(
-      storiesRoot,
-      "050.2.1-the-promised-expiry-and-the-explicit-recovery/01-the-lost-objective-run-is-announced.md",
     ),
   },
 ] as const;
@@ -325,12 +304,22 @@ describe("test/sequence/conformance", () => {
       "050",
       "050.1",
       "050.2",
-      "050.2.1",
       "050.3",
       "050.4",
       "050.5",
+      "050.6",
+      "051",
+      "051.1",
+      "051.2",
+      "051.3",
+      "051.4",
+      "051.5",
+      "051.6",
+      "052",
+      "052.1",
+      "052.2",
     ]);
-    assert.deepEqual(shippedEpics, ["050", "050.1", "050.2", "050.2.1"]);
+    assert.deepEqual(shippedEpics, ["050", "050.1", "050.2"]);
     assert.deepEqual(authoredEpics.slice(0, shippedEpics.length), shippedEpics);
   });
 

@@ -8,7 +8,7 @@ Diagrams: renew-refusal-lifetime-exceeded
 
 Baselines: renew-refusal-lifetime-exceeded <- baseline-renew-task
 
-Seams: renew-refusal-lifetime-exceeded: +expiry.expireRuns, +plan.readNode, +execution.runById:R, -plan.readAllNodes
+Seams: renew-refusal-lifetime-exceeded: +expiry.expireRuns, +plan.readNode, +execution.runById:R, +plan.readSubtree, -plan.readAllNodes
 
 The baseline of this path is `baseline-renew-task`, drawn in Story 3 (`03-the-renew`). A refusal
 diagram names the baseline of its path, and its signs are measured only over the tokens it holds: a
@@ -43,6 +43,7 @@ sequenceDiagram
     Command->>Expiry: 3 expiry.expireRuns
     Command->>Plan: 4 plan.readNode
     Command->>Execution: 5 execution.runById:R
+    Command->>Plan: 6 plan.readSubtree
     Command-->>Client: refuse:lifetime-exceeded
 ```
 
@@ -59,7 +60,7 @@ Add `test/sequence/scenarios/renew-refusal-lifetime-exceeded.ts`.
 ## Change
 
 **Add `lifetime-exceeded` to `RenewRefusal`**, beside the six authority codes Story 3
-(`03-the-renew`) added at `src/commands/node/heartbeat-node.ts:11` — `HeartbeatRefusal`.
+(`03-the-renew`) added at `src/commands/run/renew-run.ts:11` — `RenewRefusal`.
 
 Evaluate it in `src/commands/run/renew-run.ts` immediately after `assertRunAuthority` — step 6 of
 Story 3's change — and before the first lease write:

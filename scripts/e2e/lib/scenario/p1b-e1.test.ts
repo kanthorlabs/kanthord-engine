@@ -492,7 +492,7 @@ function createFakeScenario(): FakeScenario {
       return command(
         argv,
         `kanthord: claimed ${id} lease-fence ${fence} expires 2026-08-17T00:00:00.000Z\n` +
-          `kanthord: run run-${id} run-fence ${fence + 1000} attempt 1 objective-run objective-run-${id} objective-run-fence ${fence + 200} objective-lease-fence ${fence + 100}\n`,
+          `kanthord: run run-${id} run-fence ${fence + 1000} attempt 1 objective-run objective-run-${id} objective-lease-fence ${fence + 100}\n`,
       );
     }
     if (argv[0] === "node" && argv[1] === "renew") {
@@ -732,7 +732,7 @@ test("passes task and objective run authority to renew, report, attest and close
     "--run-id",
     `objective-run-${alphaFirstId}`,
     "--run-fence",
-    "211",
+    "111",
     "--object-id",
     "object-authored",
   ]);
@@ -744,7 +744,7 @@ test("passes task and objective run authority to renew, report, attest and close
     "--run-id",
     `objective-run-${alphaFirstId}`,
     "--run-fence",
-    "211",
+    "111",
   ]);
 });
 

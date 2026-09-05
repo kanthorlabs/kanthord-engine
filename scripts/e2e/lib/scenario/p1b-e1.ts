@@ -631,7 +631,7 @@ async function runScenario(
     nodeId: taskGraph.alphaId,
     fence: alphaFirstResult.objectiveLeaseFence,
     runId: alphaFirstResult.objectiveRunId,
-    runFence: alphaFirstResult.objectiveRunFence,
+    runFence: alphaFirstResult.objectiveLeaseFence,
     objectId: combinedObjectId,
     label: "alpha",
   });
@@ -675,7 +675,7 @@ async function runScenario(
         report: "attested",
         fence: alphaFirstResult.objectiveLeaseFence,
         runId: alphaFirstResult.objectiveRunId,
-        runFence: alphaFirstResult.objectiveRunFence,
+        runFence: alphaFirstResult.objectiveLeaseFence,
         objectId: combinedObjectId,
       },
     ),
@@ -699,7 +699,7 @@ async function runScenario(
     "--run-id",
     alphaFirstResult.objectiveRunId,
     "--run-fence",
-    String(alphaFirstResult.objectiveRunFence),
+    String(alphaFirstResult.objectiveLeaseFence),
   ]);
   const alphaClosed = await driver.cliAs(harnessRole, [
     "node",

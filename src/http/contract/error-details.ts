@@ -172,10 +172,6 @@ export const objectiveBusyDetails = z.strictObject({
   expiresAt: epochMillis,
 });
 
-export const objectiveRunLostDetails = z.strictObject({
-  objectiveId: nodeIdentity,
-});
-
 export const subtreeBusyDetails = z.strictObject({
   relation: z.enum(subtreeRelations),
   nodeId: nodeIdentity,

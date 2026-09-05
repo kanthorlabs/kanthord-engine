@@ -112,9 +112,8 @@ type ClaimBody = Readonly<{
     expiresAt: number;
   }>;
   runId: string;
-  runFence: number;
+  fence: number;
   objectiveRunId: string;
-  objectiveRunFence: number;
   attemptId: string | null;
   attemptNo: number | null;
   node: Readonly<{
@@ -417,7 +416,7 @@ describe("src/main.claim.test", () => {
     assert.equal(body.node.title, TASK_TITLE);
     assert.equal(body.node.parentId, objectiveId);
     claimFence = body.lease.fence;
-    claimRunFence = body.runFence;
+    claimRunFence = body.fence;
     claimExpiresAt = body.lease.expiresAt;
     claimObjectiveExpiresAt = body.objectiveLease.expiresAt;
     oldTaskRunId = body.runId;
@@ -638,7 +637,7 @@ describe("src/main.claim.test", () => {
       body: {
         fence,
         runId: taskBClaim.runId,
-        runFence: taskBClaim.runFence,
+        runFence: taskBClaim.fence,
       },
     });
     assert.notEqual(renewed.status, 501, "node.renew answered 501");
@@ -650,7 +649,7 @@ describe("src/main.claim.test", () => {
       body: {
         fence,
         runId: taskBClaim.runId,
-        runFence: taskBClaim.runFence,
+        runFence: taskBClaim.fence,
       },
     });
     assert.notEqual(released.status, 501, "node.release answered 501");

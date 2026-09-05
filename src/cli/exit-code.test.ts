@@ -48,7 +48,6 @@ const expected: Readonly<Record<string, number>> = {
   "target-outside-run": 174,
   "fence-stale": 175,
   "lifetime-exceeded": 176,
-  "objective-run-lost": 177,
   "internal-error": 210,
   "not-implemented": 220,
   "service-unavailable": 230,
@@ -65,7 +64,7 @@ describe("src/cli/exit-code.test", () => {
     assert.deepEqual(codes, statuses);
   });
 
-  it("each of the thirty-seven codes maps to its literal exit code", () => {
+  it("each of the thirty-six codes maps to its literal exit code", () => {
     let count = 0;
     for (const [code, status] of Object.entries(errorStatuses)) {
       assert.equal(
@@ -75,7 +74,7 @@ describe("src/cli/exit-code.test", () => {
       );
       count += 1;
     }
-    assert.equal(count, 37);
+    assert.equal(count, 36);
   });
 
   it("every value is an integer between 1 and 255 and 0 never appears", () => {
@@ -92,7 +91,7 @@ describe("src/cli/exit-code.test", () => {
   });
 
   it("no two codes share an exit code", () => {
-    assert.equal(new Set(Object.values(exitCodes)).size, 37);
+    assert.equal(new Set(Object.values(exitCodes)).size, 36);
   });
 
   it("a transport failure is exit code 2 whatever the status", () => {

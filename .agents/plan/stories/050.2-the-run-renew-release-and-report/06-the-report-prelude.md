@@ -8,14 +8,13 @@ Diagrams: report-authority-prelude
 
 Baselines: report-authority-prelude <- baseline-report-prelude
 
-Seams: report-authority-prelude: +expiry.expireRuns, +execution.runById:R, -lease.read:T, -execution.activeRunOfNode:T
+Seams: report-authority-prelude: +expiry.expireRuns, +execution.runById:R, +plan.readSubtree, -lease.read:T, -execution.activeRunOfNode:T
 
 This story changes the prelude of `node.report` and nothing after it. EPIC 050.4 Story 6
 (`06-the-report-drops-the-lease`) declares `report-lease-free` and owns the tail. EPIC 051 draws
 `acceptExecution` as a nested command on another path — `acceptExecution` exists nowhere in `src/`
-today, and `.agents/plan/epics/051-the-execution-checkpoint.md:374` draws it with
+today, and EPIC 051.4 draws it with
 `Caller->>Command` — so `report-execution-checkpoint` never owned this tail.
-`run.ended` is deferred with the rest of the tail.
 
 **The drawn set is every branch of this prelude.** One diagram covers it, because every one of the six
 report members runs the same prelude: the branch on `src/commands/outcome/report-outcome.ts:122` —
@@ -69,7 +68,7 @@ Each step, with its caller anchor, its callee anchor and the fixture state that 
    `src/commands/outcome/report-outcome.ts:155` — `body-kind-mismatch`,
    `src/commands/outcome/report-outcome.ts:161` — `actor-forbidden` and
    `src/commands/outcome/report-outcome.ts:167` — `illegal-transition` — do not fire.
-5. `src/commands/outcome/report-outcome.ts:206` — `activeRunOfNode` →
+5. `src/commands/outcome/report-outcome.ts:206` (formerly `activeRunOfNode`) →
    `src/services/execution/index.ts:76` — `activeRunOfNode`. Reached because the fixture's lease is
    held by the caller at the presented fence, so neither
    `src/commands/outcome/report-outcome.ts:187` — `lease-held` nor
@@ -104,6 +103,7 @@ sequenceDiagram
     Command->>Expiry: 3 expiry.expireRuns
     Command->>Plan: 4 plan.readNode
     Command->>Execution: 5 execution.runById:R
+    Command->>Plan: 6 plan.readSubtree
     note over Command: tail pinned by EPIC 050.4 report-lease-free
 ```
 
@@ -111,11 +111,11 @@ Step 4 is the shipped node read, unmoved relative to the authority check: this c
 the node first, so `node-not-found` and `initiative-not-reportable` keep their shipped precedence
 with no reordering. It stays because the tail reads
 `src/commands/outcome/report-outcome.ts:122` — `node.kind` and
-`src/commands/outcome/report-outcome.ts:165` — `node.state`, which the run row does not carry.
-**It is a context token**: the baseline holds it and this diagram holds it, at
+`src/commands/outcome/report-outcome.ts:165` — `node.state`, and `plan.readSubtree` returns ids alone
+and supplies neither. **It is a context token**: the baseline holds it and this diagram holds it, at
 one count and one label, so no story declares it.
 
-Step 5 replaces the lease proof and the node-scoped run lookup. Only step 3 is new to the path.
+Steps 5 and 6 replace the lease proof and the node-scoped run lookup. Only step 3 is new to the path.
 
 This story pins the prelude, because the prelude is what it changes. EPIC 050.4 Story 6
 (`06-the-report-drops-the-lease`) declares `report-lease-free`, draws the whole path and owns the
@@ -140,24 +140,24 @@ today and no `expiry`. Inside the existing `storage.transact` at
    `src/commands/outcome/report-outcome.ts:110` — `readNode` — unchanged, with its two refusals
    unchanged.
 4. `execution.runById(transaction, input.runId)` — new, replacing
-   `src/commands/outcome/report-outcome.ts:206` — `activeRunOfNode`. The
+   `src/commands/outcome/report-outcome.ts:206` (formerly `activeRunOfNode`). The
    `src/commands/outcome/report-outcome.ts:209` — `illegal-transition` that guarded a null run is
    replaced by `run-not-found`, which Story 1 (`01-run-authority`) owns; delete the
    `{ guard: "no-active-run" }` details at
-   `src/commands/outcome/report-outcome.ts:211` — `no-active-run`.
-5. `assertRunAuthority(...)`, throwing `ReportOutcomeError(refusal.refusal, …, { runId })`. This
+   `src/commands/outcome/report-outcome.ts:211` (formerly `no-active-run`).
+5. `plan.readSubtree(transaction, run.nodeId)` — new. The node the report targets is inside the
+   subtree the run covers, and `assertRunAuthority` needs the whole set.
+6. `assertRunAuthority(...)`, throwing `ReportOutcomeError(refusal.refusal, …, { runId })`. This
    replaces the lease read at `src/commands/outcome/report-outcome.ts:173` — `read` and both of its
    refusals: the held-by-other branch at
    `src/commands/outcome/report-outcome.ts:187` — `lease-held`, whose details carry
-   `src/commands/outcome/report-outcome.ts:193` — `relation`, and the bare branch at
+   `src/commands/outcome/report-outcome.ts:193` (formerly `relation`), and the bare branch at
    `src/commands/outcome/report-outcome.ts:203` — `lease-held`, which carries no details at all.
 
-Everything after step 5 keeps its shipped shape, including the `lease.release` at
+Everything after step 6 keeps its shipped shape, including the `lease.release` at
 `src/commands/outcome/report-outcome.ts:282` — `release` and the `plan.readAllNodes` at
 `src/commands/outcome/report-outcome.ts:310` — `readAllNodes`. EPIC 051 rewrites the body and EPIC
 050.4 Story 6 (`06-the-report-drops-the-lease`) removes the release.
-The retained release maps `LeaseError("lease-fenced")` to the existing `ReportOutcomeError("lease-held")`;
-EPIC 050.4 removes both the mapping and the release.
 
 Add `runId: string` and `runFence: number` to `ReportOutcomeInput` at
 `src/commands/outcome/report-outcome.ts:70` — `ReportOutcomeInput`. They sit on the **input**, not on
@@ -167,28 +167,27 @@ a run is presented on every member. The shipped body `fence` is the **node lease
 Add the six authority codes to `ReportOutcomeRefusal` at
 `src/commands/outcome/report-outcome.ts:79` — `ReportOutcomeRefusal`.
 
-**`lease-held` remains reachable from the retained release and it is not removed.** Step 6 deletes both
-lease-read throw sites. The retained release can still raise `LeaseError("lease-fenced")`, so translate
-that error to `ReportOutcomeError("lease-held")`. Keep the member at
+**`lease-held` becomes unreachable on this command and it is not removed.** Step 6 deletes both
+throw sites, and no other site in the file throws it. Keep the member at
 `src/commands/outcome/report-outcome.ts:85` — `lease-held` and keep its mapping at
 `src/http/server/node/refusals.ts:83` — `lease-held`; EPIC 050.4 Story 8
-(`08-lease-held-is-retired`) retires the code across the product after Story 6 removes the release.
+(`08-lease-held-is-retired`) retires the code across the product, and removing it here would take
+that story's work.
 
 **A report never changes `node.assignment`**, for the reason Story 5 (`05-the-release`) states: no
 `PlanStore` method touches the column.
 
 ## Constraints
 
-- Do not change the tail seam order after the authority check. Map a retained release
-  `LeaseError("lease-fenced")` to `ReportOutcomeError("lease-held")`; EPIC 050.4 Story 6
-  (`06-the-report-drops-the-lease`) removes that call and mapping.
+- Change nothing after the authority check. The note pins the boundary, and EPIC 050.4 Story 6
+  (`06-the-report-drops-the-lease`) owns the tail.
 - Leave the node read where it is. It already precedes the authority check, and moving it would make
   `node-not-found` and `initiative-not-reportable` unreachable.
-- Take no subtree read. The authority check is bound to the run's own node, so `run.nodeId` answers
-  it, and the node row serves the tail.
+- `plan.readSubtree` is added beside `plan.readNode`; it does not replace it. The subtree serves the
+  authority check and the node row serves the tail, and neither answers the other's question.
 - Do not change the existing body `fence` field's meaning. `runId` and `runFence` go on the input.
 - The prelude runs for all six members of the report union, including `closed`.
-- Keep `lease-held` on `ReportOutcomeRefusal`. The retained release can produce it until EPIC 050.4.
+- Keep `lease-held` on `ReportOutcomeRefusal`. It is unreachable, not removed.
 - Keep the actor check and the state check. They sit before the pin and they still fire.
 
 ## Verify
@@ -221,11 +220,6 @@ Add, each as a separate `it`:
    `test/helpers/rows.ts:184` — `seedSiblingTask`, presented with the run of `T`. Assert
    `refusal === "target-outside-run"`.
 
-4b. `"a report on a task presenting the objective run refuses target-outside-run"` — claim the task,
-then report it naming `objectiveRunId` and `objectiveRunFence`. Assert
-`refusal === "target-outside-run"`. A structural objective run holds no task attempt, so the
-shipped subtree admission reached a bare `Error` here, which is a 500.
-
 5. `"a report on an unknown node refuses node-not-found, not target-outside-run"` — present a valid
    `runId` and `runFence` with `nodeId: "task_zzz"`. Assert `refusal === "node-not-found"`. Case 4 is
    its control.
@@ -250,7 +244,9 @@ shipped subtree admission reached a bare `Error` here, which is a 500.
 10. `"node.assignment is unchanged after a rejection"` — read the raw `assignment` column of the node
     row by SQL before and after, and assert equality.
 
-11. `"a report with valid run authority and a stale retained node-lease fence returns lease-held and writes nothing"` — make the run authority valid, advance the retained node-lease fence, report a task outcome, and assert `refusal === "lease-held"` with `databaseBytes` unchanged.
+11. `"no report path throws lease-held"` — drive every reachable refusal of the command and assert
+    none carries `refusal === "lease-held"`. The control is case 1, which proves a stale run fence
+    reports `fence-stale` and not the retired code.
 
 12. `"every shipped report case still passes"` — carry all thirty shipped cases of the file across
     with `runId` and `runFence` added to their inputs, and with the two `lease-held` cases at

@@ -29,7 +29,7 @@ function createFixtureTree(
   for (const epicId of authoredEpics) {
     writeFileSync(
       join(epicsRoot, `${epicId}-fixture.md`),
-      `# EPIC ${epicId} — fixture\n`,
+      epicDocument(epicId),
     );
     mkdirSync(join(storiesRoot, `${epicId}-fixture`), { recursive: true });
   }
@@ -46,6 +46,19 @@ function createFixtureTree(
   }
 
   return fixtureRoot;
+}
+
+function epicDocument(epicId: string, gate?: readonly string[]): string {
+  return [
+    `# EPIC ${epicId} — fixture`,
+    "",
+    "## Verification Gate",
+    "",
+    "| #   | assertion | story |",
+    "| --- | --------- | ----- |",
+    ...(gate ?? ["| 1   | the fixture asserts one thing | 1     |"]),
+    "",
+  ].join("\n");
 }
 
 function storyDocument(
@@ -91,8 +104,9 @@ function diagram(
 function assertFixtureRefusal(
   stories: readonly FixtureStory[],
   expected: string | RegExp,
+  scenarioIds: readonly string[] = [],
 ): void {
-  const fixtureRoot = createFixtureTree(stories);
+  const fixtureRoot = createFixtureTree(stories, scenarioIds);
   try {
     assert.throws(
       () => verifyEpicSequence(fixtureRoot),
@@ -128,7 +142,7 @@ describe("scripts/verify-epic-sequence", () => {
           join(epicsRoot, `${epicId}-fixture.md`),
           epicId === "050"
             ? "# EPIC 050 — fixture\n\n```mermaid\nflowchart TD\n```\n"
-            : `# EPIC ${epicId} — fixture\n`,
+            : epicDocument(epicId),
         );
         mkdirSync(join(storiesRoot, `${epicId}-fixture`), {
           recursive: true,
@@ -163,7 +177,7 @@ describe("scripts/verify-epic-sequence", () => {
       for (const epicId of authoredEpics) {
         writeFileSync(
           join(epicsRoot, `${epicId}-fixture.md`),
-          `# EPIC ${epicId} — fixture\n`,
+          epicDocument(epicId),
         );
         const storyRoot = join(storiesRoot, `${epicId}-fixture`);
         mkdirSync(storyRoot, { recursive: true });
@@ -232,7 +246,7 @@ describe("scripts/verify-epic-sequence", () => {
       for (const epicId of authoredEpics) {
         writeFileSync(
           join(epicsRoot, `${epicId}-fixture.md`),
-          `# EPIC ${epicId} — fixture\n`,
+          epicDocument(epicId),
         );
         mkdirSync(join(storiesRoot, `${epicId}-fixture`), {
           recursive: true,
@@ -284,7 +298,7 @@ describe("scripts/verify-epic-sequence", () => {
       for (const epicId of authoredEpics) {
         writeFileSync(
           join(epicsRoot, `${epicId}-fixture.md`),
-          `# EPIC ${epicId} — fixture\n`,
+          epicDocument(epicId),
         );
         mkdirSync(join(storiesRoot, `${epicId}-fixture`), {
           recursive: true,
@@ -347,7 +361,7 @@ describe("scripts/verify-epic-sequence", () => {
       for (const epicId of authoredEpics) {
         writeFileSync(
           join(epicsRoot, `${epicId}-fixture.md`),
-          `# EPIC ${epicId} — fixture\n`,
+          epicDocument(epicId),
         );
         mkdirSync(join(storiesRoot, `${epicId}-fixture`), {
           recursive: true,
@@ -880,5 +894,395 @@ describe("scripts/verify-epic-sequence", () => {
   it("the real plan tree passes the range gate", () => {
     const repositoryRoot = resolve(import.meta.dirname, "..");
     assert.doesNotThrow(() => verifyEpicSequence(repositoryRoot));
+  });
+
+  const lane = (declarations: readonly string[], kind = "story-foundation") => [
+    {
+      epicId: "050",
+      fileName: "01-fixture.md",
+      source: storyDocument(kind, declarations),
+    },
+  ];
+
+  it("a story declaring Executor and no Paths fails", () => {
+    assertFixtureRefusal(
+      lane(["Executor: groundwork-engineer"]),
+      /declares Executor and not the other/,
+    );
+  });
+
+  it("a story declaring Paths and no Executor fails", () => {
+    assertFixtureRefusal(
+      lane(["Paths: package.json"]),
+      /declares Paths and not the other/,
+    );
+  });
+
+  it("a story declaring both Executor and Paths passes", () => {
+    const root = createFixtureTree(
+      lane(["Executor: groundwork-engineer", "Paths: package.json"]),
+    );
+    try {
+      assert.doesNotThrow(() => verifyEpicSequence(root));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a story-implement carrying a lane declaration fails", () => {
+    assertFixtureRefusal(
+      [
+        {
+          epicId: "050.2",
+          fileName: "01-fixture.md",
+          source:
+            storyDocument("story-implement", [
+              "Executor: groundwork-engineer",
+              "Paths: package.json",
+              "",
+              "Diagrams: lane-path",
+              "",
+              "test/sequence/scenarios/lane-path.ts",
+              "",
+            ]) + diagram("lane-path", []),
+        },
+      ],
+      /carries a lane declaration/,
+      ["lane-path"],
+    );
+  });
+
+  it("a Paths path allowed to an engineer lane fails", () => {
+    assertFixtureRefusal(
+      lane(["Executor: groundwork-engineer", "Paths: src/domain/run.ts"]),
+      /allowed to an engineer lane/,
+    );
+  });
+
+  it("a Paths path denied to groundwork-engineer fails", () => {
+    assertFixtureRefusal(
+      lane([
+        "Executor: groundwork-engineer",
+        "Paths: .agents/plan/authoring.md",
+      ]),
+      /denied to groundwork-engineer/,
+    );
+  });
+
+  it("one path in the Paths line of two stories of one epic fails", () => {
+    assertFixtureRefusal(
+      [
+        {
+          epicId: "050",
+          fileName: "01-fixture.md",
+          source: storyDocument("story-foundation", [
+            "Executor: groundwork-engineer",
+            "Paths: package.json",
+          ]),
+        },
+        {
+          epicId: "050",
+          fileName: "02-fixture.md",
+          source: storyDocument("story-foundation", [
+            "Executor: groundwork-engineer",
+            "Paths: package.json",
+          ]),
+        },
+      ],
+      /appears in the Paths line of two stories of 050/,
+    );
+  });
+
+  it("the same path in two stories of different epics passes", () => {
+    const root = createFixtureTree([
+      {
+        epicId: "050",
+        fileName: "01-fixture.md",
+        source: storyDocument("story-foundation", [
+          "Executor: groundwork-engineer",
+          "Paths: package.json",
+        ]),
+      },
+      {
+        epicId: "050.1",
+        fileName: "01-fixture.md",
+        source: storyDocument("story-foundation", [
+          "Executor: groundwork-engineer",
+          "Paths: package.json",
+        ]),
+      },
+    ]);
+    try {
+      assert.doesNotThrow(() => verifyEpicSequence(root));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("an edit directive naming an undeclared groundwork path fails", () => {
+    assertFixtureRefusal(
+      [
+        {
+          epicId: "050",
+          fileName: "01-fixture.md",
+          source:
+            storyDocument("story-foundation") +
+            "\n## Change\n\n**Add a row to `AGENTS.md`**\n",
+        },
+      ],
+      /edits AGENTS\.md, which no Paths line of 050 declares/,
+    );
+  });
+
+  it("the same path cited in prose rather than an edit directive passes", () => {
+    const root = createFixtureTree([
+      {
+        epicId: "050",
+        fileName: "01-fixture.md",
+        source:
+          storyDocument("story-foundation") +
+          "\n## Change\n\nThe contract at `AGENTS.md` requires it.\n",
+      },
+    ]);
+    try {
+      assert.doesNotThrow(() => verifyEpicSequence(root));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("an edit directive naming a path locked to every role passes", () => {
+    const root = createFixtureTree([
+      {
+        epicId: "050",
+        fileName: "01-fixture.md",
+        source:
+          storyDocument("story-foundation") +
+          "\n## Change\n\n**Add a bullet to `.agents/plan/authoring.md`**\n",
+      },
+    ]);
+    try {
+      assert.doesNotThrow(() => verifyEpicSequence(root));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a reference whose stem names no story of the named epic fails", () => {
+    assertFixtureRefusal(
+      [
+        {
+          epicId: "050",
+          fileName: "01-fixture.md",
+          source:
+            storyDocument("story-foundation") +
+            "\nIt follows EPIC 050 Story 1 (`01-no-such-story`).\n",
+        },
+      ],
+      /a stem that epic has no story for/,
+    );
+  });
+
+  it("a reference whose ordinal is neither position nor prefix fails", () => {
+    assertFixtureRefusal(
+      [
+        {
+          epicId: "050",
+          fileName: "01-fixture.md",
+          source:
+            storyDocument("story-foundation") +
+            "\nIt follows EPIC 050 Story 7 (`01-fixture`).\n",
+        },
+      ],
+      /neither its dispatch position 1 nor its file prefix 1/,
+    );
+  });
+
+  it("a reference by dispatch position and one by file prefix both pass", () => {
+    const root = createFixtureTree([
+      {
+        epicId: "050",
+        fileName: "00-fixture.md",
+        source: storyDocument("story-foundation"),
+      },
+      {
+        epicId: "050",
+        fileName: "01-second.md",
+        source:
+          storyDocument("story-foundation") +
+          "\nDispatch: EPIC 050 Story 2 (`01-second`). Prefix: EPIC 050 Story 1 (`01-second`).\n",
+      },
+    ]);
+    try {
+      assert.doesNotThrow(() => verifyEpicSequence(root));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a citation naming a file that does not exist fails", () => {
+    assertFixtureRefusal(
+      [
+        {
+          epicId: "050",
+          fileName: "01-fixture.md",
+          source:
+            storyDocument("story-foundation") +
+            "\nSee `src/domain/no-such-file.ts:3` — `token`.\n",
+        },
+      ],
+      /which is not a file/,
+    );
+  });
+
+  it("a citation naming a line beyond end of file fails", () => {
+    assertFixtureRefusal(
+      [
+        {
+          epicId: "050",
+          fileName: "01-fixture.md",
+          source:
+            storyDocument("story-foundation") +
+            "\nSee `.agents/plan/epics/050-fixture.md:9000` — `assertion`.\n",
+        },
+      ],
+      /beyond its \d+ lines/,
+    );
+  });
+
+  it("a citation naming an identifier the file does not hold fails", () => {
+    assertFixtureRefusal(
+      [
+        {
+          epicId: "050",
+          fileName: "01-fixture.md",
+          source:
+            storyDocument("story-foundation") +
+            "\nSee `.agents/plan/epics/050-fixture.md:1` — `nowhereInThisFile`.\n",
+        },
+      ],
+      /which the file does not hold/,
+    );
+  });
+
+  it("a citation whose identifier only moved is reported and not refused", () => {
+    const root = createFixtureTree([
+      {
+        epicId: "050",
+        fileName: "01-fixture.md",
+        source:
+          storyDocument("story-foundation") +
+          "\nSee `.agents/plan/epics/050-fixture.md:1` — `assertion`.\n",
+      },
+    ]);
+    try {
+      const relocated = verifyEpicSequence(root);
+      assert.equal(relocated.length, 1);
+      assert.match(relocated[0] ?? "", /050-fixture\.md:1 — assertion/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a two-part citation is neither refused nor reported", () => {
+    const root = createFixtureTree([
+      {
+        epicId: "050",
+        fileName: "01-fixture.md",
+        source:
+          storyDocument("story-foundation") +
+          "\nSee `src/domain/no-such-file.ts:9000`.\n",
+      },
+    ]);
+    try {
+      assert.deepEqual(verifyEpicSequence(root), []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a gate list that is not a table fails", () => {
+    const root = mkdtempSync(join(tmpdir(), "kanthord-epic-sequence-"));
+    const epicsRoot = join(root, ".agents", "plan", "epics");
+    const storiesRoot = join(root, ".agents", "plan", "stories");
+    mkdirSync(epicsRoot, { recursive: true });
+    mkdirSync(storiesRoot, { recursive: true });
+    try {
+      for (const epicId of authoredEpics) {
+        writeFileSync(
+          join(epicsRoot, `${epicId}-fixture.md`),
+          epicId === "050"
+            ? "# EPIC 050 — fixture\n\n## Verification Gate\n\n- one bullet. Story 1.\n"
+            : epicDocument(epicId),
+        );
+        mkdirSync(join(storiesRoot, `${epicId}-fixture`), { recursive: true });
+      }
+      assert.throws(
+        () => verifyEpicSequence(root),
+        /hermetic-coverage list is not a table/,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a gate row naming two stories fails, and one naming none fails", () => {
+    for (const [cell, expected] of [
+      ["1 and 2", /names 2 stories/],
+      ["", /names 0 stories/],
+    ] as const) {
+      const root = mkdtempSync(join(tmpdir(), "kanthord-epic-sequence-"));
+      const epicsRoot = join(root, ".agents", "plan", "epics");
+      const storiesRoot = join(root, ".agents", "plan", "stories");
+      mkdirSync(epicsRoot, { recursive: true });
+      mkdirSync(storiesRoot, { recursive: true });
+      try {
+        for (const epicId of authoredEpics) {
+          writeFileSync(
+            join(epicsRoot, `${epicId}-fixture.md`),
+            epicId === "050"
+              ? epicDocument(epicId, [`| 1   | one assertion | ${cell} |`])
+              : epicDocument(epicId),
+          );
+          mkdirSync(join(storiesRoot, `${epicId}-fixture`), {
+            recursive: true,
+          });
+        }
+        assert.throws(() => verifyEpicSequence(root), expected);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("a gate table headed without a # column passes", () => {
+    const root = mkdtempSync(join(tmpdir(), "kanthord-epic-sequence-"));
+    const epicsRoot = join(root, ".agents", "plan", "epics");
+    const storiesRoot = join(root, ".agents", "plan", "stories");
+    mkdirSync(epicsRoot, { recursive: true });
+    mkdirSync(storiesRoot, { recursive: true });
+    try {
+      for (const epicId of authoredEpics) {
+        writeFileSync(
+          join(epicsRoot, `${epicId}-fixture.md`),
+          epicId === "050"
+            ? [
+                "# EPIC 050 — fixture",
+                "",
+                "## Verification Gate",
+                "",
+                "| assertion | story |",
+                "| --------- | ----- |",
+                "| one assertion | 1 |",
+                "",
+              ].join("\n")
+            : epicDocument(epicId),
+        );
+        mkdirSync(join(storiesRoot, `${epicId}-fixture`), { recursive: true });
+      }
+      assert.doesNotThrow(() => verifyEpicSequence(root));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

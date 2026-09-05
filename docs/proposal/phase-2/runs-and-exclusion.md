@@ -74,9 +74,7 @@ A write is admitted only when its run is active, unexpired, held by the caller, 
 
 A refusal names the run id and the reason only. It never returns the current fence, because giving its replacement value to a writer with a stale fence would give that writer the authority the raise was meant to remove.
 
-The target binding is the run's own node. A write is admitted only when the run it names is the run of the node it targets. The subtree rule governs exclusion at claim time, and it does not govern authority: a structural objective run holds no task attempt, so admitting a descendant would let an objective run authorize a task release or a task report that no attempt can answer. A structural mutation inside a claimed subtree is a separate admission, and the epic that ships it declares that admission and its own control case.
-
-A lease fence and a run fence are two counters. A lease fence rises when a lease is taken again after it expires. A run fence rises only when a run ends. A claim reuses an active structural objective run, so the two counters diverge, and the claim response therefore names all four values: the task lease fence, the task run fence, the objective lease fence and the objective run fence. A write presents the run fence of the run it names.
+The target is bound to the run when it is the run's own node or a descendant in that node's subtree.
 
 A renew sets `expires_at = min(now + runTtlMs, max_lifetime_at)` and refuses `lifetime-exceeded` when `now >= max_lifetime_at`.
 A renew never changes the fence.
@@ -84,20 +82,6 @@ A renew never changes the fence.
 A release means that a worker voluntarily ends its run with no checkpoint. The node returns to `ready`, the open attempt is cancelled, the run ends and the fence rises.
 
 A transitional renew renews both leases until EPIC 050.4 Story 4 removes the node lease without changing wire shape.
-
-A task renew renews two runs: the task run it names and the structural run of that task's objective, derived from the node. A claim renews the structural objective run it reuses. Without both, the objective run expires under a live task run, the expiry pass ends it, and the later attest or close refuses `run-ended`. One `run.renewed` is appended per run whose `expires_at` moved.
-
-## A promised expiry is kept, and no recovery is silent
-
-`max_lifetime_at` is absolute. No path renews a run past it, and no path mints a replacement run on a client's behalf. A structural objective run that reaches its lifetime expires like any other run and appends one `run.expired`. The daemon states a deadline and then honours it.
-
-Three rules follow, and none of them is a repair.
-
-A renew never continues silently over a lost objective run. When the target is a task and its objective holds no active run, the renew refuses `objective-run-lost` and writes nothing, so a worker learns that its objective authority is gone at the renew rather than at its last write.
-
-Every renew announces the deadline. The response carries `objectiveExpiresAt` beside the task run's own `expiresAt`, so a client sees the objective authority expiring while it still holds that authority, and decides what to do about it.
-
-The recovery is a claim, and the client makes it. A claim is admitted on a `running` objective when no live run remains under it: it opens a fresh structural run and returns the new run id and fence. Until the client claims, the objective has no authority and every write bound to the old run is refused by code. An automatic rotation would decide for the client that the work should continue, and the daemon cannot know that.
 
 The expiry pass and release paths append exactly one of `run.ended` or `run.expired`, never both and never neither, in the same transaction as the transition and the fence raise. The report path remains outstanding for EPIC 050.4 Story 6.
 

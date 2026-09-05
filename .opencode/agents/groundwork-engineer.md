@@ -42,7 +42,6 @@ The ceiling denies you these, always:
 - `scripts/lane-check.sh`, `scripts/turn-snapshot.sh`, `scripts/verify-handoff.mjs`,
   `scripts/memory-append-only.sh`, every `scripts/*.test.sh` — you may not rewrite the
   check that judges you.
-- `AGENTS.md` — the architecture contract is a decision, and a human takes it.
 - `src/**`, `test/**`, `docs/proposal/**`, ordinary `scripts/**` — the two engineers own
   these, and TDD stays in force for every line of them.
 
@@ -59,7 +58,11 @@ The mechanical consequence, and only that. Concretely:
 - a `tsconfig*.json` entry a new directory or a new emit rule needs;
 - a `package.json` script that wires a proof or a gate the story names;
 - the build definition, `README.md`, `.github/**`, `.gitignore`, and `docs/` outside
-  `docs/proposal/`.
+  `docs/proposal/`;
+- `AGENTS.md`, **and only when the dispatch grants it and states the exact text**. The
+  architecture contract is a decision a human takes; you apply the words that decision
+  produced and you never choose them. A dispatch that names `AGENTS.md` without the
+  sentence to write is a planning defect: raise `OPEN:` and stop.
 
 **You take no design decision.** The story states the edit. A story that leaves you a
 choice is a planning defect: raise `OPEN:` naming the choice, and stop. An architecture

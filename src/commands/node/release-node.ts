@@ -89,11 +89,16 @@ export function releaseNode(
     }
 
     const run = dependencies.execution.runById(transaction, input.runId);
+    const subtreeIds =
+      run === null
+        ? []
+        : dependencies.plan.readSubtree(transaction, run.nodeId);
     const refusal = assertRunAuthority({
       run,
       runId: input.runId,
       fence: input.runFence,
       targetNodeId: input.nodeId,
+      subtreeIds,
       caller: dependencies.caller,
       now,
     });
@@ -279,24 +284,10 @@ function releaseObjective(
         at: now,
       });
     }
-    const endedChildRun = dependencies.execution.endRun(transaction, {
+    dependencies.execution.endRun(transaction, {
       runId: childRun.id,
       outcome: "released",
       at: now,
-    });
-    dependencies.events.append(transaction, {
-      subjectKind: "run",
-      subjectId: endedChildRun.id,
-      type: "run.ended",
-      actorKind: input.actorKind,
-      actorId: input.actorId,
-      payload: {
-        runId: endedChildRun.id,
-        nodeId: endedChildRun.nodeId,
-        fence: endedChildRun.fence,
-        outcome: "released",
-        reason: null,
-      },
     });
   }
   const endedRun = dependencies.execution.endRun(transaction, {

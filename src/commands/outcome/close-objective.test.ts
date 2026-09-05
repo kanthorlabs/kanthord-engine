@@ -377,7 +377,7 @@ function toAwaitingApproval(
     actorId: ACTOR_A,
     fence: claimed.lease.fence,
     runId: claimed.runId,
-    runFence: claimed.runFence,
+    runFence: claimed.fence,
   });
   attest(fixture, clock, {
     nodeId: fixtureIds.objective,
