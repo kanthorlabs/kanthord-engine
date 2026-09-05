@@ -157,7 +157,7 @@ the four production files above:
 - Delete the `clock` dependency. A dependency nothing reads is a key a later story has to explain.
 - Do not add an expired-run projection. Adding a response field is a wire change this epic did not rule on.
 - Do not change the `system.health` operation, its handler or its binding.
-- Do not touch the `lease` table. It survives this epic, empty, until EPIC 057's migration `17`.
+- Do not touch the `lease` table. It survives this epic, empty, until EPIC 057's migration `18`.
 
 ## Verify
 

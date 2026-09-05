@@ -6,19 +6,19 @@ Starting work, stopping it, and reading what an attempt did. These are the route
 
 ## Routes
 
-| operationId      | Method and path               | introducedIn | status  | Source                                      |
-| ---------------- | ----------------------------- | ------------ | ------- | ------------------------------------------- |
-| `run.start`      | `POST /v1/project/:id/run`    | phase-2      | stubbed | P1-E1, `kanthord run`                       |
-| `run.cancel`     | `POST /v1/run/:id/cancel`     | phase-2      | stubbed | agents-and-workers.md, cancellation         |
-| `run.list`       | `GET /v1/run`                 | phase-2      | stubbed | domain.md, `run` table                      |
-| `run.show`       | `GET /v1/run/:id`             | phase-2      | stubbed | domain.md, `run` table                      |
-| `node.attempts`  | `GET /v1/node/:id/attempt`    | phase-2      | stubbed | P2-E2, "the attempt record"                 |
-| `attempt.show`   | `GET /v1/attempt/:id`         | phase-2      | stubbed | agents-and-workers.md, inspection           |
-| `node.checks`    | `GET /v1/node/:id/check`      | phase-2      | stubbed | gates-and-approval.md, diagnostic results   |
-| `worker.list`    | `GET /v1/worker`              | phase-2      | routed  | domain.md, worker kinds                     |
-| `node.claim`     | `POST /v1/node/:id/claim`     | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
-| `node.heartbeat` | `POST /v1/node/:id/heartbeat` | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
-| `node.release`   | `POST /v1/node/:id/release`   | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
+| operationId     | Method and path             | introducedIn | status  | Source                                      |
+| --------------- | --------------------------- | ------------ | ------- | ------------------------------------------- |
+| `run.start`     | `POST /v1/project/:id/run`  | phase-2      | stubbed | P1-E1, `kanthord run`                       |
+| `run.cancel`    | `POST /v1/run/:id/cancel`   | phase-2      | stubbed | agents-and-workers.md, cancellation         |
+| `run.list`      | `GET /v1/run`               | phase-2      | stubbed | domain.md, `run` table                      |
+| `run.show`      | `GET /v1/run/:id`           | phase-2      | stubbed | domain.md, `run` table                      |
+| `node.attempts` | `GET /v1/node/:id/attempt`  | phase-2      | stubbed | P2-E2, "the attempt record"                 |
+| `attempt.show`  | `GET /v1/attempt/:id`       | phase-2      | stubbed | agents-and-workers.md, inspection           |
+| `node.checks`   | `GET /v1/node/:id/check`    | phase-2      | stubbed | gates-and-approval.md, diagnostic results   |
+| `worker.list`   | `GET /v1/worker`            | phase-2      | routed  | domain.md, worker kinds                     |
+| `node.claim`    | `POST /v1/node/:id/claim`   | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
+| `node.renew`    | `POST /v1/node/:id/renew`   | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
+| `node.release`  | `POST /v1/node/:id/release` | phase-1      | routed  | `013-external-drive-overview.md`, the claim |
 
 ## `run.start`
 
@@ -102,7 +102,7 @@ The response shape is `{ workers: [...] }`. It is a query, so a client can tell 
 
 ## Leases have no route
 
-A lease appears as a field of a node and of a run: the owner, the expiry, and whether it is stale. A separate lease collection would be an internal table promoted to a public resource, and nothing in the proposal asks a human to read one directly. `system.status` reports the stale ones. the lease is still not addressable, and a claim, a heartbeat and a release are actions on the node, spelled `POST /v1/node/:id/claim`, `POST /v1/node/:id/heartbeat` and `POST /v1/node/:id/release`.
+A lease appears as a field of a node and of a run: the owner, the expiry, and whether it is stale. A separate lease collection would be an internal table promoted to a public resource, and nothing in the proposal asks a human to read one directly. `system.status` reports the stale ones. The lease is still not addressable, and a claim, a renew and a release are actions on the node, spelled `POST /v1/node/:id/claim`, `POST /v1/node/:id/renew` and `POST /v1/node/:id/release`.
 
 ## The objective scope of a claim
 
@@ -110,26 +110,28 @@ An external claim holds the objective. A task claim holds the objective and the 
 
 ## node.claim
 
-Claims a node for the authenticated actor. The request body is empty: the TTL is configuration and the owner is the authenticated actor. The response carries the task lease, the objective lease, the task run id and the objective run id, the open attempt id and number, the heartbeat interval and the node view. An objective claim opens no attempt, so `attemptId` and `attemptNo` are null.
+Claims a node for the authenticated actor. The request body is empty: the TTL is configuration and the owner is the authenticated actor. The response carries the task lease, the objective lease, the task run id and its fence, the objective run id, the open attempt id and number, the expiry, the renewal hint and the node view. An objective claim opens no attempt, so `attemptId` and `attemptNo` are null.
 
 The refusals are `404 not-found` for an unknown node, `400 invalid-request` with `refusal: "initiative-not-claimable"` for an initiative, `422 plan-invalid` with the completeness findings, `409 illegal-transition` for a drive-mode pin, a node state that is not claimable or an ancestor that is not startable, and `409 lease-held` when another actor holds the objective, the task or a sibling.
 
-## node.heartbeat
+## node.renew
 
-The request body is `{ fence }`, the fence the claim returned. The response carries the renewed task lease, the renewed objective lease and the heartbeat interval. The refusals are `404 not-found` for an unknown node, `400 invalid-request` with `refusal: "initiative-not-claimable"` for an initiative, and `409 lease-held` for a stale fence, another owner, or an absent, free or expired objective lease.
+The request body is `{ fence, runId, runFence }`. `fence` is the node lease fence, and `runFence` is the run fence. The response carries the renewed task lease, the renewed objective lease, `expiresAt` and `renewAfterMs`.
 
-A claim and every heartbeat each write `expires_at = now + leaseTtlMs`, so expiry measures from the latest renewal. `heartbeatIntervalMs` is `Math.floor(leaseTtlMs / 3)`, `100000` under the default, and the claim response and every heartbeat response carry it, so the harness never guesses.
+The daemon first expires due runs, then proves that the run is active, unexpired, held by the caller, bound to the target, and at the presented fence. It renews every lease that the run holds, leaves the fence unchanged, and writes `run.expires_at = min(now + runTtlMs, maxLifetimeAt)`. At `now >= maxLifetimeAt`, it refuses `409 lifetime-exceeded`.
 
-On a request timeout or a network partition the harness retries at the same interval, and it stops all work once `leaseTtlMs` has passed since its last successful heartbeat. On `409 lease-held` the harness stops at once, because the claim is gone, and it reports nothing. A daemon restart is not an expiry: the `lease` row is durable, so a heartbeat with a live fence still succeeds.
+The refusals are `404 not-found` for an unknown node, `400 invalid-request` with `refusal: "initiative-not-claimable"` for an initiative, `409 lease-held` for a stale node lease, and the run authority codes `run-not-found`, `run-ended`, `run-expired`, `run-caller-mismatch`, `target-outside-run`, `fence-stale` and `lifetime-exceeded`.
 
-Every heartbeat carries a fresh `Idempotency-Key`, minted per request, because a repeated key replays the captured body from `src/http/server/idempotency.ts` and would hand the harness an old `expiresAt` while the real lease expires.
+On a request timeout or a network partition the harness retries at the same interval, and it stops all work once the run expiry passes since its last successful renew. On a run authority refusal the harness stops at once, because the run is no longer authorized, and it reports nothing. A daemon restart does not change a live run or its fence.
 
-EPIC 019 must refuse every report that carries an owner or a fence other than the current live pair, with `409 lease-held`. That refusal is lease safety, and this epic states the requirement. Recovery recovers the claim and never the in-flight work: kanthord cannot inspect, reset or kill a harness process tree, so the old harness may still edit and commit. The protocol rule and that fence check are the whole protection.
+Every renew carries a fresh `Idempotency-Key`, minted per request, because a repeated key replays the captured body from `src/http/server/idempotency.ts` and would hand the harness an old `expiresAt` while the real run expires.
+
+EPIC 019 must refuse every report that carries a run id or a run fence outside the current live authority, with the matching `409` run authority code. Recovery recovers the claim and never the in-flight work: kanthord cannot inspect, reset or kill a harness process tree, so the old harness may still edit and commit. The protocol rule and that authority check are the whole protection.
 
 ## node.release
 
-Gives a claim back. The request body is `{ fence }`, the fence the claim returned. The response carries the node view. A task release frees the task lease only and closes the open attempt; the task run stays active, because the attempt counter is `MAX(attempt_no)` of the active task run and a release never refunds a spent try. The objective lease stays held and the objective run stays active. An objective release frees the objective lease, ends every still-active task run under it that its own release left behind, and ends the objective run; it is refused while any task lease under it is live.
+Gives a claim back. The request body is `{ fence, runId, runFence }`. The response carries the node view. A task release cancels the open attempt, returns the task to `ready`, ends its run and releases its node lease. An objective release ends every still-active task run under it and ends the objective run; it is refused while any task lease under it is live.
 
 A release that would spend the last attempt of the active run parks the task instead of handing it back: the attempt closes, the task moves to `blocked` with reason `attempt-limit` under trigger `attempt-limit-reached`, and the run ends. A harness cannot loop a task past its budget by releasing, because at the limit the release itself is the park. A human `unblock` is the way out. The expiry sweep remains an epoch reset by design: an abandoned claim returns to the pool with a fresh run.
 
-The refusals are `404 not-found` for an unknown node, `400 invalid-request` with `refusal: "initiative-not-claimable"` for an initiative, `409 lease-held` for a stale fence or a live task lease under a released objective, and `409 illegal-transition` when the node is not in a releasable condition.
+The refusals are `404 not-found` for an unknown node, `400 invalid-request` with `refusal: "initiative-not-claimable"` for an initiative, `409 lease-held` for a live task lease under a released objective, the run authority codes for an unauthorized run, and `409 illegal-transition` when the node is not in a releasable condition.

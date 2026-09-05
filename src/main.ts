@@ -83,7 +83,7 @@ import { updateNode } from "./commands/node/update-node.ts";
 import { deleteNode } from "./commands/node/delete-node.ts";
 import { claimNode, type Expiry } from "./commands/node/claim-node.ts";
 import { expireRuns } from "./commands/run/expire-runs.ts";
-import { heartbeatNode } from "./commands/node/heartbeat-node.ts";
+import { renewRun } from "./commands/run/renew-run.ts";
 import { releaseNode } from "./commands/node/release-node.ts";
 import { unblockNode } from "./commands/node/unblock-node.ts";
 import {
@@ -160,7 +160,7 @@ import { createNodeHandler } from "./http/server/node/create-node.ts";
 import { updateNodeHandler } from "./http/server/node/update-node.ts";
 import { deleteNodeHandler } from "./http/server/node/delete-node.ts";
 import { claimNodeHandler } from "./http/server/node/claim-node.ts";
-import { heartbeatNodeHandler } from "./http/server/node/heartbeat-node.ts";
+import { renewNodeHandler } from "./http/server/node/renew-node.ts";
 import { releaseNodeHandler } from "./http/server/node/release-node.ts";
 import { reportNodeHandler } from "./http/server/node/report-node.ts";
 import { unblockNodeHandler } from "./http/server/node/unblock-node.ts";
@@ -267,6 +267,10 @@ async function serve(options: ServeOptions): Promise<void> {
       const plan = new SqlitePlanStore({ readiness });
       const blobs = new SqliteBlobStore({ storage, clock });
       const revision = new NodeWriteRevision({ blobs, plan });
+      const callerRecord = {
+        worker: "claude@1",
+        authorized: ["claude@1"],
+      } as const;
       const waits = createWaitRegistry({ schedule: systemSchedule });
       const boundAggregateInitiative = (
         transaction: Transaction,
@@ -309,6 +313,8 @@ async function serve(options: ServeOptions): Promise<void> {
             execution,
             events,
             clock,
+            expiry,
+            caller: callerRecord.worker,
             reportObjective: boundReportObjective,
             closeObjective: boundCloseObjective,
             instanceId,
@@ -562,10 +568,7 @@ async function serve(options: ServeOptions): Promise<void> {
                 clock,
                 ids,
                 expiry,
-                callerRecord: {
-                  worker: "claude@1",
-                  authorized: ["claude@1"],
-                },
+                callerRecord,
                 registry: workerRegistry,
                 attemptLimit: settings.attemptLimit,
                 leaseTtlMs: settings.leaseTtlMs,
@@ -585,16 +588,20 @@ async function serve(options: ServeOptions): Promise<void> {
             return { ...result, node: view };
           },
         }),
-        "node.heartbeat": heartbeatNodeHandler({
-          heartbeatNode: (input) =>
-            heartbeatNode(
+        "node.renew": renewNodeHandler({
+          renewRun: (input) =>
+            renewRun(
               {
                 storage,
                 plan,
                 lease,
+                execution,
                 events,
                 clock,
                 leaseTtlMs: settings.leaseTtlMs,
+                runTtlMs: settings.runTtlMs,
+                expiry,
+                caller: callerRecord.worker,
               },
               input,
             ),
@@ -602,7 +609,16 @@ async function serve(options: ServeOptions): Promise<void> {
         "node.release": releaseNodeHandler({
           releaseNode: (input) => {
             const result = releaseNode(
-              { storage, plan, lease, execution, events, clock },
+              {
+                storage,
+                plan,
+                lease,
+                execution,
+                events,
+                clock,
+                expiry,
+                caller: callerRecord.worker,
+              },
               input,
             );
             const view = showNode(

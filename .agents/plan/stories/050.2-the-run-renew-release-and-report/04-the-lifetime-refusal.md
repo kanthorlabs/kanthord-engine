@@ -60,7 +60,7 @@ Add `test/sequence/scenarios/renew-refusal-lifetime-exceeded.ts`.
 ## Change
 
 **Add `lifetime-exceeded` to `RenewRefusal`**, beside the six authority codes Story 3
-(`03-the-renew`) added at `src/commands/node/heartbeat-node.ts:11` — `HeartbeatRefusal`.
+(`03-the-renew`) added at `src/commands/run/renew-run.ts:11` — `RenewRefusal`.
 
 Evaluate it in `src/commands/run/renew-run.ts` immediately after `assertRunAuthority` — step 6 of
 Story 3's change — and before the first lease write:

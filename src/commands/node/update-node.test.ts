@@ -604,7 +604,11 @@ function claimForConcurrency(
 ): ReturnType<typeof claimNode> {
   const execution = createBackedExecutionFake({
     ids: createMockIdGenerator({
-      ulids: ["01GQZ3NDEKTSV4RRFFQ69G5FC1", "01GQZ3NDEKTSV4RRFFQ69G5FC2"],
+      ulids: [
+        "01GQZ3NDEKTSV4RRFFQ69G5FC1",
+        "01GQZ3NDEKTSV4RRFFQ69G5FC2",
+        "01GQZ3NDEKTSV4RRFFQ69G5FC3",
+      ],
     }),
   });
   const lease = createBackedLeaseFake();
@@ -1929,14 +1933,14 @@ describe("src/commands/node/update-node.test", () => {
         }>[],
       }));
 
-      assert.equal(rows.runs.length, 1);
+      assert.equal(rows.runs.length, 2);
       assert.equal(rows.task.state, "running");
       assert.equal(rows.objective.state, "running");
       assert.equal(rows.initiative.state, "running");
       assert.deepEqual(
-        { ...rows.runs[0] },
+        { ...rows.runs.find((run) => run.node_id === taskId) },
         {
-          id: "run_01GQZ3NDEKTSV4RRFFQ69G5FC1",
+          id: "run_01GQZ3NDEKTSV4RRFFQ69G5FC2",
           node_id: taskId,
           state: "active",
           graph_revision:
@@ -1958,7 +1962,7 @@ describe("src/commands/node/update-node.test", () => {
         assert.deepEqual(outcomes.update.error.details, {
           relation: "self",
           nodeId: taskId,
-          runId: "run_01GQZ3NDEKTSV4RRFFQ69G5FC1",
+          runId: "run_01GQZ3NDEKTSV4RRFFQ69G5FC2",
           expiresAt: CLOCK_START + 120000,
         });
       }
@@ -1986,7 +1990,7 @@ describe("src/commands/node/update-node.test", () => {
     assert.deepEqual(caught.details, {
       relation: "self",
       nodeId: taskId,
-      runId: "run_01GQZ3NDEKTSV4RRFFQ69G5FC1",
+      runId: "run_01GQZ3NDEKTSV4RRFFQ69G5FC2",
       expiresAt: CLOCK_START + 120000,
     });
   });
@@ -2037,10 +2041,29 @@ describe("src/commands/node/update-node.test", () => {
   });
 
   it("an update on an objective whose child holds an active run refuses, naming the descendant", (t) => {
-    const fixture = build(seedClaimablePlanFixture, [U_REV]);
+    const runId = "run_update_descendant";
+    const workspaceId = "workspace_update_descendant";
+    const fixture = build(
+      (storage, plan, blobs) => {
+        seedPlanFixture(storage, plan, blobs);
+        storage.transact((transaction) => {
+          seedWorkspaceOnNode(transaction, {
+            id: workspaceId,
+            nodeId: taskId,
+          });
+          seedRunRow(transaction, {
+            id: runId,
+            kind: "task",
+            nodeId: taskId,
+            parentRunId: null,
+            workspaceId,
+            graphRevision: null,
+          });
+        });
+      },
+      [U_REV],
+    );
     t.after(() => fixture.dispose());
-
-    claimForConcurrency(fixture);
 
     let caught: unknown;
     try {
@@ -2061,8 +2084,8 @@ describe("src/commands/node/update-node.test", () => {
     assert.deepEqual(caught.details, {
       relation: "descendant",
       nodeId: taskId,
-      runId: "run_01GQZ3NDEKTSV4RRFFQ69G5FC1",
-      expiresAt: CLOCK_START + 120000,
+      runId,
+      expiresAt: 1700300000000,
     });
   });
 

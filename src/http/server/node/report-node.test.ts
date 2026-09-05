@@ -19,6 +19,7 @@ import { registry } from "../../contract/registry.ts";
 
 const U = "01JQ8Z7G3HZZZZZZZZZZZZZZZZ";
 const TASK = `task_${U}`;
+const RUN_ID = `run_${U}`;
 const OID40 = "a".repeat(40);
 
 function reportErrorEnvelope(): ReturnType<typeof buildErrorEnvelope> {
@@ -60,15 +61,21 @@ describe("src/http/server/node/report-node.test", () => {
       received.push(input);
       return successResult;
     });
-    const response = await app
-      .post(`/v1/node/${TASK}/report`)
-      .send({ report: "accepted", fence: 1, objectId: OID40 });
+    const response = await app.post(`/v1/node/${TASK}/report`).send({
+      report: "accepted",
+      fence: 1,
+      runId: RUN_ID,
+      runFence: 1,
+      objectId: OID40,
+    });
     assert.equal(response.status, 200);
     assert.deepEqual(received, [
       {
         nodeId: TASK,
         actorId: HARNESS_ACTOR_FIXTURE.id,
         actorKind: "harness",
+        runId: RUN_ID,
+        runFence: 1,
         body: { report: "accepted", fence: 1, objectId: OID40 },
       },
     ]);
@@ -100,7 +107,9 @@ describe("src/http/server/node/report-node.test", () => {
         calls += 1;
         return successResult;
       });
-      const response = await app.post(`/v1/node/${TASK}/report`).send(body);
+      const response = await app
+        .post(`/v1/node/${TASK}/report`)
+        .send({ ...body, runId: RUN_ID, runFence: 1 });
       assert.equal(response.status, 400, JSON.stringify(body));
       assert.equal(response.body.error.code, "invalid-request");
       assert.equal(calls, 0);
@@ -136,9 +145,13 @@ describe("src/http/server/node/report-node.test", () => {
         calls += 1;
         return successResult;
       });
-      const response = await app
-        .post(`/v1/node/${TASK}/report`)
-        .send({ report: "accepted", fence: 1, objectId });
+      const response = await app.post(`/v1/node/${TASK}/report`).send({
+        report: "accepted",
+        fence: 1,
+        runId: RUN_ID,
+        runFence: 1,
+        objectId,
+      });
       assert.equal(response.status, 200, objectId);
       assert.equal(calls, 1);
     }
@@ -157,9 +170,13 @@ describe("src/http/server/node/report-node.test", () => {
         calls += 1;
         return successResult;
       });
-      const response = await app
-        .post(`/v1/node/${TASK}/report`)
-        .send({ report: "accepted", fence: 1, objectId });
+      const response = await app.post(`/v1/node/${TASK}/report`).send({
+        report: "accepted",
+        fence: 1,
+        runId: RUN_ID,
+        runFence: 1,
+        objectId,
+      });
       assert.equal(response.status, 400, objectId);
       assert.equal(response.body.error.code, "invalid-request");
       assert.equal(calls, 0);
@@ -302,9 +319,13 @@ describe("src/http/server/node/report-node.test", () => {
       const app = await buildApp(() => {
         throw row.error;
       });
-      const response = await app
-        .post(`/v1/node/${TASK}/report`)
-        .send({ report: "accepted", fence: 1, objectId: OID40 });
+      const response = await app.post(`/v1/node/${TASK}/report`).send({
+        report: "accepted",
+        fence: 1,
+        runId: RUN_ID,
+        runFence: 1,
+        objectId: OID40,
+      });
       assert.equal(response.status, row.status, row.error.refusal);
       assert.equal(response.body.error.code, row.code, row.error.refusal);
       if (row.details === undefined) {
@@ -342,7 +363,9 @@ describe("src/http/server/node/report-node.test", () => {
         calls += 1;
         return successResult;
       });
-      const response = await app.post(`/v1/node/${TASK}/report`).send(body);
+      const response = await app
+        .post(`/v1/node/${TASK}/report`)
+        .send({ ...body, runId: RUN_ID, runFence: 1 });
       assert.equal(response.status, 200, JSON.stringify(body));
       assert.equal(calls, 1, JSON.stringify(body));
     }

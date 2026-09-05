@@ -8,43 +8,69 @@ export type HarnessIdentity = Readonly<{
 }>;
 
 export type HarnessTaskResult = Readonly<{
-  fence: number;
+  leaseFence: number;
   runId: string;
+  runFence: number;
+  objectiveRunId: string;
+  objectiveLeaseFence: number;
   attemptNo: number;
   objectId: string;
 }>;
 
 function parseClaim(stdout: string): Readonly<{
-  fence: number;
+  leaseFence: number;
   runId: string;
+  runFence: number;
+  objectiveRunId: string;
+  objectiveLeaseFence: number;
   attemptNo: number;
 }> {
   const lease =
-    /^kanthord: claimed \S+ fence ([1-9][0-9]*) expires \S+ heartbeat [0-9]+ms$/m.exec(
+    /^kanthord: claimed \S+ lease-fence ([1-9][0-9]*) expires \S+$/m.exec(
       stdout,
     );
   const run =
-    /^kanthord: run (\S+) attempt ([1-9][0-9]*) objective-run \S+ objective-fence [1-9][0-9]*$/m.exec(
+    /^kanthord: run (\S+) run-fence ([1-9][0-9]*) attempt ([1-9][0-9]*) objective-run (\S+) objective-lease-fence ([1-9][0-9]*)$/m.exec(
       stdout,
     );
-  const fenceText = lease?.[1];
+  const leaseFenceText = lease?.[1];
   const runId = run?.[1];
-  const attemptText = run?.[2];
+  const runFenceText = run?.[2];
+  const attemptText = run?.[3];
+  const objectiveRunId = run?.[4];
+  const objectiveLeaseFenceText = run?.[5];
   if (
-    fenceText === undefined ||
+    leaseFenceText === undefined ||
     runId === undefined ||
-    attemptText === undefined
+    runFenceText === undefined ||
+    attemptText === undefined ||
+    objectiveRunId === undefined ||
+    objectiveLeaseFenceText === undefined
   ) {
     throw new Error("kanthord: unable to parse node claim output");
   }
 
-  const fence = Number(fenceText);
+  const leaseFence = Number(leaseFenceText);
+  const runFence = Number(runFenceText);
   const attemptNo = Number(attemptText);
-  if (!Number.isSafeInteger(fence) || !Number.isSafeInteger(attemptNo)) {
+  const objectiveLeaseFence = Number(objectiveLeaseFenceText);
+  if (
+    !Number.isSafeInteger(leaseFence) ||
+    !Number.isSafeInteger(runFence) ||
+    !Number.isSafeInteger(attemptNo) ||
+    !Number.isSafeInteger(objectiveLeaseFence)
+  ) {
     throw new Error("kanthord: node claim output contains an unsafe number");
   }
 
-  return { fence, runId, attemptNo };
+  return {
+    leaseFence,
+    runId,
+    runFence,
+    objectiveRunId,
+    objectiveLeaseFence,
+    attemptNo,
+  };
 }
 
 function withToken(identity: HarnessIdentity): Readonly<{ tokenFile: string }> {
@@ -79,19 +105,23 @@ export async function runHarnessTask(
   const parsed = parseClaim(claim.stdout);
   context.assert(`${input.label}-claim-attempt`, 1, parsed.attemptNo);
 
-  const heartbeat = await driver.cliAs(
+  const renew = await driver.cliAs(
     identity.role,
     [
       "node",
-      "heartbeat",
+      "renew",
       "--id",
       input.nodeId,
       "--fence",
-      String(parsed.fence),
+      String(parsed.leaseFence),
+      "--run-id",
+      parsed.runId,
+      "--run-fence",
+      String(parsed.runFence),
     ],
     withToken(identity),
   );
-  context.assert(`${input.label}-heartbeat-status`, 0, heartbeat.exitCode);
+  context.assert(`${input.label}-renew-status`, 0, renew.exitCode);
 
   const report = await driver.cliAs(
     identity.role,
@@ -105,15 +135,22 @@ export async function runHarnessTask(
       "--object-id",
       input.objectId,
       "--fence",
-      String(parsed.fence),
+      String(parsed.leaseFence),
+      "--run-id",
+      parsed.runId,
+      "--run-fence",
+      String(parsed.runFence),
     ],
     withToken(identity),
   );
   context.assert(`${input.label}-report-status`, 0, report.exitCode);
 
   return {
-    fence: parsed.fence,
+    leaseFence: parsed.leaseFence,
     runId: parsed.runId,
+    runFence: parsed.runFence,
+    objectiveRunId: parsed.objectiveRunId,
+    objectiveLeaseFence: parsed.objectiveLeaseFence,
     attemptNo: parsed.attemptNo,
     objectId: input.objectId,
   };
@@ -126,6 +163,8 @@ export async function attestObjective(
   input: Readonly<{
     nodeId: string;
     fence: number;
+    runId: string;
+    runFence: number;
     objectId: string;
     label: string;
   }>,
@@ -139,6 +178,10 @@ export async function attestObjective(
       input.nodeId,
       "--fence",
       String(input.fence),
+      "--run-id",
+      input.runId,
+      "--run-fence",
+      String(input.runFence),
       "--object-id",
       input.objectId,
     ],
@@ -151,7 +194,7 @@ export function harnessTaskAssertionNames(label: string): readonly string[] {
   return [
     `${label}-claim-status`,
     `${label}-claim-attempt`,
-    `${label}-heartbeat-status`,
+    `${label}-renew-status`,
     `${label}-report-status`,
   ];
 }

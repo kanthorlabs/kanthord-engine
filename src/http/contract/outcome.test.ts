@@ -7,15 +7,28 @@ import { renderPath } from "./path.ts";
 
 const OID40 = "a".repeat(40);
 const OID64 = "b".repeat(64);
+const RUN_ID = "run_01JQ8ZAN9P0ABCDEFGHJKMNPQR";
 
 const validBodies = [
-  { report: "accepted", fence: 1, objectId: OID40 },
-  { report: "rejected", fence: 1, reason: "not good" },
-  { report: "failed", fence: 1, reason: "boom" },
-  { report: "cancelled", fence: 1 },
-  { report: "cancelled", fence: 1, reason: "giving up" },
-  { report: "attested", fence: 1, objectId: OID64 },
-  { report: "closed", acknowledgePartial: true },
+  { report: "accepted", fence: 1, runId: RUN_ID, runFence: 1, objectId: OID40 },
+  {
+    report: "rejected",
+    fence: 1,
+    runId: RUN_ID,
+    runFence: 1,
+    reason: "not good",
+  },
+  { report: "failed", fence: 1, runId: RUN_ID, runFence: 1, reason: "boom" },
+  { report: "cancelled", fence: 1, runId: RUN_ID, runFence: 1 },
+  {
+    report: "cancelled",
+    fence: 1,
+    runId: RUN_ID,
+    runFence: 1,
+    reason: "giving up",
+  },
+  { report: "attested", fence: 1, runId: RUN_ID, runFence: 1, objectId: OID64 },
+  { report: "closed", runId: RUN_ID, runFence: 1, acknowledgePartial: true },
 ];
 
 describe("src/http/contract/outcome.test", () => {

@@ -9,8 +9,16 @@ Kind: story-foundation
 ### 1 — the policy amendment
 
 `docs/proposal/api/README.md:89` — `## Versioning` opens the section. The forbidden list opens at
-`docs/proposal/api/README.md:100` — `never` and its items are `:102` through `:106`;
-`docs/proposal/api/README.md:105` — `add a required request field` is the item this epic breaks.
+`docs/proposal/api/README.md:101` — `never` and its items are `:103` through `:106`.
+
+**`add a required request field` is no longer among them.** A human moved it to the permitted list on
+2026-09-03, and `docs/proposal/api/README.md:98` — `required` now carries it, with the ruling and its
+condition recorded at `docs/proposal/api/README.md:110` — `moved`. So `runId` and `runFence` arriving
+as required fields is a legal change, and this story's amendment covers the epic's **other** two
+breaks: `heartbeatIntervalMs` leaving the `node.renew` response, which
+`docs/proposal/api/README.md:103` — `remove` forbids, and `node.heartbeat` being removed, which the
+closed list permits nowhere.
+
 `docs/proposal/api/README.md:108` — `closed` reads:
 
 > The list is closed. A change outside it is a `/v2`, and this product has no `/v2`.
@@ -35,8 +43,8 @@ record a reader reaches, and case 9 asserts it.
 ### 3 — the capability swap
 
 `src/http/contract/capability.ts:5` — `capabilityOperations` binds
-`src/http/contract/capability.ts:7` — `external-drive` to `node.claim`,
-`src/http/contract/capability.ts:9` — `node.heartbeat`, `node.release` and `node.report` — precisely
+`src/http/contract/capability.ts:7` (formerly `external-drive`) to `node.claim`,
+`src/http/contract/capability.ts:9` (formerly `node.heartbeat`), `node.release` and `node.report` — precisely
 the four operations this epic changes. Retire it and declare `worker-model` in its place:
 
 ```ts
@@ -102,24 +110,26 @@ capabilities: ["event-wait", "per-node-write", "project-graph", "worker-model"],
 ### 6 — the compatibility record
 
 `docs/proposal/api/README.md` has no compatibility record section. Create one as the last `##` section
-of the file, after `docs/proposal/api/README.md:297` — `## Identity`:
+of the file, after `docs/proposal/api/README.md:299` — `## Identity`:
 
 ```markdown
 ## Compatibility record
 
 Each row records one change outside the closed list of `## Versioning`, the epic whose human ruling made it legal, and the capability swap that announced it.
 
-| epic       | change outside the closed list                                                                                                                                       | capability retired | capability declared |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------- |
-| EPIC 050.1 | `available` becomes a required field of the `node.claim` request                                                                                                     | `external-drive`   | `worker-model`      |
-| EPIC 050.1 | `heartbeatIntervalMs` leaves the `node.claim` response                                                                                                               | `external-drive`   | `worker-model`      |
-| EPIC 050.2 | `node.heartbeat` is removed and replaced by `node.renew`                                                                                                             | `external-drive`   | `worker-model`      |
-| EPIC 050.2 | `runId` and `runFence` become required fields of the `node.renew`, `node.release` and `node.report` requests; `heartbeatIntervalMs` leaves the `node.renew` response | `external-drive`   | `worker-model`      |
+| epic       | change outside the closed list                           | capability retired | capability declared |
+| ---------- | -------------------------------------------------------- | ------------------ | ------------------- |
+| EPIC 050.1 | `heartbeatIntervalMs` leaves the `node.claim` response   | `external-drive`   | `worker-model`      |
+| EPIC 050.2 | `node.heartbeat` is removed and replaced by `node.renew` | `external-drive`   | `worker-model`      |
+| EPIC 050.2 | `heartbeatIntervalMs` leaves the `node.renew` response   | `external-drive`   | `worker-model`      |
 ```
 
-Four rows, one per change of this wire generation that the closed list forbids. `runId` and `fence`
-arriving on the `node.claim` response is **not** a row: `docs/proposal/api/README.md:95` —
-`add a response field` already permits it, and a record of legal changes would hide the illegal ones.
+Three rows, one per change of this wire generation that the closed list forbids. Two candidates are
+**not** rows, and each is excluded by a different permission. `runId` and `fence` arriving on the
+`node.claim` response is permitted by `docs/proposal/api/README.md:95` — `add a response field`.
+`available`, `runId` and `runFence` becoming required request fields is permitted by
+`docs/proposal/api/README.md:98` — `required`, since the 2026-09-03 ruling. A record of legal changes
+would hide the illegal ones.
 
 The table shape is four columns and is fixed here, because EPIC 050.4 Story 8
 (`08-lease-held-is-retired`), EPIC 050.5 Story 8 (`08-the-proposal-records-the-removal`) and EPIC 057

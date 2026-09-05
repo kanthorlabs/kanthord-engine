@@ -23,7 +23,7 @@ A candidate is a text plus a citation. There are three sources, and no other.
 | Task outcome      | a task reaches `done`                                 | `feature`     | a draft  |
 | Recovered failure | a task is rejected, then accepted inside the same run | `project`     | a draft  |
 
-The daemon never harvests a tool call, a file read, a heartbeat or a lease renewal. Those are in the attempt record already, they are complete there, and a second copy of them under a different name is the mistake this design exists to avoid.
+The daemon never harvests a tool call, a file read or a run renewal. Those are in the attempt record already, they are complete there, and a second copy of them under a different name is the mistake this design exists to avoid.
 
 A candidate carries its citation: the node id, the run id and the attempt id it came from, or the actor id of the human who wrote it. A candidate with no citation is refused.
 

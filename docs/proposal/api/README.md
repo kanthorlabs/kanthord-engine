@@ -95,6 +95,7 @@ Inside `/v1` the daemon may:
 - add a response field;
 - add a member to an enum;
 - add an optional request field;
+- add a required request field;
 - add an operation.
 
 Inside `/v1` the daemon may never:
@@ -102,10 +103,11 @@ Inside `/v1` the daemon may never:
 - remove or rename a response field;
 - change the type of a response field;
 - remove a member from an enum;
-- add a required request field;
 - change what an error code means, or the status a code maps to.
 
-The list is closed. A change outside it is a `/v2`, and this product has no `/v2`.
+The list is closed by default. A change outside it is legal only when a human records the ruling in the epic that makes it, and the capability name covering the affected operations is retired and replaced. A client reads `system.health.capabilities`, so it cannot call a changed shape unknowingly. The daemon still serves one wire version, and there is no `/v2`.
+
+**Adding a required request field moved from the second list to the first on 2026-09-03, by a human ruling.** It was forbidden because a client that already sends a valid request starts sending an invalid one, with no signal that anything changed. This product has no deployment and no client the team does not control, so that cost has no bearer, and the rule was buying protection nobody needed against a wire that is still being designed. **The condition is explicit: the item returns to the second list when the first client outside this repository calls `/v1`**, and the epic that admits such a client moves it back. Nothing else about the two lists changed, and a removal of any kind is still forbidden.
 
 **A client must ignore an unknown response field, and it must tolerate an unknown enum member.** A client that refuses either is a client this policy cannot serve.
 
@@ -262,6 +264,13 @@ The CLI routes on `code` and never parses `message`. A block reason, a publish r
 | 409    | `review-head-unavailable`  | the review run has no workspace head to judge                                                     |
 | 409    | `objective-busy`           | a sibling task already has an active run                                                          |
 | 409    | `subtree-busy`             | an active run already covers the node or its subtree                                              |
+| 409    | `run-not-found`            | the presented run does not exist                                                                  |
+| 409    | `run-ended`                | the presented run has ended                                                                       |
+| 409    | `run-expired`              | the presented run has expired                                                                     |
+| 409    | `run-caller-mismatch`      | the caller does not own the presented run                                                         |
+| 409    | `target-outside-run`       | the target node is outside the presented run                                                      |
+| 409    | `fence-stale`              | the presented run fence is not current                                                            |
+| 409    | `lifetime-exceeded`        | the presented run reached its maximum lifetime                                                    |
 | 422    | `plan-invalid`             | the plan failed validation, and `details` lists every finding                                     |
 | 422    | `choices-invalid`          | the choice set builds an invalid graph, and `details` names the nodes                             |
 | 422    | `identity-kind-mismatch`   | one ULID payload appeared under two kind prefixes                                                 |
@@ -314,9 +323,8 @@ A name is unique where the proposal says so, and it is a query filter, never a p
 
 Each row records one change outside the closed list of `## Versioning`, the epic whose human ruling made it legal, and the capability swap that announced it.
 
-| epic       | change outside the closed list                                                                                                                                       | capability retired | capability declared |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------- |
-| EPIC 050.1 | `available` becomes a required field of the `node.claim` request                                                                                                     | `external-drive`   | `worker-model`      |
-| EPIC 050.1 | `heartbeatIntervalMs` leaves the `node.claim` response                                                                                                               | `external-drive`   | `worker-model`      |
-| EPIC 050.2 | `node.heartbeat` is removed and replaced by `node.renew`                                                                                                             | `external-drive`   | `worker-model`      |
-| EPIC 050.2 | `runId` and `runFence` become required fields of the `node.renew`, `node.release` and `node.report` requests; `heartbeatIntervalMs` leaves the `node.renew` response | `external-drive`   | `worker-model`      |
+| epic       | change outside the closed list                           | capability retired | capability declared |
+| ---------- | -------------------------------------------------------- | ------------------ | ------------------- |
+| EPIC 050.1 | `heartbeatIntervalMs` leaves the `node.claim` response   | `external-drive`   | `worker-model`      |
+| EPIC 050.2 | `node.heartbeat` is removed and replaced by `node.renew` | `external-drive`   | `worker-model`      |
+| EPIC 050.2 | `heartbeatIntervalMs` leaves the `node.renew` response   | `external-drive`   | `worker-model`      |

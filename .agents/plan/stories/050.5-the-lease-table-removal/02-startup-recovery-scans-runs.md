@@ -180,7 +180,7 @@ is a state neither command can read.
 `RecoverHomeDependencies.leases` all keep their names in this epic.
 
 **Renaming the dependency key changes a path this epic cannot draw.**
-`recover-home.ts:22` calls `dependencies.leases()`, a function-valued dependency, so its token is
+`src/commands/startup/recover-home.ts:22` calls `dependencies.leases()`, a function-valued dependency, so its token is
 `leases.call`. Renaming the key to `runs` makes it `runs.call` — a seam change on `recoverHome`, whose
 trace is four `.call` tokens and which therefore has no live diagram and can have none. A seam change
 no diagram measures is exactly what `Seams:` exists to prevent, and `Seams:` can only bind a live
@@ -202,7 +202,7 @@ than the mechanism, and they do not change either.
 - Do not rename `RECOVERY_STEP_ORDER`'s `leases` step, `LeasesStep`, `LeasesResultLike` or `RecoverHomeDependencies.leases`. Each rename is a seam change on a path with no diagram.
 - Do not change `RecoveryReport`'s field names.
 - Do not change the git verdict. `clean && head === base` decides `ready` against `blocked`, and this story changes only where the base comes from.
-- Do not touch the `lease` table. It survives this epic, empty, until EPIC 057's migration `17`.
+- Do not touch the `lease` table. It survives this epic, empty, until EPIC 057's migration `18`.
 
 ## Verify
 
@@ -234,7 +234,7 @@ Add, each as a separate `it`:
 
 10. `"RECOVERY_STEP_ORDER is unchanged"` — assert `["reap", "sweep", "reconcile", "leases"]` by value, and assert `RecoveryReport` still holds `returnedToReady`, `objectivesFreed` and `blocked` by key set. Two assertions, one case. The step vocabulary is deliberately not renamed, and this is the assertion that makes the decision visible rather than an omission.
 
-11. `"recoverHome calls the four steps in order"` — the shipped `recover-home.test.ts:128` case, carried across unchanged. Its dependency keys do not move.
+11. `"recoverHome calls the four steps in order"` — the shipped `src/commands/startup/recover-home.test.ts:128` case, carried across unchanged. Its dependency keys do not move.
 
 12. `"writeRecoveryVerdict is injected, not called directly"` — assert `RecoverExpiredRunsDependencies` holds the key, and assert the outer pass calls the injected function by substituting a recording double. Without this the extraction could be a rename that leaves the call direct, and the diagram would then describe a trace the outer command actually owns.
 

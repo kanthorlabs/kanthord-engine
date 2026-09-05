@@ -38,6 +38,12 @@ operation it names is `routed`, and a test enforces that.
 closed by default rather than absolutely. `docs/proposal/api/README.md` carries the exception sentence, and the capability name
 covering the affected operations is retired and replaced. Nothing else in D1 changes.
 
+**Superseded again on 2026-09-03, by a human ruling.** `add a required request field` moved from the
+forbidden list to the permitted one in `docs/proposal/api/README.md`, so the restatement below is
+stale on that one item and the shipped document is the record. The condition is written beside the
+ruling: the item returns when the first client outside this repository calls `/v1`. Every other item
+of both lists is unchanged, and a removal of any kind is still forbidden.
+
 `KANTHORD_VERSION` is a hardcoded literal at `src/domain/version.ts:1`, today `"27.8.1"`. One
 repository ships the daemon and the CLI, so that string describes a build, and it describes the wire
 contract only by accident. **The wire contract is `/v1`, and the policy binds to `/v1` alone.**

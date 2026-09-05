@@ -49,9 +49,9 @@ sequenceDiagram
     Command->>Storage: 1 storage.transact
     Command->>Clock: 2 clock.now
     Command->>Expiry: 3 expiry.expireRuns
-    Command->>Execution: 4 execution.runById:R
-    Command->>Plan: 5 plan.readSubtree
-    Command->>Plan: 6 plan.readNode
+    Command->>Plan: 4 plan.readNode
+    Command->>Execution: 5 execution.runById:R
+    Command->>Plan: 6 plan.readSubtree
     Command->>Execution: 7 execution.attemptsOfRun:R
     Command->>Execution: 8 execution.closeAttempt:A
     Command->>Plan: 9 plan.setNodeState:T:claim-released
@@ -60,7 +60,16 @@ sequenceDiagram
     Command-->>Client: ok
 ```
 
-**`plan.readNode` at step 6 is a context token, and it stays.** EPIC 050.2 Story 5 (`05-the-release`)
+**Amended: this story deletes lease seams and does not reorder the prelude.** The diagram above drew
+`4 execution.runById:R`, `5 plan.readSubtree`, `6 plan.readNode` — a transcription of the superseded
+diagram that moved three reads this story's `## Change` never touches. EPIC 050.2 Story 5 (`05-the-release`) orders the
+callback with `plan.readNode` third, at `.agents/plan/stories/050.2-the-run-renew-release-and-report/05-the-release.md:168` — `expireRuns`, and
+`.agents/plan/stories/050.2-the-run-renew-release-and-report/05-the-release.md:141` —
+`Step 4 precedes step 5, and that order is the ruling` states the rule for the family. The order above
+is corrected to match, the `Seams:` line is unchanged because a sign is decided over token presence
+and never over an ordinal, and the deletions this story makes are unaffected.
+
+**`plan.readNode` at step 4 is a context token, and it stays.** EPIC 050.2 Story 5 (`05-the-release`)
 states what it supplies: `node.kind` for the branch, `node.revision` for `cause`, and the
 `node-not-found` and `initiative-not-claimable` refusals — and `plan.readSubtree` returns ids alone,
 so it replaces neither. That story's own case asserts both refusals still fire. This story deletes
@@ -158,7 +167,7 @@ Add, each as a separate `it`:
 
 11. `"the derived field decisions hold no node.release fence line"` — the shipped `coverage.test.ts` harness over the regenerated fixture.
 
-Add `test/sequence/scenarios/release-lease-free.ts`.
+Add `test/sequence/scenarios/release-lease-free.ts`. **Delete `test/sequence/scenarios/release-success.ts` in the same commit**, because this replacement makes EPIC 050.2's `release-success` superseded the moment it exists, and a scenario naming a superseded diagram is refused at `test/sequence/conformance.test.ts:115` — `names a superseded live diagram`. EPIC 050.3 Story 10 (`10-the-conformance-harness-admits-an-incremental-supersession`) lands that rule one epic earlier, and this epic repeats none of it.
 
 `pnpm run verify` exits 0.
 

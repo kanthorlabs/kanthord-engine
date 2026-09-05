@@ -40,12 +40,30 @@ describe("src/http/contract/capability.test", () => {
     );
   });
 
-  it("the real registry declares the exact expected list", () => {
+  it("worker-model is the last key", () => {
+    assert.equal(Object.keys(capabilityOperations).at(-1), "worker-model");
+  });
+
+  it("declaredCapabilities omits external-drive and includes worker-model", () => {
     assert.deepEqual(declaredCapabilities(registry), [
       "event-wait",
-      "external-drive",
       "per-node-write",
       "project-graph",
+      "worker-model",
+    ]);
+  });
+
+  it("external-drive is not a capability name", () => {
+    assert.equal(Object.hasOwn(capabilityOperations, "external-drive"), false);
+    assert.equal(capabilityName.safeParse("external-drive").success, false);
+  });
+
+  it("worker-model names the four worker operations", () => {
+    assert.deepEqual(capabilityOperations["worker-model"], [
+      "node.claim",
+      "node.renew",
+      "node.release",
+      "node.report",
     ]);
   });
 
@@ -56,9 +74,9 @@ describe("src/http/contract/capability.test", () => {
   it("declaredCapabilities is unchanged", () => {
     assert.deepEqual(declaredCapabilities(registry), [
       "event-wait",
-      "external-drive",
       "per-node-write",
       "project-graph",
+      "worker-model",
     ]);
   });
 
@@ -70,7 +88,7 @@ describe("src/http/contract/capability.test", () => {
     assert.equal(Object.keys(capabilityOperations)[0], "event-wait");
   });
 
-  it("a stubbed operation suppresses its name", () => {
+  it("stubbing node.report removes worker-model", () => {
     const fixture = registry.map((entry) =>
       entry.operationId === "node.report"
         ? { ...entry, status: "stubbed" as const }
@@ -90,9 +108,9 @@ describe("src/http/contract/capability.test", () => {
         : entry,
     );
     assert.deepEqual(declaredCapabilities(fixture), [
-      "external-drive",
       "per-node-write",
       "project-graph",
+      "worker-model",
     ]);
   });
 
@@ -102,8 +120,8 @@ describe("src/http/contract/capability.test", () => {
     );
     assert.deepEqual(declaredCapabilities(fixture), [
       "event-wait",
-      "external-drive",
       "per-node-write",
+      "worker-model",
     ]);
   });
 
@@ -112,9 +130,9 @@ describe("src/http/contract/capability.test", () => {
       (entry) => entry.operationId !== "event.list",
     );
     assert.deepEqual(declaredCapabilities(fixture), [
-      "external-drive",
       "per-node-write",
       "project-graph",
+      "worker-model",
     ]);
   });
 

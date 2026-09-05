@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 
 import {
+  systemHealthExamples,
   systemDbResponse,
   systemHealthResponse,
   systemStatusResponse,
 } from "./system.ts";
+import { declaredCapabilities } from "./capability.ts";
 import { dependencyStatuses } from "../../domain/health.ts";
 import { findOperation, registry } from "./registry.ts";
 import type { Operation } from "./operation.ts";
@@ -80,6 +82,13 @@ const propertyNamesOf = (
 };
 
 describe("src/http/contract/system.test", () => {
+  it("the system.health example lists the four declared capabilities", () => {
+    const success = systemHealthExamples.success as {
+      capabilities: readonly string[];
+    };
+    assert.deepEqual(success.capabilities, declaredCapabilities(registry));
+  });
+
   it("systemHealthResponse accepts an empty and a two-line dependency list", () => {
     assert.equal(
       systemHealthResponse.safeParse({
@@ -94,7 +103,7 @@ describe("src/http/contract/system.test", () => {
       systemHealthResponse.safeParse({
         status: "degraded",
         version: "27.8.1",
-        capabilities: ["external-drive", "per-node-write"],
+        capabilities: ["per-node-write", "worker-model"],
         dependencies: [
           { name: "storage", status: "ok" },
           { name: "git", status: "failed" },
@@ -373,9 +382,9 @@ describe("src/http/contract/system.test", () => {
       "node.claim",
       "node.create",
       "node.delete",
-      "node.heartbeat",
       "node.list",
       "node.release",
+      "node.renew",
       "node.report",
       "node.show",
       "node.unblock",
@@ -421,8 +430,8 @@ describe("src/http/contract/system.test", () => {
         "node.claim",
         "node.create",
         "node.delete",
-        "node.heartbeat",
         "node.release",
+        "node.renew",
         "node.report",
         "node.update",
         "plan.import",

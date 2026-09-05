@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { z } from "zod";
 
-import { nodeClaimResponse } from "./execution.ts";
+import { nodeClaimResponse, nodeRenewResponse } from "./execution.ts";
 import { buildErrorEnvelope } from "./errors.ts";
+import { nodeReportRequest } from "./outcome.ts";
 import { findOperation, registry } from "./registry.ts";
 
 const withExamples = registry.filter((entry) => entry.examples !== undefined);
@@ -35,6 +37,7 @@ test("src/http/contract/example.test", async (t) => {
       assert.equal(typeof response.runId, "string");
       assert.equal(typeof response.fence, "number");
       assert.equal((response.fence as number) >= 1, true);
+      assert.equal(typeof response.objectiveRunId, "string");
       assert.equal(typeof response.expiresAt, "number");
       assert.equal((response.renewAfterMs as number) > 0, true);
     },
@@ -45,6 +48,100 @@ test("src/http/contract/example.test", async (t) => {
       Object.hasOwn(nodeClaimResponse.shape, "heartbeatIntervalMs"),
       false,
     );
+  });
+
+  await t.test(
+    "a node.report omitting runId fails schema validation with the issue path runId",
+    () => {
+      const bodies: readonly Record<string, unknown>[] = [
+        {
+          report: "accepted",
+          fence: 1,
+          runFence: 1,
+          objectId: "a".repeat(40),
+        },
+        { report: "rejected", fence: 1, runFence: 1, reason: "not good" },
+        { report: "failed", fence: 1, runFence: 1, reason: "boom" },
+        { report: "cancelled", fence: 1, runFence: 1 },
+        {
+          report: "attested",
+          fence: 1,
+          runFence: 1,
+          objectId: "b".repeat(64),
+        },
+        { report: "closed", runFence: 1, acknowledgePartial: true },
+      ];
+
+      for (const body of bodies) {
+        const result = nodeReportRequest.safeParse(body);
+        assert.equal(result.success, false, JSON.stringify(body));
+        if (!result.success) {
+          const issue = result.error.issues.find(
+            (candidate) =>
+              candidate.path.length === 1 && candidate.path[0] === "runId",
+          );
+          assert.notEqual(issue, undefined, JSON.stringify(body));
+          if (issue !== undefined) {
+            assert.deepEqual(issue.path, ["runId"]);
+          }
+        }
+      }
+    },
+  );
+
+  await t.test(
+    "nodeRenewResponse carries expiresAt and renewAfterMs and no heartbeatIntervalMs",
+    () => {
+      const response = nodeRenewResponse.parse(
+        findOperation("node.renew")!.examples!.success,
+      ) as Record<string, unknown>;
+
+      assert.equal(response.expiresAt, 1722800300000);
+      assert.equal(response.renewAfterMs, 100000);
+      assert.equal(Object.hasOwn(response, "heartbeatIntervalMs"), false);
+    },
+  );
+
+  await t.test("heartbeatIntervalMs appears in no contract schema", () => {
+    const control = z.toJSONSchema(
+      z.strictObject({ heartbeatIntervalMs: z.int() }),
+      { target: "openapi-3.0", io: "input" },
+    );
+    assert.equal(JSON.stringify(control).includes("heartbeatIntervalMs"), true);
+
+    for (const entry of registry) {
+      if (entry.request !== undefined) {
+        const schema = z.toJSONSchema(entry.request, {
+          target: "openapi-3.0",
+          io: "input",
+        });
+        assert.equal(
+          JSON.stringify(schema).includes("heartbeatIntervalMs"),
+          false,
+          `${entry.operationId}.request`,
+        );
+      }
+      if (entry.response !== undefined) {
+        const schema = z.toJSONSchema(entry.response, {
+          target: "openapi-3.0",
+          io: "output",
+        });
+        assert.equal(
+          JSON.stringify(schema).includes("heartbeatIntervalMs"),
+          false,
+          `${entry.operationId}.response`,
+        );
+      }
+    }
+  });
+
+  await t.test("renewAfterMs is one third of runTtlMs", () => {
+    const runTtlMs = 300000;
+    const response = nodeRenewResponse.parse(
+      findOperation("node.renew")!.examples!.success,
+    );
+
+    assert.equal(response.renewAfterMs, Math.floor(runTtlMs / 3));
   });
 
   await t.test("every example parses against its declared schema", () => {
@@ -61,9 +158,9 @@ test("src/http/contract/example.test", async (t) => {
       "node.claim",
       "node.create",
       "node.delete",
-      "node.heartbeat",
       "node.list",
       "node.release",
+      "node.renew",
       "node.report",
       "node.show",
       "node.unblock",

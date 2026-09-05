@@ -67,10 +67,10 @@ Each step, with its caller anchor, its callee anchor and the fixture state that 
    Reached unconditionally.
 3. `src/commands/node/release-node.ts:65` — `readAllNodes` → `src/services/plan/index.ts:74` —
    `readAllNodes`. Reached unconditionally; the command filters in memory at
-   `src/commands/node/release-node.ts:66` — `find`.
-4. `src/commands/node/release-node.ts:310` — `assertHeld` → `src/services/lease/index.ts:101` —
+   `src/commands/node/release-node.ts:66` (formerly `find`).
+4. `src/commands/node/release-node.ts:310` (formerly `assertHeld`) → `src/services/lease/index.ts:101` —
    `assertHeld`, through the wrapper invoked at
-   `src/commands/node/release-node.ts:77` — `assertHeld`. Reached because the fixture's `T` is not the
+   `src/commands/node/release-node.ts:77` (formerly `assertHeld`). Reached because the fixture's `T` is not the
    initiative, so `src/commands/node/release-node.ts:72` — `initiative-not-claimable` does not fire.
 5. `src/commands/node/release-node.ts:93` — `activeRunOfNode` →
    `src/services/execution/index.ts:76` — `activeRunOfNode`. Reached because
@@ -92,7 +92,7 @@ Each step, with its caller anchor, its callee anchor and the fixture state that 
 10. `src/commands/node/release-node.ts:180` — `release` → `src/services/lease/index.ts:94` —
     `release`.
 11. `src/commands/node/release-node.ts:188` — `append` → `src/services/event/index.ts:50` — `append`,
-    with `src/commands/node/release-node.ts:191` — `lease.released`.
+    with `src/commands/node/release-node.ts:191` (formerly `lease.released`).
 
 Step 7 repeats the token of step 6, so this path cannot be drawn as a live diagram until the two
 reads collapse into one; that is why the pair carries the `:#2` discriminator here and appears in no
@@ -168,7 +168,7 @@ which holds six keys today and no `expiry`. Inside the existing `storage.transac
 2. `dependencies.expiry.expireRuns(transaction, { now });` — new, immediately after the clock read.
 3. `plan.readNode(transaction, input.nodeId)` — new, replacing the whole-graph read at
    `src/commands/node/release-node.ts:65` — `readAllNodes` and the in-memory filter at
-   `src/commands/node/release-node.ts:66` — `find`. It keeps `node-not-found` and
+   `src/commands/node/release-node.ts:66` (formerly `find`). It keeps `node-not-found` and
    `initiative-not-claimable` **in front of the authority check**, and it supplies `node.kind` for
    `src/commands/node/release-node.ts:79` — `node.kind` and `node.revision` for
    `src/commands/node/release-node.ts:178` — `node.revision`.
@@ -177,8 +177,8 @@ which holds six keys today and no `expiry`. Inside the existing `storage.transac
 5. `plan.readSubtree(transaction, run.nodeId)` — new, from
    `src/services/plan/index.ts:101` — `readSubtree`.
 6. `assertRunAuthority(...)`, throwing `ReleaseNodeError(refusal.refusal, …, { runId })`. This
-   replaces the wrapper at `src/commands/node/release-node.ts:77` — `assertHeld` and its
-   `src/commands/node/release-node.ts:310` — `assertHeld`: the run proves the caller now. Delete the
+   replaces the wrapper at `src/commands/node/release-node.ts:77` (formerly `assertHeld`) and its
+   `src/commands/node/release-node.ts:310` (formerly `assertHeld`): the run proves the caller now. Delete the
    wrapper, its `LeaseError` catch at `src/commands/node/release-node.ts:318` — `lease-fenced`, and
    the now-unused `LeaseError` value import at `src/commands/node/release-node.ts:7` — `LeaseError`.
 
@@ -242,20 +242,20 @@ type is declared and `src/http/contract/event-payload.test.ts:365` — `it` asse
 non-retired type has a producer, both by literal string scan over `src/commands`.
 
 **`lease.released` has three producers, and all three move.** They are
-`src/commands/node/release-node.ts:154` — `lease.released` (exhausted task),
-`src/commands/node/release-node.ts:191` — `lease.released` (ordinary task) and
-`src/commands/node/release-node.ts:290` — `lease.released` (objective). The third is on the path this
+`src/commands/node/release-node.ts:154` (formerly `lease.released`) (exhausted task),
+`src/commands/node/release-node.ts:191` (formerly `lease.released`) (ordinary task) and
+`src/commands/node/release-node.ts:290` (formerly `lease.released`) (objective). The third is on the path this
 story otherwise leaves alone, and it moves anyway: leaving it would keep `lease.released` produced,
 so it could not leave `eventTypes`, and the epic's decision that no `lease.*` type remains would be
 false. The objective append keeps its `subjectId` and its
-`src/commands/node/release-node.ts:295` — `objectiveId`, which is the objective's own id there; only
+`src/commands/node/release-node.ts:295` (formerly `objectiveId`), which is the objective's own id there; only
 the type and the run-scoped payload change.
 
-- `src/domain/event-type.ts:6` — `lease.released`: remove the member. Add `"run.ended"` in its
+- `src/domain/event-type.ts:6` (formerly `lease.released`): remove the member. Add `"run.ended"` in its
   bytewise position in `src/domain/event-type.ts:1` — `eventTypes`.
 - `src/domain/event-type.ts:44` — `retiredEventTypes` stays empty, for the typing reason Story 3
   (`03-the-renew`) states.
-- `src/http/contract/event-payload.ts:104` — `lease.released`: remove the schema. Add `run.ended` in
+- `src/http/contract/event-payload.ts:104` (formerly `lease.released`): remove the schema. Add `run.ended` in
   the same bytewise position in `src/http/contract/event-payload.ts:71` — `eventPayloads`:
 
 ```ts
@@ -273,13 +273,13 @@ on every release path, because no release input carries one and the `run` table 
 column; EPIC 051 supplies a value on the report path.
 
 - `src/http/contract/event-payload.test.ts:50` — `recordedPayloads`: replace the `lease.released`
-  fixture at `src/http/contract/event-payload.test.ts:91` — `lease.released` with a `run.ended` one
+  fixture at `src/http/contract/event-payload.test.ts:91` (formerly `lease.released`) with a `run.ended` one
   in the same position, because
   `src/http/contract/event-payload.test.ts:434` — `deepEqual` pins the key order.
 - `src/http/contract/event-payload.test.ts:459` — `it` reads the `lease.*` schemas by name. After
   Story 3 (`03-the-renew`) and this story, `lease.claimed` is its only remaining subject; rename the
   case accordingly.
-- `src/http/contract/openapi.test.ts:269` — `lease.released`: rename the component entry to
+- `src/http/contract/openapi.test.ts:269` (formerly `lease.released`): rename the component entry to
   `run.ended` in its bytewise position. The count at
   `src/http/contract/openapi.test.ts:416` — `equal` stays at 38.
 
@@ -353,9 +353,12 @@ Add, each as a separate `it`:
 10. `"a release on an unknown node refuses node-not-found, not target-outside-run"` — present a valid
     `runId` and `runFence` with `nodeId: "task_zzz"`. Assert `refusal === "node-not-found"`.
 
-11. `"a release on an initiative refuses initiative-not-claimable, not target-outside-run"` — the
-    shipped case at `src/commands/node/release-node.test.ts:667` — `it`, carried across with a valid
-    `runId` and `runFence`, plus the added assertion that the code is not `"target-outside-run"`.
+11. `"a release on an initiative refuses initiative-not-claimable, not target-outside-run"` —
+    **written fresh.** The shipped case this story planned to carry across,
+    `"an initiative release is refused initiative-not-claimable and writes nothing"`, was removed by
+    commit `04376fb` and exists nowhere in the tree. Seed an initiative from
+    `test/helpers/rows.ts:184` — `seedSiblingTask`'s sibling fixture, present a valid `runId` and
+    `runFence`, and assert the code is `"initiative-not-claimable"` and not `"target-outside-run"`.
     Cases 10 and 11 are the pair that proves the node read precedes the authority check.
 
 12. `"a release refuses a target outside the run"` — an existing sibling task from
@@ -369,16 +372,18 @@ Add, each as a separate `it`:
     case at `src/commands/node/release-node.test.ts:417` — `it`, carried across, plus assertions that
     the run `outcome` is `"blocked"` and exactly one `run.ended` event carries it.
 
-15. `"an objective release appends run.ended and no lease.released"` — the shipped case at
-    `src/commands/node/release-node.test.ts:609` — `it`, carried across, plus an assertion on the
-    event type. It proves the third producer moved.
+15. `"an objective release appends run.ended and no lease.released"` — **written fresh.** The
+    shipped case this story planned to carry across,
+    `"an objective release after every task release frees the objective lease and ends the objective run released"`,
+    was removed by commit `04376fb` and exists nowhere in the tree. Release every task, then the
+    objective, and assert the appended event type. It proves the third producer moved.
 
 16. `"an objective release still refuses lease-held while a child lease is live"` — the shipped case
-    at `src/commands/node/release-node.test.ts:590` — `it`, carried across unchanged. It is the
+    at `src/commands/node/release-node.test.ts:386` — `it`, carried across unchanged. It is the
     control proving this story left the objective path's reads alone.
 
 17. `"a release whose run has no open attempt is refused no-open-attempt"` — the shipped case at
-    `src/commands/node/release-node.test.ts:702` — `it`, carried across, and extended with a
+    `src/commands/node/release-node.test.ts:425` — `it`, carried across, and extended with a
     `databaseBytes` snapshot the shipped case does not take.
 
 18. `"lease.released is absent from eventTypes and run.ended is present"` — in

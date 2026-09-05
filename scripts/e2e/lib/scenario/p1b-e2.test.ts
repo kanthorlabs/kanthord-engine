@@ -281,8 +281,8 @@ function claimFence(id: string): number {
 function claimOutput(id: string): string {
   const fence = claimFence(id);
   return (
-    `kanthord: claimed ${id} fence ${String(fence)} expires 2026-08-17T00:00:00.000Z heartbeat 1000ms\n` +
-    `kanthord: run run-${id} attempt 1 objective-run objective-run-${id} objective-fence ${String(fence + 100)}\n`
+    `kanthord: claimed ${id} lease-fence ${String(fence)} expires 2026-08-17T00:00:00.000Z\n` +
+    `kanthord: run run-${id} run-fence ${String(fence + 1000)} attempt 1 objective-run objective-run-${id} objective-lease-fence ${String(fence + 100)}\n`
   );
 }
 
@@ -499,7 +499,7 @@ function createFakeScenario(winner: "first" | "second"): FakeScenario {
       const id = argv[argv.indexOf("--id") + 1] as string;
       return command(argv, claimOutput(id));
     }
-    if (argv[0] === "node" && argv[1] === "heartbeat") {
+    if (argv[0] === "node" && argv[1] === "renew") {
       return command(
         argv,
         `kanthord: renewed ${argv[argv.indexOf("--id") + 1] as string}\n`,
@@ -649,6 +649,38 @@ test("asserts one success and one lease-held without asserting which client won"
     assert.deepEqual(raceSuccess?.actual, 200);
     assert.deepEqual(raceHeld?.actual, { status: 409, code: "lease-held" });
   }
+});
+
+test("passes the objective run authority to both objective closes", async () => {
+  const result = await runScenario();
+  const closes = result.fake.cliCalls.filter(
+    (call) => call.argv[0] === "node" && call.argv[1] === "close",
+  );
+  assert.deepEqual(
+    closes.map((call) => call.argv),
+    [
+      [
+        "node",
+        "close",
+        "--id",
+        alphaId,
+        "--run-id",
+        `objective-run-${alphaFirstId}`,
+        "--run-fence",
+        "111",
+      ],
+      [
+        "node",
+        "close",
+        "--id",
+        betaId,
+        "--run-id",
+        `objective-run-${betaFirstId}`,
+        "--run-fence",
+        "121",
+      ],
+    ],
+  );
 });
 
 test("records its assertion names in the declared order", async () => {

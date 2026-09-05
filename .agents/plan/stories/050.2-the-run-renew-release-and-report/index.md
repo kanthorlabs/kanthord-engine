@@ -64,8 +64,8 @@ Four questions the diagrams exposed. A human ruled each one.
   subtree, and an absent node and an initiative both satisfy it. With the node read after the
   authority check, `src/commands/node/release-node.ts:68` — `node-not-found`,
   `src/commands/node/release-node.ts:72` — `initiative-not-claimable`,
-  `src/commands/node/heartbeat-node.ts:70` — `node-not-found`,
-  `src/commands/node/heartbeat-node.ts:74` — `initiative-not-claimable` and
+  `src/commands/run/renew-run.ts:70` — `node-not-found`,
+  `src/commands/run/renew-run.ts:74` — `initiative-not-claimable` and
   `src/commands/outcome/report-outcome.ts:116` — `initiative-not-reportable` all become unreachable
   and two wire-visible codes change meaning. The four ship diagrams therefore read the node first,
   and each of Stories 3, 5 and 6 carries a pair of cases plus a `target-outside-run` control that
@@ -119,9 +119,9 @@ template. Every fact there holds here. These are the additions this authoring ve
   no `fence`, `expires_at` or `max_lifetime_at`. `src/domain/run.ts:13` — `runRow` already declares
   the post-migration shape, and `src/services/storage/schema-parity.test.ts:90` — `it`
   compares table names only, which is why the two can diverge without failing.
-- **`src/commands/node/heartbeat-node.ts` is 208 lines**, and its trace order is not its file order:
-  `src/commands/node/heartbeat-node.ts:117` — `renewLease` and
-  `src/commands/node/heartbeat-node.ts:145` — `renewObjectiveLease` are declared after the command
+- **`src/commands/run/renew-run.ts` is 208 lines**, and its trace order is not its file order:
+  `src/commands/run/renew-run.ts:117` — `renewLease` and
+  `src/commands/run/renew-run.ts:145` — `renewObjectiveLease` are declared after the command
   and invoked at `:81` and `:84`, above the `events.append` at `:93`. Story 3 (`03-the-renew`) moves
   the file and keeps that block.
 - **`src/commands/node/release-node.ts` holds two task branches**: the exhausted branch at
@@ -144,11 +144,11 @@ template. Every fact there holds here. These are the additions this authoring ve
   `src/commands/outcome/report-outcome.ts:203` — `lease-held`, and no other site in the file throws
   it. EPIC 050.4 Story 8 (`08-lease-held-is-retired`) retires the code across the product.
 - **`heartbeatIntervalMs` is triplicated with no shared constant**:
-  `src/commands/node/heartbeat-node.ts:112`, `src/commands/node/claim-node.ts:356` and
+  `src/commands/run/renew-run.ts:112`, `src/commands/node/claim-node.ts:356` and
   `src/commands/node/claim-node.ts:415`. It is not a config key; `src/services/config/index.ts:28` —
   `Settings` holds nine keys and none of them is it.
 - **`acceptExecution` exists nowhere in `src/`.** EPIC 051 draws it at
-  `.agents/plan/epics/051-the-execution-checkpoint.md:374` with `Caller->>Command`, so it is a nested
+  EPIC 051.4 with `Caller->>Command`, so it is a nested
   command on another path and `report-execution-checkpoint` never owned the report tail.
 - **No `PlanStore` method touches `node.assignment`.** The column is declared at
   `src/services/storage/migration-0011-deliverable.ts:26` — `assignment`, and `setNodeAssignment`

@@ -53,7 +53,7 @@ EPIC 050 held seventeen stories, and `.agents/plan/authoring.md` caps an epic at
 
 A human ruled on each. The EPIC carries them; these stories implement them.
 
-- **The expiry pass deletes no candidate ref.** The namespace `refs/kanthord/candidate/<runId>/<attemptNo>` is declared by EPIC 051 (`.agents/plan/epics/051-the-execution-checkpoint.md:30`), nothing in this range creates one, and `services/git` carries no delete primitive — `RefUpdateInput.nextOid` at `src/services/git/index.ts:51` is a non-null `string`. EPIC 051 adds the expiry path as a fourth caller of its own deletion. See `02-the-expiry-pass.md`.
+- **The expiry pass deletes no candidate ref.** The namespace `refs/kanthord/candidate/<runId>/<attemptNo>` is declared by EPIC 051.1 (`.agents/plan/epics/051.1-the-candidate-and-the-git-primitives.md`), nothing in this range creates one, and `services/git` carries no delete primitive — `RefUpdateInput.nextOid` at `src/services/git/index.ts:51` is a non-null `string`. EPIC 051.1 adds the expiry path as a fourth caller of its own deletion. See `02-the-expiry-pass.md`.
 - **The claim records the project's newest plan revision, not the node's.** The claim reads `plan.newestRevision(transaction, node.projectId)` (`src/services/plan/index.ts:75`) and never `node.revision`, which `docs/proposal/database/node.md:44` defines as the revision that last _wrote_ the node — pinning it would make EPIC 052 refuse a run that raced nothing. See `03-the-claim-of-a-task.md`.
 - **The claiming worker comes from a server-owned caller record.** `ClaimNodeDependencies` carries `{ worker, authorized }`; `main.ts` binds `{ worker: "claude@1", authorized: ["claude@1"] }`. It is never derived from `input.actorId`, an `actor_<ULID>` authentication identity, and never read from the wire — a `worker` request field would create two worker authorities once EPIC 055 lands. The command intersects `authorized` with `capableWorkers` before calling `routeWorker`, because EPIC 048 throws on an unintersected input. See `03-the-claim-of-a-task.md`.
 - **A refusal rolls the expiry back with everything else, and that is correct.** `src/services/storage/connection.ts:83` rolls back the whole callback on a throw, and the engine exposes no savepoint and no nested transaction. An expired-but-unswept run authorizes nothing, because every operation runs the pass before it evaluates authority. Splitting the expiry into its own transaction would break one command, one transaction, open a window for another claim, and break the rule that a refusal writes nothing. A claim that _succeeds_ commits the expiry and the replacement run atomically, so `run_one_active` never sees two active rows. See `02-the-expiry-pass.md` and `03-the-claim-of-a-task.md`.
@@ -64,9 +64,9 @@ A human ruled on each. The EPIC carries them; these stories implement them.
 
 Drawing the shipped claim before drawing its replacement produced four corrections. The EPIC carries them.
 
-- **The claim reads the lease of every relative, and the diagram draws one step per read.** `claim-node.ts:157` calls `liveLeasesOf` over `relativesOf`, which returns the target, the parent, the children and the siblings. The fixture takes three reads, not one.
-- **The own-lease read at `claim-node.ts:179` dies with the replay path.** Two reads of one subject carry one token twice, which the parser refuses. Deleting the replay path is what makes the path drawable.
-- **The expiry pass is a capability key, not a function-valued dependency.** `sweepExpiredExternalLeases` at `claim-node.ts:58` holds no `<key>.<method>` token, so `ClaimNodeDependencies` takes `expiry: Expiry` instead.
+- **The claim reads the lease of every relative, and the diagram draws one step per read.** `src/commands/node/claim-node.ts:157` calls `liveLeasesOf` over `relativesOf`, which returns the target, the parent, the children and the siblings. The fixture takes three reads, not one.
+- **The own-lease read at `src/commands/node/claim-node.ts:179` dies with the replay path.** Two reads of one subject carry one token twice, which the parser refuses. Deleting the replay path is what makes the path drawable.
+- **The expiry pass is a capability key, not a function-valued dependency.** `sweepExpiredExternalLeases` at `src/commands/node/claim-node.ts:58` holds no `<key>.<method>` token, so `ClaimNodeDependencies` takes `expiry: Expiry` instead.
 - **A run-scoped seam projects the run id.** `execution.openAttempt` receives a run id, so it renders `:R` and never `:T`. A projection nobody can compute is a step nobody can check.
 
 ## Still open
@@ -82,7 +82,7 @@ Nothing blocks dispatch once EPIC 050 lands.
 ### Line anchors the EPIC cites that are stale
 
 - `src/commands/node/claim-node.ts` — the EPIC cites lines 99, 104 and 105. The real sites are: `storage.transact` opens at **:104**, `clock.now()` at **:105**, the lease sweep at **:107-110**, `plan.readAllNodes` at **:112**, `ClaimRefusal` at **:27-35**.
-- `docs/proposal/api/README.md:100` — line 100 is the opening line of the forbidden list, not an item. `add a required request field;` is line **105**, and the closing sentence EPIC 050.2 Story 8 replaces is line **108**.
+- `docs/proposal/api/README.md:100` — the EPIC's anchor is stale twice over. The forbidden list now opens at **:101**, and `add a required request field;` is no longer in it: a human moved it to the permitted list on 2026-09-03 and it is line **98**. The closing sentence EPIC 050.2 Story 8 replaces is still line **108**.
 
 ### Commands
 
@@ -102,9 +102,9 @@ Nothing blocks dispatch once EPIC 050 lands.
 - `runtime-matrix.test.ts` reads `docs/proposal/phase-1/runtime-capability-matrix.md`, requires the rows in registry order, pins the count at 48, and requires exactly nine cells per row.
 - The harness operation list is duplicated in **three** places: `registry.test.ts:27-46`, `authorization.test.ts:17-36` and `system.test.ts:359-436`. All three move together.
 - `errorStatuses` at `errors.ts:7-31` is ordered by ascending HTTP status, and every 409 is a `PreconditionCode` whose `httpError` overload **requires** a `details` argument (`errors.ts:95-111`).
-- `eventPayloads` at `event-payload.ts:71` is typed `Readonly<Record<EventType, ZodType>>`, so a new event type without a payload fails type checking. The shared `fence` alias is at `:29-35`.
+- `eventPayloads` at `src/http/contract/event-payload.ts:71` is typed `Readonly<Record<EventType, ZodType>>`, so a new event type without a payload fails type checking. The shared `fence` alias is at `:29-35`.
 - `src/http/contract/system.ts:84` is already stale: it lists three capabilities where the live registry declares four.
-- `coverage.test.ts:273` asserts every `z.enum` in the contract traces to a `domain/` import, and `:355` requires a line in `field-decisions.fixture.ts` for every registry field.
+- `src/http/contract/coverage.test.ts:273` asserts every `z.enum` in the contract traces to a `domain/` import, and `:355` requires a line in `field-decisions.fixture.ts` for every registry field.
 
 ### Verify
 

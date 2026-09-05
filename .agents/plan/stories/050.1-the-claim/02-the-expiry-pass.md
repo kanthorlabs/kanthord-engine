@@ -95,14 +95,14 @@ The update and every append sit in the caller's one transaction, so a failure at
 
 4. Return the rows as `ExpiredRun[]` in the same sorted order.
 
-**Do not delete a candidate ref here.** The ref namespace `refs/kanthord/candidate/<runId>/<attemptNo>` is introduced by EPIC 051, nothing in EPIC 050 or EPIC 050.1 creates one, and `services/git` carries no ref-delete primitive — `RefUpdateInput.nextOid` at `src/services/git/index.ts:51` is a non-null `string`. EPIC 051 already deletes the ref on acceptance, on rejection and on contention, and owns the startup sweep; it adds the expiry path as a fourth caller of the same deletion. This story ends runs and raises the fence.
+**Do not delete a candidate ref here.** The ref namespace `refs/kanthord/candidate/<runId>/<attemptNo>` is introduced by EPIC 051.1, nothing in EPIC 050 or EPIC 050.1 creates one, and `services/git` carries no ref-delete primitive — `RefUpdateInput.nextOid` at `src/services/git/index.ts:51` is a non-null `string`. EPIC 051.1 Story 4 owns the deletion and Story 5 owns the startup sweep; that sweep is the fourth caller, and it runs after this pass commits. This story ends runs and raises the fence.
 
 **Do not change `node.assignment`, `node.state`, the `lease` table, or any `attempt` row.** An ordinary failure never changes the assignment, attempt classification is EPIC 054, and the node-lease mechanism runs beside this one until EPIC 050.4.
 
 ## Constraints
 
 - `expireRuns` runs inside the caller's transaction. It never calls `storage.transact`.
-- `outcome = 'expired'` is the only outcome this story writes. `run.outcome` carries no CHECK (`migration-0007-external-execution.ts:25`), so the value is free; pin it to `'expired'`.
+- `outcome = 'expired'` is the only outcome this story writes. `run.outcome` carries no CHECK (`src/services/storage/migration-0007-external-execution.ts:25`), so the value is free; pin it to `'expired'`.
 - The fence rises by exactly one per run, once. Do not write a second `UPDATE`.
 - Do not read the clock. `now` is an input, and the caller reads `dependencies.clock.now()` once as the first statement inside its transaction, per `src/commands/node/claim-node.ts:105`.
 - `actorKind: "daemon"` and `actorId: dependencies.instanceId`, matching the ancestor `node.running` appends at `src/commands/node/claim-node.ts:319-333`.

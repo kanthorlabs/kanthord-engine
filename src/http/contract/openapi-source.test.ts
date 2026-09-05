@@ -14,13 +14,13 @@ function compareBytewise(a: string, b: string): number {
   return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 }
 
-test("emits eighteen component files", () => {
+test("emits seventeen component files", () => {
   const tree = buildOpenApiSourceTree();
   const componentKeys = [...tree.keys()]
     .filter((key) => key.startsWith("components/"))
     .sort(compareBytewise);
 
-  assert.equal(componentKeys.length, 18);
+  assert.equal(componentKeys.length, 17);
   assert.deepEqual(componentKeys, [
     "components/Error.yaml",
     "components/actor.yaml",
@@ -28,7 +28,6 @@ test("emits eighteen component files", () => {
     "components/blob.yaml",
     "components/edge.yaml",
     "components/event.yaml",
-    "components/lease.yaml",
     "components/node.yaml",
     "components/outcome.yaml",
     "components/plan.yaml",
@@ -255,10 +254,10 @@ test("leaves no internal component pointer in a feature fragment", () => {
   );
 });
 
-test("emits one root, nineteen fragments and eighteen component files", () => {
+test("emits one root, nineteen fragments and seventeen component files", () => {
   const tree = buildOpenApiSourceTree();
 
-  assert.equal(tree.size, 38);
+  assert.equal(tree.size, 37);
   assert.equal(tree.has("openapi.yaml"), true);
 });
 

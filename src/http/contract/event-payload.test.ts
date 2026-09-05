@@ -75,19 +75,6 @@ const recordedPayloads: Readonly<Record<string, readonly unknown[]>> = {
       rotatedAt: 1234,
     },
   ],
-  "lease.released": [
-    { subjectId: "task_1", objectiveId: "objective_1", fence: 1 },
-  ],
-  "lease.renewed": [
-    {
-      subjectId: "task_1",
-      objectiveId: "objective_1",
-      fence: 1,
-      objectiveFence: 2,
-      expiresAt: 1234,
-      objectiveExpiresAt: 2345,
-    },
-  ],
   "node.awaitingApproval": [
     {
       from: "running",
@@ -276,6 +263,15 @@ const recordedPayloads: Readonly<Record<string, readonly unknown[]>> = {
       landingOid: H40,
     },
   ],
+  "run.ended": [
+    {
+      runId: "run_1",
+      nodeId: "task_1",
+      fence: 2,
+      outcome: "released",
+      reason: null,
+    },
+  ],
   "run.expired": [
     {
       runId: "run_1",
@@ -291,6 +287,14 @@ const recordedPayloads: Readonly<Record<string, readonly unknown[]>> = {
       fence: 1,
       kind: "execution",
       worker: "claude@1",
+      expiresAt: 1234,
+    },
+  ],
+  "run.renewed": [
+    {
+      runId: "run_1",
+      nodeId: "task_1",
+      fence: 1,
       expiresAt: 1234,
     },
   ],
@@ -521,25 +525,25 @@ describe("src/http/contract/event-payload.test", () => {
     assert.throws(() => schema.parse({ ...shape, extra: 1 }));
   });
 
-  it("remaining lease event payloads reject invented string fences", () => {
-    const released = eventPayloads["lease.released"];
-    const renewed = eventPayloads["lease.renewed"];
-    assert.ok(released !== undefined && renewed !== undefined);
+  it("run event payloads reject invented string fences", () => {
+    const ended = eventPayloads["run.ended"];
+    const renewed = eventPayloads["run.renewed"];
+    assert.ok(ended !== undefined && renewed !== undefined);
     assert.throws(() =>
-      released.parse({
-        subjectId: "task_1",
-        objectiveId: "objective_1",
+      ended.parse({
+        runId: "run_1",
+        nodeId: "task_1",
         fence: "1",
+        outcome: "released",
+        reason: null,
       }),
     );
     assert.throws(() =>
       renewed.parse({
-        subjectId: "task_1",
-        objectiveId: "objective_1",
-        fence: 1,
-        objectiveFence: "2",
+        runId: "run_1",
+        nodeId: "task_1",
+        fence: "1",
         expiresAt: 1234,
-        objectiveExpiresAt: 2345,
       }),
     );
   });

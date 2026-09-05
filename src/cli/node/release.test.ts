@@ -7,6 +7,7 @@ import type { CallResult } from "../client.ts";
 import { registerNodeRelease } from "./release.ts";
 
 const TASK = "task_01JQ8Z7G3HZZZZZZZZZZZZZZZW";
+const RUN_ID = "run_01JQ8Z7G3HZZZZZZZZZZZZZZZT";
 
 const NODE = {
   id: TASK,
@@ -113,17 +114,43 @@ const run = async (
 describe("src/cli/node/release.test", () => {
   it("node release calls node.release with the id parameter and the fence body", async () => {
     const h = harness();
-    await run(h.program, ["node", "release", "--id", TASK, "--fence", "1"]);
+    await run(h.program, [
+      "node",
+      "release",
+      "--id",
+      TASK,
+      "--fence",
+      "1",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1",
+    ]);
 
     assert.deepEqual(h.calls()[0]?.operationId, "node.release");
     assert.deepEqual(h.calls()[0]?.parameters, { id: TASK });
-    assert.deepEqual(h.calls()[0]?.body, { fence: 1 });
+    assert.deepEqual(h.calls()[0]?.body, {
+      fence: 1,
+      runId: RUN_ID,
+      runFence: 1,
+    });
     assert.equal(h.failCalls(), 0);
   });
 
   it("node release prints the released line", async () => {
     const h = harness();
-    await run(h.program, ["node", "release", "--id", TASK, "--fence", "1"]);
+    await run(h.program, [
+      "node",
+      "release",
+      "--id",
+      TASK,
+      "--fence",
+      "1",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1",
+    ]);
 
     assert.equal(h.stdoutText(), `kanthord: released ${TASK} state ready\n`);
     assert.equal(h.stderrText(), "");
@@ -131,9 +158,20 @@ describe("src/cli/node/release.test", () => {
   });
 
   it("node release refuses a non-numeric fence without calling the daemon", async () => {
-    for (const value of ["abc", "0", "-1"]) {
+    for (const value of ["abc", "0", "-1", "1x"]) {
       const h = harness();
-      await run(h.program, ["node", "release", "--id", TASK, "--fence", value]);
+      await run(h.program, [
+        "node",
+        "release",
+        "--id",
+        TASK,
+        "--fence",
+        value,
+        "--run-id",
+        RUN_ID,
+        "--run-fence",
+        "1",
+      ]);
 
       assert.equal(
         h.stderrText(),
@@ -144,6 +182,30 @@ describe("src/cli/node/release.test", () => {
       assert.equal(h.failCalls(), 1, `--fence ${value}`);
       assert.equal(h.calls().length, 0, `--fence ${value}`);
     }
+  });
+
+  it("node release refuses a run-fence token with a numeric prefix without calling the daemon", async () => {
+    const h = harness();
+    await run(h.program, [
+      "node",
+      "release",
+      "--id",
+      TASK,
+      "--fence",
+      "1",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1x",
+    ]);
+
+    assert.equal(
+      h.stderrText(),
+      "kanthord: invalid-request: --run-fence must be a positive integer\n",
+    );
+    assert.equal(h.stdoutText(), "");
+    assert.equal(h.failCalls(), 1);
+    assert.equal(h.calls().length, 0);
   });
 
   it("node release requires a fence", async () => {
@@ -157,7 +219,17 @@ describe("src/cli/node/release.test", () => {
     overrideExits(h.program);
 
     await assert.rejects(
-      () => run(h.program, ["node", "release", "--id", TASK]),
+      () =>
+        run(h.program, [
+          "node",
+          "release",
+          "--id",
+          TASK,
+          "--run-id",
+          RUN_ID,
+          "--run-fence",
+          "1",
+        ]),
       (err: unknown) =>
         err instanceof Error &&
         (err as Readonly<{ code?: string }>).code ===
@@ -176,7 +248,18 @@ describe("src/cli/node/release.test", () => {
         details: undefined,
       }),
     });
-    await run(h.program, ["node", "release", "--id", TASK, "--fence", "2"]);
+    await run(h.program, [
+      "node",
+      "release",
+      "--id",
+      TASK,
+      "--fence",
+      "2",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1",
+    ]);
 
     assert.equal(h.stdoutText(), "");
     assert.equal(
@@ -188,7 +271,16 @@ describe("src/cli/node/release.test", () => {
 
   it("node release without --id writes the invalid-request line and records zero calls", async () => {
     const h = harness();
-    await run(h.program, ["node", "release", "--fence", "1"]);
+    await run(h.program, [
+      "node",
+      "release",
+      "--fence",
+      "1",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1",
+    ]);
 
     assert.equal(h.failCalls(), 1);
     assert.equal(h.calls().length, 0);

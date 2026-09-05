@@ -44,6 +44,10 @@ that belongs to a story. The range gate refuses a mermaid block in an epic file.
    already authored**, so no cross-reference moves.
 5. An epic file at a number you allocate already exists: stop and report it. Do
    not clobber.
+6. **The debate engine is available.** `KANTHOR_DEBATE_ENGINE` is set to an engine
+   whose binary is executable. The **Debate review** needs it. It is missing:
+   report a blocker and stop before you write an epic file. A run that writes the
+   range and then fails the review strands allocated numbers.
 
 ## Step 2 — Read what already decides the answer
 
@@ -134,6 +138,13 @@ standard.
 1. **<name>** — <the output, with the exact file or symbol it produces>. `story-foundation`.
 2. **<name>** — <the path it changes>. `story-implement`.
 
+## Amendments this epic asks of other epics
+
+None is applied here, and a human applies each before dispatch.
+
+- **<the target epic and its story, in bold>.** <the ask, with `file:line` evidence>. <the default if
+  no ruling arrives, and what it costs>
+
 ## Verification Gate
 
 Gates: `pnpm run verify`
@@ -171,6 +182,24 @@ Rules for the text you write:
   subject reaches every story as a settled one.
 - **The Proof passes on exit 0 and its sentinel.** A printed string alone is not
   a pass.
+- **An amendment section carries one bullet per ask, and every bullet states three
+  things**: the target epic and story, the ask with `file:line` evidence, and the
+  default if no ruling arrives. A bullet with no default is a blocker on the target
+  epic, and this skill does not write one. Omit the section when the epic asks
+  nothing.
+- **An inbound amendment is consumed atomically.** Before you write an epic, grep
+  `.agents/plan/epics/` for an amendment bullet that names it. For each bullet,
+  either incorporate every obligation into that epic's `## Decisions`, `## Stories`
+  and `## Verification Gate`, and delete the source bullet in the same run; or leave
+  the bullet intact and report it as a blocker. **Never copy without deleting, and
+  never delete without preserving the operative constraint and its evidence.**
+- **An amendment on a lane-locked path names the receiving epic's Story 0.** A path
+  `scripts/lane-check.sh` denies to both engineers and allows to `groundwork-engineer`
+  belongs to the receiving epic's groundwork story, and the bullet names that story and
+  the exact path. Story 0 counts against the ten-story cap, so an inbound locked-path
+  amendment is a sizing input, not a detail for `/author`. A path denied to
+  `groundwork-engineer` too, or one no epic entry can edit, names a human blocker or a
+  later receiving epic instead.
 - Cut motivation, history and background everywhere.
 
 ## Step 6 — Self-check
@@ -180,8 +209,8 @@ Confirm, per epic file you wrote:
 1. no mermaid block, and no `## Sequence` section;
 2. ten stories or fewer;
 3. every story entry declares a kind;
-4. the number of `story-implement` entries equals the number of paths Step 4
-   counted for that epic;
+4. the number of `story-implement` entries equals the number of paths the
+   **Sketch the path** step counted for that epic;
 5. the hermetic-coverage list is a table, every row names exactly one proof-owning
    story, and every story is named by at least one row or delivers a Proof test
    file;
@@ -191,13 +220,49 @@ Confirm, per epic file you wrote:
 8. no sentence leaves a design choice to `/author` or to build time;
 9. every event type the epic introduces or changes carries its subject kind,
    subject id, payload and transaction in `## Decisions`.
+10. every amendment bullet you wrote names a target epic file that exists, a story of
+    it, and a default if no ruling arrives;
+11. no amendment bullet anywhere in `.agents/plan/epics/` still names an epic you wrote
+    in this run, unless you reported it as a blocker.
 
 A failure here is yours to fix before you report.
 
-## Step 7 — Report
+## Step 7 — Debate review, before the report
 
-Print the epic files you created, the story count and the implement-story count
-per epic, and every open item as a bullet list in the house format:
+The epic range is not finished until an adversarial reader has attacked it. Run
+this step on every run that wrote or amended a file. A run that stops in
+**Parse and pre-flight** never reaches it, and a **Self-check** pass never
+excuses it.
+
+1. Invoke `/debate` with a prompt that names, by path, every epic file this run
+   created or amended, including each epic whose amendment bullet you deleted.
+   Name `.agents/plan/authoring.md` and the `## Architecture` section of
+   `AGENTS.md` as the sources the range is judged against. `/debate` decides for
+   itself which bodies it inlines for the engine.
+2. State the defect classes the critique must attack, **at minimum**: a decision
+   with weak evidence, a gate assertion the stated tests cannot prove, a story
+   count the changed-path count does not support, a split at the wrong boundary,
+   an amendment with no default, and a design choice left to `/author`. Ask also
+   for any other violation of the standard or of the architecture.
+3. **Any `/debate` failure is a blocker.** A missing engine, a rejected read-only
+   mode, a stall, an empty reply and an error reply all count. Report the failure,
+   print every file this run changed, and stop. Do not report the range as
+   reviewed.
+4. Rule on each critique the debate returns. A critique you accept, you apply to
+   the epic file in this run, and the **Self-check** runs again over the edit.
+   A critique you reject, you reject with a reason.
+5. **The debate runs once.** Do not re-invoke it on the edits you just applied.
+   Print those edits in the **Report**, so the human reviews the bytes the debate
+   did not see.
+6. A critique that exposes a behaviour question is a **blocker** for the human,
+   not an edit you make alone.
+
+## Step 8 — Report
+
+Print the epic files you created **or amended**, the story count and the
+implement-story count per epic, the debate engine that ran the **Debate
+review**, every critique it raised with your ruling on it, every edit you applied
+after it, and every open item as a bullet list in the house format:
 
 ```text
 <B1/S1> - status:<FIXED/OPEN> - action:<YES/NO> - <name> - <description> - fix:<recommended change> - why:<reason>
@@ -217,7 +282,10 @@ Do **not** commit — the human reviews and commits.
 - a hermetic-coverage list that is not a table, and a row owned by no story or by
   two;
 - a decision with no evidence;
+- an amendment bullet with no target story, no `file:line` evidence, or no default;
+- an inbound amendment copied into the epic it names and left standing in the asker;
 - an event type introduced or changed with no settled subject kind, subject id,
   payload and transaction;
+- reporting a range that the **Debate review** did not put through `/debate`;
 - writing a story file, a test, production code, or any document outside
   `.agents/plan/epics/`.

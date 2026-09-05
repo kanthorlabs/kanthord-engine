@@ -13,7 +13,7 @@ Seams: report-authority-prelude: +expiry.expireRuns, +execution.runById:R, +plan
 This story changes the prelude of `node.report` and nothing after it. EPIC 050.4 Story 6
 (`06-the-report-drops-the-lease`) declares `report-lease-free` and owns the tail. EPIC 051 draws
 `acceptExecution` as a nested command on another path — `acceptExecution` exists nowhere in `src/`
-today, and `.agents/plan/epics/051-the-execution-checkpoint.md:374` draws it with
+today, and EPIC 051.4 draws it with
 `Caller->>Command` — so `report-execution-checkpoint` never owned this tail.
 
 **The drawn set is every branch of this prelude.** One diagram covers it, because every one of the six
@@ -68,7 +68,7 @@ Each step, with its caller anchor, its callee anchor and the fixture state that 
    `src/commands/outcome/report-outcome.ts:155` — `body-kind-mismatch`,
    `src/commands/outcome/report-outcome.ts:161` — `actor-forbidden` and
    `src/commands/outcome/report-outcome.ts:167` — `illegal-transition` — do not fire.
-5. `src/commands/outcome/report-outcome.ts:206` — `activeRunOfNode` →
+5. `src/commands/outcome/report-outcome.ts:206` (formerly `activeRunOfNode`) →
    `src/services/execution/index.ts:76` — `activeRunOfNode`. Reached because the fixture's lease is
    held by the caller at the presented fence, so neither
    `src/commands/outcome/report-outcome.ts:187` — `lease-held` nor
@@ -140,18 +140,18 @@ today and no `expiry`. Inside the existing `storage.transact` at
    `src/commands/outcome/report-outcome.ts:110` — `readNode` — unchanged, with its two refusals
    unchanged.
 4. `execution.runById(transaction, input.runId)` — new, replacing
-   `src/commands/outcome/report-outcome.ts:206` — `activeRunOfNode`. The
+   `src/commands/outcome/report-outcome.ts:206` (formerly `activeRunOfNode`). The
    `src/commands/outcome/report-outcome.ts:209` — `illegal-transition` that guarded a null run is
    replaced by `run-not-found`, which Story 1 (`01-run-authority`) owns; delete the
    `{ guard: "no-active-run" }` details at
-   `src/commands/outcome/report-outcome.ts:211` — `no-active-run`.
+   `src/commands/outcome/report-outcome.ts:211` (formerly `no-active-run`).
 5. `plan.readSubtree(transaction, run.nodeId)` — new. The node the report targets is inside the
    subtree the run covers, and `assertRunAuthority` needs the whole set.
 6. `assertRunAuthority(...)`, throwing `ReportOutcomeError(refusal.refusal, …, { runId })`. This
    replaces the lease read at `src/commands/outcome/report-outcome.ts:173` — `read` and both of its
    refusals: the held-by-other branch at
    `src/commands/outcome/report-outcome.ts:187` — `lease-held`, whose details carry
-   `src/commands/outcome/report-outcome.ts:193` — `relation`, and the bare branch at
+   `src/commands/outcome/report-outcome.ts:193` (formerly `relation`), and the bare branch at
    `src/commands/outcome/report-outcome.ts:203` — `lease-held`, which carries no details at all.
 
 Everything after step 6 keeps its shipped shape, including the `lease.release` at

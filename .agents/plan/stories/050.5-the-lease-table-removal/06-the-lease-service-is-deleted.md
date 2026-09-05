@@ -73,6 +73,25 @@ it reads "the twenty-one capabilities plus home-lock" over a 22-entry literal �
 capability lands on twenty plus home-lock. Story 4 no longer touches this file, so this story is the
 only one that moves the count.
 
+**The same file also carries the write-exemption count, and this story is the only one that can move
+it.** `src/domain/layout.test.ts:428` — `eighteen` names the count in its case name and
+`src/domain/layout.test.ts:439` — `assert.equal` asserts `quoted.length` is `18`. Story 0
+(`00-groundwork`) added the nineteenth entry before the loop began, so take the case name from
+"eighteen" to "nineteen" and the literal from `18` to `19`.
+
+**No single turn could have written both halves.** `eslint.config.js` belongs to
+`groundwork-engineer` and `src/domain/layout.test.ts` belongs to the test-engineer, so the entry and
+the count that describes it are always two turns apart. **The interval is stated, and it is
+invisible to the loop**: the assertion is red from Story 0's turn until this case lands, and of
+Stories 1 to 5 none runs the file — each names its own `node --test` list and
+`src/domain/layout.test.ts` appears in this story's alone. The whole-epic `pnpm run verify` therefore
+sees a matched pair, exactly as it does for the `package.json` and `KANTHORD_VERSION` pair Story 0
+opens and Story 8 closes.
+
+**The count returns to eighteen in EPIC 057.** That epic deletes the stale
+`"src/commands/startup/recover-expired-leases.test.ts"` entry no story of this epic may remove, and
+the case name and the literal move back with it.
+
 **The three-importer assertion of EPIC 050.4 Story 9
 (`09-the-proposal-records-one-authority`) is retired here.** That story lands
 `it("the Lease service keeps exactly three importers")`, asserting the importer set deep-equals
@@ -88,14 +107,14 @@ orphaned it: `src/services/lease/index.ts:2` and `sqlite.ts:3-6` are its last tw
 `src/domain/rows.ts:10,33` registers as the row schema of the `lease` table, and
 `src/services/storage/schema-parity.test.ts:90` asserts the migrated table set equals
 `Object.keys(rows)`. The table survives this epic, so `rows.lease` must survive with it, so
-`leaseRow` must too. EPIC 057's migration `17` drops the table, and that is the one edit that can
+`leaseRow` must too. EPIC 057's migration `18` drops the table, and that is the one edit that can
 remove all three at once.
 
 ## Constraints
 
 - Delete the directory, not selected exports. A surviving `LeaseRecord` type is a type nothing can produce.
 - Do not delete `src/domain/lease-hierarchy.ts` or `src/domain/lease.ts`. Story 7 owns both.
-- Do not touch the `lease` table, `src/domain/lease.ts` or `src/domain/rows.ts`. All three survive until EPIC 057's migration `17`.
+- Do not touch the `lease` table, `src/domain/lease.ts` or `src/domain/rows.ts`. All three survive until EPIC 057's migration `18`.
 - If a `LeaseError` catch survives anywhere, report it as an EPIC 050.4 defect rather than editing that command here.
 - Delete `test/helpers/lease.ts` whole. Do not keep `createBackedLeaseFake` against raw SQL: a lease row is seeded by `test/helpers/rows.ts`, which imports no lease module and survives to EPIC 057.
 - Take the `:101` count to twenty, not twenty-one. No story of this epic adds a capability.
@@ -116,6 +135,8 @@ Add, each as a separate `it`:
 1c. `"no test file imports test/helpers/lease.ts"` — enumerate every `*.test.ts` under `src/` and assert none holds a matching import specifier. Report the file names on failure. Case 3 covers production files and case 4 covers the identifier; neither sees a test helper, which is how this deletion was missed.
 
 1d. `"the service inventory names no lease"` — the shipped `src/domain/layout.test.ts:101` case with `"lease"` removed and the suite name at twenty, and the `:151` case over `agent`, `verify` and `worker-health` alone.
+
+1e. `"the write exemption list holds exactly nineteen exact paths"` — the shipped `src/domain/layout.test.ts:428` case with its name at nineteen and `assert.equal(quoted.length, 19)`. `node --test src/domain/layout.test.ts` exits `0`, which it does not before this case: Story 0 (`00-groundwork`) added the nineteenth entry and no earlier story runs the file.
 
 2. `"src/main.ts imports nothing from services/lease"` — an import-graph assertion over that one file. `main.ts` exports no dependency map to introspect — it is the composition root and `src/main.test.ts` drives the daemon through its routes — so the import graph is the decidable proof, and it is exact: the implementation cannot be constructed without importing it.
 

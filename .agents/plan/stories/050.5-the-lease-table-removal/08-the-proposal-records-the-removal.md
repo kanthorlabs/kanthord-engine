@@ -9,10 +9,10 @@ Kind: story-foundation
 ### 1 — the documents
 
 **`docs/proposal/database/lease.md` is amended, not deleted.** The table survives this epic, empty and
-unreachable from any command, until EPIC 057's migration `17` drops it. A document describing a table
+unreachable from any command, until EPIC 057's migration `18` drops it. A document describing a table
 that still exists is not stale; a deleted document for a table `sqlite_master` still lists is. Amend it
 to state that the table has no writer and no reader after EPIC 050.5, that its `subject_kind = 'node'`
-half was the worker lease the run replaced, and that migration `17` drops it. **Delete the document
+half was the worker lease the run replaced, and that migration `18` drops it. **Delete the document
 in the epic that drops the table**, not here.
 
 **`docs/proposal/database/README.md`** — two edits:
@@ -22,7 +22,7 @@ in the epic that drops the table**, not here.
 
 The table index row for `lease` at `:26` and the polymorphic-column lists at `:80` and `:126` **keep
 their `lease` entries**, because the table and `lease.subject_id` both still exist. The `run` row of
-that index, at `:27`, is amended with `run.md:3`.
+that index, at `:27`, is amended with `docs/proposal/database/run.md:3`.
 
 **`docs/proposal/database/run.md`** — its question line at `:3` reads _"which worker ran it, under which
 lease generation, from which base commit"_. The generation is the run's own fence. Amend it, and amend
@@ -58,7 +58,7 @@ lease"_; it is a run.
 (`07-the-proposal-records-the-run-model`) and amended by EPIC 050.4 Story 9 (`09-the-proposal-records-one-authority`), gains one closing
 section: no production code reaches a node lease, the run is the only exclusion and the only
 authority, startup recovery and the read-path sweep both key on run expiry, and the empty `lease`
-table is dropped by EPIC 057's migration `17`.
+table is dropped by EPIC 057's migration `18`.
 
 **`docs/proposal/phase-1/git-foundation.md`** is referenced from `lease.md` for the home lock. That
 link stays: `lease.md` stays, and the home lock is `src/services/home-lock/`, a separate mechanism this
@@ -74,7 +74,7 @@ are equal, so it is red from that turn until this edit, and this edit is what cl
 reads both values and asserts nothing about who wrote them.
 
 **It is a major, not a patch.** Story 4 removes `leases[]` from the `system.status` response, and a
-response field removal is outside the closed list of `docs/proposal/api/README.md:100-106`.
+response field removal is outside the closed list of `docs/proposal/api/README.md:101-106`.
 
 **The policy gains one clause, and this story writes it.** The amended policy legalizes a change
 outside the closed list behind a human ruling plus the capability swap that announced it, and
@@ -122,7 +122,7 @@ the identifier `leaseHeld`, `liveLeaseRefusal`, `LeaseError` or `LeaseRecord`.
 as the row schema of a table that still exists, and
 `src/services/storage/schema-parity.test.ts:90` asserts the migrated table set equals
 `Object.keys(rows)`. Adding `leaseRow` to the forbidden identifiers would make this assertion and that
-one contradict each other. EPIC 057 adds it when migration `17` drops the table.
+one contradict each other. EPIC 057 adds it when migration `18` drops the table.
 
 **Match imports and identifiers, never the substring `lease`.** A case-insensitive substring search
 matches `release`, so it matches `release-node.ts`, `releaseNode`, `ReleaseRefusal` and the

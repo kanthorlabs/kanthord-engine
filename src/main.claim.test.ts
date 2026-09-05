@@ -112,6 +112,7 @@ type ClaimBody = Readonly<{
     expiresAt: number;
   }>;
   runId: string;
+  fence: number;
   objectiveRunId: string;
   attemptId: string | null;
   attemptNo: number | null;
@@ -123,10 +124,11 @@ type ClaimBody = Readonly<{
   }>;
 }>;
 
-type HeartbeatBody = Readonly<{
+type RenewBody = Readonly<{
   lease: Readonly<{ fence: number; expiresAt: number }>;
   objectiveLease: Readonly<{ fence: number; expiresAt: number }>;
-  heartbeatIntervalMs: number;
+  expiresAt: number;
+  renewAfterMs: number;
 }>;
 
 let home: TemporaryHome | undefined;
@@ -140,6 +142,7 @@ let taskBId = "";
 let objectiveId = "";
 let initiativeId = "";
 let claimFence = 1;
+let claimRunFence = 1;
 let claimExpiresAt = 0;
 let claimObjectiveExpiresAt = 0;
 let oldTaskRunId = "";
@@ -252,8 +255,8 @@ function expireBothLeases(taskId: string, objective: string): void {
       )
       .all(taskId, objective) as unknown as readonly { subject_id: string }[];
     database
-      .prepare("UPDATE run SET expires_at = 1 WHERE node_id = ?")
-      .run(taskId);
+      .prepare("UPDATE run SET expires_at = 1 WHERE node_id IN (?, ?)")
+      .run(taskId, objective);
     database.exec("COMMIT");
     assert.deepEqual(
       [...expired].map((row) => row.subject_id).sort(byBytes),
@@ -413,6 +416,7 @@ describe("src/main.claim.test", () => {
     assert.equal(body.node.title, TASK_TITLE);
     assert.equal(body.node.parentId, objectiveId);
     claimFence = body.lease.fence;
+    claimRunFence = body.fence;
     claimExpiresAt = body.lease.expiresAt;
     claimObjectiveExpiresAt = body.objectiveLease.expiresAt;
     oldTaskRunId = body.runId;
@@ -426,7 +430,20 @@ describe("src/main.claim.test", () => {
     assert.equal(taskRun.kind, "execution");
     assert.equal(taskRun.driver, "external");
     assert.equal(taskRun.state, "active");
-    assert.equal(body.objectiveRunId, body.runId);
+    assert.notEqual(body.objectiveRunId, body.runId);
+    const objectiveRun = readOne(
+      "SELECT kind, node_id, driver, state FROM run WHERE id = ?",
+      [body.objectiveRunId],
+    );
+    assert.deepEqual(
+      { ...objectiveRun },
+      {
+        kind: "structural",
+        node_id: objectiveId,
+        driver: "external",
+        state: "active",
+      },
+    );
 
     const task = await call(client(harnessTokenA), {
       operationId: "node.show",
@@ -498,20 +515,21 @@ describe("src/main.claim.test", () => {
     );
   });
 
-  it("node.heartbeat extends expiresAt and leaves the fence unchanged", async () => {
-    const heartbeated = await call(client(harnessTokenA), {
-      operationId: "node.heartbeat",
+  it("node.renew extends expiresAt and leaves the fence unchanged", async () => {
+    const renewed = await call(client(harnessTokenA), {
+      operationId: "node.renew",
       parameters: { id: taskAId },
-      body: { fence: claimFence },
+      body: { fence: claimFence, runId: oldTaskRunId, runFence: claimRunFence },
     });
-    assert.equal(heartbeated.status, 200, JSON.stringify(heartbeated));
-    const body = bodyOf(heartbeated) as HeartbeatBody;
+    assert.equal(renewed.status, 200, JSON.stringify(renewed));
+    const body = bodyOf(renewed) as RenewBody;
 
     assert.equal(body.lease.fence, claimFence);
     assert.equal(body.objectiveLease.fence, claimFence);
     assert.ok(body.lease.expiresAt > claimExpiresAt);
     assert.ok(body.objectiveLease.expiresAt > claimObjectiveExpiresAt);
-    assert.equal(body.heartbeatIntervalMs, 100000);
+    assert.ok(body.expiresAt > claimExpiresAt);
+    assert.equal(body.renewAfterMs, 100000);
 
     const taskRow = readOne(
       "SELECT owner, owner_kind, fence, expires_at FROM lease WHERE subject_kind = 'node' AND subject_id = ?",
@@ -579,15 +597,15 @@ describe("src/main.claim.test", () => {
     assert.equal(oldAttempt.outcome, "cancelled");
   });
 
-  it("the old owner's node.release is refused lease-held", async () => {
+  it("the old owner's node.release is refused run-ended", async () => {
     const released = await call(client(harnessTokenA), {
       operationId: "node.release",
       parameters: { id: taskAId },
-      body: { fence: claimFence },
+      body: { fence: claimFence, runId: oldTaskRunId, runFence: claimRunFence },
     });
     assert.equal(released.status, 409, JSON.stringify(released));
     assert.equal(released.ok, false);
-    assert.equal(released.code, "lease-held");
+    assert.equal(released.code, "run-ended");
   });
 
   it("the stale fence differs from the live fence", () => {
@@ -612,18 +630,27 @@ describe("src/main.claim.test", () => {
     const fence = (bodyOf(claimed) as ClaimBody).lease.fence;
     assert.ok(fence >= 1);
 
-    const heartbeated = await call(client(harnessTokenB), {
-      operationId: "node.heartbeat",
+    const taskBClaim = bodyOf(claimed) as ClaimBody;
+    const renewed = await call(client(harnessTokenB), {
+      operationId: "node.renew",
       parameters: { id: taskBId },
-      body: { fence },
+      body: {
+        fence,
+        runId: taskBClaim.runId,
+        runFence: taskBClaim.fence,
+      },
     });
-    assert.notEqual(heartbeated.status, 501, "node.heartbeat answered 501");
-    assert.equal(heartbeated.status, 200, JSON.stringify(heartbeated));
+    assert.notEqual(renewed.status, 501, "node.renew answered 501");
+    assert.equal(renewed.status, 200, JSON.stringify(renewed));
 
     const released = await call(client(harnessTokenB), {
       operationId: "node.release",
       parameters: { id: taskBId },
-      body: { fence },
+      body: {
+        fence,
+        runId: taskBClaim.runId,
+        runFence: taskBClaim.fence,
+      },
     });
     assert.notEqual(released.status, 501, "node.release answered 501");
     assert.equal(released.status, 200, JSON.stringify(released));

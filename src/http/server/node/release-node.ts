@@ -29,6 +29,8 @@ export function releaseNodeHandler(
       const result = dependencies.releaseNode({
         nodeId: id,
         fence: parsed.data.fence,
+        runId: parsed.data.runId,
+        runFence: parsed.data.runFence,
         actorId: context.actor.id,
         actorKind: context.actor.kind,
       });

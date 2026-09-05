@@ -37,7 +37,7 @@ describe("src/http/contract/path.test", () => {
   it("pins the closed-array sizes", () => {
     assert.equal(resourceSegments.length, 14);
     assert.equal(subresourceSegments.length, 17);
-    assert.equal(actionSegments.length, 24);
+    assert.equal(actionSegments.length, 25);
     assert.equal(systemSegments.length, 3);
   });
 
@@ -206,5 +206,12 @@ describe("src/http/contract/path.test", () => {
       renderPath([resource("provider"), sub("login"), action("cancel")]),
       "/v1/provider/login/cancel",
     );
+  });
+
+  it("renew is an action segment sorted between rename and report", () => {
+    assert.ok(actionSegments.includes("renew"));
+    const renewIndex = actionSegments.indexOf("renew");
+    assert.equal(renewIndex, actionSegments.indexOf("rename") + 1);
+    assert.equal(renewIndex, actionSegments.indexOf("report") - 1);
   });
 });

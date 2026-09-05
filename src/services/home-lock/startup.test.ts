@@ -126,9 +126,9 @@ describe("src/services/home-lock/startup.test", () => {
       version: KANTHORD_VERSION,
       capabilities: [
         "event-wait",
-        "external-drive",
         "per-node-write",
         "project-graph",
+        "worker-model",
       ],
       dependencies: [{ name: "storage", status: "ok" }],
     });

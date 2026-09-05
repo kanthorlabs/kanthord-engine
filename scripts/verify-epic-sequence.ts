@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,8 +32,12 @@ type Seam = Readonly<{
 type Story = Readonly<{
   epicId: string;
   path: string;
+  stem: string;
+  ordinal: number;
   source: string;
   kind: string;
+  executor: string | null;
+  paths: readonly string[];
   diagrams: readonly string[];
   baselines: ReadonlyMap<string, string>;
   seams: ReadonlyMap<string, readonly Seam[]>;
@@ -44,6 +49,7 @@ type Epic = Readonly<{
   id: string;
   path: string;
   stem: string;
+  epicSource: string;
   stories: readonly Story[];
 }>;
 
@@ -343,7 +349,14 @@ function parseSeams(
   return seams;
 }
 
-function parseStory(epicId: string, storyPath: string): Story {
+function singleLine(source: string, key: string): string | null {
+  const matches = [
+    ...source.matchAll(new RegExp(`^${key}:\\s*(.*?)\\s*$`, "gm")),
+  ];
+  return matches.length === 0 ? null : (matches[0]?.[1] ?? "");
+}
+
+function parseStory(epicId: string, storyPath: string, ordinal: number): Story {
   const source = readFileSync(storyPath, "utf8");
   const kindLines = [...source.matchAll(/^Kind:\s*(.*?)\s*$/gm)];
   const kind = kindLines[0]?.[1] ?? "";
@@ -394,11 +407,19 @@ function parseStory(epicId: string, storyPath: string): Story {
   const diagramBlocks = diagramSections(source, storyPath).map((section) =>
     parseDiagram(section, storyPath),
   );
+  const pathsLine = singleLine(source, "Paths");
   return {
     epicId,
     path: storyPath,
+    stem: basename(storyPath, ".md"),
+    ordinal,
     source,
     kind,
+    executor: singleLine(source, "Executor"),
+    paths:
+      pathsLine === null
+        ? []
+        : pathsLine.split(/\s+/).filter((p) => p.length > 0),
     diagrams,
     baselines,
     seams: parseSeams(source, storyPath),
@@ -438,10 +459,12 @@ function readEpics(repositoryRoot: string): readonly Epic[] {
     }
     const stories = sortedEntries(storyPath)
       .filter((name) => name.endsWith(".md") && name !== "index.md")
-      .map((name) => parseStory(epicId, resolve(storyPath, name)));
+      .map((name, index) =>
+        parseStory(epicId, resolve(storyPath, name), index + 1),
+      );
     if (stories.length > 10)
       error(`epic ${epicPath} holds more than ten stories`);
-    epics.push({ id: epicId, path: epicPath, stem, stories });
+    epics.push({ id: epicId, path: epicPath, stem, epicSource, stories });
   }
   return epics;
 }
@@ -693,6 +716,7 @@ function validateScenarios(repositoryRoot: string, index: DiagramIndex): void {
       .filter((diagram) => diagram.baseline)
       .map((diagram) => diagram.id),
   );
+  const authored = new Set<string>(authoredEpics);
   const shipped = new Set<string>(shippedEpics);
   const scenarios =
     existsSync(scenariosRoot) && statSync(scenariosRoot).isDirectory()
@@ -709,9 +733,12 @@ function validateScenarios(repositoryRoot: string, index: DiagramIndex): void {
     const diagram = byId.get(id);
     if (diagram === undefined)
       error(`scenario ${scenarioPath} names no live diagram`);
-    if (
-      diagram.supersededBy.some((reference) => shipped.has(reference.epicId))
-    ) {
+    const superseded = diagram.supersededBy.some(
+      (reference) =>
+        authored.has(reference.epicId) &&
+        (scenarioIds.has(reference.diagramId) || !scenarioIds.has(diagram.id)),
+    );
+    if (superseded) {
       error(`scenario ${scenarioPath} names a superseded live diagram`);
     }
   }
@@ -720,9 +747,13 @@ function validateScenarios(repositoryRoot: string, index: DiagramIndex): void {
     const owner = index.owners.get(diagram.id);
     if (owner === undefined)
       error(`live diagram ${diagram.id} has no story owner`);
+    const superseded = diagram.supersededBy.some(
+      (reference) =>
+        authored.has(reference.epicId) &&
+        (scenarioIds.has(reference.diagramId) || !scenarioIds.has(diagram.id)),
+    );
     const due =
-      shipped.has(owner.epicId) &&
-      !diagram.supersededBy.some((reference) => shipped.has(reference.epicId));
+      (shipped.has(owner.epicId) || scenarioIds.has(diagram.id)) && !superseded;
     if (due) {
       const scenarioPath = join(
         "test",
@@ -740,15 +771,246 @@ function validateScenarios(repositoryRoot: string, index: DiagramIndex): void {
   }
 }
 
-export function verifyEpicSequence(repositoryRoot: string): void {
+const laneCache = new Map<string, boolean>();
+
+function laneAllows(role: string, path: string): boolean {
+  const key = `${role} ${path}`;
+  const cached = laneCache.get(key);
+  if (cached !== undefined) return cached;
+  const guard = resolve(import.meta.dirname, "lane-check.sh");
+  let allowed = true;
+  try {
+    execFileSync(guard, [role, path], { stdio: "ignore" });
+  } catch {
+    allowed = false;
+  }
+  laneCache.set(key, allowed);
+  return allowed;
+}
+
+function sectionOf(source: string, heading: string): string | null {
+  const start = source.search(new RegExp(`^## ${heading}\\s*$`, "m"));
+  if (start < 0) return null;
+  const rest = source.slice(start).replace(/^## .*\n/, "");
+  const next = rest.search(/^## /m);
+  return next < 0 ? rest : rest.slice(0, next);
+}
+
+const EDIT_VERB =
+  /^(?:Create|Add|Delete|Remove|Move|Rename|Replace|Append|Extend|Edit|Update|Write|Register|Drop|Insert)\b/;
+
+function validateLanes(epics: readonly Epic[]): void {
+  for (const epic of epics) {
+    const declared = new Map<string, Story>();
+    for (const story of epic.stories) {
+      const hasExecutor = story.executor !== null;
+      const hasPaths = story.paths.length > 0;
+      if (hasExecutor !== hasPaths) {
+        error(
+          `story ${story.path} declares ${hasExecutor ? "Executor" : "Paths"} and not the other`,
+        );
+      }
+      if (story.kind === "story-implement" && (hasExecutor || hasPaths)) {
+        error(`story-implement ${story.path} carries a lane declaration`);
+      }
+      for (const path of story.paths) {
+        if (
+          laneAllows("test-engineer", path) ||
+          laneAllows("software-engineer", path)
+        ) {
+          error(`Paths path is allowed to an engineer lane: ${path}`);
+        }
+        if (!laneAllows("groundwork-engineer", path)) {
+          error(`Paths path is denied to groundwork-engineer: ${path}`);
+        }
+        const previous = declared.get(path);
+        if (previous !== undefined) {
+          error(
+            `path ${path} appears in the Paths line of two stories of ${epic.id}`,
+          );
+        }
+        declared.set(path, story);
+      }
+    }
+    for (const story of epic.stories) {
+      const change = sectionOf(story.source, "Change");
+      if (change === null) continue;
+      for (const directive of change.matchAll(
+        /\*\*([A-Z][a-z]+[^*]{0,200}?)\*\*/g,
+      )) {
+        const text = directive[1] ?? "";
+        if (!EDIT_VERB.test(text)) continue;
+        for (const span of text.matchAll(
+          /`([A-Za-z0-9._/-]+\.(?:ts|js|mjs|json|sh|yaml|yml|md))`/g,
+        )) {
+          const path = span[1] ?? "";
+          if (
+            laneAllows("test-engineer", path) ||
+            laneAllows("software-engineer", path)
+          ) {
+            continue;
+          }
+          if (!laneAllows("groundwork-engineer", path)) continue;
+          if (declared.has(path)) continue;
+          error(
+            `story ${story.path} edits ${path}, which no Paths line of ${epic.id} declares`,
+          );
+        }
+      }
+    }
+  }
+}
+
+function validateStoryReferences(epics: readonly Epic[]): void {
+  // Two orderings are in use and both are legitimate: an epic holding
+  // `00-groundwork.md` is cited by dispatch position in 48 places and by
+  // filename prefix in 92. Accepting either still refuses an ordinal that is
+  // neither, which is the defect worth catching.
+  const byEpic = new Map(
+    epics.map((epic) => [
+      epic.id,
+      new Map(
+        epic.stories.map((story) => [
+          story.stem,
+          [story.ordinal, Number(story.stem.slice(0, 2))] as const,
+        ]),
+      ),
+    ]),
+  );
+  for (const epic of epics) {
+    for (const file of [
+      { path: epic.path, source: epic.epicSource },
+      ...epic.stories,
+    ]) {
+      const flat = file.source.replace(/\r?\n/g, " ");
+      for (const match of flat.matchAll(
+        /(?:EPIC\s+(\d+(?:\.\d+)?)\s+)?Story\s+(\d+)\s*\(\s*`(\d{2}[a-z0-9.-]*)`\s*\)/g,
+      )) {
+        const named = match[1];
+        const stem = match[3] ?? "";
+        const written = Number(match[2]);
+        const stems = byEpic.get(named ?? epic.id);
+        if (stems === undefined) continue;
+        const ordinals = stems.get(stem);
+        if (ordinals === undefined) {
+          if (named === undefined) continue;
+          error(
+            `${file.path} names EPIC ${named} Story ${written} (${stem}), a stem that epic has no story for`,
+          );
+        }
+        if (!ordinals.includes(written)) {
+          error(
+            `${file.path} names Story ${written} (${stem}), which is neither its dispatch position ${ordinals[0]} nor its file prefix ${ordinals[1]}`,
+          );
+        }
+      }
+    }
+  }
+}
+
+function validateCitations(
+  repositoryRoot: string,
+  epics: readonly Epic[],
+): readonly string[] {
+  const relocated: string[] = [];
+  const lineCache = new Map<string, readonly string[] | null>();
+  const linesOf = (target: string): readonly string[] | null => {
+    const cached = lineCache.get(target);
+    if (cached !== undefined) return cached;
+    const value =
+      existsSync(target) && statSync(target).isFile()
+        ? readFileSync(target, "utf8").split(/\r?\n/)
+        : null;
+    lineCache.set(target, value);
+    return value;
+  };
+  for (const epic of epics) {
+    for (const file of [
+      { path: epic.path, source: epic.epicSource },
+      ...epic.stories,
+    ]) {
+      const flat = file.source.replace(/\r?\n/g, " ");
+      for (const match of flat.matchAll(
+        /`([^`\s]+?):(\d+)`\s*(?:—|--)\s*`([^`]+)`/g,
+      )) {
+        const cited = match[1] ?? "";
+        const line = Number(match[2]);
+        const identifier = match[3] ?? "";
+        if (!/\.[A-Za-z0-9]+$/.test(cited)) continue;
+        const lines = linesOf(resolve(repositoryRoot, cited));
+        if (lines === null) {
+          error(`${file.path} cites ${cited}, which is not a file`);
+        }
+        if (line > lines.length) {
+          error(
+            `${file.path} cites ${cited}:${line}, beyond its ${lines.length} lines`,
+          );
+        }
+        if ((lines[line - 1] ?? "").includes(identifier)) continue;
+        if (!lines.some((candidate) => candidate.includes(identifier))) {
+          error(
+            `${file.path} cites ${cited}:${line} for ${identifier}, which the file does not hold`,
+          );
+        }
+        relocated.push(`${file.path}: ${cited}:${line} — ${identifier}`);
+      }
+    }
+  }
+  return relocated;
+}
+
+function validateGateTables(epics: readonly Epic[]): void {
+  for (const epic of epics) {
+    const gate = sectionOf(epic.epicSource, "Verification Gate");
+    if (gate === null) error(`epic ${epic.path} has no Verification Gate`);
+    const rows = gate.split(/\r?\n/).filter((line) => /^\s*\|/.test(line));
+    if (rows.length === 0) {
+      error(`epic ${epic.path} hermetic-coverage list is not a table`);
+    }
+    const header = (rows[0] ?? "")
+      .split("|")
+      .map((cell) => cell.trim().toLowerCase());
+    const storyColumn = header.findIndex((cell) => cell === "story");
+    if (storyColumn < 0) {
+      error(`epic ${epic.path} gate table has no story column`);
+    }
+    for (const row of rows.slice(2)) {
+      const cells = row.split("|");
+      const cell = (cells[storyColumn] ?? "").trim();
+      const named = cell
+        .split(/[,+&]| and /)
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0);
+      if (named.length !== 1) {
+        error(
+          `epic ${epic.path} gate row names ${named.length} stories: "${cell}"`,
+        );
+      }
+    }
+  }
+}
+
+export function verifyEpicSequence(repositoryRoot: string): readonly string[] {
   const epics = readEpics(resolve(repositoryRoot));
   const index = allDiagrams(epics);
   validateReferences(epics, index);
   validateBaselinePairs(epics, index);
   validateSeams(epics, index);
   validateScenarios(repositoryRoot, index);
+  validateLanes(epics);
+  validateStoryReferences(epics);
+  validateGateTables(epics);
+  return validateCitations(repositoryRoot, epics);
 }
 
 if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
-  verifyEpicSequence(resolve(process.cwd()));
+  const relocated = verifyEpicSequence(resolve(process.cwd()));
+  for (const line of relocated) {
+    process.stdout.write(`relocated citation: ${line}\n`);
+  }
+  if (relocated.length > 0) {
+    process.stdout.write(
+      `${relocated.length} citations name an identifier that moved. Not a refusal: see .agents/plan/authoring.md.\n`,
+    );
+  }
 }

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { objectId } from "../../domain/column.ts";
+import { identity } from "../../domain/identity.ts";
 import {
   blockReasons,
   nodeKinds,
@@ -13,6 +14,7 @@ import {
   invalidRequestDetails,
   leaseHeldDetails,
   nodeUnblockDetails,
+  runAuthorityDetails,
   subtreeBusyDetails,
 } from "./error-details.ts";
 import { EXAMPLE_HASH as H, EXAMPLE_ULID as U } from "./example-literal.ts";
@@ -25,30 +27,42 @@ export const nodeReportRequest = z.discriminatedUnion("report", [
   z.strictObject({
     report: z.literal("accepted"),
     fence: z.number().int(),
+    runId: identity("run"),
+    runFence: z.number().int().min(1),
     objectId,
   }),
   z.strictObject({
     report: z.literal("rejected"),
     fence: z.number().int(),
+    runId: identity("run"),
+    runFence: z.number().int().min(1),
     reason: z.string().min(1).max(2000),
   }),
   z.strictObject({
     report: z.literal("failed"),
     fence: z.number().int(),
+    runId: identity("run"),
+    runFence: z.number().int().min(1),
     reason: z.string().min(1).max(2000),
   }),
   z.strictObject({
     report: z.literal("cancelled"),
     fence: z.number().int(),
+    runId: identity("run"),
+    runFence: z.number().int().min(1),
     reason: z.string().min(1).max(2000).optional(),
   }),
   z.strictObject({
     report: z.literal("attested"),
     fence: z.number().int(),
+    runId: identity("run"),
+    runFence: z.number().int().min(1),
     objectId,
   }),
   z.strictObject({
     report: z.literal("closed"),
+    runId: identity("run"),
+    runFence: z.number().int().min(1),
     acknowledgePartial: z.boolean(),
   }),
 ]);
@@ -73,7 +87,13 @@ export const nodeUnblockResponse = z.strictObject({
 const REPORT_OBJECT_ID = "a".repeat(40);
 
 export const nodeReportExamples: OperationExamples = {
-  request: { report: "accepted", fence: 1, objectId: REPORT_OBJECT_ID },
+  request: {
+    report: "accepted",
+    fence: 1,
+    runId: `run_${U}`,
+    runFence: 1,
+    objectId: REPORT_OBJECT_ID,
+  },
   success: {
     nodeId: `task_${U}`,
     kind: "task",
@@ -156,6 +176,12 @@ export const outcome = operations([
       "actor-forbidden": null,
       "not-found": null,
       "invalid-request": invalidRequestDetails,
+      "run-not-found": runAuthorityDetails,
+      "run-ended": runAuthorityDetails,
+      "run-expired": runAuthorityDetails,
+      "run-caller-mismatch": runAuthorityDetails,
+      "target-outside-run": runAuthorityDetails,
+      "fence-stale": runAuthorityDetails,
     },
     examples: nodeReportExamples,
   },

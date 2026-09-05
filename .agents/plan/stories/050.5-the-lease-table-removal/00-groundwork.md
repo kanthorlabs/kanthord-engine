@@ -29,7 +29,7 @@ is on neither list fails `pnpm run lint` on every one of them.
 first dispatch of the loop, so `src/commands/startup/recover-expired-leases.test.ts` still exists
 when the edit lands. Replacing its entry rather than adding beside it un-exempts a file that is still
 in the tree and still holds the six writes, and `pnpm run lint` fails on this turn. The nineteen-entry
-list is the one state that is green both before Story 1's rename and after it: `eslint.config.js:469`
+list is the one state that is green both before Story 1's rename and after it: `eslint.config.js:478`
 — `files` applies a block to the files its patterns match, and a pattern that matches none applies to
 nothing.
 
@@ -47,7 +47,7 @@ the exact string `"30.0.0"`. Change no other key: no dependency, no `scripts` en
 no `files` entry.
 
 The major bump is the ruling EPIC 050.5 records. `leases[]` leaves the `system.status` response, and
-`docs/proposal/api/README.md:102` — `remove or rename a response field` puts that outside the closed
+`docs/proposal/api/README.md:103` — `remove or rename a response field` puts that outside the closed
 list, so the change is legal only behind a recorded human ruling. EPIC 050.5 Story 8
 (`08-the-proposal-records-the-removal`) writes the ruling and the compatibility-record row.
 
@@ -101,9 +101,15 @@ Add, each as a separate case:
    `git diff --numstat -- package.json` prints exactly `1	1	package.json`. A locked file is where
    scope creep does the most damage, so the diff size is an assertion and not an observation.
 
-`pnpm run verify` is red on `src/domain/version.test.ts` until EPIC 050.5 Story 8
-(`08-the-proposal-records-the-removal`) moves `src/domain/version.ts` to the same string. That is the
-only assertion it fails, and no case of this story runs it.
+`pnpm run verify` is red on two assertions after this turn, and each is closed by a named story.
+`src/domain/version.test.ts` fails until EPIC 050.5 Story 8
+(`08-the-proposal-records-the-removal`) moves `src/domain/version.ts` to the same string.
+`src/domain/layout.test.ts:439` — `assert.equal` fails until EPIC 050.5 Story 6
+(`06-the-lease-service-is-deleted`) takes `quoted.length` from `18` to `19`, because
+`src/domain/layout.test.ts:428` — `eighteen` counts the very list this turn extends. **Neither half
+could land here**: `src/domain/version.ts` is the software-engineer's and
+`src/domain/layout.test.ts` is the test-engineer's, and this role writes neither. No case of this
+story runs either file, and no case of any story between this turn and its closing story does.
 
 Proof: no PASS line of its own. `src/domain/version.test.ts` in `PASS EPIC-050.5` is owned by
 EPIC 050.5 Story 8 (`08-the-proposal-records-the-removal`), which lands the matching half.

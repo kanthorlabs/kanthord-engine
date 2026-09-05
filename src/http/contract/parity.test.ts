@@ -243,6 +243,6 @@ describe("src/http/contract/parity.test", () => {
     const rows = section
       .split("\n")
       .filter((line) => /^\| EPIC \d+(?:\.\d+)?\s*\|/.test(line));
-    assert.equal(rows.length, 4);
+    assert.equal(rows.length, 3);
   });
 });

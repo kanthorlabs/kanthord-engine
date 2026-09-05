@@ -50,7 +50,7 @@ Separately, while the TDD loop runs, the orchestrator counts `ATTEMPT-FAILED: <c
 The count answers "can the loop still resolve this?". It is the wrong question for a blocker whose fix needs a file locked to **both engineers** — `package.json`, `tsconfig*.json`, `*.config.*`, the `Makefile`, `Containerfile`, `compose.yaml`, `README.md`, `.github/**`. No number of attempts closes such a blocker, and a debate guideline cannot either, because the guideline would have to be executed by a role that may not write the file. The engineers mark it `OPEN: OUT-OF-LANE — <path> — <change>`, and Step 5h validates the claim with `scripts/lane-check.sh` and then splits it:
 
 - the `groundwork-engineer` role may write the path → **Step 5h.2 dispatches that role for it** on a single-use request, and the loop continues. This is the case that used to stop the cycle for a human.
-- the path is locked to **every** role — the plan tree, the pipeline definition, the pipeline guards, `AGENTS.md` — → the human, on the **first** occurrence. Each of those records a decision or judges the executor, and no agent writes it.
+- the path is locked to **every** role — the plan tree, the pipeline definition, the pipeline guards — → the human, on the **first** occurrence. Each of those judges the executor, and no agent writes it. `AGENTS.md` is **not** in this set: it is the groundwork lane, and it reaches the human only when no story states the text to write.
 
 ## Step 1 — Parse arguments
 
@@ -460,7 +460,8 @@ script**: `scripts/lane-check.sh <role> <path>` (exit 0 = in-lane).
   `scripts/turn-snapshot.sh`, `scripts/verify-handoff.mjs`,
   `scripts/memory-append-only.sh` and every `scripts/*.test.sh`;
   toolchain/config `package.json`, `package-lock.json`, `tsconfig*.json`,
-  `*.config.*`; the architecture contract `AGENTS.md`; container/build files
+  `*.config.*`; the architecture contract `AGENTS.md`, whose words a human decides
+  and the role only applies; container/build files
   `Containerfile`, `compose.yaml`, `Makefile`. The reviewer-engineer edits
   nothing at all.
 
@@ -632,7 +633,7 @@ The guard is `> $lines_before`, not `> ${START:-0}`: the marker must belong to t
 A marker from an earlier turn of the same review cycle is either already routed or already escalated,
 and re-reading it re-routes a settled blocker.
 
-- **`te=no`, `se=no` and `gw=no`** → the path is locked to **every** role: the plan tree, the pipeline definition, a pipeline guard, or `AGENTS.md`. **Stop the loop and escalate to the human operator now**, whatever `FAIL_COUNT` says. Print the `OPEN: OUT-OF-LANE` line, the denial reason `scripts/lane-check.sh` writes to stderr for that path, the discussion file path, and instructions to make the change — or amend the story that needs it — and re-run the skill. Jump to Step 8 with `reason=human-escalation-out-of-lane`. Do **not** run 5h.1: a debate cannot author a locked file, so its guideline would name a change no role may execute.
+- **`te=no`, `se=no` and `gw=no`** → the path is locked to **every** role: the plan tree, the pipeline definition, or a pipeline guard. **Stop the loop and escalate to the human operator now**, whatever `FAIL_COUNT` says. Print the `OPEN: OUT-OF-LANE` line, the denial reason `scripts/lane-check.sh` writes to stderr for that path, the discussion file path, and instructions to make the change — or amend the story that needs it — and re-run the skill. Jump to Step 8 with `reason=human-escalation-out-of-lane`. Do **not** run 5h.1: a debate cannot author a locked file, so its guideline would name a change no role may execute.
 - **`te=no`, `se=no` and `gw=yes`, with `applied=0`** → the path is the groundwork lane and no turn of this cycle has written it. **Run 5h.2.** This is the branch that used to stop the cycle for a human.
 - **`te=no`, `se=no`, `gw=yes` and `applied` non-zero** → a groundwork turn already wrote this path in this cycle, and the blocker is raised again. Stop the loop and escalate with `reason=human-escalation-groundwork-repeat`, printing every matching `GROUNDWORK-COMPLETE:` line and the new marker. Do not re-dispatch: the first turn wrote the path and did not close the blocker, which is the loop failing to converge, not a new need.
 - **`te=yes` or `se=yes`** → the claim is wrong. The path is one engineer's lane, so the work is in lane for that role. Log `out-of-lane claim rejected: <path> is the <role> lane`, and fall through to the count below, which treats the turn as an ordinary failed attempt. The rejected claim reaches the human through the review, not through an escalation.

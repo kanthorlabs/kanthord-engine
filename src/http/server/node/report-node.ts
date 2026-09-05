@@ -28,16 +28,18 @@ export function reportNodeHandler(
         parsed.error,
       );
     }
+    const { runId, runFence, ...body } = parsed.data;
     try {
       const result = dependencies.reportOutcome({
         nodeId: id,
         actorId: context.actor.id,
         actorKind: context.actor.kind,
-        body: parsed.data,
+        runId,
+        runFence,
+        body,
       });
       return { kind: "json", status: 200, body: result };
     } catch (error) {
-      const body = parsed.data;
       throw toHttpError(
         error,
         body.report === "closed"

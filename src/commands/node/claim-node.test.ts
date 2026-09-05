@@ -182,6 +182,8 @@ function reportTaskOutcome(
     actorId: string;
     outcome: "rejected" | "failed" | "cancelled";
     fence: number;
+    runId: string;
+    runFence: number;
   }>,
 ): void {
   reportOutcome(
@@ -192,6 +194,8 @@ function reportTaskOutcome(
       execution: fixture.execution.execution,
       events: fixture.events,
       clock,
+      expiry: { expireRuns: () => [] },
+      caller: "claude@1",
       reportObjective: () => {
         throw new Error("unexpected reportObjective call");
       },
@@ -204,6 +208,8 @@ function reportTaskOutcome(
       nodeId: input.nodeId,
       actorId: input.actorId,
       actorKind: "harness",
+      runId: input.runId,
+      runFence: input.runFence,
       body: {
         report: input.outcome,
         fence: input.fence,
@@ -1321,7 +1327,7 @@ describe("src/commands/node/claim-node.test", () => {
     }
   });
 
-  it("a task claim opens exactly one run", (t) => {
+  it("a task claim opens one structural objective run and one execution task run", (t) => {
     const fixture = createClaimFixture();
     t.after(() => fixture.dispose());
     seedReadyFixture(fixture);
@@ -1333,11 +1339,16 @@ describe("src/commands/node/claim-node.test", () => {
 
     const runs = fixture.storage.transact((transaction) =>
       transaction.all(
-        "SELECT node_id FROM run WHERE state = 'active' ORDER BY id",
+        "SELECT node_id, kind FROM run WHERE state = 'active' ORDER BY node_id",
       ),
-    ) as readonly Readonly<{ node_id: string }>[];
-    assert.equal(runs.length, 1);
-    assert.equal(runs[0]!.node_id, fixtureIds.task);
+    ) as readonly Readonly<{ node_id: string; kind: string }>[];
+    assert.deepEqual(
+      runs.map((row) => ({ ...row })),
+      [
+        { node_id: fixtureIds.objective, kind: "structural" },
+        { node_id: fixtureIds.task, kind: "execution" },
+      ],
+    );
   });
 
   it("run-driver-mismatch is not a member of ClaimRefusal", () => {
@@ -2029,7 +2040,7 @@ describe("src/commands/node/claim-node.test", () => {
       assert.equal(error.refusal, "illegal-transition");
       assert.deepEqual(error.details, {
         state,
-        admitted: ["ready", "running"],
+        admitted: ["ready"],
       });
       assert.ok(!("ancestorId" in (error.details ?? {})));
       assert.deepEqual(databaseBytes(fixture.storage), before);
@@ -2076,7 +2087,7 @@ describe("src/commands/node/claim-node.test", () => {
       assert.equal(error.refusal, "illegal-transition");
       assert.deepEqual(error.details, {
         state,
-        admitted: ["ready", "running"],
+        admitted: ["ready"],
       });
     }
   });
@@ -2136,9 +2147,12 @@ describe("src/commands/node/claim-node.test", () => {
     assert.notEqual(second.runId, first.runId);
     assert.equal(second.attemptNo, 1);
     const events = fixture.events.list({});
-    assert.equal(events.length, eventsBefore + 2);
-    assert.equal(events[events.length - 2]!.actorId, ACTOR_B);
-    assert.equal(events[events.length - 1]!.type, "node.running");
+    assert.equal(events.length, eventsBefore + 3);
+    assert.deepEqual(
+      events.slice(-3).map((event) => event.type),
+      ["run.renewed", "run.opened", "node.running"],
+    );
+    assert.equal(events[events.length - 1]!.actorId, ACTOR_B);
   });
 
   it("a same-worker claim on a busy sibling is refused objective-busy", (t) => {
@@ -2377,6 +2391,8 @@ describe("src/commands/node/claim-node.test", () => {
       actorId: ACTOR_A,
       outcome: "rejected",
       fence: first.lease.fence,
+      runId: first.runId,
+      runFence: first.fence,
     });
     const before = databaseBytes(fixture.storage);
     const error = refused(fixture, clock, {
