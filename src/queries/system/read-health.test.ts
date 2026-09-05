@@ -9,9 +9,9 @@ type Reporter = DependencyReporter & Readonly<{ calls: () => number }>;
 
 const VERSION = "27.8.1";
 const CAPABILITIES = [
-  "external-drive",
   "per-node-write",
   "project-graph",
+  "worker-model",
 ] as const;
 
 const reporter = (
@@ -171,9 +171,9 @@ describe("src/queries/system/read-health.test", () => {
     });
     assert.equal(result.version, VERSION);
     assert.deepEqual(result.capabilities, [
-      "external-drive",
       "per-node-write",
       "project-graph",
+      "worker-model",
     ]);
   });
 
@@ -196,9 +196,9 @@ describe("src/queries/system/read-health.test", () => {
     assert.equal(result.status, "degraded");
     assert.equal(result.version, VERSION);
     assert.deepEqual(result.capabilities, [
-      "external-drive",
       "per-node-write",
       "project-graph",
+      "worker-model",
     ]);
   });
 
@@ -206,9 +206,9 @@ describe("src/queries/system/read-health.test", () => {
     const result = readHealth({
       reporters: [],
       version: VERSION,
-      capabilities: ["project-graph", "external-drive"],
+      capabilities: ["project-graph", "worker-model"],
     });
-    assert.deepEqual(result.capabilities, ["project-graph", "external-drive"]);
+    assert.deepEqual(result.capabilities, ["project-graph", "worker-model"]);
   });
 
   it("each result passes systemHealthResponse.parse", () => {

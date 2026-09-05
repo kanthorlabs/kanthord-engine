@@ -58,7 +58,9 @@ function contextWith(assertions: Assertion[]): ScenarioContext {
   };
 }
 
-function fakeDriver(): HarnessFake {
+function fakeDriver(
+  driverOptions: Readonly<{ legacyHeartbeatOutput?: boolean }> = {},
+): HarnessFake {
   const cliCalls: Readonly<{
     role: HostRole;
     argv: readonly string[];
@@ -107,11 +109,13 @@ function fakeDriver(): HarnessFake {
       if (argv[1] === "claim") {
         return command(
           effectiveArgv,
-          "kanthord: claimed task-1 fence 7 expires 2026-08-17T00:00:00.000Z heartbeat 1000ms\n" +
-            "kanthord: run run-1 attempt 1 objective-run objective-run-1 objective-fence 3\n",
+          (driverOptions.legacyHeartbeatOutput === true
+            ? "kanthord: claimed task-1 lease-fence 7 expires 2026-08-17T00:00:00.000Z heartbeat 1000ms\n"
+            : "kanthord: claimed task-1 lease-fence 7 expires 2026-08-17T00:00:00.000Z\n") +
+            "kanthord: run run-1 run-fence 5 attempt 1 objective-run objective-run-1 objective-run-fence 2 objective-lease-fence 3\n",
         );
       }
-      if (argv[1] === "heartbeat") {
+      if (argv[1] === "renew") {
         return command(
           effectiveArgv,
           "kanthord: renewed task-1 fence 7 expires 2026-08-17T00:00:00.000Z\n",
@@ -175,7 +179,7 @@ test("registerHarness returns the actor id and the token file and no token", asy
   assert.equal("token" in result, false);
 });
 
-test("runHarnessTask issues claim, heartbeat and report in that order", async () => {
+test("runHarnessTask issues claim, renew and report in that order", async () => {
   const fake = fakeDriver();
   const assertions: Assertion[] = [];
 
@@ -201,11 +205,15 @@ test("runHarnessTask issues claim, heartbeat and report in that order", async ()
       role: "client",
       argv: [
         "node",
-        "heartbeat",
+        "renew",
         "--id",
         "task-1",
         "--fence",
         "7",
+        "--run-id",
+        "run-1",
+        "--run-fence",
+        "5",
         "--api-token-file",
         "/tmp/client-1.token",
       ],
@@ -223,6 +231,10 @@ test("runHarnessTask issues claim, heartbeat and report in that order", async ()
         "object-1",
         "--fence",
         "7",
+        "--run-id",
+        "run-1",
+        "--run-fence",
+        "5",
         "--api-token-file",
         "/tmp/client-1.token",
       ],
@@ -230,7 +242,20 @@ test("runHarnessTask issues claim, heartbeat and report in that order", async ()
   ]);
 });
 
-test("runHarnessTask returns the fence, run id, attempt number and object id it parsed", async () => {
+test("runHarnessTask rejects legacy heartbeat claim output", async () => {
+  const fake = fakeDriver({ legacyHeartbeatOutput: true });
+
+  await assert.rejects(
+    runHarnessTask(contextWith([]), fake.driver, identity(), {
+      nodeId: "task-1",
+      objectId: "object-1",
+      label: "alpha-1",
+    }),
+  );
+  assert.equal(fake.cliCalls.length, 1);
+});
+
+test("runHarnessTask returns both run authorities and the object id it parsed", async () => {
   const fake = fakeDriver();
 
   const result = await runHarnessTask(
@@ -241,8 +266,12 @@ test("runHarnessTask returns the fence, run id, attempt number and object id it 
   );
 
   assert.deepEqual(result, {
-    fence: 7,
+    leaseFence: 7,
     runId: "run-1",
+    runFence: 5,
+    objectiveRunId: "objective-run-1",
+    objectiveRunFence: 2,
+    objectiveLeaseFence: 3,
     attemptNo: 1,
     objectId: "object-1",
   });
@@ -263,7 +292,7 @@ test("runHarnessTask records its four assertion names in order", async () => {
     [
       "alpha-1-claim-status",
       "alpha-1-claim-attempt",
-      "alpha-1-heartbeat-status",
+      "alpha-1-renew-status",
       "alpha-1-report-status",
     ],
   );
@@ -277,12 +306,20 @@ test("attestObjective sends the fence and the object id", async () => {
   const fake = fakeDriver();
   const assertions: Assertion[] = [];
 
-  await attestObjective(contextWith(assertions), fake.driver, identity(), {
+  const objectiveInput = {
     nodeId: "objective-1",
     fence: 7,
+    runId: "objective-run-1",
+    runFence: 3,
     objectId: "object-alpha",
     label: "alpha",
-  });
+  };
+  await attestObjective(
+    contextWith(assertions),
+    fake.driver,
+    identity(),
+    objectiveInput as Parameters<typeof attestObjective>[3],
+  );
 
   assert.deepEqual(fake.cliCalls, [
     {
@@ -294,6 +331,10 @@ test("attestObjective sends the fence and the object id", async () => {
         "objective-1",
         "--fence",
         "7",
+        "--run-id",
+        "objective-run-1",
+        "--run-fence",
+        "3",
         "--object-id",
         "object-alpha",
         "--api-token-file",

@@ -1,13 +1,16 @@
 import { HttpError, httpError } from "../../contract/errors.ts";
 import { NodeWriteError } from "../../../commands/node/refusal.ts";
 import { ClaimNodeError } from "../../../commands/node/claim-node.ts";
-import { HeartbeatNodeError } from "../../../commands/node/heartbeat-node.ts";
+import { RenewRunError } from "../../../commands/run/renew-run.ts";
 import { ReleaseNodeError } from "../../../commands/node/release-node.ts";
 import { ReportOutcomeError } from "../../../commands/outcome/report-outcome.ts";
 import { ReportObjectiveError } from "../../../commands/outcome/report-objective.ts";
 import { CloseObjectiveError } from "../../../commands/outcome/close-objective.ts";
+import type { RunAuthorityRefusalCode } from "../../../domain/run-authority.ts";
 import { ListProjectNodeError } from "../../../queries/node/list-project-node.ts";
 import { VerifyBlockError } from "../../../domain/verify-block.ts";
+
+type RunAuthorityErrorCode = RunAuthorityRefusalCode | "lifetime-exceeded";
 
 export function toHttpError(
   error: unknown,
@@ -33,8 +36,8 @@ export function toHttpError(
   if (error instanceof ClaimNodeError) {
     return claimRefusal(error);
   }
-  if (error instanceof HeartbeatNodeError) {
-    return heartbeatRefusal(error, presented);
+  if (error instanceof RenewRunError) {
+    return renewRefusal(error, presented);
   }
   if (error instanceof ReleaseNodeError) {
     return releaseRefusal(error, presented);
@@ -82,6 +85,15 @@ function reportOutcomeRefusal(
       return outcomeTransitionRefusal(error);
     case "lease-held":
       return leaseHeld(error, presented);
+    case "run-not-found":
+    case "run-ended":
+    case "run-expired":
+    case "run-caller-mismatch":
+    case "target-outside-run":
+    case "fence-stale":
+      return runAuthorityRefusal(error.refusal, error);
+    default:
+      throw error;
   }
 }
 
@@ -184,8 +196,8 @@ function claimRefusal(error: ClaimNodeError): HttpError {
   }
 }
 
-function heartbeatRefusal(
-  error: HeartbeatNodeError,
+function renewRefusal(
+  error: RenewRunError,
   presented: Readonly<{ subject: string; fence: number }> | undefined,
 ): HttpError {
   switch (error.refusal) {
@@ -197,6 +209,18 @@ function heartbeatRefusal(
       });
     case "lease-held":
       return leaseHeld(error, presented);
+    case "objective-run-lost":
+      return httpError("objective-run-lost", error.message, details(error));
+    case "run-not-found":
+    case "run-ended":
+    case "run-expired":
+    case "run-caller-mismatch":
+    case "target-outside-run":
+    case "fence-stale":
+    case "lifetime-exceeded":
+      return runAuthorityRefusal(error.refusal, error);
+    default:
+      throw error;
   }
 }
 
@@ -213,6 +237,13 @@ function releaseRefusal(
       });
     case "lease-held":
       return leaseHeld(error, presented);
+    case "run-not-found":
+    case "run-ended":
+    case "run-expired":
+    case "run-caller-mismatch":
+    case "target-outside-run":
+    case "fence-stale":
+      return runAuthorityRefusal(error.refusal, error);
     case "no-active-run":
       return httpError("illegal-transition", error.message, {
         refusal: "node-state",
@@ -237,7 +268,7 @@ function releaseRefusal(
 function leaseHeld(
   error:
     | ClaimNodeError
-    | HeartbeatNodeError
+    | RenewRunError
     | ReleaseNodeError
     | ReportOutcomeError
     | ReportObjectiveError,
@@ -266,14 +297,17 @@ function leaseHeld(
 }
 
 function details(
-  error:
-    | NodeWriteError
-    | ClaimNodeError
-    | HeartbeatNodeError
-    | ReleaseNodeError
-    | ReportOutcomeError
-    | ReportObjectiveError
-    | CloseObjectiveError,
+  error: Readonly<{ details: unknown }>,
 ): Readonly<Record<string, unknown>> {
   return (error.details ?? {}) as Readonly<Record<string, unknown>>;
+}
+
+function runAuthorityRefusal(
+  refusal: RunAuthorityErrorCode,
+  error: Readonly<{
+    message: string;
+    details: unknown;
+  }>,
+): HttpError {
+  return httpError(refusal, error.message, details(error));
 }

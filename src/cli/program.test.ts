@@ -280,7 +280,7 @@ describe("src/cli/program.test", () => {
     assert.notEqual(first, second);
   });
 
-  it("buildProgram registers node list, node show, node claim, node heartbeat and node release", () => {
+  it("buildProgram registers node list, node show, node claim, node renew and node release", () => {
     const { dependencies } = fakeDependencies();
     const program = buildProgram(dependencies);
 
@@ -294,7 +294,7 @@ describe("src/cli/program.test", () => {
       "list",
       "show",
       "claim",
-      "heartbeat",
+      "renew",
       "release",
     ]) {
       assert.ok(names.includes(name), `the node group registers ${name}`);

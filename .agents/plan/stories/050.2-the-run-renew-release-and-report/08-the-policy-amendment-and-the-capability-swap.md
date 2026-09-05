@@ -115,11 +115,14 @@ Each row records one change outside the closed list of `## Versioning`, the epic
 | EPIC 050.1 | `heartbeatIntervalMs` leaves the `node.claim` response                                                                                                               | `external-drive`   | `worker-model`      |
 | EPIC 050.2 | `node.heartbeat` is removed and replaced by `node.renew`                                                                                                             | `external-drive`   | `worker-model`      |
 | EPIC 050.2 | `runId` and `runFence` become required fields of the `node.renew`, `node.release` and `node.report` requests; `heartbeatIntervalMs` leaves the `node.renew` response | `external-drive`   | `worker-model`      |
+| EPIC 050.2 | the `node.claim` response field `fence` is renamed `runFence`, beside the added `objectiveRunFence`                                                                  | `external-drive`   | `worker-model`      |
 ```
 
-Four rows, one per change of this wire generation that the closed list forbids. `runId` and `fence`
-arriving on the `node.claim` response is **not** a row: `docs/proposal/api/README.md:95` —
+Five rows, one per change of this wire generation that the closed list forbids. `runId` arriving on
+the `node.claim` response is **not** a row: `docs/proposal/api/README.md:95` —
 `add a response field` already permits it, and a record of legal changes would hide the illegal ones.
+The rename of `fence` **is** a row, because a rename removes the old field, and `objectiveRunFence`
+rides in that row as the addition the rename serves.
 
 The table shape is four columns and is fixed here, because EPIC 050.4 Story 8
 (`08-lease-held-is-retired`), EPIC 050.5 Story 8 (`08-the-proposal-records-the-removal`) and EPIC 057
@@ -196,7 +199,7 @@ Add cases 8 and 9 to `test/helpers/proposal.test.ts`, the suite that already rea
 
 8. `"the compatibility record names every change of this wire generation"` — read
    `docs/proposal/api/README.md`, take the `## Compatibility record` section, parse its table rows,
-   and assert exactly four rows: two whose epic cell is `EPIC 050.1` and two whose epic cell is
+   and assert exactly five rows: two whose epic cell is `EPIC 050.1` and three whose epic cell is
    `EPIC 050.2`, every one naming `external-drive` retired and `worker-model` declared. This makes
    the record a checked artifact rather than prose.
 

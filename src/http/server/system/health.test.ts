@@ -14,7 +14,7 @@ import {
 const okResult: ReadHealthResult = {
   status: "ok",
   version: "27.8.1",
-  capabilities: ["external-drive", "per-node-write", "project-graph"],
+  capabilities: ["per-node-write", "project-graph", "worker-model"],
   dependencies: [{ name: "storage", status: "ok" }],
 };
 
@@ -36,7 +36,7 @@ describe("src/http/server/system/health.test", () => {
     const degraded: ReadHealthResult = {
       status: "degraded",
       version: "27.8.1",
-      capabilities: ["external-drive", "per-node-write", "project-graph"],
+      capabilities: ["per-node-write", "project-graph", "worker-model"],
       dependencies: [{ name: "storage", status: "failed" }],
     };
     const app = await createTestApp({

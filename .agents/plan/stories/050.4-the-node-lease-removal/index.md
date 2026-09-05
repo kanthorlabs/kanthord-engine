@@ -135,7 +135,8 @@ was read out of the source before a story was written, and each one changed a st
   `src/cli/` are typed against `http/contract/`, so a deleted request or response field breaks them.
   `src/http/server/node/heartbeat-node.ts:31` and `:37`, `release-node.ts:31` and `:37`, and
   `report-node.ts:41-45` read the node-lease `fence`; `src/cli/node/claim.ts:51` and `:54` read
-  `body.lease.fence`, `body.objectiveRunId` and `body.objectiveLease.fence`; and
+  `body.lease.fence`, `body.objectiveRunId` and `body.objectiveLease.fence`; `objectiveRunId` stays,
+  while the two lease-fence reads leave; and
   `src/cli/node/heartbeat.ts`, `release.ts`, `report.ts` and `attest.ts` each declare a `--fence`
   option and send it. Stories 1, 4, 5 and 6 take those sites with the schema fields that force them,
   under the coupling rule of `.agents/plan/authoring.md`.
@@ -172,10 +173,10 @@ was read out of the source before a story was written, and each one changed a st
   `nodeRenewResponse` at `:52-53`; `nodeRenewRequest:33` and `nodeReleaseRequest:38` still carry the
   node-lease `fence`. The draft epic's "changes no wire shape" and `28.0.2` were both wrong.
 
-- **`nodeClaimResponse.objectiveRunId` at `:45` has no producer after EPIC 050.** That epic's
-  `claim-success-task` opens one run where the baseline opened two, and EPIC 050.1 Story 1 (`01-the-claim-contract`) lists what the
-  response keeps, gains and loses without naming the field. Story 1 of this tree closes the gap rather
-  than leaving a required field for a test to discover.
+- **`nodeClaimResponse.objectiveRunId` at `:45` remains produced after EPIC 050.** EPIC 050.1's
+  `claim-success-task` opens or reuses the structural objective run and opens the task run, and EPIC
+  050.1 Story 1 (`01-the-claim-contract`) now names the field. Story 1 of this tree removes only the
+  node-lease fields and retains the objective run id for later objective authority.
 
 - **`report-outcome.ts` reads its attempts twice**, at `:213` and `:240`, and `lease.release` sits at
   `:282`, after both. Two steps of one live diagram may not carry one token, so Story 6 collapses the
@@ -274,7 +275,7 @@ here because an instruction to re-apply a landed edit is how a diagram gets pinn
 
 ## What this epic is not
 
-It is **not** wire-invisible, and it does not pretend to be. Three response fields and three required
+It is **not** wire-invisible, and it does not pretend to be. Two response fields and three required
 request fields leave four operations, and an error code is retired. Every one of those is outside the
 closed list of `docs/proposal/api/README.md:100-106`. The amendment EPIC 050.2 Story 8 landed makes
 them legal behind a recorded human ruling plus a capability retirement, and Story 8 carries both.
@@ -288,7 +289,7 @@ the migration. Its story list is not yet expanded.
 
 ## The tokens this tree inherits, and the rule that settles them
 
-**EPIC 050.1 is in flight and is not amendable, so this tree settles nothing about it — it copies.**
+**EPIC 050.1 records the approved objective/task run pair, so this tree copies it.**
 Six of the seven paths here supersede a live diagram of EPIC 050.1 or EPIC 050.2, and this epic
 changes only the lease. Every other token of those diagrams is a **context token**: no `Seams:` line
 declares it, and `.agents/plan/authoring.md` requires it to be the prior diagram's token at one count
@@ -299,26 +300,23 @@ and one label. The rule is therefore mechanical and it takes no decision:
 > stale copy in **this** tree. Fix the diagram. Never add a sign to make the difference legal, and
 > never edit the prior diagram.
 
-That works because EPIC 050.4 follows EPIC 050.1 and EPIC 050.2 by sequence order, so both are landed
-facts on disk before this tree dispatches. Two token families are known to be unsettled today, and
-both resolve by that rule rather than by an amendment.
+That works because EPIC 050.4 follows EPIC 050.1 and EPIC 050.2 by sequence order, so both are settled
+facts on disk before this tree dispatches. The objective run tokens copy from the amended claim
+diagram, and lease removal remains the only change this tree declares.
 
-**Re-read these six tokens before dispatch.** They are the only ones whose current label is in doubt.
+**Re-read these five tokens before dispatch.** They are the only inherited labels whose current value is in doubt.
 
 | story                                               | diagram                           | step | token as drawn here                    | prior diagram                             |
 | --------------------------------------------------- | --------------------------------- | ---- | -------------------------------------- | ----------------------------------------- |
 | 1 (`01-the-claim-of-a-task-drops-the-lease`)        | `claim-lease-free-task`           | 7    | `execution.activeRunsOfNodes:siblings` | EPIC 050.1 `claim-success-task`           |
 | 1 (`01-the-claim-of-a-task-drops-the-lease`)        | `claim-lease-free-task`           | 9    | `execution.activeRunsOfNodes:subtree`  | EPIC 050.1 `claim-success-task`           |
-| 1 (`01-the-claim-of-a-task-drops-the-lease`)        | `claim-lease-free-task`           | 16   | `events.append:run.opened:T`           | EPIC 050.1 `claim-success-task`           |
 | 2 (`02-the-claim-of-an-initiative-drops-the-lease`) | `claim-lease-free-initiative`     | 7    | `execution.activeRunsOfNodes:subtree`  | EPIC 050.1 `claim-success-initiative`     |
 | 2 (`02-the-claim-of-an-initiative-drops-the-lease`) | `claim-lease-free-initiative`     | 11   | `events.append:run.opened:I`           | EPIC 050.1 `claim-success-initiative`     |
 | 3 (`03-the-objective-busy-refusal-drops-the-lease`) | `claim-lease-free-objective-busy` | 7    | `execution.activeRunsOfNodes:siblings` | EPIC 050.1 `claim-refusal-objective-busy` |
 
-`renew-lease-free` and `release-lease-free` are **not** in doubt. They draw
+The `run.opened` tokens now copy the amended claim diagram. `renew-lease-free` and `release-lease-free` are **not** in doubt. They draw
 `events.append:run.renewed:R` and `events.append:run.ended:R`, which agree with
-`events.append:run.expired:R` of EPIC 050.1 Story 2 (`02-the-expiry-pass`). Only the claim's
-`run.opened` is node-subjected, so the inconsistency is two tokens in this tree and two in EPIC
-050.1 — four, not the eight an earlier note claimed.
+`events.append:run.expired:R` of EPIC 050.1 Story 2 (`02-the-expiry-pass`).
 
 **The set-name projection is a defect inside EPIC 050.1, and it is recorded rather than fixed here.**
 `.agents/plan/stories/050.1-the-claim/06-the-conformance-harness.md:41` projects
@@ -337,14 +335,13 @@ EPIC 050.1 while it is still in flight.** Nothing below blocks EPIC 050.4. Item 
 that stops a loop, and the loop it stops is EPIC 050.1's own — every later item is owned by another
 epic and triggered by EPIC 057.
 
-| #   | issue                                                                | owner                                             | blocks                                    |
-| --- | -------------------------------------------------------------------- | ------------------------------------------------- | ----------------------------------------- |
-| 1   | `activeRunsOfNodes` has a projection its signature cannot supply     | EPIC 050.1 Story 6 (`06-the-conformance-harness`) | EPIC 050.1's first claim scenario         |
-| 2   | `run.opened` is node-subjected; every other `run.*` is run-subjected | EPIC 050.1 Story 1 (`01-the-claim-contract`)      | nothing                                   |
-| 3   | `system.status`'s `leases[]` removal has no covering capability      | EPIC 050.5, or the version policy                 | EPIC 050.5                                |
-| 4   | EPIC 051 declares no `Supersedes: report-lease-free`                 | the EPIC 051 story-tree conversion                | `node.report`'s chain after this epic     |
-| 5   | ten epics hold a gate bullet list where the standard wants a table   | Ulrich, per epic                                  | `pnpm run verify`, once the gate is wired |
-| 6   | EPIC 051 holds 22 mermaid blocks in the epic file                    | `/author`, invoked on EPIC 051                    | `pnpm run verify`, once the gate is wired |
+| #   | issue                                                              | owner                                             | blocks                                    |
+| --- | ------------------------------------------------------------------ | ------------------------------------------------- | ----------------------------------------- |
+| 1   | `activeRunsOfNodes` has a projection its signature cannot supply   | EPIC 050.1 Story 6 (`06-the-conformance-harness`) | EPIC 050.1's first claim scenario         |
+| 2   | `system.status`'s `leases[]` removal has no covering capability    | EPIC 050.5, or the version policy                 | EPIC 050.5                                |
+| 3   | EPIC 051 declares no `Supersedes: report-lease-free`               | the EPIC 051 story-tree conversion                | `node.report`'s chain after this epic     |
+| 4   | ten epics hold a gate bullet list where the standard wants a table | Ulrich, per epic                                  | `pnpm run verify`, once the gate is wired |
+| 5   | EPIC 051 holds 22 mermaid blocks in the epic file                  | `/author`, invoked on EPIC 051                    | `pnpm run verify`, once the gate is wired |
 
 **1 — the projection. Fix it now, in EPIC 050.1.**
 `.agents/plan/stories/050.1-the-claim/06-the-conformance-harness.md:41` projects
@@ -360,23 +357,19 @@ it. **Why now:** the harness does not exist yet, so nothing is red — the first
 claim path is what fails, and it fails as a diagram defect reaching the human rather than an
 implementation defect.
 
-**2 — the `run.opened` subject. Let EPIC 050.1 settle it with its payloads.** Four tokens carry the
-inconsistency: two here and two in EPIC 050.1. The copy rule above takes whatever that epic lands, so
-this needs no decision before dispatch and no edit here.
-
-**3 — the `system.status` capability gap.** The amended policy makes an out-of-list change legal
+**2 — the `system.status` capability gap.** The amended policy makes an out-of-list change legal
 behind a recorded ruling _and_ a capability retirement, but `system.status` belongs to no capability,
 so there is no name to retire. EPIC 050.5 carries the ruling with that gap stated, or the policy gains
 a clause for an operation outside every capability. Not this epic: the table still exists here, so the
 projection is truthful.
 
-**4 — EPIC 051's supersession.** `.agents/plan/epics/051-the-execution-checkpoint.md:835` resolves the
+**3 — EPIC 051's supersession.** `.agents/plan/epics/051-the-execution-checkpoint.md:835` resolves the
 pin correctly and then defers its own `Supersedes:` line: _"The successor of `report-lease-free` is the
 `node.report` diagram of story 12. The conversion declares that id and its `Supersedes` line, so this
-document declares neither yet."_ The chain therefore ends at this epic until item 6 lands. That is
+document declares neither yet."_ The chain therefore ends at this epic until item 5 lands. That is
 recorded, not lost.
 
-**5 and 6 — the two gate debts.** `.agents/plan/pending/gate-table-retrofit.md` and
+**4 and 5 — the two gate debts.** `.agents/plan/pending/gate-table-retrofit.md` and
 `.agents/plan/pending/051-the-story-tree-conversion.md` own them, and both name the same trigger:
 `scripts/verify-epic-sequence.ts` entering the `verify` script, which EPIC 050.1 Story 8
 (`08-the-range-gate`) defers to the change that completes the last story of the range — EPIC 057.

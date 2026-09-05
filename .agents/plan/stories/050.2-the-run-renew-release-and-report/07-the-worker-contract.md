@@ -33,6 +33,48 @@ Update every example literal that these schemas parse: `nodeRenewExamples.reques
 
 **`heartbeatIntervalMs` is removed, not renamed.** It is `Math.floor(leaseTtlMs / 3)` at `src/commands/node/claim-node.ts:356` — `heartbeatIntervalMs` and again at `src/commands/node/claim-node.ts:415` — `heartbeatIntervalMs`, a third copy beside `src/commands/node/heartbeat-node.ts:112` — `heartbeatIntervalMs` with no shared constant, and derived from a lease this block replaces, and the epic states its replacement: `expiresAt` as the deadline and `renewAfterMs` as the relative hint. EPIC 050.1 removed it from the claim response; this story removes its last producer and every remaining site listed in section 5b. A response field removal is outside the closed list of `docs/proposal/api/README.md:100`, which is exactly what Story 8's policy amendment and capability retirement authorise.
 
+### 3b — the claim response carries two run fences
+
+`nodeClaimResponse` at `src/http/contract/execution.ts:53-64` returns `runId`, `objectiveRunId` and a
+top-level `fence`, and no fence of the objective run. A caller that must present a run fence for the
+objective therefore presents `objectiveLease.fence`, which is a different counter: a lease fence
+rises when a lease is taken again after it expires, at
+`src/services/lease/sqlite.ts:165` — `fence = lease.fence + 1`, and a run fence rises only when a run
+ends. A claim reuses an active structural objective run at
+`src/commands/node/claim-node.ts:330` — `reusableObjectiveRun`, so the objective lease fence reaches
+2 while the reused objective run's fence stays 1, and the presented value is refused `fence-stale`.
+
+The response therefore names four credentials, each with its own name:
+
+- `lease.fence` — the task lease fence, unchanged.
+- `runFence` — the task run fence. The top-level `fence` is **renamed** to it, because on
+  `nodeRenewRequest` and `nodeReleaseRequest` the field `fence` means the lease fence, and one name
+  for two counters is the defect above.
+- `objectiveLease.fence` — the objective lease fence, unchanged.
+- `objectiveRunFence` — new, `z.int().min(1)`.
+
+`ClaimNodeResult` at `src/commands/node/claim-node.ts:112-124` carries `runFence: run.fence` and
+`objectiveRunFence: objectiveRun?.fence ?? run.fence`; the non-task claim opens one structural run,
+so both fields name that one run there. The handler passes the command result through and changes
+nothing. Update `src/http/contract/field-decisions.fixture.ts`, the `node.claim` success example, and
+`docs/proposal/api/execution.md`.
+
+`src/cli/node/claim.ts:49-55` prints the four values under four names:
+
+```text
+kanthord: claimed <id> lease-fence <n> expires <n>
+kanthord: run <id> run-fence <n> attempt <n> objective-run <id> objective-run-fence <n> objective-lease-fence <n>
+```
+
+`scripts/e2e/lib/scenario/harness.ts` parses all four and `HarnessTaskResult` carries all four, so a
+scenario presents a run fence to `--run-fence` and a lease fence to `--fence`. This is the only
+parser of that output.
+
+**This section changes `node.claim`, which EPIC 050.1 settled.** The two epics are one wire
+generation delivered in two commits and no build is published between them, and the claim is the only
+place a worker can learn a run fence it must later present. Story 8's compatibility record lists this
+change with the rest.
+
 ### 4 — the error codes
 
 Add the six authority codes plus `lifetime-exceeded` to `src/http/contract/errors.ts:7-31`. EPIC 050.1 Story 1 already added the five claim refusals. The ordering convention is ascending HTTP status, and within a status group the proposal table's order. `src/http/contract/errors.test.ts:28` — `it` pins the exact key array and `src/http/contract/errors.test.ts:94` — `it` pins the per-status grouping. Neither array lives in `src/http/contract/errors.ts`; that file holds `src/http/contract/errors.ts:7` — `errorStatuses` and its 409 group at `:14` through `:23`.
@@ -114,7 +156,7 @@ The registry total stays **73** and the routed total stays **50**: one operation
 - Keep the registry at 73 operations and 50 routed. This story renames; it adds no operation.
 - Every new error code is 409, appended in the stated order at the end of the 409 group.
 - `runId` and `runFence` are required on `node.renew`, `node.release` and `node.report`.
-- Do not touch `node.claim`'s request or response. EPIC 050.1 settled both.
+- Do not touch `node.claim`'s request. Section 3b is the only change to its response, and it adds `objectiveRunFence` and renames `fence` to `runFence` and nothing else.
 - `heartbeatIntervalMs` appears in no schema and no production file when this story ends.
 - Touch neither `src/domain/event-type.ts` nor `src/http/contract/event-payload.ts`. Story 3 (`03-the-renew`) and Story 5 (`05-the-release`) own both, because a declared type must have a producer in the same story.
 
@@ -144,7 +186,13 @@ Add:
 
 8. `"every new refusal code maps to 409"` — assert `errorStatuses[code] === 409` for each of the seven. Update the pinned key array, which is `src/http/contract/errors.test.ts:29` — `deepEqual` through `:53`, whose first member is `src/http/contract/errors.test.ts:36` — `stale-revision`, and the 409 group, which is `src/http/contract/errors.test.ts:107` — `409` through `:118`. Both are positional `deepEqual` comparisons, so appending is not enough.
 
-9. `"the error code table and the proposal agree"` — the shipped case at `src/http/contract/errors.test.ts:16` — `it` reads `docs/proposal/api/README.md` through `test/helpers/proposal.ts:89` — `readErrorCodeMatrix` and asserts sorted key equality plus per-code status. It fails until the markdown table carries the seven new rows, so the document edit is not optional.
+9. `"the claim response carries both run fences"` — parse the `node.claim` success example and assert `runFence` and `objectiveRunFence` are integers at least 1, and assert `nodeClaimResponse.shape` holds no `fence`. Both halves are asserted, so the rename is complete rather than additive.
+
+10. `"the objective run fence and the objective lease fence are separate counters"` — in `src/commands/node/claim-node.test.ts`, claim a task, end its run, expire the owner's leases, return the task to `ready`, and claim again. Assert the second claim reuses the objective run id, that `objectiveLease.fence` is 2 and `objectiveRunFence` is 1, and that `objectiveRunFence` equals the run row's `fence`. Without this case both values are 1 everywhere and the fix is unfalsifiable.
+
+11. `"the claim prints four named fences"` — assert the two CLI lines exactly, over a fixture whose four fences are four different numbers.
+
+12. `"the error code table and the proposal agree"` — the shipped case at `src/http/contract/errors.test.ts:16` — `it` reads `docs/proposal/api/README.md` through `test/helpers/proposal.ts:89` — `readErrorCodeMatrix` and asserts sorted key equality plus per-code status. It fails until the markdown table carries the seven new rows, so the document edit is not optional.
 
 `pnpm run verify` exits 0. It emits and validates the master OpenAPI document and every feature slice in a temporary directory, so a schema or component drift fails there too.
 

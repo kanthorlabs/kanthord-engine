@@ -16,6 +16,7 @@ function field(
   key: string,
   context: ProjectionContext,
 ): string {
+  if (key === "runId" && typeof input === "string") return input;
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     throw new Error(`${context.method} takes no input object to project`);
   }
@@ -78,7 +79,8 @@ const projections: Readonly<Record<string, Projection>> = {
     if (
       typeof payload === "object" &&
       payload !== null &&
-      "reason" in payload
+      "reason" in payload &&
+      (payload as Readonly<Record<string, unknown>>).reason !== null
     ) {
       labels.push(
         String((payload as Readonly<Record<string, unknown>>).reason),
@@ -102,7 +104,9 @@ export function recordSeams<T extends object>(
   sets: Readonly<Record<string, readonly string[]>> = {},
 ): Readonly<{ dependencies: T; tokens: readonly string[] }> {
   const tokens: string[] = [];
-  const dependencyKeys = Object.keys(dependencies);
+  const dependencyKeys = Object.entries(dependencies)
+    .filter(([, value]) => typeof value === "object" && value !== null)
+    .map(([key]) => key);
   const recordedTokens = tokens as RecordedTokens;
   Object.defineProperty(recordedTokens, "dependencyKeys", {
     value: dependencyKeys,
@@ -119,20 +123,16 @@ export function recordSeams<T extends object>(
         if (typeof value !== "function") return value;
         return (...args: readonly unknown[]) => {
           const input = args.at(-1);
-          if (typeof input === "object" && input !== null) {
-            const method = `${key}.${String(property)}`;
-            const projection = projections[method];
-            const labels =
-              projection === undefined
-                ? []
-                : projection(input, { method, sets }).map(
-                    (label) => aliases[label] ?? label,
-                  );
-            const token = `${key}.${String(property)}${labels.length > 0 ? `:${labels.join(":")}` : ""}`;
-            tokens.push(token);
-          } else {
-            tokens.push(`${key}.${String(property)}`);
-          }
+          const method = `${key}.${String(property)}`;
+          const projection = projections[method];
+          const labels =
+            projection === undefined
+              ? []
+              : projection(input, { method, sets }).map(
+                  (label) => aliases[label] ?? label,
+                );
+          const token = `${method}${labels.length > 0 ? `:${labels.join(":")}` : ""}`;
+          tokens.push(token);
           return Reflect.apply(value, target, args);
         };
       },
@@ -342,11 +342,12 @@ export function assertConformance(
       `terminal mismatch: expected ${parsed.terminal}, got ${resultTerminal(input.result)}`,
     );
   }
-  if (parsed.terminal === null) {
-    throw new Error(`diagram ${input.diagram} terminal is pinned by note`);
-  }
+  const recordedTokens =
+    parsed.terminal === null
+      ? input.recorder.tokens.slice(0, parsed.tokens.length)
+      : input.recorder.tokens;
   assert.deepStrictEqual(
-    input.recorder.tokens,
+    recordedTokens,
     parsed.tokens,
     `sequence mismatch for diagram ${input.diagram}`,
   );

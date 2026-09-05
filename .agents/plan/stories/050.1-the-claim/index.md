@@ -3,7 +3,7 @@
 Epic: `.agents/plan/epics/050.1-the-claim.md`
 Prereq: EPIC 050, implemented. Every story here reads the run row, the exclusion rules, the claim seams and the budgets that EPIC 050 creates. EPICs 047 and 048 must land before EPIC 050. See **Facts** below.
 
-A claim opens exactly one run, writes the node assignment in the same transaction, evaluates one total refusal order before the first mutation, and expires a due run before it acts. The schema, the pure exclusion rules and the budgets belong to EPIC 050. `node.renew`, `node.release` and `node.report` belong to EPIC 050.2, and the node lease is removed in EPIC 050.4.
+Task claims open or reuse one structural objective run and open one execution task run, write the node assignment in the same transaction, evaluate one total refusal order before the first mutation, and expire a due run before it acts. The schema, the pure exclusion rules and the budgets belong to EPIC 050. `node.renew`, `node.release` and `node.report` belong to EPIC 050.2, and the node lease is removed in EPIC 050.4.
 
 ## One story, one path
 

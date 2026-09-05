@@ -38,6 +38,8 @@ The same spike settled four behaviours that the design had assumed and never che
 
 - **A second, non-coding convention.** Today one convention exists and it is simply how KanthorD behaves: a task is judged by acceptance criteria, an objective by unit tests, an initiative by end-to-end detection. No selector, no named policy, no configuration language ships. When a non-coding purpose arrives, the seam gets designed against that real case, because a link checker needs network policy and a schema validator consumes artifacts rather than a working tree. Those are execution semantics, not command names, and guessing them now would produce the wrong abstraction.
 
+- **The report terminal event.** EPIC 050.2 owns the report authority prelude and no tail. The report path remains outstanding until EPIC 050.4 Story 6 adds its `run.ended` event.
+
 ## The external tool contract
 
 The daemon runs executables it does not ship. That is a release contract, and it is recorded here because no other file owns it.
@@ -70,7 +72,7 @@ A host `git` is a supply-chain surface the product inherits. Its patches are the
 
 The CLI has no written grammar and no mechanism. `api/README.md` pins the HTTP path grammar, and `AGENTS.md` gives it a typed segment tuple, so a route edit cannot introduce a plural or a free-form segment. No equivalent exists for a command. Three epics each chose an option shape on their own, and every gate stayed green.
 
-One rule is settled and already applied. A command names its own subject `--id`. A command names a reference to another entity `--<entity>`. EPIC 020 normalized `node claim`, `node heartbeat`, `node release`, `node show` and `node unblock` to it, and amended the three planning files that specified the superseded grammar: `018-claim-and-lease/16-cli-commands.md`, `019-outcome-report/19a-node-unblock.md` and `epics/111-inspection-and-manual-controls.md`. Every command that names its own subject now takes `--id`.
+One rule is settled and already applied. A command names its own subject `--id`. A command names a reference to another entity `--<entity>`. EPIC 020 normalized `node claim`, `node renew`, `node release`, `node show` and `node unblock` to it, and amended the three planning files that specified the superseded grammar: `018-claim-and-lease/16-cli-commands.md`, `019-outcome-report/19a-node-unblock.md` and `epics/111-inspection-and-manual-controls.md`. Every command that names its own subject now takes `--id`.
 
 Three questions stay open, and each one needs a decision before the rule becomes a test.
 

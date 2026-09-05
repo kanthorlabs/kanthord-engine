@@ -461,13 +461,17 @@ export async function runP1BE2(
 
   await attestObjective(context, driver, alphaActor, {
     nodeId: graph.alphaId,
-    fence: alphaFirstResult.fence,
+    fence: alphaFirstResult.objectiveLeaseFence,
+    runId: alphaFirstResult.objectiveRunId,
+    runFence: alphaFirstResult.objectiveRunFence,
     objectId: alphaAttestObjectId,
     label: "alpha",
   });
   await attestObjective(context, driver, betaActor, {
     nodeId: graph.betaId,
-    fence: betaFirstResult.fence,
+    fence: betaFirstResult.objectiveLeaseFence,
+    runId: betaFirstResult.objectiveRunId,
+    runFence: betaFirstResult.objectiveRunFence,
     objectId: betaAttestObjectId,
     label: "beta",
   });
@@ -510,7 +514,12 @@ export async function runP1BE2(
       "POST",
       `/v1/node/${pathSegment(graph.alphaId)}/report`,
       alphaActor.tokenFile,
-      { report: "closed", acknowledgePartial: false },
+      {
+        report: "closed",
+        runId: alphaFirstResult.objectiveRunId,
+        runFence: alphaFirstResult.objectiveRunFence,
+        acknowledgePartial: false,
+      },
     ),
   );
   context.assert(
@@ -519,7 +528,16 @@ export async function runP1BE2(
     errorRecord(harnessClose),
   );
 
-  await driver.cliAs("client", ["node", "close", "--id", graph.alphaId]);
+  await driver.cliAs("client", [
+    "node",
+    "close",
+    "--id",
+    graph.alphaId,
+    "--run-id",
+    alphaFirstResult.objectiveRunId,
+    "--run-fence",
+    String(alphaFirstResult.objectiveRunFence),
+  ]);
   const alphaClosed = await driver.cliAs("client", [
     "node",
     "show",
@@ -543,7 +561,16 @@ export async function runP1BE2(
     nodeStateLine(gammaAfterFirstClose),
   );
 
-  await driver.cliAs("client", ["node", "close", "--id", graph.betaId]);
+  await driver.cliAs("client", [
+    "node",
+    "close",
+    "--id",
+    graph.betaId,
+    "--run-id",
+    betaFirstResult.objectiveRunId,
+    "--run-fence",
+    String(betaFirstResult.objectiveRunFence),
+  ]);
   const betaClosed = await driver.cliAs("client", [
     "node",
     "show",

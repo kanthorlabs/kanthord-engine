@@ -91,9 +91,9 @@ outside this role's lane, and Story 0 applied it before the loop opened.
 
 Add one row to the compatibility record EPIC 050.2 Story 8 created in `docs/proposal/api/README.md`:
 
-| epic       | change outside the closed list                                                                                                            | capability retired | capability declared |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------- |
-| EPIC 050.4 | `lease`, `objectiveLease` and `objectiveRunId` leave two responses; the node-lease `fence` leaves three requests; `lease-held` is retired | `worker-model`     | `worker-run`        |
+| epic       | change outside the closed list                                                                                                                  | capability retired | capability declared |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------- |
+| EPIC 050.4 | `lease` and `objectiveLease` leave two responses; `objectiveRunId` stays; the node-lease `fence` leaves three requests; `lease-held` is retired | `worker-model`     | `worker-run`        |
 
 ## Constraints
 

@@ -50,11 +50,11 @@ When a session ends, the adapter returns one immutable envelope: the final messa
 
 ## Progress is host-observed
 
-Progress comes from what the host observes, never from what the model volunteers. The adapter watches the SDK stream — messages, tool start and end, elapsed time, cancellation — through in-process callbacks, and forwards what it sees to the attempt record. No reporting path depends on the model choosing to call a tool: `general@1` holds `bash`, so any local endpoint a progress tool could call is equally reachable by every subprocess the model spawns, and a channel that `bash` can reach is not a trust boundary. The heartbeat belongs to the worker process, which holds the lease; the model cannot renew, hold, or surrender one.
+Progress comes from what the host observes, never from what the model volunteers. The adapter watches the SDK stream — messages, tool start and end, elapsed time, cancellation — through in-process callbacks, and forwards what it sees to the attempt record. No reporting path depends on the model choosing to call a tool: `general@1` holds `bash`, so any local endpoint a progress tool could call is equally reachable by every subprocess the model spawns, and a channel that `bash` can reach is not a trust boundary. The renew belongs to the worker process, which holds the run authority; the model cannot renew, hold, or surrender one.
 
 ## Model commentary is untrusted
 
-A role may carry an in-process custom tool that appends free-text notes to the attempt record. Every note is stored labelled untrusted, append-only and size-capped. A note drives nothing — not the heartbeat, not the attempt counter, not verification, not a transition. A custom tool joins a role only when this file's allow list names it, and its definition pins into the attempt record with every other tool definition; the fail-closed assertion of `Capability` counts it.
+A role may carry an in-process custom tool that appends free-text notes to the attempt record. Every note is stored labelled untrusted, append-only and size-capped. A note drives nothing — not the renew, not the attempt counter, not verification, not a transition. A custom tool joins a role only when this file's allow list names it, and its definition pins into the attempt record with every other tool definition; the fail-closed assertion of `Capability` counts it.
 
 ## From envelope to report
 

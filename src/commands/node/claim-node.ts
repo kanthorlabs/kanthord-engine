@@ -113,10 +113,11 @@ export type ClaimNodeResult = Readonly<{
   lease: ClaimedLease;
   objectiveLease: ClaimedLease;
   runId: string;
+  runFence: number;
   objectiveRunId: string;
+  objectiveRunFence: number;
   attemptId: string | null;
   attemptNo: number | null;
-  fence: number;
   expiresAt: number;
   renewAfterMs: number;
   node: NodeView;
@@ -201,9 +202,18 @@ export function claimNode(
       );
     }
 
+    const alreadyRunning =
+      node.kind === "objective" && node.state === "running";
     const routedWorker =
       node.assignment ??
-      routeClaimWorker(node, caller, input.available, dependencies.registry);
+      (alreadyRunning
+        ? caller.worker
+        : routeClaimWorker(
+            node,
+            caller,
+            input.available,
+            dependencies.registry,
+          ));
     const runKind = runKindFor(deliverable);
     if (runKind === "review") {
       throw new ClaimNodeError(
@@ -218,6 +228,12 @@ export function claimNode(
       node.projectId,
     );
     const relativeIds = relativesOf(nodes, node);
+    const liveLeases = liveLeasesOf(
+      dependencies.lease,
+      transaction,
+      relativeIds,
+      now,
+    );
     const leaseRefusal = liveLeaseRefusal({
       targetId: node.id,
       targetKind: node.kind,
@@ -236,12 +252,7 @@ export function claimNode(
               )
               .map((candidate) => candidate.id),
       owner: input.actorId,
-      liveLeases: liveLeasesOf(
-        dependencies.lease,
-        transaction,
-        relativeIds,
-        now,
-      ),
+      liveLeases,
     });
     if (leaseRefusal !== null) {
       throw new ClaimNodeError(
@@ -317,22 +328,37 @@ export function claimNode(
     const ancestorIds = ancestorChain(nodes, node).map(
       (ancestor) => ancestor.id,
     );
-    const runs = dependencies.execution
-      .activeRunsOfNodes(
-        transaction,
-        uniqueIds([node.id, ...ancestorIds, ...subtreeIds]),
-      )
-      .map((run) => ({
-        runId: run.id,
-        nodeId: run.nodeId,
-        state: run.state,
-        expiresAt: run.expiresAt,
-      }));
+    const activeRuns = dependencies.execution.activeRunsOfNodes(
+      transaction,
+      uniqueIds([node.id, ...ancestorIds, ...subtreeIds]),
+    );
+    const objectiveNode =
+      node.kind === "task"
+        ? nodes.find((candidate) => candidate.id === objectiveId)
+        : undefined;
+    const reusableObjectiveRun =
+      node.kind === "task" && objectiveNode?.state === "running"
+        ? activeRuns.find(
+            (run) =>
+              run.nodeId === objectiveId &&
+              run.kind === "structural" &&
+              run.driver === "external",
+          )
+        : undefined;
+    const exclusionRuns =
+      reusableObjectiveRun === undefined
+        ? activeRuns
+        : activeRuns.filter((run) => run.id !== reusableObjectiveRun.id);
     const exclusion = subtreeExclusion({
       targetId: node.id,
       ancestorIds,
       descendantIds: subtreeIds.filter((id) => id !== node.id),
-      runs,
+      runs: exclusionRuns.map((run) => ({
+        runId: run.id,
+        nodeId: run.nodeId,
+        state: run.state,
+        expiresAt: run.expiresAt,
+      })),
       now,
     });
     if (exclusion !== null) {
@@ -348,7 +374,7 @@ export function claimNode(
       );
     }
 
-    if (node.state !== "ready") {
+    if (node.state !== "ready" && !alreadyRunning) {
       throw new ClaimNodeError(
         "illegal-transition",
         `the node ${node.id} is ${node.state}, not claimable`,
@@ -384,6 +410,30 @@ export function claimNode(
       id: node.id,
       assignment: routedWorker,
     });
+    const objectiveRun =
+      node.kind === "task"
+        ? reusableObjectiveRun === undefined
+          ? dependencies.execution.openRun(transaction, {
+              nodeId: objectiveId,
+              kind: "structural",
+              workspaceId: null,
+              worker: routedWorker,
+              fence: 1,
+              attemptLimit: dependencies.attemptLimit,
+              judgedOid: null,
+              graphRevision,
+              agents: [],
+              expiresAt: now + dependencies.runTtlMs,
+              maxLifetimeAt: now + dependencies.runMaxLifetimeMs,
+            })
+          : dependencies.execution.renewRun(transaction, {
+              runId: reusableObjectiveRun.id,
+              expiresAt: Math.min(
+                now + dependencies.runTtlMs,
+                reusableObjectiveRun.maxLifetimeAt,
+              ),
+            })
+        : undefined;
     const run = dependencies.execution.openRun(transaction, {
       nodeId: node.id,
       kind: runKind,
@@ -397,20 +447,21 @@ export function claimNode(
       expiresAt: now + dependencies.runTtlMs,
       maxLifetimeAt: now + dependencies.runMaxLifetimeMs,
     });
-    const fence = run.fence;
     const attempt =
       runKind === "execution"
         ? dependencies.execution.openAttempt(transaction, { runId: run.id })
         : null;
-    dependencies.plan.setNodeState(transaction, {
-      id: node.id,
-      from: "ready",
-      to: "running",
-      trigger: "claim-taken",
-      blockReason: null,
-      at: now,
-      cause: { revision: node.revision, importId: null },
-    });
+    if (!alreadyRunning) {
+      dependencies.plan.setNodeState(transaction, {
+        id: node.id,
+        from: "ready",
+        to: "running",
+        trigger: "claim-taken",
+        blockReason: null,
+        at: now,
+        cause: { revision: node.revision, importId: null },
+      });
+    }
     for (const entry of cascade) {
       dependencies.plan.setNodeState(transaction, {
         id: entry.id,
@@ -422,21 +473,42 @@ export function claimNode(
         cause: { revision: entry.revision, importId: null },
       });
     }
-    dependencies.events.append(transaction, {
-      subjectKind: "run",
-      subjectId: run.id,
-      type: "run.opened",
-      actorKind: input.actorKind,
-      actorId: input.actorId,
-      payload: {
-        runId: run.id,
-        nodeId: node.id,
-        fence,
-        kind: runKind,
-        worker: routedWorker,
-        expiresAt: now + dependencies.runTtlMs,
-      },
-    });
+    if (objectiveRun !== undefined && reusableObjectiveRun !== undefined) {
+      dependencies.events.append(transaction, {
+        subjectKind: "run",
+        subjectId: objectiveRun.id,
+        type: "run.renewed",
+        actorKind: input.actorKind,
+        actorId: input.actorId,
+        payload: {
+          runId: objectiveRun.id,
+          nodeId: objectiveRun.nodeId,
+          fence: objectiveRun.fence,
+          expiresAt: objectiveRun.expiresAt,
+        },
+      });
+    }
+    const openedRuns = [run];
+    if (objectiveRun !== undefined && reusableObjectiveRun === undefined) {
+      openedRuns.unshift(objectiveRun);
+    }
+    for (const openedRun of openedRuns) {
+      dependencies.events.append(transaction, {
+        subjectKind: "run",
+        subjectId: openedRun.id,
+        type: "run.opened",
+        actorKind: input.actorKind,
+        actorId: input.actorId,
+        payload: {
+          runId: openedRun.id,
+          nodeId: openedRun.nodeId,
+          fence: openedRun.fence,
+          kind: openedRun.kind,
+          worker: openedRun.worker,
+          expiresAt: openedRun.expiresAt,
+        },
+      });
+    }
     for (const entry of cascade) {
       dependencies.events.append(transaction, {
         subjectKind: "node",
@@ -453,29 +525,32 @@ export function claimNode(
         },
       });
     }
-    dependencies.events.append(transaction, {
-      subjectKind: "node",
-      subjectId: node.id,
-      type: "node.running",
-      actorKind: input.actorKind,
-      actorId: input.actorId,
-      payload: {
-        from: "ready",
-        to: "running",
-        reason: "claim-taken",
-        revision: node.revision,
-        importId: null,
-      },
-    });
+    if (!alreadyRunning) {
+      dependencies.events.append(transaction, {
+        subjectKind: "node",
+        subjectId: node.id,
+        type: "node.running",
+        actorKind: input.actorKind,
+        actorId: input.actorId,
+        payload: {
+          from: "ready",
+          to: "running",
+          reason: "claim-taken",
+          revision: node.revision,
+          importId: null,
+        },
+      });
+    }
 
     return {
       lease: toClaimedLease(claimedLease.record),
       objectiveLease: toClaimedLease(objectiveLease.record),
       runId: run.id,
-      objectiveRunId: run.id,
+      runFence: run.fence,
+      objectiveRunId: objectiveRun?.id ?? run.id,
+      objectiveRunFence: objectiveRun?.fence ?? run.fence,
       attemptId: attempt?.id ?? null,
       attemptNo: attempt?.attemptNo ?? null,
-      fence,
       expiresAt: now + dependencies.runTtlMs,
       renewAfterMs: Math.floor(dependencies.runTtlMs / 3),
       node: { id: node.id, state: "running" },

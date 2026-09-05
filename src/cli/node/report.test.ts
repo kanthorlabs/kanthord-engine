@@ -8,6 +8,7 @@ import { nodeReportRequest } from "../../http/contract/outcome.ts";
 import { registerNodeReport } from "./report.ts";
 
 const TASK = "task_01JQ8Z7G3HZZZZZZZZZZZZZZZW";
+const RUN_ID = "run_01JQ8Z7G3HZZZZZZZZZZZZZZZT";
 const OBJECT_ID = "a".repeat(40);
 const OBJECT_ID_64 = "b".repeat(64);
 const REASON = "r";
@@ -269,7 +270,15 @@ describe("src/cli/node/report.test", () => {
   for (const refusal of localRefusals) {
     it(`node report refuses ${refusal.name} locally`, async () => {
       const h = harness();
-      await run(h.program, ["node", "report", ...refusal.args]);
+      await run(h.program, [
+        "node",
+        "report",
+        "--run-id",
+        RUN_ID,
+        "--run-fence",
+        "1",
+        ...refusal.args,
+      ]);
 
       assert.equal(
         h.stderrText(),
@@ -323,6 +332,10 @@ describe("src/cli/node/report.test", () => {
         "report",
         "--id",
         TASK,
+        "--run-id",
+        RUN_ID,
+        "--run-fence",
+        "1",
         ...report.args,
         "--fence",
         "3",
@@ -331,7 +344,11 @@ describe("src/cli/node/report.test", () => {
       const call = h.calls()[0];
       assert.ok(call);
       assert.equal(call.operationId, "node.report");
-      assert.deepEqual(call.body, report.body);
+      assert.deepEqual(call.body, {
+        ...report.body,
+        runId: RUN_ID,
+        runFence: 1,
+      });
       assert.doesNotThrow(() => nodeReportRequest.parse(call.body));
       assert.equal(h.failCalls(), 0);
       assert.deepEqual(h.exitCodes(), []);
@@ -345,6 +362,10 @@ describe("src/cli/node/report.test", () => {
       "report",
       "--id",
       TASK,
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1",
       "--outcome",
       "rejected",
       "--reason",
@@ -356,7 +377,13 @@ describe("src/cli/node/report.test", () => {
     assert.deepEqual(h.calls(), [
       {
         operationId: "node.report",
-        body: { report: "rejected", fence: 3, reason: REASON },
+        body: {
+          report: "rejected",
+          fence: 3,
+          runId: RUN_ID,
+          runFence: 1,
+          reason: REASON,
+        },
         parameters: { id: TASK },
       },
     ]);
@@ -372,6 +399,10 @@ describe("src/cli/node/report.test", () => {
       "report",
       "--id",
       TASK,
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1",
       "--outcome",
       "accepted",
       "--fence",
@@ -383,6 +414,8 @@ describe("src/cli/node/report.test", () => {
     assert.deepEqual(h.calls()[0]?.body, {
       report: "accepted",
       fence: 3,
+      runId: RUN_ID,
+      runFence: 1,
       objectId: OBJECT_ID,
     });
     assert.equal(h.failCalls(), 0);
@@ -390,7 +423,20 @@ describe("src/cli/node/report.test", () => {
 
   it("node report without --id writes the invalid-request line and records zero calls", async () => {
     const h = harness();
-    await run(h.program, ["node", "report", "--outcome", "rejected"]);
+    await run(h.program, [
+      "node",
+      "report",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1",
+      "--outcome",
+      "rejected",
+      "--reason",
+      REASON,
+      "--fence",
+      "3",
+    ]);
 
     assert.equal(h.failCalls(), 1);
     assert.equal(h.calls().length, 0);
@@ -408,6 +454,10 @@ describe("src/cli/node/report.test", () => {
       "report",
       "--id",
       TASK,
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1",
       "--outcome",
       "rejected",
       "--fence",
@@ -427,6 +477,10 @@ describe("src/cli/node/report.test", () => {
       "report",
       "--id",
       TASK,
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1",
       "--outcome",
       "rejected",
       "--fence",
@@ -454,6 +508,10 @@ describe("src/cli/node/report.test", () => {
       "report",
       "--id",
       TASK,
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1",
       "--outcome",
       "rejected",
       "--reason",

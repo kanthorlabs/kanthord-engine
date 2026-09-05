@@ -579,6 +579,42 @@ describe("test/helpers/sequence-conformance.test", () => {
     }
   });
 
+  it("a pinned tail accepts the recorded prefix and later steps", () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "sequence-conformance-"));
+    const fixture = resolve(directory, "story.md");
+    writeFileSync(
+      fixture,
+      [
+        "### `pinned-tail-check`",
+        "```mermaid",
+        "sequenceDiagram",
+        "    participant Command",
+        "    participant Plan",
+        "    Note over Command: tail pinned by EPIC 050.4 report-lease-free",
+        "    Command->>Plan: 1 plan.read",
+        "```",
+      ].join("\n"),
+    );
+    try {
+      const recorder = recordSeams(
+        { plan: { read: () => undefined, write: () => undefined } },
+        {},
+      );
+      recorder.dependencies.plan.read();
+      recorder.dependencies.plan.write();
+      assert.doesNotThrow(() =>
+        assertConformance({
+          story: fixture,
+          diagram: "pinned-tail-check",
+          recorder,
+          result: {},
+        }),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("a pure-domain call produces no token", () => {
     const recorder = recordSeams({ plan: { read: () => undefined } }, {});
     recorder.dependencies.plan.read();

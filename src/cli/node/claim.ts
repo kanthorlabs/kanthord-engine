@@ -48,10 +48,10 @@ export function registerNodeClaim(input: NodeClaimCliInput): void {
 
       const body = nodeClaimResponse.parse(result.body);
       input.stdout(
-        `kanthord: claimed ${id} fence ${body.lease.fence} expires ${body.lease.expiresAt}\n`,
+        `kanthord: claimed ${id} lease-fence ${body.lease.fence} expires ${body.lease.expiresAt}\n`,
       );
       input.stdout(
-        `kanthord: run ${body.runId} attempt ${body.attemptNo ?? "-"} objective-run ${body.objectiveRunId} objective-fence ${body.objectiveLease.fence}\n`,
+        `kanthord: run ${body.runId} run-fence ${body.runFence} attempt ${body.attemptNo ?? "-"} objective-run ${body.objectiveRunId} objective-run-fence ${body.objectiveRunFence} objective-lease-fence ${body.objectiveLease.fence}\n`,
       );
     });
 }

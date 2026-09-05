@@ -1,14 +1,19 @@
 import type { StoredNode } from "../../domain/plan-graph.ts";
 import { accountAttempts } from "../../domain/attempt-accounting.ts";
+import {
+  assertRunAuthority,
+  type RunAuthorityRefusalCode,
+} from "../../domain/run-authority.ts";
 import type { NodeState } from "../../domain/state.ts";
 import type { Clock } from "../../services/clock/index.ts";
 import type { EventLog } from "../../services/event/index.ts";
-import type { Execution } from "../../services/execution/index.ts";
+import type { Execution, RunRecord } from "../../services/execution/index.ts";
 import { LeaseError, type Lease } from "../../services/lease/index.ts";
 import type { PlanStore } from "../../services/plan/index.ts";
 import type { Storage, Transaction } from "../../services/storage/index.ts";
 
 export type ReleaseRefusal =
+  | RunAuthorityRefusalCode
   | "node-not-found"
   | "initiative-not-claimable"
   | "lease-held"
@@ -28,11 +33,20 @@ export type ReleaseNodeDependencies = Readonly<{
   execution: Execution;
   events: EventLog;
   clock: Clock;
+  expiry: Readonly<{
+    expireRuns(
+      transaction: Transaction,
+      input: Readonly<{ now: number }>,
+    ): readonly unknown[];
+  }>;
+  caller: string;
 }>;
 
 export type ReleaseNodeInput = Readonly<{
   nodeId: string;
   fence: number;
+  runId: string;
+  runFence: number;
   actorId: string;
   actorKind: "human" | "harness";
 }>;
@@ -61,10 +75,10 @@ export function releaseNode(
 ): ReleaseNodeResult {
   return dependencies.storage.transact((transaction) => {
     const now = dependencies.clock.now();
+    dependencies.expiry.expireRuns(transaction, { now });
 
-    const nodes = dependencies.plan.readAllNodes(transaction);
-    const node = nodes.find((candidate) => candidate.id === input.nodeId);
-    if (node === undefined) {
+    const node = dependencies.plan.readNode(transaction, input.nodeId);
+    if (node === null) {
       throw new ReleaseNodeError("node-not-found", `no node ${input.nodeId}`);
     }
     if (node.kind === "initiative") {
@@ -74,10 +88,25 @@ export function releaseNode(
       );
     }
 
-    assertHeld(dependencies.lease, transaction, input, node.id, now);
+    const run = dependencies.execution.runById(transaction, input.runId);
+    const refusal = assertRunAuthority({
+      run,
+      runId: input.runId,
+      fence: input.runFence,
+      targetNodeId: input.nodeId,
+      caller: dependencies.caller,
+      now,
+    });
+    if (refusal !== null) {
+      throw new ReleaseNodeError(
+        refusal.refusal,
+        `run ${refusal.runId} is not authorized for release`,
+        { runId: refusal.runId },
+      );
+    }
 
     if (node.kind === "task") {
-      return releaseTask(dependencies, transaction, input, node, now);
+      return releaseTask(dependencies, transaction, input, node, now, run!);
     }
     return releaseObjective(dependencies, transaction, input, node, now);
   });
@@ -89,17 +118,10 @@ function releaseTask(
   input: ReleaseNodeInput,
   node: StoredNode,
   now: number,
+  run: RunRecord,
 ): ReleaseNodeResult {
-  const run = dependencies.execution.activeRunOfNode(transaction, node.id);
-  if (run === null) {
-    throw new ReleaseNodeError(
-      "no-active-run",
-      `no active run of node ${node.id}`,
-    );
-  }
-  const openAttempts = dependencies.execution
-    .attemptsOfRun(transaction, run.id)
-    .filter((attempt) => attempt.outcome === null);
+  const attempts = dependencies.execution.attemptsOfRun(transaction, run.id);
+  const openAttempts = attempts.filter((attempt) => attempt.outcome === null);
   if (openAttempts.length > 1) {
     throw new Error(`run ${run.id} holds more than one open attempt`);
   }
@@ -111,13 +133,11 @@ function releaseTask(
     );
   }
   const projected = accountAttempts({
-    attempts: dependencies.execution
-      .attemptsOfRun(transaction, run.id)
-      .map((attempt) =>
-        attempt.id === open.id
-          ? { attemptNo: attempt.attemptNo, outcome: "cancelled" as const }
-          : { attemptNo: attempt.attemptNo, outcome: attempt.outcome },
-      ),
+    attempts: attempts.map((attempt) =>
+      attempt.id === open.id
+        ? { attemptNo: attempt.attemptNo, outcome: "cancelled" as const }
+        : { attemptNo: attempt.attemptNo, outcome: attempt.outcome },
+    ),
     limit: run.attemptLimit,
   });
   if (projected.exhausted) {
@@ -135,30 +155,24 @@ function releaseTask(
       at: now,
       cause: { revision: node.revision, importId: null },
     });
-    dependencies.execution.endRun(transaction, {
+    const endedRun = dependencies.execution.endRun(transaction, {
       runId: run.id,
       outcome: "blocked",
       at: now,
     });
-    dependencies.lease.release(transaction, {
-      subjectKind: "node",
-      subjectId: node.id,
-      owner: input.actorId,
-      ownerKind: "actor",
-      fence: input.fence,
-      now,
-    });
+    releaseLease(dependencies, transaction, input, node.id, now);
     dependencies.events.append(transaction, {
-      subjectKind: "node",
-      subjectId: node.id,
-      type: "lease.released",
+      subjectKind: "run",
+      subjectId: endedRun.id,
+      type: "run.ended",
       actorKind: input.actorKind,
       actorId: input.actorId,
       payload: {
-        subjectId: node.id,
-        objectiveId: objectiveScopeOf(node),
-        fence: input.fence,
-        blocked: "attempt-limit",
+        runId: endedRun.id,
+        nodeId: endedRun.nodeId,
+        fence: endedRun.fence,
+        outcome: "blocked",
+        reason: null,
       },
     });
     return { node: { id: node.id, state: "blocked" } };
@@ -177,24 +191,24 @@ function releaseTask(
     at: now,
     cause: { revision: node.revision, importId: null },
   });
-  dependencies.lease.release(transaction, {
-    subjectKind: "node",
-    subjectId: node.id,
-    owner: input.actorId,
-    ownerKind: "actor",
-    fence: input.fence,
-    now,
+  const endedRun = dependencies.execution.endRun(transaction, {
+    runId: run.id,
+    outcome: "released",
+    at: now,
   });
+  releaseLease(dependencies, transaction, input, node.id, now);
   dependencies.events.append(transaction, {
-    subjectKind: "node",
-    subjectId: node.id,
-    type: "lease.released",
+    subjectKind: "run",
+    subjectId: endedRun.id,
+    type: "run.ended",
     actorKind: input.actorKind,
     actorId: input.actorId,
     payload: {
-      subjectId: node.id,
-      objectiveId: objectiveScopeOf(node),
-      fence: input.fence,
+      runId: endedRun.id,
+      nodeId: endedRun.nodeId,
+      fence: endedRun.fence,
+      outcome: "released",
+      reason: null,
     },
   });
   return { node: { id: node.id, state: "ready" } };
@@ -265,52 +279,62 @@ function releaseObjective(
         at: now,
       });
     }
-    dependencies.execution.endRun(transaction, {
+    const endedChildRun = dependencies.execution.endRun(transaction, {
       runId: childRun.id,
       outcome: "released",
       at: now,
     });
+    dependencies.events.append(transaction, {
+      subjectKind: "run",
+      subjectId: endedChildRun.id,
+      type: "run.ended",
+      actorKind: input.actorKind,
+      actorId: input.actorId,
+      payload: {
+        runId: endedChildRun.id,
+        nodeId: endedChildRun.nodeId,
+        fence: endedChildRun.fence,
+        outcome: "released",
+        reason: null,
+      },
+    });
   }
-  dependencies.execution.endRun(transaction, {
+  const endedRun = dependencies.execution.endRun(transaction, {
     runId: run.id,
     outcome: "released",
     at: now,
   });
-  dependencies.lease.release(transaction, {
-    subjectKind: "node",
-    subjectId: node.id,
-    owner: input.actorId,
-    ownerKind: "actor",
-    fence: input.fence,
-    now,
-  });
+  releaseLease(dependencies, transaction, input, node.id, now);
   dependencies.events.append(transaction, {
-    subjectKind: "node",
-    subjectId: node.id,
-    type: "lease.released",
+    subjectKind: "run",
+    subjectId: endedRun.id,
+    type: "run.ended",
     actorKind: input.actorKind,
     actorId: input.actorId,
     payload: {
-      subjectId: node.id,
-      objectiveId: node.id,
-      fence: input.fence,
+      runId: endedRun.id,
+      nodeId: endedRun.nodeId,
+      fence: endedRun.fence,
+      outcome: "released",
+      reason: null,
     },
   });
   return { node: { id: node.id, state: node.state } };
 }
 
-function assertHeld(
-  lease: Lease,
+function releaseLease(
+  dependencies: ReleaseNodeDependencies,
   transaction: Transaction,
   input: ReleaseNodeInput,
   subjectId: string,
   now: number,
 ): void {
   try {
-    lease.assertHeld(transaction, {
+    dependencies.lease.release(transaction, {
       subjectKind: "node",
       subjectId,
       owner: input.actorId,
+      ownerKind: "actor",
       fence: input.fence,
       now,
     });
@@ -323,13 +347,6 @@ function assertHeld(
     }
     throw error;
   }
-}
-
-function objectiveScopeOf(node: StoredNode): string {
-  if (node.parentId === null) {
-    throw new Error(`a task with no parent objective cannot be released`);
-  }
-  return node.parentId;
 }
 
 function compareIds(left: string, right: string): number {

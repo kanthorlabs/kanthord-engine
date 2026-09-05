@@ -197,6 +197,125 @@ describe("src/services/execution/sqlite.test", () => {
     }
   });
 
+  it("runById returns an ended run rather than null", () => {
+    const { storage, execution, dispose } = build([RUN1]);
+    try {
+      storage.transact((transaction) => {
+        const record = execution.openRun(transaction, objectiveRunInput);
+        execution.endRun(transaction, {
+          runId: record.id,
+          outcome: "expired",
+          at: AT,
+        });
+        const returned = execution.runById(transaction, record.id);
+        assert.ok(returned !== null);
+        assert.equal(returned.state, "ended");
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it("runById returns null for an unknown id", () => {
+    const { storage, execution, dispose } = build([RUN1]);
+    try {
+      storage.transact((transaction) => {
+        assert.equal(execution.runById(transaction, "run_zzz"), null);
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it("runById returns an expired run that is still active", () => {
+    const { storage, execution, dispose } = build([RUN1]);
+    try {
+      storage.transact((transaction) => {
+        const record = execution.openRun(transaction, objectiveRunInput);
+        transaction.run(
+          "UPDATE run SET expires_at = ?, state = 'active' WHERE id = ?",
+          [NOW - 1, record.id],
+        );
+        const returned = execution.runById(transaction, record.id);
+        assert.ok(returned !== null);
+        assert.equal(returned.state, "active");
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it("renewRun writes expires_at and leaves fence unchanged", () => {
+    const { storage, execution, dispose } = build([RUN1]);
+    try {
+      storage.transact((transaction) => {
+        const record = execution.openRun(transaction, objectiveRunInput);
+        transaction.run(
+          "UPDATE run SET fence = ?, expires_at = ? WHERE id = ?",
+          [3, NOW, record.id],
+        );
+        execution.renewRun(transaction, {
+          runId: record.id,
+          expiresAt: NOW + 1000,
+        });
+        const row = transaction.get(
+          "SELECT expires_at, fence FROM run WHERE id = ?",
+          [record.id],
+        ) as Readonly<{ expires_at: number; fence: number }>;
+        assert.equal(row.expires_at, NOW + 1000);
+        assert.equal(row.fence, 3);
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it("renewRun touches no other column", () => {
+    const { storage, execution, dispose } = build([RUN1]);
+    try {
+      storage.transact((transaction) => {
+        const record = execution.openRun(transaction, objectiveRunInput);
+        const before = transaction.get("SELECT * FROM run WHERE id = ?", [
+          record.id,
+        ]) as Readonly<Record<string, unknown>>;
+        execution.renewRun(transaction, {
+          runId: record.id,
+          expiresAt: NOW + 1000,
+        });
+        const after = transaction.get("SELECT * FROM run WHERE id = ?", [
+          record.id,
+        ]) as Readonly<Record<string, unknown>>;
+        assert.equal(after.expires_at, NOW + 1000);
+        for (const column of Object.keys(before)) {
+          if (column === "expires_at") {
+            continue;
+          }
+          assert.deepEqual(after[column], before[column]);
+        }
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it("renewRun on an unknown run id raises run-not-found", () => {
+    const { storage, execution, dispose } = build([]);
+    try {
+      storage.transact((transaction) => {
+        assertExecutionError(
+          () =>
+            execution.renewRun(transaction, {
+              runId: "run_zzz",
+              expiresAt: NOW + 1000,
+            }),
+          "run-not-found",
+        );
+      });
+    } finally {
+      dispose();
+    }
+  });
+
   it("activeRunOfNode returns the one active run or null", () => {
     const { storage, execution, dispose } = build([RUN1]);
     try {

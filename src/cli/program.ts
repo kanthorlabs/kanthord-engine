@@ -41,7 +41,7 @@ import { registerNodeUpdate } from "./node/update.ts";
 import { registerNodeList } from "./node/list.ts";
 import { registerNodeShow } from "./node/show.ts";
 import { registerNodeClaim } from "./node/claim.ts";
-import { registerNodeHeartbeat } from "./node/heartbeat.ts";
+import { registerNodeRenew } from "./node/renew.ts";
 import { registerNodeRelease } from "./node/release.ts";
 import { registerNodeReport } from "./node/report.ts";
 import { registerNodeAttest } from "./node/attest.ts";
@@ -375,7 +375,7 @@ export function buildProgram(dependencies: ProgramDependencies): Command {
     exit: dependencies.exit,
     randomBytes: dependencies.randomBytes,
   });
-  registerNodeHeartbeat({
+  registerNodeRenew({
     program,
     client,
     stdout: dependencies.stdout,

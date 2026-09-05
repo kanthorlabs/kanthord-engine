@@ -37,10 +37,9 @@ sequenceDiagram
     Command->>Clock: 2 clock.now
     Command->>Expiry: 3 expiry.expireRuns
     Command->>Execution: 4 execution.runById:R
-    Command->>Plan: 5 plan.readSubtree
-    Command->>Plan: 6 plan.readNode
-    Command->>Execution: 7 execution.renewRun:R
-    Command->>Events: 8 events.append:run.renewed:R
+    Command->>Plan: 5 plan.readNode
+    Command->>Execution: 6 execution.renewRun:R
+    Command->>Events: 7 events.append:run.renewed:R
     Command-->>Client: ok
 ```
 
@@ -48,11 +47,11 @@ Three steps leave the superseded diagram: the target renew, the objective read a
 renew. `Lease` leaves the participant list. No fence write appears, and that absence is still the
 assertion EPIC 050.2 made: the fence rises when a run ends and nowhere else.
 
-**`plan.readNode` at step 6 is a context token, and it stays.** It is the only node read of this
+**`plan.readNode` at step 5 is a context token, and it stays.** It is the only node read of this
 command, and it is not the lease's. EPIC 050.2 Story 3 (`03-the-renew`) states what it supplies:
 `node.kind` for the objective branch, `node.parentId` for `objectiveScopeOf`, and the
-`node-not-found` and `initiative-not-claimable` refusals — and `plan.readSubtree` returns ids alone,
-so it replaces neither. Item 5 below keeps both refusals in `RenewRefusal`, so deleting the read
+`node-not-found` and `initiative-not-claimable` refusals — and the run row carries none of them.
+Item 5 below keeps both refusals in `RenewRefusal`, so deleting the read
 would leave a path that cannot raise them. What the objective-lease deletion removes is the two
 **consumers** `node.kind` and `node.parentId` fed, not the read.
 

@@ -240,7 +240,7 @@ describe("scripts/verify-epic-sequence", () => {
       }
 
       writeFileSync(
-        join(storiesRoot, "050.2-fixture", "01-unshipped.md"),
+        join(storiesRoot, "050.3-fixture", "01-unshipped.md"),
         [
           "# Story fixture",
           "",

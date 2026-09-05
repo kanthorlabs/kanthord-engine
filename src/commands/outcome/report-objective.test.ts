@@ -283,7 +283,13 @@ function claim(
 function reportTask(
   fixture: ReportObjectiveFixture,
   clock: Clock,
-  input: Readonly<{ nodeId: string; actorId: string; fence: number }>,
+  input: Readonly<{
+    nodeId: string;
+    actorId: string;
+    fence: number;
+    runId: string;
+    runFence: number;
+  }>,
 ): void {
   const never: DelegatedReportObjective = () => {
     throw new Error("unexpected reportObjective call");
@@ -299,6 +305,20 @@ function reportTask(
       execution: fixture.execution.execution,
       events: fixture.events,
       clock,
+      expiry: {
+        expireRuns(transaction: Transaction, input: Readonly<{ now: number }>) {
+          return expireRuns(
+            {
+              events: fixture.events,
+              execution: fixture.execution.execution,
+              instanceId: INSTANCE,
+            },
+            transaction,
+            input,
+          );
+        },
+      },
+      caller: "claude@1",
       reportObjective: never,
       closeObjective: neverClose,
       instanceId: INSTANCE,
@@ -307,6 +327,8 @@ function reportTask(
       nodeId: input.nodeId,
       actorId: input.actorId,
       actorKind: "harness",
+      runId: input.runId,
+      runFence: input.runFence,
       body: { report: "accepted", fence: input.fence, objectId: OBJECT_ID },
     },
   );

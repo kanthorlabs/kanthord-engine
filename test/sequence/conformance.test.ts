@@ -34,6 +34,57 @@ const epicsRoot = resolve(repositoryRoot, ".agents/plan/epics");
 const storiesRoot = resolve(repositoryRoot, ".agents/plan/stories");
 const scenariosRoot = resolve(import.meta.dirname, "scenarios");
 const planRoots: PlanRoots = { epicsRoot, storiesRoot };
+const epic0502ScenarioCases = [
+  {
+    id: "renew-success",
+    story: resolve(
+      storiesRoot,
+      "050.2-the-run-renew-release-and-report/03-the-renew.md",
+    ),
+  },
+  {
+    id: "renew-refusal-lifetime-exceeded",
+    story: resolve(
+      storiesRoot,
+      "050.2-the-run-renew-release-and-report/04-the-lifetime-refusal.md",
+    ),
+  },
+  {
+    id: "release-success",
+    story: resolve(
+      storiesRoot,
+      "050.2-the-run-renew-release-and-report/05-the-release.md",
+    ),
+  },
+  {
+    id: "claim-reuse-objective-run",
+    story: resolve(
+      storiesRoot,
+      "050.2-the-run-renew-release-and-report/10-the-reused-objective-run.md",
+    ),
+  },
+  {
+    id: "report-authority-prelude",
+    story: resolve(
+      storiesRoot,
+      "050.2-the-run-renew-release-and-report/06-the-report-prelude.md",
+    ),
+  },
+  {
+    id: "claim-recovers-objective-authority",
+    story: resolve(
+      storiesRoot,
+      "050.2.1-the-promised-expiry-and-the-explicit-recovery/02-the-explicit-recovery.md",
+    ),
+  },
+  {
+    id: "renew-refusal-objective-run-lost",
+    story: resolve(
+      storiesRoot,
+      "050.2.1-the-promised-expiry-and-the-explicit-recovery/01-the-lost-objective-run-is-announced.md",
+    ),
+  },
+] as const;
 
 function authoredLiveDiagrams(roots = planRoots): readonly LiveDiagram[] {
   const shipped = new Set<string>(shippedEpics);
@@ -169,6 +220,24 @@ describe("test/sequence/conformance", () => {
     }
   });
 
+  for (const scenarioCase of epic0502ScenarioCases) {
+    it(`${scenarioCase.id} replays its real command`, async () => {
+      const scenarioPath = resolve(scenariosRoot, `${scenarioCase.id}.ts`);
+      const scenarioModule = await import(scenarioPath);
+      const scenario = scenarioModule.default as () => Readonly<{
+        recorder: Readonly<{ tokens: readonly string[] }>;
+        result: unknown;
+      }>;
+      const { recorder, result } = scenario();
+      assertConformance({
+        story: scenarioCase.story,
+        diagram: scenarioCase.id,
+        recorder,
+        result,
+      });
+    });
+  }
+
   it("a baseline id holding a scenario file fails", () => {
     const fixtureRoot = mkdtempSync(join(tmpdir(), "kanthord-sequence-"));
     try {
@@ -236,7 +305,7 @@ describe("test/sequence/conformance", () => {
         });
       }
       writeFileSync(
-        join(fixtureStoriesRoot, "050.2-fixture", "story.md"),
+        join(fixtureStoriesRoot, "050.3-fixture", "story.md"),
         "Diagrams: unshipped-live\n\n### `unshipped-live`\n",
       );
 
@@ -256,11 +325,12 @@ describe("test/sequence/conformance", () => {
       "050",
       "050.1",
       "050.2",
+      "050.2.1",
       "050.3",
       "050.4",
       "050.5",
     ]);
-    assert.deepEqual(shippedEpics, ["050", "050.1"]);
+    assert.deepEqual(shippedEpics, ["050", "050.1", "050.2", "050.2.1"]);
     assert.deepEqual(authoredEpics.slice(0, shippedEpics.length), shippedEpics);
   });
 

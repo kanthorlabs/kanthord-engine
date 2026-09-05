@@ -173,19 +173,25 @@ const fixtures: Readonly<Record<string, Fixture>> = {
     body: { available: true },
     expect: 404,
   },
-  "node.heartbeat": {
+  "node.renew": {
     parameters: { id: missing("node") },
-    body: { fence: 1 },
+    body: { fence: 1, runId: missing("run"), runFence: 1 },
     expect: 404,
   },
   "node.release": {
     parameters: { id: missing("node") },
-    body: { fence: 1 },
+    body: { fence: 1, runId: missing("run"), runFence: 1 },
     expect: 404,
   },
   "node.report": {
     parameters: { id: missing("node") },
-    body: { report: "accepted", fence: 1, objectId: "a".repeat(40) },
+    body: {
+      report: "accepted",
+      fence: 1,
+      runId: missing("run"),
+      runFence: 1,
+      objectId: "a".repeat(40),
+    },
     expect: 404,
   },
   "node.unblock": {
@@ -319,7 +325,7 @@ describe("src/main.test", () => {
     }
   });
 
-  it("no routed operation is left unbound", () => {
+  it("node.heartbeat is not wired and node.renew is", () => {
     const residue = registry
       .filter((entry) => entry.status === "routed")
       .map((entry) => entry.operationId)
@@ -332,7 +338,13 @@ describe("src/main.test", () => {
     const result = await call(clientDependencies(), {
       operationId: "node.report",
       parameters: { id: missing("node") },
-      body: { report: "accepted", fence: 1, objectId: "a".repeat(40) },
+      body: {
+        report: "accepted",
+        fence: 1,
+        runId: missing("run"),
+        runFence: 1,
+        objectId: "a".repeat(40),
+      },
     });
 
     assert.notEqual(

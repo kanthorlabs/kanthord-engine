@@ -17,7 +17,12 @@ import {
   type ClaimRefusal,
   type ClaimNodeResult,
 } from "./claim-node.ts";
-import { reportOutcome } from "../outcome/report-outcome.ts";
+import {
+  reportOutcome,
+  ReportOutcomeError,
+  type ReportObjectiveInput,
+  type ReportObjectiveResult,
+} from "../outcome/report-outcome.ts";
 import { nodeClaimRequest } from "../../http/contract/execution.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
 import {
@@ -182,6 +187,8 @@ function reportTaskOutcome(
     actorId: string;
     outcome: "rejected" | "failed" | "cancelled";
     fence: number;
+    runId: string;
+    runFence: number;
   }>,
 ): void {
   reportOutcome(
@@ -192,6 +199,23 @@ function reportTaskOutcome(
       execution: fixture.execution.execution,
       events: fixture.events,
       clock,
+      expiry: {
+        expireRuns(
+          transaction: Transaction,
+          expiryInput: Readonly<{ now: number }>,
+        ) {
+          return expireRuns(
+            {
+              events: fixture.events,
+              execution: fixture.execution.execution,
+              instanceId: INSTANCE,
+            },
+            transaction,
+            expiryInput,
+          );
+        },
+      },
+      caller: "claude@1",
       reportObjective: () => {
         throw new Error("unexpected reportObjective call");
       },
@@ -204,6 +228,8 @@ function reportTaskOutcome(
       nodeId: input.nodeId,
       actorId: input.actorId,
       actorKind: "harness",
+      runId: input.runId,
+      runFence: input.runFence,
       body: {
         report: input.outcome,
         fence: input.fence,
@@ -211,6 +237,175 @@ function reportTaskOutcome(
       },
     },
   );
+}
+
+const RECOVERY_OBJECT = "a".repeat(40);
+const ATTEST_OBJECT = "b".repeat(64);
+
+// Drives the real reportOutcome command for an `accepted` task report, which
+// ends the task run and moves the task to `done`. That is the shape the
+// objective-recovery fixtures need: no live run left under the objective.
+function reportTaskAccepted(
+  fixture: ClaimFixture,
+  clock: Clock,
+  input: Readonly<{
+    nodeId: string;
+    actorId: string;
+    fence: number;
+    runId: string;
+    runFence: number;
+  }>,
+): void {
+  reportOutcome(
+    {
+      storage: fixture.storage,
+      plan: fixture.plan.plan,
+      lease: fixture.lease.lease,
+      execution: fixture.execution.execution,
+      events: fixture.events,
+      clock,
+      expiry: {
+        expireRuns(
+          transaction: Transaction,
+          expiryInput: Readonly<{ now: number }>,
+        ) {
+          return expireRuns(
+            {
+              events: fixture.events,
+              execution: fixture.execution.execution,
+              instanceId: INSTANCE,
+            },
+            transaction,
+            expiryInput,
+          );
+        },
+      },
+      caller: "claude@1",
+      reportObjective: () => {
+        throw new Error("unexpected reportObjective call");
+      },
+      closeObjective: () => {
+        throw new Error("unexpected closeObjective call");
+      },
+      instanceId: INSTANCE,
+    },
+    {
+      nodeId: input.nodeId,
+      actorId: input.actorId,
+      actorKind: "harness",
+      runId: input.runId,
+      runFence: input.runFence,
+      body: {
+        report: "accepted",
+        fence: input.fence,
+        objectId: RECOVERY_OBJECT,
+      },
+    },
+  );
+}
+
+// Drives the real reportOutcome prelude for an objective attestation. The
+// objective body itself belongs to a later EPIC, so the delegate records the
+// call and returns a canned result: what this file asserts is whether the
+// presented run authorizes the write.
+function attestObjective(
+  fixture: ClaimFixture,
+  clock: Clock,
+  input: Readonly<{
+    nodeId: string;
+    actorId: string;
+    fence: number;
+    runId: string;
+    runFence: number;
+  }>,
+): readonly ReportObjectiveInput[] {
+  const calls: ReportObjectiveInput[] = [];
+  reportOutcome(
+    {
+      storage: fixture.storage,
+      plan: fixture.plan.plan,
+      lease: fixture.lease.lease,
+      execution: fixture.execution.execution,
+      events: fixture.events,
+      clock,
+      expiry: {
+        expireRuns(
+          transaction: Transaction,
+          expiryInput: Readonly<{ now: number }>,
+        ) {
+          return expireRuns(
+            {
+              events: fixture.events,
+              execution: fixture.execution.execution,
+              instanceId: INSTANCE,
+            },
+            transaction,
+            expiryInput,
+          );
+        },
+      },
+      caller: "claude@1",
+      reportObjective: (
+        _transaction: Transaction,
+        objectiveInput: ReportObjectiveInput,
+      ): ReportObjectiveResult => {
+        calls.push(objectiveInput);
+        return {
+          nodeId: objectiveInput.nodeId,
+          kind: "objective",
+          state: "awaiting_approval",
+          blockReason: null,
+          attemptId: null,
+          attemptNo: null,
+          attemptsRemaining: null,
+          objectId: objectiveInput.objectId,
+          objectiveState: "awaiting_approval",
+          objectiveProjection: null,
+        };
+      },
+      closeObjective: () => {
+        throw new Error("unexpected closeObjective call");
+      },
+      instanceId: INSTANCE,
+    },
+    {
+      nodeId: input.nodeId,
+      actorId: input.actorId,
+      actorKind: "harness",
+      runId: input.runId,
+      runFence: input.runFence,
+      body: {
+        report: "attested",
+        fence: input.fence,
+        objectId: ATTEST_OBJECT,
+      },
+    },
+  );
+  return calls;
+}
+
+function refusedAttest(
+  fixture: ClaimFixture,
+  clock: Clock,
+  input: Readonly<{
+    nodeId: string;
+    actorId: string;
+    fence: number;
+    runId: string;
+    runFence: number;
+  }>,
+): ReportOutcomeError {
+  let raised: unknown;
+  try {
+    attestObjective(fixture, clock, input);
+  } catch (error) {
+    raised = error;
+  }
+  assert.ok(
+    raised instanceof ReportOutcomeError,
+    `expected ReportOutcomeError, got ${String(raised)}`,
+  );
+  return raised;
 }
 
 type ClaimInput = Readonly<{
@@ -746,8 +941,8 @@ describe("src/commands/node/claim-node.test", () => {
     ) as Readonly<{ id: string; fence: number }>;
 
     assert.equal(result.runId, run.id);
-    assert.equal(result.fence, 1);
-    assert.equal(result.fence, run.fence);
+    assert.equal(result.runFence, 1);
+    assert.equal(result.runFence, run.fence);
   });
 
   it("a claim opens the run with its provenance", (t) => {
@@ -970,9 +1165,9 @@ describe("src/commands/node/claim-node.test", () => {
       ),
     ) as Readonly<{ worker: string; fence: number }>;
 
-    assert.equal(result.fence, 1);
+    assert.equal(result.runFence, 1);
     assert.equal(run.worker, "claude@1");
-    assert.equal(run.fence, result.fence);
+    assert.equal(run.fence, result.runFence);
     assert.equal(nodeState(fixture, fixtureIds.task), "running");
   });
 
@@ -1321,23 +1516,77 @@ describe("src/commands/node/claim-node.test", () => {
     }
   });
 
-  it("a task claim opens exactly one run", (t) => {
+  it("a task claim opens one structural objective run and one execution task run", (t) => {
     const fixture = createClaimFixture();
     t.after(() => fixture.dispose());
     seedReadyFixture(fixture);
 
-    claim(fixture, createMockClock({ start: NOW }), {
+    const result = claim(fixture, createMockClock({ start: NOW }), {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
     });
 
-    const runs = fixture.storage.transact((transaction) =>
-      transaction.all(
-        "SELECT node_id FROM run WHERE state = 'active' ORDER BY id",
-      ),
-    ) as readonly Readonly<{ node_id: string }>[];
-    assert.equal(runs.length, 1);
-    assert.equal(runs[0]!.node_id, fixtureIds.task);
+    const runs = runRows(fixture)
+      .filter((run) => run.state === "active")
+      .map((run) => ({
+        id: run.id,
+        kind: run.kind,
+        nodeId: run.node_id,
+        state: run.state,
+      }));
+    assert.deepEqual(runs, [
+      {
+        id: result.objectiveRunId,
+        kind: "structural",
+        nodeId: fixtureIds.objective,
+        state: "active",
+      },
+      {
+        id: result.runId,
+        kind: "execution",
+        nodeId: fixtureIds.task,
+        state: "active",
+      },
+    ]);
+    assert.notEqual(result.objectiveRunId, result.runId);
+    assert.equal(result.objectiveLease.subjectId, fixtureIds.objective);
+    assert.equal(result.objectiveLease.fence, 1);
+    assert.equal(result.lease.subjectId, fixtureIds.task);
+    assert.equal(result.runFence, 1);
+    assert.deepEqual(
+      fixture.events.list({}).map((event) => ({
+        type: event.type,
+        subjectKind: event.subjectKind,
+        subjectId: event.subjectId,
+      })),
+      [
+        {
+          type: "run.opened",
+          subjectKind: "run",
+          subjectId: result.objectiveRunId,
+        },
+        {
+          type: "run.opened",
+          subjectKind: "run",
+          subjectId: result.runId,
+        },
+        {
+          type: "node.running",
+          subjectKind: "node",
+          subjectId: fixtureIds.objective,
+        },
+        {
+          type: "node.running",
+          subjectKind: "node",
+          subjectId: fixtureIds.initiative,
+        },
+        {
+          type: "node.running",
+          subjectKind: "node",
+          subjectId: fixtureIds.task,
+        },
+      ],
+    );
   });
 
   it("run-driver-mismatch is not a member of ClaimRefusal", () => {
@@ -2081,6 +2330,120 @@ describe("src/commands/node/claim-node.test", () => {
     }
   });
 
+  it("the objective run fence and the objective lease fence are separate counters", (t) => {
+    const fixture = createClaimFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const first = claim(fixture, createMockClock({ start: NOW }), {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    assert.equal(first.objectiveRunFence, 1);
+    assert.equal(first.objectiveLease.fence, 1);
+    fixture.storage.transact((transaction) => {
+      fixture.execution.execution.closeAttempt(transaction, {
+        attemptId: first.attemptId!,
+        outcome: "cancelled",
+        at: NOW,
+      });
+      fixture.execution.execution.endRun(transaction, {
+        runId: first.runId,
+        outcome: "released",
+        at: NOW,
+      });
+      fixture.lease.lease.expireLeasesOfOwner(transaction, {
+        owner: ACTOR_A,
+        now: NOW,
+      });
+      fixture.plan.plan.setNodeState(transaction, {
+        id: fixtureIds.task,
+        from: "running",
+        to: "ready",
+        trigger: "claim-released",
+        blockReason: null,
+        at: NOW,
+        cause: { revision: REVISION_A, importId: null },
+      });
+    });
+
+    const second = claim(fixture, createMockClock({ start: NOW + 1 }), {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+
+    assert.equal(second.objectiveRunId, first.objectiveRunId);
+    assert.equal(second.objectiveLease.fence, 2);
+    assert.equal(second.objectiveRunFence, 1);
+    assert.notEqual(second.objectiveRunFence, second.objectiveLease.fence);
+    const objectiveRun = runRows(fixture).find(
+      (run) => run.id === second.objectiveRunId,
+    );
+    assert.ok(objectiveRun !== undefined);
+    assert.equal(objectiveRun.fence, second.objectiveRunFence);
+  });
+
+  it("a second claim reuses the objective run and moves its expires_at forward", (t) => {
+    const fixture = createClaimFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const first = claim(fixture, createMockClock({ start: NOW }), {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    const objectiveRunBefore = runRows(fixture).find(
+      (run) => run.id === first.objectiveRunId,
+    );
+    assert.ok(objectiveRunBefore !== undefined);
+    fixture.storage.transact((transaction) => {
+      fixture.execution.execution.closeAttempt(transaction, {
+        attemptId: first.attemptId!,
+        outcome: "cancelled",
+        at: NOW,
+      });
+      fixture.execution.execution.endRun(transaction, {
+        runId: first.runId,
+        outcome: "released",
+        at: NOW,
+      });
+      fixture.lease.lease.release(transaction, {
+        subjectKind: "node",
+        subjectId: fixtureIds.task,
+        owner: ACTOR_A,
+        ownerKind: "actor",
+        fence: first.lease.fence,
+        now: NOW,
+      });
+      fixture.plan.plan.setNodeState(transaction, {
+        id: fixtureIds.task,
+        from: "running",
+        to: "ready",
+        trigger: "claim-released",
+        blockReason: null,
+        at: NOW,
+        cause: { revision: REVISION_A, importId: null },
+      });
+    });
+
+    const later = NOW + 60000;
+    const second = claim(fixture, createMockClock({ start: later }), {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+
+    assert.equal(second.objectiveRunId, first.objectiveRunId);
+    assert.equal(second.objectiveRunFence, first.objectiveRunFence);
+    const objectiveRunAfter = runRows(fixture).find(
+      (run) => run.id === first.objectiveRunId,
+    );
+    assert.ok(objectiveRunAfter !== undefined);
+    assert.equal(objectiveRunAfter.expires_at, later + 120000);
+    assert.ok(objectiveRunAfter.expires_at > objectiveRunBefore.expires_at);
+    assert.equal(
+      objectiveRunAfter.max_lifetime_at,
+      objectiveRunBefore.max_lifetime_at,
+    );
+  });
+
   it("a new acquisition over a freed row is not mistaken for a replay", (t) => {
     const fixture = createClaimFixture();
     t.after(() => fixture.dispose());
@@ -2136,7 +2499,11 @@ describe("src/commands/node/claim-node.test", () => {
     assert.notEqual(second.runId, first.runId);
     assert.equal(second.attemptNo, 1);
     const events = fixture.events.list({});
-    assert.equal(events.length, eventsBefore + 2);
+    assert.equal(events.length, eventsBefore + 3);
+    assert.deepEqual(
+      events.slice(-3).map((event) => event.type),
+      ["run.renewed", "run.opened", "node.running"],
+    );
     assert.equal(events[events.length - 2]!.actorId, ACTOR_B);
     assert.equal(events[events.length - 1]!.type, "node.running");
   });
@@ -2377,6 +2744,8 @@ describe("src/commands/node/claim-node.test", () => {
       actorId: ACTOR_A,
       outcome: "rejected",
       fence: first.lease.fence,
+      runId: first.runId,
+      runFence: first.runFence,
     });
     const before = databaseBytes(fixture.storage);
     const error = refused(fixture, clock, {
@@ -2706,5 +3075,249 @@ describe("src/commands/node/claim-node.test", () => {
         }),
       /declares levels/,
     );
+  });
+
+  it("a claim recovers objective authority after the structural run reached its lifetime", (t) => {
+    const fixture = createClaimFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const first = claim(fixture, createMockClock({ start: NOW }), {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    fixture.storage.transact((transaction) => {
+      transaction.run(
+        "UPDATE run SET expires_at = ?, max_lifetime_at = ? WHERE id = ?",
+        [NOW + 1000, NOW + 1000, first.objectiveRunId],
+      );
+    });
+
+    reportTaskAccepted(fixture, createMockClock({ start: NOW + 2000 }), {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+      fence: first.lease.fence,
+      runId: first.runId,
+      runFence: first.runFence,
+    });
+
+    const lapsed = runRows(fixture).find(
+      (run) => run.id === first.objectiveRunId,
+    );
+    assert.ok(lapsed !== undefined);
+    assert.equal(lapsed.state, "ended");
+    assert.equal(lapsed.outcome, "expired");
+    assert.equal(lapsed.expires_at, NOW + 1000);
+    assert.deepEqual(
+      fixture.events
+        .list({})
+        .filter((event) => event.type === "run.expired")
+        .map((event) => event.subjectId),
+      [first.objectiveRunId],
+    );
+    assert.equal(nodeState(fixture, fixtureIds.objective), "running");
+
+    const stale = refusedAttest(
+      fixture,
+      createMockClock({ start: NOW + 3000 }),
+      {
+        nodeId: fixtureIds.objective,
+        actorId: ACTOR_A,
+        fence: first.objectiveLease.fence,
+        runId: first.objectiveRunId,
+        runFence: first.objectiveRunFence,
+      },
+    );
+    assert.equal(stale.refusal, "run-ended");
+
+    const recovered = claim(fixture, createMockClock({ start: NOW + 4000 }), {
+      nodeId: fixtureIds.objective,
+      actorId: ACTOR_A,
+      registry: expansionCapableRegistry,
+    });
+
+    assert.notEqual(recovered.runId, first.objectiveRunId);
+    assert.equal(recovered.objectiveRunId, recovered.runId);
+    assert.equal(recovered.runFence, 1);
+    assert.equal(recovered.objectiveRunFence, 1);
+    assert.equal(recovered.attemptId, null);
+    assert.equal(recovered.attemptNo, null);
+    assert.equal(recovered.node.state, "running");
+    const fresh = runRows(fixture).find((run) => run.id === recovered.runId);
+    assert.ok(fresh !== undefined);
+    assert.equal(fresh.kind, "structural");
+    assert.equal(fresh.node_id, fixtureIds.objective);
+    assert.equal(fresh.state, "active");
+    assert.equal(fresh.fence, 1);
+    assert.equal(fresh.expires_at, NOW + 4000 + 120000);
+    assert.deepEqual(
+      fixture.events
+        .list({ subject: recovered.runId })
+        .map((event) => event.type),
+      ["run.opened"],
+    );
+    assert.deepEqual(
+      runRows(fixture)
+        .filter((run) => run.node_id === fixtureIds.objective)
+        .map((run) => run.id)
+        .sort(),
+      [first.objectiveRunId, recovered.runId].sort(),
+    );
+
+    const calls = attestObjective(
+      fixture,
+      createMockClock({ start: NOW + 5000 }),
+      {
+        nodeId: fixtureIds.objective,
+        actorId: ACTOR_A,
+        fence: recovered.objectiveLease.fence,
+        runId: recovered.objectiveRunId,
+        runFence: recovered.objectiveRunFence,
+      },
+    );
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.nodeId, fixtureIds.objective);
+  });
+
+  it("a claim on a running objective is refused subtree-busy while a task run under it is live", (t) => {
+    const fixture = createClaimFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const first = claim(fixture, createMockClock({ start: NOW }), {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    fixture.storage.transact((transaction) => {
+      transaction.run(
+        "UPDATE run SET expires_at = ?, max_lifetime_at = ? WHERE id = ?",
+        [NOW + 1000, NOW + 1000, first.objectiveRunId],
+      );
+    });
+    const before = databaseBytes(fixture.storage);
+
+    const error = refused(fixture, createMockClock({ start: NOW + 2000 }), {
+      nodeId: fixtureIds.objective,
+      actorId: ACTOR_A,
+      registry: expansionCapableRegistry,
+    });
+
+    assert.equal(error.refusal, "subtree-busy");
+    assert.deepEqual(error.details, {
+      relation: "descendant",
+      nodeId: fixtureIds.task,
+      runId: first.runId,
+      expiresAt: NOW + 120000,
+    });
+    assert.deepEqual(
+      runRows(fixture)
+        .filter((run) => run.node_id === fixtureIds.objective)
+        .map((run) => run.id),
+      [first.objectiveRunId],
+    );
+    assert.deepEqual(databaseBytes(fixture.storage), before);
+  });
+
+  it("a claim on a running objective writes no node state change", (t) => {
+    const fixture = createClaimFixture();
+    t.after(() => fixture.dispose());
+    fixture.storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedNodeState(transaction, fixtureIds.initiative, "running");
+      seedNodeState(transaction, fixtureIds.objective, "running");
+      seedNodeState(transaction, fixtureIds.task, "done");
+    });
+
+    const result = claim(fixture, createMockClock({ start: NOW }), {
+      nodeId: fixtureIds.objective,
+      actorId: ACTOR_A,
+      registry: expansionCapableRegistry,
+    });
+
+    assert.equal(result.node.state, "running");
+    assert.equal(nodeState(fixture, fixtureIds.objective), "running");
+    assert.deepEqual(setNodeStateCalls(fixture), []);
+    assert.deepEqual(runningEvents(fixture), []);
+  });
+
+  it("a claim recovering a running objective takes the caller worker and does not route", (t) => {
+    const fixture = createClaimFixture();
+    t.after(() => fixture.dispose());
+    fixture.storage.transact((transaction) => {
+      seedRegistry(transaction);
+      seedGraph(transaction);
+      seedNodeState(transaction, fixtureIds.initiative, "running");
+      seedNodeState(transaction, fixtureIds.objective, "running");
+      seedNodeState(transaction, fixtureIds.task, "done");
+    });
+
+    const result = claim(fixture, createMockClock({ start: NOW }), {
+      nodeId: fixtureIds.objective,
+      actorId: ACTOR_A,
+      callerWorker: "claude@1",
+    });
+
+    assert.equal(result.objectiveRunId, result.runId);
+    assert.equal(result.runFence, 1);
+    assert.equal(result.objectiveRunFence, 1);
+    const run = runRows(fixture).find((row) => row.id === result.runId);
+    assert.ok(run !== undefined);
+    assert.equal(run.kind, "structural");
+    assert.equal(run.node_id, fixtureIds.objective);
+    assert.equal(run.worker, "claude@1");
+    assert.equal(run.fence, 1);
+    assert.equal(run.state, "active");
+  });
+
+  it("a claim on a ready objective carrying expansion still refuses unroutable with failedSet capable", (t) => {
+    const fixture = createClaimFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const before = databaseBytes(fixture.storage);
+
+    const error = refused(fixture, createMockClock({ start: NOW }), {
+      nodeId: fixtureIds.objective,
+      actorId: ACTOR_A,
+      callerWorker: "claude@1",
+    });
+
+    assert.equal(error.refusal, "unroutable");
+    assert.deepEqual(error.details, { failedSet: "capable" });
+    assert.deepEqual(databaseBytes(fixture.storage), before);
+  });
+
+  it("a claim on an objective that is neither ready nor running is refused illegal-transition", (t) => {
+    for (const state of [
+      "pending",
+      "blocked",
+      "awaiting_approval",
+      "done",
+      "partial",
+      "discarded",
+    ] as const) {
+      const fixture = createClaimFixture();
+      t.after(() => fixture.dispose());
+      fixture.storage.transact((transaction) => {
+        seedRegistry(transaction);
+        seedGraph(transaction);
+        seedNodeState(transaction, fixtureIds.initiative, "running");
+        seedNodeState(transaction, fixtureIds.objective, state);
+        seedNodeState(transaction, fixtureIds.task, "ready");
+      });
+      const before = databaseBytes(fixture.storage);
+
+      const error = refused(fixture, createMockClock({ start: NOW }), {
+        nodeId: fixtureIds.objective,
+        actorId: ACTOR_A,
+        registry: expansionCapableRegistry,
+      });
+
+      assert.equal(error.refusal, "illegal-transition", state);
+      assert.deepEqual(error.details, {
+        state,
+        admitted: ["ready", "running"],
+      });
+      assert.deepEqual(databaseBytes(fixture.storage), before);
+    }
   });
 });

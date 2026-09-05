@@ -8,7 +8,7 @@ Diagrams: renew-refusal-lifetime-exceeded
 
 Baselines: renew-refusal-lifetime-exceeded <- baseline-renew-task
 
-Seams: renew-refusal-lifetime-exceeded: +expiry.expireRuns, +plan.readNode, +execution.runById:R, +plan.readSubtree, -plan.readAllNodes
+Seams: renew-refusal-lifetime-exceeded: +expiry.expireRuns, +plan.readNode, +execution.runById:R, -plan.readAllNodes
 
 The baseline of this path is `baseline-renew-task`, drawn in Story 3 (`03-the-renew`). A refusal
 diagram names the baseline of its path, and its signs are measured only over the tokens it holds: a
@@ -43,7 +43,6 @@ sequenceDiagram
     Command->>Expiry: 3 expiry.expireRuns
     Command->>Plan: 4 plan.readNode
     Command->>Execution: 5 execution.runById:R
-    Command->>Plan: 6 plan.readSubtree
     Command-->>Client: refuse:lifetime-exceeded
 ```
 

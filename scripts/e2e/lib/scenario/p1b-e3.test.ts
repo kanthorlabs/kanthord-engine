@@ -39,6 +39,9 @@ const humanToken = "human-token";
 const firstFence = 41;
 const firstExpiry = 10000;
 const takeoverExpiry = 20000;
+const defaultTakeoverFence = 100;
+const firstRunId = "run-task-alpha-first";
+const takeoverRunId = "run-task-alpha-takeover";
 
 type AssertionRecord = Readonly<{
   name: string;
@@ -82,6 +85,7 @@ type FakeOptions = Readonly<{
   takeoverFence?: number;
   neverTakeover?: boolean;
   eventRecordCount?: number;
+  legacyHeartbeatOutput?: boolean;
 }>;
 
 function command(
@@ -177,9 +181,10 @@ function createFakeScenario(
   clock: P1B3Clock,
   options: FakeOptions = {},
 ): FakeScenario {
-  const takeoverFence = options.takeoverFence ?? 100;
+  const takeoverFence = options.takeoverFence ?? defaultTakeoverFence;
   const neverTakeover = options.neverTakeover ?? false;
   const eventRecordCount = options.eventRecordCount ?? 1;
+  const legacyHeartbeatOutput = options.legacyHeartbeatOutput ?? false;
   const cliCalls: CliCall[] = [];
   const issueCalls: IssueCall[] = [];
   const registrations: Registration[] = [];
@@ -213,6 +218,14 @@ function createFakeScenario(
           status: 200,
           body: JSON.stringify({
             lease: { fence: takeoverFence, expiresAt: takeoverExpiry },
+            objectiveLease: {
+              fence: takeoverFence,
+              expiresAt: takeoverExpiry,
+            },
+            runFence: takeoverFence,
+            runId: takeoverRunId,
+            objectiveRunId: "objective-run-task-alpha-takeover",
+            objectiveRunFence: takeoverFence,
           }),
         };
       }
@@ -245,7 +258,10 @@ function createFakeScenario(
       const id = argv[argv.indexOf("--id") + 1] as string;
       return command(
         argv,
-        `kanthord: claimed ${id} fence ${String(firstFence)} expires ${String(firstExpiry)} heartbeat 1000ms\n`,
+        (legacyHeartbeatOutput
+          ? `kanthord: claimed ${id} lease-fence ${String(firstFence)} expires ${String(firstExpiry)} heartbeat 1000ms\n`
+          : `kanthord: claimed ${id} lease-fence ${String(firstFence)} expires ${String(firstExpiry)}\n`) +
+          `kanthord: run ${firstRunId} run-fence ${String(firstFence)} attempt 1 objective-run objective-run-${id} objective-run-fence ${String(firstFence)} objective-lease-fence ${String(firstFence)}\n`,
       );
     }
     if (argv[0] === "node" && argv[1] === "report") {
@@ -382,6 +398,13 @@ test("configures the daemon with a lease term of 2000 ms", async () => {
   assert.equal(pieces.journeyOptions?.leaseTtlMs, 2000);
 });
 
+test("runP1BE3 rejects legacy heartbeat claim output", async () => {
+  const pieces = makePieces({ legacyHeartbeatOutput: true });
+
+  await assert.rejects(drive(pieces));
+  assert.equal(pieces.fake.cliCalls.length, 1);
+});
+
 test("polls at 250 ms to a 60000 ms deadline", async () => {
   const pieces = await runScenario();
   assert.equal(takeoverPollIntervalMs, 250);
@@ -427,6 +450,41 @@ test("asserts exactly one outcome.reported record naming the second actor", asyn
   const pieces = makePieces({ eventRecordCount: 2 });
   await assert.rejects(drive(pieces));
   assert.equal(failedRecord(pieces)?.name, "outcome-events-count");
+});
+
+test("passes run authority to the stale and takeover reports", async () => {
+  const pieces = await runScenario();
+  const staleReport = pieces.fake.issueCalls.find((call) =>
+    call.request.path.endsWith("/report"),
+  );
+  assert.ok(staleReport !== undefined);
+  assert.deepEqual(JSON.parse(staleReport.request.body ?? "{}"), {
+    report: "accepted",
+    fence: firstFence,
+    runId: firstRunId,
+    runFence: firstFence,
+    objectId: "object-e3-first",
+  });
+
+  const takeoverReport = pieces.fake.cliCalls.find(
+    (call) => call.argv[0] === "node" && call.argv[1] === "report",
+  );
+  assert.deepEqual(takeoverReport?.argv, [
+    "node",
+    "report",
+    "--id",
+    taskId,
+    "--outcome",
+    "accepted",
+    "--object-id",
+    "object-e3-first",
+    "--fence",
+    String(defaultTakeoverFence),
+    "--run-id",
+    takeoverRunId,
+    "--run-fence",
+    String(defaultTakeoverFence),
+  ]);
 });
 
 test("records its assertion names in the declared order", async () => {

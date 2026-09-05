@@ -17,6 +17,7 @@ import {
   reportOutcome,
   ReportOutcomeError,
   type ReportOutcomeDependencies,
+  type ReportOutcomeRefusal,
   type ReportOutcomeResult,
 } from "./report-outcome.ts";
 import { createMockClock } from "../../../test/helpers/clock.ts";
@@ -33,6 +34,7 @@ import {
   createBackedLeaseFake,
   type BackedLeaseFake,
 } from "../../../test/helpers/lease.ts";
+import { expansionCapableRegistry } from "../../../test/helpers/worker-registry.ts";
 import {
   createPlanStore,
   createReadiness,
@@ -46,18 +48,23 @@ import {
   seedNodeState,
   seedRegistry,
   seedSecondRevisionWithTask,
+  seedSiblingTask,
 } from "../../../test/helpers/rows.ts";
-import { workerRegistry } from "../../domain/worker-registry.ts";
+import {
+  workerRegistry,
+  type WorkerEntry,
+} from "../../domain/worker-registry.ts";
 
 const NOW = 1700000000000;
 const TTL = 300000;
 const INSTANCE = "daemon_instance_a";
 const ACTOR_A = "actor_alpha";
-const ACTOR_B = "actor_beta";
 const ATTEMPT_LIMIT = 3;
 const TASK_B = "task_b";
 const OBJECT_ID = "a".repeat(40);
 const REASON = "base\nnot-é-漢字";
+const FIXTURE_RUN_ID = "run_fixture";
+const FIXTURE_RUN_FENCE = 1;
 const NON_RUNNING_STATES = [
   "pending",
   "ready",
@@ -271,7 +278,11 @@ function seedTaskState(fixture: ReportFixture, state: string): void {
 function claim(
   fixture: ReportFixture,
   clock: Clock,
-  input: Readonly<{ nodeId: string; actorId: string }>,
+  input: Readonly<{
+    nodeId: string;
+    actorId: string;
+    registry?: readonly WorkerEntry[];
+  }>,
 ): ClaimNodeResult {
   return claimNode(
     {
@@ -296,7 +307,7 @@ function claim(
         },
       },
       callerRecord: { worker: "claude@1", authorized: ["claude@1"] },
-      registry: workerRegistry,
+      registry: input.registry ?? workerRegistry,
       attemptLimit: ATTEMPT_LIMIT,
       leaseTtlMs: TTL,
       runTtlMs: 120000,
@@ -316,6 +327,8 @@ type ReportInput = Readonly<{
   nodeId: string;
   actorId: string;
   actorKind?: "human" | "harness";
+  runId: string;
+  runFence: number;
   body: ReportBody;
 }>;
 
@@ -323,7 +336,16 @@ function report(
   fixture: ReportFixture,
   clock: Clock,
   input: ReportInput,
+  expiryPass = true,
 ): ReportOutcomeResult {
+  const commandInput = {
+    nodeId: input.nodeId,
+    actorId: input.actorId,
+    actorKind: input.actorKind ?? "harness",
+    runId: input.runId,
+    runFence: input.runFence,
+    body: input.body,
+  };
   return reportOutcome(
     {
       storage: fixture.storage,
@@ -332,16 +354,28 @@ function report(
       execution: fixture.execution.execution,
       events: fixture.events,
       clock,
+      expiry: {
+        expireRuns(transaction: Transaction, input: Readonly<{ now: number }>) {
+          if (!expiryPass) {
+            return [];
+          }
+          return expireRuns(
+            {
+              events: fixture.events,
+              execution: fixture.execution.execution,
+              instanceId: INSTANCE,
+            },
+            transaction,
+            input,
+          );
+        },
+      },
+      caller: "claude@1",
       reportObjective: fixture.reportObjective,
       closeObjective: fixture.closeObjective,
       instanceId: INSTANCE,
     },
-    {
-      nodeId: input.nodeId,
-      actorId: input.actorId,
-      actorKind: input.actorKind ?? "harness",
-      body: input.body,
-    },
+    commandInput,
   );
 }
 
@@ -349,10 +383,11 @@ function refused(
   fixture: ReportFixture,
   clock: Clock,
   input: ReportInput,
+  expiryPass = true,
 ): ReportOutcomeError {
   let raised: unknown;
   try {
-    report(fixture, clock, input);
+    report(fixture, clock, input, expiryPass);
   } catch (error) {
     raised = error;
   }
@@ -519,6 +554,8 @@ function driveOutcomeToLimit(
     report(fixture, clock, {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
       body:
         outcome === "cancelled"
           ? { report: outcome, fence: claimed.lease.fence }
@@ -556,6 +593,787 @@ function reportedAppends(fixture: ReportFixture): readonly RecordedAppend[] {
 }
 
 describe("src/commands/outcome/report-outcome.test", () => {
+  it("a report refuses a stale fence", (t) => {
+    const fixture = createReportFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const clock = createMockClock({ start: NOW });
+    const claimed = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    fixture.storage.transact((transaction) => {
+      transaction.run("UPDATE run SET fence = 2 WHERE id = ?", [claimed.runId]);
+    });
+    const bytes = databaseBytes(fixture.storage);
+    const error = refused(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: 1,
+      body: { report: "rejected", fence: claimed.lease.fence, reason: REASON },
+    });
+    assert.equal(error.refusal, "fence-stale");
+    assert.deepEqual(databaseBytes(fixture.storage), bytes);
+  });
+
+  it("a report refuses an ended run", (t) => {
+    const fixture = createReportFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const clock = createMockClock({ start: NOW });
+    const claimed = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    fixture.storage.transact((transaction) => {
+      transaction.run(
+        "UPDATE run SET state = 'ended', outcome = 'released', ended_at = ? WHERE id = ?",
+        [NOW, claimed.runId],
+      );
+    });
+    const bytes = databaseBytes(fixture.storage);
+    const error = refused(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
+      body: { report: "rejected", fence: claimed.lease.fence, reason: REASON },
+    });
+    assert.equal(error.refusal, "run-ended");
+    assert.deepEqual(databaseBytes(fixture.storage), bytes);
+  });
+
+  it("a report with valid run authority and a stale retained node-lease fence returns ReportOutcomeError lease-held, not LeaseError, and leaves databaseBytes unchanged", (t) => {
+    const fixture = createReportFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const clock = createMockClock({ start: NOW });
+    const claimed = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    fixture.storage.transact((transaction) => {
+      fixture.lease.lease.expireLeasesOfOwner(transaction, {
+        owner: ACTOR_A,
+        now: NOW,
+      });
+      const reclaimed = fixture.lease.lease.acquire(transaction, {
+        subjectKind: "node",
+        subjectId: fixtureIds.task,
+        owner: ACTOR_A,
+        ownerKind: "actor",
+        ttlMs: TTL,
+        now: NOW,
+      });
+      assert.equal(reclaimed.acquired, true);
+      assert.equal(reclaimed.record.fence, claimed.lease.fence + 1);
+    });
+    const bytes = databaseBytes(fixture.storage);
+
+    const error = refused(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
+      body: { report: "rejected", fence: claimed.lease.fence, reason: REASON },
+    });
+
+    assert.equal(error.refusal, "lease-held");
+    assert.deepEqual(databaseBytes(fixture.storage), bytes);
+  });
+
+  it("a report on an expired run refuses and writes nothing", (t) => {
+    const fixture = createReportFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const clock = createMockClock({ start: NOW });
+    const claimed = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    fixture.storage.transact((transaction) => {
+      transaction.run("UPDATE run SET expires_at = ? WHERE id = ?", [
+        NOW - 1,
+        claimed.runId,
+      ]);
+    });
+    const bytes = databaseBytes(fixture.storage);
+    const error = refused(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
+      body: { report: "rejected", fence: claimed.lease.fence, reason: REASON },
+    });
+    assert.equal(error.refusal, "run-ended");
+    assert.deepEqual(databaseBytes(fixture.storage), bytes);
+  });
+
+  it("a report refuses a target outside the run", (t) => {
+    const fixture = createReportFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const clock = createMockClock({ start: NOW });
+    const claimed = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    fixture.storage.transact((transaction) => {
+      seedSiblingTask(transaction);
+      seedNodeState(transaction, TASK_B, "running");
+    });
+
+    const error = refused(fixture, clock, {
+      nodeId: TASK_B,
+      actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
+      body: { report: "rejected", fence: 1, reason: REASON },
+    });
+
+    assert.equal(error.refusal, "target-outside-run");
+  });
+
+  it("a report on a task presenting the objective run refuses target-outside-run", (t) => {
+    const fixture = createReportFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const clock = createMockClock({ start: NOW });
+    const claimed = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+
+    const error = refused(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+      runId: claimed.objectiveRunId,
+      runFence: claimed.objectiveRunFence,
+      body: { report: "rejected", fence: claimed.lease.fence, reason: REASON },
+    });
+
+    assert.equal(error.refusal, "target-outside-run");
+  });
+
+  it("a report on an unknown node refuses node-not-found, not target-outside-run", (t) => {
+    const fixture = createReportFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const clock = createMockClock({ start: NOW });
+    const claimed = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    const bytes = databaseBytes(fixture.storage);
+    const base = baseline(fixture);
+
+    const error = refused(fixture, clock, {
+      nodeId: "task_zzz",
+      actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
+      body: {
+        report: "rejected",
+        fence: claimed.lease.fence,
+        reason: REASON,
+      },
+    });
+
+    assert.equal(error.refusal, "node-not-found");
+    assert.notEqual(error.refusal, "target-outside-run");
+    assertNoWrite(fixture, bytes, base);
+  });
+
+  it("a report on an initiative refuses initiative-not-reportable, not target-outside-run", (t) => {
+    const fixture = createReportFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const clock = createMockClock({ start: NOW });
+    const claimed = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    const bytes = databaseBytes(fixture.storage);
+    const base = baseline(fixture);
+
+    const error = refused(fixture, clock, {
+      nodeId: fixtureIds.initiative,
+      actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
+      body: {
+        report: "accepted",
+        fence: claimed.lease.fence,
+        objectId: OBJECT_ID,
+      },
+    });
+
+    assert.equal(error.refusal, "initiative-not-reportable");
+    assert.notEqual(error.refusal, "target-outside-run");
+    assertNoWrite(fixture, bytes, base);
+  });
+
+  it("a report refusal carries only the run id", (t) => {
+    type AuthorityRefusal =
+      | "run-not-found"
+      | "run-ended"
+      | "run-expired"
+      | "run-caller-mismatch"
+      | "target-outside-run"
+      | "fence-stale";
+
+    const scenarios: readonly Readonly<{
+      refusal: AuthorityRefusal;
+      prepare(
+        fixture: ReportFixture,
+        claimed: ClaimNodeResult,
+      ): Readonly<{
+        nodeId: string;
+        runId: string;
+        runFence: number;
+        expiryPass?: boolean;
+      }>;
+    }>[] = [
+      {
+        refusal: "run-not-found",
+        prepare(_fixture, claimed) {
+          return {
+            nodeId: fixtureIds.task,
+            runId: "run_missing",
+            runFence: claimed.runFence,
+          };
+        },
+      },
+      {
+        refusal: "run-ended",
+        prepare(fixture, claimed) {
+          fixture.storage.transact((transaction) => {
+            transaction.run(
+              "UPDATE run SET state = 'ended', ended_at = ? WHERE id = ?",
+              [NOW, claimed.runId],
+            );
+          });
+          return {
+            nodeId: fixtureIds.task,
+            runId: claimed.runId,
+            runFence: claimed.runFence,
+          };
+        },
+      },
+      {
+        refusal: "run-expired",
+        prepare(fixture, claimed) {
+          fixture.storage.transact((transaction) => {
+            transaction.run("UPDATE run SET expires_at = ? WHERE id = ?", [
+              NOW - 1,
+              claimed.runId,
+            ]);
+          });
+          return {
+            nodeId: fixtureIds.task,
+            runId: claimed.runId,
+            runFence: claimed.runFence,
+            expiryPass: false,
+          };
+        },
+      },
+      {
+        refusal: "run-caller-mismatch",
+        prepare(fixture, claimed) {
+          fixture.storage.transact((transaction) => {
+            transaction.run("UPDATE run SET worker = ? WHERE id = ?", [
+              "opencode@1",
+              claimed.runId,
+            ]);
+          });
+          return {
+            nodeId: fixtureIds.task,
+            runId: claimed.runId,
+            runFence: claimed.runFence,
+          };
+        },
+      },
+      {
+        refusal: "target-outside-run",
+        prepare(fixture, claimed) {
+          fixture.storage.transact((transaction) => {
+            seedSiblingTask(transaction);
+            seedNodeState(transaction, TASK_B, "running");
+          });
+          return {
+            nodeId: TASK_B,
+            runId: claimed.runId,
+            runFence: claimed.runFence,
+          };
+        },
+      },
+      {
+        refusal: "fence-stale",
+        prepare(fixture, claimed) {
+          fixture.storage.transact((transaction) => {
+            transaction.run("UPDATE run SET fence = ? WHERE id = ?", [
+              claimed.runFence + 1,
+              claimed.runId,
+            ]);
+          });
+          return {
+            nodeId: fixtureIds.task,
+            runId: claimed.runId,
+            runFence: claimed.runFence,
+          };
+        },
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const fixture = createReportFixture();
+      t.after(() => fixture.dispose());
+      seedReadyFixture(fixture);
+      const clock = createMockClock({ start: NOW });
+      const claimed = claim(fixture, clock, {
+        nodeId: fixtureIds.task,
+        actorId: ACTOR_A,
+      });
+      const scenarioInput = scenario.prepare(fixture, claimed);
+
+      const error = refused(
+        fixture,
+        clock,
+        {
+          nodeId: scenarioInput.nodeId,
+          actorId: ACTOR_A,
+          runId: scenarioInput.runId,
+          runFence: scenarioInput.runFence,
+          body: {
+            report: "rejected",
+            fence: claimed.lease.fence,
+            reason: REASON,
+          },
+        },
+        scenarioInput.expiryPass,
+      );
+
+      assert.equal(error.refusal, scenario.refusal);
+      assert.deepEqual(Object.keys(error.details!), ["runId"]);
+      const details = error.details as Readonly<{ runId: string }>;
+      assert.equal(details.runId, scenarioInput.runId);
+    }
+  });
+
+  it("the actor check and the state check still fire ahead of the authority check", (t) => {
+    {
+      const fixture = createReportFixture();
+      t.after(() => fixture.dispose());
+      seedReadyFixture(fixture);
+      const clock = createMockClock({ start: NOW });
+      const claimed = claim(fixture, clock, {
+        nodeId: fixtureIds.task,
+        actorId: ACTOR_A,
+      });
+
+      const error = refused(fixture, clock, {
+        nodeId: fixtureIds.task,
+        actorId: ACTOR_A,
+        actorKind: "human",
+        runId: claimed.runId,
+        runFence: claimed.runFence,
+        body: {
+          report: "accepted",
+          fence: claimed.lease.fence,
+          objectId: OBJECT_ID,
+        },
+      });
+
+      assert.equal(error.refusal, "actor-forbidden");
+    }
+    {
+      const fixture = createReportFixture();
+      t.after(() => fixture.dispose());
+      seedReadyFixture(fixture);
+      const clock = createMockClock({ start: NOW });
+      const claimed = claim(fixture, clock, {
+        nodeId: fixtureIds.task,
+        actorId: ACTOR_A,
+      });
+      seedTaskState(fixture, "ready");
+
+      const error = refused(fixture, clock, {
+        nodeId: fixtureIds.task,
+        actorId: ACTOR_A,
+        runId: claimed.runId,
+        runFence: claimed.runFence,
+        body: {
+          report: "accepted",
+          fence: claimed.lease.fence,
+          objectId: OBJECT_ID,
+        },
+      });
+
+      assert.equal(error.refusal, "illegal-transition");
+    }
+  });
+
+  it("the prelude runs for the closed member", (t) => {
+    const fixture = createReportFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const clock = createMockClock({ start: NOW });
+    const claimed = claim(fixture, clock, {
+      nodeId: fixtureIds.objective,
+      actorId: ACTOR_A,
+      registry: expansionCapableRegistry,
+    });
+
+    const error = refused(fixture, clock, {
+      nodeId: fixtureIds.objective,
+      actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence - 1,
+      body: { report: "closed", acknowledgePartial: false },
+    });
+
+    assert.equal(error.refusal, "fence-stale");
+  });
+
+  it("node.assignment is unchanged after a rejection", (t) => {
+    const fixture = createReportFixture();
+    t.after(() => fixture.dispose());
+    seedReadyFixture(fixture);
+    const clock = createMockClock({ start: NOW });
+    const claimed = claim(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+    });
+    const assignmentBefore = fixture.storage.transact((transaction) => {
+      const row = transaction.get("SELECT assignment FROM node WHERE id = ?", [
+        fixtureIds.task,
+      ]) as Readonly<{ assignment: string | null }> | undefined;
+      assert.ok(row !== undefined);
+      return row.assignment;
+    });
+    assert.equal(assignmentBefore, "claude@1");
+
+    report(fixture, clock, {
+      nodeId: fixtureIds.task,
+      actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
+      body: { report: "rejected", fence: claimed.lease.fence, reason: REASON },
+    });
+
+    const assignmentAfter = fixture.storage.transact((transaction) => {
+      const row = transaction.get("SELECT assignment FROM node WHERE id = ?", [
+        fixtureIds.task,
+      ]) as Readonly<{ assignment: string | null }> | undefined;
+      assert.ok(row !== undefined);
+      return row.assignment;
+    });
+    assert.equal(assignmentAfter, assignmentBefore);
+  });
+
+  it("other refusal paths keep their declared codes apart from the retained lease-held path", (t) => {
+    type ReachableRefusal = Exclude<ReportOutcomeRefusal, "lease-held">;
+    type ScenarioInput = Readonly<{
+      input: ReportInput;
+      expiryPass?: boolean;
+    }>;
+    const scenarios: readonly Readonly<{
+      refusal: ReachableRefusal;
+      prepare(fixture: ReportFixture, clock: Clock): ScenarioInput;
+    }>[] = [
+      {
+        refusal: "node-not-found",
+        prepare(fixture, clock) {
+          const claimed = claim(fixture, clock, {
+            nodeId: fixtureIds.task,
+            actorId: ACTOR_A,
+          });
+          return {
+            input: {
+              nodeId: "task_zzz",
+              actorId: ACTOR_A,
+              runId: claimed.runId,
+              runFence: claimed.runFence,
+              body: {
+                report: "rejected",
+                fence: claimed.lease.fence,
+                reason: REASON,
+              },
+            },
+          };
+        },
+      },
+      {
+        refusal: "initiative-not-reportable",
+        prepare(fixture, clock) {
+          const claimed = claim(fixture, clock, {
+            nodeId: fixtureIds.task,
+            actorId: ACTOR_A,
+          });
+          return {
+            input: {
+              nodeId: fixtureIds.initiative,
+              actorId: ACTOR_A,
+              runId: claimed.runId,
+              runFence: claimed.runFence,
+              body: {
+                report: "accepted",
+                fence: claimed.lease.fence,
+                objectId: OBJECT_ID,
+              },
+            },
+          };
+        },
+      },
+      {
+        refusal: "body-kind-mismatch",
+        prepare(fixture, clock) {
+          const claimed = claim(fixture, clock, {
+            nodeId: fixtureIds.task,
+            actorId: ACTOR_A,
+          });
+          return {
+            input: {
+              nodeId: fixtureIds.objective,
+              actorId: ACTOR_A,
+              runId: claimed.runId,
+              runFence: claimed.runFence,
+              body: {
+                report: "accepted",
+                fence: claimed.lease.fence,
+                objectId: OBJECT_ID,
+              },
+            },
+          };
+        },
+      },
+      {
+        refusal: "actor-forbidden",
+        prepare(fixture, clock) {
+          const claimed = claim(fixture, clock, {
+            nodeId: fixtureIds.task,
+            actorId: ACTOR_A,
+          });
+          return {
+            input: {
+              nodeId: fixtureIds.task,
+              actorId: ACTOR_A,
+              actorKind: "human",
+              runId: claimed.runId,
+              runFence: claimed.runFence,
+              body: {
+                report: "accepted",
+                fence: claimed.lease.fence,
+                objectId: OBJECT_ID,
+              },
+            },
+          };
+        },
+      },
+      {
+        refusal: "illegal-transition",
+        prepare(fixture, clock) {
+          const claimed = claim(fixture, clock, {
+            nodeId: fixtureIds.task,
+            actorId: ACTOR_A,
+          });
+          seedTaskState(fixture, "ready");
+          return {
+            input: {
+              nodeId: fixtureIds.task,
+              actorId: ACTOR_A,
+              runId: claimed.runId,
+              runFence: claimed.runFence,
+              body: {
+                report: "accepted",
+                fence: claimed.lease.fence,
+                objectId: OBJECT_ID,
+              },
+            },
+          };
+        },
+      },
+      {
+        refusal: "run-not-found",
+        prepare(fixture, clock) {
+          const claimed = claim(fixture, clock, {
+            nodeId: fixtureIds.task,
+            actorId: ACTOR_A,
+          });
+          return {
+            input: {
+              nodeId: fixtureIds.task,
+              actorId: ACTOR_A,
+              runId: "run_missing",
+              runFence: claimed.runFence,
+              body: {
+                report: "rejected",
+                fence: claimed.lease.fence,
+                reason: REASON,
+              },
+            },
+          };
+        },
+      },
+      {
+        refusal: "run-ended",
+        prepare(fixture, clock) {
+          const claimed = claim(fixture, clock, {
+            nodeId: fixtureIds.task,
+            actorId: ACTOR_A,
+          });
+          fixture.storage.transact((transaction) => {
+            transaction.run("UPDATE run SET state = 'ended' WHERE id = ?", [
+              claimed.runId,
+            ]);
+          });
+          return {
+            input: {
+              nodeId: fixtureIds.task,
+              actorId: ACTOR_A,
+              runId: claimed.runId,
+              runFence: claimed.runFence,
+              body: {
+                report: "rejected",
+                fence: claimed.lease.fence,
+                reason: REASON,
+              },
+            },
+          };
+        },
+      },
+      {
+        refusal: "run-expired",
+        prepare(fixture, clock) {
+          const claimed = claim(fixture, clock, {
+            nodeId: fixtureIds.task,
+            actorId: ACTOR_A,
+          });
+          fixture.storage.transact((transaction) => {
+            transaction.run("UPDATE run SET expires_at = ? WHERE id = ?", [
+              NOW - 1,
+              claimed.runId,
+            ]);
+          });
+          return {
+            expiryPass: false,
+            input: {
+              nodeId: fixtureIds.task,
+              actorId: ACTOR_A,
+              runId: claimed.runId,
+              runFence: claimed.runFence,
+              body: {
+                report: "rejected",
+                fence: claimed.lease.fence,
+                reason: REASON,
+              },
+            },
+          };
+        },
+      },
+      {
+        refusal: "run-caller-mismatch",
+        prepare(fixture, clock) {
+          const claimed = claim(fixture, clock, {
+            nodeId: fixtureIds.task,
+            actorId: ACTOR_A,
+          });
+          fixture.storage.transact((transaction) => {
+            transaction.run("UPDATE run SET worker = ? WHERE id = ?", [
+              "opencode@1",
+              claimed.runId,
+            ]);
+          });
+          return {
+            input: {
+              nodeId: fixtureIds.task,
+              actorId: ACTOR_A,
+              runId: claimed.runId,
+              runFence: claimed.runFence,
+              body: {
+                report: "rejected",
+                fence: claimed.lease.fence,
+                reason: REASON,
+              },
+            },
+          };
+        },
+      },
+      {
+        refusal: "target-outside-run",
+        prepare(fixture, clock) {
+          const claimed = claim(fixture, clock, {
+            nodeId: fixtureIds.task,
+            actorId: ACTOR_A,
+          });
+          fixture.storage.transact((transaction) => {
+            seedSiblingTask(transaction);
+            seedNodeState(transaction, TASK_B, "running");
+          });
+          return {
+            input: {
+              nodeId: TASK_B,
+              actorId: ACTOR_A,
+              runId: claimed.runId,
+              runFence: claimed.runFence,
+              body: {
+                report: "rejected",
+                fence: 1,
+                reason: REASON,
+              },
+            },
+          };
+        },
+      },
+      {
+        refusal: "fence-stale",
+        prepare(fixture, clock) {
+          const claimed = claim(fixture, clock, {
+            nodeId: fixtureIds.task,
+            actorId: ACTOR_A,
+          });
+          fixture.storage.transact((transaction) => {
+            transaction.run("UPDATE run SET fence = ? WHERE id = ?", [
+              claimed.runFence + 1,
+              claimed.runId,
+            ]);
+          });
+          return {
+            input: {
+              nodeId: fixtureIds.task,
+              actorId: ACTOR_A,
+              runId: claimed.runId,
+              runFence: claimed.runFence,
+              body: {
+                report: "rejected",
+                fence: claimed.lease.fence,
+                reason: REASON,
+              },
+            },
+          };
+        },
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const fixture = createReportFixture();
+      t.after(() => fixture.dispose());
+      seedReadyFixture(fixture);
+      const clock = createMockClock({ start: NOW });
+      const scenarioInput = scenario.prepare(fixture, clock);
+      const error = refused(
+        fixture,
+        clock,
+        scenarioInput.input,
+        scenarioInput.expiryPass,
+      );
+
+      assert.equal(error.refusal, scenario.refusal);
+      assert.notEqual(error.refusal, "lease-held");
+    }
+  });
+
   it("attemptsRemaining clamps at zero", (t) => {
     {
       const fixture = createReportFixture();
@@ -569,6 +1387,8 @@ describe("src/commands/outcome/report-outcome.test", () => {
       const result = report(fixture, clock, {
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
+        runId: claimed.runId,
+        runFence: claimed.runFence,
         body: { report: "rejected", fence: claimed.lease.fence, reason: "no" },
       });
       assert.equal(result.attemptsRemaining, 2);
@@ -594,6 +1414,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       const result = report(fixture, clock, {
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
+        runId: claimed.runId,
+        runFence: claimed.runFence,
         body: { report: "rejected", fence: claimed.lease.fence, reason: "no" },
       });
       assert.equal(result.attemptsRemaining, 0);
@@ -619,6 +1441,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       report(fixture, clock, {
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
+        runId: claimed.runId,
+        runFence: claimed.runFence,
         body:
           outcome === "accepted"
             ? {
@@ -644,6 +1468,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       report(fixture, clock, {
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
+        runId: first.runId,
+        runFence: first.runFence,
         body: {
           report: "accepted",
           fence: first.lease.fence,
@@ -658,6 +1484,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       report(fixture, clock, {
         nodeId: TASK_B,
         actorId: ACTOR_A,
+        runId: second.runId,
+        runFence: second.runFence,
         body: {
           report: "accepted",
           fence: second.lease.fence,
@@ -679,6 +1507,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       const error = refused(fixture, createMockClock({ start: NOW }), {
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
+        runId: FIXTURE_RUN_ID,
+        runFence: FIXTURE_RUN_FENCE,
         body: { report: "accepted", fence: 1, objectId: OBJECT_ID },
       });
       assert.equal(error.refusal, "illegal-transition");
@@ -687,29 +1517,33 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
     }
   });
 
-  it("a wrong owner, a stale fence and an expired lease are each lease-held", (t) => {
+  it("a mismatched caller, a stale run fence and an expired run are each run-authority refusals", (t) => {
     {
       const fixture = createReportFixture();
       t.after(() => fixture.dispose());
       seedReadyFixture(fixture);
       const clock = createMockClock({ start: NOW });
-      claim(fixture, clock, { nodeId: fixtureIds.task, actorId: ACTOR_A });
+      const claimed = claim(fixture, clock, {
+        nodeId: fixtureIds.task,
+        actorId: ACTOR_A,
+      });
+      fixture.storage.transact((transaction) => {
+        transaction.run("UPDATE run SET worker = ? WHERE id = ?", [
+          "opencode@1",
+          claimed.runId,
+        ]);
+      });
       const bytes = databaseBytes(fixture.storage);
       const base = baseline(fixture);
       const error = refused(fixture, clock, {
         nodeId: fixtureIds.task,
-        actorId: ACTOR_B,
+        actorId: ACTOR_A,
+        runId: claimed.runId,
+        runFence: claimed.runFence,
         body: { report: "rejected", fence: 1, reason: "no" },
       });
-      assert.equal(error.refusal, "lease-held");
-      assert.deepEqual(error.details, {
-        subject: fixtureIds.task,
-        holder: ACTOR_A,
-        holderKind: "actor",
-        fence: 1,
-        expiresAt: NOW + TTL,
-        relation: "self",
-      });
+      assert.equal(error.refusal, "run-caller-mismatch");
+      assert.deepEqual(error.details, { runId: claimed.runId });
       assertNoWrite(fixture, bytes, base);
     }
     {
@@ -717,16 +1551,21 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       t.after(() => fixture.dispose());
       seedReadyFixture(fixture);
       const clock = createMockClock({ start: NOW });
-      claim(fixture, clock, { nodeId: fixtureIds.task, actorId: ACTOR_A });
+      const claimed = claim(fixture, clock, {
+        nodeId: fixtureIds.task,
+        actorId: ACTOR_A,
+      });
       const bytes = databaseBytes(fixture.storage);
       const base = baseline(fixture);
       const error = refused(fixture, clock, {
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
+        runId: claimed.runId,
+        runFence: claimed.runFence - 1,
         body: { report: "rejected", fence: 999, reason: "no" },
       });
-      assert.equal(error.refusal, "lease-held");
-      assert.equal(error.details, undefined);
+      assert.equal(error.refusal, "fence-stale");
+      assert.deepEqual(error.details, { runId: claimed.runId });
       assertNoWrite(fixture, bytes, base);
     }
     {
@@ -734,7 +1573,7 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       t.after(() => fixture.dispose());
       seedReadyFixture(fixture);
       const mutable = createMutableClock();
-      claim(fixture, mutable.clock, {
+      const claimed = claim(fixture, mutable.clock, {
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
       });
@@ -744,11 +1583,18 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       const error = refused(fixture, mutable.clock, {
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
+        runId: claimed.runId,
+        runFence: claimed.runFence,
         body: { report: "rejected", fence: 1, reason: "no" },
       });
-      assert.equal(error.refusal, "lease-held");
-      assert.equal(error.details, undefined);
-      assertNoWrite(fixture, bytes, base);
+      assert.equal(error.refusal, "run-ended");
+      assert.deepEqual(error.details, { runId: claimed.runId });
+      assert.deepEqual(databaseBytes(fixture.storage), bytes);
+      assert.equal(
+        fixture.lease.calls.filter((call) => call.name === "release").length,
+        base.releases,
+      );
+      assert.equal(setNodeStateCalls(fixture).length, base.states);
     }
   });
 
@@ -767,6 +1613,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
       actorKind: "human",
+      runId: claimed.runId,
+      runFence: claimed.runFence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -774,21 +1622,6 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       },
     });
     assert.equal(error.refusal, "actor-forbidden");
-    assertNoWrite(fixture, bytes, base);
-  });
-
-  it("an initiative is initiative-not-reportable", (t) => {
-    const fixture = createReportFixture();
-    t.after(() => fixture.dispose());
-    seedReadyFixture(fixture);
-    const bytes = databaseBytes(fixture.storage);
-    const base = baseline(fixture);
-    const error = refused(fixture, createMockClock({ start: NOW }), {
-      nodeId: fixtureIds.initiative,
-      actorId: ACTOR_A,
-      body: { report: "accepted", fence: 1, objectId: OBJECT_ID },
-    });
-    assert.equal(error.refusal, "initiative-not-reportable");
     assertNoWrite(fixture, bytes, base);
   });
 
@@ -802,6 +1635,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       const error = refused(fixture, createMockClock({ start: NOW }), {
         nodeId: fixtureIds.objective,
         actorId: ACTOR_A,
+        runId: FIXTURE_RUN_ID,
+        runFence: FIXTURE_RUN_FENCE,
         body: { report: "accepted", fence: 1, objectId: OBJECT_ID },
       });
       assert.equal(error.refusal, "body-kind-mismatch");
@@ -816,6 +1651,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       const error = refused(fixture, createMockClock({ start: NOW }), {
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
+        runId: FIXTURE_RUN_ID,
+        runFence: FIXTURE_RUN_FENCE,
         body: { report: "attested", fence: 1, objectId: OBJECT_ID },
       });
       assert.equal(error.refusal, "body-kind-mismatch");
@@ -829,12 +1666,15 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
     seedReadyFixture(fixture);
     const clock = createMockClock({ start: NOW });
     const claimed = claim(fixture, clock, {
-      nodeId: fixtureIds.task,
+      nodeId: fixtureIds.objective,
       actorId: ACTOR_A,
+      registry: expansionCapableRegistry,
     });
     const result = report(fixture, clock, {
       nodeId: fixtureIds.objective,
       actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
       body: {
         report: "attested",
         fence: claimed.objectiveLease.fence,
@@ -861,10 +1701,16 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
     t.after(() => fixture.dispose());
     seedReadyFixture(fixture);
     const clock = createMockClock({ start: NOW });
-    claim(fixture, clock, { nodeId: fixtureIds.task, actorId: ACTOR_A });
+    const claimed = claim(fixture, clock, {
+      nodeId: fixtureIds.objective,
+      actorId: ACTOR_A,
+      registry: expansionCapableRegistry,
+    });
     const result = report(fixture, clock, {
       nodeId: fixtureIds.objective,
       actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
       body: { report: "closed", acknowledgePartial: false },
     });
     assert.equal(fixture.closeCalls.length, 1);
@@ -893,6 +1739,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
     const result = report(fixture, clock, {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -915,6 +1763,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
     const result = report(fixture, clock, {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -938,6 +1788,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
     const result = report(fixture, clock, {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -1012,6 +1864,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
     report(fixture, clock, {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -1069,6 +1923,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       report(fixture, clock, {
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
+        runId: claimed.runId,
+        runFence: claimed.runFence,
         body:
           outcome === "cancelled"
             ? { report: outcome, fence: claimed.lease.fence }
@@ -1094,6 +1950,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
     report(fixture, clock, {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -1128,6 +1986,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
     report(fixture, clock, {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
       body: {
         report: "accepted",
         fence: claimed.lease.fence,
@@ -1167,6 +2027,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
     report(fixture, clock, {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
       body: { report: "rejected", fence: claimed.lease.fence, reason: REASON },
     });
     const payload = reportedAppends(fixture)[0]!.input.payload as Readonly<
@@ -1190,6 +2052,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
     report(fixture, clock, {
       nodeId: fixtureIds.task,
       actorId: ACTOR_A,
+      runId: claimed.runId,
+      runFence: claimed.runFence,
       body: { report: "cancelled", fence: claimed.lease.fence },
     });
     const payload = reportedAppends(fixture)[0]!.input.payload as Readonly<
@@ -1217,6 +2081,8 @@ VALUES (?, ?, 'external', ?, NULL, NULL, NULL, NULL, NULL, 'rejected', ?)`,
       report(fixture, clock, {
         nodeId: fixtureIds.task,
         actorId: ACTOR_A,
+        runId: claimed.runId,
+        runFence: claimed.runFence,
         body:
           outcome === "accepted"
             ? {

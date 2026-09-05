@@ -65,16 +65,16 @@ export const declaredCommands: readonly DeclaredCommand[] = [
     operationIds: ["node.show", "plan.revisions", "node.delete"],
   },
   {
-    path: ["node", "heartbeat"],
-    operationIds: ["node.heartbeat"],
-  },
-  {
     path: ["node", "list"],
     operationIds: ["node.list"],
   },
   {
     path: ["node", "release"],
     operationIds: ["node.release"],
+  },
+  {
+    path: ["node", "renew"],
+    operationIds: ["node.renew"],
   },
   {
     path: ["node", "report"],

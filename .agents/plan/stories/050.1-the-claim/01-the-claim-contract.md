@@ -15,7 +15,7 @@ both halves.
 `src/http/contract/execution.ts:29-58`:
 
 - `nodeClaimRequest` (`:29`) becomes `z.strictObject({ available: z.boolean() })`. It is a **required** field: a caller that does not state its availability has not run the self health check the daemon relies on.
-- `nodeClaimResponse` (`:39-48`) keeps `runId: identity("run")` at `:42` and gains `fence: z.int().min(1)`, `expiresAt: z.int()` and `renewAfterMs: z.int().min(1)`. `node.claim` returns all four and receives none.
+- `nodeClaimResponse` (`:39-48`) keeps `runId: identity("run")` and `objectiveRunId: identity("run")` and gains `fence: z.int().min(1)`, `expiresAt: z.int()` and `renewAfterMs: z.int().min(1)`. `node.claim` returns these fields and receives none.
 - `nodeClaimResponse` **loses `heartbeatIntervalMs`**. It is `Math.floor(leaseTtlMs / 3)` at `src/commands/node/claim-node.ts:356`, derived from a lease this block replaces. An absolute `expiresAt` alone is not a sufficient replacement: a worker comparing a server timestamp against its own clock renews late under skew or network delay. `renewAfterMs` is `Math.floor(runTtlMs / 3)`, and a worker renews after it and treats `expiresAt` as the deadline.
 
 Update the example literal `nodeClaimExamples.request` at `src/http/contract/execution.ts:89` and its response counterpart. `src/http/contract/example.test.ts:73-142` parses each against its schema.

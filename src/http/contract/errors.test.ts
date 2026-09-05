@@ -62,6 +62,14 @@ describe("src/http/contract/errors.test", () => {
       "review-head-unavailable",
       "objective-busy",
       "subtree-busy",
+      "run-not-found",
+      "run-ended",
+      "run-expired",
+      "run-caller-mismatch",
+      "target-outside-run",
+      "fence-stale",
+      "lifetime-exceeded",
+      "objective-run-lost",
       "plan-invalid",
       "choices-invalid",
       "identity-kind-mismatch",
@@ -140,6 +148,14 @@ describe("src/http/contract/errors.test", () => {
       "review-head-unavailable",
       "objective-busy",
       "subtree-busy",
+      "run-not-found",
+      "run-ended",
+      "run-expired",
+      "run-caller-mismatch",
+      "target-outside-run",
+      "fence-stale",
+      "lifetime-exceeded",
+      "objective-run-lost",
     ]);
     assert.deepEqual(groups[422], [
       "plan-invalid",
@@ -165,6 +181,25 @@ describe("src/http/contract/errors.test", () => {
       Record<string, number | undefined>
     >;
     for (const code of claimRefusals) {
+      assert.equal(statuses[code], 409, `${code} status drifted`);
+    }
+  });
+
+  it("every new refusal code maps to 409", () => {
+    const newRefusals = [
+      "run-not-found",
+      "run-ended",
+      "run-expired",
+      "run-caller-mismatch",
+      "target-outside-run",
+      "fence-stale",
+      "lifetime-exceeded",
+      "objective-run-lost",
+    ] as const;
+    const statuses = errorStatuses as Readonly<
+      Record<string, number | undefined>
+    >;
+    for (const code of newRefusals) {
       assert.equal(statuses[code], 409, `${code} status drifted`);
     }
   });

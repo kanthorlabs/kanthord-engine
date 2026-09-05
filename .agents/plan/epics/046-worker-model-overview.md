@@ -36,19 +36,19 @@ These epics restate earlier text. This block does not edit the earlier files. Ea
 
 ## Order
 
-| #   | Epic                                      | Capability at close                                                                  |
-| --- | ----------------------------------------- | ------------------------------------------------------------------------------------ |
-| 047 | The deliverable and the node pair         | A node declares a deliverable and a `verify` block, and an illegal pair is refused.  |
-| 048 | The worker registry and routing           | Three eligible sets resolve to one worker, or the daemon answers `unroutable`.       |
-| 049 | Dual-read plan parsing and the conversion | Both frontmatter shapes parse, and the conversion emits a report and a document set. |
-| 050 | The run, the fence and exclusion          | A claim opens one run, writes the assignment, and a stale fence fails a write.       |
-| 051 | The execution checkpoint                  | An ingested commit lands on the objective branch by compare and swap.                |
-| 052 | The structural checkpoint                 | A staged graph patch lands against a graph revision, and creates a child.            |
-| 053 | The review checkpoint and state ownership | An attestation binds to a pinned commit, and aggregation owns a parent state.        |
-| 054 | Attempt classification and the supervisor | A termination is classified by the driver, and an ambiguous budget bounds a loop.    |
-| 055 | The grant and the external client         | A grant bounds a client to one root, one worker and its operation list.              |
-| 056 | The worker switch and human controls      | A human switches a worker in one operation, and closes an objective.                 |
-| 057 | Non-null enforcement and legacy removal   | The nullable columns become mandatory, and the legacy fields are gone.               |
+| #   | Epic                                      | Capability at close                                                                                                      |
+| --- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 047 | The deliverable and the node pair         | A node declares a deliverable and a `verify` block, and an illegal pair is refused.                                      |
+| 048 | The worker registry and routing           | Three eligible sets resolve to one worker, or the daemon answers `unroutable`.                                           |
+| 049 | Dual-read plan parsing and the conversion | Both frontmatter shapes parse, and the conversion emits a report and a document set.                                     |
+| 050 | The run, the fence and exclusion          | A task claim opens or reuses an objective run, opens a task run, writes the assignment, and a stale fence fails a write. |
+| 051 | The execution checkpoint                  | An ingested commit lands on the objective branch by compare and swap.                                                    |
+| 052 | The structural checkpoint                 | A staged graph patch lands against a graph revision, and creates a child.                                                |
+| 053 | The review checkpoint and state ownership | An attestation binds to a pinned commit, and aggregation owns a parent state.                                            |
+| 054 | Attempt classification and the supervisor | A termination is classified by the driver, and an ambiguous budget bounds a loop.                                        |
+| 055 | The grant and the external client         | A grant bounds a client to one root, one worker and its operation list.                                                  |
+| 056 | The worker switch and human controls      | A human switches a worker in one operation, and closes an objective.                                                     |
+| 057 | Non-null enforcement and legacy removal   | The nullable columns become mandatory, and the legacy fields are gone.                                                   |
 
 ## Dependencies
 

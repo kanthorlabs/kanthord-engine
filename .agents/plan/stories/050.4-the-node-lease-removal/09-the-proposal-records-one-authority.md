@@ -26,6 +26,8 @@ sentences verbatim, so check that file for a sentence this edit invalidates.
 run is the only proof of a worker's authority, the node lease is gone from every worker operation,
 and every surviving exclusion rule reads a run. Name the three that survive — `subtreeExclusion`,
 `objectiveBusy` and the `drive-mode-pinned` driver pin — because this epic deletes none of them.
+Its terminal-event sentence widens back to the unconditional rule: every run that moves from `active`
+to `ended` appends exactly one of `run.ended` or `run.expired`, never both and never neither.
 
 **`docs/proposal/database/lease.md`** is **not** edited here. The table still exists after this epic
 with its node rows in place, and `system.status` still reports it. EPIC 050.5 owns the document with

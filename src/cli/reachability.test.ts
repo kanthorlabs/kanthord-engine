@@ -306,16 +306,23 @@ const responseFor = (request: RecordedRequest): unknown => {
         lease,
         objectiveLease,
         runId: RUN_ID,
+        runFence: 1,
         objectiveRunId: RUN_ID,
-        fence: 1,
+        objectiveRunFence: 1,
         expiresAt: 1722800300000,
         renewAfterMs: 1000,
         attemptId: ATTEMPT_ID,
         attemptNo: 1,
         node: { ...node, state: "running" },
       };
-    case "node.heartbeat":
-      return { lease, objectiveLease, heartbeatIntervalMs: 1000 };
+    case "node.renew":
+      return {
+        lease,
+        objectiveLease,
+        expiresAt: 1722800300000,
+        objectiveExpiresAt: 1722800300000,
+        renewAfterMs: 1000,
+      };
     case "node.release":
       return { node };
     case "node.report":
@@ -441,6 +448,10 @@ const rows: readonly Row[] = [
       OBJECTIVE_ID,
       "--fence",
       "1",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1",
       "--object-id",
       "a".repeat(40),
     ],
@@ -453,7 +464,16 @@ const rows: readonly Row[] = [
   },
   {
     path: ["node", "close"],
-    argv: ["node", "close", "--id", OBJECTIVE_ID],
+    argv: [
+      "node",
+      "close",
+      "--id",
+      OBJECTIVE_ID,
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1",
+    ],
     operationIds: ["node.report"],
   },
   {
@@ -478,9 +498,20 @@ const rows: readonly Row[] = [
     operationIds: ["node.show", "plan.revisions", "node.delete"],
   },
   {
-    path: ["node", "heartbeat"],
-    argv: ["node", "heartbeat", "--id", TASK_ID, "--fence", "1"],
-    operationIds: ["node.heartbeat"],
+    path: ["node", "renew"],
+    argv: [
+      "node",
+      "renew",
+      "--id",
+      TASK_ID,
+      "--fence",
+      "1",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1",
+    ],
+    operationIds: ["node.renew"],
   },
   {
     path: ["node", "list"],
@@ -489,7 +520,18 @@ const rows: readonly Row[] = [
   },
   {
     path: ["node", "release"],
-    argv: ["node", "release", "--id", TASK_ID, "--fence", "1"],
+    argv: [
+      "node",
+      "release",
+      "--id",
+      TASK_ID,
+      "--fence",
+      "1",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1",
+    ],
     operationIds: ["node.release"],
   },
   {
@@ -502,6 +544,10 @@ const rows: readonly Row[] = [
       "--outcome",
       "accepted",
       "--fence",
+      "1",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
       "1",
       "--object-id",
       "a".repeat(40),

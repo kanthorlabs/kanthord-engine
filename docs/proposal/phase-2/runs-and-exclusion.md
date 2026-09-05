@@ -18,9 +18,9 @@ At most one active run covers a node. The `run_one_active` partial index defends
 
 The daemon refuses a second active run in one objective branch with `objective-busy`. The subtree rule refuses an active run over the claimed node with `subtree-busy`. The refusal names the sibling node id, its run id and that run's `expires_at`, so a client knows what it waits on and until when. The daemon holds no queue. A blocking wait would hold one request open for a run lifetime, and a queue would make the daemon a scheduler. The caller retries. One liveness predicate governs this rule and the subtree rule, so the two cannot disagree about an expired run.
 
-## A claim opens exactly one run
+## A task claim opens an objective run and a task run
 
-At the first claim on an unassigned node, the daemon writes `node.assignment` and inserts the run in one storage transaction. One operation prevents a crash from leaving an assignment without a run, which would make the next claim read an assignment that nobody holds. The claim uses an immediate write transaction, so two sibling claims serialize and the loser sees the winner's run.
+At the first task claim on an unassigned node, the daemon writes `node.assignment`, opens the structural objective run and inserts the execution task run in one storage transaction. Later task claims under the same objective reuse its active objective run and open their own task run. One operation prevents a crash from leaving an assignment without its authority, which would make the next claim read an assignment that nobody holds. The claim uses an immediate write transaction, so two sibling claims serialize and the loser sees the winner's objective run.
 
 ## An unassigned node routes, and an assigned node compares
 
@@ -32,7 +32,7 @@ A worker runs a self health check before it claims. The claim request carries `a
 
 ## The claim has one path
 
-A node with a null `deliverable` is refused `pair-illegal`. The column stays nullable until EPIC 057, and the claim dispatches on no other shape. A claim opens exactly one run covering the claimed node and every descendant, and it never adopts an existing run. A task claim opens no parent objective run. A second claim by the same worker on a node with an active run is refused with `subtree-busy`. Retrying a lost response is the transport's job.
+A node with a null `deliverable` is refused `pair-illegal`. The column stays nullable until EPIC 057, and the claim dispatches on no other shape. An initiative claim opens one structural run. A task claim opens or reuses the structural objective run and opens one execution task run, and it never adopts a task run. A second claim by the same worker on a node with an active run is refused with `subtree-busy`. Retrying a lost response is the transport's job.
 
 ## The refusal order is fixed
 
@@ -60,6 +60,46 @@ A review run records the commit it judges at claim time. This phase creates no w
 ## Every run operation evaluates expiry first
 
 Every run operation evaluates expiry first. The claim runs the expiry pass before anything else, inside its one transaction. Sweeping only at the next claim would leave an expired run able to renew itself back to life. The expiry is a conditional update, so two racing sweeps cannot raise the fence twice, and the transition and its event are one transaction. Expiry is transactional maintenance: a command that expires a run and then refuses rolls the expiry back with everything else, because a refusal writes nothing. The next operation sweeps the run again. Renew, release and report run the same pass in EPIC 050.2.
+
+## Run authority
+
+A write is admitted only when its run is active, unexpired, held by the caller, bound to the target and carrying the current fence. The six refusal codes appear in this fixed order:
+
+1. `run-not-found`
+2. `run-ended`
+3. `run-expired`
+4. `run-caller-mismatch`
+5. `target-outside-run`
+6. `fence-stale`
+
+A refusal names the run id and the reason only. It never returns the current fence, because giving its replacement value to a writer with a stale fence would give that writer the authority the raise was meant to remove.
+
+The target binding is the run's own node. A write is admitted only when the run it names is the run of the node it targets. The subtree rule governs exclusion at claim time, and it does not govern authority: a structural objective run holds no task attempt, so admitting a descendant would let an objective run authorize a task release or a task report that no attempt can answer. A structural mutation inside a claimed subtree is a separate admission, and the epic that ships it declares that admission and its own control case.
+
+A lease fence and a run fence are two counters. A lease fence rises when a lease is taken again after it expires. A run fence rises only when a run ends. A claim reuses an active structural objective run, so the two counters diverge, and the claim response therefore names all four values: the task lease fence, the task run fence, the objective lease fence and the objective run fence. A write presents the run fence of the run it names.
+
+A renew sets `expires_at = min(now + runTtlMs, max_lifetime_at)` and refuses `lifetime-exceeded` when `now >= max_lifetime_at`.
+A renew never changes the fence.
+
+A release means that a worker voluntarily ends its run with no checkpoint. The node returns to `ready`, the open attempt is cancelled, the run ends and the fence rises.
+
+A transitional renew renews both leases until EPIC 050.4 Story 4 removes the node lease without changing wire shape.
+
+A task renew renews two runs: the task run it names and the structural run of that task's objective, derived from the node. A claim renews the structural objective run it reuses. Without both, the objective run expires under a live task run, the expiry pass ends it, and the later attest or close refuses `run-ended`. One `run.renewed` is appended per run whose `expires_at` moved.
+
+## A promised expiry is kept, and no recovery is silent
+
+`max_lifetime_at` is absolute. No path renews a run past it, and no path mints a replacement run on a client's behalf. A structural objective run that reaches its lifetime expires like any other run and appends one `run.expired`. The daemon states a deadline and then honours it.
+
+Three rules follow, and none of them is a repair.
+
+A renew never continues silently over a lost objective run. When the target is a task and its objective holds no active run, the renew refuses `objective-run-lost` and writes nothing, so a worker learns that its objective authority is gone at the renew rather than at its last write.
+
+Every renew announces the deadline. The response carries `objectiveExpiresAt` beside the task run's own `expiresAt`, so a client sees the objective authority expiring while it still holds that authority, and decides what to do about it.
+
+The recovery is a claim, and the client makes it. A claim is admitted on a `running` objective when no live run remains under it: it opens a fresh structural run and returns the new run id and fence. Until the client claims, the objective has no authority and every write bound to the old run is refused by code. An automatic rotation would decide for the client that the work should continue, and the daemon cannot know that.
+
+The expiry pass and release paths append exactly one of `run.ended` or `run.expired`, never both and never neither, in the same transaction as the transition and the fence raise. The report path remains outstanding for EPIC 050.4 Story 6.
 
 ## base is a set qualified by repository
 

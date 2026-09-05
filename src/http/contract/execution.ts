@@ -11,9 +11,11 @@ import {
   illegalTransitionDetails,
   leaseHeldDetails,
   objectiveBusyDetails,
+  objectiveRunLostDetails,
   pairIllegalDetails,
   planInvalidDetails,
   reviewHeadUnavailableDetails,
+  runAuthorityDetails,
   subtreeBusyDetails,
   unroutableDetails,
 } from "./error-details.ts";
@@ -38,20 +40,25 @@ export const nodeClaimRequest = z.strictObject({
   available: z.boolean(),
 });
 
-export const nodeHeartbeatRequest = z.strictObject({
+export const nodeRenewRequest = z.strictObject({
   fence: z.int().min(1),
+  runId: identity("run"),
+  runFence: z.int().min(1),
 });
 
 export const nodeReleaseRequest = z.strictObject({
   fence: z.int().min(1),
+  runId: identity("run"),
+  runFence: z.int().min(1),
 });
 
 export const nodeClaimResponse = z.strictObject({
   lease: claimedLease,
   objectiveLease: claimedLease,
   runId: identity("run"),
+  runFence: z.int().min(1),
   objectiveRunId: identity("run"),
-  fence: z.int().min(1),
+  objectiveRunFence: z.int().min(1),
   expiresAt: z.int(),
   renewAfterMs: z.int().min(1),
   attemptId: identity("attempt").nullable(),
@@ -59,10 +66,12 @@ export const nodeClaimResponse = z.strictObject({
   node: nodeShowResponse,
 });
 
-export const nodeHeartbeatResponse = z.strictObject({
+export const nodeRenewResponse = z.strictObject({
   lease: claimedLease,
   objectiveLease: claimedLease,
-  heartbeatIntervalMs: z.int(),
+  expiresAt: z.int(),
+  objectiveExpiresAt: z.int(),
+  renewAfterMs: z.int().min(1),
 });
 
 export const nodeReleaseResponse = z.strictObject({
@@ -134,8 +143,9 @@ export const nodeClaimExamples: OperationExamples = {
       expiresAt: 1722800300000,
     },
     runId: `run_${U}`,
+    runFence: 1,
     objectiveRunId: `run_${U}`,
-    fence: 1,
+    objectiveRunFence: 1,
     expiresAt: 1722800300000,
     renewAfterMs: 100000,
     attemptId: `attempt_${U}`,
@@ -159,8 +169,8 @@ export const nodeClaimExamples: OperationExamples = {
   },
 };
 
-export const nodeHeartbeatExamples: OperationExamples = {
-  request: { fence: 1 },
+export const nodeRenewExamples: OperationExamples = {
+  request: { fence: 1, runId: `run_${U}`, runFence: 1 },
   success: {
     lease: {
       subjectId: `task_${U}`,
@@ -176,7 +186,9 @@ export const nodeHeartbeatExamples: OperationExamples = {
       fence: 1,
       expiresAt: 1722800300000,
     },
-    heartbeatIntervalMs: 100000,
+    expiresAt: 1722800300000,
+    objectiveExpiresAt: 1722800300000,
+    renewAfterMs: 100000,
   },
   error: {
     error: {
@@ -192,7 +204,7 @@ export const nodeHeartbeatExamples: OperationExamples = {
 };
 
 export const nodeReleaseExamples: OperationExamples = {
-  request: { fence: 1 },
+  request: { fence: 1, runId: `run_${U}`, runFence: 1 },
   success: { node: nodeRelease_node },
   error: {
     error: {
@@ -325,23 +337,31 @@ export const execution = operations([
     examples: nodeClaimExamples,
   },
   {
-    operationId: "node.heartbeat",
+    operationId: "node.renew",
     method: "POST",
-    path: [resource("node"), parameter("node"), action("heartbeat")],
+    path: [resource("node"), parameter("node"), action("renew")],
     introducedIn: "phase-1",
     status: "routed",
     idempotency: "memory",
     replayable: [200],
     allowedActors: ["human", "harness"],
-    request: nodeHeartbeatRequest,
-    response: nodeHeartbeatResponse,
+    request: nodeRenewRequest,
+    response: nodeRenewResponse,
     errors: {
       ...baselineErrors,
       "lease-held": leaseHeldDetails,
       "illegal-transition": illegalTransitionDetails,
       "plan-invalid": planInvalidDetails,
+      "run-not-found": runAuthorityDetails,
+      "run-ended": runAuthorityDetails,
+      "run-expired": runAuthorityDetails,
+      "run-caller-mismatch": runAuthorityDetails,
+      "target-outside-run": runAuthorityDetails,
+      "fence-stale": runAuthorityDetails,
+      "lifetime-exceeded": runAuthorityDetails,
+      "objective-run-lost": objectiveRunLostDetails,
     },
-    examples: nodeHeartbeatExamples,
+    examples: nodeRenewExamples,
   },
   {
     operationId: "node.release",
@@ -359,6 +379,12 @@ export const execution = operations([
       "lease-held": leaseHeldDetails,
       "illegal-transition": illegalTransitionDetails,
       "plan-invalid": planInvalidDetails,
+      "run-not-found": runAuthorityDetails,
+      "run-ended": runAuthorityDetails,
+      "run-expired": runAuthorityDetails,
+      "run-caller-mismatch": runAuthorityDetails,
+      "target-outside-run": runAuthorityDetails,
+      "fence-stale": runAuthorityDetails,
     },
     examples: nodeReleaseExamples,
   },

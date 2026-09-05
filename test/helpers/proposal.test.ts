@@ -4,11 +4,13 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { proposalStatements, readRouteMatrix } from "./proposal.ts";
+import { KANTHORD_VERSION } from "../../src/domain/version.ts";
 import {
   objectiveBusy,
   subtreeExclusion,
 } from "../../src/domain/run-exclusion.ts";
 import { claimRefusalCodes } from "../../src/commands/node/claim-node.ts";
+import { runAuthorityRefusals } from "../../src/domain/run-authority.ts";
 
 const tables = [
   "agent_invocation",
@@ -31,6 +33,39 @@ const tables = [
   "run",
   "workspace",
 ];
+
+const capabilityConsumerFiles = [
+  "../../src/main.capability.test.ts",
+  "../../src/queries/system/read-health.test.ts",
+  "../../src/http/server/system/health.test.ts",
+  "../../src/services/home-lock/startup.test.ts",
+  "../../docs/proposal/api/system.md",
+] as const;
+
+const apiProposalPath = resolve(
+  import.meta.dirname,
+  "../../docs/proposal/api/README.md",
+);
+
+type CompatibilityRow = Readonly<{
+  epic: string;
+  retired: string;
+  declared: string;
+}>;
+
+function compatibilityRows(document: string): readonly CompatibilityRow[] {
+  const section =
+    document.split(/^## Compatibility record$/m)[1]?.split(/^## /m)[0] ?? "";
+  return [
+    ...section.matchAll(
+      /^\|\s*(EPIC \d+(?:\.\d+)?)\s*\|\s*.*?\s*\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|$/gm,
+    ),
+  ].map((match) => ({
+    epic: match[1]!,
+    retired: match[2]!,
+    declared: match[3]!,
+  }));
+}
 
 describe("test/helpers/proposal.test", () => {
   it("blob yields one comment-free normalized statement", () => {
@@ -185,5 +220,176 @@ describe("test/helpers/proposal.test", () => {
       document.indexOf("node-not-found") <
         document.indexOf("ancestor-not-startable"),
     );
+  });
+
+  it("every remaining external-drive site names worker-model", () => {
+    for (const file of capabilityConsumerFiles) {
+      const source = readFileSync(resolve(import.meta.dirname, file), "utf8");
+      assert.deepEqual(
+        {
+          namesDeclaredCapability: source.includes("worker-model"),
+          namesRetiredCapability: source.includes("external-drive"),
+        },
+        {
+          namesDeclaredCapability: true,
+          namesRetiredCapability: false,
+        },
+        file,
+      );
+    }
+  });
+
+  it("the compatibility record names every change of this wire generation", () => {
+    const rows = compatibilityRows(readFileSync(apiProposalPath, "utf8"));
+    assert.deepEqual(rows, [
+      {
+        epic: "EPIC 050.1",
+        retired: "external-drive",
+        declared: "worker-model",
+      },
+      {
+        epic: "EPIC 050.1",
+        retired: "external-drive",
+        declared: "worker-model",
+      },
+      {
+        epic: "EPIC 050.2",
+        retired: "external-drive",
+        declared: "worker-model",
+      },
+      {
+        epic: "EPIC 050.2",
+        retired: "external-drive",
+        declared: "worker-model",
+      },
+      {
+        epic: "EPIC 050.2",
+        retired: "external-drive",
+        declared: "worker-model",
+      },
+    ]);
+  });
+
+  it("the versioning section carries the exception sentence", () => {
+    const document = readFileSync(apiProposalPath, "utf8");
+    const versioningSection =
+      document.split(/^## Versioning$/m)[1]?.split(/^## /m)[0] ?? "";
+    assert.equal(versioningSection.includes("closed by default"), true);
+    assert.equal(
+      versioningSection.includes("The list is closed. A change outside it is "),
+      false,
+    );
+  });
+
+  it("KANTHORD_VERSION is unchanged", () => {
+    const manifest = JSON.parse(
+      readFileSync(resolve(import.meta.dirname, "../../package.json"), "utf8"),
+    ) as Readonly<{ version: string }>;
+    assert.equal(KANTHORD_VERSION, "27.8.1");
+    assert.equal(KANTHORD_VERSION, manifest.version);
+  });
+
+  it("the proposal states the five authority conditions", () => {
+    const document = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../docs/proposal/phase-2/runs-and-exclusion.md",
+      ),
+      "utf8",
+    );
+    const authoritySection = document
+      .split(/^## /m)
+      .find(
+        (section) =>
+          section.split("\n", 1)[0]?.toLowerCase().includes("authority") ===
+          true,
+      );
+
+    assert.ok(authoritySection, "authority section is missing");
+    for (const condition of [
+      "active",
+      "unexpired",
+      "caller",
+      "target",
+      "current fence",
+    ]) {
+      assert.ok(authoritySection.includes(condition), condition);
+    }
+
+    let previousPosition = -1;
+    for (const refusal of runAuthorityRefusals) {
+      const position = authoritySection.indexOf(refusal);
+      assert.ok(position >= 0, refusal);
+      assert.ok(position > previousPosition, refusal);
+      previousPosition = position;
+    }
+  });
+
+  it("the proposal states the renew formula and the lifetime boundary", () => {
+    const document = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../docs/proposal/phase-2/runs-and-exclusion.md",
+      ),
+      "utf8",
+    );
+
+    assert.ok(document.includes("min(now + runTtlMs, max_lifetime_at)"));
+    assert.ok(document.includes("now >= max_lifetime_at"));
+  });
+
+  it("the run authority section records renew, release and lease transition behavior", () => {
+    const document = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../docs/proposal/phase-2/runs-and-exclusion.md",
+      ),
+      "utf8",
+    );
+    const authoritySection =
+      document.split(/^## Run authority$/m)[1]?.split(/^## /m)[0] ?? "";
+
+    for (const fragment of [
+      "A renew never changes the fence.",
+      "A release means that a worker voluntarily ends its run with no checkpoint. The node returns to `ready`, the open attempt is cancelled, the run ends and the fence rises.",
+      "A transitional renew renews both leases until EPIC 050.4 Story 4 removes the node lease without changing wire shape.",
+    ]) {
+      assert.ok(authoritySection.includes(fragment), fragment);
+    }
+  });
+
+  it("the proposal states one terminal event per run", () => {
+    const document = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../docs/proposal/phase-2/runs-and-exclusion.md",
+      ),
+      "utf8",
+    );
+
+    assert.ok(document.includes("run.ended"));
+    assert.ok(document.includes("run.expired"));
+    assert.ok(document.includes("never both and never neither"));
+  });
+
+  it("the terminal-event rule leaves the report path outstanding for EPIC 050.4 Story 6", () => {
+    const document = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../docs/proposal/phase-2/runs-and-exclusion.md",
+      ),
+      "utf8",
+    );
+    const terminalEventSentence = document
+      .split("\n")
+      .find((line) => line.startsWith("The expiry pass and release paths"));
+
+    assert.equal(
+      terminalEventSentence,
+      "The expiry pass and release paths append exactly one of `run.ended` or `run.expired`, never both and never neither, in the same transaction as the transition and the fence raise. The report path remains outstanding for EPIC 050.4 Story 6.",
+    );
+    assert.equal(terminalEventSentence?.includes("report path"), true);
+    assert.equal(terminalEventSentence?.includes("outstanding"), true);
+    assert.equal(terminalEventSentence?.includes("EPIC 050.4 Story 6"), true);
   });
 });

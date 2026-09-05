@@ -4,14 +4,9 @@ import type { Operation } from "./operation.ts";
 
 export const capabilityOperations = {
   "event-wait": ["event.list"],
-  "external-drive": [
-    "node.claim",
-    "node.heartbeat",
-    "node.release",
-    "node.report",
-  ],
   "per-node-write": ["node.create", "node.update", "node.delete"],
   "project-graph": ["project.nodes", "project.graph"],
+  "worker-model": ["node.claim", "node.renew", "node.release", "node.report"],
 } as const satisfies Readonly<Record<string, readonly string[]>>;
 
 export type CapabilityName = keyof typeof capabilityOperations;

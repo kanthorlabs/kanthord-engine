@@ -2,6 +2,10 @@ import { aggregate } from "../../domain/aggregation.ts";
 import { accountAttempts } from "../../domain/attempt-accounting.ts";
 import type { ExternalTriggerId } from "../../domain/external-transition.ts";
 import {
+  assertRunAuthority,
+  type RunAuthorityRefusalCode,
+} from "../../domain/run-authority.ts";
+import {
   taskReportEffect,
   type NodeReportResult,
 } from "../../domain/outcome-report.ts";
@@ -9,8 +13,8 @@ import { terminalStates } from "../../domain/state.ts";
 import type { NodeState, TerminalState } from "../../domain/state.ts";
 import type { Clock } from "../../services/clock/index.ts";
 import type { EventLog } from "../../services/event/index.ts";
-import type { Execution } from "../../services/execution/index.ts";
-import type { Lease } from "../../services/lease/index.ts";
+import type { Execution, RunRecord } from "../../services/execution/index.ts";
+import { LeaseError, type Lease } from "../../services/lease/index.ts";
 import type { PlanStore } from "../../services/plan/index.ts";
 import type { Storage, Transaction } from "../../services/storage/index.ts";
 
@@ -56,6 +60,13 @@ export type ReportOutcomeDependencies = Readonly<{
   execution: Execution;
   events: EventLog;
   clock: Clock;
+  expiry: Readonly<{
+    expireRuns(
+      transaction: Transaction,
+      input: Readonly<{ now: number }>,
+    ): readonly unknown[];
+  }>;
+  caller: string;
   reportObjective: (
     transaction: Transaction,
     input: ReportObjectiveInput,
@@ -71,12 +82,15 @@ export type ReportOutcomeInput = Readonly<{
   nodeId: string;
   actorId: string;
   actorKind: "human" | "harness";
+  runId: string;
+  runFence: number;
   body: NodeReportRequest;
 }>;
 
 export type ReportOutcomeResult = NodeReportResult;
 
 export type ReportOutcomeRefusal =
+  | RunAuthorityRefusalCode
   | "node-not-found"
   | "initiative-not-reportable"
   | "body-kind-mismatch"
@@ -106,6 +120,7 @@ export function reportOutcome(
 ): ReportOutcomeResult {
   return dependencies.storage.transact((transaction) => {
     const now = dependencies.clock.now();
+    dependencies.expiry.expireRuns(transaction, { now });
 
     const node = dependencies.plan.readNode(transaction, input.nodeId);
     if (node === null) {
@@ -122,6 +137,17 @@ export function reportOutcome(
     if (node.kind === "objective") {
       switch (body.report) {
         case "attested":
+        case "closed":
+          break;
+        default:
+          throw new ReportOutcomeError(
+            "body-kind-mismatch",
+            `a task report names a task node, not the objective ${node.id}`,
+          );
+      }
+      assertRunAuthorityForReport(dependencies, transaction, input, now);
+      switch (body.report) {
+        case "attested":
           return dependencies.reportObjective(transaction, {
             nodeId: node.id,
             actorId: input.actorId,
@@ -136,11 +162,6 @@ export function reportOutcome(
             actorKind: input.actorKind,
             acknowledgePartial: body.acknowledgePartial,
           });
-        default:
-          throw new ReportOutcomeError(
-            "body-kind-mismatch",
-            `a task report names a task node, not the objective ${node.id}`,
-          );
       }
     }
 
@@ -170,47 +191,12 @@ export function reportOutcome(
       );
     }
 
-    const leaseRecord = dependencies.lease.read(transaction, {
-      subjectKind: "node",
-      subjectId: node.id,
+    const run = assertRunAuthorityForReport(
+      dependencies,
+      transaction,
+      input,
       now,
-    });
-    const staleLease = `the lease of ${node.id} is not held by ${input.actorId} at fence ${body.fence}`;
-    if (
-      leaseRecord !== null &&
-      leaseRecord.owner !== null &&
-      leaseRecord.ownerKind !== null &&
-      leaseRecord.expiresAt !== null &&
-      leaseRecord.expiresAt > now &&
-      leaseRecord.owner !== input.actorId
-    ) {
-      throw new ReportOutcomeError("lease-held", staleLease, {
-        subject: node.id,
-        holder: leaseRecord.owner,
-        holderKind: leaseRecord.ownerKind,
-        fence: leaseRecord.fence,
-        expiresAt: leaseRecord.expiresAt,
-        relation: "self",
-      });
-    }
-    if (
-      leaseRecord === null ||
-      leaseRecord.owner !== input.actorId ||
-      leaseRecord.fence !== body.fence ||
-      leaseRecord.expiresAt === null ||
-      leaseRecord.expiresAt <= now
-    ) {
-      throw new ReportOutcomeError("lease-held", staleLease);
-    }
-
-    const run = dependencies.execution.activeRunOfNode(transaction, node.id);
-    if (run === null) {
-      throw new ReportOutcomeError(
-        "illegal-transition",
-        `the task ${node.id} holds no active run`,
-        { guard: "no-active-run" },
-      );
-    }
+    );
     const openAttempts = dependencies.execution
       .attemptsOfRun(transaction, run.id)
       .filter((attempt) => attempt.outcome === null);
@@ -279,14 +265,24 @@ export function reportOutcome(
       });
     }
 
-    dependencies.lease.release(transaction, {
-      subjectKind: "node",
-      subjectId: node.id,
-      owner: input.actorId,
-      ownerKind: "actor",
-      fence: body.fence,
-      now,
-    });
+    try {
+      dependencies.lease.release(transaction, {
+        subjectKind: "node",
+        subjectId: node.id,
+        owner: input.actorId,
+        ownerKind: "actor",
+        fence: body.fence,
+        now,
+      });
+    } catch (error) {
+      if (error instanceof LeaseError && error.code === "lease-fenced") {
+        throw new ReportOutcomeError(
+          "lease-held",
+          `the lease of ${node.id} is not held by ${input.actorId} at fence ${body.fence}`,
+        );
+      }
+      throw error;
+    }
 
     dependencies.events.append(transaction, {
       subjectKind: "node",
@@ -340,6 +336,36 @@ export function reportOutcome(
         : null,
     };
   });
+}
+
+function assertRunAuthorityForReport(
+  dependencies: ReportOutcomeDependencies,
+  transaction: Transaction,
+  input: ReportOutcomeInput,
+  now: number,
+): RunRecord {
+  const run = dependencies.execution.runById(transaction, input.runId);
+  const refusal = assertRunAuthority({
+    run,
+    runId: input.runId,
+    fence: input.runFence,
+    targetNodeId: input.nodeId,
+    caller: dependencies.caller,
+    now,
+  });
+  if (refusal !== null) {
+    throw new ReportOutcomeError(
+      refusal.refusal,
+      `run ${refusal.runId} is not authorized for reporting`,
+      { runId: refusal.runId },
+    );
+  }
+  if (run === null) {
+    throw new ReportOutcomeError("run-not-found", `no run ${input.runId}`, {
+      runId: input.runId,
+    });
+  }
+  return run;
 }
 
 function compareIds(left: string, right: string): number {

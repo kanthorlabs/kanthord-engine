@@ -54,14 +54,16 @@ A workable serial order: **1 → 2 → 7 → 3 → 4 → 5 → 6 → 8 → 9**. 
 - 7 — The worker contract → `07-the-worker-contract.md`
 - 8 — The policy amendment and the capability swap → `08-the-policy-amendment-and-the-capability-swap.md`
 - 9 — The proposal records the authority model → `09-the-proposal-records-the-authority-model.md`
+- 10 — The reused objective run → `10-the-reused-objective-run.md`
 
 ## Decisions taken during authoring, and now recorded in the EPIC
 
-Four questions the diagrams exposed. A human ruled each one.
+Four questions the diagrams exposed, and three a review of the implementation exposed. A human ruled
+each one.
 
 - **The node read precedes the authority check on all three operations.** `assertRunAuthority`
-  condition 5 refuses `target-outside-run` for a target that is neither the run's node nor in its
-  subtree, and an absent node and an initiative both satisfy it. With the node read after the
+  condition 5 refuses `target-outside-run` for a target that is not the run's node, and an absent
+  node and an initiative both satisfy it. With the node read after the
   authority check, `src/commands/node/release-node.ts:68` — `node-not-found`,
   `src/commands/node/release-node.ts:72` — `initiative-not-claimable`,
   `src/commands/node/heartbeat-node.ts:70` — `node-not-found`,
@@ -70,6 +72,27 @@ Four questions the diagrams exposed. A human ruled each one.
   and two wire-visible codes change meaning. The four ship diagrams therefore read the node first,
   and each of Stories 3, 5 and 6 carries a pair of cases plus a `target-outside-run` control that
   proves the precedence. See `03-the-renew.md`, `05-the-release.md`, `06-the-report-prelude.md`.
+
+- **Condition 5 binds a write to the run's own node.** An earlier draft admitted any target inside
+  `plan.readSubtree(run.nodeId)`. A structural objective run holds no attempt, so that admission let
+  a task release present the objective run id and refuse `no-open-attempt`, and let a task report
+  present it and reach `src/commands/outcome/report-outcome.ts:209` — a bare `Error`, which is a 500.
+  Condition 5 is now `targetNodeId === run.nodeId`, `subtreeIds` leaves the input, and
+  `plan.readSubtree` leaves all three preludes. EPIC 052 owns the subtree-bound structural mutation
+  and declares its own admission; it never widens this condition in place. See `01-run-authority.md`.
+
+- **The claim response names two run fences.** It returned `objectiveRunId` with no fence of that
+  run, so every caller presented `objectiveLease.fence` instead. The two are separate counters, and
+  a reused objective run makes them diverge, so the presented value is refused `fence-stale`. The
+  response now carries `runFence` and `objectiveRunFence`, the top-level `fence` is renamed to the
+  first, and the CLI and the e2e harness name four fences. See `07-the-worker-contract.md`.
+
+- **A task renew moves the objective run, and a claim refreshes the one it reuses.** The shipped
+  renew moved the task run alone, so the structural objective run expired under a live task run and
+  the later attest or close refused `run-ended`. Each run clamps to its own `max_lifetime_at`, so an
+  objective run that reaches its lifetime ends the whole objective attempt. The renew half is
+  `03-the-renew.md`; the claim half is `10-the-reused-objective-run.md`, which also draws the reuse
+  branch EPIC 050.1 left undrawn.
 
 - **Story 5 converts all three `lease.released` producers, the objective path included.** They are
   `src/commands/node/release-node.ts:154`, `:191` and `src/commands/node/release-node.ts:290` —
@@ -153,10 +176,10 @@ template. Every fact there holds here. These are the additions this authoring ve
 - **No `PlanStore` method touches `node.assignment`.** The column is declared at
   `src/services/storage/migration-0011-deliverable.ts:26` — `assignment`, and `setNodeAssignment`
   exists nowhere. The epic's two assignment assertions read the raw row by SQL.
-- **`eventTypes` holds 38 members**, at `src/domain/event-type.ts:1` — `eventTypes`, and
+- **`eventTypes` holds 39 members**, at `src/domain/event-type.ts:1` — `eventTypes`, and
   `src/domain/event-type.ts:44` — `retiredEventTypes` is typed `readonly EventType[]`, so a removed
   member cannot be listed there at all. `src/http/contract/openapi.test.ts:416` — `equal` pins the
-  count at 38; both event changes of this epic are replacements, so it does not move.
+  count at 39; both event changes of this epic are replacements, so it does not move.
 - **`"renew"` sorts to index 15 of `actionSegments`**, between
   `src/http/contract/path.ts:55` — `rename` and `src/http/contract/path.ts:56` — `report`:
   `"rename" < "renew"` at the fourth character and `"renew" < "report"` at the third. The array holds

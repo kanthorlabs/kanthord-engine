@@ -50,24 +50,23 @@ sequenceDiagram
     Command->>Clock: 2 clock.now
     Command->>Expiry: 3 expiry.expireRuns
     Command->>Execution: 4 execution.runById:R
-    Command->>Plan: 5 plan.readSubtree
-    Command->>Plan: 6 plan.readNode
-    Command->>Execution: 7 execution.attemptsOfRun:R
-    Command->>Execution: 8 execution.closeAttempt:A
-    Command->>Plan: 9 plan.setNodeState:T:claim-released
-    Command->>Execution: 10 execution.endRun:R
-    Command->>Events: 11 events.append:run.ended:R
+    Command->>Plan: 5 plan.readNode
+    Command->>Execution: 6 execution.attemptsOfRun:R
+    Command->>Execution: 7 execution.closeAttempt:A
+    Command->>Plan: 8 plan.setNodeState:T:claim-released
+    Command->>Execution: 9 execution.endRun:R
+    Command->>Events: 10 events.append:run.ended:R
     Command-->>Client: ok
 ```
 
-**`plan.readNode` at step 6 is a context token, and it stays.** EPIC 050.2 Story 5 (`05-the-release`)
+**`plan.readNode` at step 5 is a context token, and it stays.** EPIC 050.2 Story 5 (`05-the-release`)
 states what it supplies: `node.kind` for the branch, `node.revision` for `cause`, and the
-`node-not-found` and `initiative-not-claimable` refusals — and `plan.readSubtree` returns ids alone,
-so it replaces neither. That story's own case asserts both refusals still fire. This story deletes
+`node-not-found` and `initiative-not-claimable` refusals — and the run row carries none of them.
+That story's own case asserts both refusals still fire. This story deletes
 the lease and no consumer of the node row, so the read is unchanged and no `Seams:` token governs it.
 
-One step leaves the superseded diagram, and `Lease` leaves the participant list. Step 10 is still the
-last write and step 11 the only event, so a release appends exactly one terminal event.
+One step leaves the superseded diagram, and `Lease` leaves the participant list. Step 9 is still the
+last write and step 10 the only event, so a release appends exactly one terminal event.
 
 Add `test/sequence/scenarios/release-lease-free.ts`.
 
