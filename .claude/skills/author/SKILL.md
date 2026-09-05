@@ -55,6 +55,11 @@ Abort with a clear message on any failure.
 7. **Every story entry declares a kind.** An entry with none: stop and report it.
    The kind decides what the story draws, and guessing it is `/plan`'s work done
    here.
+8. **The debate engine is available.** `KANTHOR_DEBATE_ENGINE` is set to an engine
+   whose binary is executable. The **Debate review** needs it. It is missing:
+   report a blocker and stop before you write a story file. A run that writes the
+   set and then fails the review leaves an expanded directory the next run refuses
+   to clobber.
 
 ## Step 2 — Read the EPIC, which is the source of truth
 
@@ -411,7 +416,7 @@ order proving no story depends on a later one>
 ```
 
 A decision you had to take while authoring goes here **and** into the EPIC's
-`## Decisions` — by asking the human, never by deciding alone. See Step 7.
+`## Decisions` — by asking the human, never by deciding alone. See the **Report**.
 
 ## Step 6 — Self-check, and prove it
 
@@ -453,11 +458,47 @@ perform its checks yourself over what you wrote, and report each result:
 
 A failure here is yours to fix before you report, not the reader's to find.
 
-## Step 7 — Report
+## Step 7 — Debate review, before the report
+
+The story set is not finished until an adversarial reader has attacked it. Run
+this step on every run that wrote or amended a file. A run that stops in
+**Parse and pre-flight** never reaches it, and a **Self-check** pass never
+excuses it.
+
+1. Invoke `/debate` with a prompt that names, by path, every artifact this run
+   changed: each story file, `index.md`, every earlier story a supersession
+   amended, and every scenario file a supersession deleted. Name the EPIC file,
+   `.agents/plan/authoring.md` and the `## Architecture` section of `AGENTS.md` as
+   the sources the set is judged against. `/debate` decides for itself which
+   bodies it inlines for the engine.
+2. State the defect classes the critique must attack, **at minimum**: a diagram
+   whose trace the cited code does not support, a baseline step no fixture state
+   reaches, a `Seams:` sign that contradicts its diagrams, a `## Verify` case whose
+   assertion does not prove its `## Change` obligation, a dispatch order that
+   depends on a later story, and any sentence that leaves a decision to build time.
+   Ask also for any other violation of the standard or of the architecture.
+3. **Any `/debate` failure is a blocker.** A missing engine, a rejected read-only
+   mode, a stall, an empty reply and an error reply all count. Report the failure,
+   print every file this run changed, and stop. Do not report the set as reviewed.
+4. Rule on each critique the debate returns. A critique you accept, you apply to
+   the story file in this run, and the **Self-check** runs again over the edit.
+   A critique you reject, you reject with a reason.
+5. **The debate runs once.** Do not re-invoke it on the edits you just applied.
+   Print those edits in the **Report**, so the human reviews the bytes the debate
+   did not see.
+6. A critique that exposes a behaviour question is a **blocker** for the human,
+   not an edit you make alone, and it is never handed to `/work`. A critique that
+   needs the EPIC changed is also a blocker, because this skill does not edit the
+   EPIC.
+
+## Step 8 — Report
 
 Print the story files created, the diagram ids with their owning story, the
-dispatch order, the seams this epic now owns that no interface declares yet, and
-every open item as a bullet list in the house format:
+dispatch order, the seams this epic now owns that no interface declares yet, the
+debate engine that ran the **Debate review**, every critique it raised with your
+ruling on it,
+every edit you applied after it, and every open item as a bullet list in the house
+format:
 
 ```text
 <B1/S1> - status:<FIXED/OPEN> - action:<YES/NO> - <name> - <description> - fix:<recommended change> - why:<reason>
@@ -492,5 +533,6 @@ Do **not** commit — the human reviews and commits.
 - a gate bullet claiming a property the trace does not prove, in particular "the
   operation wrote nothing" and "every branch is drawn";
 - renaming or renumbering a live diagram id another epic references;
+- reporting a story set that the **Debate review** did not put through `/debate`;
 - editing the EPIC, production code, a test, or any file outside
   `.agents/plan/stories/<epic-slug>/` and the one diagram a supersession retires.
