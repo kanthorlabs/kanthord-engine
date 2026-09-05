@@ -4,11 +4,12 @@ import { Command } from "commander";
 
 import { registerClientOptions } from "../options.ts";
 import type { CallResult } from "../client.ts";
-import { registerNodeHeartbeat } from "./heartbeat.ts";
+import { registerNodeRenew } from "./renew.ts";
 
 const TASK = "task_01JQ8Z7G3HZZZZZZZZZZZZZZZW";
 const OBJECTIVE = "objective_01JQ8Z7G3HZZZZZZZZZZZZZZZV";
 const ACTOR = "actor_01JQ8Z7G3HZZZZZZZZZZZZZZZU";
+const RUN_ID = "run_01JQ8Z7G3HZZZZZZZZZZZZZZZT";
 
 const RENEWED = {
   lease: {
@@ -25,7 +26,8 @@ const RENEWED = {
     fence: 2,
     expiresAt: 1722800900000,
   },
-  heartbeatIntervalMs: 100000,
+  expiresAt: 1722800900000,
+  renewAfterMs: 100000,
 };
 
 type CallOptions = Readonly<{
@@ -74,7 +76,7 @@ const harness = (
   let stderrText = "";
   let failCalls = 0;
   const exitCalls: number[] = [];
-  registerNodeHeartbeat({
+  registerNodeRenew({
     program,
     client,
     stdout: (text) => {
@@ -108,20 +110,46 @@ const run = async (
   await program.parseAsync([...args], { from: "user" });
 };
 
-describe("src/cli/node/heartbeat.test", () => {
-  it("node heartbeat calls node.heartbeat with the id parameter and the fence body", async () => {
+describe("src/cli/node/renew.test", () => {
+  it("node renew calls node.renew with the id parameter and the fence body", async () => {
     const h = harness();
-    await run(h.program, ["node", "heartbeat", "--id", TASK, "--fence", "3"]);
+    await run(h.program, [
+      "node",
+      "renew",
+      "--id",
+      TASK,
+      "--fence",
+      "3",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "3",
+    ]);
 
-    assert.deepEqual(h.calls()[0]?.operationId, "node.heartbeat");
+    assert.deepEqual(h.calls()[0]?.operationId, "node.renew");
     assert.deepEqual(h.calls()[0]?.parameters, { id: TASK });
-    assert.deepEqual(h.calls()[0]?.body, { fence: 3 });
+    assert.deepEqual(h.calls()[0]?.body, {
+      fence: 3,
+      runId: RUN_ID,
+      runFence: 3,
+    });
     assert.equal(h.failCalls(), 0);
   });
 
-  it("node heartbeat prints the renewed line", async () => {
+  it("node renew prints the renewed line", async () => {
     const h = harness();
-    await run(h.program, ["node", "heartbeat", "--id", TASK, "--fence", "3"]);
+    await run(h.program, [
+      "node",
+      "renew",
+      "--id",
+      TASK,
+      "--fence",
+      "3",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "3",
+    ]);
 
     assert.equal(
       h.stdoutText(),
@@ -131,22 +159,55 @@ describe("src/cli/node/heartbeat.test", () => {
     assert.equal(h.failCalls(), 0);
   });
 
-  it("node heartbeat sends an Idempotency-Key of 32 lowercase hex characters", async () => {
+  it("node renew sends an Idempotency-Key of 32 lowercase hex characters", async () => {
     const h = harness();
-    await run(h.program, ["node", "heartbeat", "--id", TASK, "--fence", "3"]);
+    await run(h.program, [
+      "node",
+      "renew",
+      "--id",
+      TASK,
+      "--fence",
+      "3",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "3",
+    ]);
 
     const key = h.calls()[0]?.options?.idempotencyKey ?? "";
     assert.match(key, /^[0-9a-f]{32}$/);
     assert.equal(h.failCalls(), 0);
   });
 
-  it("node heartbeat mints a different Idempotency-Key on two consecutive calls", async () => {
+  it("node renew mints a different Idempotency-Key on two consecutive calls", async () => {
     let counter = 0;
     const h = harness({
       randomBytes: (size) => Buffer.alloc(size, counter++),
     });
-    await run(h.program, ["node", "heartbeat", "--id", TASK, "--fence", "3"]);
-    await run(h.program, ["node", "heartbeat", "--id", TASK, "--fence", "3"]);
+    await run(h.program, [
+      "node",
+      "renew",
+      "--id",
+      TASK,
+      "--fence",
+      "3",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "3",
+    ]);
+    await run(h.program, [
+      "node",
+      "renew",
+      "--id",
+      TASK,
+      "--fence",
+      "3",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "3",
+    ]);
 
     const first = h.calls()[0]?.options?.idempotencyKey ?? "";
     const second = h.calls()[1]?.options?.idempotencyKey ?? "";
@@ -155,16 +216,20 @@ describe("src/cli/node/heartbeat.test", () => {
     assert.notEqual(first, second);
   });
 
-  it("node heartbeat refuses a non-numeric fence without calling the daemon", async () => {
-    for (const value of ["abc", "0", "-1"]) {
+  it("node renew refuses a non-numeric fence without calling the daemon", async () => {
+    for (const value of ["abc", "0", "-1", "1x"]) {
       const h = harness();
       await run(h.program, [
         "node",
-        "heartbeat",
+        "renew",
         "--id",
         TASK,
         "--fence",
         value,
+        "--run-id",
+        RUN_ID,
+        "--run-fence",
+        "3",
       ]);
 
       assert.equal(
@@ -178,7 +243,31 @@ describe("src/cli/node/heartbeat.test", () => {
     }
   });
 
-  it("node heartbeat requires a fence", async () => {
+  it("node renew refuses a run-fence token with a numeric prefix without calling the daemon", async () => {
+    const h = harness();
+    await run(h.program, [
+      "node",
+      "renew",
+      "--id",
+      TASK,
+      "--fence",
+      "3",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "1x",
+    ]);
+
+    assert.equal(
+      h.stderrText(),
+      "kanthord: invalid-request: --run-fence must be a positive integer\n",
+    );
+    assert.equal(h.stdoutText(), "");
+    assert.equal(h.failCalls(), 1);
+    assert.equal(h.calls().length, 0);
+  });
+
+  it("node renew requires a fence", async () => {
     const h = harness();
     const overrideExits = (command: Command): void => {
       command.exitOverride();
@@ -189,7 +278,17 @@ describe("src/cli/node/heartbeat.test", () => {
     overrideExits(h.program);
 
     await assert.rejects(
-      () => run(h.program, ["node", "heartbeat", "--id", TASK]),
+      () =>
+        run(h.program, [
+          "node",
+          "renew",
+          "--id",
+          TASK,
+          "--run-id",
+          RUN_ID,
+          "--run-fence",
+          "3",
+        ]),
       (err: unknown) =>
         err instanceof Error &&
         (err as Readonly<{ code?: string }>).code ===
@@ -198,7 +297,7 @@ describe("src/cli/node/heartbeat.test", () => {
     assert.equal(h.calls().length, 0);
   });
 
-  it("node heartbeat prints the error code and calls fail on a refusal", async () => {
+  it("node renew prints the error code and calls fail on a refusal", async () => {
     const h = harness({
       respond: () => ({
         ok: false as const,
@@ -208,7 +307,18 @@ describe("src/cli/node/heartbeat.test", () => {
         details: undefined,
       }),
     });
-    await run(h.program, ["node", "heartbeat", "--id", TASK, "--fence", "2"]);
+    await run(h.program, [
+      "node",
+      "renew",
+      "--id",
+      TASK,
+      "--fence",
+      "2",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "2",
+    ]);
 
     assert.equal(h.stdoutText(), "");
     assert.equal(
@@ -218,9 +328,18 @@ describe("src/cli/node/heartbeat.test", () => {
     assert.deepEqual(h.exitCodes(), [155]);
   });
 
-  it("node heartbeat without --id writes the invalid-request line and records zero calls", async () => {
+  it("node renew without --id writes the invalid-request line and records zero calls", async () => {
     const h = harness();
-    await run(h.program, ["node", "heartbeat", "--fence", "3"]);
+    await run(h.program, [
+      "node",
+      "renew",
+      "--fence",
+      "3",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "3",
+    ]);
 
     assert.equal(h.failCalls(), 1);
     assert.equal(h.calls().length, 0);

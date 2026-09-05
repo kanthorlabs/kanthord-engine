@@ -178,3 +178,7 @@ export const subtreeBusyDetails = z.strictObject({
   runId: identity("run"),
   expiresAt: epochMillis,
 });
+
+export const runAuthorityDetails = z.strictObject({
+  runId: identity("run"),
+});

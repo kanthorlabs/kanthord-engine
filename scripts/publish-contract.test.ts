@@ -96,7 +96,7 @@ test("scripts/publish-contract", async (t) => {
       ]);
       assert.equal(
         readdirSync(join(directory, "source", "components")).length,
-        18,
+        17,
       );
       assert.equal(
         readdirSync(join(directory, "source", "features")).length,

@@ -7,6 +7,7 @@ import type { CallResult } from "../client.ts";
 import { registerNodeClose } from "./close.ts";
 
 const OBJECTIVE = "objective_01JQ8Z7G3HZZZZZZZZZZZZZZZV";
+const RUN_ID = "run_01JQ8Z7G3HZZZZZZZZZZZZZZZT";
 const OBJECT_ID = "a".repeat(40);
 
 const RESULT = {
@@ -101,13 +102,22 @@ describe("src/cli/node/close.test", () => {
       "close",
       "--id",
       OBJECTIVE,
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "3",
       "--acknowledge-partial",
     ]);
 
     assert.deepEqual(h.calls(), [
       {
         operationId: "node.report",
-        body: { report: "closed", acknowledgePartial: true },
+        body: {
+          report: "closed",
+          runId: RUN_ID,
+          runFence: 3,
+          acknowledgePartial: true,
+        },
         parameters: { id: OBJECTIVE },
       },
     ]);
@@ -118,10 +128,21 @@ describe("src/cli/node/close.test", () => {
 
   it("node close without --acknowledge-partial sends acknowledgePartial false", async () => {
     const h = harness();
-    await run(h.program, ["node", "close", "--id", OBJECTIVE]);
+    await run(h.program, [
+      "node",
+      "close",
+      "--id",
+      OBJECTIVE,
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "3",
+    ]);
 
     assert.deepEqual(h.calls()[0]?.body, {
       report: "closed",
+      runId: RUN_ID,
+      runFence: 3,
       acknowledgePartial: false,
     });
     assert.equal(h.failCalls(), 0);
@@ -129,7 +150,14 @@ describe("src/cli/node/close.test", () => {
 
   it("node close without --id writes the invalid-request line and records zero calls", async () => {
     const h = harness();
-    await run(h.program, ["node", "close"]);
+    await run(h.program, [
+      "node",
+      "close",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "3",
+    ]);
 
     assert.equal(h.failCalls(), 1);
     assert.equal(h.calls().length, 0);
@@ -150,7 +178,16 @@ describe("src/cli/node/close.test", () => {
         details: undefined,
       }),
     });
-    await run(h.program, ["node", "close", "--id", OBJECTIVE]);
+    await run(h.program, [
+      "node",
+      "close",
+      "--id",
+      OBJECTIVE,
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "3",
+    ]);
 
     assert.deepEqual(h.exitCodes(), [154]);
     assert.equal(

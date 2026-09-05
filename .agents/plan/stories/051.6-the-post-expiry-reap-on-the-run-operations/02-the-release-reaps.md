@@ -283,7 +283,7 @@ Extend `src/commands/node/release-node.test.ts`, suite at
 `test/helpers/database.ts:32` — `createMigratedStorage`, and whose byte oracle is
 `test/helpers/database.ts:117` — `databaseBytes`. Case 5 also extends
 `src/commands/run/renew-run.test.ts`, suite at
-`src/commands/node/heartbeat-node.test.ts:227` — `describe`. The route case runs against the daemon
+`src/commands/run/renew-run.test.ts:227` — `describe`. The route case runs against the daemon
 `src/main.test.ts:265` — `launchDaemon` spawns, over the client
 `src/main.test.ts:240` — `clientDependencies` builds.
 

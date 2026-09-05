@@ -2,8 +2,6 @@ export const eventTypes = [
   "actor.registered",
   "actor.revoked",
   "actor.tokenRotated",
-  "lease.released",
-  "lease.renewed",
   "node.awaitingApproval",
   "node.created",
   "node.deleted",
@@ -36,8 +34,10 @@ export const eventTypes = [
   "repository.outsideWriter",
   "repository.register.credentialRejected",
   "repository.registered",
+  "run.ended",
   "run.expired",
   "run.opened",
+  "run.renewed",
 ] as const;
 
 export type EventType = (typeof eventTypes)[number];

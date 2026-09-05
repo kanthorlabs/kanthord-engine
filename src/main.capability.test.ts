@@ -123,9 +123,9 @@ describe("src/main.capability.test", () => {
     };
     assert.deepEqual(body.capabilities, [
       "event-wait",
-      "external-drive",
       "per-node-write",
       "project-graph",
+      "worker-model",
     ]);
   });
 

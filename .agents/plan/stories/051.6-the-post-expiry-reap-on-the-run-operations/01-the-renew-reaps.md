@@ -16,7 +16,7 @@ This story leaves the release reap to Story 2 (`02-the-release-reaps`) and the r
 
 **EPIC 050.2 Story 3 renamed `heartbeat-node.ts` to `src/commands/run/renew-run.ts`**, so every
 citation below names the shipped `heartbeat-node.ts` and locates the code by the symbol that survives
-the rename. `src/http/server/node/heartbeat-node.ts` becomes `src/http/server/node/renew-node.ts` in
+the rename. `src/http/server/node/renew-node.ts` becomes `src/http/server/node/renew-node.ts` in
 the same story, and it is cited the same way.
 
 **A path an earlier epic already drew has no `baseline-` diagram.** Its prior set is
@@ -129,7 +129,7 @@ the whole change is the value the callback carries out plus one statement after 
 ### 1 — the two seam declarations
 
 **Tighten the command's own `Expiry`.** EPIC 050.2 Story 3 gives this command an `expiry` key on
-`RenewRunDependencies` at `src/commands/node/heartbeat-node.ts:22` — `HeartbeatNodeDependencies`, and
+`RenewRunDependencies` at `src/commands/run/renew-run.ts:22` — `RenewRunDependencies`, and
 its `Expiry` copies the shipped declaration at
 `src/commands/node/claim-node.ts:75` — `Expiry`, whose return is
 `src/commands/node/claim-node.ts:79` — `readonly unknown[]`. A command cannot read `runId` off
@@ -165,8 +165,8 @@ value exists so each bucket is asserted by value in `reapRunCandidates`' own tes
 
 ### 2 — the callback carries the expired-run list out
 
-`src/commands/node/heartbeat-node.ts:64` — `storage.transact` opens the one transaction, and
-`src/commands/node/heartbeat-node.ts:109` — `return` is where the callback returns its result today.
+`src/commands/run/renew-run.ts:64` — `storage.transact` opens the one transaction, and
+`src/commands/run/renew-run.ts:109` — `return` is where the callback returns its result today.
 Bind the value `expiry.expireRuns` already returns, and return it beside the result:
 
 ```ts
@@ -188,7 +188,7 @@ adds.
 ### 3 — the reap is a plain statement, and there is no `try`
 
 Every refusal of this command is thrown inside the callback of
-`src/commands/node/heartbeat-node.ts:64` — `storage.transact`, so nothing is raised after the
+`src/commands/run/renew-run.ts:64` — `storage.transact`, so nothing is raised after the
 transaction returns and no exception has to be caught to reach the reap. A `finally` here would mask a
 **success**: `.agents/plan/stories/051.2-the-command-gate/index.md:98` — `finally` rules in this
 repository that a `finally` discards the exception it wrapped and skips what follows it. The totality
@@ -204,28 +204,28 @@ give the conformance runner two traces for one path.
 
 ### 4 — `renewRun` becomes `async`
 
-`src/commands/node/heartbeat-node.ts:63` — `HeartbeatNodeResult` is the shipped return type of the
+`src/commands/run/renew-run.ts:63` — `RenewRunResult` is the shipped return type of the
 function, and it becomes `Promise<RenewRunResult>`. `candidate.reap` resolves a promise, because
 `.agents/plan/epics/051.1-the-candidate-and-the-git-primitives.md:95` — `git.listRefs` returns
 `Promise<string[]>` and `reapRunCandidates` is therefore asynchronous.
 
 ### 5 — the handler gains one `await`
 
-`src/http/server/node/heartbeat-node.ts:9` — `heartbeatNode` declares the injected callable as
-`(input: HeartbeatNodeInput) => unknown`. Change it to
+`src/http/server/node/renew-node.ts:9` — `renewRun` declares the injected callable as
+`(input: RenewRunInput) => unknown`. Change it to
 `(input: RenewRunInput) => Promise<RenewRunResult>`, and add `RenewRunResult` to the type import at
-`src/http/server/node/heartbeat-node.ts:5` — `HeartbeatNodeInput`. The call at
-`src/http/server/node/heartbeat-node.ts:29` — `heartbeatNode` gains an `await`. The handler is already
-asynchronous at `src/http/server/node/heartbeat-node.ts:15` — `async`, and its `try` block at
-`src/http/server/node/heartbeat-node.ts:28` — `try` then catches a rejected refusal exactly as it
+`src/http/server/node/renew-node.ts:5` — `RenewRunInput`. The call at
+`src/http/server/node/renew-node.ts:29` — `renewRun` gains an `await`. The handler is already
+asynchronous at `src/http/server/node/renew-node.ts:15` — `async`, and its `try` block at
+`src/http/server/node/renew-node.ts:28` — `try` then catches a rejected refusal exactly as it
 catches a thrown one. **Add no second key**: a handler parses, calls exactly one command and formats.
 
 `src/cli/node/renew.ts` reaches the daemon over HTTP and does not change.
 
 ### 6 — `src/main.ts` binds the callable
 
-`src/main.ts:588` — `node.heartbeat` is the handler entry and
-`src/main.ts:589` — `heartbeatNode` is the closure. Add `candidate: { reap: boundReapRunCandidates }`
+`src/main.ts:588` — `node.renew` is the handler entry and
+`src/main.ts:589` — `renewRun` is the closure. Add `candidate: { reap: boundReapRunCandidates }`
 to its dependency literal, where `boundReapRunCandidates` is the one callable EPIC 051.5 Story 3
 already constructs for the claim in the shape `src/main.ts:388` — `expiry` sets. The closure returns
 the command's promise unchanged, so it needs no `async` keyword; the handler awaits it. Construct no
@@ -269,9 +269,9 @@ node --test src/commands/run/renew-run.test.ts src/main.test.ts test/sequence/co
 ```
 
 Extend `src/commands/run/renew-run.test.ts` — the shipped
-`src/commands/node/heartbeat-node.test.ts`, suite at
-`src/commands/node/heartbeat-node.test.ts:227` — `describe`, whose fixture is
-`src/commands/node/heartbeat-node.test.ts:72` — `createFixture` over real SQLite through
+`src/commands/run/renew-run.test.ts`, suite at
+`src/commands/run/renew-run.test.ts:227` — `describe`, whose fixture is
+`src/commands/run/renew-run.test.ts:72` — `createFixture` over real SQLite through
 `test/helpers/database.ts:32` — `createMigratedStorage`, and whose byte oracle is
 `test/helpers/database.ts:117` — `databaseBytes`. The route cases run against the daemon
 `src/main.test.ts:265` — `launchDaemon` spawns, over the client

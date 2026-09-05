@@ -36,8 +36,6 @@ const TASK_BETA = "task_01HRZ3NDEKTSV4RRFFQ69G5FAV";
 const INITIATIVE_GAMMA = "initiative_01JQZ3NDEKTSV4RRFFQ69G5FAV";
 const OBJECTIVE_GAMMA = "objective_01KQZ3NDEKTSV4RRFFQ69G5FAV";
 const TASK_GAMMA = "task_01MQZ3NDEKTSV4RRFFQ69G5FAV";
-const OBJECTIVE_RUN_ALPHA = "run_objective_alpha";
-const OBJECTIVE_RUN_BETA = "run_objective_beta";
 
 type StoredRow = Readonly<Record<string, unknown>>;
 
@@ -54,6 +52,7 @@ type ClaimBody = Readonly<{
     owner: string;
   }>;
   runId: string;
+  fence: number;
   objectiveRunId: string;
   attemptId: string | null;
   attemptNo: number | null;
@@ -420,30 +419,6 @@ function runRow(homePath: string, runId: string): StoredRow {
   );
 }
 
-function seedObjectiveRun(
-  homePath: string,
-  objectiveId: string,
-  runId: string,
-  worker: string,
-  fence: number,
-): void {
-  withDatabase(homePath, (database) => {
-    database
-      .prepare(
-        `INSERT INTO run (id, kind, node_id, driver, workspace_id, worker, fence, attempt_limit, head_oid, judged_oid, graph_revision, agents_json, expires_at, max_lifetime_at, state, outcome, ended_at)
-VALUES (?, 'structural', ?, 'external', NULL, ?, ?, 3, NULL, NULL, NULL, '[]', ?, ?, 'active', NULL, NULL)`,
-      )
-      .run(
-        runId,
-        objectiveId,
-        worker,
-        fence,
-        Number.MAX_SAFE_INTEGER,
-        Number.MAX_SAFE_INTEGER,
-      );
-  });
-}
-
 function objectiveLeaseRow(homePath: string, objectiveId: string): StoredRow {
   return withDatabase(homePath, (database) =>
     oneRow(
@@ -668,6 +643,8 @@ async function acceptTask(
   const result = await report(fixture, actor.token, taskId, {
     report: "accepted",
     fence: claimed.lease.fence,
+    runId: claimed.runId,
+    runFence: claimed.fence,
     objectId,
   });
   assertStatus(result, 200);
@@ -678,11 +655,13 @@ async function rejectTask(
   fixture: Fixture,
   actor: Actor,
   taskId: string,
-  fence: number,
+  claimed: ClaimBody,
 ): Promise<NodeReportBody> {
   const result = await report(fixture, actor.token, taskId, {
     report: "rejected",
-    fence,
+    fence: claimed.lease.fence,
+    runId: claimed.runId,
+    runFence: claimed.fence,
     reason: "the harness rejected this attempt",
   });
   assertStatus(result, 200);
@@ -694,17 +673,28 @@ async function blockTask(
   actor: Actor,
   taskId: string,
   limit = 3,
-): Promise<Readonly<{ endedRunId: string; objectiveFence: number }>> {
+): Promise<
+  Readonly<{
+    endedRunId: string;
+    objectiveRunId: string;
+    objectiveRunFence: number;
+    objectiveLeaseFence: number;
+  }>
+> {
   let endedRunId = "";
-  let objectiveFence = 0;
+  let objectiveRunId = "";
+  let objectiveRunFence = 0;
+  let objectiveLeaseFence = 0;
   for (let attempt = 0; attempt < limit; attempt++) {
     const claimed = await claim(fixture, actor, taskId);
-    objectiveFence = claimed.objectiveLease.fence;
+    objectiveRunId = claimed.objectiveRunId;
+    objectiveRunFence = claimed.objectiveLease.fence;
+    objectiveLeaseFence = claimed.objectiveLease.fence;
     endedRunId = claimed.runId;
-    await rejectTask(fixture, actor, taskId, claimed.lease.fence);
+    await rejectTask(fixture, actor, taskId, claimed);
     expireRun(fixture.home.path, taskId);
   }
-  return { endedRunId, objectiveFence };
+  return { endedRunId, objectiveRunId, objectiveRunFence, objectiveLeaseFence };
 }
 
 describe("src/main.report.test", () => {
@@ -720,6 +710,7 @@ describe("src/main.report.test", () => {
       assert.equal(first.report.state, "done");
       assert.equal(first.report.objectiveProjection, null);
       assert.equal(nodeRow(fixture.home.path, TASK_ALPHA_ONE).state, "done");
+      assert.notEqual(first.claim.objectiveRunId, first.claim.runId);
 
       const second = await acceptTask(
         fixture,
@@ -742,14 +733,6 @@ describe("src/main.report.test", () => {
       assert.equal(beforeAttestation.projection, "done");
       assert.equal(beforeAttestation.attestedObjectId, null);
 
-      seedObjectiveRun(
-        fixture.home.path,
-        OBJECTIVE_ALPHA,
-        OBJECTIVE_RUN_ALPHA,
-        "claude@1",
-        first.claim.objectiveLease.fence,
-      );
-
       const attested = await report(
         fixture,
         fixture.harness.token,
@@ -757,6 +740,8 @@ describe("src/main.report.test", () => {
         {
           report: "attested",
           fence: first.claim.objectiveLease.fence,
+          runId: first.claim.objectiveRunId,
+          runFence: first.claim.objectiveLease.fence,
           objectId: OBJECT_ID_TWO,
         },
       );
@@ -764,7 +749,10 @@ describe("src/main.report.test", () => {
       const attestedBody = bodyOf(attested) as NodeReportBody;
       assert.equal(attestedBody.state, "awaiting_approval");
 
-      const activeObjectiveRun = runRow(fixture.home.path, OBJECTIVE_RUN_ALPHA);
+      const activeObjectiveRun = runRow(
+        fixture.home.path,
+        first.claim.objectiveRunId,
+      );
       assert.equal(activeObjectiveRun.state, "active");
       assert.equal(activeObjectiveRun.head_oid, OBJECT_ID_TWO);
 
@@ -775,12 +763,20 @@ describe("src/main.report.test", () => {
         fixture,
         fixture.humanToken,
         OBJECTIVE_ALPHA,
-        { report: "closed", acknowledgePartial: false },
+        {
+          report: "closed",
+          runId: first.claim.objectiveRunId,
+          runFence: first.claim.objectiveLease.fence,
+          acknowledgePartial: false,
+        },
       );
       assertStatus(closed, 200);
       assert.equal((bodyOf(closed) as NodeReportBody).state, "done");
 
-      const endedObjectiveRun = runRow(fixture.home.path, OBJECTIVE_RUN_ALPHA);
+      const endedObjectiveRun = runRow(
+        fixture.home.path,
+        first.claim.objectiveRunId,
+      );
       assert.equal(endedObjectiveRun.state, "ended");
       assert.equal(endedObjectiveRun.outcome, "done");
       assert.equal(
@@ -796,13 +792,6 @@ describe("src/main.report.test", () => {
         OBJECT_ID_ONE,
       );
       assert.equal(betaTask.report.objectiveProjection, "done");
-      seedObjectiveRun(
-        fixture.home.path,
-        OBJECTIVE_BETA,
-        OBJECTIVE_RUN_BETA,
-        "claude@1",
-        betaTask.claim.objectiveLease.fence,
-      );
       const betaAttested = await report(
         fixture,
         fixture.harness.token,
@@ -810,6 +799,8 @@ describe("src/main.report.test", () => {
         {
           report: "attested",
           fence: betaTask.claim.objectiveLease.fence,
+          runId: betaTask.claim.objectiveRunId,
+          runFence: betaTask.claim.objectiveLease.fence,
           objectId: OBJECT_ID_ONE,
         },
       );
@@ -818,7 +809,12 @@ describe("src/main.report.test", () => {
         fixture,
         fixture.humanToken,
         OBJECTIVE_BETA,
-        { report: "closed", acknowledgePartial: false },
+        {
+          report: "closed",
+          runId: betaTask.claim.objectiveRunId,
+          runFence: betaTask.claim.objectiveLease.fence,
+          acknowledgePartial: false,
+        },
       );
       assertStatus(betaClosed, 200);
       assert.equal((bodyOf(betaClosed) as NodeReportBody).state, "done");
@@ -855,14 +851,8 @@ describe("src/main.report.test", () => {
         TASK_ALPHA_TWO,
         OBJECT_ID_TWO,
       );
-      assert.notEqual(second.claim.objectiveRunId, first.claim.objectiveRunId);
-      seedObjectiveRun(
-        fixture.home.path,
-        OBJECTIVE_ALPHA,
-        OBJECTIVE_RUN_ALPHA,
-        "claude@1",
-        first.claim.objectiveLease.fence,
-      );
+      assert.notEqual(second.claim.runId, first.claim.runId);
+      assert.equal(second.claim.objectiveRunId, first.claim.objectiveRunId);
       const attested = await report(
         fixture,
         fixture.harness.token,
@@ -870,6 +860,8 @@ describe("src/main.report.test", () => {
         {
           report: "attested",
           fence: first.claim.objectiveLease.fence,
+          runId: first.claim.objectiveRunId,
+          runFence: first.claim.objectiveLease.fence,
           objectId: OBJECT_ID_TWO,
         },
       );
@@ -883,12 +875,7 @@ describe("src/main.report.test", () => {
     const fixture = await createFixture();
     try {
       const first = await claim(fixture, fixture.harness, TASK_ALPHA_ONE);
-      await rejectTask(
-        fixture,
-        fixture.harness,
-        TASK_ALPHA_ONE,
-        first.lease.fence,
-      );
+      await rejectTask(fixture, fixture.harness, TASK_ALPHA_ONE, first);
       const beforeRestart = taskLeaseRow(fixture.home.path, TASK_ALPHA_ONE);
       assert.equal(beforeRestart.owner, null);
       assert.equal(beforeRestart.expires_at, null);
@@ -992,10 +979,12 @@ describe("src/main.report.test", () => {
         {
           report: "accepted",
           fence: first.lease.fence + 1,
+          runId: first.runId,
+          runFence: first.fence,
           objectId: OBJECT_ID_ONE,
         },
       );
-      assertRefusal(staleFence, 409, "lease-held");
+      assertRefusal(staleFence, 409, "run-ended");
       assert.deepEqual(databaseSnapshot(fixture.home.path), beforeStaleFence);
 
       const beforeStaleOwner = databaseSnapshot(fixture.home.path);
@@ -1006,10 +995,12 @@ describe("src/main.report.test", () => {
         {
           report: "accepted",
           fence: first.lease.fence + 1,
+          runId: first.runId,
+          runFence: first.fence,
           objectId: OBJECT_ID_ONE,
         },
       );
-      assertRefusal(staleOwner, 409, "lease-held");
+      assertRefusal(staleOwner, 409, "run-ended");
       assert.deepEqual(databaseSnapshot(fixture.home.path), beforeStaleOwner);
     } finally {
       await fixture.cleanup();
@@ -1023,6 +1014,8 @@ describe("src/main.report.test", () => {
       const body = {
         report: "accepted",
         fence: claimed.lease.fence,
+        runId: claimed.runId,
+        runFence: claimed.fence,
         objectId: OBJECT_ID_ONE,
       } as const;
       const first = await report(
@@ -1078,6 +1071,8 @@ describe("src/main.report.test", () => {
         {
           report: "accepted",
           fence: claimed.lease.fence,
+          runId: claimed.runId,
+          runFence: claimed.fence,
           objectId: OBJECT_ID_ONE,
         },
       );
@@ -1091,6 +1086,8 @@ describe("src/main.report.test", () => {
         {
           report: "accepted",
           fence: claimed.lease.fence,
+          runId: claimed.runId,
+          runFence: claimed.fence,
           objectId: OBJECT_ID_ONE,
         },
       );
@@ -1101,13 +1098,6 @@ describe("src/main.report.test", () => {
         TASK_ALPHA_TWO,
         OBJECT_ID_TWO,
       );
-      seedObjectiveRun(
-        fixture.home.path,
-        OBJECTIVE_ALPHA,
-        OBJECTIVE_RUN_ALPHA,
-        "claude@1",
-        claimed.objectiveLease.fence,
-      );
       const attested = await report(
         fixture,
         fixture.harness.token,
@@ -1115,6 +1105,8 @@ describe("src/main.report.test", () => {
         {
           report: "attested",
           fence: claimed.objectiveLease.fence,
+          runId: claimed.objectiveRunId,
+          runFence: claimed.objectiveLease.fence,
           objectId: OBJECT_ID_TWO,
         },
       );
@@ -1126,7 +1118,12 @@ describe("src/main.report.test", () => {
         fixture,
         fixture.harness.token,
         OBJECTIVE_ALPHA,
-        { report: "closed", acknowledgePartial: false },
+        {
+          report: "closed",
+          runId: claimed.objectiveRunId,
+          runFence: claimed.objectiveLease.fence,
+          acknowledgePartial: false,
+        },
       );
       assertRefusal(harnessClose, 403, "actor-forbidden");
       assert.deepEqual(databaseSnapshot(fixture.home.path), beforeClose);
@@ -1206,6 +1203,8 @@ describe("src/main.report.test", () => {
       await report(fixture, fixture.harness.token, TASK_ALPHA_ONE, {
         report: "accepted",
         fence: rerun.lease.fence,
+        runId: rerun.runId,
+        runFence: rerun.fence,
         objectId: OBJECT_ID_ONE,
       }).then((result) => assertStatus(result, 200));
       const secondTask = await acceptTask(
@@ -1215,20 +1214,15 @@ describe("src/main.report.test", () => {
         OBJECT_ID_TWO,
       );
       assert.equal(secondTask.report.objectiveProjection, "done");
-      seedObjectiveRun(
-        fixture.home.path,
-        OBJECTIVE_ALPHA,
-        OBJECTIVE_RUN_ALPHA,
-        "claude@1",
-        blocked.objectiveFence,
-      );
       const attested = await report(
         fixture,
         fixture.harness.token,
         OBJECTIVE_ALPHA,
         {
           report: "attested",
-          fence: blocked.objectiveFence,
+          fence: blocked.objectiveLeaseFence,
+          runId: blocked.objectiveRunId,
+          runFence: blocked.objectiveRunFence,
           objectId: OBJECT_ID_TWO,
         },
       );
@@ -1237,7 +1231,12 @@ describe("src/main.report.test", () => {
         fixture,
         fixture.humanToken,
         OBJECTIVE_ALPHA,
-        { report: "closed", acknowledgePartial: false },
+        {
+          report: "closed",
+          runId: blocked.objectiveRunId,
+          runFence: blocked.objectiveRunFence,
+          acknowledgePartial: false,
+        },
       );
       assertStatus(closed, 200);
       assert.equal((bodyOf(closed) as NodeReportBody).state, "done");
@@ -1280,7 +1279,7 @@ describe("src/main.report.test", () => {
       assert.deepEqual(refused.details, {
         refusal: "node-state",
         state: "pending",
-        admitted: ["ready", "running"],
+        admitted: ["ready"],
       });
       assert.deepEqual(databaseSnapshot(fixture.home.path), beforeClaim);
     } finally {

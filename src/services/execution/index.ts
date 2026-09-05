@@ -103,6 +103,11 @@ export interface Execution {
     transaction: Transaction,
     nodeIds: readonly string[],
   ): readonly RunRecord[];
+  runById(transaction: Transaction, runId: string): RunRecord | null;
+  renewRun(
+    transaction: Transaction,
+    input: Readonly<{ runId: string; expiresAt: number }>,
+  ): RunRecord;
   latestRunOfNode(transaction: Transaction, nodeId: string): RunRecord | null;
   adoptRun(transaction: Transaction, input: AdoptRunInput): RunRecord;
   endRun(transaction: Transaction, input: EndRunInput): RunRecord;

@@ -30,9 +30,9 @@ export const harnessOperations = [
   "node.claim",
   "node.create",
   "node.delete",
-  "node.heartbeat",
   "node.list",
   "node.release",
+  "node.renew",
   "node.report",
   "node.show",
   "node.update",
@@ -117,8 +117,8 @@ describe("src/http/contract/registry.test", () => {
       "node.claim",
       "node.create",
       "node.delete",
-      "node.heartbeat",
       "node.release",
+      "node.renew",
       "node.report",
       "node.update",
       "plan.import",
@@ -149,9 +149,9 @@ describe("src/http/contract/registry.test", () => {
       "node.claim",
       "node.create",
       "node.delete",
-      "node.heartbeat",
       "node.list",
       "node.release",
+      "node.renew",
       "node.report",
       "node.show",
       "node.unblock",
@@ -684,7 +684,7 @@ describe("src/http/contract/registry.test", () => {
         "node.claim",
         "node.create",
         "node.delete",
-        "node.heartbeat",
+        "node.renew",
         "node.release",
         "node.report",
         "node.update",
@@ -838,12 +838,8 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("node.claim, node.heartbeat and node.release each declare memory idempotency and replayable [200]", () => {
-    for (const operationId of [
-      "node.claim",
-      "node.heartbeat",
-      "node.release",
-    ]) {
+  it("node.claim, node.renew and node.release each declare memory idempotency and replayable [200]", () => {
+    for (const operationId of ["node.claim", "node.renew", "node.release"]) {
       const entry = findOperation(operationId);
       assert.notEqual(entry, undefined, operationId);
       assert.equal(idempotencyOf(entry!), "memory", operationId);
@@ -852,11 +848,7 @@ describe("src/http/contract/registry.test", () => {
   });
 
   it("each of the three admits human and harness", () => {
-    for (const operationId of [
-      "node.claim",
-      "node.heartbeat",
-      "node.release",
-    ]) {
+    for (const operationId of ["node.claim", "node.renew", "node.release"]) {
       assert.deepEqual(
         findOperation(operationId)?.allowedActors,
         ["human", "harness"],
@@ -865,12 +857,12 @@ describe("src/http/contract/registry.test", () => {
     }
   });
 
-  it("the three new paths render as expected", () => {
+  it("the three worker paths render as expected", () => {
     const claim = findOperation("node.claim");
-    const heartbeat = findOperation("node.heartbeat");
+    const renew = findOperation("node.renew");
     const release = findOperation("node.release");
     assert.equal(renderPath(claim!.path), "/v1/node/:id/claim");
-    assert.equal(renderPath(heartbeat!.path), "/v1/node/:id/heartbeat");
+    assert.equal(renderPath(renew!.path), "/v1/node/:id/renew");
     assert.equal(renderPath(release!.path), "/v1/node/:id/release");
   });
 
@@ -883,6 +875,17 @@ describe("src/http/contract/registry.test", () => {
     assert.equal(entry!.introducedIn, "phase-1");
     assert.equal(entry!.status, "routed");
     assert.deepEqual(registryFaults(registry), []);
+  });
+
+  it("node.heartbeat is absent from the registry", () => {
+    assert.equal(findOperation("node.heartbeat"), undefined);
+  });
+
+  it("node.renew is routed", () => {
+    const entry = findOperation("node.renew");
+    assert.notEqual(entry, undefined);
+    assert.equal(entry!.status, "routed");
+    assert.equal(renderPath(entry!.path), "/v1/node/:id/renew");
   });
 
   it("flags a replayable outcome declared without a memory policy", () => {
@@ -1057,7 +1060,7 @@ describe("src/http/contract/registry.test", () => {
         "node.claim",
         "node.create",
         "node.delete",
-        "node.heartbeat",
+        "node.renew",
         "node.release",
         "node.update",
         "project.nodes",

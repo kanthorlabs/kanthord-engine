@@ -173,22 +173,36 @@ function readyTaskIds(response: HttpResponse): readonly string[] {
     .map((node) => stringField(node, "id"));
 }
 
-function parseClaim(
-  stdout: string,
-): Readonly<{ fence: number; expiresAt: number }> {
-  const match =
-    /^kanthord: claimed \S+ fence ([1-9][0-9]*) expires ([1-9][0-9]*) heartbeat [0-9]+ms$/m.exec(
+function parseClaim(stdout: string): Readonly<{
+  fence: number;
+  expiresAt: number;
+  runId: string;
+  runFence: number;
+}> {
+  const lease =
+    /^kanthord: claimed \S+ lease-fence ([1-9][0-9]*) expires ([1-9][0-9]*)$/m.exec(
       stdout,
     );
-  if (match === null) {
+  const run =
+    /^kanthord: run (\S+) run-fence ([1-9][0-9]*) attempt [1-9][0-9]* objective-run \S+ objective-lease-fence [1-9][0-9]*$/m.exec(
+      stdout,
+    );
+  if (lease === null || run === null) {
     return fail("the node claim command returned no claim");
   }
-  const fence = Number(match[1]);
-  const expiresAt = Number(match[2]);
-  if (!Number.isSafeInteger(fence) || !Number.isSafeInteger(expiresAt)) {
+  const fence = Number(lease[1]);
+  const expiresAt = Number(lease[2]);
+  const runId = run[1];
+  const runFence = Number(run[2]);
+  if (
+    !Number.isSafeInteger(fence) ||
+    !Number.isSafeInteger(expiresAt) ||
+    !Number.isSafeInteger(runFence) ||
+    runId === undefined
+  ) {
     return fail("the node claim command returned an unsafe fence or expiry");
   }
-  return { fence, expiresAt };
+  return { fence, expiresAt, runId, runFence };
 }
 
 function showIdentity(response: HttpResponse): NodeIdentity {
@@ -342,9 +356,12 @@ export async function runP1BE3(
   }
 
   context.assert("takeover-status", 200, takeover.status);
-  const takeoverLease = asObject(objectBody(takeover).lease);
+  const takeoverBody = objectBody(takeover);
+  const takeoverLease = asObject(takeoverBody.lease);
   const newFence = integerField(takeoverLease, "fence");
   const takeoverExpiry = integerField(takeoverLease, "expiresAt");
+  const takeoverRunId = stringField(takeoverBody, "runId");
+  const takeoverRunFence = integerField(takeoverBody, "fence");
   context.assert("takeover-fence-greater", true, newFence > firstFence);
   const takeoverAt = clock.now();
 
@@ -369,6 +386,8 @@ export async function runP1BE3(
     request("POST", `/v1/node/${pathSegment(taskId)}/report`, first.tokenFile, {
       report: "accepted",
       fence: firstFence,
+      runId: firstClaim.runId,
+      runFence: firstClaim.runFence,
       objectId,
     }),
   );
@@ -401,6 +420,10 @@ export async function runP1BE3(
       objectId,
       "--fence",
       String(newFence),
+      "--run-id",
+      takeoverRunId,
+      "--run-fence",
+      String(takeoverRunFence),
     ],
     { tokenFile: second.tokenFile },
   );

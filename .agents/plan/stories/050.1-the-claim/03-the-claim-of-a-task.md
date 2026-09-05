@@ -105,15 +105,17 @@ sequenceDiagram
     Command->>Lease: 13 lease.acquire:O
     Command->>Lease: 14 lease.acquire:T
     Command->>Plan: 15 plan.setNodeAssignment:T
-    Command->>Execution: 16 execution.openRun:T
-    Command->>Execution: 17 execution.openAttempt:R
-    Command->>Plan: 18 plan.setNodeState:T:claim-taken
-    Command->>Plan: 19 plan.setNodeState:O:ancestor-started
-    Command->>Plan: 20 plan.setNodeState:I:ancestor-started
-    Command->>Events: 21 events.append:run.opened:R
-    Command->>Events: 22 events.append:node.running:O:child-started
-    Command->>Events: 23 events.append:node.running:I:child-started
-    Command->>Events: 24 events.append:node.running:T:claim-taken
+    Command->>Execution: 16 execution.openRun:O
+    Command->>Execution: 17 execution.openRun:T
+    Command->>Execution: 18 execution.openAttempt:R
+    Command->>Plan: 19 plan.setNodeState:T:claim-taken
+    Command->>Plan: 20 plan.setNodeState:O:ancestor-started
+    Command->>Plan: 21 plan.setNodeState:I:ancestor-started
+    Command->>Events: 22 events.append:run.opened:O
+    Command->>Events: 23 events.append:run.opened:R
+    Command->>Events: 24 events.append:node.running:O:child-started
+    Command->>Events: 25 events.append:node.running:I:child-started
+    Command->>Events: 26 events.append:node.running:T:claim-taken
     Command-->>Client: ok
 ```
 
@@ -121,8 +123,9 @@ Steps 2 to 12 are reads, and step 13 is the first mutation, so every refusal is 
 Steps 6 to 8 are the relative lease reads of `liveLeaseRefusal`, one per relative, in the order
 `relativesOf` returns. Step 11 follows step 10 because the subtree read serves `subtree-busy`, which
 the refusal order places after `objective-busy`, and a read no refusal needs is not taken. Steps 15
-and 16 are the assignment and the run, in the one transaction the epic requires. Steps 19 and 20 are
-the cascade, unrolled, so the cascade order is part of the contract.
+to 18 are the assignment, the objective run, the task run and the attempt, in the one transaction
+the epic requires. Steps 20 and 21 are the cascade, unrolled, so the cascade order is part of the
+contract.
 
 Add `test/sequence/scenarios/claim-success-task.ts`.
 
@@ -138,8 +141,9 @@ nobody holds.
 `node.deliverable` is `NOT NULL` after migration `12`, so there is no legacy node and no branch.
 
 **Delete `openOrAdoptRun` at `src/commands/node/claim-node.ts:449` and its call site at `:459-483`.**
-A claim opens exactly one run and never adopts one. A task claim opens **no parent objective run**,
-which is what keeps `run_one_active` free.
+A task claim opens a structural objective run when none is active, then opens its execution task run.
+Later task claims under the same objective reuse that active objective run and open their own task run.
+The objective run carries the authority for objective attestation and closure.
 
 **Delete the own-lease replay path at `src/commands/node/claim-node.ts:179-199` and `replayResult` at
 `:362-418`.** That block holds the second `lease.read` of the target, which no diagram can draw. A
@@ -401,7 +405,7 @@ Add, each as a separate `it`:
 
 23. `"the refusal decision table names one winner per pair"` — a table over every pair of the **eleven** refusals this story raises that can trigger at once, asserting the winner of each pair. Story 5 extends the table with the `objective-busy` rows when it inserts that refusal, so no pair is asserted twice. A trace proves the read order and never the precedence.
 
-24. `"a task claim opens exactly one run"` — assert `SELECT COUNT(*) AS c FROM run WHERE state = 'active'` equals `1` and its `node_id` is the task. No parent objective run is opened.
+24. `"a task claim opens one structural objective run and one execution task run"` — assert the active run rows hold one structural run on the objective and one execution run on the task, with distinct ids, and assert the returned objective authority names the structural run.
 
 25. `"run-driver-mismatch is not a member of ClaimRefusal"` — assert against the exported refusal list.
 

@@ -120,7 +120,7 @@ No phase-1 scenario crosses the VPN. Routing, binding across two machines and to
 - **Why it exists:** one registered harness must complete the claim, report, attestation and close loop through the packaged daemon.
 - **Automation:** `scripts/e2e/run.mjs P1B-E1`
 - **Human action:** none
-- **Oracle:** one registered harness lists the ready frontier; each alpha task claims with attempt number 1, heartbeats, and reports `accepted`; alpha reaches `awaiting_approval` on an attestation; `node show` returns that `attestedObjectId` and the computed `projection`; an attest by the human token is `403 actor-forbidden`; `node close` by the human token moves alpha to `done`; `gamma` still reads `pending` and beta's first task still reads `ready`.
+- **Oracle:** one registered harness lists the ready frontier; each alpha task claims with attempt number 1, renews, and reports `accepted`; alpha reaches `awaiting_approval` on an attestation; `node show` returns that `attestedObjectId` and the computed `projection`; an attest by the human token is `403 actor-forbidden`; `node close` by the human token moves alpha to `done`; `gamma` still reads `pending` and beta's first task still reads `ready`.
 - **Evidence:** every command with its exit status, and the node state of each of the five tasks by identity.
 
 ### P1B-E2 — Two harness clients on one daemon
@@ -142,5 +142,5 @@ No phase-1 scenario crosses the VPN. Routing, binding across two machines and to
 - **Automation:** `scripts/e2e/run.mjs P1B-E3`
 - **Human action:** none
 - **Topology:** the topology of P1B-E2.
-- **Oracle:** an unheartbeated lease expires; the second client's first `200` carries a fence greater than the first; a report on the stale fence is `409 lease-held` and changes no node state; exactly one `outcome.reported` event exists for the task, naming the second actor.
+- **Oracle:** an unrenewed run expires; the second client's first `200` carries a fence greater than the first; a report on the stale run fence is `409 fence-stale` and changes no node state; exactly one `outcome.reported` event exists for the task, naming the second actor.
 - **Evidence:** the bundle records the observed takeover latency, which is diagnostic.

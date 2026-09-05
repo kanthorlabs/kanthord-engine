@@ -81,7 +81,12 @@ export const systemHealthExamples: OperationExamples = {
   success: {
     status: "ok",
     version: KANTHORD_VERSION,
-    capabilities: ["external-drive", "per-node-write", "project-graph"],
+    capabilities: [
+      "event-wait",
+      "per-node-write",
+      "project-graph",
+      "worker-model",
+    ],
     dependencies: [{ name: "storage", status: "ok" }],
   },
   error: {

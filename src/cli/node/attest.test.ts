@@ -7,6 +7,7 @@ import type { CallResult } from "../client.ts";
 import { registerNodeAttest } from "./attest.ts";
 
 const OBJECTIVE = "objective_01JQ8Z7G3HZZZZZZZZZZZZZZZV";
+const RUN_ID = "run_01JQ8Z7G3HZZZZZZZZZZZZZZZT";
 const OBJECT_ID = "a".repeat(40);
 
 const RESULT = {
@@ -103,6 +104,10 @@ describe("src/cli/node/attest.test", () => {
       OBJECTIVE,
       "--fence",
       "3",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "3",
       "--object-id",
       OBJECT_ID,
     ]);
@@ -110,7 +115,13 @@ describe("src/cli/node/attest.test", () => {
     assert.deepEqual(h.calls(), [
       {
         operationId: "node.report",
-        body: { report: "attested", fence: 3, objectId: OBJECT_ID },
+        body: {
+          report: "attested",
+          fence: 3,
+          runId: RUN_ID,
+          runFence: 3,
+          objectId: OBJECT_ID,
+        },
         parameters: { id: OBJECTIVE },
       },
     ]);
@@ -125,6 +136,10 @@ describe("src/cli/node/attest.test", () => {
       "node",
       "attest",
       "--fence",
+      "3",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
       "3",
       "--object-id",
       OBJECT_ID,
@@ -148,6 +163,10 @@ describe("src/cli/node/attest.test", () => {
       OBJECTIVE,
       "--fence",
       "3.0",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
+      "3",
       "--object-id",
       OBJECT_ID,
     ]);
@@ -174,6 +193,10 @@ describe("src/cli/node/attest.test", () => {
       "--id",
       OBJECTIVE,
       "--fence",
+      "3",
+      "--run-id",
+      RUN_ID,
+      "--run-fence",
       "3",
       "--object-id",
       OBJECT_ID,

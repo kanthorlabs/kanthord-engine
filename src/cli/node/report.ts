@@ -23,6 +23,8 @@ type ReportOptions = Readonly<{
   id?: string;
   outcome?: string;
   fence?: string;
+  runId?: string;
+  runFence?: string;
   objectId?: string;
   reason?: string;
 }>;
@@ -45,6 +47,8 @@ export function registerNodeReport(input: NodeReportCliInput): void {
       "task outcome: accepted, rejected, failed, or cancelled",
     )
     .option("--fence <n>", "lease fence")
+    .requiredOption("--run-id <id>", "run id")
+    .requiredOption("--run-fence <n>", "run fence")
     .option(
       "--object-id <oid>",
       "40- or 64-hex object id; required for accepted",
@@ -60,6 +64,18 @@ export function registerNodeReport(input: NodeReportCliInput): void {
       };
       if (options.id === undefined) {
         refuse("--id is required");
+        return;
+      }
+      if (options.runId === undefined) {
+        refuse("--run-id is required");
+        return;
+      }
+      const runFence = Number(options.runFence ?? "");
+      if (
+        !/^[1-9][0-9]*$/.test(options.runFence ?? "") ||
+        !Number.isSafeInteger(runFence)
+      ) {
+        refuse("--run-fence must be a positive integer");
         return;
       }
       const fence = Number(options.fence ?? "");
@@ -111,10 +127,18 @@ export function registerNodeReport(input: NodeReportCliInput): void {
       }
       const body: Readonly<Record<string, unknown>> =
         options.outcome === "accepted"
-          ? { report: options.outcome, fence, objectId: options.objectId }
+          ? {
+              report: options.outcome,
+              fence,
+              runId: options.runId,
+              runFence,
+              objectId: options.objectId,
+            }
           : {
               report: options.outcome,
               fence,
+              runId: options.runId,
+              runFence,
               ...(options.reason !== undefined
                 ? { reason: options.reason }
                 : {}),

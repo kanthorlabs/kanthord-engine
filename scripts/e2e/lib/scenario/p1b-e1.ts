@@ -629,7 +629,9 @@ async function runScenario(
 
   await attestObjective(context, driver, harness, {
     nodeId: taskGraph.alphaId,
-    fence: alphaFirstResult.fence,
+    fence: alphaFirstResult.objectiveLeaseFence,
+    runId: alphaFirstResult.objectiveRunId,
+    runFence: alphaFirstResult.objectiveLeaseFence,
     objectId: combinedObjectId,
     label: "alpha",
   });
@@ -671,7 +673,9 @@ async function runScenario(
       humanTokenFile,
       {
         report: "attested",
-        fence: alphaFirstResult.fence,
+        fence: alphaFirstResult.objectiveLeaseFence,
+        runId: alphaFirstResult.objectiveRunId,
+        runFence: alphaFirstResult.objectiveLeaseFence,
         objectId: combinedObjectId,
       },
     ),
@@ -687,7 +691,16 @@ async function runScenario(
       : undefined;
   context.assert("attest-human-code", "actor-forbidden", humanAttestCode);
 
-  await driver.cliAs(harnessRole, ["node", "close", "--id", taskGraph.alphaId]);
+  await driver.cliAs(harnessRole, [
+    "node",
+    "close",
+    "--id",
+    taskGraph.alphaId,
+    "--run-id",
+    alphaFirstResult.objectiveRunId,
+    "--run-fence",
+    String(alphaFirstResult.objectiveLeaseFence),
+  ]);
   const alphaClosed = await driver.cliAs(harnessRole, [
     "node",
     "show",

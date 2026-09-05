@@ -113,9 +113,9 @@ is free, so append the eight after `"subtree-busy"` at `src/cli/exit-code.ts:39`
 `patch-id-duplicate` 177.
 
 `src/cli/exit-code.test.ts:17` — `expected` holds the literal map and
-`src/cli/exit-code.test.ts:60` — `twenty-nine` asserts a count of 29; both move to 36, and the test
-name moves with the count. `src/cli/exit-code.test.ts:86` — `no two codes share an exit code` asserts
-a set size, which becomes 36.
+`src/cli/exit-code.test.ts:67` — `thirty-six` asserts a count of 36; both move to 43, and the test
+name moves with the count. `src/cli/exit-code.test.ts:92` — `no two codes share an exit code` asserts
+a set size, which becomes 43.
 
 **`stale-revision` and `plan-invalid` are left alone in both files.** Both already exist, at
 `src/http/contract/errors.ts:14` — `stale-revision` and `:30` — `plan-invalid`, and at

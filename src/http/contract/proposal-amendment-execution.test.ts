@@ -36,7 +36,7 @@ describe("src/http/contract/proposal-amendment-execution.test", () => {
     assert.ok(execution.includes("`system.status` reports the stale ones."));
     assert.ok(
       execution.includes(
-        "the lease is still not addressable, and a claim, a heartbeat and a release are actions on the node, spelled `POST /v1/node/:id/claim`, `POST /v1/node/:id/heartbeat` and `POST /v1/node/:id/release`.",
+        "The lease is still not addressable, and a claim, a renew and a release are actions on the node, spelled `POST /v1/node/:id/claim`, `POST /v1/node/:id/renew` and `POST /v1/node/:id/release`.",
       ),
       "the lease amendment clause is absent",
     );

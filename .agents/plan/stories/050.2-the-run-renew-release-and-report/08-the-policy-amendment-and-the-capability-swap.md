@@ -43,8 +43,8 @@ record a reader reaches, and case 9 asserts it.
 ### 3 — the capability swap
 
 `src/http/contract/capability.ts:5` — `capabilityOperations` binds
-`src/http/contract/capability.ts:7` — `external-drive` to `node.claim`,
-`src/http/contract/capability.ts:9` — `node.heartbeat`, `node.release` and `node.report` — precisely
+`src/http/contract/capability.ts:7` (formerly `external-drive`) to `node.claim`,
+`src/http/contract/capability.ts:9` (formerly `node.heartbeat`), `node.release` and `node.report` — precisely
 the four operations this epic changes. Retire it and declare `worker-model` in its place:
 
 ```ts

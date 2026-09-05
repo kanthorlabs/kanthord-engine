@@ -59,6 +59,15 @@ export function createExecutionFake(): ExecutionFake {
     ): never {
       return unexpected("activeRunsOfNodes");
     },
+    runById(_transaction: Transaction, _runId: string): never {
+      return unexpected("runById");
+    },
+    renewRun(
+      _transaction: Transaction,
+      _input: Readonly<{ runId: string; expiresAt: number }>,
+    ): never {
+      return unexpected("renewRun");
+    },
     adoptRun(_transaction: Transaction, _input: unknown): never {
       return unexpected("adoptRun");
     },
@@ -337,6 +346,34 @@ ORDER BY node_id, id`,
         nodeIds,
       ) as readonly RunRow[];
       return rows.map(toRunRecord);
+    },
+    runById(transaction: Transaction, runId: string): RunRecord | null {
+      const row = transaction.get(
+        `SELECT ${RUN_COLUMNS}
+FROM run
+WHERE id = ?`,
+        [runId],
+      ) as RunRow | undefined;
+      return row === undefined ? null : toRunRecord(row);
+    },
+    renewRun(
+      transaction: Transaction,
+      input: Readonly<{ runId: string; expiresAt: number }>,
+    ): RunRecord {
+      const rows = transaction.all(
+        `UPDATE run SET expires_at = ?
+WHERE id = ?
+RETURNING ${RUN_COLUMNS}`,
+        [input.expiresAt, input.runId],
+      ) as readonly RunRow[];
+      const row = rows[0];
+      if (row === undefined) {
+        throw new ExecutionError(
+          "run-not-found",
+          `run ${input.runId} is not found`,
+        );
+      }
+      return toRunRecord(row);
     },
     adoptRun(transaction: Transaction, input: AdoptRunInput): RunRecord {
       adoptRunCalls.push(input);

@@ -75,7 +75,11 @@ export default function claimSuccessTask(): Readonly<{
     });
     const execution = new SqliteExecution({
       ids: createMockIdGenerator({
-        ulids: ["00000000000000000000000020", "00000000000000000000000021"],
+        ulids: [
+          "00000000000000000000000020",
+          "00000000000000000000000021",
+          "00000000000000000000000022",
+        ],
       }),
     });
     const expiry: Expiry = {
@@ -115,7 +119,8 @@ export default function claimSuccessTask(): Readonly<{
         [fixtureIds.objective]: "O",
         [fixtureIds.task]: "T",
         [TASK_SIBLING]: "S",
-        run_00000000000000000000000020: "R",
+        run_00000000000000000000000020: "O",
+        run_00000000000000000000000021: "R",
       },
       {
         siblings: [TASK_SIBLING],

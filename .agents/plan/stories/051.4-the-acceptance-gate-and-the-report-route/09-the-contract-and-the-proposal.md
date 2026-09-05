@@ -77,7 +77,7 @@ sorted value.
 `src/http/contract/errors.test.ts:42` — the ordered 29-key pin becomes 35, in table order.
 `src/http/contract/errors.test.ts:113` — the per-status group gains the six under `409`.
 `src/cli/exit-code.test.ts:17` — the `expected` mirror gains the six, and the two hard-coded counts at
-`src/cli/exit-code.test.ts:70` — `29` and `src/cli/exit-code.test.ts:87` — `29` become `35`.
+`src/cli/exit-code.test.ts:67` — `36` and `src/cli/exit-code.test.ts:93` — `36` become `42`.
 
 ### 4 — the CLI
 

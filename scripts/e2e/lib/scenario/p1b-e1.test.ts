@@ -491,11 +491,11 @@ function createFakeScenario(): FakeScenario {
       currentStates[id] = "running";
       return command(
         argv,
-        `kanthord: claimed ${id} fence ${fence} expires 2026-08-17T00:00:00.000Z heartbeat 1000ms\n` +
-          `kanthord: run run-${id} attempt 1 objective-run objective-run-${id} objective-fence ${fence + 100}\n`,
+        `kanthord: claimed ${id} lease-fence ${fence} expires 2026-08-17T00:00:00.000Z\n` +
+          `kanthord: run run-${id} run-fence ${fence + 1000} attempt 1 objective-run objective-run-${id} objective-lease-fence ${fence + 100}\n`,
       );
     }
-    if (argv[0] === "node" && argv[1] === "heartbeat") {
+    if (argv[0] === "node" && argv[1] === "renew") {
       const id = idOption(argv) as string;
       const fence = argv[argv.indexOf("--fence") + 1] as string;
       return command(
@@ -665,6 +665,87 @@ test("claims alpha's first task, alpha's second task and the authored task in th
     )
     .map((call) => idOption(call.argv));
   assert.deepEqual(claimed, [alphaFirstId, alphaSecondId, durableId]);
+});
+
+test("passes task and objective run authority to renew, report, attest and close", async () => {
+  const result = await runScenario();
+  const renew = result.fake.cliCalls.find(
+    (call) =>
+      call.argv[0] === "node" &&
+      call.argv[1] === "renew" &&
+      idOption(call.argv) === alphaFirstId,
+  );
+  const report = result.fake.cliCalls.find(
+    (call) =>
+      call.argv[0] === "node" &&
+      call.argv[1] === "report" &&
+      idOption(call.argv) === alphaFirstId,
+  );
+  const attest = result.fake.cliCalls.find(
+    (call) =>
+      call.argv[0] === "node" &&
+      call.argv[1] === "attest" &&
+      idOption(call.argv) === alphaId,
+  );
+  const close = result.fake.cliCalls.find(
+    (call) =>
+      call.argv[0] === "node" &&
+      call.argv[1] === "close" &&
+      idOption(call.argv) === alphaId,
+  );
+
+  assert.deepEqual(renew?.argv, [
+    "node",
+    "renew",
+    "--id",
+    alphaFirstId,
+    "--fence",
+    "11",
+    "--run-id",
+    `run-${alphaFirstId}`,
+    "--run-fence",
+    "1011",
+  ]);
+  assert.deepEqual(report?.argv, [
+    "node",
+    "report",
+    "--id",
+    alphaFirstId,
+    "--outcome",
+    "accepted",
+    "--object-id",
+    "object-first",
+    "--fence",
+    "11",
+    "--run-id",
+    `run-${alphaFirstId}`,
+    "--run-fence",
+    "1011",
+  ]);
+  assert.deepEqual(attest?.argv, [
+    "node",
+    "attest",
+    "--id",
+    alphaId,
+    "--fence",
+    "111",
+    "--run-id",
+    `objective-run-${alphaFirstId}`,
+    "--run-fence",
+    "111",
+    "--object-id",
+    "object-authored",
+  ]);
+  assert.deepEqual(close?.argv, [
+    "node",
+    "close",
+    "--id",
+    alphaId,
+    "--run-id",
+    `objective-run-${alphaFirstId}`,
+    "--run-fence",
+    "111",
+  ]);
 });
 
 test("authors both nodes under alpha before any claim", async () => {

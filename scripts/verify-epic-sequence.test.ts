@@ -104,8 +104,9 @@ function diagram(
 function assertFixtureRefusal(
   stories: readonly FixtureStory[],
   expected: string | RegExp,
+  scenarioIds: readonly string[] = [],
 ): void {
-  const fixtureRoot = createFixtureTree(stories);
+  const fixtureRoot = createFixtureTree(stories, scenarioIds);
   try {
     assert.throws(
       () => verifyEpicSequence(fixtureRoot),
@@ -253,7 +254,7 @@ describe("scripts/verify-epic-sequence", () => {
       }
 
       writeFileSync(
-        join(storiesRoot, "050.2-fixture", "01-unshipped.md"),
+        join(storiesRoot, "050.3-fixture", "01-unshipped.md"),
         [
           "# Story fixture",
           "",
@@ -941,10 +942,13 @@ describe("scripts/verify-epic-sequence", () => {
               "",
               "Diagrams: lane-path",
               "",
+              "test/sequence/scenarios/lane-path.ts",
+              "",
             ]) + diagram("lane-path", []),
         },
       ],
       /carries a lane declaration/,
+      ["lane-path"],
     );
   });
 

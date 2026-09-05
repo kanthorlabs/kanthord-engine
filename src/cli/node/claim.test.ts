@@ -158,8 +158,8 @@ describe("src/cli/node/claim.test", () => {
 
     assert.equal(
       h.stdoutText(),
-      `kanthord: claimed ${TASK} fence 1 expires 1722800300000\n` +
-        `kanthord: run ${RUN} attempt 1 objective-run ${OBJECTIVE_RUN} objective-fence 2\n`,
+      `kanthord: claimed ${TASK} lease-fence 1 expires 1722800300000\n` +
+        `kanthord: run ${RUN} run-fence 1 attempt 1 objective-run ${OBJECTIVE_RUN} objective-lease-fence 2\n`,
     );
     assert.equal(h.stderrText(), "");
     assert.equal(h.failCalls(), 0);
@@ -177,8 +177,8 @@ describe("src/cli/node/claim.test", () => {
 
     assert.equal(
       h.stdoutText(),
-      `kanthord: claimed ${TASK} fence 1 expires 1722800300000\n` +
-        `kanthord: run ${RUN} attempt - objective-run ${OBJECTIVE_RUN} objective-fence 2\n`,
+      `kanthord: claimed ${TASK} lease-fence 1 expires 1722800300000\n` +
+        `kanthord: run ${RUN} run-fence 1 attempt - objective-run ${OBJECTIVE_RUN} objective-lease-fence 2\n`,
     );
     assert.equal(h.failCalls(), 0);
   });

@@ -16,6 +16,7 @@ import { nodeReleaseResponse } from "../../contract/execution.ts";
 const U = "01JQ8Z7G3HZZZZZZZZZZZZZZZZ";
 const TASK = `task_${U}`;
 const OBJECTIVE = `objective_${U}`;
+const RUN_ID = `run_${U}`;
 const ACTOR = "actor_01JQ8ZAN9P0ABCDEFGHJKMNPQR";
 const HASH = `sha256:${"a".repeat(64)}`;
 
@@ -62,7 +63,7 @@ describe("src/http/server/node/release-node.test", () => {
     const app = await buildApp(() => successResult);
     const response = await app
       .post(`/v1/node/${TASK}/release`)
-      .send({ fence: 1 });
+      .send({ fence: 1, runId: RUN_ID, runFence: 1 });
     assert.equal(response.status, 200);
     assert.equal(nodeReleaseResponse.safeParse(response.body).success, true);
   });
@@ -163,7 +164,7 @@ describe("src/http/server/node/release-node.test", () => {
       });
       const response = await app
         .post(`/v1/node/${TASK}/release`)
-        .send({ fence: 1 });
+        .send({ fence: 1, runId: RUN_ID, runFence: 1 });
       assert.equal(response.status, row.status, row.refusal);
       assert.equal(response.body.error.code, row.code, row.refusal);
       if (row.details === undefined) {
@@ -182,14 +183,16 @@ describe("src/http/server/node/release-node.test", () => {
     const app = await buildApp(() => successResult);
     const response = await app
       .post(`/v1/node/${TASK}/release`)
-      .send({ fence: 1, extra: 2 });
+      .send({ fence: 1, runId: RUN_ID, runFence: 1, extra: 2 });
     assert.equal(response.status, 400);
     assert.equal(response.body.error.code, "invalid-request");
   });
 
   it("node.release with no fence is 400 invalid-request", async (t) => {
     const app = await buildApp(() => successResult);
-    const response = await app.post(`/v1/node/${TASK}/release`).send({});
+    const response = await app
+      .post(`/v1/node/${TASK}/release`)
+      .send({ runId: RUN_ID, runFence: 1 });
     assert.equal(response.status, 400);
     assert.equal(response.body.error.code, "invalid-request");
   });
@@ -202,7 +205,7 @@ describe("src/http/server/node/release-node.test", () => {
     });
     const response = await app
       .post(`/v1/node/${TASK}/release`)
-      .send({ fence: 1 });
+      .send({ fence: 1, runId: RUN_ID, runFence: 1 });
     assert.equal(response.status, 200);
     assert.equal(calls, 1);
   });
@@ -213,20 +216,27 @@ describe("src/http/server/node/release-node.test", () => {
       received.push(input);
       return successResult;
     });
-    const ok = await app.post(`/v1/node/${TASK}/release`).send({ fence: 1 });
+    const ok = await app
+      .post(`/v1/node/${TASK}/release`)
+      .send({ fence: 1, runId: RUN_ID, runFence: 1 });
     assert.equal(ok.status, 200);
     assert.deepEqual(received, [
       {
         nodeId: TASK,
         fence: 1,
+        runId: RUN_ID,
+        runFence: 1,
         actorId: HARNESS_ACTOR_FIXTURE.id,
         actorKind: "harness",
       },
     ]);
 
-    const refused = await app
-      .post(`/v1/node/${TASK}/release`)
-      .send({ fence: 1, actorId: "actor_01JQ8ZAN9P0ABCDEFGHJKMNPQS" });
+    const refused = await app.post(`/v1/node/${TASK}/release`).send({
+      fence: 1,
+      runId: RUN_ID,
+      runFence: 1,
+      actorId: "actor_01JQ8ZAN9P0ABCDEFGHJKMNPQS",
+    });
     assert.equal(refused.status, 400);
     assert.equal(refused.body.error.code, "invalid-request");
   });

@@ -21,7 +21,12 @@ Answers whether the daemon can do its work, by asking each dependency to report 
 {
   "status": "degraded",
   "version": "27.8.1",
-  "capabilities": ["external-drive", "per-node-write", "project-graph"],
+  "capabilities": [
+    "event-wait",
+    "per-node-write",
+    "project-graph",
+    "worker-model"
+  ],
   "dependencies": [
     { "name": "storage", "status": "ok" },
     { "name": "git", "status": "failed" }

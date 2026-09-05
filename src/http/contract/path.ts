@@ -53,6 +53,7 @@ export const actionSegments = [
   "reconcile",
   "release",
   "rename",
+  "renew",
   "report",
   "resolve",
   "revoke",

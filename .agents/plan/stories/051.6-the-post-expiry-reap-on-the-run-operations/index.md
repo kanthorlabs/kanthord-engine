@@ -111,16 +111,16 @@ already in `authoredEpics` and already pinned by
   `src/main.ts:84` — `Expiry` imports the claim's type into the root. One object still reaches all
   four commands.
 - `renewRun` and `releaseNode` are synchronous today, at
-  `src/commands/node/heartbeat-node.ts:63` — `HeartbeatNodeResult` and
+  `src/commands/run/renew-run.ts:63` — `RenewRunResult` and
   `src/commands/node/release-node.ts:61` — `ReleaseNodeResult`. Both become `Promise<…>`.
   `reportOutcome` is already a promise after EPIC 051.4 Story 8.
 - Both handlers are already `async` and neither awaits its command:
-  `src/http/server/node/heartbeat-node.ts:29` — `heartbeatNode` and
+  `src/http/server/node/renew-node.ts:29` — `renewRun` and
   `src/http/server/node/release-node.ts:29` — `releaseNode`. Each gains one `await`, inside the `try`
   it already has.
 - `src/main.ts:603` — `releaseNode` calls `src/main.ts:608` — `showNode` over the command's result, so
   that closure gains `async` and an `await`. The renew closure at
-  `src/main.ts:589` — `heartbeatNode` returns the promise unchanged and needs neither.
+  `src/main.ts:589` — `renewRun` returns the promise unchanged and needs neither.
 - The recorder holds no `candidate.reap` projection.
   `test/helpers/sequence-conformance.ts:50` — `projections` is the table and
   `test/helpers/sequence-conformance.ts:126` — `projection === undefined` yields an empty label list,

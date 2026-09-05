@@ -188,6 +188,36 @@ ORDER BY node_id, id`,
     return rows.map(toRunRecord);
   }
 
+  runById(transaction: Transaction, runId: string): RunRecord | null {
+    const row = transaction.get(
+      `SELECT ${RUN_COLUMNS}
+FROM run
+WHERE id = ?`,
+      [runId],
+    ) as RunRow | undefined;
+    return row === undefined ? null : toRunRecord(row);
+  }
+
+  renewRun(
+    transaction: Transaction,
+    input: Readonly<{ runId: string; expiresAt: number }>,
+  ): RunRecord {
+    const rows = transaction.all(
+      `UPDATE run SET expires_at = ?
+WHERE id = ?
+RETURNING ${RUN_COLUMNS}`,
+      [input.expiresAt, input.runId],
+    ) as readonly RunRow[];
+    const row = rows[0];
+    if (row === undefined) {
+      throw new ExecutionError(
+        "run-not-found",
+        `run ${input.runId} is not found`,
+      );
+    }
+    return toRunRecord(row);
+  }
+
   latestRunOfNode(transaction: Transaction, nodeId: string): RunRecord | null {
     const row = transaction.get(
       `SELECT ${RUN_COLUMNS}
@@ -218,7 +248,7 @@ RETURNING ${RUN_COLUMNS}`,
 
   endRun(transaction: Transaction, input: EndRunInput): RunRecord {
     const rows = transaction.all(
-      `UPDATE run SET state = 'ended', outcome = ?, ended_at = ?
+      `UPDATE run SET state = 'ended', fence = fence + 1, outcome = ?, ended_at = ?
 WHERE id = ? AND state = 'active'
 RETURNING ${RUN_COLUMNS}`,
       [input.outcome, input.at, input.runId],
