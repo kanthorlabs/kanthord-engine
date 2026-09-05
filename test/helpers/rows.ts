@@ -238,14 +238,18 @@ export function seedSiblingTask(transaction: Transaction): void {
   );
 }
 
-export function seedSiblingObjective(transaction: Transaction): void {
+export function seedSiblingObjective(
+  transaction: Transaction,
+  parentId: string = fixtureIds.initiative,
+  id: string = "objective_sibling",
+): void {
   transaction.run(
     "INSERT INTO node (id, project_id, kind, parent_id, title, instruction_blob, acceptance_blob, worker, repository_id, state, block_reason, discard_reason, revision, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', NULL, NULL, ?, ?)",
     [
-      "objective_sibling",
+      id,
       fixtureIds.project,
       "objective",
-      fixtureIds.initiative,
+      parentId,
       "Sibling objective",
       fixtureIds.instructionBlob,
       null,
@@ -354,6 +358,18 @@ export function seedNodeBlockReason(
     blockReason,
     id,
   ]);
+}
+
+export function seedNodeDeliverable(
+  transaction: Transaction,
+  id: string,
+  deliverable: string,
+  verifyJson: string | null,
+): void {
+  transaction.run(
+    "UPDATE node SET deliverable = ?, verify_json = ? WHERE id = ?",
+    [deliverable, verifyJson, id],
+  );
 }
 
 export function seedNode(

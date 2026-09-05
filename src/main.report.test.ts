@@ -480,6 +480,16 @@ function expireRun(homePath: string, nodeId: string): void {
   });
 }
 
+function endRun(homePath: string, nodeId: string): void {
+  withDatabase(homePath, (database) => {
+    database
+      .prepare(
+        "UPDATE run SET state = 'ended', outcome = 'released', ended_at = 2, fence = fence + 1 WHERE node_id = ? AND state = 'active'",
+      )
+      .run(nodeId);
+  });
+}
+
 function daemonInstanceId(homePath: string): string {
   return (
     JSON.parse(
@@ -673,28 +683,15 @@ async function blockTask(
   actor: Actor,
   taskId: string,
   limit = 3,
-): Promise<
-  Readonly<{
-    endedRunId: string;
-    objectiveRunId: string;
-    objectiveRunFence: number;
-    objectiveLeaseFence: number;
-  }>
-> {
+): Promise<Readonly<{ endedRunId: string }>> {
   let endedRunId = "";
-  let objectiveRunId = "";
-  let objectiveRunFence = 0;
-  let objectiveLeaseFence = 0;
   for (let attempt = 0; attempt < limit; attempt++) {
     const claimed = await claim(fixture, actor, taskId);
-    objectiveRunId = claimed.objectiveRunId;
-    objectiveRunFence = claimed.objectiveLease.fence;
-    objectiveLeaseFence = claimed.objectiveLease.fence;
     endedRunId = claimed.runId;
     await rejectTask(fixture, actor, taskId, claimed);
     expireRun(fixture.home.path, taskId);
   }
-  return { endedRunId, objectiveRunId, objectiveRunFence, objectiveLeaseFence };
+  return { endedRunId };
 }
 
 describe("src/main.report.test", () => {
@@ -1154,6 +1151,7 @@ describe("src/main.report.test", () => {
         runRow(fixture.home.path, blocked.endedRunId).outcome,
         "blocked",
       );
+      endRun(fixture.home.path, OBJECTIVE_ALPHA);
 
       const eventsBeforeUnblock = eventRows(fixture.home.path, TASK_ALPHA_ONE);
       const unblocked = await call(fixture.client(fixture.humanToken), {
@@ -1220,9 +1218,9 @@ describe("src/main.report.test", () => {
         OBJECTIVE_ALPHA,
         {
           report: "attested",
-          fence: blocked.objectiveLeaseFence,
-          runId: blocked.objectiveRunId,
-          runFence: blocked.objectiveRunFence,
+          fence: secondTask.claim.objectiveLease.fence,
+          runId: secondTask.claim.objectiveRunId,
+          runFence: secondTask.claim.objectiveLease.fence,
           objectId: OBJECT_ID_TWO,
         },
       );
@@ -1233,8 +1231,8 @@ describe("src/main.report.test", () => {
         OBJECTIVE_ALPHA,
         {
           report: "closed",
-          runId: blocked.objectiveRunId,
-          runFence: blocked.objectiveRunFence,
+          runId: secondTask.claim.objectiveRunId,
+          runFence: secondTask.claim.objectiveLease.fence,
           acknowledgePartial: false,
         },
       );
@@ -1250,6 +1248,7 @@ describe("src/main.report.test", () => {
     try {
       await claim(fixture, fixture.harness, TASK_ALPHA_ONE);
       expireRun(fixture.home.path, TASK_ALPHA_ONE);
+      endRun(fixture.home.path, OBJECTIVE_ALPHA);
       seedBlockedNode(fixture.home.path, TASK_ALPHA_TWO);
 
       const unblocked = await call(fixture.client(fixture.humanToken), {

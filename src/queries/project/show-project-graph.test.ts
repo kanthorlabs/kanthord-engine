@@ -425,6 +425,9 @@ describe("src/queries/project/show-project-graph.test", () => {
         return plan.readGraph(transaction, projectId);
       },
       readNode: plan.readNode,
+      runCoversNode(transaction, seedIds, now) {
+        return plan.runCoversNode(transaction, seedIds, now);
+      },
       readAllNodes: plan.readAllNodes,
       newestRevision(transaction: Transaction, projectId: string) {
         newestRevisionTx = transaction;

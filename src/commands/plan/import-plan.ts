@@ -81,6 +81,7 @@ export type ImportPlanRefusal =
   | "choices-invalid"
   | "choices-stale"
   | "choices-changed"
+  | "subtree-busy"
   | "stale-revision"
   | "idempotency-mismatch"
   | "documents-hash-mismatch"
@@ -166,6 +167,8 @@ export function importPlan(
       return retryResult(dependencies, transaction, existing, input);
     }
 
+    const updatedAt = dependencies.clock.now();
+
     const newest = dependencies.plan.newestRevision(
       transaction,
       input.projectId,
@@ -196,6 +199,31 @@ export function importPlan(
       transaction,
       input.projectId,
     );
+    const submittedIds = input.choices
+      .filter((choice) => choice.take === "submitted")
+      .map((choice) => choice.id);
+    const chosenIds = new Set(input.choices.map((choice) => choice.id));
+    const deletedIds = storedNodes
+      .map((node) => node.id)
+      .filter((id) => !chosenIds.has(id));
+    const seedIds = [...new Set([...submittedIds, ...deletedIds])];
+    const covering = dependencies.plan.runCoversNode(
+      transaction,
+      seedIds,
+      updatedAt,
+    );
+    if (covering !== null) {
+      throw new ImportPlanError(
+        "subtree-busy",
+        "an active run covers the import",
+        {
+          relation: covering.relation,
+          nodeId: covering.nodeId,
+          runId: covering.runId,
+          expiresAt: covering.expiresAt,
+        },
+      );
+    }
     const repositoryNamesById = readRepositoryNamesById(transaction);
     const nodes = storedNodes.map((node) => {
       if (node.repositoryId === null) {
@@ -392,7 +420,6 @@ export function importPlan(
     );
 
     const revision = dependencies.ids.mint("planRevision");
-    const updatedAt = dependencies.clock.now();
 
     const canonical = canonicalPaths(
       candidate.nodes.map((node) => ({

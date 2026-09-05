@@ -275,7 +275,7 @@ describe("test/helpers/proposal.test", () => {
     const manifest = JSON.parse(
       readFileSync(resolve(import.meta.dirname, "../../package.json"), "utf8"),
     ) as Readonly<{ version: string }>;
-    assert.equal(KANTHORD_VERSION, "27.8.1");
+    assert.equal(KANTHORD_VERSION, "28.0.1");
     assert.equal(KANTHORD_VERSION, manifest.version);
   });
 

@@ -168,6 +168,24 @@ export function updateNode(
       );
     }
 
+    const covering = dependencies.plan.runCoversNode(
+      transaction,
+      [input.id],
+      at,
+    );
+    if (covering !== null) {
+      throw new NodeWriteError(
+        "subtree-busy",
+        "an active run covers the node",
+        {
+          relation: covering.relation,
+          nodeId: covering.nodeId,
+          runId: covering.runId,
+          expiresAt: covering.expiresAt,
+        },
+      );
+    }
+
     const facts =
       before.kind === "task"
         ? dependencies.plan.readContainmentFacts(transaction, input.id)
@@ -186,7 +204,6 @@ export function updateNode(
         );
       }
       const blockers: Readonly<{ nodeId: string; blocker: string }>[] = [];
-      if (facts.lease) blockers.push({ nodeId: input.id, blocker: "lease" });
       if (facts.workspace) {
         blockers.push({ nodeId: input.id, blocker: "workspace" });
       }

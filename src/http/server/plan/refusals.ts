@@ -23,6 +23,8 @@ export function toHttpError(error: unknown): HttpError {
         return httpError("stale-revision", error.message, details(error));
       case "idempotency-mismatch":
         return httpError("idempotency-mismatch", error.message, details(error));
+      case "subtree-busy":
+        return httpError("subtree-busy", error.message, details(error));
       case "documents-hash-mismatch":
         return httpError("invalid-request", error.message, {
           refusal: error.refusal,

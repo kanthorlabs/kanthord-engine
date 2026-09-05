@@ -11,6 +11,7 @@ import type {
   SubtreeExecutionFact,
   ValidationContext,
 } from "../../domain/plan-graph.ts";
+import type { SubtreeExclusionRefusal } from "../../domain/run-exclusion.ts";
 
 export type RevisionRecord = Readonly<{
   id: string;
@@ -76,6 +77,11 @@ export interface PlanStore {
     edges: readonly StoredEdge[];
   }>;
   readNode(transaction: Transaction, id: string): StoredNode | null;
+  runCoversNode(
+    transaction: Transaction,
+    seedIds: readonly string[],
+    now: number,
+  ): SubtreeExclusionRefusal | null;
   readAllNodes(transaction: Transaction): readonly StoredNode[];
   newestRevision(transaction: Transaction, projectId: string): string | null;
   listRevisions(

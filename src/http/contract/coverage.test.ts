@@ -6,6 +6,7 @@ import { z } from "zod";
 import { registry } from "./registry.ts";
 import { errorStatuses, buildErrorEnvelope } from "./errors.ts";
 import { baselineErrors } from "./error-baseline.ts";
+import { subtreeBusyDetails } from "./error-details.ts";
 import { fieldDecisions } from "./field-decisions.fixture.ts";
 import { cursorRequest } from "./cursor.ts";
 
@@ -26,6 +27,7 @@ const operationAdditions: Readonly<Record<string, readonly string[]>> = {
     "choices-changed",
     "stale-revision",
     "idempotency-mismatch",
+    "subtree-busy",
   ],
   "plan.validate": ["plan-invalid"],
   "project.repositories": ["binding-in-use"],
@@ -34,18 +36,21 @@ const operationAdditions: Readonly<Record<string, readonly string[]>> = {
     "plan-invalid",
     "illegal-transition",
     "binding-in-use",
+    "subtree-busy",
   ],
   "node.update": [
     "stale-revision",
     "plan-invalid",
     "illegal-transition",
     "binding-in-use",
+    "subtree-busy",
   ],
   "node.delete": [
     "stale-revision",
     "plan-invalid",
     "illegal-transition",
     "binding-in-use",
+    "subtree-busy",
   ],
   "node.claim": [
     "illegal-transition",
@@ -92,7 +97,7 @@ const operationAdditions: Readonly<Record<string, readonly string[]>> = {
     "run-not-found",
     "target-outside-run",
   ],
-  "node.unblock": ["illegal-transition"],
+  "node.unblock": ["illegal-transition", "subtree-busy"],
 };
 
 function objectNodes(schema: unknown): readonly Record<string, unknown>[] {
@@ -495,6 +500,347 @@ describe("src/http/contract/coverage.test", () => {
       ),
       false,
     );
+  });
+
+  it("subtree-busy is declared on all five plan operations", () => {
+    const operationIds = [
+      "plan.import",
+      "node.create",
+      "node.update",
+      "node.delete",
+      "node.unblock",
+    ] as const;
+
+    for (const operationId of operationIds) {
+      const entry = registry.find(
+        (candidate) => candidate.operationId === operationId,
+      );
+      assert.ok(entry, `${operationId} is not registered`);
+      assert.ok(
+        entry.errors !== undefined &&
+          Object.hasOwn(entry.errors, "subtree-busy"),
+        `${operationId} does not declare subtree-busy`,
+      );
+    }
+  });
+
+  it("lease-held is declared on no plan operation", () => {
+    const operationIds = [
+      "plan.import",
+      "node.create",
+      "node.update",
+      "node.delete",
+      "node.unblock",
+    ] as const;
+
+    for (const operationId of operationIds) {
+      const entry = registry.find(
+        (candidate) => candidate.operationId === operationId,
+      );
+      assert.ok(entry, `${operationId} is not registered`);
+      assert.equal(
+        Object.hasOwn(entry.errors ?? {}, "lease-held"),
+        false,
+        `${operationId} declares lease-held`,
+      );
+    }
+  });
+
+  it("lease-held is still declared on the four run operations", () => {
+    const operationIds = [
+      "node.claim",
+      "node.renew",
+      "node.release",
+      "node.report",
+    ] as const;
+
+    for (const operationId of operationIds) {
+      const entry = registry.find(
+        (candidate) => candidate.operationId === operationId,
+      );
+      assert.ok(entry, `${operationId} is not registered`);
+      assert.ok(
+        entry.errors !== undefined && Object.hasOwn(entry.errors, "lease-held"),
+        `${operationId} does not declare lease-held`,
+      );
+    }
+  });
+
+  it("subtree-busy is a 409 precondition", () => {
+    assert.equal(errorStatuses["subtree-busy"], 409);
+  });
+
+  it("the subtree-busy details schema parses what a plan command throws", () => {
+    const details = {
+      relation: "ancestor",
+      nodeId: "objective_01JQ8Z7G3HZZZZZZZZZZZZZZZZ",
+      runId: "run_01JQ8Z7G3JZZZZZZZZZZZZZZZZ",
+      expiresAt: 1738368000001,
+    } as const;
+
+    assert.deepEqual(subtreeBusyDetails.parse(details), details);
+    assert.throws(() =>
+      subtreeBusyDetails.parse({
+        relation: details.relation,
+        nodeId: details.nodeId,
+        expiresAt: details.expiresAt,
+      }),
+    );
+  });
+
+  it("each of the five operations' error sets grows by exactly one member", () => {
+    const shippedErrorSets: Readonly<Record<string, readonly string[]>> = {
+      "plan.import": [
+        "invalid-request",
+        "unauthenticated",
+        "origin-forbidden",
+        "host-forbidden",
+        "actor-forbidden",
+        "not-found",
+        "not-implemented",
+        "internal-error",
+        "service-unavailable",
+        "plan-invalid",
+        "choices-invalid",
+        "choices-stale",
+        "choices-changed",
+        "stale-revision",
+        "idempotency-mismatch",
+      ],
+      "node.create": [
+        "invalid-request",
+        "unauthenticated",
+        "origin-forbidden",
+        "host-forbidden",
+        "actor-forbidden",
+        "not-found",
+        "not-implemented",
+        "internal-error",
+        "service-unavailable",
+        "stale-revision",
+        "plan-invalid",
+        "illegal-transition",
+        "binding-in-use",
+      ],
+      "node.update": [
+        "invalid-request",
+        "unauthenticated",
+        "origin-forbidden",
+        "host-forbidden",
+        "actor-forbidden",
+        "not-found",
+        "not-implemented",
+        "internal-error",
+        "service-unavailable",
+        "stale-revision",
+        "plan-invalid",
+        "illegal-transition",
+        "binding-in-use",
+      ],
+      "node.delete": [
+        "invalid-request",
+        "unauthenticated",
+        "origin-forbidden",
+        "host-forbidden",
+        "actor-forbidden",
+        "not-found",
+        "not-implemented",
+        "internal-error",
+        "service-unavailable",
+        "stale-revision",
+        "plan-invalid",
+        "illegal-transition",
+        "binding-in-use",
+      ],
+      "node.unblock": [
+        "invalid-request",
+        "unauthenticated",
+        "origin-forbidden",
+        "host-forbidden",
+        "actor-forbidden",
+        "not-found",
+        "not-implemented",
+        "internal-error",
+        "service-unavailable",
+        "illegal-transition",
+      ],
+    };
+
+    for (const [operationId, shipped] of Object.entries(shippedErrorSets)) {
+      const entry = registry.find(
+        (candidate) => candidate.operationId === operationId,
+      );
+      assert.ok(entry, `${operationId} is not registered`);
+      assert.deepEqual(
+        Object.keys(entry.errors ?? {}).sort(),
+        [...shipped, "subtree-busy"].sort(),
+        `${operationId} error set changed by more than subtree-busy`,
+      );
+    }
+  });
+
+  it("no other operation's error set changes", () => {
+    const guardedOperationIds = new Set([
+      "plan.import",
+      "node.create",
+      "node.update",
+      "node.delete",
+      "node.unblock",
+    ]);
+    const baselineCodes = [
+      "invalid-request",
+      "unauthenticated",
+      "origin-forbidden",
+      "host-forbidden",
+      "actor-forbidden",
+      "not-found",
+      "not-implemented",
+      "internal-error",
+      "service-unavailable",
+    ] as const;
+    const baselineOnlyOperationIds = [
+      "actor.list",
+      "actor.register",
+      "actor.revoke",
+      "actor.rotate",
+      "actor.show",
+      "agent.list",
+      "blob.show",
+      "edge.list",
+      "event.list",
+      "node.list",
+      "node.show",
+      "plan.export",
+      "plan.revisions",
+      "project.create",
+      "project.graph",
+      "project.list",
+      "project.nodes",
+      "project.show",
+      "project.status",
+      "provider.catalog",
+      "provider.inspect",
+      "provider.list",
+      "provider.loginCancel",
+      "provider.loginComplete",
+      "provider.loginStart",
+      "provider.register",
+      "provider.rename",
+      "provider.setDefault",
+      "provider.show",
+      "provider.verify",
+      "repository.list",
+      "repository.show",
+      "system.db",
+      "system.health",
+      "system.status",
+      "worker.list",
+    ] as const;
+    const additionalCodes: Readonly<Record<string, readonly string[]>> = {
+      "node.claim": [
+        "illegal-transition",
+        "lease-held",
+        "plan-invalid",
+        "pair-illegal",
+        "assignment-held",
+        "unroutable",
+        "review-head-unavailable",
+        "objective-busy",
+        "subtree-busy",
+      ],
+      "node.renew": [
+        "lease-held",
+        "illegal-transition",
+        "plan-invalid",
+        "run-not-found",
+        "run-ended",
+        "run-expired",
+        "run-caller-mismatch",
+        "target-outside-run",
+        "fence-stale",
+        "lifetime-exceeded",
+      ],
+      "node.release": [
+        "lease-held",
+        "illegal-transition",
+        "plan-invalid",
+        "run-not-found",
+        "run-ended",
+        "run-expired",
+        "run-caller-mismatch",
+        "target-outside-run",
+        "fence-stale",
+      ],
+      "node.report": [
+        "lease-held",
+        "illegal-transition",
+        "acknowledgement-required",
+        "run-not-found",
+        "run-ended",
+        "run-expired",
+        "run-caller-mismatch",
+        "target-outside-run",
+        "fence-stale",
+      ],
+      "plan.validate": ["plan-invalid"],
+      "project.repositories": ["binding-in-use"],
+      "provider.remove": ["binding-in-use"],
+      "repository.inspect": ["credential-rejected", "host-key-mismatch"],
+      "repository.register": ["credential-rejected", "host-key-mismatch"],
+    };
+    const stubbedOperationIds = [
+      "attempt.show",
+      "binding.worker.project",
+      "gitOperation.list",
+      "instructions.resolve",
+      "node.abandon",
+      "node.approvalEvidence",
+      "node.approve",
+      "node.attempts",
+      "node.checks",
+      "node.discard",
+      "node.waive",
+      "profile.export",
+      "profile.import",
+      "profile.instantiate",
+      "profile.verify",
+      "repository.publish",
+      "repository.reconcile",
+      "run.cancel",
+      "run.list",
+      "run.show",
+      "run.start",
+      "template.list",
+      "template.show",
+    ] as const;
+    const expected = new Map<string, readonly string[]>();
+
+    for (const operationId of baselineOnlyOperationIds) {
+      expected.set(operationId, baselineCodes);
+    }
+    for (const [operationId, additions] of Object.entries(additionalCodes)) {
+      expected.set(operationId, [...baselineCodes, ...additions]);
+    }
+    for (const operationId of stubbedOperationIds) {
+      expected.set(operationId, []);
+    }
+
+    const actualOperationIds = registry
+      .filter((entry) => !guardedOperationIds.has(entry.operationId))
+      .map((entry) => entry.operationId)
+      .sort();
+    assert.deepEqual(actualOperationIds, [...expected.keys()].sort());
+
+    for (const entry of registry) {
+      if (guardedOperationIds.has(entry.operationId)) continue;
+      const expectedCodes = expected.get(entry.operationId);
+      assert.ok(expectedCodes, `${entry.operationId} is not pinned`);
+      assert.deepEqual(
+        Object.keys(entry.errors ?? {}).sort(),
+        [...expectedCodes].sort(),
+        `${entry.operationId} error set changed`,
+      );
+    }
   });
 
   it("no route returns a token except actor.register and actor.rotate", () => {

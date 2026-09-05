@@ -77,6 +77,24 @@ export function deleteNode(
     const deleteSet = dependencies.plan.readSubtree(transaction, input.id);
     const deleteSetSet = new Set(deleteSet);
 
+    const covering = dependencies.plan.runCoversNode(
+      transaction,
+      [input.id],
+      at,
+    );
+    if (covering !== null) {
+      throw new NodeWriteError(
+        "subtree-busy",
+        "an active run covers the subtree",
+        {
+          relation: covering.relation,
+          nodeId: covering.nodeId,
+          runId: covering.runId,
+          expiresAt: covering.expiresAt,
+        },
+      );
+    }
+
     const { nodes: stored, edges: storedEdges } = dependencies.plan.readGraph(
       transaction,
       before.projectId,

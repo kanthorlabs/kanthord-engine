@@ -71,6 +71,9 @@ export function createRecordingPlanStore(plan: PlanStore): Readonly<{
     readNode(transaction, id) {
       return plan.readNode(transaction, id);
     },
+    runCoversNode(transaction, seedIds, now) {
+      return plan.runCoversNode(transaction, seedIds, now);
+    },
     readAllNodes(transaction) {
       return plan.readAllNodes(transaction);
     },

@@ -891,6 +891,91 @@ describe("scripts/verify-epic-sequence", () => {
     );
   });
 
+  it("the range gate treats supersession and dueness per diagram", () => {
+    const supersessionStories = (
+      supersedingEpic = "050.4",
+    ): readonly FixtureStory[] => [
+      {
+        epicId: "050",
+        fileName: "01-predecessor.md",
+        source: storyDocument("story-implement", [
+          "Diagrams: pred-a",
+          "test/sequence/scenarios/pred-a.ts",
+          diagram(
+            "pred-a",
+            [],
+            "Command-->>Client: ok",
+            `Superseded by: EPIC ${supersedingEpic} rep-a`,
+          ),
+        ]),
+      },
+      {
+        epicId: "050.4",
+        fileName: "01-replacement.md",
+        source: storyDocument("story-implement", [
+          "Diagrams: rep-a",
+          "test/sequence/scenarios/rep-a.ts",
+          diagram(
+            "rep-a",
+            [],
+            "Command-->>Client: ok",
+            "Supersedes: EPIC 050 pred-a",
+          ),
+        ]),
+      },
+    ];
+
+    for (const scenarioIds of [["pred-a"], ["rep-a"], []] as const) {
+      const root = createFixtureTree(supersessionStories(), scenarioIds);
+      try {
+        assert.doesNotThrow(() => verifyEpicSequence(root));
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+
+    const unshippedRoot = createFixtureTree(
+      [
+        {
+          epicId: "050.4",
+          fileName: "01-unshipped.md",
+          source: storyDocument("story-implement", [
+            "Diagrams: unshipped-live",
+            "test/sequence/scenarios/unshipped-live.ts",
+            diagram("unshipped-live", []),
+          ]),
+        },
+      ],
+      ["unshipped-live"],
+    );
+    try {
+      assert.doesNotThrow(() => verifyEpicSequence(unshippedRoot));
+    } finally {
+      rmSync(unshippedRoot, { recursive: true, force: true });
+    }
+
+    assertFixtureRefusal(
+      [
+        {
+          epicId: "050",
+          fileName: "01-plain.md",
+          source: storyDocument("story-implement", [
+            "Diagrams: plain-d",
+            "test/sequence/scenarios/plain-d.ts",
+            diagram("plain-d", []),
+          ]),
+        },
+      ],
+      "due live diagram plain-d lacks test/sequence/scenarios/plain-d.ts",
+    );
+
+    assertFixtureRefusal(
+      supersessionStories("099"),
+      "supersession names an epic outside the authored set: EPIC 099",
+      ["pred-a", "rep-a"],
+    );
+  });
+
   it("the real plan tree passes the range gate", () => {
     const repositoryRoot = resolve(import.meta.dirname, "..");
     assert.doesNotThrow(() => verifyEpicSequence(repositoryRoot));

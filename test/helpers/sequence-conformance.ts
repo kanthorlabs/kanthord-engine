@@ -209,7 +209,10 @@ function parseDiagram(
     const note = line.match(/^\s*Note over Command:\s*(.*)$/i);
     if (note !== null) {
       const text = note[1] ?? "";
-      if (!/^tail pinned by EPIC \d+\.?\d* [a-z0-9-]+$/.test(text)) {
+      if (
+        !/^tail pinned by EPIC \d+\.?\d* [a-z0-9-]+$/.test(text) &&
+        !/^tail unchanged by EPIC \d+\.?\d*$/.test(text)
+      ) {
         throw new Error(`invalid Command note in diagram ${diagram}`);
       }
       sawNote = true;

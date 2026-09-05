@@ -29,6 +29,18 @@ type PlanRoots = Readonly<{
   storiesRoot: string;
 }>;
 
+type FixtureStory = Readonly<{
+  epicId: string;
+  fileName: string;
+  source: string;
+}>;
+
+type FixtureTree = Readonly<{
+  root: string;
+  roots: PlanRoots;
+  scenariosRoot: string;
+}>;
+
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const epicsRoot = resolve(repositoryRoot, ".agents/plan/epics");
 const storiesRoot = resolve(repositoryRoot, ".agents/plan/stories");
@@ -65,8 +77,45 @@ const epic0502ScenarioCases = [
   },
 ] as const;
 
-function authoredLiveDiagrams(roots = planRoots): readonly LiveDiagram[] {
-  const shipped = new Set<string>(shippedEpics);
+function createFixtureTree(
+  stories: readonly FixtureStory[],
+  scenarioIds: readonly string[] = [],
+): FixtureTree {
+  const root = mkdtempSync(join(tmpdir(), "kanthord-sequence-"));
+  const roots = {
+    epicsRoot: join(root, "epics"),
+    storiesRoot: join(root, "stories"),
+  };
+  const fixtureScenariosRoot = join(root, "scenarios");
+  mkdirSync(roots.epicsRoot, { recursive: true });
+  mkdirSync(roots.storiesRoot, { recursive: true });
+  mkdirSync(fixtureScenariosRoot, { recursive: true });
+
+  for (const epicId of authoredEpics) {
+    writeFileSync(join(roots.epicsRoot, `${epicId}-fixture.md`), "");
+    mkdirSync(join(roots.storiesRoot, `${epicId}-fixture`), {
+      recursive: true,
+    });
+  }
+  for (const story of stories) {
+    writeFileSync(
+      join(roots.storiesRoot, `${story.epicId}-fixture`, story.fileName),
+      story.source,
+    );
+  }
+  for (const scenarioId of scenarioIds) {
+    writeFileSync(join(fixtureScenariosRoot, `${scenarioId}.ts`), "");
+  }
+
+  return { root, roots, scenariosRoot: fixtureScenariosRoot };
+}
+
+function authoredLiveDiagrams(
+  roots = planRoots,
+  root = scenariosRoot,
+): readonly LiveDiagram[] {
+  const authored = new Set<string>(authoredEpics);
+  const scenarioIds = scenarioFilesById(root);
   const diagrams: LiveDiagram[] = [];
   for (const epicId of authoredEpics) {
     const epicFile = readdirSync(roots.epicsRoot, { withFileTypes: true }).find(
@@ -99,8 +148,12 @@ function authoredLiveDiagrams(roots = planRoots): readonly LiveDiagram[] {
             nextHeading < 0 ? source.length : nextHeading,
           );
           const superseded = [
-            ...section.matchAll(/^Superseded by:\s+EPIC\s+(\S+)/gm),
-          ].some((supersession) => shipped.has(supersession[1] ?? ""));
+            ...section.matchAll(/^Superseded by:\s+EPIC\s+(\S+)\s+(\S+)/gm),
+          ].some(
+            (supersession) =>
+              authored.has(supersession[1] ?? "") &&
+              (scenarioIds.has(supersession[2] ?? "") || !scenarioIds.has(id)),
+          );
           diagrams.push({ id, epicId, story, superseded });
         }
       }
@@ -109,10 +162,16 @@ function authoredLiveDiagrams(roots = planRoots): readonly LiveDiagram[] {
   return diagrams;
 }
 
-function liveDiagrams(roots = planRoots): readonly LiveDiagram[] {
+function liveDiagrams(
+  roots = planRoots,
+  root = scenariosRoot,
+): readonly LiveDiagram[] {
   const shipped = new Set<string>(shippedEpics);
-  return authoredLiveDiagrams(roots).filter(
-    (diagram) => shipped.has(diagram.epicId) && !diagram.superseded,
+  const scenarioIds = scenarioFilesById(root);
+  return authoredLiveDiagrams(roots, root).filter(
+    (diagram) =>
+      (shipped.has(diagram.epicId) || scenarioIds.has(diagram.id)) &&
+      !diagram.superseded,
   );
 }
 
@@ -132,7 +191,7 @@ function scenarioFilesById(
 }
 
 function validateScenarioFiles(root = scenariosRoot, roots = planRoots): void {
-  const diagrams = authoredLiveDiagrams(roots);
+  const diagrams = authoredLiveDiagrams(roots, root);
   const liveIds = new Set(diagrams.map((diagram) => diagram.id));
   for (const [id, paths] of scenarioFilesById(root)) {
     const scenarioPath = paths[0] ?? id;
@@ -149,7 +208,7 @@ function validateScenarioFiles(root = scenariosRoot, roots = planRoots): void {
       throw new Error(`scenario ${scenarioPath} names no live diagram`);
     }
   }
-  for (const diagram of liveDiagrams(roots)) {
+  for (const diagram of liveDiagrams(roots, root)) {
     const matches = scenarioFilesById(root).get(diagram.id) ?? [];
     if (matches.length !== 1) {
       throw new Error(
@@ -234,68 +293,295 @@ describe("test/sequence/conformance", () => {
   });
 
   it("a live diagram superseded by a shipped epic holding a scenario file fails", () => {
-    const fixtureRoot = mkdtempSync(join(tmpdir(), "kanthord-sequence-"));
-    const fixtureEpicsRoot = join(fixtureRoot, "epics");
-    const fixtureStoriesRoot = join(fixtureRoot, "stories");
-    const fixtureScenariosRoot = join(fixtureRoot, "scenarios");
-    mkdirSync(fixtureEpicsRoot, { recursive: true });
-    mkdirSync(fixtureStoriesRoot, { recursive: true });
-    mkdirSync(fixtureScenariosRoot, { recursive: true });
+    const fixture = createFixtureTree(
+      [
+        {
+          epicId: "050",
+          fileName: "story.md",
+          source:
+            "Diagrams: superseded-live\n\n### `superseded-live`\nSuperseded by: EPIC 050.1 replacement-live\n",
+        },
+        {
+          epicId: "050.1",
+          fileName: "story.md",
+          source: "Diagrams: replacement-live\n\n### `replacement-live`\n",
+        },
+      ],
+      ["superseded-live", "replacement-live"],
+    );
+    const scenarioPath = join(fixture.scenariosRoot, "superseded-live.ts");
     try {
-      for (const epicId of authoredEpics) {
-        writeFileSync(join(fixtureEpicsRoot, `${epicId}-fixture.md`), "");
-        mkdirSync(join(fixtureStoriesRoot, `${epicId}-fixture`), {
-          recursive: true,
-        });
-      }
-      writeFileSync(
-        join(fixtureStoriesRoot, "050-fixture", "story.md"),
-        "Diagrams: superseded-live\n\n### `superseded-live`\nSuperseded by: EPIC 050.1\n",
-      );
-      const scenarioPath = join(fixtureScenariosRoot, "superseded-live.ts");
-      writeFileSync(scenarioPath, "");
-
       assert.throws(
-        () =>
-          validateScenarioFiles(fixtureScenariosRoot, {
-            epicsRoot: fixtureEpicsRoot,
-            storiesRoot: fixtureStoriesRoot,
-          }),
+        () => validateScenarioFiles(fixture.scenariosRoot, fixture.roots),
         new Error(`scenario ${scenarioPath} names a superseded live diagram`),
       );
     } finally {
-      rmSync(fixtureRoot, { recursive: true, force: true });
+      rmSync(fixture.root, { recursive: true, force: true });
     }
   });
 
   it("a live diagram of an unshipped epic needs no scenario file", () => {
-    const fixtureRoot = mkdtempSync(join(tmpdir(), "kanthord-sequence-"));
-    const fixtureEpicsRoot = join(fixtureRoot, "epics");
-    const fixtureStoriesRoot = join(fixtureRoot, "stories");
-    const fixtureScenariosRoot = join(fixtureRoot, "scenarios");
-    mkdirSync(fixtureEpicsRoot, { recursive: true });
-    mkdirSync(fixtureStoriesRoot, { recursive: true });
-    mkdirSync(fixtureScenariosRoot, { recursive: true });
+    const fixture = createFixtureTree([
+      {
+        epicId: "050.3",
+        fileName: "story.md",
+        source: "Diagrams: unshipped-live\n\n### `unshipped-live`\n",
+      },
+    ]);
     try {
-      for (const epicId of authoredEpics) {
-        writeFileSync(join(fixtureEpicsRoot, `${epicId}-fixture.md`), "");
-        mkdirSync(join(fixtureStoriesRoot, `${epicId}-fixture`), {
-          recursive: true,
-        });
-      }
-      writeFileSync(
-        join(fixtureStoriesRoot, "050.3-fixture", "story.md"),
-        "Diagrams: unshipped-live\n\n### `unshipped-live`\n",
-      );
-
       assert.doesNotThrow(() =>
-        validateScenarioFiles(fixtureScenariosRoot, {
-          epicsRoot: fixtureEpicsRoot,
-          storiesRoot: fixtureStoriesRoot,
-        }),
+        validateScenarioFiles(fixture.scenariosRoot, fixture.roots),
       );
     } finally {
-      rmSync(fixtureRoot, { recursive: true, force: true });
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("a diagram superseded by an authored epic is due while the superseding scenario is absent", () => {
+    const fixture = createFixtureTree(
+      [
+        {
+          epicId: "050",
+          fileName: "predecessor.md",
+          source:
+            "Diagrams: superseded-live\n\n### `superseded-live`\nSuperseded by: EPIC 050.4 replacement-live\n",
+        },
+        {
+          epicId: "050.4",
+          fileName: "replacement.md",
+          source: "Diagrams: replacement-live\n\n### `replacement-live`\n",
+        },
+      ],
+      ["superseded-live"],
+    );
+    try {
+      assert.doesNotThrow(() =>
+        validateScenarioFiles(fixture.scenariosRoot, fixture.roots),
+      );
+      assert.deepEqual(
+        liveDiagrams(fixture.roots, fixture.scenariosRoot).map(
+          (diagram) => diagram.id,
+        ),
+        ["superseded-live"],
+      );
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("a diagram is superseded once the superseding scenario file exists", () => {
+    const fixture = createFixtureTree(
+      [
+        {
+          epicId: "050",
+          fileName: "predecessor.md",
+          source:
+            "Diagrams: superseded-live\n\n### `superseded-live`\nSuperseded by: EPIC 050.4 replacement-live\n",
+        },
+        {
+          epicId: "050.4",
+          fileName: "replacement.md",
+          source: "Diagrams: replacement-live\n\n### `replacement-live`\n",
+        },
+      ],
+      ["replacement-live"],
+    );
+    try {
+      assert.doesNotThrow(() =>
+        validateScenarioFiles(fixture.scenariosRoot, fixture.roots),
+      );
+      assert.deepEqual(
+        liveDiagrams(fixture.roots, fixture.scenariosRoot).map(
+          (diagram) => diagram.id,
+        ),
+        ["replacement-live"],
+      );
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("a diagram whose own scenario is gone is superseded with no replacement on disk", () => {
+    const fixture = createFixtureTree([
+      {
+        epicId: "050",
+        fileName: "predecessor.md",
+        source:
+          "Diagrams: superseded-live\n\n### `superseded-live`\nSuperseded by: EPIC 050.4 replacement-live\n",
+      },
+      {
+        epicId: "050.4",
+        fileName: "replacement.md",
+        source: "Diagrams: replacement-live\n\n### `replacement-live`\n",
+      },
+    ]);
+    try {
+      assert.doesNotThrow(() =>
+        validateScenarioFiles(fixture.scenariosRoot, fixture.roots),
+      );
+      assert.deepEqual(
+        liveDiagrams(fixture.roots, fixture.scenariosRoot).map(
+          (diagram) => diagram.id,
+        ),
+        [],
+      );
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("a diagram of an unshipped epic is due once its own scenario file exists", () => {
+    const fixture = createFixtureTree(
+      [
+        {
+          epicId: "050.4",
+          fileName: "story.md",
+          source: "Diagrams: unshipped-live\n\n### `unshipped-live`\n",
+        },
+      ],
+      ["unshipped-live"],
+    );
+    const scenarioPath = join(fixture.scenariosRoot, "unshipped-live.ts");
+    try {
+      assert.deepEqual(
+        liveDiagrams(fixture.roots, fixture.scenariosRoot).map(
+          (diagram) => diagram.id,
+        ),
+        ["unshipped-live"],
+      );
+      rmSync(scenarioPath);
+      assert.deepEqual(
+        liveDiagrams(fixture.roots, fixture.scenariosRoot).map(
+          (diagram) => diagram.id,
+        ),
+        [],
+      );
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("a Superseded by naming an unauthored epic supersedes nothing", () => {
+    const fixture = createFixtureTree(
+      [
+        {
+          epicId: "050",
+          fileName: "story.md",
+          source:
+            "Diagrams: superseded-live\n\n### `superseded-live`\nSuperseded by: EPIC 099 replacement-live\n",
+        },
+      ],
+      ["superseded-live", "replacement-live"],
+    );
+    try {
+      assert.deepEqual(
+        liveDiagrams(fixture.roots, fixture.scenariosRoot).map(
+          (diagram) => diagram.id,
+        ),
+        ["superseded-live"],
+      );
+      assert.throws(
+        () => validateScenarioFiles(fixture.scenariosRoot, fixture.roots),
+        new Error(
+          `scenario ${join(fixture.scenariosRoot, "replacement-live.ts")} names no live diagram`,
+        ),
+      );
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("a diagram with no Superseded by line keeps the shipped behaviour", () => {
+    const fixture = createFixtureTree([
+      {
+        epicId: "050",
+        fileName: "story.md",
+        source: "Diagrams: plain-live\n\n### `plain-live`\n",
+      },
+    ]);
+    try {
+      assert.deepEqual(
+        liveDiagrams(fixture.roots, fixture.scenariosRoot).map(
+          (diagram) => diagram.id,
+        ),
+        ["plain-live"],
+      );
+      assert.throws(() =>
+        validateScenarioFiles(fixture.scenariosRoot, fixture.roots),
+      );
+      writeFileSync(join(fixture.scenariosRoot, "plain-live.ts"), "");
+      assert.doesNotThrow(() =>
+        validateScenarioFiles(fixture.scenariosRoot, fixture.roots),
+      );
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("the scenario swap is green at every boundary EPIC 050.4 passes through", () => {
+    const predecessorIds = Array.from(
+      { length: 6 },
+      (_, index) => `pred-${index + 1}`,
+    );
+    const replacementIds = Array.from(
+      { length: 6 },
+      (_, index) => `rep-${index + 1}`,
+    );
+    const predecessorSource = [
+      `Diagrams: ${[...predecessorIds, "plain-7"].join(" ")}`,
+      "",
+      ...predecessorIds.flatMap((id, index) => [
+        `### \`${id}\``,
+        `Superseded by: EPIC 050.4 ${replacementIds[index]}`,
+        "",
+      ]),
+      "### `plain-7`",
+      "",
+    ].join("\n");
+    const replacementSource = [
+      `Diagrams: ${replacementIds.join(" ")}`,
+      "",
+      ...replacementIds.flatMap((id) => [`### \`${id}\``, ""]),
+    ].join("\n");
+    const fixture = createFixtureTree(
+      [
+        {
+          epicId: "050",
+          fileName: "predecessors.md",
+          source: predecessorSource,
+        },
+        {
+          epicId: "050.4",
+          fileName: "replacements.md",
+          source: replacementSource,
+        },
+      ],
+      [...predecessorIds, "plain-7"],
+    );
+    try {
+      let stateCount = 0;
+      for (let index = 0; index < predecessorIds.length; index += 1) {
+        rmSync(join(fixture.scenariosRoot, `${predecessorIds[index]}.ts`));
+        writeFileSync(
+          join(fixture.scenariosRoot, `${replacementIds[index]}.ts`),
+          "",
+        );
+        assert.doesNotThrow(() =>
+          validateScenarioFiles(fixture.scenariosRoot, fixture.roots),
+        );
+        stateCount += 1;
+      }
+      assert.equal(stateCount, 6);
+      const files = scenarioFilesById(fixture.scenariosRoot);
+      for (const id of predecessorIds) assert.equal(files.has(id), false);
+      for (const id of replacementIds) assert.equal(files.get(id)?.length, 1);
+
+      rmSync(join(fixture.scenariosRoot, "plain-7.ts"));
+      assert.throws(() =>
+        validateScenarioFiles(fixture.scenariosRoot, fixture.roots),
+      );
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
     }
   });
 

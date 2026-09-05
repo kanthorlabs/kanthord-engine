@@ -14,6 +14,20 @@ The fence is a counter on the run. Every later write carries the run id and the 
 
 At most one active run covers a node. The `run_one_active` partial index defends the same-node case only. The subtree rule is a pure function over the ancestor, descendant and target sets. A run whose expiry has passed is not counted, and the boundary instant is expired.
 
+## A plan write refuses an active run over its affected graph
+
+A plan write refuses with `subtree-busy` while an active run covers its affected graph. The affected graph is the seed named by the command, every ancestor of each seed and every descendant of each seed. The refusal carries the same relation, node id, run id and expiry details as the claim refusal.
+
+| command        | seed                                               |
+| -------------- | -------------------------------------------------- |
+| `create-node`  | the parent id; no seed for an initiative           |
+| `update-node`  | the node id                                        |
+| `delete-node`  | the node id                                        |
+| `unblock-node` | the node id                                        |
+| `import-plan`  | every submitted id and every id the import deletes |
+
+The `expires_at <= now` boundary is expired for this guard, the claim exclusion and worker authority. A plan write is admitted at the instant the stale worker is refused. Coverage is a property of the run, not the node state. A node left `running` behind an expired run remains editable.
+
 ## One active run per objective branch, and a task claim is refused rather than queued
 
 The daemon refuses a second active run in one objective branch with `objective-busy`. The subtree rule refuses an active run over the claimed node with `subtree-busy`. The refusal names the sibling node id, its run id and that run's `expires_at`, so a client knows what it waits on and until when. The daemon holds no queue. A blocking wait would hold one request open for a run lifetime, and a queue would make the daemon a scheduler. The caller retries. One liveness predicate governs this rule and the subtree rule, so the two cannot disagree about an expired run.

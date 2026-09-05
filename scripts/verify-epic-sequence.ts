@@ -716,6 +716,7 @@ function validateScenarios(repositoryRoot: string, index: DiagramIndex): void {
       .filter((diagram) => diagram.baseline)
       .map((diagram) => diagram.id),
   );
+  const authored = new Set<string>(authoredEpics);
   const shipped = new Set<string>(shippedEpics);
   const scenarios =
     existsSync(scenariosRoot) && statSync(scenariosRoot).isDirectory()
@@ -732,9 +733,12 @@ function validateScenarios(repositoryRoot: string, index: DiagramIndex): void {
     const diagram = byId.get(id);
     if (diagram === undefined)
       error(`scenario ${scenarioPath} names no live diagram`);
-    if (
-      diagram.supersededBy.some((reference) => shipped.has(reference.epicId))
-    ) {
+    const superseded = diagram.supersededBy.some(
+      (reference) =>
+        authored.has(reference.epicId) &&
+        (scenarioIds.has(reference.diagramId) || !scenarioIds.has(diagram.id)),
+    );
+    if (superseded) {
       error(`scenario ${scenarioPath} names a superseded live diagram`);
     }
   }
@@ -743,9 +747,13 @@ function validateScenarios(repositoryRoot: string, index: DiagramIndex): void {
     const owner = index.owners.get(diagram.id);
     if (owner === undefined)
       error(`live diagram ${diagram.id} has no story owner`);
+    const superseded = diagram.supersededBy.some(
+      (reference) =>
+        authored.has(reference.epicId) &&
+        (scenarioIds.has(reference.diagramId) || !scenarioIds.has(diagram.id)),
+    );
     const due =
-      shipped.has(owner.epicId) &&
-      !diagram.supersededBy.some((reference) => shipped.has(reference.epicId));
+      (shipped.has(owner.epicId) || scenarioIds.has(diagram.id)) && !superseded;
     if (due) {
       const scenarioPath = join(
         "test",

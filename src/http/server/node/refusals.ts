@@ -31,6 +31,8 @@ export function toHttpError(
         return httpError("illegal-transition", error.message, details(error));
       case "binding-in-use":
         return httpError("binding-in-use", error.message, details(error));
+      case "subtree-busy":
+        return httpError("subtree-busy", error.message, details(error));
     }
   }
   if (error instanceof ClaimNodeError) {

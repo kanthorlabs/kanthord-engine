@@ -29,7 +29,8 @@ export type UnblockNodeRefusal =
   | "not-found"
   | "node-kind-invalid"
   | "not-blocked"
-  | "block-reason-not-clearable";
+  | "block-reason-not-clearable"
+  | "subtree-busy";
 
 export class UnblockNodeError extends Error {
   readonly refusal: UnblockNodeRefusal;
@@ -83,6 +84,24 @@ export function unblockNode(
         "block-reason-not-clearable",
         `the block reason of task ${node.id} is not attempt-limit`,
         { blockReason: node.blockReason },
+      );
+    }
+
+    const covering = dependencies.plan.runCoversNode(
+      transaction,
+      [node.id],
+      now,
+    );
+    if (covering !== null) {
+      throw new UnblockNodeError(
+        "subtree-busy",
+        "an active run covers the node",
+        {
+          relation: covering.relation,
+          nodeId: covering.nodeId,
+          runId: covering.runId,
+          expiresAt: covering.expiresAt,
+        },
       );
     }
 

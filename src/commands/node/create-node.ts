@@ -110,6 +110,24 @@ export function createNode(
       );
     }
 
+    const covering = dependencies.plan.runCoversNode(
+      transaction,
+      input.node.kind === "initiative" ? [] : [input.node.parentId],
+      at,
+    );
+    if (covering !== null) {
+      throw new NodeWriteError(
+        "subtree-busy",
+        "an active run covers the parent",
+        {
+          relation: covering.relation,
+          nodeId: covering.nodeId,
+          runId: covering.runId,
+          expiresAt: covering.expiresAt,
+        },
+      );
+    }
+
     const id = dependencies.ids.mint(input.node.kind);
     const revisionId = dependencies.ids.mint("planRevision");
 
