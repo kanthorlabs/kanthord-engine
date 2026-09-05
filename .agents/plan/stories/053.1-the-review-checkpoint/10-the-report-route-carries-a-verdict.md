@@ -122,7 +122,7 @@ The arm, in order:
    `body-kind-mismatch` when `run.kind` is not `"review"` **or when `node.kind` is not `"task"`**.
    The second term is what keeps the objective review pair out of this epic: Story 2
    (`02-a-review-claim-is-admitted`) refuses its claim, and this refuses its report, so no half of
-   the pair is half-admitted. EPIC 053.2 removes both terms together;
+   the pair is half-admitted. EPIC 054.5 removes both terms together;
 2. select the one open attempt from the prelude's list, as the shipped arm does at
    `src/commands/outcome/report-outcome.ts:216` — `filter`;
 3. call `dependencies.accept.review(transaction, { nodeId: node.id, parentId: node.parentId,
@@ -247,7 +247,7 @@ for the first time here. Every scenario file must already exist, which is why th
   derives nothing from them; Story 7 (`07-the-attestation-with-a-reason`) calls `accountAttempts`
   over them.
 - The arm refuses `body-kind-mismatch` when the node kind is not `task`. Removing that term admits
-  the objective review pair, which EPIC 053.2 owns.
+  the objective review pair, which EPIC 054.5 owns.
 
 ## Verify
 

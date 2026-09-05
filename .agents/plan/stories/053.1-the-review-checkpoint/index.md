@@ -167,7 +167,7 @@ open against another epic, and the epic's `## Amendments this epic asks of other
 the EPIC 050.1 `judged_oid` decision, whose pin this epic moves to the attestation. Two asks are
 resolved: the attempt-lifecycle repair is applied to EPIC 050.4 Story 2
 (`02-the-claim-of-an-initiative-drops-the-lease`), and the objective review path is authored as
-EPIC 053.2.
+EPIC 054.5.
 
 - **`judged-checkpoint-unaccepted` is dropped, and the epic carries five new codes.** EPIC 052 Story 5
   (`05-the-seams-the-acceptance-needs`) settled that every checkpoint row is an accepted checkpoint —
@@ -213,7 +213,7 @@ EPIC 053.2.
 - **The refusal mapping is written in `src/http/server/node/refusals.ts`.** The epic names
   `report-node.ts`; the code and EPIC 052.2 both say `refusals.ts`. See
   `10-the-report-route-carries-a-verdict.md`.
-- **Story 2 draws the review-task claim, and EPIC 053.2 owns the review-objective claim.** The lift
+- **Story 2 draws the review-task claim, and EPIC 054.5 owns the review-objective claim.** The lift
   admits both `(task, review)` and `(objective, review)` — `src/domain/node-pair.ts:43` — `review`
   makes the second legal with the state owner `attestation-then-human` — and their token sets differ,
   so they are two paths. The epic is at the ten-story cap, and a story count is not a product-scope

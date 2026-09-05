@@ -95,7 +95,7 @@ patched.
 
 **The drawn set is every branch of the review-task claim.** `src/domain/node-pair.ts:43` — `review`
 also legalises `(objective, review)` with the state owner `attestation-then-human`, and the lift
-admits that claim too. Its token set differs, so it is a second path, and **EPIC 053.2 owns it**
+admits that claim too. Its token set differs, so it is a second path, and **EPIC 054.5 owns it**
 together with the objective attestation lifecycle. `index.md` records the split.
 
 Add `test/sequence/scenarios/claim-success-review.ts`.
@@ -123,11 +123,11 @@ Everything inside the block is unchanged, and `const runKind = runKindFor(delive
 **Deleting the block outright would admit a second path this epic does not draw.** The throw is
 keyed on the run kind alone, and `src/domain/node-pair.ts:43` — `review` legalises
 `(objective, review)`, so a plain deletion admits the objective review claim too. Its token set
-differs from this diagram's, so it is a second path, and EPIC 053.2 owns it. **Omitting a diagram
+differs from this diagram's, so it is a second path, and EPIC 054.5 owns it. **Omitting a diagram
 does not defer a behaviour**; the gate is what defers it.
 
 **The code's surviving meaning is narrower than its name.** For the objective pair it now says the
-daemon does not yet admit an objective review claim, not that a head is missing. EPIC 053.2 removes
+daemon does not yet admit an objective review claim, not that a head is missing. EPIC 054.5 removes
 this gate when it adds the objective attestation lifecycle. The epic's Decision and its gate row 5
 state the same narrowing.
 
@@ -193,7 +193,7 @@ condition still arms under the narrowed gate.
 - Do not lift the `(initiative, review)` refusal. `src/domain/node-pair.ts:29` — `pair-illegal` refuses it
   `pair-illegal` at `src/commands/node/claim-node.ts:164` — `nodePairLegality`, before the deleted block, and it stays.
 - Do not admit the `(objective, review)` claim. The narrowed gate of section 1 is what refuses it,
-  and EPIC 053.2 removes that gate.
+  and EPIC 054.5 removes that gate.
 
 ## Verify
 
