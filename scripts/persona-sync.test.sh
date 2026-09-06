@@ -69,6 +69,16 @@ for role in $roles; do
   # the name in each frontmatter must be the role, or a dispatch names nothing
   grep -qx "name: $role" "$claude" || fail "$claude declares the wrong name"
   grep -qx "name: $role" "$opencode" || fail "$opencode declares the wrong name"
+
+  # The model and its grants are per-harness and must differ. The dispatch summary
+  # is the one operational field both harnesses read the same way, so it must not
+  # drift; an unstated model would silently take a harness default.
+  if [ "$(grep -m1 '^description: ' "$claude")" != "$(grep -m1 '^description: ' "$opencode")" ]; then
+    fail "the $role description differs between .claude and .opencode"
+  fi
+  grep -q '^model: ' "$claude" || fail "$claude states no model"
+  grep -q '^model: ' "$opencode" || fail "$opencode states no model"
+  grep -qE '^[[:space:]]+"\*\.env": deny$' "$opencode" || fail "$opencode does not deny .env reads"
 done
 
 # the reviewer never gets an edit grant in either harness
