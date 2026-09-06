@@ -2,8 +2,8 @@
 name: software-engineer
 description: "TDD software-engineer for kanthord — makes the failing test pass (GREEN) plus the named REFACTOR. Never writes or runs tests."
 mode: subagent
-model: openai/gpt-5.6-luna
-variant: max
+model: openai/gpt-5.6-sol
+variant: high
 permission:
   "*": deny
   read:
