@@ -58,19 +58,7 @@ if [ "$role" = reviewer-engineer ]; then
 fi
 
 case $path in
-.agents/tdd/memory/*)
-  rest=${path#.agents/tdd/memory/}
-  case $rest in
-  test-engineer/* | software-engineer/* | reviewer-engineer/* | groundwork-engineer/*)
-    [ "${rest%%/*}" = "$role" ] || deny "another role's journal"
-    ;;
-  test-engineer | software-engineer | reviewer-engineer | groundwork-engineer)
-    deny "a role journal name is a directory, not a file"
-    ;;
-  */*) deny "an unknown journal namespace" ;;
-  esac
-  exit 0
-  ;;
+.agents/tdd/memory/*) deny "the memory tree is read-only" ;;
 .agents/tdd/*) exit 0 ;;
 esac
 

@@ -47,15 +47,9 @@ deny reviewer-engineer docs/proposal/phase-1/state-machine.md
 
 allow test-engineer .agents/tdd/history/2026-08-05-006-git-primitives.md
 allow test-engineer .agents/tdd/.test-engineer-response-t1.md
-allow test-engineer .agents/tdd/memory/ts-gotchas.md
-allow test-engineer .agents/tdd/memory/test-engineer/2026-08-05.md
-allow software-engineer .agents/tdd/memory/software-engineer/2026-08-05.md
-deny test-engineer .agents/tdd/memory/software-engineer/2026-08-05.md
-deny software-engineer .agents/tdd/memory/test-engineer/2026-08-05.md
-deny test-engineer .agents/tdd/memory/reviewer-engineer/2026-08-05.md
-deny test-engineer .agents/tdd/memory/unknown/2026-08-05.md
-deny test-engineer .agents/tdd/memory/software-engineer-other/2026-08-05.md
-deny test-engineer .agents/tdd/memory/software-engineer
+deny test-engineer .agents/tdd/memory/ts-gotchas.md
+deny test-engineer .agents/tdd/memory/test-engineer/2026-08-05.md
+deny software-engineer .agents/tdd/memory/software-engineer/2026-08-05.md
 
 allow groundwork-engineer package.json
 allow groundwork-engineer package-lock.json
@@ -72,9 +66,7 @@ allow groundwork-engineer .gitignore
 allow groundwork-engineer docs/brainstorm.md
 allow groundwork-engineer docs/diagrams/state-machine.svg
 allow groundwork-engineer .agents/tdd/history/2026-08-05-006-git-primitives.md
-allow groundwork-engineer .agents/tdd/memory/groundwork-engineer/2026-08-05.md
-deny groundwork-engineer .agents/tdd/memory/software-engineer/2026-08-05.md
-deny test-engineer .agents/tdd/memory/groundwork-engineer/2026-08-05.md
+deny groundwork-engineer .agents/tdd/memory/groundwork-engineer/2026-08-05.md
 allow groundwork-engineer AGENTS.md
 deny groundwork-engineer .agents/plan/stories/epic/story.md
 deny groundwork-engineer .claude/skills/work/SKILL.md

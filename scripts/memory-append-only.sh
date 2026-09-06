@@ -41,7 +41,7 @@ check() {
 
 while IFS= read -r -d '' path; do
   check "$path"
-done < <(git -C "$root" ls-files -z -- '.agents/tdd/history' '.agents/tdd/memory')
+done < <(git -C "$root" ls-files -z -- '.agents/tdd/history')
 
 if [ "$status" -eq 0 ]; then
   echo "APPEND-ONLY: PASS"
