@@ -254,7 +254,7 @@ everything.
   See `03-scope-and-project.md`.
 
 - **`hasAcceptedCheckpoint` is a bare existence test on `node_id`.** The `checkpoint` table has no
-  `accepted` column, and every row is written only on an acceptance. `../docs/workflow/worker.md:449` makes a review
+  `accepted` column, and every row is written only on an acceptance. `docs/workflow/worker.md:449` makes a review
   verdict of `reject` a delivered verdict, so a rejected review checkpoint counts. A reader who
   expects a `WHERE accepted = 1` clause would look for a column the schema will never have. See
   `05-the-seams-the-acceptance-needs.md`.

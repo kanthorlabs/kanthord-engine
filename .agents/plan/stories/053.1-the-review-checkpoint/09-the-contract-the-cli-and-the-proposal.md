@@ -56,7 +56,7 @@ members. A member carrying `fence` would reintroduce a field that epic removed.
 `src/domain/identity.ts:49` — `ulidPattern` then requires a prefixed 26-character ULID. A bare
 string would admit an id no `checkpoint` row can carry.
 
-**It carries no `objectId` and no `repositoryId`.** `../docs/workflow/worker.md:562` — `candidate`
+**It carries no `objectId` and no `repositoryId`.** `docs/workflow/worker.md:562` — `candidate`
 states a review node reports an attestation and pushes no candidate, so there is no object to name.
 The `strictObject` is what refuses one.
 
@@ -260,9 +260,9 @@ the gap rather than creating it here. One `##` section per fact, in the prose st
    no `run_base` row, cuts no candidate ref and pins no judged oid.
 7. **The verdict semantics** — the node reaches `done` for `accept` and for `reject` alike, no code
    reads the verdict to decide a state, and the verdict changes no other node's state.
-8. **Trust, and undetected reviewer mutation** — `../docs/workflow/worker.md:729` — `Trusted` places
+8. **Trust, and undetected reviewer mutation** — `docs/workflow/worker.md:729` — `Trusted` places
    the verdict and "that the reviewer mutated nothing" under Trusted, and
-   `../docs/workflow/worker.md:735` — `mutation` states the daemon detects no reviewer mutation at a
+   `docs/workflow/worker.md:735` — `mutation` states the daemon detects no reviewer mutation at a
    review checkpoint. State both sentences and derive neither from the other.
 
 **Edit `docs/proposal/phase-2/runs-and-exclusion.md`.** Supersede the shipped paragraph that
@@ -291,7 +291,7 @@ and assert one verbatim sentence per fact, plus `indexOf` comparisons for sectio
 - Every 409 details schema is a `strictObject`, and each parses the exact object Stories 4 to 6 build.
   A schema looser than the command describes a response the daemon never sends.
 - Do not touch `docs/proposal/phase-2/worker.md`. It does not exist; the product document is
-  `../docs/workflow/worker.md`, in the superproject, and this epic amends no file outside this
+  `docs/workflow/worker.md`, in the superproject, and this epic amends no file outside this
   repository.
 
 ## Verify
@@ -325,7 +325,7 @@ Add, each as a separate `it`:
    removed that field, and this is what stops it returning through a new member.
 
 5. `"a review member carrying objectId is refused by the strict object"` — a complete body plus
-   `objectId`, asserting `success: false`. `../docs/workflow/worker.md:562` — `candidate` states a
+   `objectId`, asserting `success: false`. `docs/workflow/worker.md:562` — `candidate` states a
    review node pushes no candidate, so there is no object to name. This is the epic's gate row 20.
 
 6. `"a verdict outside the two values is refused by value"` — `verdict` of `"maybe"`, asserting

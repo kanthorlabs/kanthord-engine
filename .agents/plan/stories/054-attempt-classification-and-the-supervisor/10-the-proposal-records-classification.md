@@ -43,7 +43,7 @@ order. Each quoted sentence is written verbatim here and copied into the documen
 case 1 asserts each by `includes`.
 
 1. **`## The three classes`** — the table of `termination`, "Consumes an attempt" and "Source", copied
-   from `../docs/workflow/worker.md:457` — `termination`, plus the sentence:
+   from `docs/workflow/worker.md:457` — `termination`, plus the sentence:
    `"A termination is semantic, infrastructure or ambiguous, and only a non-accepted attempt carries one."`
 
 2. **`## The evidence union`** — the ten-row table with the columns `kind`, `driver` and `class`,

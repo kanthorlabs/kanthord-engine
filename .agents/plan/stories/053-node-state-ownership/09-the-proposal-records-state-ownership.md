@@ -44,7 +44,7 @@ Write one section per rule, each stating the rule and nothing about how it is im
   no human. Nothing remains to approve, and an objective that could reach neither the gate nor a
   terminal state would be unreachable state;
 - **the aggregation rules** — every child `done` gives `done`, every child `discarded` gives
-  `discarded`, a mixture gives `partial`, which is `../docs/workflow/worker.md:363` — `aggregate` in
+  `discarded`, a mixture gives `partial`, which is `docs/workflow/worker.md:363` — `aggregate` in
   prose;
 - **the terminal-state tuple** — `done`, `partial`, `discarded`, and that `awaiting_approval` is not
   in it;
@@ -53,7 +53,7 @@ Write one section per rule, each stating the rule and nothing about how it is im
   State that no ordered transition list and no generic ancestor walk exists, and that the depth is a
   property of the graph rather than a limit anyone enforces;
 - **the precedence carried by the state guard** — human input overrides aggregation, and aggregation
-  overrides attestation, which is `../docs/workflow/worker.md:367` — `Human input overrides`. State
+  overrides attestation, which is `docs/workflow/worker.md:367` — `Human input overrides`. State
   that the precedence needs no provenance column: an aggregation writes only from `running`, and a
   closed objective is `done` or `partial` while an attested atomic objective is `awaiting_approval`,
   so neither is reachable by a later aggregation;

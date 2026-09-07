@@ -102,7 +102,7 @@ records its worker cannot leave the two disagreeing.
 **Do not read `caller.worker`.** `src/commands/node/claim-node.ts:191` — `caller` is a local binding
 for `src/commands/node/claim-node.ts:82` — `ClaimCallerRecord`, which is the **claiming worker**, not
 the authenticated principal. The two names collide and the values are different things:
-`../docs/workflow/worker.md:489` — `Authorization and attribution are separate` is the sentence this
+`docs/workflow/worker.md:489` — `Authorization and attribution are separate` is the sentence this
 derivation implements.
 
 ### 4 — `test/helpers/execution.ts` — mirror the insert

@@ -96,7 +96,7 @@ Nothing blocks dispatch.
 
 ### Line anchors the EPIC cites that are stale
 
-- `worker.md` **section 13 does not exist**. The file is at `../docs/workflow/worker.md`, outside this repository, at the monorepo root, and it ends at section 11. The migration step plan the EPIC attributes to section 13 lives at `.agents/plan/epics/046-worker-model-overview.md:87-113`; step 3 deploys the writers and step 8 enforces.
+- `worker.md` **section 13 does not exist**. The file is at `docs/workflow/worker.md`, outside this repository, at the monorepo root, and it ends at section 11. The migration step plan the EPIC attributes to section 13 lives at `.agents/plan/epics/046-worker-model-overview.md:87-113`; step 3 deploys the writers and step 8 enforces.
 - The EPIC's Proof names `src/services/config/config.test.ts`. That file does not exist. The loader's tests are `src/services/config/convict.test.ts` and `src/services/config/refusals.test.ts`.
 
 ### Storage

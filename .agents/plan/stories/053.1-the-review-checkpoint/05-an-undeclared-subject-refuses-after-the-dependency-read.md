@@ -45,7 +45,7 @@ prior set.
 **`plan.readDependencies` has no projection**, so it draws a bare token, and this command calls it
 once.
 
-**This is the case that replaces the subtree lookup.** `../docs/workflow/worker.md:447` —
+**This is the case that replaces the subtree lookup.** `docs/workflow/worker.md:447` —
 `depends_on` states a review node is atomic, so it holds no child and its own subtree can never
 contain an execution checkpoint. A subtree lookup would be unsatisfiable, and an implicit lookup
 would let the reviewer choose its own subject.

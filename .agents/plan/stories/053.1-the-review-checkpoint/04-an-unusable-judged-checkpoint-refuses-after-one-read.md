@@ -86,7 +86,7 @@ before the null check narrows the type, so `unknown` precedes `not-execution` by
 precedence case is needed between them.
 
 **A `review` row and a `structural` row both refuse `not-execution`.**
-`../docs/workflow/worker.md:447` — `depends_on` states the daemon refuses a judged checkpoint that is
+`docs/workflow/worker.md:447` — `depends_on` states the daemon refuses a judged checkpoint that is
 not an accepted **execution** checkpoint of a node the review node depends on, so a review verdict
 never judges another verdict and never judges a graph patch.
 

@@ -145,9 +145,9 @@ export function classifyExternal(evidence: ExternalEvidence): Termination {
 }
 ```
 
-**Two functions, not one with a driver parameter.** `../docs/workflow/worker.md:465` — `supervisor`
+**Two functions, not one with a driver parameter.** `docs/workflow/worker.md:465` — `supervisor`
 states an internal worker has a supervisor that classifies from observed termination, and
-`../docs/workflow/worker.md:467` — `no supervisor` states the daemon classifies for an external
+`docs/workflow/worker.md:467` — `no supervisor` states the daemon classifies for an external
 worker. One function taking a driver would let `process-exit` reach an external run, which has no
 supervisor to observe it, and `provider-quota` reach an external run, whose provider response the
 daemon's own transport never received.

@@ -188,8 +188,8 @@ engineer or the other — `src/domain/`, `src/commands/`, `src/http/contract/`, 
   `scripts/epic-sequence-range.ts:20` — `shippedEpics` is `["050", "050.1"]`, so every diagram from
   EPIC 050.2 onward is authored and not yet due, `report-checkpoint-reap` included. That diagram has
   no scenario file today, and its deletion by story 7 is a no-op against the present tree.
-- **`worker.md` lives outside this repository**, at `../docs/workflow/worker.md` in the kanthord
-  superproject. Its section 6 is `## 6. Node state` at `../docs/workflow/worker.md:359` — `Node state`.
+- **`worker.md` lives outside this repository**, at `docs/workflow/worker.md` in the kanthord
+  superproject. Its section 6 is `## 6. Node state` at `docs/workflow/worker.md:359` — `Node state`.
 - **`aggregate` refuses a `partial` task and an initiative parent alike.**
   `src/domain/aggregation.ts:31` — `a task is never partial` fires only for
   `parent === "objective"`. Neither `empty-parent` nor `invalid-child-state` appears in

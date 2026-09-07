@@ -52,7 +52,7 @@ order:
 1. **An `update` or a `delete` naming an id outside the claimed subtree of the _pinned_ graph
    refuses.** The pinned subtree is what the run claimed, so a mutation may not reach a node the
    claim never covered. This is the rule EPIC 050's exclusion depends on:
-   `../docs/workflow/worker.md:377` states a run covers the claimed node and every descendant.
+   `docs/workflow/worker.md:377` states a run covers the claimed node and every descendant.
 2. **A `create` whose final parent is outside the claimed subtree of the _staged_ graph refuses.** A
    created node is in no pinned subtree, so the pinned graph cannot answer this. The final parent is
    read from the staged graph, so a `create` whose parent is another node the same patch creates is

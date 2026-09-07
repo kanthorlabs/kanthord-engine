@@ -109,7 +109,7 @@ passing `{ plan, blobs, graph, revision, execution, events, ids }` and nothing e
 ### 2 — `src/commands/outcome/report-outcome.ts:116` — lift `initiative-not-reportable` for this member
 
 `src/commands/outcome/report-outcome.ts:114` — `initiative` refuses every report on an initiative
-today, and `../docs/workflow/worker.md:365` — `structural` states an initiative's run is `structural`,
+today, and `docs/workflow/worker.md:365` — `structural` states an initiative's run is `structural`,
 so `(initiative, expansion)` is unrunnable while that guard stands.
 `.agents/plan/epics/052.2-the-structural-report-route.md:31` — `initiative-not-reportable` takes the
 ask EPIC 053 raised, and gate row 35 proves it.

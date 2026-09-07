@@ -236,7 +236,7 @@ Add, each as a separate `it`:
    assert the two listings deep-equal `[]`. **The control is a second fixture** in which a ref named
    `refs/kanthord/candidate/<the claimed run id>/1` is hand-seeded before the claim; assert the same
    predicate reports it, so the absence oracle is proven to fire on the exact forbidden name. An
-   `implementation` claim is **not** a control here: `../docs/workflow/worker.md:562` — `candidate`
+   `implementation` claim is **not** a control here: `docs/workflow/worker.md:562` — `candidate`
    states the worker pushes the candidate, so no claim of any kind writes one. This is the epic's
    gate row 4.
 

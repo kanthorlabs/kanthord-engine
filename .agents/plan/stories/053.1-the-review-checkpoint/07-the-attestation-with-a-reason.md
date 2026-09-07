@@ -136,7 +136,7 @@ declares `created_at INTEGER NOT NULL`, and this command holds no clock:
 `judged.acceptedOid` came from step 1's read, and `checkpoint_execution_accepted_oid` guarantees it is
 non-null for an `execution` row. The copy is what lets a reader answer "which commit was judged" with
 no join, and the reference beside it keeps the commit repository-qualified:
-`../docs/workflow/worker.md:447` — `depends_on` states the attestation stores the checkpoint
+`docs/workflow/worker.md:447` — `depends_on` states the attestation stores the checkpoint
 reference for that reason.
 
 **Every execution and structural column is `NULL`.** `repository_id`, `base_oid`, `accepted_oid`,
@@ -297,8 +297,8 @@ than recomputing it.
 
 **The node state comes from the report, never from the verdict.** `effect.nodeState` is `"done"` for
 both verdict values because `outcome` is the literal `"accepted"`:
-`../docs/workflow/worker.md:449` — `done` states both deliver the node, and
-`../docs/workflow/worker.md:729` — `Trusted` places the verdict under Trusted, so a daemon that acted
+`docs/workflow/worker.md:449` — `done` states both deliver the node, and
+`docs/workflow/worker.md:729` — `Trusted` places the verdict under Trusted, so a daemon that acted
 on it would be verifying it.
 
 **The new module imports** `accountAttempts` from `src/domain/attempt-accounting.ts`,

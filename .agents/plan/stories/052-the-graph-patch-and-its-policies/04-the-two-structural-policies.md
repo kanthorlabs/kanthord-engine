@@ -33,7 +33,7 @@ export function pairChangeVerdict(
 ```
 
 It refuses when `hasChild` or `hasAcceptedCheckpoint` is true. The condition is **disjunctive**:
-`../docs/workflow/worker.md:94` states the pair is fixed once the node holds an accepted checkpoint **or** a child.
+`docs/workflow/worker.md:94` states the pair is fixed once the node holds an accepted checkpoint **or** a child.
 
 `nodeId` is carried on the refusal and read nowhere else, so an unused parameter cannot reach
 `pnpm run lint`.
@@ -86,13 +86,13 @@ unconditional, and the test is a direct-child test:
 is inline.
 
 **A node that already holds children still refuses when the patch empties it.** The rule **closes**
-the completeness exemption of `../docs/workflow/worker.md:383`, which covers a childless node's own missing children.
+the completeness exemption of `docs/workflow/worker.md:383`, which covers a childless node's own missing children.
 A conditional rule would only renew that exemption: an emptied node fails completeness for ever and
 earns the exemption again at its next claim, so an accepted checkpoint could recreate the very
-incompleteness the rule exists to bound. `../docs/workflow/worker.md:385` states the closing form. Restructuring stays
+incompleteness the rule exists to bound. `docs/workflow/worker.md:385` states the closing form. Restructuring stays
 free, because the rule forbids only the transition to zero.
 
-**It counts staged children, never `create` mutations.** `../docs/workflow/worker.md:385` reads "rejects an expansion
+**It counts staged children, never `create` mutations.** `docs/workflow/worker.md:385` reads "rejects an expansion
 patch that creates none", and the epic overrides that reading: a `create` finally parented elsewhere
 creates one and leaves the claimed node none. The function receives the pinned and staged graphs and
 never the mutation set, so it cannot count `create` mutations by construction. Case 6 below is that
@@ -114,7 +114,7 @@ function's. `src/domain/plan-graph.ts:19` — `deliverable` is `string | null` a
 - `expansionVerdict` reads the **staged** graph and nothing else. It takes no pinned graph: the rule
   is unconditional, so what the node held at claim time cannot change the verdict.
 - Both tests use direct children. Do not use a subtree walk: a grandchild is not a child, and
-  `../docs/workflow/worker.md:385` says child.
+  `docs/workflow/worker.md:385` says child.
 - Add `pair-fixed` and `expansion-empty` to no registry. They are refusals, not findings, so
   `src/domain/plan-finding.ts:6` — `findingCodes` and
   `src/domain/plan-finding.ts:44` — `findingScope` are untouched, and EPIC 052.2 Story 1

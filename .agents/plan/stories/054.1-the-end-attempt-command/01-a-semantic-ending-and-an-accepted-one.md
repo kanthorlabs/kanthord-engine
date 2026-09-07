@@ -298,7 +298,7 @@ const termination =
       });
 ```
 
-**An accepted ending reaches no classifier.** `../docs/workflow/worker.md:467` — `A daemon rejection`
+**An accepted ending reaches no classifier.** `docs/workflow/worker.md:467` — `A daemon rejection`
 classifies a failure, and an acceptance is none, so `rawClass` is `null` and `termination` is `null`.
 
 **`mismatch` throws a bare `Error` naming the driver and the kind**, as a module-local function

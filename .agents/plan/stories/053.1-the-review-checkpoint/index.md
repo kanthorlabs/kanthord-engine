@@ -157,7 +157,7 @@ line is legal and none is written.
 - **`from_node` is the dependent and `to_node` is the dependency.**
   `src/services/plan/sqlite.ts:118` — `from_node` fixes the direction, and
   `src/services/plan/sqlite.ts:174` — `to_node` is the statement `readDependencies` issues.
-- **The product document is `../docs/workflow/worker.md`, in the superproject**, and it has 741
+- **The product document is `docs/workflow/worker.md`, in the superproject**, and it has 741
   lines. `docs/proposal/phase-2/worker.md` does not exist.
 
 ## Decisions taken during authoring, and now recorded in the EPIC

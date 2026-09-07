@@ -109,7 +109,7 @@ if (violations !== null) {
 
 `.agents/plan/epics/052-the-graph-patch-and-its-policies.md:59` — `delete` states both conditions:
 a deleted node must be `pending`, `ready` or `blocked`, and no durable row may name it.
-`../docs/workflow/worker.md:414` — `delete` is the source. The verdict is pure, so it is no message,
+`docs/workflow/worker.md:414` — `delete` is the source. The verdict is pure, so it is no message,
 and EPIC 052 owns it.
 
 **The schema enforces the binding half already, and that is why the guard exists.**

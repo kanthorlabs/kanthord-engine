@@ -138,20 +138,20 @@ export interface Supervisor {
 ```
 
 **`WorkerHandle` names a run and an attempt, and carries no pid.**
-`../docs/workflow/worker.md:483` — `another machine` states a later worker runs elsewhere, and the
+`docs/workflow/worker.md:483` — `another machine` states a later worker runs elsewhere, and the
 epic's Decisions require the interface to admit that without a signature change. A `pid` member would
 be the field a remote implementation could not fill.
 
 **`launch` and `observe` are asynchronous and `classify` is not.** The first two do I/O — spawning a
 process tree and waiting on its termination —
-per `../docs/workflow/worker.md:481` — `separate process`. `classify` takes the observation and two
+per `docs/workflow/worker.md:481` — `separate process`. `classify` takes the observation and two
 numbers and returns a value.
 
 **`classify` is on the interface and not left to the two domain functions.** It composes
 `classifyInternal` with `convertOnExhaustion`, and it belongs to the supervisor because a remote
 supervisor is what observed the termination: the daemon cannot see a process on another machine, so
 the component that classifies has to be the component that observed.
-`../docs/workflow/worker.md:465` — `supervisor` states that directly.
+`docs/workflow/worker.md:465` — `supervisor` states that directly.
 
 **`SupervisorErrorCode` holds one code.** `AgentErrorCode` at
 `src/services/agent/index.ts:21` — `AgentErrorCode` holds a second, `"agent-timeout"`, because an

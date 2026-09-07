@@ -28,7 +28,7 @@ follows `src/domain/run.ts:48` — `runBaseRow`, the nearest keyless leaf row: n
 a table that owns its own id, and this table is keyed on the node id, so `nodeIdentity` is the fit and
 the three pinned counts of `src/domain/identity.test.ts:17` — `it` do not move.
 
-**No `state` column and no `state` field.** Neither this epic nor `../docs/workflow/worker.md`
+**No `state` column and no `state` field.** Neither this epic nor `docs/workflow/worker.md`
 section 7 defines a transition for the branch record, and a column with no transitions is a column
 nobody can write correctly.
 

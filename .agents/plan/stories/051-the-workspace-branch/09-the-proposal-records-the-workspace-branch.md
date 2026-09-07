@@ -28,7 +28,7 @@ trigger `workspace_branch_checkpoint_guard`, marked as belonging to migration `1
 - **`repository_id` is not a column.** It joins from `node`, and
   `src/services/storage/migration-0011-deliverable.ts:28` — `CHECK` makes an objective the only kind
   carrying one, so the join is constraint-backed and total.
-- **`state` is not a column.** Neither this family nor `../docs/workflow/worker.md` section 7 defines
+- **`state` is not a column.** Neither this family nor `docs/workflow/worker.md` section 7 defines
   a transition for the record.
 - **`origin_oid` is immutable and the row is not deletable while a checkpoint names it.** The first
   trigger belongs to migration `13`; the second belongs to migration `14`, because a trigger naming

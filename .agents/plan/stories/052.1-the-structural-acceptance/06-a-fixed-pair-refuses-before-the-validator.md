@@ -92,7 +92,7 @@ if (verdict !== null) {
 `hasChild` is read from the **pinned** graph, and `hasAcceptedCheckpoint` from the execution store.
 `.agents/plan/epics/052-the-graph-patch-and-its-policies.md:53` — `pairChangeVerdict` decides both.
 The fix is permanent: an accepted expansion writes a structural checkpoint on the claimed node, so a
-parent objective never becomes atomic. `../docs/workflow/worker.md:94` — `pair` states it.
+parent objective never becomes atomic. `docs/workflow/worker.md:94` — `pair` states it.
 
 ### 2 — the aggregation and its sort key
 

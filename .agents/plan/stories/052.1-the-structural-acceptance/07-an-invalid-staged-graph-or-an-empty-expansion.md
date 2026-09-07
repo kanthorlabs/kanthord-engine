@@ -161,7 +161,7 @@ if (empty !== null) {
 `.agents/plan/epics/052-the-graph-patch-and-its-policies.md:55` — `expansionVerdict` refuses when the
 claimed node holds no direct child in the **staged** graph, whatever it held at claim time. The rule
 is unconditional and reads the staged graph alone.
-`../docs/workflow/worker.md:385` — `expansion` states that an accepted expansion checkpoint creates
+`docs/workflow/worker.md:385` — `expansion` states that an accepted expansion checkpoint creates
 at least one child, and that this closes the completeness exemption of
 `src/commands/node/claim-node.ts:180` — `expansion`.
 

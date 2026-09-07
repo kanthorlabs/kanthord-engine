@@ -270,7 +270,7 @@ null, and the paragraph above states the arithmetic.
 `subjectId` the run id, matching `.agents/plan/stories/050.2-the-run-renew-release-and-report/05-the-release.md:137`
 — `run.ended`.
 
-**No node transition is written.** `../docs/workflow/worker.md:365` — `structural` states a run never
+**No node transition is written.** `docs/workflow/worker.md:365` — `structural` states a run never
 sets an initiative or a parent-objective terminal state, and that the initiative stays `pending` or
 `ready`. There is no `plan.setNodeState` call in this command, on any path.
 

@@ -83,7 +83,7 @@ attempt close, the run end, the node transition, both events and the aggregation
 
 - `reason_blob` is `null` for a reasonless attestation, and the `blob` table gains no row.
 - `verdict` is still required. A reasonless attestation is a complete attestation:
-  `../docs/workflow/worker.md:449` — `done` makes both verdict values a delivered verdict, and no
+  `docs/workflow/worker.md:449` — `done` makes both verdict values a delivered verdict, and no
   sentence requires a reason.
 - The conditional tests `=== undefined`, never falsiness. `src/http/contract/outcome.ts`'s
   `.min(1)` refuses an empty string at the wire, so an empty string reaching the command is a defect

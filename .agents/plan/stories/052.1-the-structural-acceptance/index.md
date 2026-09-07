@@ -92,9 +92,9 @@ line.
 
 ## Facts (needed for implementation)
 
-- **`worker.md` lives outside this repository.** It is `../docs/workflow/worker.md`, in the kanthord
+- **`worker.md` lives outside this repository.** It is `docs/workflow/worker.md`, in the kanthord
   superproject, not `docs/proposal/phase-2/worker.md`. Its section 2 is `## 2. Node` at
-  `../docs/workflow/worker.md:59` — `Node`, section 7 is `## 7. Exclusion` at `:375` — `Exclusion`, and
+  `docs/workflow/worker.md:59` — `Node`, section 7 is `## 7. Exclusion` at `:375` — `Exclusion`, and
   section 8 is `## 8. Checkpoint` at `:414` — `Checkpoint`. Every citation of it in EPIC 052.1
   resolves at the line it names.
 - **`reportOutcome` opens its transaction as its first statement.**
@@ -131,7 +131,7 @@ line.
   table, and this epic writes no migration.
 - **`accepted` is already a legal attempt outcome.** `src/domain/attempt.ts:8` — `accepted`.
 - **The production registry declares `expansion` on `research@1` alone, which is not among the first
-  two workers.** `../docs/workflow/worker.md:209` — `research@1`. Every test of this epic supplies
+  two workers.** `docs/workflow/worker.md:209` — `research@1`. Every test of this epic supplies
   `expansionCapableRegistry` at `test/helpers/worker-registry.ts:3` —
   `expansionCapableRegistry`, and Story 10
   (`10-the-proposal-records-the-structural-acceptance`) case 1 asserts the production behaviour so

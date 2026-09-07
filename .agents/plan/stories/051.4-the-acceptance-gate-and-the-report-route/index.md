@@ -186,7 +186,7 @@ Each fact was read out of the tree before a story was written, and each one chan
   `--repository-id`; the epic's Proof already anticipates it by listing
   `src/cli/node/report.test.ts`.
 
-- **`worker.md` is outside this repository**, at `../docs/workflow/worker.md`, at the monorepo root.
+- **`worker.md` is outside this repository**, at `docs/workflow/worker.md`, at the monorepo root.
   Section 8 is lines 414 to 452, section 11 is lines 719 to 739. A citation to it is not gate-checkable
   and no story writes one in citation form.
 

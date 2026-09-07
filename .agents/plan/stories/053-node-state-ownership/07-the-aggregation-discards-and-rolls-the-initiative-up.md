@@ -100,7 +100,7 @@ stamps one time, and this command holds no `clock` key for that reason.
 
 **The walk stops here, and the stop is by construction.** A task report aggregates its parent
 objective; that objective moves the initiative only when it reaches `discarded`; and an initiative has
-no parent. `../docs/workflow/worker.md:365` — `A run never sets` states that a run never sets an
+no parent. `docs/workflow/worker.md:365` — `A run never sets` states that a run never sets an
 initiative or a parent objective terminal state, and the `awaiting_approval` row of Story 6
 (`06-the-aggregation-reaches-the-human-gate`) satisfies it because `awaiting_approval` is not
 terminal. No ordered transition list and no generic ancestor walk exists, and none is added.

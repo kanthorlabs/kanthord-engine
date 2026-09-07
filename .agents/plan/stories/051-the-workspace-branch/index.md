@@ -151,7 +151,7 @@ EPIC 050.5 have shipped. EPIC 051 cannot land before them.
 - **`scripts/verify-epic-sequence.ts` is not named in `package.json:28` — `verify`.** It runs through
   `pnpm test`, because `scripts/verify-epic-sequence.test.ts:880` — `it` runs the gate against the
   real tree. A gate violation still fails `pnpm run verify`.
-- **`../docs/workflow/worker.md` is in the umbrella repository, not in this one.** Section 7 holds the
+- **`docs/workflow/worker.md` is in the umbrella repository, not in this one.** Section 7 holds the
   workspace record and the first-claim rule the epic quotes, and section 8 holds the compare and swap.
   No path under `docs/` in this repository resolves it.
 

@@ -296,7 +296,7 @@ attempt(id)` makes `attempt` a referenced table. Both premises were wrong for th
   which `pnpm run build` catches; a throwing `default` would move that failure to run time. See
   `06-the-evidence-union-and-the-classifiers.md` section 2.
 - **`SupervisorErrorCode` holds one code, and `WorkerHandle` carries no pid.**
-  `../docs/workflow/worker.md:483` — `another machine` requires the interface to admit a remote worker
+  `docs/workflow/worker.md:483` — `another machine` requires the interface to admit a remote worker
   without a signature change, and a pid is the field a remote implementation could not fill. See
   `09-the-budget-and-the-supervisor.md` section 3.
 - **Story 10 supersedes two shipped paragraphs the epic does not name.**
@@ -308,7 +308,7 @@ attempt(id)` makes `attempt` a referenced table. Both premises were wrong for th
   that states the opposite of the code. See `10-the-proposal-records-classification.md` sections 2
   and 3.
 - **The epic's citation of a section 13 is repaired.** Its nullable-column non-goal cited
-  `../docs/workflow/worker.md` section 13; that document runs sections 1 to 11 and ends at
-  `../docs/workflow/worker.md:721` — `## 11. Guarantees`. No section of it states a nullability rule,
+  `docs/workflow/worker.md` section 13; that document runs sections 1 to 11 and ends at
+  `docs/workflow/worker.md:721` — `## 11. Guarantees`. No section of it states a nullability rule,
   and the reason is the epic's own: migration `16` backfills nothing, so a `NOT NULL` column would
   need a value for every existing row. The non-goal now says that and cites nothing.

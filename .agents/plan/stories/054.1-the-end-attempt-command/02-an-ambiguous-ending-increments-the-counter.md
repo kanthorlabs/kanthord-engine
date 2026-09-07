@@ -20,7 +20,7 @@ case 4 here.
 already rules that a branch which changes a value and not the call set is not a diagram.
 
 **The increment keys on the class before the conversion, and that is the whole point of the story.**
-`../docs/workflow/worker.md:455` — `## 9. Attempt` states that an exhausted budget converts the next
+`docs/workflow/worker.md:455` — `## 9. Attempt` states that an exhausted budget converts the next
 ambiguous termination, so the charge is what the counter counts. A conversion that also suppressed
 the charge would leave a crash loop unbounded past the budget.
 
