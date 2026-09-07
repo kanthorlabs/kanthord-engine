@@ -6,6 +6,7 @@ import os from "node:os";
 import { spawnSync } from "node:child_process";
 import {
   main,
+  commitMessage,
   lex,
   repoPath,
   parsePaths,
@@ -113,8 +114,15 @@ function fixture(t, options = {}) {
     "-qm",
     "baseline",
   );
+  cmd(root, "config", "user.email", "fixture@example.invalid");
+  cmd(root, "config", "user.name", "Fixture");
   const base = cmd(root, "rev-parse", "HEAD");
-  if (options.setup) options.setup({ root, write, base });
+  t.after(() => {
+    for (const p of extra) fs.rmSync(p, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  if (options.setup)
+    options.setup({ root, write, base, cmd: (...a) => cmd(root, ...a) });
   const opened = main([
     "open",
     "--root",
@@ -127,10 +135,6 @@ function fixture(t, options = {}) {
   ]);
   const sp = opened.session;
   if (sp) extra.push(path.dirname(sp));
-  t.after(() => {
-    for (const p of extra) fs.rmSync(p, { recursive: true, force: true });
-    fs.rmSync(root, { recursive: true, force: true });
-  });
   const exec = (command, ...args) => main([command, "--session", sp, ...args]);
   const scratch = (name, data) => {
     const p = path.join(path.dirname(sp), name);
@@ -164,6 +168,44 @@ function fixture(t, options = {}) {
     append(b, block, changes);
     return { ...b, result: finishWorker(b, block) };
   }
+  function closeStory(stem = "01-core", cases = ["01-core#V1"], changes) {
+    const b = begin("test-engineer"),
+      block = turn(
+        "test-engineer",
+        `**Story closed.** ${stem}\npnpm test\nexit 0\nTESTS OK\nSTORY-COMPLETE: ${stem} — cases: ${cases.join(", ")}`,
+      );
+    append(b, block, changes ?? { "src/core.test.ts": `// ${stem}\n` });
+    finishWorker(b, block, cases);
+    return { b, block };
+  }
+  function commitStory(stem = "01-core", overrides = {}) {
+    const turnId =
+      overrides.turn ??
+      parseDiscussion(
+        fs.readFileSync(path.join(root, opened.discussion), "utf8"),
+      ).turns.at(-1).turn;
+    return exec(
+      "commit",
+      "--story",
+      stem,
+      "--assessment",
+      scratch(`${cryptoName()}.json`, {
+        turn: turnId,
+        story: stem,
+        storyGateSource: section(story, "Verify"),
+        required: ["pnpm test"],
+        checks: [
+          {
+            command: "pnpm test",
+            exit: 0,
+            output: "TESTS OK",
+            evidence: "pnpm test\nexit 0\nTESTS OK",
+          },
+        ],
+        ...overrides,
+      }),
+    );
+  }
   return {
     root,
     sp,
@@ -177,6 +219,9 @@ function fixture(t, options = {}) {
     worker,
     assess,
     finishWorker,
+    closeStory,
+    commitStory,
+    cmd: (...a) => cmd(root, ...a),
     extra,
   };
 }
@@ -184,6 +229,8 @@ function cryptoName() {
   return String(Math.random()).slice(2);
 }
 function makeReady(f) {
+  f.closeStory();
+  f.commitStory();
   const b = f.begin("test-engineer");
   const block = turn(
     "test-engineer",
@@ -873,7 +920,7 @@ test("automatic findings route once, preserve severity and force TE first", (t) 
   const st = f.exec("state");
   assert.equal(st.autoUsed, true);
   assert.equal(st.nextRole, "test-engineer");
-  assert.equal(st.turns, 2);
+  assert.equal(st.turns, 3);
   assert.equal(
     st.reviews[0].findings.find((x) => x.id === "S1").severity,
     "SUGGESTION",
@@ -1218,7 +1265,7 @@ test("review NOT_RUN remains a mandatory human blocker rather than a passing res
   assert.equal(f.exec("state").currentReview.verdict, "FAIL");
 });
 test("reviewer and debate dispatches also spend the invocation cap", (t) => {
-  const f = fixture(t, { maxTurns: 1 });
+  const f = fixture(t, { maxTurns: 2 });
   makeReady(f);
   assert.throws(() => f.begin("reviewer-engineer"), /max-turns/);
 });
@@ -1572,8 +1619,10 @@ test("readiness gates come from the EPIC, not from the submitted assessment", (t
   assert.ok(b.turn);
 });
 test("readiness requires the cited turn to name every case", (t) => {
-  const f = fixture(t),
-    b = f.begin("test-engineer");
+  const f = fixture(t);
+  f.closeStory();
+  f.commitStory();
+  const b = f.begin("test-engineer");
   const block = turn(
     "test-engineer",
     "**Cases closed.** all of them\nIMPLEMENTATION_READY_FOR_REVIEW:\n- gates: PASS",
@@ -1695,4 +1744,173 @@ test("cleanEnv strips every git location variable", () => {
   assert.equal(env.GIT_DIR, undefined);
   assert.equal(env.GIT_WORK_TREE, undefined);
   assert.equal(env.LC_ALL, "C");
+});
+
+// --- one commit per completed story ---
+test("a closed story commits once, with a deterministic message", (t) => {
+  const f = fixture(t);
+  f.closeStory();
+  const r = f.commitStory();
+  assert.equal(r.status, "committed");
+  assert.deepEqual(r.hookModified, []);
+  assert.equal(
+    f.cmd("log", "-1", "--format=%B").trim(),
+    commitMessage("001-demo", { groundwork: false, path: storyRel }, "Core", [
+      "01-core#V1",
+    ]).trim(),
+  );
+  assert.equal(
+    f.cmd("show", "--name-only", "--format=", "HEAD"),
+    "src/core.test.ts",
+  );
+  assert.equal(f.exec("state").commits.done[0].sha, r.sha);
+});
+test("the ledger stays out of every story commit", (t) => {
+  const f = fixture(t);
+  f.closeStory();
+  f.commitStory();
+  assert.equal(
+    f.cmd("ls-files", "--", ".agents/tdd/history"),
+    "",
+    "the discussion must remain untracked",
+  );
+  // Control: the story's own change did land, so the assertion is not vacuous.
+  assert.equal(f.cmd("ls-files", "--", "src/core.test.ts"), "src/core.test.ts");
+});
+test("a second commit for the same story is refused as already committed", (t) => {
+  const f = fixture(t);
+  f.closeStory();
+  const first = f.commitStory();
+  f.worker("test-engineer", "", { "src/core.test.ts": "// more\n" });
+  const again = f.commitStory();
+  assert.equal(again.status, "already-committed");
+  assert.equal(again.sha, first.sha);
+  assert.equal(f.cmd("rev-parse", "HEAD"), first.sha);
+});
+test("a blocked closing turn cannot be committed", (t) => {
+  const f = fixture(t);
+  const b = f.begin("test-engineer"),
+    block = turn(
+      "test-engineer",
+      "pnpm test\nexit 0\nTESTS OK\nATTEMPT-FAILED: 01-core#V1 — still red\nSTORY-COMPLETE: 01-core — cases: 01-core#V1",
+    );
+  f.append(b, block, { "src/core.test.ts": "// blocked\n" });
+  f.finishWorker(b, block, ["01-core#V1"]);
+  assert.throws(() => f.commitStory(), /blocked/);
+  assert.equal(f.cmd("rev-parse", "HEAD"), f.base);
+});
+test("a tree edited after the closing turn is not committable", (t) => {
+  const f = fixture(t);
+  f.closeStory();
+  f.write("src/core.ts", "export const value = 99;\n");
+  assert.throws(() => f.commitStory(), /no turn validation/);
+  assert.equal(f.cmd("rev-parse", "HEAD"), f.base);
+});
+test("STORY-COMPLETE must name exactly the story's cases", (t) => {
+  const f = fixture(t);
+  f.closeStory("01-core", ["01-core#V2"]);
+  assert.throws(() => f.commitStory(), /exactly this story's cases/);
+});
+test("only the test-engineer may close a story", () => {
+  assert.throws(
+    () =>
+      validateAppend(
+        "",
+        turn(
+          "software-engineer",
+          "STORY-COMPLETE: 01-core — cases: 01-core#V1",
+        ),
+        turn(
+          "software-engineer",
+          "STORY-COMPLETE: 01-core — cases: 01-core#V1",
+        ),
+        "software-engineer",
+      ),
+    /belongs only to test-engineer/,
+  );
+  // Control: the same block from the test-engineer is accepted.
+  const block = turn(
+    "test-engineer",
+    "STORY-COMPLETE: 01-core — cases: 01-core#V1",
+  );
+  assert.ok(validateAppend("", block, block, "test-engineer"));
+});
+test("readiness refuses a story that never committed", (t) => {
+  const f = fixture(t);
+  const b = f.begin("test-engineer"),
+    block = turn(
+      "test-engineer",
+      "**Cases closed.** 01-core#V1\nIMPLEMENTATION_READY_FOR_REVIEW:\n- gates: PASS",
+    );
+  f.append(b, block);
+  f.finishWorker(b, block, ["01-core#V1"]);
+  assert.throws(
+    () =>
+      f.exec("ready", "--assessment", f.scratch("r.json", { turn: b.turn })),
+    /every story commits before readiness/,
+  );
+});
+test("a hook that rewrites staged content is recorded, never silently certified", (t) => {
+  const f = fixture(t, {
+    setup: ({ root }) => {
+      const h = path.join(root, ".git", "hooks", "pre-commit");
+      fs.writeFileSync(
+        h,
+        "#!/bin/sh\nprintf '// reformatted\\n' >> src/core.test.ts\ngit add src/core.test.ts\n",
+      );
+      fs.chmodSync(h, 0o755);
+    },
+  });
+  f.closeStory();
+  const r = f.commitStory();
+  assert.equal(r.status, "committed-with-hook-changes");
+  assert.deepEqual(r.hookModified, ["src/core.test.ts"]);
+  assert.equal(f.exec("state").commits.done[0].hookModified.length, 1);
+});
+test("a commit intent with no commit behind it settles as discarded", (t) => {
+  const f = fixture(t);
+  f.closeStory();
+  fs.appendFileSync(
+    path.join(f.root, f.opened.discussion),
+    `WORK-EVENT: ${JSON.stringify({
+      v: 1,
+      type: "commit-intent",
+      op: "op-1",
+      story: "01-core",
+      turn: "t-1",
+      parent: f.cmd("rev-parse", "HEAD"),
+      tree: f.cmd("rev-parse", "HEAD^{tree}"),
+      message: "unused",
+    })}\n`,
+  );
+  assert.equal(f.commitStory().status, "commit-discarded");
+  assert.equal(f.cmd("rev-parse", "HEAD"), f.base);
+  // The discarded intent releases the story, so the real commit still lands.
+  assert.equal(f.commitStory().status, "committed");
+});
+test("a new cycle refuses to open on a tree it does not own", (t) => {
+  assert.throws(
+    () =>
+      fixture(t, {
+        setup: ({ write }) =>
+          write("src/stray.ts", "export const stray = 1;\n"),
+      }),
+    /needs a clean tree/,
+  );
+  // Control: the same fixture without the stray file opens.
+  assert.equal(fixture(t).opened.status, "opened");
+});
+test("stories commit in their planned order", (t) => {
+  const f = fixture(t, {
+    setup: ({ write, cmd }) => {
+      write(".agents/plan/stories/001-demo/02-next.md", story);
+      cmd("add", ".");
+      cmd("commit", "-qm", "second story");
+    },
+  });
+  f.closeStory("02-next", ["02-next#V1"]);
+  assert.throws(
+    () => f.commitStory("02-next"),
+    /commit the earlier stories first/,
+  );
 });

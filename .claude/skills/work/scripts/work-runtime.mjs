@@ -61,6 +61,16 @@ function run(root, binary, args) {
 function git(root, args) {
   return run(root, "git", args);
 }
+function gitTry(root, args) {
+  const p = spawnSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    env: cleanEnv({ GIT_OPTIONAL_LOCKS: "0", LC_ALL: "C" }),
+  });
+  if (p.error) fail(`git ${args.join(" ")}: ${p.error.message}`);
+  return { status: p.status, stdout: p.stdout, stderr: p.stderr };
+}
 export function repoPath(p) {
   oneLine(p, "path");
   if (
@@ -271,6 +281,10 @@ export function parseDiscussion(text) {
       : LAST(engineers)?.role === "test-engineer"
         ? "software-engineer"
         : "test-engineer";
+  // A story commit closes a story, so the next turn opens the next one: TE first.
+  const lastEngineer = LAST(engineers)?.end ?? 0;
+  if (events.some((e) => e.type === "story-commit" && e.line > lastEngineer))
+    next = "test-engineer";
   const completions = markers
     .filter((l) => l.s.startsWith("GROUNDWORK-COMPLETE: "))
     .map((l) => {
@@ -401,6 +415,19 @@ export function parseDiscussion(text) {
       (e) => e.type === "review" && e.line > humanBoundary,
     ),
     readyChecks: events.filter((e) => e.type === "ready"),
+    storyCommits: events.filter((e) => e.type === "story-commit"),
+    commitIntent:
+      LAST(
+        events.filter(
+          (e) =>
+            e.type === "commit-intent" &&
+            !events.some(
+              (x) =>
+                ["story-commit", "commit-discarded"].includes(x.type) &&
+                x.op === e.op,
+            ),
+        ),
+      ) ?? null,
     markers,
   };
 }
@@ -452,6 +479,20 @@ function snapshot(root) {
       return [p, `${h}:mode=${stat.mode & 0o7777}`];
     }),
   );
+}
+export const LEDGER = ".agents/tdd/history/";
+function dirtyOutsideProtocol(root) {
+  return distinct(
+    (
+      git(root, ["diff", "--name-only", "--no-renames", "-z", "HEAD", "--"]) +
+      git(root, ["ls-files", "--others", "--exclude-standard", "-z"])
+    )
+      .split("\0")
+      .filter(Boolean),
+  )
+    .map(repoPath)
+    .filter((p) => !p.startsWith(LEDGER))
+    .sort();
 }
 function gitState(root) {
   return {
@@ -615,6 +656,11 @@ function openSession(o) {
     const date = new Date().toISOString().slice(0, 10),
       runId = crypto.randomUUID();
     if (!discussion) {
+      const unowned = dirtyOutsideProtocol(root);
+      if (unowned.length)
+        fail(
+          `a new cycle needs a clean tree; commit or stash first: ${unowned.join(", ")}`,
+        );
       discussion = `.agents/tdd/history/${date}-${path.basename(epic, ".md")}.md`;
       fs.mkdirSync(path.dirname(path.join(root, discussion)), {
         recursive: true,
@@ -940,6 +986,13 @@ export function validateAppend(prefix, current, draft, role) {
       .length > 1
   )
     fail("duplicate ready marker");
+  if (
+    role !== "test-engineer" &&
+    active.some((l) => l.s.startsWith("STORY-COMPLETE:"))
+  )
+    fail("story completion belongs only to test-engineer");
+  if (active.filter((l) => l.s.startsWith("STORY-COMPLETE:")).length > 1)
+    fail("duplicate story-complete marker");
   return block;
 }
 function validateEffects(s, b) {
@@ -1435,6 +1488,13 @@ function ready(sp, assessmentPath) {
     t = st.readyTurn,
     a = json(assessmentPath);
   if (!t || st.pending.length) fail("no latest accepted TE readiness turn");
+  const uncommitted = planCases(s.root, s.epic)
+    .map((x) => path.basename(x.path, ".md"))
+    .filter((n) => !st.storyCommits.some((e) => e.story === n));
+  if (uncommitted.length)
+    fail(
+      `every story commits before readiness; missing: ${uncommitted.join(", ")}`,
+    );
   if (st.events.some((e) => e.type === "ready-rejected" && e.turn === t.turn))
     fail("rejected readiness requires a fresh TE turn");
   if (
@@ -1710,8 +1770,217 @@ function inspect(sp) {
       .filter(Boolean)
       .map((t) => ({ role: t.role, turn: t.turn, start: t.start, end: t.end })),
     completions: st.completions,
+    commits: {
+      intent: st.commitIntent,
+      done: st.storyCommits.map((e) => ({
+        story: e.story,
+        sha: e.sha,
+        hookModified: e.hookModified,
+      })),
+      owed: (() => {
+        const closed = LAST(st.turns);
+        if (!closed || st.pending.length) return null;
+        const marker =
+          closed.role === "test-engineer"
+            ? parseStoryComplete(closed.block)
+            : null;
+        const stem = marker?.story ?? null;
+        return stem && !st.storyCommits.some((e) => e.story === stem)
+          ? stem
+          : null;
+      })(),
+    },
     guides: st.guides.filter((g) => g.line > st.boundary),
   };
+}
+export function storyTitle(text, stem) {
+  const h1 = lex(text).find((l) => l.active && /^# \S/.test(l.s));
+  return h1 ? h1.s.slice(2).trim() : stem;
+}
+export function commitMessage(epic, story, title, cases) {
+  return [
+    `${story.groundwork ? "chore" : "feat"}(${epic}): ${title}`,
+    "",
+    `Story: ${story.path}`,
+    `Cases: ${cases.join(", ")}`,
+    "",
+  ].join("\n");
+}
+export function parseStoryComplete(block) {
+  const line = lex(block)
+    .filter((l) => l.active && l.s.startsWith("STORY-COMPLETE:"))
+    .map((l) => l.s);
+  if (line.length !== 1) return null;
+  const m = line[0].match(/^STORY-COMPLETE:\s+(\S+)\s+—\s+cases:\s+(.+)$/);
+  if (!m) fail("malformed STORY-COMPLETE marker");
+  return {
+    story: m[1],
+    cases: m[2]
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean),
+  };
+}
+function restoreIndex(root) {
+  git(root, ["reset", "-q", "--mixed"]);
+}
+function settleCommit(s, intent) {
+  const head = git(s.root, ["rev-parse", "HEAD"]).trim();
+  const entries = [];
+  let out;
+  if (head === intent.parent) {
+    restoreIndex(s.root);
+    out = { status: "commit-discarded", story: intent.story, op: intent.op };
+    entries.push(
+      event({
+        type: "commit-discarded",
+        op: intent.op,
+        story: intent.story,
+        reason: "no commit landed; the index is restored",
+      }),
+    );
+  } else if (
+    git(s.root, ["rev-parse", `${head}^`]).trim() === intent.parent &&
+    git(s.root, ["log", "-1", "--format=%B", head]).trim() ===
+      intent.message.trim()
+  ) {
+    const tree = git(s.root, ["rev-parse", `${head}^{tree}`]).trim();
+    const hookModified =
+      tree === intent.tree
+        ? []
+        : git(s.root, [
+            "diff",
+            "--name-only",
+            "--no-renames",
+            "-z",
+            intent.tree,
+            tree,
+          ])
+            .split("\0")
+            .filter(Boolean)
+            .map(repoPath)
+            .sort();
+    out = {
+      status: hookModified.length ? "committed-with-hook-changes" : "committed",
+      story: intent.story,
+      sha: head,
+      hookModified,
+    };
+    entries.push(
+      event({
+        type: "story-commit",
+        op: intent.op,
+        story: intent.story,
+        turn: intent.turn,
+        sha: head,
+        tree,
+        hookModified,
+      }),
+    );
+  } else
+    fail(
+      `HEAD does not match the recorded commit intent ${intent.op}; a human must inspect the tree`,
+    );
+  emit(path.join(s.root, s.discussion), entries);
+  return out;
+}
+function storyCommit(sp, stem, assessmentPath) {
+  const s = session(sp),
+    st = stateOf(s);
+  if (st.human === "PASS") fail("cycle is closed");
+  if (st.pending.length)
+    fail("a dispatch is in flight; finish or abandon it before a commit");
+  if (st.commitIntent) return settleCommit(s, st.commitIntent);
+  const epicSlug = path.basename(s.epic, ".md"),
+    stories = planCases(s.root, s.epic);
+  const ix = stories.findIndex((x) => path.basename(x.path, ".md") === stem);
+  if (ix < 0) fail(`unknown story for this EPIC: ${stem}`);
+  const story = stories[ix];
+  const done = st.storyCommits.filter((e) => e.story === stem);
+  if (done.length)
+    return { status: "already-committed", story: stem, sha: LAST(done).sha };
+  const earlier = stories
+    .slice(0, ix)
+    .map((x) => path.basename(x.path, ".md"))
+    .filter((n) => !st.storyCommits.some((e) => e.story === n));
+  if (earlier.length)
+    fail(`commit the earlier stories first: ${earlier.join(", ")}`);
+  const turn = LAST(st.turns);
+  if (!turn || turn.legacy || !turn.receipt)
+    fail("no accepted turn closes this story");
+  if (fingerprint(s) !== turn.receipt.fingerprint)
+    fail(
+      "the tree changed since the closing turn; these bytes carry no turn validation",
+    );
+  if (
+    lex(turn.block).some(
+      (l) => l.active && /^(OPEN:|ATTEMPT-FAILED:)/.test(l.s),
+    )
+  )
+    fail("the closing turn is blocked; a blocked story is not committable");
+  if (story.groundwork) {
+    if (turn.role !== "groundwork-engineer")
+      fail("a groundwork story closes on an accepted groundwork turn");
+    if (
+      !st.completions.some(
+        (c) => c.id === stem && c.sourceHash === story.sourceHash,
+      )
+    )
+      fail(`no current GROUNDWORK-COMPLETE for ${stem}`);
+  } else {
+    if (turn.role !== "test-engineer")
+      fail("only an accepted test-engineer turn closes a story");
+    const closed = parseStoryComplete(turn.block);
+    if (!closed) fail("the latest accepted turn carries no STORY-COMPLETE");
+    if (closed.story !== stem)
+      fail(`the latest STORY-COMPLETE closes ${closed.story}, not ${stem}`);
+    if (
+      closed.cases.length !== story.cases.length ||
+      story.cases.some((c) => !closed.cases.includes(c))
+    )
+      fail("STORY-COMPLETE does not name exactly this story's cases");
+  }
+  const a = json(assessmentPath),
+    text = read(inside(s.root, story.path, { existing: true })),
+    verify = section(text, "Verify");
+  if (a.turn !== turn.turn || a.story !== stem)
+    fail("the assessment must name this story and its closing turn");
+  if (typeof a.storyGateSource !== "string" || a.storyGateSource !== verify)
+    fail("storyGateSource is not the story's verbatim Verify section");
+  if (!Array.isArray(a.required) || !a.required.length)
+    fail("name the story's required commands in required[]");
+  for (const c of a.required)
+    if (typeof c !== "string" || !verify.includes(c))
+      fail(`required command is absent from the story's Verify: ${c}`);
+  evidenceChecks(a.required, a.checks, turn.block);
+  const paths = dirtyOutsideProtocol(s.root);
+  if (!paths.length) fail("nothing outside the ledger has changed to commit");
+  git(s.root, ["add", "-A", "--", ".", `:(exclude)${LEDGER}`]);
+  const tree = git(s.root, ["write-tree"]).trim(),
+    parent = git(s.root, ["rev-parse", "HEAD"]).trim(),
+    title = storyTitle(text, stem),
+    message = commitMessage(epicSlug, story, title, story.cases),
+    op = crypto.randomUUID();
+  emit(path.join(s.root, s.discussion), [
+    event({
+      type: "commit-intent",
+      op,
+      story: stem,
+      turn: turn.turn,
+      sourceHash: story.sourceHash,
+      parent,
+      tree,
+      paths,
+      message,
+    }),
+  ]);
+  const res = gitTry(s.root, ["commit", "-m", message]);
+  const intent = { op, story: stem, turn: turn.turn, parent, tree, message };
+  if (res.status !== 0) {
+    const out = settleCommit(s, intent);
+    return { ...out, hook: `${res.stdout}${res.stderr}`.trim() };
+  }
+  return { ...settleCommit(s, intent), paths };
 }
 function scope(sp) {
   const s = session(sp),
@@ -1807,6 +2076,7 @@ export function main(argv) {
     "reject-ready": ["session", "reason"],
     scope: ["session"],
     plan: ["session"],
+    commit: ["session", "story", "assessment"],
     close: ["session"],
     abandon: ["session", "confirm-idle", "human-reason"],
   };
@@ -1834,6 +2104,12 @@ export function main(argv) {
       return rejectReady(sp, o.reason ?? fail("--reason required"));
     case "scope":
       return scope(sp);
+    case "commit":
+      return storyCommit(
+        sp,
+        o.story ?? fail("--story required"),
+        o.assessment ?? fail("--assessment required"),
+      );
     case "plan": {
       const s = session(sp);
       return planCases(s.root, s.epic);
@@ -1844,7 +2120,7 @@ export function main(argv) {
       return abandon(sp, o);
     default:
       fail(
-        "commands: open, state, begin, finish, ready, reject-ready, scope, plan, close, abandon",
+        "commands: open, state, begin, finish, ready, reject-ready, scope, plan, commit, close, abandon",
       );
   }
 }

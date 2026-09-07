@@ -1,13 +1,13 @@
 ---
 name: work
-description: Orchestrate one EPIC through guarded TDD, exact-grant groundwork, case-scoped debate, one reviewer auto-repair pass, and human review. Lifecycle state stays in the append-only discussion; no commits or plan edits.
+description: Orchestrate one EPIC through guarded TDD, exact-grant groundwork, case-scoped debate, one reviewer auto-repair pass, and human review. Lifecycle state stays in the append-only discussion; one commit per completed story, and no plan edits.
 ---
 
 # /work — one EPIC, guarded TDD
 
 Arguments: `$ARGUMENTS` = `<epic-file-path> [--max-turns N]`. Read the invocation text when the harness does not substitute arguments. Default cap: **128**; `0` is unlimited. Reject missing paths, unknown arguments, and invalid counts.
 
-You orchestrate; you do not implement, write tests, redesign the plan, or commit. Use the harness's actual subagent dispatcher and the **effective** `test-engineer`, `software-engineer`, `groundwork-engineer`, and `reviewer-engineer` definitions this harness loads from `.claude/agents/`. `.opencode/agents/` mirrors those bodies for a different harness; `scripts/persona-sync.test.sh` keeps the two in step. Keep their model, variant, tools and permissions unchanged.
+You orchestrate; you do not implement, write tests, or redesign the plan. You commit only through the helper's `commit` command, once per completed story, and never by hand. Use the harness's actual subagent dispatcher and the **effective** `test-engineer`, `software-engineer`, `groundwork-engineer`, and `reviewer-engineer` definitions this harness loads from `.claude/agents/`. `.opencode/agents/` mirrors those bodies for a different harness; `scripts/persona-sync.test.sh` keeps the two in step. Keep their model, variant, tools and permissions unchanged.
 
 ## 1. Runtime and authority
 
@@ -27,7 +27,7 @@ node "$R" open --root "$ROOT" --epic "$EPIC" --max-turns "$MAX_TURNS"
 
 Keep the returned absolute `session` path as `S`; reuse it in every command. Paths in JSON are literal repository-relative strings unless explicitly absolute. Put request/assessment JSON and captured reviewer text in the returned session's private temporary directory, **outside the repository**. Quote shell arguments; never shell-evaluate file content.
 
-`open` validates the EPIC location, all four personas and the existing guard files. It discovers discussions by exact EPIC identity across dates; it never chooses today's filename merely because work resumed today. Multiple unfinished histories require the operator to select one explicitly with `--discussion`. A latest human PASS reports `already-closed` without dispatch. A new cycle records HEAD as `base-ref` and quotes the EPIC Verification Gate; existing files are not reseeded. Read the live EPIC as the contract, not only its quoted historical copy.
+`open` validates the EPIC location, all four personas and the existing guard files. It discovers discussions by exact EPIC identity across dates; it never chooses today's filename merely because work resumed today. Multiple unfinished histories require the operator to select one explicitly with `--discussion`. A latest human PASS reports `already-closed` without dispatch. A new cycle needs a clean tree outside `.agents/tdd/`, because an operator edit left in place would land inside a story commit; commit or stash first. A new cycle records HEAD as `base-ref` and quotes the EPIC Verification Gate; existing files are not reseeded. Read the live EPIC as the contract, not only its quoted historical copy.
 
 Only one `/work` invocation may own a worktree. On a lock conflict, inspect the reported owner/session and stop; never steal the lock or launch another EPIC in that tree. Legacy histories are recognized, but their prior guard checks cannot be reconstructed: require explicit operator authorization before reopening with `--adopt-legacy`. This records trust in the old history, not retrospective verification.
 
@@ -43,12 +43,13 @@ Use its boundaries, exact request IDs, counters, accepted-turn ranges and next r
 
 Process this priority order:
 
-1. **Interrupted turn:** a `pending` entry must be recovered as in §9, never skipped or counted as completed. A human PASS closes the lifecycle without further dispatch.
+1. **Interrupted turn:** a `pending` entry must be recovered as in §10, never skipped or counted as completed. A human PASS closes the lifecycle without further dispatch.
 2. **Pre-loop groundwork:** process the returned nonempty `groundwork.grant` under §5 before the first engineer turn. A third exhausted attempt requires the human, not another dispatch.
 3. **Outstanding locked-path requests:** process **all** requests, oldest first, under §5. Do not look only at the newest marker. Ignore an `engineer-owned` claim for groundwork routing; log its real owner and retain the ordinary failure accounting.
-4. **Readiness:** a nonrejected `readyCandidate` needs §7 validation. `validReady` goes to §8. A rejected candidate requires a fresh TE turn; it does not reset case counters or become a review failure.
-5. **Failed active case:** examine the latest accepted engineer turn and its current unresolved failures. For every affected case, use `counts`, not only the last failure line. Apply §6 before dispatching. Do not re-escalate a historical failure that later evidence resolved. Expected RED, a protocol-only handoff failure and a genuine locked-path handoff are not ordinary failed-case attempts.
-6. **Next engineer:** dispatch `nextRole` under §4. Fresh work starts with TE. A review failure forces TE first even after a TE turn; groundwork turns do not advance the alternation. Otherwise TE and SE alternate.
+4. **Readiness:** a nonrejected `readyCandidate` needs §8 validation. `validReady` goes to §9. A rejected candidate requires a fresh TE turn; it does not reset case counters or become a review failure.
+5. **Uncommitted completed story:** a nonnull `commits.owed`, or a nonnull `commits.intent`, goes to §6 before any dispatch.
+6. **Failed active case:** examine the latest accepted engineer turn and its current unresolved failures. For every affected case, use `counts`, not only the last failure line. Apply §7 before dispatching. Do not re-escalate a historical failure that later evidence resolved. Expected RED, a protocol-only handoff failure and a genuine locked-path handoff are not ordinary failed-case attempts.
+7. **Next engineer:** dispatch `nextRole` under §4. Fresh work starts with TE. A review failure forces TE first even after a TE turn; groundwork turns do not advance the alternation. Otherwise TE and SE alternate.
 
 Every dispatched worker, reviewer and `/debate` invocation consumes the cap **before** invocation. Never reset it after automatic/human review routing or inside a retry loop. A new `/work` invocation has a new cap; failures/guidelines remain scoped to discussion boundaries. Three human review failures inside one invocation stop with `review-loop-limit`.
 
@@ -168,7 +169,46 @@ Run `finish --assessment <file>` for PASS; run ordinary `finish` for explicit BL
 
 For repeat/threshold/exhaustion recovery, tell the human to fix the instruction/grant or add the missing groundwork, then append `HUMAN_REVIEW: FAIL` and precise `BLOCKER:` lines and rerun. Do not amend plans or invent that verdict yourself.
 
-## 6. Ordinary failure → debate → human
+## 6. Story commit
+
+A completed story earns exactly one commit, and the helper makes it. No persona commits or stages: `validateEffects` compares Git HEAD, the branch and the index across every turn, and that comparison is what stops a worker hiding a write behind a commit.
+
+A story is complete when its closing turn is accepted and nothing has touched the tree since. For an ordinary story that turn is the test-engineer turn carrying `STORY-COMPLETE: <story-stem> — cases: <ids>`; for a story whose `Executor:` is the groundwork-engineer it is the accepted groundwork turn with a current `GROUNDWORK-COMPLETE`. An accepted turn alone proves neither: SE runs no test, a blocked turn is still protocol-valid, and a named REFACTOR may stand deferred. Never derive completion from case membership.
+
+Read the story's `## Verify` section, take the commands it names, and record your assessment:
+
+```json
+{
+  "turn": "<the closing turn ID>",
+  "story": "<story-file-stem>",
+  "storyGateSource": "<entire Verify section, verbatim>",
+  "required": ["<exact command the Verify section names>"],
+  "checks": [
+    {
+      "command": "<the same command>",
+      "exit": 0,
+      "output": "<real output>",
+      "evidence": "<exact command-local excerpt of the closing turn including exit 0>"
+    }
+  ]
+}
+```
+
+```sh
+node "$R" commit --session "$S" --story "<story-file-stem>" --assessment <file>
+```
+
+The helper refuses a story whose closing turn is blocked, whose marker names the wrong cases, whose earlier stories are uncommitted, or whose current fingerprint differs from the closing turn's receipt. That fingerprint equality is the real authorization: it proves these exact bytes are the ones a turn already validated. A lane check says only that some role may write a path; it never says the bytes belong to this story.
+
+The commit is journaled. The helper appends `commit-intent` with the expected parent and tree, commits, then appends `story-commit` with the resulting SHA. An interrupted commit is reconciled by parent and tree identity on the next `commit` call, never by matching the message. Call `commit` again to settle a nonnull `commits.intent` before anything else.
+
+The commit excludes the discussion, so the ledger never enters a story commit and the pre-commit hook cannot reformat it. `.prettierignore` holds `.agents/tdd/` for the same reason.
+
+The pre-commit hook runs `prettier --write` and `eslint --fix` over staged files, so it can rewrite bytes no turn validated. The helper compares the staged tree with the committed tree and reports `committed-with-hook-changes` plus the exact paths. Treat those paths as unverified: name them to the test-engineer in the next dispatch, and never report them as reviewed. A `commit-discarded` result means the hook rejected the commit; read its `hook` output, fix the cause, and call `commit` again.
+
+One commit per story is the whole policy. A story repaired after a review failure earns no second commit; its repair stays in the working tree, the reviewer sees it, and the human commits it at PASS. A story commit is a checkpoint, never a publication: nothing is pushed, and no history is rewritten.
+
+## 7. Ordinary failure → debate → human
 
 An ordinary case receives three failed attempts after the later of its current review-failure boundary and its own guideline. Markers in fenced logs and duplicated same-case lines in one turn do not add attempts; all failed cases in a batch are considered. The same source case ID survives review repairs.
 
@@ -180,7 +220,9 @@ On success, pass `finish --assessment <file>` with `caseId`, `summary`, `files` 
 
 A valid guideline stays applicable to that case until resolution/supersession, not merely until the next turn. Three more ordinary failures under it require the human. Never issue a second guideline for that case within the failure epoch. Debate does not change engineer alternation or reset the invocation cap.
 
-## 7. Readiness is an evidence gate
+## 8. Readiness is an evidence gate
+
+Every story carries a `story-commit` before readiness, and the last story commits before the readiness turn, not after it: `ready` binds to the readiness turn's fingerprint, and a commit changes it. Never commit between the readiness turn and `ready`, or between `ready` and the reviewer's verdict.
 
 Only the latest accepted TE readiness turn after the review-failure boundary can qualify. Require every numbered Verify case in every EPIC story, including revision-current groundwork completions; no unexpanded/missing story or unresolved blocker; every Change obligation covered by an existing case/gate; every required story gate and **both** EPIC Gates and Proof actually executed this turn. The real Proof output must include its specified success string. A script's edit lane is not a reason to skip executing a permitted Proof. Missing coverage is an authoring defect, not permission to invent a case.
 
@@ -221,7 +263,7 @@ Include **all** commands/cases, not just the illustrative entries. The helper va
 
 For premature/stale readiness, call `reject-ready --session "$S" --reason "<missing evidence/work>"`, leave history intact, and send TE to correct/verify it. This is neither confirmed readiness nor another case failure. Non-executable mandatory work or a plan defect requires a human blocker, never a weaker gate.
 
-## 8. Reviewer gate and human review
+## 9. Reviewer gate and human review
 
 On valid readiness, first inspect `autoUsed` and `currentReview`. Reuse a matching recorded review; never redispatch merely because the operator has not answered yet. After the single automatic repair pass, do **not** rerun the reviewer: require fresh TE readiness and present the retained findings plus repair evidence. Clearly say the repaired revision was **not independently re-reviewed**. A routed finding is not resolved merely because it was routed.
 
@@ -236,7 +278,7 @@ The helper preserves severity and action independently:
 
 Human failure starts a new review epoch: collect its BLOCKER lines through the next control boundary, not all historical blockers, and return to TE. Human PASS alone closes the lifecycle; never write it yourself. At the pause, show reviewer verdict, unresolved human blockers, automatic repair status, real verification evidence and every consumed groundwork request. Ask the operator to append `HUMAN_REVIEW: PASS`, or `HUMAN_REVIEW: FAIL` plus one precise BLOCKER per required repair. Stop; do not wait or commit.
 
-## 9. Recovery and exit
+## 10. Recovery and exit
 
 A completed worker append is not accepted until `finish` validates it. After interruption, reuse the original session only after confirming no invocation/subagent is still active. If its before-evidence, draft and append are intact, run the pending `finish` rather than redispatching. Missing evidence, partial append or failed checks requires operator inspection; do not reconstruct a favorable baseline from the already-mutated tree.
 
@@ -246,6 +288,6 @@ On a normal pause/cap/closed exit with no pending turn, run `close --session "$S
 
 Print:
 
-`done · turns=<all charged dispatches> · reason=<reason> · human_review=<PASS|FAIL|pending> · lifecycle=<opened|resumed|closed>`
+`done · turns=<all charged dispatches> · commits=<story commits this cycle> · reason=<reason> · human_review=<PASS|FAIL|pending> · lifecycle=<opened|resumed|closed>`
 
-Then identify the discussion, consumed groundwork IDs/paths, remaining blockers, and precise next operator action. Preserve the specific groundwork story/grant/repeat/threshold/attempts and locked-path escalation reasons. No claims of completion, successful verification or performance improvement without their evidence.
+Then identify the discussion, committed stories with their SHAs, any path a hook rewrote, consumed groundwork IDs/paths, remaining blockers, and precise next operator action. Preserve the specific groundwork story/grant/repeat/threshold/attempts and locked-path escalation reasons. No claims of completion, successful verification or performance improvement without their evidence.
