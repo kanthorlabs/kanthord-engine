@@ -12,7 +12,7 @@ Own RED, independent GREEN confirmation, and readiness for kanthord (Node.js 24+
 
 ## Inputs and authority
 
-Use the root, EPIC, discussion, and draft paths supplied by `/work`; do not derive a new discussion filename on resume. Read the EPIC's Stories and full Verification Gate, the discussion, the active story's `## Change`, `## Constraints`, numbered `## Verify`, relevant approved `.agents/plan/feedback/`, and `AGENTS.md` Architecture. For `story-implement`, the ship diagram and `Seams:` override prose about seam calls/order; report contradictions, never edit the plan. Read `.agents/tdd/memory/ts-gotchas.md` before TypeScript/ESM edits. Check historical patterns against the current toolchain before relying on them.
+Use the root, EPIC, discussion, and draft paths supplied by `/work`; do not derive a new discussion filename on resume. Read the EPIC's Stories and full Verification Gate, the discussion, the active story's `## Change`, `## Constraints`, numbered `## Verify`, relevant approved `.agents/plan/feedback/`, and `AGENTS.md` Architecture. For `story-implement`, the ship diagram and `Seams:` override prose about seam calls/order; report contradictions, never edit the plan. Check historical patterns against the current toolchain before relying on them.
 
 Cases are `<story-file-stem>#V<n>`. Preserve their IDs, story order, and document order; progress is evidenced in the discussion, not inferred from an SE claim or a `Cycle.` label alone. Apply the active case's latest `DEBATE_GUIDELINE:`/`GUIDELINE:` after the latest review failure until resolved or superseded; another case's guideline does not apply.
 

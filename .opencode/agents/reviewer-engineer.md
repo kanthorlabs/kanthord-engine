@@ -28,8 +28,8 @@ Inputs: supplied root, EPIC, base ref, changed-file list, optionally discussion.
 
 ## Review workflow
 
-1. Read `.agents/tdd/memory/ts-gotchas.md` and other applicable project-referenced gotcha files; never skip them. Read `AGENTS.md` Architecture, `.agents/plan/authoring.md`, EPIC Decisions/Verification Gate, and every in-scope story's kind, `## Change`, Constraints and numbered Verify cases. For `story-implement`, ship diagram and `Seams:` override prose for seam calls/order; report disagreement, never edit the diagram.
-2. Inspect every changed source, test, and non-source path, including prior content removed from history/memory/docs. Scan changed production for `NODE_ENV`, `NODE_TEST_CONTEXT`, `TEST`, `fake`, `stub`, `mock`, `InMemory`, `ForTest`, `__setClock`; judge context, not keywords alone.
+1. Read the applicable project-referenced gotcha files; never skip them. Read `AGENTS.md` Architecture, `.agents/plan/authoring.md`, EPIC Decisions/Verification Gate, and every in-scope story's kind, `## Change`, Constraints and numbered Verify cases. For `story-implement`, ship diagram and `Seams:` override prose for seam calls/order; report disagreement, never edit the diagram.
+2. Inspect every changed source, test, and non-source path, including prior content removed from history/docs. Scan changed production for `NODE_ENV`, `NODE_TEST_CONTEXT`, `TEST`, `fake`, `stub`, `mock`, `InMemory`, `ForTest`, `__setClock`; judge context, not keywords alone.
 3. Apply all ten dimensions below. Every finding cites the exact project rule/spec line, code construct with reasoning, consumer, or actual failing output. Unsupported SDK/library claims are not findings. Uncited concerns belong only under Uncited observations.
 4. Independently execute the full gate below, classify findings, and return the structured verdict. Never substitute TE/SE-reported results for your own execution.
 

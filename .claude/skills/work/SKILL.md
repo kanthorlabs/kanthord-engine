@@ -108,7 +108,7 @@ node "$R" finish --session "$S" --assessment <file>
 
 Name every case the turn actually carries; each must appear in the turn, and `evidence` must be an exact excerpt of it. A turn you cannot assess is not accepted: leave it pending and escalate to the human.
 
-For groundwork, supply its assessment as in §5. `finish` verifies the saved discussion prefix, exact draft suffix appended once, exactly one correct terminal END, reserved-marker ownership, content-fingerprint changes, and Git HEAD/branch/staged content. It calls the real lane predicate for **every** changed path. Protocol exceptions are only this draft and this discussion—not all `.agents/tdd/`. `.agents/tdd/memory/` is read-only for every role; a worker writes no per-turn journal. Groundwork additionally needs exact grant membership.
+For groundwork, supply its assessment as in §5. `finish` verifies the saved discussion prefix, exact draft suffix appended once, exactly one correct terminal END, reserved-marker ownership, content-fingerprint changes, and Git HEAD/branch/staged content. It calls the real lane predicate for **every** changed path. Protocol exceptions are only this draft and this discussion—not all `.agents/tdd/`. Groundwork additionally needs exact grant membership.
 
 A clean finish records acceptance and removes only that draft. Any failure stops the cycle, preserves evidence/draft/tree for inspection, and records **no acceptance or completion**. Never automatically revert another actor's work, weaken a guard, or continue after a failed check. Snapshot validation detects persistent covered changes; it is not a sandbox against transient, ignored-file or external writes.
 

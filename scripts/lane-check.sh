@@ -58,7 +58,6 @@ if [ "$role" = reviewer-engineer ]; then
 fi
 
 case $path in
-.agents/tdd/memory/*) deny "the memory tree is read-only" ;;
 .agents/tdd/*) exit 0 ;;
 esac
 

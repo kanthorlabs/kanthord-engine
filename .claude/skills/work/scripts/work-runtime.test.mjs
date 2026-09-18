@@ -39,7 +39,6 @@ const guard = `#!/usr/bin/env bash
 role="$1"; p="$2"
 case "$p" in
  .agents/plan/*|.claude/*|.opencode/*|scripts/lane-check.sh|scripts/turn-snapshot.sh|scripts/verify-handoff.mjs|scripts/memory-append-only.sh|scripts/*.test.sh) exit 1;;
- .agents/tdd/memory/*) exit 1;;
 esac
 case "$role:$p" in
  test-engineer:src/*.test.ts|test-engineer:src/*.spec.ts|test-engineer:test/*) exit 0;;
@@ -734,14 +733,6 @@ test("out-of-lane revert to HEAD is caught", (t) => {
   });
   assert.throws(() => f.exec("finish"), /lane violation/);
 });
-test("the memory tree stays read-only for a worker turn", (t) => {
-  const f = fixture(t);
-  const b = f.begin("test-engineer");
-  f.append(b, turn("test-engineer"), {
-    ".agents/tdd/memory/test-engineer/2026-09-06.md": "journal\n",
-  });
-  assert.throws(() => f.exec("finish"), /lane violation/);
-});
 test("another role draft is not a general .agents/tdd exception", (t) => {
   const f = fixture(t);
   const b = f.begin("test-engineer");
@@ -750,7 +741,7 @@ test("another role draft is not a general .agents/tdd exception", (t) => {
   });
   assert.throws(() => f.exec("finish"), /non-owned protocol path/);
 });
-test("a worker turn that writes no memory entry is accepted", (t) => {
+test("a plain worker turn is accepted", (t) => {
   const f = fixture(t);
   assert.equal(
     f.worker("test-engineer", "RED for 01-core#V1").result.status,

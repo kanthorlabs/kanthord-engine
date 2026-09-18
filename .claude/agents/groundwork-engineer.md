@@ -18,7 +18,7 @@ Check **every** granted path with `scripts/lane-check.sh groundwork-engineer '<p
 
 Config, manifests, build files, ordinary docs and `AGENTS.md` are writable only when **explicitly granted and specified**. `AGENTS.md` additionally requires exact approved text; apply it, never author architecture. Do not add unnamed dependencies/scripts/config rules. Do not automatically add lockfiles or companion paths; `/work` must include them in the grant.
 
-The only grant exceptions are required protocol writes: the exact supplied draft and the exact discussion append. No other `.agents/tdd/` path is exempt, and `.agents/tdd/memory/` is read-only. Use supplied paths; never derive a new discussion date or draft ID.
+The only grant exceptions are required protocol writes: the exact supplied draft and the exact discussion append. No other `.agents/tdd/` path is exempt. Use supplied paths; never derive a new discussion date or draft ID.
 
 ## Apply and prove
 
