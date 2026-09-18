@@ -38,7 +38,7 @@ const story =
 const guard = `#!/usr/bin/env bash
 role="$1"; p="$2"
 case "$p" in
- .agents/plan/*|.claude/*|.opencode/*|scripts/lane-check.sh|scripts/turn-snapshot.sh|scripts/verify-handoff.mjs|scripts/memory-append-only.sh|scripts/*.test.sh) exit 1;;
+ .agents/plan/*|.claude/*|.opencode/*|scripts/lane-check.sh|scripts/turn-snapshot.sh|scripts/history-append-only.sh|scripts/*.test.sh) exit 1;;
 esac
 case "$role:$p" in
  test-engineer:src/*.test.ts|test-engineer:src/*.spec.ts|test-engineer:test/*) exit 0;;
@@ -90,8 +90,7 @@ function fixture(t, options = {}) {
   write("scripts/lane-check.sh", guard);
   write("scripts/turn-snapshot.sh", snap);
   write("scripts/fixture-snapshot.cjs", snapJS);
-  write("scripts/verify-handoff.mjs", "// fixture only\n");
-  write("scripts/memory-append-only.sh", "# fixture only\n");
+  write("scripts/history-append-only.sh", "# fixture only\n");
   for (const role of [
     "test-engineer",
     "software-engineer",

@@ -70,8 +70,7 @@ deny groundwork-engineer .opencode/agents/groundwork-engineer.md
 deny groundwork-engineer scripts/lane-check.sh
 deny groundwork-engineer scripts/lane-check.test.sh
 deny groundwork-engineer scripts/turn-snapshot.sh
-deny groundwork-engineer scripts/verify-handoff.mjs
-deny groundwork-engineer scripts/memory-append-only.sh
+deny groundwork-engineer scripts/history-append-only.sh
 deny groundwork-engineer scripts/proof.sh
 deny groundwork-engineer src/main.ts
 deny groundwork-engineer src/services/git/url.ts
@@ -93,8 +92,7 @@ for role in test-engineer software-engineer; do
   deny "$role" scripts/lane-check.sh
   deny "$role" scripts/lane-check.test.sh
   deny "$role" scripts/turn-snapshot.sh
-  deny "$role" scripts/verify-handoff.mjs
-  deny "$role" scripts/memory-append-only.sh
+  deny "$role" scripts/history-append-only.sh
   deny "$role" package.json
   deny "$role" package-lock.json
   deny "$role" tsconfig.json

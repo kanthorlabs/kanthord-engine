@@ -35,7 +35,7 @@ esac
 case $path in
 .agents/plan/*) deny "the plan tree is locked" ;;
 .claude/* | .opencode/*) deny "the pipeline definition is locked" ;;
-scripts/lane-check.sh | scripts/turn-snapshot.sh | scripts/verify-handoff.mjs | scripts/memory-append-only.sh | scripts/*.test.sh)
+scripts/lane-check.sh | scripts/turn-snapshot.sh | scripts/history-append-only.sh | scripts/*.test.sh)
   deny "the pipeline guards are locked"
   ;;
 esac

@@ -3,7 +3,7 @@ set -euo pipefail
 
 root=.
 if [ "$#" -gt 1 ]; then
-  echo "usage: scripts/memory-append-only.sh [<root>]" >&2
+  echo "usage: scripts/history-append-only.sh [<root>]" >&2
   exit 2
 fi
 if [ "$#" -eq 1 ]; then

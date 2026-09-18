@@ -10,7 +10,7 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
   GIT_PREFIX GIT_CONFIG GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
 
 here=$(cd "$(dirname "$0")" && pwd)
-guard="$here/memory-append-only.sh"
+guard="$here/history-append-only.sh"
 failures=0
 
 fail() {
@@ -57,8 +57,8 @@ printf 'untracked draft\n' >"$work/.agents/tdd/history/2026-08-06-007-draft.md"
 expect 0 "a new untracked channel file passes"
 
 if [ "$failures" -ne 0 ]; then
-  echo "memory-append-only.test.sh: $failures failure(s)" >&2
+  echo "history-append-only.test.sh: $failures failure(s)" >&2
   exit 1
 fi
 
-echo "memory-append-only.test.sh: PASS"
+echo "history-append-only.test.sh: PASS"

@@ -23,7 +23,7 @@
     "lint": "eslint . .claude/skills/work/scripts",
     "start": "node src/main.ts",
     "verify": "prettier --check src scripts eslint.config.js && pnpm run typecheck && pnpm test && pnpm run lint && pnpm run verify:guards && node --test --test-timeout=120000 .claude/skills/work/scripts/work-runtime.test.mjs",
-    "verify:guards": "scripts/lane-check.test.sh && scripts/turn-snapshot.test.sh && scripts/memory-append-only.test.sh && scripts/persona-sync.test.sh",
+    "verify:guards": "scripts/lane-check.test.sh && scripts/turn-snapshot.test.sh && scripts/history-append-only.test.sh && scripts/persona-sync.test.sh",
     "prepare": "husky"
   },
   "lint-staged": {

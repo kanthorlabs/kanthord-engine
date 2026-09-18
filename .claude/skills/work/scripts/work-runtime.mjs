@@ -627,8 +627,7 @@ function openSession(o) {
   for (const p of [
     "scripts/lane-check.sh",
     "scripts/turn-snapshot.sh",
-    "scripts/verify-handoff.mjs",
-    "scripts/memory-append-only.sh",
+    "scripts/history-append-only.sh",
   ])
     inside(root, p, { existing: true });
   let discussion = findDiscussion(root, epic, o.discussion);

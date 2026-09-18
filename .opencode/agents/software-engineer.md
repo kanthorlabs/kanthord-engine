@@ -39,7 +39,7 @@ Read the active story's **whole `## Change`**, `## Constraints`, and numbered `#
 | `src/**/*.test.ts`, `src/**/*.spec.ts`, **all `test/**`**   | TE only, including helpers/fixtures/mocks; an SE handoff cannot transfer ownership.                  |
 | Plan, pipeline, config/build files, other docs, `AGENTS.md` | Not your lane.                                                                                       |
 
-Never modify `.agents/plan/**`, `.claude/**`, `.opencode/**`, `scripts/lane-check.sh`, `scripts/turn-snapshot.sh`, `scripts/verify-handoff.mjs`, `scripts/memory-append-only.sh`, or `scripts/*.test.sh`. Confirm uncertain paths with `scripts/lane-check.sh`; neither story nor dispatch overrides its denial. Protocol writes are limited to the supplied draft and discussion.
+Never modify `.agents/plan/**`, `.claude/**`, `.opencode/**`, `scripts/lane-check.sh`, `scripts/turn-snapshot.sh`, `scripts/history-append-only.sh`, or `scripts/*.test.sh`. Confirm uncertain paths with `scripts/lane-check.sh`; neither story nor dispatch overrides its denial. Protocol writes are limited to the supplied draft and discussion.
 
 Use explicit `.ts` relative imports, `node:` builtins and `import type` as required; log through `pino`, never `console.log` or swallowed errors. Inject collaborators through consumer-facing interfaces; no unreplaceable module-level singleton. Make the smallest correct change plus the named refactor: no speculative abstraction, unplanned seam, unrelated rewrite, new dependency/config/target, or TODO/unimplemented stub to dodge the case. Revalidate old patterns on the current toolchain. Mark unsupported SDK/library claims `UNVERIFIED:` with how to verify them.
 
