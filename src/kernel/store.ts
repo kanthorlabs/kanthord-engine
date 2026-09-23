@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
-import { audit } from "./shared/files.ts";
-import { Diagnostic } from "./shared/errors.ts";
-import { isObject } from "./shared/values.ts";
+import { audit } from "./files.ts";
+import { Diagnostic } from "./errors.ts";
+import { isObject } from "./values.ts";
 
 export const IN_MEMORY_DATABASE = ":memory:";
 const DATABASE_PROBE_OK = 1;

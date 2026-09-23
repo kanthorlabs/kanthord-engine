@@ -1,40 +1,12 @@
-import { z } from "zod";
-import { CodedError, errorCodeSchema } from "../shared/errors.ts";
-import { requestIdSchema } from "./request-id.ts";
-
-export const errorDetailsSchema = z.json();
-export const errorSchema = z.strictObject({
-  error: z.strictObject({
-    code: errorCodeSchema,
-    message: z.string(),
-    details: errorDetailsSchema.nullable(),
-  }),
-  requestId: requestIdSchema,
-});
-export type ErrorBody = z.infer<typeof errorSchema>;
-
-export class GatewayError extends CodedError {
-  readonly status: number;
-  readonly details: z.infer<ReturnType<typeof z.json>> | null;
-
-  constructor(
-    status: number,
-    code: string,
-    message: string,
-    details: z.infer<ReturnType<typeof z.json>> | null = null,
-  ) {
-    super(code, message);
-    this.status = status;
-    this.details = details;
-  }
-}
-
+import { OperationError, type ErrorBody } from "../kernel/errors.ts";
+export { OperationError as GatewayError } from "../kernel/errors.ts";
+import { OperationError as GatewayError } from "../kernel/errors.ts";
 export function failure(
   error: unknown,
   requestId: string,
 ): { status: number; body: ErrorBody } {
   const safe =
-    error instanceof GatewayError
+    error instanceof OperationError
       ? error
       : new GatewayError(
           500,

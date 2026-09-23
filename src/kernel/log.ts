@@ -1,8 +1,17 @@
 import { constants, closeSync, writeSync, fstatSync } from "node:fs";
 import { join } from "node:path";
 import pino from "pino";
-import { LogDestination, type ServerConfig } from "./config/index.ts";
-import { openPrivate } from "./shared/files.ts";
+import { openPrivate } from "./files.ts";
+
+export const LogDestination = {
+  StandardError: "stderr",
+  File: "file",
+} as const;
+
+export interface LogConfig {
+  level: pino.Level;
+  destination: (typeof LogDestination)[keyof typeof LogDestination];
+}
 
 export const redactionPaths = [
   "masterKey",
@@ -36,7 +45,7 @@ export class OperationalLog {
   private closed = false;
   private readonly closing: Promise<void>[] = [];
 
-  constructor(config: ServerConfig["log"], stateDirectory: string) {
+  constructor(config: LogConfig, stateDirectory: string) {
     if (config.destination === LogDestination.File) {
       this.path = join(stateDirectory, "kanthord.log");
       this.fd = openPrivate(

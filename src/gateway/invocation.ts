@@ -1,17 +1,17 @@
 import { z } from "zod";
-import type { Store } from "../store.ts";
-import { digest } from "../shared/json.ts";
-import { CancellationContext, type Context } from "../context.ts";
-import { lifecycle } from "../service.ts";
+import type { Store } from "../kernel/store.ts";
+import { digest } from "../kernel/json.ts";
+import { CancellationContext, type Context } from "../kernel/context.ts";
+import { lifecycle } from "../kernel/service.ts";
+import { Authentication } from "./authentication.ts";
 import {
-  Authentication,
   isHumanIdentity,
   isMachineIdentity,
   type CallerIdentity,
-} from "./authentication.ts";
+} from "../kernel/caller.ts";
 import { GatewayError, failure, unauthorized } from "./errors.ts";
-import { AccessPolicy, OperationInteraction } from "./constants.ts";
-import { HttpStatus } from "../shared/http.ts";
+import { AccessPolicy, OperationInteraction } from "../kernel/operation.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { resolveRequestId } from "./request-id.ts";
 import {
   Idempotency,
@@ -22,7 +22,7 @@ import type {
   CallerContext,
   OperationRegistry,
   RegisteredOperation,
-} from "./registry.ts";
+} from "../kernel/operation.ts";
 
 export interface InvocationOptions {
   authorization?: string;
@@ -39,8 +39,8 @@ export interface InvocationOptions {
 export class Invocation {
   readonly pending = new Set<Promise<RecordedResponse>>();
   private readonly registry: OperationRegistry;
-  private readonly authentication: Authentication;
-  private readonly idempotency: Idempotency;
+  readonly authentication: Authentication;
+  readonly idempotency: Idempotency;
   private readonly store: Store;
   private readonly shutdown: CancellationContext;
   private readonly streams = new Set<Promise<void>>();
@@ -316,7 +316,7 @@ export class Invocation {
         delivery: options.delivery,
         request,
         commit: <T>(
-          write: (transaction: import("../store.ts").Transaction) => T,
+          write: (transaction: import("../kernel/store.ts").Transaction) => T,
         ): T => {
           if (!reservation || committed)
             throw new Error("A mutation commits exactly once.");

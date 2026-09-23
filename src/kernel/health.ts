@@ -7,7 +7,7 @@ import {
   type Context,
 } from "./context.ts";
 import { HealthStatus, type Healthcheck } from "./service.ts";
-import { ValueType } from "./shared/values.ts";
+import { ValueType } from "./values.ts";
 
 export const componentHealthSchema = z.record(
   z.string().min(1),

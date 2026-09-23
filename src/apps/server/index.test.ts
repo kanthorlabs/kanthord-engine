@@ -12,15 +12,15 @@ import {
 import { join } from "node:path";
 import { stringify } from "yaml";
 import { configuration } from "../../config/index.ts";
-import { temporary } from "../../test-support.ts";
+import { temporary } from "../../kernel/test-support.ts";
 import { createServer } from "node:http";
-import { writePrivate } from "../../shared/files.ts";
-import { Store } from "../../store.ts";
-import { isString } from "../../shared/values.ts";
-import { GATEWAY_STARTED_MESSAGE } from "../../gateway/service.ts";
+import { writePrivate } from "../../kernel/files.ts";
+import { Store } from "../../kernel/store.ts";
+import { isString } from "../../kernel/values.ts";
+import { GATEWAY_STARTED_MESSAGE } from "../../gateway/index.ts";
 
-import { ExitCode } from "../cli/constants.ts";
-import { HttpStatus } from "../../shared/http.ts";
+const ExitCode = { Success: 0, Failure: 1 } as const;
+import { HttpStatus } from "../../kernel/http.ts";
 
 const EMPTY_OUTPUT = "";
 const EMPTY_LOG_CONTENT = "";
@@ -164,6 +164,8 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
     status: "ok",
     services: {
       server: { gateway: 200, store: 200, log: 200 },
+      project: { bindings: 200 },
+      worker: { registrations: 200 },
       gateway: {
         listener: 200,
         authentication: 200,
@@ -244,9 +246,9 @@ test("server lifecycle returns errors, reports owned health and releases every r
       `
     import assert from 'node:assert/strict';
     import { Server } from ${JSON.stringify(new URL("./index.ts", import.meta.url).href)};
-    import { CancellationContext } from ${JSON.stringify(new URL("../../context.ts", import.meta.url).href)};
-    import { Store } from ${JSON.stringify(new URL("../../store.ts", import.meta.url).href)};
-    import { OperationalLog } from ${JSON.stringify(new URL("../../log.ts", import.meta.url).href)};
+    import { CancellationContext } from ${JSON.stringify(new URL("../../kernel/context.ts", import.meta.url).href)};
+    import { Store } from ${JSON.stringify(new URL("../../kernel/store.ts", import.meta.url).href)};
+    import { OperationalLog } from ${JSON.stringify(new URL("../../kernel/log.ts", import.meta.url).href)};
     const write = process.stdout.write.bind(process.stdout);
     let output = '';
     process.stdout.write = (text) => { output += String(text); return true; };
@@ -264,10 +266,12 @@ test("server lifecycle returns errors, reports owned health and releases every r
     assert.equal(server.start(), server.start());
     assert.equal(await server.start(), null);
     assert.deepEqual(await server.healthcheck(), { gateway: 200, store: 200, log: 200 });
-    server.health.register('worker', () => ({ 'instance-one': 200 }));
+    server.health.register('test-worker', () => ({ 'instance-one': 200 }));
     const report = await server.health.check();
     assert.deepEqual(report.server, { gateway: 200, store: 200, log: 200 });
-    assert.deepEqual(report.worker, { 'instance-one': 200 });
+    assert.deepEqual(report['test-worker'], { 'instance-one': 200 });
+    assert.deepEqual(report.worker, { registrations: 200 });
+    assert.deepEqual(report.project, { bindings: 200 });
     assert.equal(report.gateway.listener, 200);
     const logHealth = OperationalLog.prototype.healthcheck;
     OperationalLog.prototype.healthcheck = () => false;

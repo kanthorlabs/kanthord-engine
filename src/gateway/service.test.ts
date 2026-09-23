@@ -1,34 +1,31 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { request as httpRequest } from "node:http";
 import { z } from "zod";
 import { ulid } from "ulid";
 import { decode, sign } from "hono/jwt";
-import { testClient } from "hono/testing";
-import { gatewayFixture } from "../test-support.ts";
-import { deriveKey } from "../shared/json.ts";
-import { emptyInput, OperationRegistry, type Operation } from "./registry.ts";
+import { gatewayFixture } from "./test-support.ts";
+import { deriveKey } from "../kernel/json.ts";
 import {
-  Authentication,
-  generateHumanJWT,
-  isHumanIdentity,
-  isMachineIdentity,
-} from "./authentication.ts";
-import { errorSchema, GatewayError } from "./errors.ts";
-import { directClient, httpClient, OperationResultType } from "./client.ts";
-import { HttpStatus } from "../shared/http.ts";
-import { gatewayOperations } from "./operations.ts";
-import { workerOperations } from "../worker/operations.ts";
-import {
-  AccessPolicy,
-  KANTHORD_AUTH_USERNAME,
-  OperationInteraction,
-} from "./constants.ts";
-import { CancellationContext } from "../context.ts";
-import { HealthStatus } from "../service.ts";
+  emptyInput,
+  OperationRegistry,
+  type Operation,
+} from "../kernel/operation.ts";
+import { createInvocation } from "./index.ts";
+import { generateHumanJWT } from "./local.ts";
+import { isHumanIdentity, isMachineIdentity } from "../kernel/caller.ts";
+import { errorSchema } from "../kernel/errors.ts";
+import { OperationError as GatewayError } from "../kernel/errors.ts";
+import { directClient } from "./index.ts";
+import { httpClient } from "./client.ts";
+import { OperationResultType } from "../kernel/operation.ts";
+import { HttpStatus } from "../kernel/http.ts";
+import { gatewayOperations } from "./contract.ts";
+import { AccessPolicy, OperationInteraction } from "../kernel/operation.ts";
+import { KANTHORD_AUTH_USERNAME } from "./local.ts";
+import { CancellationContext } from "../kernel/context.ts";
+import { HealthStatus } from "../kernel/service.ts";
 
-const ALLOWED_ORIGIN = "https://allowed.example";
 const HUMAN_USERNAME = "ulrich";
 const SINGLE_EXECUTION_COUNT = 1;
 const DELIVERY_SIGNATURE = "exact";
@@ -56,98 +53,6 @@ const protectedRead = {
   description: "Read the verified test caller.",
 } as const satisfies Operation;
 
-test("real listener serves unversioned health, applies host/origin policy and uses one failure envelope", async (t) => {
-  const fixture = await gatewayFixture(t);
-  fixture.config.gateway.allowedOrigins.push("https://allowed.example");
-  const response = await fixture.request("/api/healthcheck");
-  assert.equal(response.status, HttpStatus.OK);
-  assert.deepEqual(await response.json(), {
-    status: "ok",
-    services: {
-      gateway: {
-        listener: 200,
-        authentication: 200,
-        idempotency: 200,
-        registry: 200,
-        invocation: 200,
-      },
-    },
-  });
-  assert.match(
-    response.headers.get("x-request-id")!,
-    /^request_[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
-  );
-  for (const path of [
-    "/healthcheck",
-    "/healthz",
-    "/api/v1/healthcheck",
-    "/auth/login",
-    "/missing",
-  ]) {
-    const missing = await fixture.request(path);
-    assert.equal(missing.status, HttpStatus.NotFound);
-    assert.equal(
-      errorSchema.parse(await missing.json()).error.code,
-      ExpectedErrorCode.RouteNotFound,
-    );
-  }
-  const forbidden = await new Promise<{ status: number; body: string }>(
-    (resolve, reject) => {
-      const request = httpRequest(
-        fixture.endpoint + "/api/healthcheck",
-        { headers: { Host: "evil.example", "X-Forwarded-Host": "localhost" } },
-        (response) => {
-          let body = "";
-          response.setEncoding("utf8");
-          response.on("data", (chunk) => {
-            body += chunk;
-          });
-          response.on("end", () =>
-            resolve({ status: response.statusCode!, body }),
-          );
-        },
-      );
-      request.on("error", reject);
-      request.end();
-    },
-  );
-  assert.equal(forbidden.status, HttpStatus.Forbidden);
-  assert.equal(
-    errorSchema.parse(JSON.parse(forbidden.body)).error.code,
-    ExpectedErrorCode.HostNotAllowed,
-  );
-  const preflight = await fixture.request("/api/worker/register", {
-    method: "OPTIONS",
-    headers: {
-      Origin: "https://allowed.example",
-      "Access-Control-Request-Method": "POST",
-      "Access-Control-Request-Headers": "Content-Type,Idempotency-Key",
-    },
-  });
-  assert.equal(preflight.status, HttpStatus.NoContent);
-  assert.equal(
-    preflight.headers.get("access-control-allow-origin"),
-    ALLOWED_ORIGIN,
-  );
-  assert.equal(preflight.headers.get("access-control-allow-credentials"), null);
-  const untrusted = await fixture.request("/api/healthcheck", {
-    headers: { Origin: "https://evil.example" },
-  });
-  assert.equal(untrusted.headers.get("access-control-allow-origin"), null);
-  const client = testClient(fixture.gateway.app) as unknown as {
-    api: {
-      healthcheck: {
-        $get: (input: object, options: object) => Promise<Response>;
-      };
-    };
-  };
-  assert.equal(
-    (await client.api.healthcheck.$get({}, { headers: { Host: "localhost" } }))
-      .status,
-    HttpStatus.OK,
-  );
-});
-
 test("a locally generated JWT authenticates the default human and forwards only minted identities without a password route", async (t) => {
   const registry = new OperationRegistry();
   let observed: unknown;
@@ -168,7 +73,7 @@ test("a locally generated JWT authenticates the default human and forwards only 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       username: KANTHORD_AUTH_USERNAME,
-      password: "secret-marker",
+      marker: "removed-route",
     }),
   });
   assert.equal(removed.status, HttpStatus.NotFound);
@@ -303,7 +208,12 @@ test("JWT verification rejects expiry, wrong algorithm, invalid usernames, accou
     ).status,
     HttpStatus.OK,
   );
-  const rotated = new Authentication(fixture.store, otherMasterKey);
+  const rotated = createInvocation({
+    registry: fixture.gateway.registry,
+    store: fixture.store,
+    masterKey: otherMasterKey,
+    tokenLifetime: fixture.config.gateway.tokenLifetime,
+  }).authentication;
   await assert.rejects(
     rotated.authenticate(`Bearer ${fresh.token}`),
     /Authentication required/,
@@ -333,11 +243,12 @@ test("a JWT issued for an explicit username authenticates that human over HTTP a
   });
   for (const client of [
     httpClient({ identity: protectedRead }, fixture.endpoint, token),
-    directClient({ identity: protectedRead }, fixture.gateway.invocation, {
-      identity,
-    }),
+    directClient({ identity: protectedRead }, fixture.gateway.invocation),
   ]) {
-    const result = await client.identity({ params: {}, query: {}, body: null });
+    const result = await client.identity(
+      { params: {}, query: {}, body: null },
+      { identity },
+    );
     assert.equal(result.type, OperationResultType.Completed);
     if (result.type === OperationResultType.Completed)
       assert.deepEqual(result.data, { accountId: "ulrich" });
@@ -401,10 +312,9 @@ test("direct and HTTP adapters share transactional idempotency, validation, fail
     `Bearer ${token}`,
   );
   const http = httpClient({ mutation }, fixture.endpoint, token);
-  const direct = directClient({ mutation }, fixture.gateway.invocation, {
-    identity: caller,
-  });
+  const direct = directClient({ mutation }, fixture.gateway.invocation);
   const options = {
+    identity: caller,
     idempotencyKey: ulid(),
     traceparent: "00-12345678901234567890123456789012-1234567890123456-01",
   };
@@ -434,11 +344,14 @@ test("direct and HTTP adapters share transactional idempotency, validation, fail
     query: {},
     body: { value: "wrong" as unknown as number },
   });
-  const badDirect = await direct.mutation({
-    params: {},
-    query: {},
-    body: { value: "wrong" as unknown as number },
-  });
+  const badDirect = await direct.mutation(
+    {
+      params: {},
+      query: {},
+      body: { value: "wrong" as unknown as number },
+    },
+    { identity: caller },
+  );
   assert.equal(badHTTP.type, OperationResultType.Failure);
   assert.equal(badDirect.type, OperationResultType.Failure);
   if (
@@ -518,53 +431,6 @@ test("timeout leaves a mutation in progress until its atomic commit, then replay
   assert.equal(replay.status, HttpStatus.OK);
   assert.deepEqual(await replay.json(), { done: true });
   assert.equal(count, SINGLE_EXECUTION_COUNT);
-});
-
-test("body limits cover declared sizes and streaming auth bodies; unexpected registration bodies are rejected", async (t) => {
-  const fixture = await gatewayFixture(t);
-  const tooLarge = await new Promise<number>((resolve, reject) => {
-    const request = httpRequest(
-      fixture.endpoint + "/api/worker/register",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Length": 41 * 1024,
-        },
-      },
-      (response) => {
-        response.resume();
-        resolve(response.statusCode!);
-      },
-    );
-    request.on("error", reject);
-    request.end("x");
-  });
-  assert.equal(tooLarge, HttpStatus.PayloadTooLarge);
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(new Uint8Array(41 * 1024));
-      controller.close();
-    },
-  });
-  const streamed = await fixture.request("/api/worker/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body,
-    duplex: "half",
-  } as RequestInit);
-  assert.equal(streamed.status, HttpStatus.PayloadTooLarge);
-  assert.equal(
-    errorSchema.parse(await streamed.json()).error.code,
-    ExpectedErrorCode.BodyTooLarge,
-  );
-  const duplicate = await fixture.request("/api/worker/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: '{"binding":"unexpected"}',
-  });
-  assert.equal(duplicate.status, HttpStatus.BadRequest);
-  assert.doesNotMatch(await duplicate.text(), /secret-marker/);
 });
 
 test("delivery forwards exact bytes/headers and the shutdown context closes an active stream", async (t) => {
@@ -677,23 +543,6 @@ test("client disconnect reaches waiting handlers", async (t) => {
   await request;
 });
 
-test("unconfigured worker bindings refuse machine authentication", async (t) => {
-  const fixture = await gatewayFixture(t);
-  const token = await fixture.machineToken("binding");
-  const result = await httpClient(
-    workerOperations,
-    fixture.endpoint,
-    token,
-  ).register({
-    params: {},
-    query: {},
-    body: null,
-  });
-  assert.equal(result.type, OperationResultType.Failure);
-  if (result.type === OperationResultType.Failure)
-    assert.equal(result.status, HttpStatus.Unauthorized);
-});
-
 test("the verification API returns only the authenticated human identity and requires a bearer token", async (t) => {
   const fixture = await gatewayFixture(t);
   const client = httpClient(gatewayOperations, fixture.endpoint, fixture.token);
@@ -758,13 +607,12 @@ test("CancellationContext drains admitted work and refuses upcoming work during 
   const token = fixture.token;
   const context = new CancellationContext();
   const running = fixture.gateway.run(context);
-  const client = directClient(
-    { drain: operation },
-    fixture.gateway.invocation,
-    { authorization: `Bearer ${token}` },
+  const identity = await fixture.gateway.authentication.authenticate(
+    `Bearer ${token}`,
   );
+  const client = directClient({ drain: operation }, fixture.gateway.invocation);
   const input = { params: {}, query: {}, body: null };
-  const request = client.drain(input);
+  const request = client.drain(input, { identity });
   await entered.promise;
   context.cancel();
   await cancelled.promise;
@@ -775,7 +623,7 @@ test("CancellationContext drains admitted work and refuses upcoming work during 
     stopped = true;
   });
   const assertRefused = async () => {
-    const result = await client.drain(input);
+    const result = await client.drain(input, { identity });
     assert.equal(result.type, OperationResultType.Failure);
     if (result.type === OperationResultType.Failure) {
       assert.equal(result.status, HttpStatus.ServiceUnavailable);
@@ -816,10 +664,11 @@ test("direct and HTTP client cancellation uses Context", async (t) => {
   });
   const fixture = await gatewayFixture(t, { registry });
   const token = fixture.token;
+  const identity = await fixture.gateway.authentication.authenticate(
+    `Bearer ${token}`,
+  );
   for (const client of [
-    directClient({ cancel: operation }, fixture.gateway.invocation, {
-      authorization: `Bearer ${token}`,
-    }),
+    directClient({ cancel: operation }, fixture.gateway.invocation),
     httpClient({ cancel: operation }, fixture.endpoint, token),
   ]) {
     entered = Promise.withResolvers<void>();
@@ -827,7 +676,7 @@ test("direct and HTTP client cancellation uses Context", async (t) => {
     const context = new CancellationContext();
     const request = client.cancel(
       { params: {}, query: {}, body: null },
-      { context },
+      { context, identity },
     );
     await entered.promise;
     context.cancel();

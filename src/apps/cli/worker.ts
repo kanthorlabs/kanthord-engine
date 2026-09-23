@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { Command } from "commander";
 import { ulid } from "ulid";
-import { Diagnostic } from "../../shared/errors.ts";
-import { ulidSchema } from "../../shared/identity.ts";
-import { httpClient, OperationResultType } from "../../gateway/client.ts";
-import { AccessPolicy } from "../../gateway/constants.ts";
+import { Diagnostic } from "../../kernel/errors.ts";
+import { ulidSchema } from "../../kernel/identity.ts";
+import { httpClient } from "../../gateway/client.ts";
+import { OperationResultType } from "../../kernel/operation.ts";
+import { AccessPolicy } from "../../kernel/operation.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
-import { workerOperations } from "../../worker/operations.ts";
+import { workerOperations } from "../../worker/contract.ts";
 import { resolveClient } from "./client-config.ts";
 
 async function register(command: Command): Promise<void> {

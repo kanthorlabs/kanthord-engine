@@ -1,3 +1,4 @@
+import { workerOperations } from "../../worker/contract.ts";
 import assert from "node:assert/strict";
 import { Command, CommanderError } from "commander";
 import { dirname } from "node:path";
@@ -7,16 +8,14 @@ import {
   loadConfig,
   showConfig,
 } from "../../config/index.ts";
-import { writePrivate } from "../../shared/files.ts";
-import { Diagnostic, diagnostic } from "../../shared/errors.ts";
+import { writePrivate } from "../../kernel/files.ts";
+import { Diagnostic, diagnostic } from "../../kernel/errors.ts";
 import { Server } from "../server/index.ts";
-import {
-  apiOperations,
-  gatewayOperations,
-  openapiPath,
-} from "../../gateway/operations.ts";
-import { writeOpenAPI } from "../../gateway/openapi.ts";
-import { httpClient, OperationResultType } from "../../gateway/client.ts";
+import { gatewayOperations } from "../../gateway/contract.ts";
+import { openapiPath } from "../../gateway/local.ts";
+import { writeOpenAPI } from "../../gateway/local.ts";
+import { httpClient } from "../../gateway/client.ts";
+import { OperationResultType } from "../../kernel/operation.ts";
 import {
   generateHumanJWT,
   generateMachineJWT,
@@ -24,8 +23,8 @@ import {
   parseDisplayName,
   parseWorkerBinding,
   requireTokenTerminal,
-} from "../../gateway/authentication.ts";
-import { KANTHORD_AUTH_USERNAME } from "../../gateway/constants.ts";
+} from "../../gateway/local.ts";
+import { KANTHORD_AUTH_USERNAME } from "../../gateway/local.ts";
 import { resolveClient } from "./client-config.ts";
 import { addWorkerCommand } from "./worker.ts";
 import {
@@ -274,3 +273,5 @@ export async function runCLI(
     return ExitCode.Failure;
   }
 }
+
+const apiOperations = { ...gatewayOperations, ...workerOperations };

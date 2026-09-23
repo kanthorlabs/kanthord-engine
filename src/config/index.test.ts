@@ -12,7 +12,7 @@ import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { temporary } from "../test-support.ts";
+import { temporary } from "../kernel/test-support.ts";
 import {
   configuration,
   configPath,
@@ -22,8 +22,8 @@ import {
   parseMapping,
   showConfig,
 } from "./index.ts";
-import { writePrivate } from "../shared/files.ts";
-import { ExitCode } from "../apps/cli/constants.ts";
+import { writePrivate } from "../kernel/files.ts";
+const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const EMPTY_OUTPUT = "";
 const CONFIGURED_PORT = 12345;
@@ -36,6 +36,23 @@ const CUSTOM_CONFIG_DIRECTORY = "/custom/kanthord";
 const FALLBACK_DATA_DIRECTORY = "/home/test/.local/share/kanthord";
 const ORIGINAL_CONTENT = "original";
 const REPLACEMENT_CONTENT = "replacement";
+
+test("service fragments preserve the existing YAML field set", () => {
+  const initial = parseMapping(initialConfig());
+  const config = configuration(initial).getProperties();
+  assert.deepEqual(Object.keys(initial).sort(), [
+    "gateway",
+    "log",
+    "masterKey",
+  ]);
+  assert.deepEqual(Object.keys(config.gateway).sort(), [
+    "allowedHosts",
+    "allowedOrigins",
+    "bind",
+    "port",
+    "tokenLifetime",
+  ]);
+});
 
 test("configuration is strict, file-only, masks secrets, and reports every invalid field safely", (t) => {
   const directory = temporary(t);

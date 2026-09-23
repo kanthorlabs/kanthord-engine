@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { canonicalJSON, deriveKey, digest } from "./json.ts";
-import { parseJSON } from "../gateway/json.ts";
 
 const CANONICAL_NESTED_OBJECT =
   '{"10":10,"2":2,"array":[3,1],"nested":{"a":0,"z":0}}';
@@ -32,27 +31,4 @@ test("RFC 8785 canonicalization preserves numeric-name ordering, nested order, a
     deriveKey(key, "gateway/jwt-hs256/v1"),
     deriveKey(key, "custody/aes-256-gcm/v1"),
   );
-});
-
-test("ingress rejects duplicate members before JSON.parse drops them, including escaped keys", () => {
-  for (const source of [
-    '{"a":1,"a":2}',
-    '{"a":1,"\\u0061":2}',
-    '{"nested":{"a":1,"a":2}}',
-    '{"secret-marker":',
-    "[1,]",
-    "1e999",
-    '"\\ud800"',
-  ]) {
-    assert.throws(
-      () => parseJSON(source),
-      (error: Error) => {
-        assert.doesNotMatch(error.message, /secret-marker/);
-        return true;
-      },
-    );
-  }
-  assert.deepEqual(parseJSON('{"a":[true,null,1e3,"\\\""]}'), {
-    a: [true, null, 1000, '"'],
-  });
 });

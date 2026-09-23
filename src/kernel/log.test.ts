@@ -7,7 +7,7 @@ import pino from "pino";
 import { temporary } from "./test-support.ts";
 import { OperationalLog, redactionPaths } from "./log.ts";
 
-import { ExitCode } from "./apps/cli/constants.ts";
+const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const EMPTY_OUTPUT = "";
 const EMPTY_LOG_CONTENT = "";

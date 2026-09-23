@@ -6,17 +6,20 @@ import { existsSync, readFileSync } from "node:fs";
 import { ulid } from "ulid";
 import { stringify } from "yaml";
 import { decode } from "hono/jwt";
+import { temporary } from "../../kernel/test-support.ts";
 import {
   fakeMachines,
   gatewayFixture,
-  temporary,
   TEST_PROJECT_ID,
   TEST_WORKER_BINDING,
-} from "../../test-support.ts";
-import { isNumber } from "../../shared/values.ts";
-import { writePrivate } from "../../shared/files.ts";
-import { ExitCode } from "./constants.ts";
-import { clientConfigPath } from "./client-config.ts";
+} from "./test-support.ts";
+import { isNumber } from "../../kernel/values.ts";
+import { writePrivate } from "../../kernel/files.ts";
+import { directories } from "../../config/index.ts";
+
+const ExitCode = { Success: 0, Failure: 1 } as const;
+const clientConfigPath = (env: NodeJS.ProcessEnv) =>
+  join(directories(env).config, "cli.yaml");
 
 const EMPTY_OUTPUT = "";
 const NO_REGISTRATIONS = 0;

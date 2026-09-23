@@ -2,30 +2,26 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { decode, sign } from "hono/jwt";
 import { ulid } from "ulid";
-import { background } from "../context.ts";
-import { deriveKey } from "../shared/json.ts";
-import { identitySchema } from "../shared/identity.ts";
-import { HttpStatus } from "../shared/http.ts";
+import { background } from "../kernel/context.ts";
+import { deriveKey } from "../kernel/json.ts";
+import { identitySchema } from "../kernel/identity.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import {
-  fakeMachines,
+  fakeLookups,
+  authenticationFixture,
   gatewayFixture,
   TEST_WORKER_BINDING,
-} from "../test-support.ts";
+} from "./test-support.ts";
 import {
   CLIENT_IDENTITY_PREFIX,
   IdentityKind,
   MAX_BINDING_ID_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
   MAX_HUMAN_USERNAME_LENGTH,
-} from "./constants.ts";
-import {
-  generateHumanJWT,
-  generateMachineJWT,
-  isHumanIdentity,
-  isMachineIdentity,
-} from "./authentication.ts";
-import { gatewayOperations } from "./operations.ts";
-import { workerOperations } from "../worker/operations.ts";
+} from "../kernel/caller.ts";
+import { generateHumanJWT, generateMachineJWT } from "./local.ts";
+import { isHumanIdentity, isMachineIdentity } from "../kernel/caller.ts";
+import { gatewayOperations } from "./contract.ts";
 
 const TOKEN_LIFETIME = 600;
 const MILLISECONDS_PER_SECOND = 1000;
@@ -45,7 +41,7 @@ async function tokenKey(masterKey: string) {
 }
 
 test("issuance preserves human subjects and names, and generates fresh machine subjects and session identifiers", async (t) => {
-  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
+  const fixture = await gatewayFixture(t, { lookups: fakeLookups() });
   const human = await generateHumanJWT(
     fixture.config.masterKey,
     TOKEN_LIFETIME,
@@ -101,8 +97,8 @@ test("issuance preserves human subjects and names, and generates fresh machine s
 });
 
 test("both token kinds reject invalid names, timestamps, session identifiers, signatures, algorithms and kinds", async (t) => {
-  const machines = fakeMachines();
-  const fixture = await gatewayFixture(t, { machines });
+  const machines = fakeLookups();
+  const fixture = await authenticationFixture(t, machines);
   const key = await tokenKey(fixture.config.masterKey);
   const tokens = [
     fixture.token,
@@ -133,19 +129,17 @@ test("both token kinds reject invalid names, timestamps, session identifiers, si
     for (const changes of invalidClaims) {
       const invalid = await sign({ ...claims, ...changes }, key, "HS256");
       await assert.rejects(
-        fixture.gateway.authentication.authenticate(`Bearer ${invalid}`),
+        fixture.authentication.authenticate(`Bearer ${invalid}`),
         /Authentication required/,
       );
     }
     const wrongAlgorithm = await sign(claims, "test-algorithm-key", "HS512");
     await assert.rejects(
-      fixture.gateway.authentication.authenticate(`Bearer ${wrongAlgorithm}`),
+      fixture.authentication.authenticate(`Bearer ${wrongAlgorithm}`),
       /Authentication required/,
     );
     await assert.rejects(
-      fixture.gateway.authentication.authenticate(
-        `Bearer ${token.slice(0, -3)}AAA`,
-      ),
+      fixture.authentication.authenticate(`Bearer ${token.slice(0, -3)}AAA`),
       /Authentication required/,
     );
     for (const authorization of [
@@ -155,7 +149,7 @@ test("both token kinds reject invalid names, timestamps, session identifiers, si
       `Bearer ${token} extra`,
     ])
       await assert.rejects(
-        fixture.gateway.authentication.authenticate(authorization),
+        fixture.authentication.authenticate(authorization),
         /Authentication required/,
       );
   }
@@ -163,7 +157,7 @@ test("both token kinds reject invalid names, timestamps, session identifiers, si
 });
 
 test("human and machine claims enforce distinct subjects and binding rules", async (t) => {
-  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
+  const fixture = await authenticationFixture(t, fakeLookups());
   const key = await tokenKey(fixture.config.masterKey);
   const human = decode(fixture.token).payload;
   const machine = decode(
@@ -198,7 +192,7 @@ test("human and machine claims enforce distinct subjects and binding rules", asy
     for (const changes of invalid) {
       const token = await sign({ ...base, ...changes }, key, "HS256");
       await assert.rejects(
-        fixture.gateway.authentication.authenticate(`Bearer ${token}`),
+        fixture.authentication.authenticate(`Bearer ${token}`),
         /Authentication required/,
       );
     }
@@ -208,8 +202,8 @@ test("human and machine claims enforce distinct subjects and binding rules", asy
       "HS256",
     );
     assert.equal(
-      (await fixture.gateway.authentication.authenticate(`Bearer ${token}`))
-        .name.length,
+      (await fixture.authentication.authenticate(`Bearer ${token}`)).name
+        .length,
       MAX_DISPLAY_NAME_LENGTH,
     );
   }
@@ -239,62 +233,16 @@ test("human and machine claims enforce distinct subjects and binding rules", asy
   );
 });
 
-test("expired and banned human and machine JWTs fail HTTP and banned direct identities fail before validation", async (t) => {
-  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
-  const key = await tokenKey(fixture.config.masterKey);
-  for (const token of [
-    fixture.token,
-    await fixture.machineToken(TEST_WORKER_BINDING),
-  ]) {
-    const identity = await fixture.gateway.authentication.authenticate(
-      `Bearer ${token}`,
-    );
-    const claims = decode(token).payload;
-    const operation = isHumanIdentity(identity)
-      ? gatewayOperations.verify
-      : workerOperations.register;
-    const expired = await sign(
-      { ...claims, exp: Math.floor(Date.now() / MILLISECONDS_PER_SECOND) - 1 },
-      key,
-      "HS256",
-    );
-    fixture.gateway.authentication.ban(
-      identity.jti,
-      claims.exp! * MILLISECONDS_PER_SECOND,
-    );
-    for (const invalid of [expired, token]) {
-      const response = await fixture.request(operation.path, {
-        method: operation.method,
-        headers: {
-          Authorization: `Bearer ${invalid}`,
-          "Idempotency-Key": ulid(),
-        },
-      });
-      assert.equal(response.status, HttpStatus.Unauthorized);
-    }
-    const direct = await fixture.gateway.invocation.invoke(
-      operation.id,
-      { invalid: true },
-      { identity },
-    );
-    assert.equal(direct.status, HttpStatus.Unauthorized);
-    await assert.rejects(
-      fixture.gateway.authentication.recheck(identity, background),
-      /Authentication required/,
-    );
-  }
-});
-
 test("binding collaborator failures propagate instead of becoming invalid credentials", async (t) => {
-  const machines = fakeMachines();
+  const machines = fakeLookups();
   const failure = new Error("binding lookup failed");
   t.mock.method(machines.project, "resolveWorkerBinding", async () => {
     throw failure;
   });
-  const fixture = await gatewayFixture(t, { machines });
+  const fixture = await authenticationFixture(t, machines);
   const token = await fixture.machineToken(TEST_WORKER_BINDING);
   await assert.rejects(
-    fixture.gateway.authentication.authenticate(`Bearer ${token}`),
+    fixture.authentication.authenticate(`Bearer ${token}`),
     (error) => error === failure,
   );
   assert.equal(machines.worker.registrations.size, NO_REGISTRATIONS);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { ExitCode } from "./apps/cli/constants.ts";
+const ExitCode = { Success: 0, Failure: 1 } as const;
 import {
   abortSignal,
   background,

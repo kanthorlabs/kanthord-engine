@@ -3,35 +3,23 @@ import convict, { type Field, type Schema } from "convict";
 import { parseDocument, stringify } from "yaml";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { isIP } from "node:net";
 import { randomBytes } from "node:crypto";
-import { audit, readPrivate } from "../shared/files.ts";
-import { Diagnostic } from "../shared/errors.ts";
-import { isObject, isString } from "../shared/values.ts";
+import { audit, readPrivate } from "../kernel/files.ts";
+import { Diagnostic } from "../kernel/errors.ts";
+import { isObject } from "../kernel/values.ts";
 
-export const LogDestination = {
-  StandardError: "stderr",
-  File: "file",
-} as const;
-export const MASTER_KEY_BYTES = 32;
-const IPV4_VERSION = 4;
-export const IPV6_LOOPBACK = "::1";
+import {
+  globalConfigSchema,
+  MASTER_KEY_BYTES,
+  type GlobalConfig,
+} from "./global.ts";
+import { gatewayConfigSchema, type GatewayConfig } from "../gateway/index.ts";
+import { projectConfigSchema } from "../project/index.ts";
+import { workerConfigSchema } from "../worker/index.ts";
 const EXHAUSTED_NODE_BUDGET = 0;
 const EMPTY_SCHEMA_FIELD_COUNT = 0;
-
-export interface ServerConfig {
-  masterKey: string;
-  log: {
-    level: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
-    destination: (typeof LogDestination)[keyof typeof LogDestination];
-  };
-  gateway: {
-    bind: string;
-    port: number;
-    allowedHosts: string[];
-    allowedOrigins: string[];
-    tokenLifetime: number;
-  };
+export interface ServerConfig extends GlobalConfig {
+  gateway: GatewayConfig;
 }
 
 export function directories(
@@ -155,72 +143,18 @@ export function parseMapping(source: string): Record<string, unknown> {
 }
 convict.addParser({ extension: ["yaml", "yml"], parse: parseMapping });
 
-const strings = (value: unknown) => {
-  if (
-    !Array.isArray(value) ||
-    value.some((entry) => !isString(entry) || !entry.length)
-  )
-    throw new Error("expected an array of nonempty strings");
+const fragments = {
+  gateway: gatewayConfigSchema,
+  project: projectConfigSchema,
+  worker: workerConfigSchema,
 };
 const schema = {
-  masterKey: {
-    doc: "32-byte master key, encoded as base64.",
-    default: null,
-    sensitive: true,
-    format(value: unknown) {
-      if (
-        !isString(value) ||
-        !/^[A-Za-z0-9+/]{43}=$/.test(value) ||
-        Buffer.from(value, "base64").length !== MASTER_KEY_BYTES ||
-        Buffer.from(value, "base64").toString("base64") !== value
-      )
-        throw new Error("required 32-byte base64 secret");
-    },
-  },
-  log: {
-    level: {
-      doc: "Operational log level.",
-      format: ["trace", "debug", "info", "warn", "error", "fatal"],
-      default: "info",
-    },
-    destination: {
-      doc: "Operational log destination.",
-      format: Object.values(LogDestination),
-      default: LogDestination.StandardError,
-    },
-  },
-  gateway: {
-    bind: {
-      doc: "Loopback listener address.",
-      default: "127.0.0.1",
-      format(value: unknown) {
-        if (
-          !isString(value) ||
-          !(
-            (isIP(value) === IPV4_VERSION && value.startsWith("127.")) ||
-            value === IPV6_LOOPBACK
-          )
-        )
-          throw new Error("expected a loopback IP address");
-      },
-    },
-    port: { doc: "HTTP listener port.", format: "port", default: 31415 },
-    allowedHosts: {
-      doc: "Accepted Host headers, including port.",
-      format: strings,
-      default: ["127.0.0.1:31415", "localhost:31415"],
-    },
-    allowedOrigins: {
-      doc: "Allowed CORS origins.",
-      format: strings,
-      default: [],
-    },
-    tokenLifetime: {
-      doc: "Token lifetime in seconds.",
-      format: "nat",
-      default: 31536000,
-    },
-  },
+  ...globalConfigSchema,
+  ...Object.fromEntries(
+    Object.entries(fragments).filter(
+      ([, fragment]) => Object.keys(fragment).length > EMPTY_SCHEMA_FIELD_COUNT,
+    ),
+  ),
 };
 
 function inspectField(

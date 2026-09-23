@@ -1,4 +1,4 @@
-import { CodedError } from "./shared/errors.ts";
+import { CodedError } from "./errors.ts";
 
 const EXPIRED_REMAINING_MS = 0;
 

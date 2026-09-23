@@ -1,12 +1,25 @@
+import type { ErrorBody } from "./errors.ts";
 import { z } from "zod";
-import type { CallerIdentity } from "./authentication.ts";
-import type { Transaction } from "../store.ts";
-import type { Context } from "../context.ts";
-import { emitOpenAPI, validateOpenAPIScope } from "./openapi.ts";
-import type { HttpMethod } from "../shared/http.ts";
-import { AccessPolicy, OperationInteraction } from "./constants.ts";
+import type { CallerIdentity } from "./caller.ts";
+import type { Transaction } from "./store.ts";
+import type { Context } from "./context.ts";
+import type { HttpMethod } from "./http.ts";
 
-export type { AccessPolicy } from "./constants.ts";
+export const AccessPolicy = {
+  Human: "human",
+  Client: "client",
+  Public: "public",
+  Delivery: "delivery",
+} as const;
+export type AccessPolicy = (typeof AccessPolicy)[keyof typeof AccessPolicy];
+
+export const OperationInteraction = {
+  Delivery: "delivery",
+  Stream: "stream",
+} as const;
+export type OperationInteraction =
+  (typeof OperationInteraction)[keyof typeof OperationInteraction];
+
 const NO_TIMEOUT_MS = 0;
 const EMPTY_REGISTRY_SIZE = 0;
 export const emptyInput = z.strictObject({
@@ -73,7 +86,6 @@ export class OperationRegistry {
     handler: Handler<I, O>,
   ): void {
     if (this.sealed) throw new Error("Route registration is closed.");
-    validateOpenAPIScope(operation);
     if (!Object.values(AccessPolicy).includes(operation.access))
       throw new Error("Every route must declare an access policy.");
     if (
@@ -139,8 +151,38 @@ export class OperationRegistry {
     if (!entry) throw new Error("Unknown operation.");
     return entry;
   }
-
-  openapi() {
-    return emitOpenAPI(this.entries.map(({ operation }) => operation));
-  }
 }
+
+export const OperationResultType = {
+  Completed: "completed",
+  Failure: "failure",
+  Indeterminate: "indeterminate",
+} as const;
+
+export type OperationResult<T> =
+  | {
+      type: typeof OperationResultType.Completed;
+      status: number;
+      data: T;
+      idempotencyKey?: string;
+    }
+  | {
+      type: typeof OperationResultType.Failure;
+      status: number;
+      error: ErrorBody;
+      idempotencyKey?: string;
+    }
+  | { type: typeof OperationResultType.Indeterminate; idempotencyKey?: string };
+export interface ClientOptions {
+  identity?: CallerIdentity;
+  idempotencyKey?: string;
+  context?: Context;
+  traceparent?: string;
+  tracestate?: string;
+}
+export type ServiceClient<T extends Record<string, Operation>> = {
+  [K in keyof T]: (
+    input: z.input<T[K]["input"]>,
+    options?: ClientOptions,
+  ) => Promise<OperationResult<z.output<T[K]["output"]>>>;
+};

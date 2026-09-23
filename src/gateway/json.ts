@@ -1,4 +1,4 @@
-import { canonicalJSON } from "../shared/json.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import { GatewayError } from "./errors.ts";
 
 const MAX_JSON_DEPTH = 128;

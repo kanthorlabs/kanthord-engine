@@ -9,11 +9,11 @@ import {
 import { dirname, join } from "node:path";
 import { stringify } from "yaml";
 import { z } from "zod";
-import { ulidSchema } from "../shared/identity.ts";
-import { errorDetailsSchema, errorSchema } from "./errors.ts";
-import type { Operation } from "./registry.ts";
-import { AccessPolicy, OperationInteraction } from "./constants.ts";
-import { isObject, isString } from "../shared/values.ts";
+import { ulidSchema } from "../kernel/identity.ts";
+import { errorDetailsSchema, errorSchema } from "../kernel/errors.ts";
+import type { Operation } from "../kernel/operation.ts";
+import { AccessPolicy, OperationInteraction } from "../kernel/operation.ts";
+import { isObject, isString } from "../kernel/values.ts";
 
 export const OPENAPI_INDEX_FILE = "openapi.yaml";
 const SHARED_SCOPE = "shared";

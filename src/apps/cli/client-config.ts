@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { z } from "zod";
 import { directories, parseMapping } from "../../config/index.ts";
-import { audit, readPrivate } from "../../shared/files.ts";
-import { Diagnostic } from "../../shared/errors.ts";
+import { audit, readPrivate } from "../../kernel/files.ts";
+import { Diagnostic } from "../../kernel/errors.ts";
 
 const endpoint = z.url().refine((value) => {
   const url = URL.parse(value);

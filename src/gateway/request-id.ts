@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createIdentity, identitySchema } from "../shared/identity.ts";
+import { createIdentity, identitySchema } from "../kernel/identity.ts";
 
 export const requestIdSchema = identitySchema("request");
 

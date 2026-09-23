@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
+import { identitySchema } from "./identity.ts";
 
 const EMPTY_MESSAGE_LENGTH = 0;
 
@@ -42,4 +43,31 @@ export function diagnostic(error: unknown): string {
   return error instanceof Diagnostic
     ? `${error.code}: ${error.message}`
     : "system.operation.unknown: Operation failed.";
+}
+
+export const errorDetailsSchema = z.json();
+export const errorSchema = z.strictObject({
+  error: z.strictObject({
+    code: errorCodeSchema,
+    message: z.string(),
+    details: errorDetailsSchema.nullable(),
+  }),
+  requestId: identitySchema("request"),
+});
+export type ErrorBody = z.infer<typeof errorSchema>;
+
+export class OperationError extends CodedError {
+  readonly status: number;
+  readonly details: z.infer<ReturnType<typeof z.json>> | null;
+
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    details: z.infer<ReturnType<typeof z.json>> | null = null,
+  ) {
+    super(code, message);
+    this.status = status;
+    this.details = details;
+  }
 }

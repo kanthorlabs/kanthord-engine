@@ -1,25 +1,85 @@
 import { join, dirname } from "node:path";
-import { directories, configPath, loadConfig } from "../../config/index.ts";
-import { audit, ensureDirectory } from "../../shared/files.ts";
-import { Diagnostic, diagnostic, asError } from "../../shared/errors.ts";
+import {
+  directories,
+  configPath,
+  loadConfig,
+  type ServerConfig,
+} from "../../config/index.ts";
+import type { Logger } from "pino";
+import type { ProjectBindings } from "../../project/contract.ts";
+import type { WorkerRegistrations } from "../../worker/contract.ts";
+import { audit, ensureDirectory } from "../../kernel/files.ts";
+import { Diagnostic, diagnostic, asError } from "../../kernel/errors.ts";
 import {
   healthy,
   HealthStatus,
   lifecycle,
   type Healthcheck,
   type Service,
-} from "../../service.ts";
-import { OperationalLog } from "../../log.ts";
-import { Store } from "../../store.ts";
-import { HealthRegistry } from "../../health.ts";
-import { GatewayService } from "../../gateway/service.ts";
-import { gatewayMigrations } from "../../gateway/migrations.ts";
+} from "../../kernel/service.ts";
+import { OperationalLog } from "../../kernel/log.ts";
+import { Store } from "../../kernel/store.ts";
+import { HealthRegistry } from "../../kernel/health.ts";
+import { GatewayService } from "../../gateway/index.ts";
+import { gatewayMigrations, createInvocation } from "../../gateway/index.ts";
+import { ProjectService, projectMigrations } from "../../project/index.ts";
+import { WorkerService, workerMigrations } from "../../worker/index.ts";
+import { OperationRegistry } from "../../kernel/operation.ts";
 import {
   background,
   CancellationContext,
   throwIfCancelled,
   type Context,
-} from "../../context.ts";
+} from "../../kernel/context.ts";
+
+export function composeServices(options: {
+  config: ServerConfig;
+  store: Store;
+  logger: Logger;
+  health: HealthRegistry;
+  registry?: OperationRegistry;
+  bindings?: ProjectBindings;
+  registrations?: WorkerRegistrations;
+}) {
+  const registry = options.registry ?? new OperationRegistry();
+  const invocation = createInvocation({
+    registry,
+    store: options.store,
+    masterKey: options.config.masterKey,
+    tokenLifetime: options.config.gateway.tokenLifetime,
+    lookups: {
+      project: {
+        resolveWorkerBinding: (binding, context) =>
+          project.resolveWorkerBinding(binding, context),
+      },
+      worker: {
+        findByClient: (client) => worker.registrations.findByClient(client),
+      },
+    },
+  });
+  const project: ProjectService = new ProjectService({
+    config: {},
+    health: options.health,
+    bindings: options.bindings,
+  });
+  const worker: WorkerService = new WorkerService({
+    config: {},
+    health: options.health,
+    registrations: options.registrations,
+  });
+  project.declare(registry);
+  worker.declare(registry);
+  const gateway = new GatewayService({
+    config: options.config.gateway,
+    logger: options.logger,
+    registry,
+    invocation,
+    health: options.health,
+  });
+  gateway.declare(registry);
+  registry.seal();
+  return { project, worker, gateway };
+}
 
 export class Server implements Service {
   readonly health = new HealthRegistry();
@@ -72,18 +132,24 @@ export class Server implements Service {
       this.releases.push(() => this.store!.close());
       this.store.migrate([
         { service: "gateway", migrations: gatewayMigrations },
+        { service: "worker", migrations: workerMigrations },
+        { service: "project", migrations: projectMigrations },
       ]);
       throwIfCancelled(this.shutdown);
-      this.gateway = new GatewayService({
+      const { project, worker, gateway } = composeServices({
         config,
         store: this.store,
         logger: this.log.logger,
         health: this.health,
       });
-      this.releases.push(() => this.gateway!.stop());
-      const error = await this.gateway.start();
-      if (error) throw error;
-      throwIfCancelled(this.shutdown);
+      this.gateway = gateway;
+      const services = [project, worker, gateway];
+      for (const service of services) this.releases.push(() => service.stop());
+      for (const service of services) {
+        const error = await service.start();
+        if (error) throw error;
+        throwIfCancelled(this.shutdown);
+      }
     } catch (error) {
       const cleanup = await this.release();
       if (cleanup)

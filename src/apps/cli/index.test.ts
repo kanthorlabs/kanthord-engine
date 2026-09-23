@@ -9,18 +9,15 @@ import {
   statSync,
 } from "node:fs";
 import { join } from "node:path";
-import { temporary } from "../../test-support.ts";
+import { temporary } from "../../kernel/test-support.ts";
 import { initialConfig, loadConfig } from "../../config/index.ts";
-import {
-  IdentityKind,
-  KANTHORD_AUTH_USERNAME,
-  CLIENT_IDENTITY_PREFIX,
-} from "../../gateway/constants.ts";
+import { IdentityKind, CLIENT_IDENTITY_PREFIX } from "../../kernel/caller.ts";
+import { KANTHORD_AUTH_USERNAME } from "../../gateway/local.ts";
 import { decode, verify } from "hono/jwt";
-import { identitySchema } from "../../shared/identity.ts";
-import { deriveKey } from "../../shared/json.ts";
+import { identitySchema } from "../../kernel/identity.ts";
+import { deriveKey } from "../../kernel/json.ts";
 import { stringify } from "yaml";
-import { PRIVATE_FILE_MODE, writePrivate } from "../../shared/files.ts";
+import { PRIVATE_FILE_MODE, writePrivate } from "../../kernel/files.ts";
 import { clientConfigPath, resolveClient } from "./client-config.ts";
 
 import { ExitCode } from "./constants.ts";

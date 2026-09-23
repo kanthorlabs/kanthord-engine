@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { HealthRegistry } from "../health.ts";
-import { gatewayFixture } from "../test-support.ts";
-import { directClient, OperationResultType } from "./client.ts";
-import { errorSchema } from "./errors.ts";
-import { gatewayOperations } from "./operations.ts";
-import { HttpStatus } from "../shared/http.ts";
+import { HealthRegistry } from "../kernel/health.ts";
+import { gatewayFixture } from "./test-support.ts";
+import { directClient } from "./index.ts";
+import { OperationResultType } from "../kernel/operation.ts";
+import { errorSchema } from "../kernel/errors.ts";
+import { gatewayOperations } from "./contract.ts";
+import { HttpStatus } from "../kernel/http.ts";
 
 const UNHEALTHY_ERROR_CODE = "gateway.healthcheck.unhealthy";
 
@@ -95,7 +96,9 @@ test("a closed SQLite database is reported alongside other registered services",
   fixture.gateway.health.register("store", () => ({
     sqlite: fixture.store.healthcheck() ? 200 : 503,
   }));
-  fixture.gateway.health.register("worker", () => ({ "instance-one": 200 }));
+  fixture.gateway.health.register("worker", () => ({
+    "instance-one": 200,
+  }));
   fixture.store.close();
   const response = await fixture.request("/api/healthcheck");
   assert.equal(response.status, HttpStatus.ServiceUnavailable);

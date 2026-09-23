@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { httpClient, OperationResultType } from "./client.ts";
+import { httpClient } from "./client.ts";
+import { OperationResultType } from "../kernel/operation.ts";
 import {
   conflict,
-  errorSchema,
   failure,
   GatewayError,
   respondError,
   unauthorized,
 } from "./errors.ts";
-import { gatewayOperations } from "./operations.ts";
+import { errorSchema } from "../kernel/errors.ts";
+import { gatewayOperations } from "./contract.ts";
 
-import { HttpStatus } from "../shared/http.ts";
+import { HttpStatus } from "../kernel/http.ts";
 
 const ExpectedErrorCode = {
   Unknown: "gateway.invocation.unknown",

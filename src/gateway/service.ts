@@ -19,42 +19,39 @@ import {
   lifecycle,
   type Healthcheck,
   type Service,
-} from "../service.ts";
-import { HealthRegistry } from "../health.ts";
+} from "../kernel/service.ts";
+import { HealthRegistry } from "../kernel/health.ts";
 import {
   background,
   CancellationContext,
   throwIfCancelled,
   type Context,
-} from "../context.ts";
-import type { ServerConfig } from "../config/index.ts";
-import type { Store } from "../store.ts";
-import { Diagnostic, asError } from "../shared/errors.ts";
-import { Authentication } from "./authentication.ts";
-import type { MachineDependencies } from "./contracts.ts";
+} from "../kernel/context.ts";
+import type { GatewayConfig } from "./config.ts";
+import { Diagnostic, asError } from "../kernel/errors.ts";
+import type { Authentication } from "./authentication.ts";
 import { GatewayError, respondError } from "./errors.ts";
-import { Idempotency } from "./idempotency.ts";
-import { Invocation } from "./invocation.ts";
+import type { Idempotency } from "./idempotency.ts";
+import type { Invocation } from "./invocation.ts";
 import { parseJSON } from "./json.ts";
-import { gatewayOperations, registerGatewayOperations } from "./operations.ts";
-import { AccessPolicy, OperationInteraction } from "./constants.ts";
-import { HttpMethod, HttpStatus, MediaType } from "../shared/http.ts";
-import { isString } from "../shared/values.ts";
-import { registerWorkerOperations } from "../worker/operations.ts";
-import { OperationRegistry } from "./registry.ts";
+import { gatewayOperations } from "./contract.ts";
+import { registerGatewayOperations } from "./declarations.ts";
+import { AccessPolicy, OperationInteraction } from "../kernel/operation.ts";
+import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
+import { isString } from "../kernel/values.ts";
+import type { OperationRegistry } from "../kernel/operation.ts";
 import { resolveRequestId } from "./request-id.ts";
 
 const SERVER_NOT_RUNNING = "ERR_SERVER_NOT_RUNNING";
 const SINGLE_QUERY_VALUE_COUNT = 1;
-export const GATEWAY_STARTED_MESSAGE = "Gateway Service started";
+import { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
 
-interface GatewayOptions {
-  config: ServerConfig;
-  store: Store;
+export interface GatewayDependencies {
+  config: GatewayConfig;
   logger: Logger;
-  registry?: OperationRegistry;
+  registry: OperationRegistry;
+  invocation: Invocation;
   health?: HealthRegistry;
-  machines?: MachineDependencies;
 }
 
 export class GatewayService implements Service {
@@ -65,7 +62,7 @@ export class GatewayService implements Service {
   readonly authentication: Authentication;
   private readonly idempotency: Idempotency;
   private readonly shutdown = new CancellationContext();
-  private readonly options: GatewayOptions;
+  private readonly options: GatewayDependencies;
   private listener?: ServerType;
   private ready = false;
   private started = false;
@@ -74,33 +71,21 @@ export class GatewayService implements Service {
   private readonly stopped = Promise.withResolvers<Error | null>();
   private readonly httpPending = new Set<Promise<unknown>>();
 
-  constructor(options: GatewayOptions) {
+  constructor(options: GatewayDependencies) {
     this.options = options;
-    this.registry = options.registry ?? new OperationRegistry();
-    this.authentication = new Authentication(
-      options.store,
-      options.config.masterKey,
-      options.machines,
-    );
-    this.idempotency = new Idempotency(options.store);
-    this.invocation = new Invocation(
-      this.registry,
-      this.authentication,
-      this.idempotency,
-      options.store,
-      this.shutdown,
-    );
+    this.registry = options.registry;
+    this.invocation = options.invocation;
+    this.authentication = options.invocation.authentication;
+    this.idempotency = options.invocation.idempotency;
     this.health = options.health ?? new HealthRegistry();
     this.health.register("gateway", () => this.healthcheck());
-    registerGatewayOperations(this.registry, (context) =>
+    this.app = this.createApp();
+  }
+
+  declare(registry: OperationRegistry): void {
+    registerGatewayOperations(registry, (context) =>
       this.health.check(context),
     );
-    registerWorkerOperations(
-      this.registry,
-      this.authentication,
-      options.machines?.worker,
-    );
-    this.app = this.createApp();
   }
 
   address(): AddressInfo | undefined {
@@ -124,7 +109,6 @@ export class GatewayService implements Service {
     this.authentication.sweep();
     this.idempotency.sweep();
     this.registerRoutes();
-    this.registry.seal();
     const server = createAdaptorServer({
       fetch: (request, env) => this.app.fetch(request, env as HttpBindings),
     });
@@ -135,13 +119,13 @@ export class GatewayService implements Service {
           reject(
             new Diagnostic(
               "gateway.listener.bind_failed",
-              `gateway: cannot bind ${this.options.config.gateway.bind}:${this.options.config.gateway.port}.`,
+              `gateway: cannot bind ${this.options.config.bind}:${this.options.config.port}.`,
             ),
           );
         server.once("error", error);
         server.listen(
-          this.options.config.gateway.port,
-          this.options.config.gateway.bind,
+          this.options.config.port,
+          this.options.config.bind,
           () => {
             server.off("error", error);
             resolve();
@@ -157,7 +141,7 @@ export class GatewayService implements Service {
       this.started = true;
       this.options.logger.info(
         {
-          address: this.options.config.gateway.bind,
+          address: this.options.config.bind,
           port: this.address()?.port,
         },
         GATEWAY_STARTED_MESSAGE,
@@ -174,6 +158,7 @@ export class GatewayService implements Service {
     if (this.stopTask) return this.stopTask;
     this.ready = false;
     this.shutdown.cancel();
+    const invocationStop = this.invocation.stop();
     // close stops admission immediately; its callback is joined only after abort.
     const close = new Promise<Error | null>((resolve) => {
       // During startup, open() owns the bind callback and closes after observing
@@ -189,7 +174,7 @@ export class GatewayService implements Service {
       try {
         await this.startTask;
         await Promise.allSettled(this.httpPending);
-        const invocationError = await this.invocation.stop();
+        const invocationError = await invocationStop;
         const error = await close;
         if (error || invocationError) throw error ?? invocationError;
       } finally {
@@ -285,7 +270,7 @@ export class GatewayService implements Service {
       const host = context.req.header("host");
       if (
         !host ||
-        !this.options.config.gateway.allowedHosts.includes(host.toLowerCase())
+        !this.options.config.allowedHosts.includes(host.toLowerCase())
       )
         return respondError(
           new GatewayError(
@@ -335,7 +320,7 @@ export class GatewayService implements Service {
           );
       }
       return cors({
-        origin: this.options.config.gateway.allowedOrigins,
+        origin: this.options.config.allowedOrigins,
         credentials: false,
         allowMethods: Object.values(HttpMethod),
         allowHeaders: [

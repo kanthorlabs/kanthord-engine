@@ -1,31 +1,34 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { TestContext } from "node:test";
 import pino from "pino";
-import { configuration } from "./config/index.ts";
-import { Store } from "./store.ts";
-import { gatewayMigrations } from "./gateway/migrations.ts";
-import { GatewayService } from "./gateway/service.ts";
-import { OperationRegistry } from "./gateway/registry.ts";
-import type {
-  MachineDependencies,
-  Registration,
-  VerifiedClient,
-} from "./gateway/contracts.ts";
-import type { Transaction } from "./store.ts";
-import { throwIfCancelled, type Context } from "./context.ts";
-import { createIdentity } from "./shared/identity.ts";
-import { HttpStatus } from "./shared/http.ts";
-import { GatewayError } from "./gateway/errors.ts";
-import { KANTHORD_AUTH_USERNAME } from "./gateway/constants.ts";
-import {
-  generateHumanJWT,
-  generateMachineJWT,
-} from "./gateway/authentication.ts";
-import type { HealthRegistry } from "./health.ts";
+import { configuration } from "../../config/index.ts";
+import { Store } from "../../kernel/store.ts";
+import { gatewayMigrations } from "../../gateway/index.ts";
+import { projectMigrations } from "../../project/index.ts";
+import { workerMigrations } from "../../worker/index.ts";
+import { composeServices } from "./index.ts";
+import type { OperationRegistry } from "../../kernel/operation.ts";
+import type { ProjectBindings } from "../../project/contract.ts";
+import type { WorkerRegistrations } from "../../worker/contract.ts";
+export interface MachineDependencies {
+  project: ProjectBindings;
+  worker: WorkerRegistrations;
+}
+import type { Registration, VerifiedClient } from "../../worker/contract.ts";
+import type { Transaction } from "../../kernel/store.ts";
+import { throwIfCancelled, type Context } from "../../kernel/context.ts";
+import { createIdentity } from "../../kernel/identity.ts";
+import { HttpStatus } from "../../kernel/http.ts";
+import { OperationError as GatewayError } from "../../kernel/errors.ts";
+import { KANTHORD_AUTH_USERNAME } from "../../gateway/local.ts";
+import { generateHumanJWT, generateMachineJWT } from "../../gateway/local.ts";
+import { HealthRegistry } from "../../kernel/health.ts";
+
+export const domainHealth = {
+  project: { bindings: 200 },
+  worker: { registrations: 200 },
+};
 
 export const TEST_WORKER_BINDING = "binding";
 export const TEST_PROJECT_ID = "project";
@@ -108,15 +111,6 @@ export function fakeMachines(
   return { project, worker } satisfies MachineDependencies;
 }
 
-export function temporary(t: TestContext): string {
-  process.umask(0o077);
-  const parent = join(tmpdir(), "opencode");
-  mkdirSync(parent, { recursive: true, mode: 0o700 });
-  const path = mkdtempSync(join(parent, "kanthord-"));
-  t.after(() => rmSync(path, { recursive: true, force: true }));
-  return path;
-}
-
 export async function gatewayFixture(
   t: TestContext,
   options: {
@@ -132,14 +126,19 @@ export async function gatewayFixture(
     gateway: { port: 0, allowedHosts: ["localhost"] },
   }).getProperties();
   const store = new Store(options.path ?? ":memory:");
-  store.migrate([{ service: "gateway", migrations: gatewayMigrations }]);
+  store.migrate([
+    { service: "gateway", migrations: gatewayMigrations },
+    { service: "worker", migrations: workerMigrations },
+    { service: "project", migrations: projectMigrations },
+  ]);
   const logs: string[] = [];
-  const gateway = new GatewayService({
+  const { gateway, project, worker } = composeServices({
     config,
     store,
     registry: options.registry,
-    health: options.health,
-    machines: options.machines,
+    health: options.health ?? new HealthRegistry(),
+    bindings: options.machines?.project,
+    registrations: options.machines?.worker,
     logger: pino(
       { level: "info" },
       {
@@ -150,15 +149,22 @@ export async function gatewayFixture(
     ),
   });
   t.after(async () => {
+    const failures: Error[] = [];
     try {
-      const error = await gateway.stop();
-      if (error) throw error;
+      for (const service of [gateway, worker, project]) {
+        const error = await service.stop();
+        if (error) failures.push(error);
+      }
+      if (failures.length)
+        throw new AggregateError(failures, "Fixture cleanup failed.");
     } finally {
       store.close();
     }
   });
-  const error = await gateway.start();
-  if (error) throw error;
+  for (const service of [project, worker, gateway]) {
+    const error = await service.start();
+    if (error) throw error;
+  }
   const port = gateway.address()!.port;
   config.gateway.allowedHosts.push(`127.0.0.1:${port}`, `localhost:${port}`);
   const endpoint = `http://127.0.0.1:${port}`;

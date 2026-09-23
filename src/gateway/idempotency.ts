@@ -1,5 +1,5 @@
-import type { Store, Transaction } from "../store.ts";
-import { ulidSchema } from "../shared/identity.ts";
+import type { Store, Transaction } from "../kernel/store.ts";
+import { ulidSchema } from "../kernel/identity.ts";
 import { conflict, GatewayError } from "./errors.ts";
 
 export const IdempotencyStatus = {

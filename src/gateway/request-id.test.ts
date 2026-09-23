@@ -1,20 +1,24 @@
+import { HttpStatus } from "../kernel/http.ts";
+import { emptyInput, OperationRegistry } from "../kernel/operation.ts";
+import { gatewayFixture } from "./test-support.ts";
+const REQUEST_LOG_RECORD_COUNT = 2;
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ulid } from "ulid";
 import { z } from "zod";
-import { createIdentity, ulidSchema } from "../shared/identity.ts";
-import { gatewayFixture } from "../test-support.ts";
-import { httpClient, OperationResultType } from "./client.ts";
-import { errorSchema, failure, unauthorized } from "./errors.ts";
+import { createIdentity, ulidSchema } from "../kernel/identity.ts";
+import { Store } from "../kernel/store.ts";
+import { OperationResultType } from "../kernel/operation.ts";
+import { errorSchema } from "../kernel/errors.ts";
+import { gatewayMigrations } from "./migrations.ts";
+import { httpClient } from "./client.ts";
+import { failure, unauthorized } from "./errors.ts";
 import { Idempotency } from "./idempotency.ts";
-import { apiOperations } from "./operations.ts";
+import { gatewayOperations } from "./contract.ts";
+import { workerOperations } from "../worker/contract.ts";
 import { emitOpenAPIFiles } from "./openapi.ts";
-import { emptyInput, OperationRegistry } from "./registry.ts";
 import { requestIdSchema, resolveRequestId } from "./request-id.ts";
-
-import { HttpStatus } from "../shared/http.ts";
-
-const REQUEST_LOG_RECORD_COUNT = 2;
+const apiOperations = { ...gatewayOperations, ...workerOperations };
 const requestId = "request_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const invalidIds = [
   ulid(),
@@ -35,6 +39,80 @@ test("request IDs preserve accepted values and replace absent or invalid values"
     generated.add(value);
   }
   assert.equal(generated.size, invalidIds.length + 3);
+});
+
+test("clients treat a failure with a bare or wrong-kind request ID as indeterminate", async () => {
+  const operation = apiOperations.verify;
+  for (const invalid of invalidIds) {
+    const body = failure(unauthorized(), invalid).body;
+    assert.equal(errorSchema.safeParse(body).success, false);
+    const client = httpClient(
+      { operation },
+      "http://localhost",
+      undefined,
+      async () => Response.json(body, { status: 401 }),
+    );
+    const result = await client.operation({
+      params: {},
+      query: {},
+      body: null,
+    });
+    assert.equal(result.type, OperationResultType.Indeterminate);
+  }
+});
+
+test("idempotency records retain full request IDs while their keys remain bare ULIDs", async (t) => {
+  const store = new Store(":memory:");
+  t.after(() => store.close());
+  store.migrate([{ service: "gateway", migrations: gatewayMigrations }]);
+  const fixture = { store };
+  const idempotency = new Idempotency(fixture.store);
+  const key = ulid();
+  const { reservation } = idempotency.reserve(
+    key,
+    "human",
+    "test.write",
+    "digest",
+  );
+  const response = failure(unauthorized(), requestId);
+  fixture.store.transaction((transaction) =>
+    idempotency.complete(transaction, reservation, response),
+  );
+  const replay = idempotency.reserve(key, "human", "test.write", "digest");
+  assert.deepEqual(replay.replay, response);
+  const row = fixture.store.database
+    .prepare("SELECT key, response FROM gateway_idempotency")
+    .get();
+  assert.equal(row?.key, key);
+  assert.deepEqual(JSON.parse(String(row?.response)), response);
+  for (const invalid of [requestId, createIdentity("project"), `${key}\n`]) {
+    assert.equal(ulidSchema.safeParse(invalid).success, false);
+    assert.throws(
+      () => idempotency.reserve(invalid, "human", "test.write", "digest"),
+      /canonical ULID/,
+    );
+  }
+});
+
+test("OpenAPI publishes the same request-ID and idempotency-key formats as validation", () => {
+  const files = emitOpenAPIFiles(Object.values(apiOperations));
+  const shared = files["openapi/shared/components.yaml"] as {
+    components: {
+      schemas: { Error: { properties: { requestId: object } } };
+      parameters: { IdempotencyKey: { schema: { pattern: string } } };
+    };
+  };
+  const { $schema: dialect, ...schema } = z.toJSONSchema(requestIdSchema);
+  assert.ok(dialect?.includes("json-schema"));
+  assert.deepEqual(
+    shared.components.schemas.Error.properties.requestId,
+    schema,
+  );
+  const keyPattern = new RegExp(
+    shared.components.parameters.IdempotencyKey.schema.pattern,
+  );
+  assert.ok(keyPattern.test(ulid()));
+  assert.equal(keyPattern.test(requestId), false);
 });
 
 test("HTTP responses and logs share the validated prefixed request ID, including routing failures", async (t) => {
@@ -96,75 +174,4 @@ test("HTTP and direct invocations forward only canonical request IDs to handlers
       else assert.notEqual(body.requestId, supplied);
     }
   }
-});
-
-test("clients treat a failure with a bare or wrong-kind request ID as indeterminate", async () => {
-  const operation = apiOperations.verify;
-  for (const invalid of invalidIds) {
-    const body = failure(unauthorized(), invalid).body;
-    assert.equal(errorSchema.safeParse(body).success, false);
-    const client = httpClient(
-      { operation },
-      "http://localhost",
-      undefined,
-      async () => Response.json(body, { status: 401 }),
-    );
-    const result = await client.operation({
-      params: {},
-      query: {},
-      body: null,
-    });
-    assert.equal(result.type, OperationResultType.Indeterminate);
-  }
-});
-
-test("idempotency records retain full request IDs while their keys remain bare ULIDs", async (t) => {
-  const fixture = await gatewayFixture(t);
-  const idempotency = new Idempotency(fixture.store);
-  const key = ulid();
-  const { reservation } = idempotency.reserve(
-    key,
-    "human",
-    "test.write",
-    "digest",
-  );
-  const response = failure(unauthorized(), requestId);
-  fixture.store.transaction((transaction) =>
-    idempotency.complete(transaction, reservation, response),
-  );
-  const replay = idempotency.reserve(key, "human", "test.write", "digest");
-  assert.deepEqual(replay.replay, response);
-  const row = fixture.store.database
-    .prepare("SELECT key, response FROM gateway_idempotency")
-    .get();
-  assert.equal(row?.key, key);
-  assert.deepEqual(JSON.parse(String(row?.response)), response);
-  for (const invalid of [requestId, createIdentity("project"), `${key}\n`]) {
-    assert.equal(ulidSchema.safeParse(invalid).success, false);
-    assert.throws(
-      () => idempotency.reserve(invalid, "human", "test.write", "digest"),
-      /canonical ULID/,
-    );
-  }
-});
-
-test("OpenAPI publishes the same request-ID and idempotency-key formats as validation", () => {
-  const files = emitOpenAPIFiles(Object.values(apiOperations));
-  const shared = files["openapi/shared/components.yaml"] as {
-    components: {
-      schemas: { Error: { properties: { requestId: object } } };
-      parameters: { IdempotencyKey: { schema: { pattern: string } } };
-    };
-  };
-  const { $schema: dialect, ...schema } = z.toJSONSchema(requestIdSchema);
-  assert.ok(dialect?.includes("json-schema"));
-  assert.deepEqual(
-    shared.components.schemas.Error.properties.requestId,
-    schema,
-  );
-  const keyPattern = new RegExp(
-    shared.components.parameters.IdempotencyKey.schema.pattern,
-  );
-  assert.ok(keyPattern.test(ulid()));
-  assert.equal(keyPattern.test(requestId), false);
 });

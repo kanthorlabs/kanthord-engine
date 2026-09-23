@@ -8,14 +8,16 @@ import {
   gatewayFixture,
   TEST_PROJECT_ID,
   TEST_WORKER_BINDING,
-} from "../test-support.ts";
-import { emptyInput, OperationRegistry } from "./registry.ts";
-import { isMachineIdentity } from "./authentication.ts";
-import { directClient, httpClient, OperationResultType } from "./client.ts";
-import { AccessPolicy } from "./constants.ts";
-import { HttpMethod, HttpStatus } from "../shared/http.ts";
-import { errorSchema } from "./errors.ts";
-import { workerOperations } from "../worker/operations.ts";
+} from "./test-support.ts";
+import { emptyInput, OperationRegistry } from "../../kernel/operation.ts";
+import { isMachineIdentity } from "../../kernel/caller.ts";
+import { directClient } from "../../gateway/index.ts";
+import { httpClient } from "../../gateway/client.ts";
+import { OperationResultType } from "../../kernel/operation.ts";
+import { AccessPolicy } from "../../kernel/operation.ts";
+import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
+import { errorSchema } from "../../kernel/errors.ts";
+import { workerOperations } from "../../worker/contract.ts";
 
 const NO_REGISTRATIONS = 0;
 const SINGLE_REGISTRATION = 1;
@@ -156,11 +158,9 @@ test("one live registration per client, live replay across adapters, and stale r
   const identity = await fixture.gateway.authentication.authenticate(
     `Bearer ${fixture.machineJWT}`,
   );
-  const direct = directClient(workerOperations, fixture.gateway.invocation, {
-    identity,
-  });
+  const direct = directClient(workerOperations, fixture.gateway.invocation);
   assert.deepEqual(
-    await direct.register(input, { idempotencyKey: key }),
+    await direct.register(input, { idempotencyKey: key, identity }),
     first,
   );
   assert.deepEqual(

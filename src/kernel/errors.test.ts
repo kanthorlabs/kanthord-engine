@@ -8,7 +8,7 @@ import {
   diagnostic,
   errorCodeSchema,
 } from "./errors.ts";
-import { ContextCancelled, DeadlineExceeded } from "../context.ts";
+import { ContextCancelled, DeadlineExceeded } from "./context.ts";
 
 import { ValueType } from "./values.ts";
 

@@ -5,15 +5,16 @@ import { createServer } from "node:http";
 import pino from "pino";
 import { ulid } from "ulid";
 import { decode } from "hono/jwt";
-import { gatewayFixture, temporary } from "../test-support.ts";
-import { KANTHORD_AUTH_USERNAME } from "./constants.ts";
-import { Store } from "../store.ts";
-import { configuration } from "../config/index.ts";
-import { gatewayMigrations } from "./migrations.ts";
-import { GatewayService } from "./service.ts";
-import { CancellationContext } from "../context.ts";
-import { isString } from "../shared/values.ts";
-import { HealthStatus } from "../service.ts";
+import { temporary } from "../kernel/test-support.ts";
+import { gatewayFixture } from "./test-support.ts";
+import { KANTHORD_AUTH_USERNAME } from "./local.ts";
+import { Store } from "../kernel/store.ts";
+import { configuration } from "./test-support.ts";
+import { gatewayMigrations } from "./index.ts";
+import { composeGateway } from "./test-support.ts";
+import { CancellationContext } from "../kernel/context.ts";
+import { isString } from "../kernel/values.ts";
+import { HealthStatus } from "../kernel/service.ts";
 
 const NO_PENDING_KEYS = 0;
 const LIVE_DENYLIST_ENTRIES = 1;
@@ -26,7 +27,7 @@ test("concurrent starts share startup and restart preserves locally issued human
   const store = new Store(path);
   t.after(() => store.close());
   store.migrate([{ service: "gateway", migrations: gatewayMigrations }]);
-  const gateway = new GatewayService({
+  const gateway = composeGateway({
     config: fixture.config,
     store,
     logger: pino({ enabled: false }),
@@ -83,7 +84,7 @@ test("a failed listener releases resources and startup sweeps dead keys and expi
     insert.run(ulid(), Date.now() - 1, Date.now() - 1000);
     insert.run(ulid(), Date.now() + 60000, Date.now());
   });
-  const gateway = new GatewayService({
+  const gateway = composeGateway({
     store,
     config: configuration({
       masterKey: Buffer.alloc(32).toString("base64"),
@@ -118,7 +119,7 @@ test("cancellation before and during gateway startup returns an error after rele
   }).getProperties();
   for (const before of [true, false]) {
     const context = new CancellationContext();
-    const gateway = new GatewayService({
+    const gateway = composeGateway({
       config,
       store,
       logger: pino({ enabled: false }),

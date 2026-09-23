@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { temporary } from "./test-support.ts";
 import { Store } from "./store.ts";
-import { ExitCode } from "./apps/cli/constants.ts";
+const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const WAL_JOURNAL_MODE = "wal";
 const FULL_SYNCHRONOUS_MODE = 2;
