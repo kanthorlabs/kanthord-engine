@@ -1,0 +1,17 @@
+# JWT acceptance checks
+
+[Internal documentation home](README.md)
+
+From the engine repository root, run:
+
+```sh
+pnpm run test:e2e:jwt
+```
+
+The runner requires Python 3 with POSIX PTY support. It builds the engine, starts a disposable loopback server, generates default and custom-username JWTs using the compiled CLI, and exercises API and CLI verification. Missing, tampered, expired, wrong-key, and malformed tokens must fail.
+
+It also verifies an environment-supplied token without login, checks the published verification and worker-registration contracts, proves that redirected server startup prints no token, stops the server, and removes disposable state.
+
+Sanitized proof is written under the workspace's `.dev/e2e/<YYMMdd>-jwt-verification/`, with a suffix for repeat runs. The proof includes decoded claims, status codes, exit codes, process provenance, and cleanup checks. Raw JWTs and master keys are excluded.
+
+Source: [acceptance runner](../scripts/e2e-jwt.py). General validation commands and documentation checks are in [AGENTS.md](../AGENTS.md).
