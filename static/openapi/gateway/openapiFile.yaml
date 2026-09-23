@@ -1,0 +1,86 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: gateway.openapiFile
+    tags:
+      - gateway
+    description:
+      Read a service-scoped or shared OpenAPI file referenced by the root
+      contract.
+    x-access-policy: public
+    x-timeout-ms: 30000
+    x-mutation: false
+    security: []
+    parameters:
+      - name: service
+        in: path
+        required: true
+        schema:
+          $ref:
+            "#/components/schemas/gateway.openapiFile.Input/properties/params/propert\
+            ies/service"
+      - name: file
+        in: path
+        required: true
+        schema:
+          $ref:
+            "#/components/schemas/gateway.openapiFile.Input/properties/params/propert\
+            ies/file"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/yaml:
+            schema:
+              $ref: "#/components/schemas/gateway.openapiFile.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    gateway.openapiFile.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            service:
+              type: string
+              pattern: ^[a-z][a-z0-9-]*$
+            file:
+              type: string
+              pattern: ^[A-Za-z][A-Za-z0-9._-]*\.yaml$
+          required:
+            - service
+            - file
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    gateway.openapiFile.Output:
+      type: string

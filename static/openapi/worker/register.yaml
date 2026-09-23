@@ -1,0 +1,76 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: worker.register
+    tags:
+      - worker
+    description:
+      Register a worker instance with a bearer machine JWT and an empty
+      body. Returns its runtime identity, not a token. A client identity holds
+      at most one live registration. Repeating the key replays that identity
+      while live; a replay after the registration ends answers 409. Cancellation
+      does not deregister an accepted registration.
+    x-access-policy: client
+    x-timeout-ms: 10000
+    x-mutation: true
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.register.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.register.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.register.Output:
+      type: object
+      properties:
+        runtimeIdentity:
+          type: string
+          minLength: 1
+          maxLength: 128
+      required:
+        - runtimeIdentity
+      additionalProperties: false

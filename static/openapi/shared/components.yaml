@@ -1,0 +1,60 @@
+# Generated from the operation registry by kanthord gateway openapi.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 26
+        maxLength: 26
+        pattern: ^[0-7][0-9A-HJKMNP-TV-Z]{25}$
+  responses:
+    Error:
+      description: Declared failure
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              pattern: ^[a-z][a-z0-9]*(?:_[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:_[a-z0-9]+)*){2,}(?![\s\S])
+              description: "Error location and condition:
+                namespace.component[.component...].error; lower-case words
+                separated by underscores."
+            message:
+              type: string
+            details:
+              anyOf:
+                - $ref: "#/components/schemas/Error/$defs/__schema0"
+                - type: "null"
+          required:
+            - code
+            - message
+            - details
+          additionalProperties: false
+        requestId:
+          type: string
+          minLength: 34
+          maxLength: 34
+          pattern: ^request_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: request_ followed by a canonical 26-character uppercase ULID.
+      required:
+        - error
+        - requestId
+      additionalProperties: false
+      $defs:
+        __schema0: {}

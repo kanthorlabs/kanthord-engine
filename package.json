@@ -4,25 +4,28 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=24.15.0",
+    "node": ">=24.15.0 <25",
     "pnpm": ">=11.24.0"
   },
   "packageManager": "pnpm@11.24.0",
   "bin": {
-    "kanthord": "./dist/main.js"
+    "kanthord": "./bin/kanthord.mjs"
   },
   "files": [
-    "dist"
+    "bin",
+    "dist",
+    "static"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepack": "pnpm run build",
     "typecheck": "tsc --noEmit",
-    "test": "node --test",
-    "format": "prettier --write src scripts eslint.config.js",
-    "lint": "eslint . .claude/skills/work/scripts",
-    "start": "node src/main.ts",
-    "verify": "prettier --check src scripts eslint.config.js && pnpm run typecheck && pnpm test && pnpm run lint && pnpm run verify:guards && node --test --test-timeout=120000 .claude/skills/work/scripts/work-runtime.test.mjs",
+    "test": "node --test --test-timeout=30000 'src/**/*.test.ts'",
+    "test:e2e:jwt": "pnpm run build && python3 scripts/e2e-jwt.py",
+    "format": "prettier --write src bin eslint.config.js",
+    "lint": "eslint src bin eslint.config.js",
+    "start": "node bin/kanthord.mjs",
+    "verify": "prettier --check src bin eslint.config.js && pnpm run typecheck && pnpm test && pnpm run lint && pnpm run build",
     "verify:guards": "node -e \"process.exit(0)\"",
     "prepare": "husky"
   },

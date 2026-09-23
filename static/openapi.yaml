@@ -1,0 +1,20 @@
+# Generated from the operation registry by kanthord gateway openapi.
+openapi: 3.1.0
+info:
+  title: kanthord
+  version: 1.0.0
+paths:
+  /api/healthcheck:
+    $ref: ./openapi/gateway/healthcheck.yaml#/pathItem
+  /api/openapi.yaml:
+    $ref: ./openapi/gateway/openapi.yaml#/pathItem
+  /api/openapi/{service}/{file}:
+    $ref: ./openapi/gateway/openapiFile.yaml#/pathItem
+  /api/auth/verify:
+    $ref: ./openapi/gateway/verify.yaml#/pathItem
+  /api/worker/register:
+    $ref: ./openapi/worker/register.yaml#/pathItem
+components:
+  securitySchemes:
+    bearerAuth:
+      $ref: ./openapi/shared/components.yaml#/components/securitySchemes/bearerAuth

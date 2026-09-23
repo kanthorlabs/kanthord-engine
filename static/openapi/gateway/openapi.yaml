@@ -1,0 +1,61 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: gateway.openapi
+    tags:
+      - gateway
+    description: Read the published OpenAPI contract shipped with this package.
+    x-access-policy: public
+    x-timeout-ms: 30000
+    x-mutation: false
+    security: []
+    parameters: []
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/yaml:
+            schema:
+              $ref: "#/components/schemas/gateway.openapi.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    gateway.openapi.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    gateway.openapi.Output:
+      type: string

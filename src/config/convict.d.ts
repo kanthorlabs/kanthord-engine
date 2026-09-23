@@ -1,0 +1,27 @@
+declare module "convict" {
+  export interface Field {
+    doc: string;
+    format: string | readonly string[] | ((value: unknown) => void);
+    default: unknown;
+    sensitive?: boolean;
+  }
+  export type Schema = { [key: string]: Field | Schema };
+  interface Config<T> {
+    load(value: unknown): Config<T>;
+    validate(options: { allowed: "strict" }): Config<T>;
+    getProperties(): T;
+    toString(): string;
+  }
+  interface Convict {
+    <T>(
+      schema: Schema,
+      options: { args: string[]; env: Record<string, string> },
+    ): Config<T>;
+    addParser(parser: {
+      extension: string[];
+      parse: (source: string) => unknown;
+    }): void;
+  }
+  const convict: Convict;
+  export default convict;
+}
