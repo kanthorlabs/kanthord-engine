@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { z } from "zod";
 import {
   AccessPolicy,
+  StoreName,
+  OperationLifetime,
   emptyInput,
   OperationRegistry,
   type Operation,
@@ -12,6 +14,8 @@ import { HttpMethod, HttpStatus } from "./http.ts";
 const read = {
   id: "test.read",
   service: "test",
+  store: StoreName.Operational,
+  lifetime: OperationLifetime.Unary,
   method: HttpMethod.Get,
   path: "/api/read",
   access: AccessPolicy.Public,
@@ -66,6 +70,15 @@ test("registry rejects undeclared access policies, duplicates, versioned paths a
       }),
     /verified caller/,
   );
+  for (const lifetime of [undefined, "invalid"])
+    assert.throws(
+      () =>
+        registry.register(
+          { ...operations.read, lifetime } as unknown as Operation,
+          () => ({}),
+        ),
+      /valid lifetime/,
+    );
   registry.register(operations.read, () => ({
     status: "ok" as const,
     services: { gateway: { listener: 200 as const } },
@@ -77,7 +90,8 @@ test("registry rejects undeclared access policies, duplicates, versioned paths a
       }),
     /Duplicate/,
   );
-  registry.seal();
+  assert.throws(() => registry.seal({}), /unavailable store: operational/);
+  registry.seal({ [StoreName.Operational]: {} });
   assert.throws(
     () =>
       registry.register(operations.write, () => {

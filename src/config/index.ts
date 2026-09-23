@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
 import convict, { type Field, type Schema } from "convict";
-import { parseDocument, stringify } from "yaml";
-import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { stringify } from "yaml";
+import { dirname, join, resolve } from "node:path";
+import { directories } from "../kernel/xdg.ts";
+import {
+  parseMapping,
+  inspectTree,
+  MAX_CONFIG_NODES,
+  MAX_CONFIG_DEPTH,
+} from "../kernel/yaml.ts";
+export { directories, type Directories } from "../kernel/xdg.ts";
+export { parseMapping } from "../kernel/yaml.ts";
 import { randomBytes } from "node:crypto";
 import { audit, readPrivate } from "../kernel/files.ts";
 import { Diagnostic } from "../kernel/errors.ts";
@@ -16,31 +24,10 @@ import {
 import { gatewayConfigSchema, type GatewayConfig } from "../gateway/index.ts";
 import { projectConfigSchema } from "../project/index.ts";
 import { workerConfigSchema } from "../worker/index.ts";
-const EXHAUSTED_NODE_BUDGET = 0;
 const EMPTY_SCHEMA_FIELD_COUNT = 0;
 export interface ServerConfig extends GlobalConfig {
   gateway: GatewayConfig;
 }
-
-export function directories(
-  env: NodeJS.ProcessEnv = process.env,
-  home = homedir(),
-) {
-  const directory = (variable: string, fallback: string) =>
-    join(
-      env[variable] && isAbsolute(env[variable])
-        ? env[variable]
-        : join(home, fallback),
-      "kanthord",
-    );
-  return {
-    config: directory("XDG_CONFIG_HOME", ".config"),
-    data: directory("XDG_DATA_HOME", ".local/share"),
-    state: directory("XDG_STATE_HOME", ".local/state"),
-    cache: directory("XDG_CACHE_HOME", ".cache"),
-  };
-}
-export type Directories = ReturnType<typeof directories>;
 
 export function configPath(
   option?: string,
@@ -53,94 +40,6 @@ export function configPath(
   );
 }
 
-const MAX_CONFIG_BYTES = 1024 * 1024;
-const MAX_CONFIG_NODES = 4096;
-const MAX_CONFIG_DEPTH = 32;
-
-/** Bound every traversal, including expansion of shared (non-cyclic) aliases. */
-function inspectTree(
-  value: unknown,
-  budget: { remaining: number },
-  ancestors: ReadonlySet<object>,
-): void {
-  assert.ok(
-    budget.remaining >= EXHAUSTED_NODE_BUDGET &&
-      budget.remaining <= MAX_CONFIG_NODES,
-  );
-  assert.ok(ancestors.size <= MAX_CONFIG_DEPTH);
-  if (budget.remaining === EXHAUSTED_NODE_BUDGET)
-    throw new Diagnostic(
-      "system.config.too_many_values",
-      "configuration: too many values.",
-    );
-  budget.remaining--;
-  if (!isObject(value)) return;
-  if (ancestors.has(value))
-    throw new Diagnostic(
-      "system.config.cyclic_alias",
-      "configuration: cyclic aliases are not allowed.",
-    );
-  if (ancestors.size === MAX_CONFIG_DEPTH)
-    throw new Diagnostic(
-      "system.config.too_deep",
-      "configuration: nesting is too deep.",
-    );
-  const prototype: unknown = Object.getPrototypeOf(value);
-  if (
-    !Array.isArray(value) &&
-    prototype !== Object.prototype &&
-    prototype !== null
-  )
-    throw new Diagnostic(
-      "system.config.invalid_mapping",
-      "configuration: expected a plain mapping or array.",
-    );
-  const children: unknown[] = Object.values(value);
-  if (children.length > budget.remaining)
-    throw new Diagnostic(
-      "system.config.too_many_values",
-      "configuration: too many values.",
-    );
-  const parents = new Set(ancestors).add(value);
-  for (const child of children) inspectTree(child, budget, parents);
-}
-
-export function parseMapping(source: string): Record<string, unknown> {
-  if (Buffer.byteLength(source, "utf8") > MAX_CONFIG_BYTES)
-    throw new Diagnostic(
-      "system.config.too_large",
-      "configuration: YAML exceeds the 1 MiB limit.",
-    );
-  const document = parseDocument(source, {
-    uniqueKeys: true,
-    stringKeys: true,
-    prettyErrors: false,
-  });
-  assert.equal(document.options.stringKeys, true);
-  assert.equal(document.options.uniqueKeys, true);
-  if (document.errors.length || document.warnings.length)
-    throw new Diagnostic(
-      "system.config.invalid_yaml",
-      "configuration: expected one valid YAML mapping with unique string keys.",
-    );
-  let value: unknown;
-  // Alias-resolution errors can include source text; preserve only a safe failure.
-  try {
-    value = document.toJS({ maxAliasCount: 100 });
-  } catch {
-    throw new Diagnostic(
-      "system.config.invalid_yaml",
-      "configuration: invalid YAML mapping.",
-    );
-  }
-  inspectTree(value, { remaining: MAX_CONFIG_NODES }, new Set());
-  if (!isObject(value) || Array.isArray(value))
-    throw new Diagnostic(
-      "system.config.invalid_mapping",
-      "configuration: expected one YAML mapping.",
-    );
-  return value as Record<string, unknown>;
-}
 convict.addParser({ extension: ["yaml", "yml"], parse: parseMapping });
 
 const fragments = {

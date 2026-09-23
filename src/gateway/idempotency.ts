@@ -1,5 +1,5 @@
-import type { Store, Transaction } from "../kernel/store.ts";
 import { ulidSchema } from "../kernel/identity.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { conflict, GatewayError } from "./errors.ts";
 
 export const IdempotencyStatus = {
@@ -7,6 +7,10 @@ export const IdempotencyStatus = {
   Secret: "secret",
   Completed: "completed",
 } as const;
+const MILLISECONDS_PER_SECOND = 1000;
+const SWEEP_INTERVAL_MS = 60000;
+const NO_LIFETIME = 0;
+export const DEFAULT_IDEMPOTENCY_TTL = 86400;
 
 export interface RecordedResponse {
   status: number;
@@ -16,37 +20,40 @@ export interface Reservation {
   key: string;
   caller: string;
 }
-interface Row {
+interface RecordEntry {
+  reservation: Reservation;
   route: string;
   fingerprint: string;
-  caller: string;
   status: string;
-  response: string | null;
+  response?: RecordedResponse;
+  expiresAt: number;
 }
 
 export class Idempotency {
-  private readonly store: Store;
-  constructor(store: Store) {
-    this.store = store;
+  private readonly records = new Map<string, RecordEntry>();
+  private readonly ttlMs: number;
+  private readonly timer: NodeJS.Timeout;
+  private stopped = false;
+
+  constructor(ttl = DEFAULT_IDEMPOTENCY_TTL) {
+    if (!Number.isSafeInteger(ttl) || ttl <= NO_LIFETIME)
+      throw new Error("Idempotency TTL must be a positive safe integer.");
+    this.ttlMs = ttl * MILLISECONDS_PER_SECOND;
+    this.timer = setInterval(() => {
+      const now = Date.now();
+      for (const [key, record] of this.records)
+        if (record.expiresAt <= now) this.records.delete(key);
+    }, SWEEP_INTERVAL_MS);
+    this.timer.unref();
   }
 
   healthcheck(): boolean {
-    try {
-      this.store.database
-        .prepare("SELECT key FROM gateway_idempotency LIMIT 1")
-        .get();
-      return true;
-    } catch {
-      return false;
-    }
+    return !this.stopped;
   }
 
-  sweep(): void {
-    this.store.transaction(({ database }) =>
-      database
-        .prepare("DELETE FROM gateway_idempotency WHERE status = ?")
-        .run(IdempotencyStatus.InProgress),
-    );
+  stop(): void {
+    this.stopped = true;
+    clearInterval(this.timer);
   }
 
   reserve(
@@ -55,63 +62,57 @@ export class Idempotency {
     route: string,
     fingerprint: string,
   ): { reservation: Reservation; replay?: RecordedResponse } {
+    if (this.stopped) throw new Error("Idempotency component is stopped.");
     if (!ulidSchema.safeParse(key).success)
       throw new GatewayError(
-        400,
+        HttpStatus.BadRequest,
         "gateway.idempotency.invalid_key",
         "Idempotency-Key must be a canonical ULID.",
       );
-    return this.store.transaction(({ database }) => {
-      const row = database
-        .prepare(
-          "SELECT * FROM gateway_idempotency WHERE key = ? AND caller = ?",
-        )
-        .get(key!, caller) as unknown as Row | undefined;
-      const reservation = { key: key!, caller };
-      if (row) {
-        if (
-          row.route !== route ||
-          row.fingerprint !== fingerprint ||
-          row.status === IdempotencyStatus.InProgress
-        )
-          throw conflict();
-        if (row.status === IdempotencyStatus.Secret) throw conflict();
-        return {
-          reservation,
-          replay: JSON.parse(row.response!) as RecordedResponse,
-        };
-      }
-      database
-        .prepare(
-          "INSERT INTO gateway_idempotency VALUES (?, ?, ?, ?, ?, NULL, ?)",
-        )
-        .run(
-          key!,
-          route,
-          fingerprint,
-          caller,
-          IdempotencyStatus.InProgress,
-          Date.now(),
-        );
-      return { reservation };
+    const index = JSON.stringify([caller, key]);
+    const now = Date.now();
+    let record = this.records.get(index);
+    if (record && record.expiresAt <= now) {
+      this.records.delete(index);
+      record = undefined;
+    }
+    if (record) {
+      if (
+        record.route !== route ||
+        record.fingerprint !== fingerprint ||
+        record.status !== IdempotencyStatus.Completed
+      )
+        throw conflict();
+      return {
+        reservation: record.reservation,
+        replay: structuredClone(record.response!),
+      };
+    }
+    const reservation = { key: key!, caller };
+    this.records.set(index, {
+      reservation,
+      route,
+      fingerprint,
+      status: IdempotencyStatus.InProgress,
+      expiresAt: now + this.ttlMs,
     });
+    return { reservation };
   }
 
   complete(
-    transaction: Transaction,
     reservation: Reservation,
     response: RecordedResponse,
     secret = false,
   ): void {
-    transaction.database
-      .prepare(
-        "UPDATE gateway_idempotency SET status = ?, response = ? WHERE key = ? AND caller = ?",
-      )
-      .run(
-        secret ? IdempotencyStatus.Secret : IdempotencyStatus.Completed,
-        JSON.stringify(secret ? { status: 409, body: null } : response),
-        reservation.key,
-        reservation.caller,
-      );
+    const record = this.records.get(
+      JSON.stringify([reservation.caller, reservation.key]),
+    );
+    if (!record || record.reservation !== reservation) return;
+    record.response = secret
+      ? { status: HttpStatus.Conflict, body: null }
+      : structuredClone(response);
+    record.status = secret
+      ? IdempotencyStatus.Secret
+      : IdempotencyStatus.Completed;
   }
 }

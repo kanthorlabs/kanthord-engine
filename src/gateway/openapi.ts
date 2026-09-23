@@ -12,7 +12,8 @@ import { z } from "zod";
 import { ulidSchema } from "../kernel/identity.ts";
 import { errorDetailsSchema, errorSchema } from "../kernel/errors.ts";
 import type { Operation } from "../kernel/operation.ts";
-import { AccessPolicy, OperationInteraction } from "../kernel/operation.ts";
+import { AccessPolicy } from "../kernel/operation.ts";
+import { packageVersion } from "../kernel/version.ts";
 import { isObject, isString } from "../kernel/values.ts";
 
 export const OPENAPI_INDEX_FILE = "openapi.yaml";
@@ -182,6 +183,7 @@ function emitOperation(operation: Operation, schemas: Record<string, unknown>) {
     "x-access-policy": operation.access,
     "x-timeout-ms": operation.timeoutMs,
     "x-mutation": operation.mutation,
+    "x-kanthord-lifetime": operation.lifetime,
     security:
       operation.access === AccessPolicy.Human ||
       operation.access === AccessPolicy.Client
@@ -200,7 +202,7 @@ function emitOperation(operation: Operation, schemas: Record<string, unknown>) {
           },
         }
       : {}),
-    ...(operation.interaction === OperationInteraction.Delivery
+    ...(operation.delivery
       ? {
           requestBody: {
             required: true,
@@ -222,7 +224,7 @@ export function emitOpenAPIFiles(
 ): OpenAPIFiles {
   const document: OpenAPIDocument = {
     openapi: "3.1.0",
-    info: { title: "kanthord", version: "1.0.0" },
+    info: { title: "kanthord", version: packageVersion() },
     paths: {},
     components: {
       securitySchemes: {

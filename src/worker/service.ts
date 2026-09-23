@@ -37,6 +37,7 @@ export class WorkerService implements Service {
   private readonly shutdown = new CancellationContext();
   private startTask?: Promise<Error | null>;
   private stopTask?: Promise<Error | null>;
+  private readonly quiesceTask = Promise.resolve(null);
   private started = false;
   start(): Promise<Error | null> {
     if (this.shutdown.err())
@@ -49,6 +50,9 @@ export class WorkerService implements Service {
     this.startTask ??= Promise.resolve(null);
     this.started = true;
     return this.startTask;
+  }
+  quiesce(): Promise<Error | null> {
+    return this.quiesceTask;
   }
   stop(): Promise<Error | null> {
     this.shutdown.cancel();
@@ -110,6 +114,7 @@ export class WorkerService implements Service {
         let runtimeIdentity: string | undefined;
         try {
           return caller.commit((transaction) => {
+            if (previous) return { runtimeIdentity: previous };
             const registration = worker.register(transaction, identity);
             assert.equal(registration.clientId, identity.clientId);
             assert.equal(registration.name, identity.name);

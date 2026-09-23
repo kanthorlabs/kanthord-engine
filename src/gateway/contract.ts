@@ -2,6 +2,8 @@ import { z } from "zod";
 import {
   emptyInput,
   AccessPolicy,
+  StoreName,
+  OperationLifetime,
   type Operation,
 } from "../kernel/operation.ts";
 import {
@@ -15,6 +17,8 @@ export const HEALTHCHECK_OK = "ok" as const;
 
 const base = {
   service: "gateway",
+  store: StoreName.Operational,
+  lifetime: OperationLifetime.Unary,
   access: AccessPolicy.Public,
   timeoutMs: 30000,
   mutation: false,

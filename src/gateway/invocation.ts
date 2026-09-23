@@ -10,7 +10,11 @@ import {
   type CallerIdentity,
 } from "../kernel/caller.ts";
 import { GatewayError, failure, unauthorized } from "./errors.ts";
-import { AccessPolicy, OperationInteraction } from "../kernel/operation.ts";
+import {
+  AccessPolicy,
+  OperationLifetime,
+  type StoreName,
+} from "../kernel/operation.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { resolveRequestId } from "./request-id.ts";
 import {
@@ -41,30 +45,29 @@ export class Invocation {
   private readonly registry: OperationRegistry;
   readonly authentication: Authentication;
   readonly idempotency: Idempotency;
-  private readonly store: Store;
-  private readonly shutdown: CancellationContext;
+  private readonly stores: Record<StoreName, Store>;
+  private readonly shutdown = new CancellationContext();
   private readonly streams = new Set<Promise<void>>();
   private stopTask?: Promise<Error | null>;
+  private stopped = false;
 
   constructor(
     registry: OperationRegistry,
     authentication: Authentication,
     idempotency: Idempotency,
-    store: Store,
-    shutdown: Context,
+    stores: Record<StoreName, Store>,
   ) {
     this.registry = registry;
     this.authentication = authentication;
     this.idempotency = idempotency;
-    this.store = store;
-    this.shutdown = new CancellationContext(shutdown);
+    this.stores = stores;
   }
 
   healthcheck(): boolean {
     return (
-      !this.shutdown.err() &&
+      !this.stopped &&
       this.registry.healthcheck() &&
-      this.store.healthcheck()
+      Object.values(this.stores).every((store) => store.healthcheck())
     );
   }
 
@@ -75,7 +78,7 @@ export class Invocation {
   ): Promise<RecordedResponse> {
     const entry = this.registry.get(id);
     const requestId = resolveRequestId(options.requestId);
-    if (this.shutdown.err())
+    if (this.stopped)
       return failure(
         new GatewayError(
           503,
@@ -115,13 +118,19 @@ export class Invocation {
   }
 
   async drain(): Promise<void> {
-    await Promise.all(this.pending);
-    await Promise.all(this.streams);
+    while (this.pending.size || this.streams.size) {
+      await Promise.all([...this.pending, ...this.streams]);
+    }
   }
 
   stop(): Promise<Error | null> {
-    this.shutdown.cancel();
-    this.stopTask ??= lifecycle(() => this.drain());
+    this.stopTask ??= lifecycle(async () => {
+      while (this.pending.size || this.streams.size)
+        await Promise.all([...this.pending, ...this.streams]);
+      this.stopped = true;
+      this.shutdown.cancel();
+      this.idempotency.stop();
+    });
     return this.stopTask;
   }
 
@@ -214,10 +223,9 @@ export class Invocation {
         options.identity === undefined
           ? undefined
           : await this.authentication.recheck(options.identity, context);
-      const parsed =
-        operation.interaction === OperationInteraction.Delivery
-          ? { success: true as const, data: raw }
-          : operation.input.safeParse(raw);
+      const parsed = operation.delivery
+        ? { success: true as const, data: raw }
+        : operation.input.safeParse(raw);
       if (!parsed.success)
         throw new GatewayError(
           400,
@@ -298,10 +306,7 @@ export class Invocation {
         reservation = held.reservation;
       }
       let request: Request | undefined;
-      if (
-        operation.interaction === OperationInteraction.Stream &&
-        options.request
-      ) {
+      if (operation.lifetime === OperationLifetime.Stream && options.request) {
         const headers = new Headers(options.request.headers);
         headers.delete("authorization");
         request = new Request(options.request, { headers });
@@ -320,25 +325,23 @@ export class Invocation {
         ): T => {
           if (!reservation || committed)
             throw new Error("A mutation commits exactly once.");
-          const response = this.store.transaction((transaction) => {
-            const body = operation.output.parse(write(transaction));
-            const result = { status: operation.status, body };
-            this.idempotency.complete(
-              transaction,
-              reservation!,
-              result,
-              operation.secret,
-            );
-            return result;
-          });
+          const response = this.stores[operation.store].transaction(
+            (transaction) => {
+              const body = operation.output.parse(write(transaction));
+              return { status: operation.status, body };
+            },
+          );
           committed = response;
           return response.body as T;
         },
       };
       const output = await handler(parsed.data, caller);
-      if (committed) return committed;
+      if (committed) {
+        this.idempotency.complete(reservation!, committed, operation.secret);
+        return committed;
+      }
       if (
-        operation.interaction === OperationInteraction.Stream &&
+        operation.lifetime === OperationLifetime.Stream &&
         output instanceof Response
       ) {
         const body = this.stream(output, context, dispose);
@@ -348,17 +351,9 @@ export class Invocation {
       const body = operation.output.parse(output);
       const response = { status: operation.status, body };
       if (reservation)
-        this.store.transaction((transaction) =>
-          this.idempotency.complete(
-            transaction,
-            reservation!,
-            response,
-            operation.secret,
-          ),
-        );
+        this.idempotency.complete(reservation, response, operation.secret);
       return response;
     } catch (error) {
-      if (committed) return committed;
       const response = failure(
         error instanceof z.ZodError
           ? new GatewayError(
@@ -369,20 +364,8 @@ export class Invocation {
           : error,
         options.requestId,
       );
-      if (reservation) {
-        try {
-          this.store.transaction((transaction) =>
-            this.idempotency.complete(
-              transaction,
-              reservation!,
-              response,
-              operation.secret,
-            ),
-          );
-        } catch (persistenceError) {
-          return failure(persistenceError, options.requestId);
-        }
-      }
+      if (reservation)
+        this.idempotency.complete(reservation, response, operation.secret);
       return response;
     } finally {
       if (!streaming) dispose();

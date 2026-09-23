@@ -36,7 +36,7 @@ import type { Invocation } from "./invocation.ts";
 import { parseJSON } from "./json.ts";
 import { gatewayOperations } from "./contract.ts";
 import { registerGatewayOperations } from "./declarations.ts";
-import { AccessPolicy, OperationInteraction } from "../kernel/operation.ts";
+import { AccessPolicy, OperationLifetime } from "../kernel/operation.ts";
 import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
 import { isString } from "../kernel/values.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
@@ -68,6 +68,8 @@ export class GatewayService implements Service {
   private started = false;
   private startTask?: Promise<Error | null>;
   private stopTask?: Promise<Error | null>;
+  private quiesceTask?: Promise<Error | null>;
+  private closeTask?: Promise<Error | null>;
   private readonly stopped = Promise.withResolvers<Error | null>();
   private readonly httpPending = new Set<Promise<unknown>>();
 
@@ -107,7 +109,6 @@ export class GatewayService implements Service {
 
   private async open(): Promise<void> {
     this.authentication.sweep();
-    this.idempotency.sweep();
     this.registerRoutes();
     const server = createAdaptorServer({
       fetch: (request, env) => this.app.fetch(request, env as HttpBindings),
@@ -154,29 +155,36 @@ export class GatewayService implements Service {
     }
   }
 
+  quiesce(): Promise<Error | null> {
+    if (this.quiesceTask) return this.quiesceTask;
+    this.quiesceTask = lifecycle(async () => {
+      this.ready = false;
+      this.shutdown.cancel();
+      this.closeTask = new Promise<Error | null>((resolve) => {
+        if (!this.listener || !this.started) return resolve(null);
+        this.listener.close((error?: NodeJS.ErrnoException) =>
+          resolve(error?.code === SERVER_NOT_RUNNING ? null : (error ?? null)),
+        );
+        if ("closeIdleConnections" in this.listener)
+          this.listener.closeIdleConnections();
+      }).catch(asError);
+    });
+    return this.quiesceTask;
+  }
+
+  async drain(): Promise<void> {
+    await Promise.allSettled(this.httpPending);
+  }
+
   stop(): Promise<Error | null> {
     if (this.stopTask) return this.stopTask;
-    this.ready = false;
-    this.shutdown.cancel();
-    const invocationStop = this.invocation.stop();
-    // close stops admission immediately; its callback is joined only after abort.
-    const close = new Promise<Error | null>((resolve) => {
-      // During startup, open() owns the bind callback and closes after observing
-      // cancellation. Closing before that callback can leave listen unresolved.
-      if (!this.listener || !this.started) return resolve(null);
-      this.listener.close((error?: NodeJS.ErrnoException) =>
-        resolve(error?.code === SERVER_NOT_RUNNING ? null : (error ?? null)),
-      );
-      if ("closeIdleConnections" in this.listener)
-        this.listener.closeIdleConnections();
-    }).catch(asError);
     this.stopTask = lifecycle(async () => {
       try {
+        const quiesceError = await this.quiesce();
         await this.startTask;
-        await Promise.allSettled(this.httpPending);
-        const invocationError = await invocationStop;
-        const error = await close;
-        if (error || invocationError) throw error ?? invocationError;
+        await this.drain();
+        const error = await this.closeTask;
+        if (error || quiesceError) throw error ?? quiesceError;
       } finally {
         this.started = false;
         this.listener = undefined;
@@ -404,7 +412,7 @@ export class GatewayService implements Service {
           const work = (async () => {
             let body: unknown = null;
             let delivery;
-            if (operation.interaction === OperationInteraction.Delivery)
+            if (operation.delivery)
               delivery = {
                 bytes: await context.req.arrayBuffer(),
                 headers: new Headers(context.req.raw.headers),
@@ -425,7 +433,7 @@ export class GatewayService implements Service {
               body = parseJSON(await context.req.text());
             } else if (
               context.req.raw.body &&
-              operation.interaction !== OperationInteraction.Stream
+              operation.lifetime !== OperationLifetime.Stream
             ) {
               if ((await context.req.text()).length)
                 throw new GatewayError(
@@ -484,8 +492,7 @@ export class GatewayService implements Service {
           } finally {
             this.httpPending.delete(work);
             // Streaming responses retain their disconnect subscription until close.
-            if (operation.interaction !== OperationInteraction.Stream)
-              cleanup();
+            if (operation.lifetime !== OperationLifetime.Stream) cleanup();
           }
         },
       );

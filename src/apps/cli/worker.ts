@@ -8,7 +8,7 @@ import { OperationResultType } from "../../kernel/operation.ts";
 import { AccessPolicy } from "../../kernel/operation.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
 import { workerOperations } from "../../worker/contract.ts";
-import { resolveClient } from "./client-config.ts";
+import { resolveClient } from "../../gateway/client.ts";
 
 async function register(command: Command): Promise<void> {
   assert.equal(workerOperations.register.access, AccessPolicy.Client);

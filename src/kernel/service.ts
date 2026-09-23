@@ -15,9 +15,10 @@ export function healthy(components: Healthcheck): boolean {
   );
 }
 
-/** start acquires resources; stop releases them; run joins the service lifetime. */
 export interface Service {
   start(): Promise<Error | null>;
+  quiesce(): Promise<Error | null>;
+  drain?(): Promise<void>;
   stop(): Promise<Error | null>;
   run(context?: Context): Promise<Error | null>;
   healthcheck(): Promise<Healthcheck>;

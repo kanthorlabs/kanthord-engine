@@ -36,6 +36,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly shutdown = new CancellationContext();
   private startTask?: Promise<Error | null>;
   private stopTask?: Promise<Error | null>;
+  private readonly quiesceTask = Promise.resolve(null);
   private started = false;
   start(): Promise<Error | null> {
     if (this.shutdown.err())
@@ -48,6 +49,9 @@ export class ProjectService implements Service, ProjectBindings {
     this.startTask ??= Promise.resolve(null);
     this.started = true;
     return this.startTask;
+  }
+  quiesce(): Promise<Error | null> {
+    return this.quiesceTask;
   }
   stop(): Promise<Error | null> {
     this.shutdown.cancel();

@@ -5,7 +5,11 @@ export function directClient<T extends Record<string, Operation>>(
   operations: T,
   invocation: Invocation,
 ): ServiceClient<T> {
-  return createClient(operations, (operation, input, options) =>
-    invocation.invoke(operation.id, input, options),
-  );
+  return createClient(operations, (operation, input, options) => {
+    const parsed = operation.input.safeParse(input);
+    const isolated = parsed.success
+      ? JSON.parse(JSON.stringify(parsed.data))
+      : input;
+    return invocation.invoke(operation.id, isolated, options);
+  });
 }

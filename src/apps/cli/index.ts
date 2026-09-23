@@ -11,6 +11,7 @@ import {
 import { writePrivate } from "../../kernel/files.ts";
 import { Diagnostic, diagnostic } from "../../kernel/errors.ts";
 import { Server } from "../server/index.ts";
+import { runWorker } from "../worker/index.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import { openapiPath } from "../../gateway/local.ts";
 import { writeOpenAPI } from "../../gateway/local.ts";
@@ -25,7 +26,7 @@ import {
   requireTokenTerminal,
 } from "../../gateway/local.ts";
 import { KANTHORD_AUTH_USERNAME } from "../../gateway/local.ts";
-import { resolveClient } from "./client-config.ts";
+import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
 import {
   CommandName,
@@ -97,16 +98,16 @@ function addServeCommand(
   assert.ok(
     !program.commands.some((command) => command.name() === CommandName.Serve),
   );
-  program
+  const serve = program
     .command(`${CommandName.Serve} [application]`)
-    .description("Start the server (default application: server)")
+    .description("Start an application (default: server)")
     .option("--config <path>", "YAML configuration file")
     .action(
       async (application: string | undefined, _options, command: Command) => {
         if (application !== undefined && application !== SERVER_APPLICATION)
           throw new Diagnostic(
             "cli.serve.unsupported_application",
-            "serve: supported application is server.",
+            "serve: supported applications are server and worker.",
           );
         const server = new Server(effectivePath(command));
         onServer(server);
@@ -114,6 +115,26 @@ function addServeCommand(
         if (error) throw error;
       },
     );
+  serve
+    .command(CommandName.Worker)
+    .description(
+      "Start the worker application after checking the server version",
+    )
+    .option("--endpoint <url>", "Server endpoint")
+    .option(
+      "--token <jwt>",
+      "Machine JWT (otherwise KANTHORD_TOKEN or cli.yaml)",
+    )
+    .action(async (_options, command: Command) => {
+      const options = command.optsWithGlobals();
+      if (options.config !== undefined)
+        throw new Diagnostic(
+          "cli.serve.worker_config",
+          "serve worker: --config is not supported; use client options or cli.yaml.",
+        );
+      const error = await runWorker(options);
+      if (error) throw error;
+    });
 }
 
 export function createProgram(

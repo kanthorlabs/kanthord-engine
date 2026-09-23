@@ -132,7 +132,7 @@ export async function gatewayFixture(
     { service: "project", migrations: projectMigrations },
   ]);
   const logs: string[] = [];
-  const { gateway, project, worker } = composeServices({
+  const { gateway, project, worker, invocation } = composeServices({
     config,
     store,
     registry: options.registry,
@@ -151,6 +151,13 @@ export async function gatewayFixture(
   t.after(async () => {
     const failures: Error[] = [];
     try {
+      const quiescence = await Promise.all(
+        [project, worker, gateway].map((service) => service.quiesce()),
+      );
+      failures.push(...quiescence.filter((error) => error !== null));
+      await gateway.drain();
+      const invocationError = await invocation.stop();
+      if (invocationError) failures.push(invocationError);
       for (const service of [gateway, worker, project]) {
         const error = await service.stop();
         if (error) failures.push(error);

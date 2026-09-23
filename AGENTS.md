@@ -33,6 +33,9 @@ engine/
 │   │   ├── json.ts             # Canonical JSON, digests, key derivation, and timestamps
 │   │   ├── identity.ts         # Prefixed entity identities and ULID schemas
 │   │   ├── values.ts           # JavaScript value predicates
+│   │   ├── version.ts          # Cached package version
+│   │   ├── xdg.ts              # Configuration, data, state, and cache directories
+│   │   ├── yaml.ts             # Bounded YAML mapping parsing
 │   │   ├── files.ts            # Private filesystem validation and publication
 │   │   ├── http.ts             # Shared HTTP methods, statuses, and media types
 │   │   └── test-support.ts     # Isolated temporary filesystem fixtures
@@ -50,7 +53,7 @@ engine/
 │   ├── gateway/                # HTTP transport, authentication, and invocation infrastructure
 │   │   ├── contract.ts         # Gateway operation declarations
 │   │   ├── index.ts            # Service composition, invocation factory, adapters, and schema
-│   │   ├── client.ts           # HTTP service client adapter
+│   │   ├── client.ts           # HTTP client, client configuration, and server version discovery
 │   │   ├── local.ts            # Local JWT issuance and OpenAPI generation without a server
 │   │   └── service.ts          # Private listener lifecycle and HTTP wiring
 │   └── apps/                   # Application entries and composition roots
@@ -59,10 +62,11 @@ engine/
 │       ├── cli/                # Non-interactive commands and client configuration
 │       │   ├── index.ts        # Commander dispatch and local configuration, JWT, and Gateway commands
 │       │   ├── constants.ts    # CLI command names and exit codes
-│       │   ├── client-config.ts # HTTP endpoint and credential resolution
 │       │   └── worker.ts       # Worker command group
-│       └── worker/             # [planned] Remote worker application using service clients
+│       └── worker/             # Remote worker application skeleton
+│           └── index.ts        # Client resolution, version check, and cancellable lifetime
 ├── static/                     # Packaged generated OpenAPI assets
+│   ├── openapi.yaml             # Root contract index and package version
 │   └── openapi/                # Service path items and shared schemas
 │       ├── gateway/            # Gateway operation documents
 │       ├── worker/             # Worker operation documents
@@ -127,7 +131,9 @@ Verify relative links and documented commands.
    when the fragment gains fields. Empty fragments add no YAML section.
 4. Add migrations and constructor dependencies in `src/apps/server/index.ts`.
    Wire collaboration lookups, call `declare`, and seal the registry after
-   declarations. Start domain services before Gateway and stop in reverse order.
+   declarations. Start domain services before Gateway. Quiesce all services,
+   drain their work with dependencies available, join the invocation chain,
+   then stop services in reverse construction order.
 5. Register the service's own health probe. Add colocated lifecycle tests and
    composition coverage under `src/apps/server/`. Include its migrations in
    `src/apps/server/migrations.test.ts`.
@@ -136,7 +142,10 @@ Verify relative links and documented commands.
 ## Add an operation
 
 1. Declare the operation and its input/output schemas in the owning service's
-   `contract.ts`.
+   `contract.ts`. Set `lifetime` to `OperationLifetime.Unary`, `Wait`, or
+   `Stream`, and `store` to `StoreName.Operational`. Supply the store when
+   sealing the registry. A mutation must be idempotent by its own natural key;
+   invocation replay lasts only within the in-memory TTL.
 2. Bind its handler in the service's `declare(registry)`. Add tests beside the
    implementation and adapter integration tests under `src/apps/server/`.
 3. For a peer call, pass the original caller through the direct client's
@@ -144,6 +153,21 @@ Verify relative links and documented commands.
 4. Add any CLI command in `src/apps/cli/`. Import the contract and the HTTP
    adapter rather than the service implementation.
 5. Regenerate OpenAPI and run `pnpm run verify`.
+
+## Run the worker application
+
+```sh
+kanthord serve worker --endpoint <url> --token <jwt>
+```
+
+The worker resolves its endpoint and token from options, then
+`KANTHORD_ENDPOINT` / `KANTHORD_TOKEN`, then `cli.yaml` in the configuration
+directory. The default endpoint is `http://127.0.0.1:31415`.
+It reads the server's package version through the OpenAPI index and refuses
+an unavailable or different version. On a match it logs
+`Worker application started` and waits for cancellation, `SIGINT`, or `SIGTERM`.
+It hosts no instances yet, opens no database, and reads no server configuration.
+`--config` is not supported. `kanthord serve` still starts the server.
 
 ## Add a migration
 

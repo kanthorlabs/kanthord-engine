@@ -10,6 +10,7 @@ pathItem:
     x-access-policy: public
     x-timeout-ms: 30000
     x-mutation: false
+    x-kanthord-lifetime: unary
     security: []
     parameters: []
     responses:

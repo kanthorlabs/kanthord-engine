@@ -13,12 +13,16 @@ export const AccessPolicy = {
 } as const;
 export type AccessPolicy = (typeof AccessPolicy)[keyof typeof AccessPolicy];
 
-export const OperationInteraction = {
-  Delivery: "delivery",
+export const OperationLifetime = {
+  Unary: "unary",
+  Wait: "wait",
   Stream: "stream",
 } as const;
-export type OperationInteraction =
-  (typeof OperationInteraction)[keyof typeof OperationInteraction];
+export type OperationLifetime =
+  (typeof OperationLifetime)[keyof typeof OperationLifetime];
+
+export const StoreName = { Operational: "operational" } as const;
+export type StoreName = (typeof StoreName)[keyof typeof StoreName];
 
 const NO_TIMEOUT_MS = 0;
 const EMPTY_REGISTRY_SIZE = 0;
@@ -41,6 +45,7 @@ export interface Operation<
   access: AccessPolicy;
   timeoutMs: number;
   mutation: boolean;
+  store: StoreName;
   input: I;
   output: O;
   status: number;
@@ -49,7 +54,8 @@ export interface Operation<
   requiresRegistration?: boolean;
   maxBodyBytes?: number;
   replayGuard?: (recorded: unknown, identity: CallerIdentity) => boolean;
-  interaction?: OperationInteraction;
+  lifetime: OperationLifetime;
+  delivery?: true;
   contentType?: string;
   errors?: readonly number[];
   description: string;
@@ -65,7 +71,6 @@ export interface CallerContext {
   /** Exact delivery bytes and headers; never reconstructed from parsed JSON. */
   delivery?: { bytes: ArrayBuffer; headers: Headers };
   request?: Request;
-  /** Commit a database mutation and its validated replay answer together. */
   commit<T>(write: (transaction: Transaction) => T): T;
 }
 export type Handler<I extends z.ZodType, O extends z.ZodType> = (
@@ -88,6 +93,8 @@ export class OperationRegistry {
     if (this.sealed) throw new Error("Route registration is closed.");
     if (!Object.values(AccessPolicy).includes(operation.access))
       throw new Error("Every route must declare an access policy.");
+    if (!Object.values(OperationLifetime).includes(operation.lifetime))
+      throw new Error("Every route must declare a valid lifetime.");
     if (
       !operation.path.startsWith("/api/") ||
       /^\/api\/v\d+(\/|$)/.test(operation.path)
@@ -99,16 +106,13 @@ export class OperationRegistry {
     )
       throw new Error("Every route requires a positive timeout.");
     if (
-      operation.interaction === OperationInteraction.Delivery &&
+      operation.delivery &&
       (operation.access !== AccessPolicy.Delivery || operation.mutation)
     )
       throw new Error(
         "Delivery verification and deduplication belong to the Scheduler Service.",
       );
-    if (
-      operation.access === AccessPolicy.Delivery &&
-      operation.interaction !== OperationInteraction.Delivery
-    )
+    if (operation.access === AccessPolicy.Delivery && !operation.delivery)
       throw new Error("A delivery requires the exact-byte adapter.");
     if (operation.mutation && operation.access === AccessPolicy.Public)
       throw new Error("A mutation requires a verified caller.");
@@ -137,7 +141,12 @@ export class OperationRegistry {
     });
   }
 
-  seal(): void {
+  seal(stores: Readonly<Partial<Record<StoreName, unknown>>>): void {
+    for (const { operation } of this.entries)
+      if (!stores[operation.store])
+        throw new Error(
+          `Operation ${operation.id} declares unavailable store: ${operation.store}.`,
+        );
     this.sealed = true;
   }
   healthcheck(): boolean {
@@ -184,5 +193,11 @@ export type ServiceClient<T extends Record<string, Operation>> = {
   [K in keyof T]: (
     input: z.input<T[K]["input"]>,
     options?: ClientOptions,
-  ) => Promise<OperationResult<z.output<T[K]["output"]>>>;
+  ) => Promise<
+    OperationResult<
+      T[K]["lifetime"] extends typeof OperationLifetime.Stream
+        ? Response
+        : z.output<T[K]["output"]>
+    >
+  >;
 };

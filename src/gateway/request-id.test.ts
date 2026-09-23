@@ -1,5 +1,10 @@
 import { HttpStatus } from "../kernel/http.ts";
-import { emptyInput, OperationRegistry } from "../kernel/operation.ts";
+import {
+  emptyInput,
+  OperationRegistry,
+  StoreName,
+  OperationLifetime,
+} from "../kernel/operation.ts";
 import { gatewayFixture } from "./test-support.ts";
 const REQUEST_LOG_RECORD_COUNT = 2;
 import assert from "node:assert/strict";
@@ -7,10 +12,8 @@ import { test } from "node:test";
 import { ulid } from "ulid";
 import { z } from "zod";
 import { createIdentity, ulidSchema } from "../kernel/identity.ts";
-import { Store } from "../kernel/store.ts";
 import { OperationResultType } from "../kernel/operation.ts";
 import { errorSchema } from "../kernel/errors.ts";
-import { gatewayMigrations } from "./migrations.ts";
 import { httpClient } from "./client.ts";
 import { failure, unauthorized } from "./errors.ts";
 import { Idempotency } from "./idempotency.ts";
@@ -62,11 +65,8 @@ test("clients treat a failure with a bare or wrong-kind request ID as indetermin
 });
 
 test("idempotency records retain full request IDs while their keys remain bare ULIDs", async (t) => {
-  const store = new Store(":memory:");
-  t.after(() => store.close());
-  store.migrate([{ service: "gateway", migrations: gatewayMigrations }]);
-  const fixture = { store };
-  const idempotency = new Idempotency(fixture.store);
+  const idempotency = new Idempotency();
+  t.after(() => idempotency.stop());
   const key = ulid();
   const { reservation } = idempotency.reserve(
     key,
@@ -75,16 +75,11 @@ test("idempotency records retain full request IDs while their keys remain bare U
     "digest",
   );
   const response = failure(unauthorized(), requestId);
-  fixture.store.transaction((transaction) =>
-    idempotency.complete(transaction, reservation, response),
-  );
+  idempotency.complete(reservation, response);
   const replay = idempotency.reserve(key, "human", "test.write", "digest");
   assert.deepEqual(replay.replay, response);
-  const row = fixture.store.database
-    .prepare("SELECT key, response FROM gateway_idempotency")
-    .get();
-  assert.equal(row?.key, key);
-  assert.deepEqual(JSON.parse(String(row?.response)), response);
+  assert.equal(replay.reservation.key, key);
+  assert.deepEqual(replay.replay, response);
   for (const invalid of [requestId, createIdentity("project"), `${key}\n`]) {
     assert.equal(ulidSchema.safeParse(invalid).success, false);
     assert.throws(
@@ -139,6 +134,8 @@ test("HTTP and direct invocations forward only canonical request IDs to handlers
   const operation = {
     id: "test.request",
     service: "test",
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
     method: "GET",
     path: "/api/test/request",
     access: "public",

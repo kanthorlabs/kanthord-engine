@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: kanthord
-  version: 1.0.0
+  version: 28.0.1
 paths:
   /api/healthcheck:
     $ref: ./openapi/gateway/healthcheck.yaml#/pathItem

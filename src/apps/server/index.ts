@@ -24,7 +24,7 @@ import { GatewayService } from "../../gateway/index.ts";
 import { gatewayMigrations, createInvocation } from "../../gateway/index.ts";
 import { ProjectService, projectMigrations } from "../../project/index.ts";
 import { WorkerService, workerMigrations } from "../../worker/index.ts";
-import { OperationRegistry } from "../../kernel/operation.ts";
+import { OperationRegistry, StoreName } from "../../kernel/operation.ts";
 import {
   background,
   CancellationContext,
@@ -44,7 +44,8 @@ export function composeServices(options: {
   const registry = options.registry ?? new OperationRegistry();
   const invocation = createInvocation({
     registry,
-    store: options.store,
+    stores: { [StoreName.Operational]: options.store },
+    idempotencyTtl: options.config.gateway.idempotencyTtl,
     masterKey: options.config.masterKey,
     tokenLifetime: options.config.gateway.tokenLifetime,
     lookups: {
@@ -77,8 +78,8 @@ export function composeServices(options: {
     health: options.health,
   });
   gateway.declare(registry);
-  registry.seal();
-  return { project, worker, gateway };
+  registry.seal({ [StoreName.Operational]: options.store });
+  return { project, worker, gateway, invocation, registry };
 }
 
 export class Server implements Service {
@@ -88,6 +89,11 @@ export class Server implements Service {
   private store?: Store;
   private gateway?: GatewayService;
   private readonly shutdown = new CancellationContext();
+  private readonly serviceContext = new CancellationContext();
+  private services: Service[] = [];
+  private runs: Promise<Error | null>[] = [];
+  private invocation?: ReturnType<typeof createInvocation>;
+  private quiesceTask?: Promise<Error | null>;
   private startTask?: Promise<Error | null>;
   private stopTask?: Promise<Error | null>;
   private readonly stopped = Promise.withResolvers<Error | null>();
@@ -136,20 +142,32 @@ export class Server implements Service {
         { service: "project", migrations: projectMigrations },
       ]);
       throwIfCancelled(this.shutdown);
-      const { project, worker, gateway } = composeServices({
+      const { project, worker, gateway, invocation } = composeServices({
         config,
         store: this.store,
         logger: this.log.logger,
         health: this.health,
       });
       this.gateway = gateway;
+      this.invocation = invocation;
+      this.releases.push(() => invocation.stop());
       const services = [project, worker, gateway];
+      this.services = services;
       for (const service of services) this.releases.push(() => service.stop());
       for (const service of services) {
         const error = await service.start();
         if (error) throw error;
         throwIfCancelled(this.shutdown);
       }
+      this.runs = services.map((service) =>
+        service.run(this.serviceContext).then((error) => {
+          if (error && error !== this.serviceContext.err()) {
+            this.runError ??= error;
+            void this.stop();
+          }
+          return error;
+        }),
+      );
     } catch (error) {
       const cleanup = await this.release();
       if (cleanup)
@@ -176,17 +194,35 @@ export class Server implements Service {
       : null;
   }
 
+  quiesce(): Promise<Error | null> {
+    this.quiesceTask ??= lifecycle(async () => {
+      const results = await Promise.all(
+        this.services.map((service) => service.quiesce()),
+      );
+      const failures = results.filter((error) => error !== null);
+      if (failures.length)
+        throw new AggregateError(failures, "Server quiescence failed.");
+    });
+    return this.quiesceTask;
+  }
+
   stop(): Promise<Error | null> {
     if (this.stopTask) return this.stopTask;
     this.shutdown.cancel();
     this.stopTask = lifecycle(async () => {
       const watchdog = setTimeout(() => process.exit(1), 10000);
       try {
-        // Abort admission and waiting handlers before joining startup or drains.
-        const gatewayError = await this.gateway?.stop();
+        const quiesceError = await this.quiesce();
         await this.startTask;
+        const drainError = await lifecycle(async () => {
+          await Promise.all(this.services.map((service) => service.drain?.()));
+        });
+        const invocationError = await this.invocation?.stop();
         const cleanup = await this.release();
-        if (cleanup || gatewayError) throw cleanup ?? gatewayError;
+        this.serviceContext.cancel();
+        await Promise.all(this.runs);
+        if (cleanup || invocationError || drainError || quiesceError)
+          throw cleanup ?? invocationError ?? drainError ?? quiesceError;
       } finally {
         clearTimeout(watchdog);
       }

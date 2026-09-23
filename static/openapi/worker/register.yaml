@@ -12,6 +12,7 @@ pathItem:
     x-access-policy: client
     x-timeout-ms: 10000
     x-mutation: true
+    x-kanthord-lifetime: unary
     security:
       - bearerAuth: []
     parameters:

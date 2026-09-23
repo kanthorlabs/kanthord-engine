@@ -8,7 +8,7 @@ import {
   type GlobalConfig,
 } from "../config/global.ts";
 import { Store } from "../kernel/store.ts";
-import { OperationRegistry } from "../kernel/operation.ts";
+import { OperationRegistry, StoreName } from "../kernel/operation.ts";
 import { HealthRegistry } from "../kernel/health.ts";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
 import type { Registration } from "../worker/contract.ts";
@@ -106,7 +106,8 @@ export function composeGateway(options: {
   const registry = options.registry ?? new OperationRegistry();
   const invocation = createInvocation({
     registry,
-    store: options.store,
+    stores: { [StoreName.Operational]: options.store },
+    idempotencyTtl: options.config.gateway.idempotencyTtl,
     masterKey: options.config.masterKey,
     tokenLifetime: options.config.gateway.tokenLifetime,
     lookups: options.lookups,
@@ -119,7 +120,7 @@ export function composeGateway(options: {
     health: options.health,
   });
   gateway.declare(registry);
-  registry.seal();
+  registry.seal({ [StoreName.Operational]: options.store });
   return gateway;
 }
 
@@ -154,7 +155,10 @@ export async function gatewayFixture(
   });
   t.after(async () => {
     try {
-      const error = await gateway.stop();
+      await gateway.quiesce();
+      await gateway.drain();
+      const invocationError = await gateway.invocation.stop();
+      const error = (await gateway.stop()) ?? invocationError;
       if (error) throw error;
     } finally {
       store.close();

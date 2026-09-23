@@ -1,6 +1,7 @@
 import { isIP } from "node:net";
-import { isString } from "../kernel/values.ts";
+import { isString, isNumber } from "../kernel/values.ts";
 const IPV4_VERSION = 4;
+const NO_LIFETIME = 0;
 export const IPV6_LOOPBACK = "::1";
 export interface GatewayConfig {
   bind: string;
@@ -8,6 +9,7 @@ export interface GatewayConfig {
   allowedHosts: string[];
   allowedOrigins: string[];
   tokenLifetime: number;
+  idempotencyTtl: number;
 }
 const strings = (value: unknown) => {
   if (
@@ -46,5 +48,17 @@ export const gatewayConfigSchema = {
     doc: "Token lifetime in seconds.",
     format: "nat",
     default: 31536000,
+  },
+  idempotencyTtl: {
+    doc: "Idempotency record lifetime in seconds.",
+    format(value: unknown) {
+      if (
+        !isNumber(value) ||
+        !Number.isSafeInteger(value) ||
+        value <= NO_LIFETIME
+      )
+        throw new Error("expected a positive safe integer");
+    },
+    default: 86400,
   },
 };

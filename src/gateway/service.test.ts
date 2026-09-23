@@ -8,6 +8,7 @@ import { gatewayFixture } from "./test-support.ts";
 import { deriveKey } from "../kernel/json.ts";
 import {
   emptyInput,
+  StoreName,
   OperationRegistry,
   type Operation,
 } from "../kernel/operation.ts";
@@ -21,7 +22,7 @@ import { httpClient } from "./client.ts";
 import { OperationResultType } from "../kernel/operation.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { gatewayOperations } from "./contract.ts";
-import { AccessPolicy, OperationInteraction } from "../kernel/operation.ts";
+import { AccessPolicy, OperationLifetime } from "../kernel/operation.ts";
 import { KANTHORD_AUTH_USERNAME } from "./local.ts";
 import { CancellationContext } from "../kernel/context.ts";
 import { HealthStatus } from "../kernel/service.ts";
@@ -42,6 +43,8 @@ const ExpectedErrorCode = {
 const protectedRead = {
   id: "test.identity",
   service: "test",
+  store: StoreName.Operational,
+  lifetime: OperationLifetime.Unary,
   method: "GET",
   path: "/api/identity",
   access: "human",
@@ -108,10 +111,6 @@ test("a locally generated JWT authenticates the default human and forwards only 
     },
   );
   assert.equal(forged.status, HttpStatus.Unauthorized);
-  const records = JSON.stringify(
-    fixture.store.database.prepare("SELECT * FROM gateway_idempotency").all(),
-  );
-  assert.ok(!records.includes(token));
   assert.doesNotMatch(fixture.logs.join(""), /secret-marker/);
   assert.ok(!fixture.logs.join("").includes(token));
 });
@@ -210,12 +209,13 @@ test("JWT verification rejects expiry, wrong algorithm, invalid usernames, accou
   );
   const rotated = createInvocation({
     registry: fixture.gateway.registry,
-    store: fixture.store,
+    stores: { [StoreName.Operational]: fixture.store },
     masterKey: otherMasterKey,
     tokenLifetime: fixture.config.gateway.tokenLifetime,
-  }).authentication;
+  });
+  t.after(() => rotated.stop());
   await assert.rejects(
-    rotated.authenticate(`Bearer ${fresh.token}`),
+    rotated.authentication.authenticate(`Bearer ${fresh.token}`),
     /Authentication required/,
   );
 });
@@ -383,6 +383,34 @@ test("direct and HTTP adapters share transactional idempotency, validation, fail
   });
 });
 
+test("expired replay executes the handler again while an unexpired replay does not", async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const registry = new OperationRegistry();
+  const operation = {
+    ...protectedRead,
+    mutation: true,
+    method: "POST" as const,
+  };
+  let calls = 0;
+  registry.register(operation, (_input, caller) =>
+    caller.commit(() => ({ accountId: String(++calls) })),
+  );
+  const fixture = await gatewayFixture(t, { registry });
+  const identity = await fixture.gateway.authentication.authenticate(
+    `Bearer ${fixture.token}`,
+  );
+  const client = directClient({ operation }, fixture.gateway.invocation);
+  const options = { identity, idempotencyKey: ulid() };
+  const input = { params: {}, query: {}, body: null };
+  const first = await client.operation(input, options);
+  assert.deepEqual(await client.operation(input, options), first);
+  assert.equal(calls, SINGLE_EXECUTION_COUNT);
+  now += fixture.config.gateway.idempotencyTtl * 1000;
+  assert.notDeepEqual(await client.operation(input, options), first);
+  assert.equal(calls, SINGLE_EXECUTION_COUNT + SINGLE_EXECUTION_COUNT);
+});
+
 test("timeout leaves a mutation in progress until its atomic commit, then replays without repeating", async (t) => {
   const registry = new OperationRegistry();
   const gate = Promise.withResolvers<void>();
@@ -443,7 +471,7 @@ test("delivery forwards exact bytes/headers and the shutdown context closes an a
       method: "POST",
       path: "/api/hooks/test",
       access: AccessPolicy.Delivery,
-      interaction: OperationInteraction.Delivery,
+      delivery: true,
       output: z.strictObject({ accepted: z.boolean() }),
     },
     (_input, caller) => {
@@ -461,7 +489,7 @@ test("delivery forwards exact bytes/headers and the shutdown context closes an a
       ...protectedRead,
       id: "test.stream",
       path: "/api/mcp/test",
-      interaction: OperationInteraction.Stream,
+      lifetime: OperationLifetime.Stream,
       timeoutMs: 900000,
       output: z.string(),
       contentType: "text/event-stream",
@@ -562,15 +590,12 @@ test("the verification API returns only the authenticated human identity and req
       ExpectedErrorCode.Unauthorized,
     );
   }
-  assert.deepEqual(
-    fixture.store.database.prepare("SELECT * FROM gateway_idempotency").all(),
-    [],
-  );
+  assert.equal(fixture.gateway.invocation.idempotency.healthcheck(), true);
 });
 
-test("component health reports the failing owned table with integer codes", async (t) => {
+test("component health reports stopped in-memory idempotency with integer codes", async (t) => {
   const fixture = await gatewayFixture(t);
-  fixture.store.database.exec("DROP TABLE gateway_idempotency");
+  fixture.gateway.invocation.idempotency.stop();
   const components = await fixture.gateway.healthcheck();
   assert.equal(components.idempotency, HealthStatus.Unavailable);
   assert.equal(components.listener, HealthStatus.Healthy);
@@ -583,7 +608,7 @@ test("component health reports the failing owned table with integer codes", asyn
   assert.match(body.requestId, /^request_[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
 });
 
-test("CancellationContext drains admitted work and refuses upcoming work during and after graceful shutdown", async (t) => {
+test("quiescence cancels HTTP work, preserves direct calls during drain and releases only after drain", async (t) => {
   const registry = new OperationRegistry();
   const entered = Promise.withResolvers<void>();
   const cancelled = Promise.withResolvers<void>();
@@ -603,47 +628,46 @@ test("CancellationContext drains admitted work and refuses upcoming work during 
     assert.equal(fixture.store.healthcheck(), true);
     return { accountId: "finished" };
   });
+  registry.register(protectedRead, () => ({ accountId: "available" }));
   const fixture = await gatewayFixture(t, { registry });
-  const token = fixture.token;
-  const context = new CancellationContext();
-  const running = fixture.gateway.run(context);
   const identity = await fixture.gateway.authentication.authenticate(
-    `Bearer ${token}`,
+    `Bearer ${fixture.token}`,
   );
-  const client = directClient({ drain: operation }, fixture.gateway.invocation);
+  const client = directClient(
+    { read: protectedRead },
+    fixture.gateway.invocation,
+  );
   const input = { params: {}, query: {}, body: null };
-  const request = client.drain(input, { identity });
+  const request = fixture.request(operation.path, {
+    headers: { Authorization: `Bearer ${fixture.token}` },
+  });
   await entered.promise;
-  context.cancel();
+  const quiescing = fixture.gateway.quiesce();
+  assert.equal(quiescing, fixture.gateway.quiesce());
+  assert.equal(await quiescing, null);
   await cancelled.promise;
+  let drained = false;
+  const drain = fixture.gateway.drain().then(() => {
+    drained = true;
+  });
+  assert.equal(
+    (await client.read(input, { identity })).type,
+    OperationResultType.Completed,
+  );
+  assert.equal(drained, false);
+  release.resolve();
+  assert.deepEqual(await (await request).json(), { accountId: "finished" });
+  await drain;
+  assert.equal(await fixture.gateway.invocation.stop(), null);
   const stopping = fixture.gateway.stop();
   assert.equal(stopping, fixture.gateway.stop());
-  let stopped = false;
-  void stopping.then(() => {
-    stopped = true;
-  });
-  const assertRefused = async () => {
-    const result = await client.drain(input, { identity });
-    assert.equal(result.type, OperationResultType.Failure);
-    if (result.type === OperationResultType.Failure) {
-      assert.equal(result.status, HttpStatus.ServiceUnavailable);
-      assert.equal(result.error.error.code, ExpectedErrorCode.Stopping);
-    }
-    assert.equal(executions, SINGLE_EXECUTION_COUNT);
-  };
-  try {
-    await assertRefused();
-    assert.equal(stopped, false);
-  } finally {
-    release.resolve();
-  }
-  const result = await request;
-  assert.equal(result.type, OperationResultType.Completed);
-  if (result.type === OperationResultType.Completed)
-    assert.deepEqual(result.data, { accountId: "finished" });
   assert.equal(await stopping, null);
-  assert.equal(await running, context.err());
-  await assertRefused();
+  assert.equal(fixture.gateway.address(), undefined);
+  const result = await client.read(input, { identity });
+  assert.equal(result.type, OperationResultType.Failure);
+  if (result.type === OperationResultType.Failure)
+    assert.equal(result.error.error.code, ExpectedErrorCode.Stopping);
+  assert.equal(executions, SINGLE_EXECUTION_COUNT);
   assert.ok((await fixture.gateway.start()) instanceof Error);
 });
 

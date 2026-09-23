@@ -30,6 +30,7 @@ export default tseslint.config(
         },
         { type: "apps-server", pattern: "src/apps/server" },
         { type: "apps-cli", pattern: "src/apps/cli" },
+        { type: "apps-worker", pattern: "src/apps/worker" },
       ],
       "boundaries/files": [
         { category: "config-global", pattern: "src/config/global.ts" },
@@ -88,11 +89,25 @@ export default tseslint.config(
                 ...allow("kernel"),
                 { to: file("config") },
                 { to: applicationEntry("apps-server") },
+                { to: applicationEntry("apps-worker") },
                 { to: serviceEntry("contract.ts") },
                 {
                   to: element("service", {
                     captured: { name: "gateway" },
                     fileInternalPath: "{client,local}.ts",
+                  }),
+                },
+              ],
+            },
+            {
+              from: element("apps-worker"),
+              allow: [
+                ...allow("kernel"),
+                { to: serviceEntry("contract.ts") },
+                {
+                  to: element("service", {
+                    captured: { name: "gateway" },
+                    fileInternalPath: "client.ts",
                   }),
                 },
               ],
@@ -110,7 +125,7 @@ export default tseslint.config(
               disallow: [
                 {
                   from: element({
-                    anyOf: ["kernel", "apps-server", "apps-cli"],
+                    anyOf: ["kernel", "apps-server", "apps-cli", "apps-worker"],
                   }),
                 },
                 { from: file({ anyOf: ["config", "config-global", "main"] }) },
@@ -124,7 +139,12 @@ export default tseslint.config(
               disallow: [
                 {
                   to: element({
-                    anyOf: ["service", "apps-server", "apps-cli"],
+                    anyOf: [
+                      "service",
+                      "apps-server",
+                      "apps-cli",
+                      "apps-worker",
+                    ],
                   }),
                 },
                 { to: file({ anyOf: ["config-global", "config", "main"] }) },

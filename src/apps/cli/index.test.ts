@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  existsSync,
-  readFileSync,
-  readdirSync,
-  statSync,
-} from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { temporary } from "../../kernel/test-support.ts";
 import { initialConfig, loadConfig } from "../../config/index.ts";
@@ -18,19 +12,13 @@ import { identitySchema } from "../../kernel/identity.ts";
 import { deriveKey } from "../../kernel/json.ts";
 import { stringify } from "yaml";
 import { PRIVATE_FILE_MODE, writePrivate } from "../../kernel/files.ts";
-import { clientConfigPath, resolveClient } from "./client-config.ts";
+import { clientConfigPath } from "../../gateway/client.ts";
 
 import { ExitCode } from "./constants.ts";
 
 const EMPTY_OUTPUT = "";
 const SINGLE_DIAGNOSTIC_LINE = 1;
 const TOKEN_LIFETIME_SECONDS = 600;
-const DEFAULT_ENDPOINT = "http://127.0.0.1:31415";
-const TokenFixture = {
-  File: "new-token",
-  Environment: "environment",
-  Option: "option",
-} as const;
 const entry = new URL("../../main.ts", import.meta.url).href;
 function invocation(args: string[], env: NodeJS.ProcessEnv, terminal = false) {
   return spawnSync(
@@ -98,6 +86,29 @@ test("CLI help works offline, config help resolves its path, and unsupported nam
   assert.ok(option.stdout.includes(join(process.cwd(), "relative.yaml")));
   assert.equal(invocation(["gateway", "--help"], env).status, ExitCode.Success);
   assert.equal(invocation(["worker", "--help"], env).status, ExitCode.Success);
+});
+
+test("serve worker rejects server configuration and uses a single transport diagnostic without starting", (t) => {
+  const directory = temporary(t);
+  const env = environment(directory);
+  const config = invocation(
+    ["serve", "worker", "--config", "private.yaml"],
+    env,
+  );
+  assert.equal(config.status, ExitCode.Failure);
+  assert.match(config.stderr, /^cli\.serve\.worker_config:/);
+  const unavailable = invocation(
+    ["serve", "worker", "--endpoint", "http://127.0.0.1:1", "--token", "x"],
+    env,
+  );
+  assert.equal(unavailable.status, ExitCode.Failure);
+  assert.equal(unavailable.stdout, EMPTY_OUTPUT);
+  assert.equal(
+    unavailable.stderr.trim().split("\n").length,
+    SINGLE_DIAGNOSTIC_LINE,
+  );
+  assert.match(unavailable.stderr, /^worker\.version\.unavailable:/);
+  assert.deepEqual(readdirSync(directory), []);
 });
 
 test("config init is non-interactive, writes validated private configuration without displaying secrets and preserves existing files", (t) => {
@@ -177,36 +188,6 @@ test("validate/show and serve never create or repair configuration and never dis
   const show = invocation(["config", "show"], env);
   assert.equal(show.status, ExitCode.Success);
   assert.match(show.stdout, /\[Sensitive\]/);
-});
-
-test("operator-supplied client config preserves precedence and permissions without login", (t) => {
-  const directory = temporary(t);
-  const env = environment(directory);
-  assert.equal(resolveClient({}, env).endpoint, DEFAULT_ENDPOINT);
-  assert.throws(() => resolveClient({ endpoint: "invalid" }, env), {
-    code: "cli.config.invalid_endpoint",
-  });
-  writePrivate(
-    clientConfigPath(env),
-    stringify({ endpoint: "http://localhost:12345", token: "new-token" }),
-  );
-  assert.deepEqual(readdirSync(join(directory, "kanthord")), ["cli.yaml"]);
-  assert.equal(resolveClient({}, env).token, TokenFixture.File);
-  assert.equal(
-    resolveClient({}, { ...env, KANTHORD_TOKEN: "environment" }).token,
-    TokenFixture.Environment,
-  );
-  assert.equal(
-    resolveClient(
-      { token: "option" },
-      { ...env, KANTHORD_TOKEN: "environment" },
-    ).token,
-    TokenFixture.Option,
-  );
-  chmodSync(clientConfigPath(env), 0o644);
-  assert.throws(() => resolveClient({}, env), /mode 600/);
-  chmodSync(clientConfigPath(env), 0o600);
-  assert.equal(resolveClient({}, env).token, TokenFixture.File);
 });
 
 test("top-level jwt uses its optional username or the constant default, the configured key and lifetime, and terminal-only output", async (t) => {

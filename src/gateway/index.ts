@@ -1,5 +1,4 @@
-import { background } from "../kernel/context.ts";
-import type { OperationRegistry } from "../kernel/operation.ts";
+import { StoreName, type OperationRegistry } from "../kernel/operation.ts";
 import type { Store } from "../kernel/store.ts";
 import {
   Authentication,
@@ -14,22 +13,22 @@ export { directClient } from "./direct-client.ts";
 export { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
 export function createInvocation(options: {
   registry: OperationRegistry;
-  store: Store;
+  stores: Record<StoreName, Store>;
+  idempotencyTtl?: number;
   masterKey: string;
   tokenLifetime: number;
   lookups?: AuthenticationLookups;
 }): Invocation {
   const authentication = new Authentication(
-    options.store,
+    options.stores[StoreName.Operational],
     options.masterKey,
     options.lookups,
   );
-  const idempotency = new Idempotency(options.store);
+  const idempotency = new Idempotency(options.idempotencyTtl);
   return new Invocation(
     options.registry,
     authentication,
     idempotency,
-    options.store,
-    background,
+    options.stores,
   );
 }

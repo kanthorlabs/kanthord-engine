@@ -9,9 +9,14 @@ import {
   TEST_PROJECT_ID,
   TEST_WORKER_BINDING,
 } from "./test-support.ts";
-import { emptyInput, OperationRegistry } from "../../kernel/operation.ts";
+import {
+  emptyInput,
+  OperationRegistry,
+  StoreName,
+  OperationLifetime,
+} from "../../kernel/operation.ts";
 import { isMachineIdentity } from "../../kernel/caller.ts";
-import { directClient } from "../../gateway/index.ts";
+import { directClient, createInvocation } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { AccessPolicy } from "../../kernel/operation.ts";
@@ -26,7 +31,6 @@ const DISPLAY_NAME = "test worker";
 const input = { params: {}, query: {}, body: null };
 const ErrorCode = {
   Unauthorized: "gateway.authentication.unauthorized",
-  Conflict: "gateway.registration.conflict",
   Capacity: "gateway.registration.capacity",
   Stale: "gateway.registration.stale",
   Required: "gateway.registration.required",
@@ -34,6 +38,8 @@ const ErrorCode = {
 const machineRead = {
   id: "test.machine",
   service: "test",
+  store: StoreName.Operational,
+  lifetime: OperationLifetime.Unary,
   method: HttpMethod.Get,
   path: "/api/worker/identity",
   access: AccessPolicy.Client,
@@ -114,10 +120,7 @@ test("absent, removed and unavailable worker bindings refuse registration before
     HttpStatus.Unauthorized,
     ErrorCode.Unauthorized,
   );
-  assert.deepEqual(
-    fixture.store.database.prepare("SELECT * FROM gateway_idempotency").all(),
-    [],
-  );
+  assert.equal(fixture.gateway.invocation.idempotency.healthcheck(), true);
 });
 
 test("concurrent machine registrations cannot oversubscribe one binding", async (t) => {
@@ -150,11 +153,9 @@ test("one live registration per client, live replay across adapters, and stale r
     first.data.runtimeIdentity,
     /^runtime_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
   );
-  assertFailure(
-    await fixture.client.register(input),
-    HttpStatus.Conflict,
-    ErrorCode.Conflict,
-  );
+  const retry = await fixture.client.register(input);
+  assert.ok(retry.type === OperationResultType.Completed);
+  assert.deepEqual(retry.data, first.data);
   const identity = await fixture.gateway.authentication.authenticate(
     `Bearer ${fixture.machineJWT}`,
   );
@@ -168,20 +169,11 @@ test("one live registration per client, live replay across adapters, and stale r
     first,
   );
   assert.equal(fixture.machines.worker.registrations.size, SINGLE_REGISTRATION);
-  const recorded = fixture.store.database
-    .prepare("SELECT * FROM gateway_idempotency WHERE key = ?")
-    .get(key);
   fixture.machines.worker.restart();
   assertFailure(
     await fixture.client.register(input, { idempotencyKey: key }),
     HttpStatus.Conflict,
     ErrorCode.Stale,
-  );
-  assert.deepEqual(
-    fixture.store.database
-      .prepare("SELECT * FROM gateway_idempotency WHERE key = ?")
-      .get(key),
-    recorded,
   );
   const next = await fixture.client.register(input);
   assert.ok(next.type === OperationResultType.Completed);
@@ -191,6 +183,33 @@ test("one live registration per client, live replay across adapters, and stale r
     HttpStatus.Conflict,
     ErrorCode.Stale,
   );
+});
+
+test("a new invocation loses replay but registration retains its natural-key identity", async (t) => {
+  const fixture = await fixtureForRegistration(t);
+  const idempotencyKey = ulid();
+  const first = await fixture.client.register(input, { idempotencyKey });
+  assert.ok(first.type === OperationResultType.Completed);
+  const invocation = createInvocation({
+    registry: fixture.gateway.registry,
+    stores: { [StoreName.Operational]: fixture.store },
+    masterKey: fixture.config.masterKey,
+    tokenLifetime: fixture.config.gateway.tokenLifetime,
+    lookups: fixture.machines,
+  });
+  t.after(() => invocation.stop());
+  const reserve = t.mock.method(invocation.idempotency, "reserve");
+  const identity = await invocation.authentication.authenticate(
+    `Bearer ${fixture.machineJWT}`,
+  );
+  const next = await directClient(workerOperations, invocation).register(
+    input,
+    { identity, idempotencyKey },
+  );
+  assert.deepEqual(next, first);
+  assert.equal(reserve.mock.calls.length, SINGLE_REGISTRATION);
+  assert.equal(reserve.mock.calls[0]!.result!.replay, undefined);
+  assert.equal(fixture.machines.worker.registrations.size, SINGLE_REGISTRATION);
 });
 
 test("work requires a live registration and machine JWTs never authorize human verification", async (t) => {
@@ -314,19 +333,24 @@ test("another client using the same key registers and runs its own mutation inst
   assert.equal(machines.worker.registrations.size, TWO_CLIENTS);
 });
 
-test("a registration is deregistered when recording its atomic response fails", async (t) => {
+test("a registration is deregistered when its store transaction fails", async (t) => {
   const fixture = await fixtureForRegistration(t);
-  fixture.store.database.exec(`
-    CREATE TRIGGER reject_registration_answer BEFORE UPDATE ON gateway_idempotency
-    WHEN json_extract(NEW.response, '$.status') = 200
-    BEGIN SELECT RAISE(ABORT, 'test response persistence failure'); END;
-  `);
+  const transaction = fixture.store.transaction.bind(fixture.store);
+  const failing = t.mock.method(
+    fixture.store,
+    "transaction",
+    (write: Parameters<typeof transaction>[0]) =>
+      transaction((tx) => {
+        write(tx);
+        throw new Error("test transaction failure");
+      }),
+  );
   const result = await fixture.client.register(input);
   assert.equal(result.type, OperationResultType.Failure);
   assert.ok(result.type === OperationResultType.Failure);
   assert.equal(result.status, HttpStatus.InternalServerError);
   assert.equal(fixture.machines.worker.registrations.size, NO_REGISTRATIONS);
-  fixture.store.database.exec("DROP TRIGGER reject_registration_answer");
+  failing.mock.restore();
   assert.ok(
     (await fixture.client.register(input)).type ===
       OperationResultType.Completed,
@@ -384,10 +408,7 @@ test("registration accepts only a bearer machine JWT, no nominated identity or b
     assert.equal(response.status, HttpStatus.BadRequest);
   }
   assert.equal(fixture.machines.worker.registrations.size, NO_REGISTRATIONS);
-  assert.deepEqual(
-    fixture.store.database.prepare("SELECT * FROM gateway_idempotency").all(),
-    [],
-  );
+  assert.equal(fixture.gateway.invocation.idempotency.healthcheck(), true);
 });
 
 test("an operation returning a secret never reruns a repeated idempotency key", async (t) => {
@@ -420,9 +441,5 @@ test("an operation returning a secret never reruns a repeated idempotency key", 
   assert.ok(replay.type === OperationResultType.Failure);
   assert.equal(replay.status, HttpStatus.Conflict);
   assert.equal(calls, SINGLE_REGISTRATION);
-  assert.ok(
-    !JSON.stringify(
-      fixture.store.database.prepare("SELECT * FROM gateway_idempotency").all(),
-    ).includes("sensitive-test-output"),
-  );
+  assert.ok(!JSON.stringify(replay).includes("sensitive-test-output"));
 });

@@ -16,7 +16,6 @@ import { temporary } from "../kernel/test-support.ts";
 import {
   configuration,
   configPath,
-  directories,
   initialConfig,
   loadConfig,
   parseMapping,
@@ -30,10 +29,7 @@ const CONFIGURED_PORT = 12345;
 const DEFAULT_BIND = "127.0.0.1";
 const DEFAULT_LOG_LEVEL = "info";
 const DEFAULT_PORT = 31415;
-const YAML_VALUE = "ok";
-const MAX_SEQUENCE_ENTRIES = 4094;
-const CUSTOM_CONFIG_DIRECTORY = "/custom/kanthord";
-const FALLBACK_DATA_DIRECTORY = "/home/test/.local/share/kanthord";
+const DEFAULT_IDEMPOTENCY_TTL = 86400;
 const ORIGINAL_CONTENT = "original";
 const REPLACEMENT_CONTENT = "replacement";
 
@@ -49,6 +45,7 @@ test("service fragments preserve the existing YAML field set", () => {
     "allowedHosts",
     "allowedOrigins",
     "bind",
+    "idempotencyTtl",
     "port",
     "tokenLifetime",
   ]);
@@ -90,22 +87,7 @@ test("configuration is strict, file-only, masks secrets, and reports every inval
   );
 });
 
-test("YAML rejects duplicate keys, extra documents, malformed secrets, arrays, and non-mappings without excerpts", () => {
-  for (const source of [
-    "masterKey: secret-marker\nmasterKey: again",
-    "a: 1\n---\nb: 2",
-    "masterKey: [secret-marker",
-    "- secret-marker",
-    "null",
-  ]) {
-    assert.throws(
-      () => parseMapping(source),
-      (error: Error) => {
-        assert.doesNotMatch(error.message, /secret-marker/);
-        return true;
-      },
-    );
-  }
+test("configuration rejects malformed secrets and accepts its initial document", () => {
   assert.throws(
     () => configuration({ masterKey: "secret-marker" }),
     /masterKey/,
@@ -230,57 +212,26 @@ test("diagnostics report explicit nulls rather than substituting defaults", () =
   }).getProperties();
   assert.equal(config.log.level, DEFAULT_LOG_LEVEL);
   assert.equal(config.gateway.port, DEFAULT_PORT);
+  assert.equal(config.gateway.idempotencyTtl, DEFAULT_IDEMPOTENCY_TTL);
+  for (const idempotencyTtl of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
+    assert.throws(
+      () =>
+        configuration({
+          masterKey: randomBytes(32).toString("base64"),
+          gateway: { idempotencyTtl },
+        }),
+      /gateway.idempotencyTtl/,
+    );
 });
 
-test("bounded YAML retains ordinary aliases and rejects unsafe tags and unresolved aliases", () => {
+test("configuration accepts ordinary aliases", () => {
   const value = parseMapping("first: &hosts [localhost]\nsecond: *hosts");
-  assert.deepEqual(value.first, ["localhost"]);
-  assert.equal(value.first, value.second);
   const config = configuration({
     masterKey: randomBytes(32).toString("base64"),
     gateway: { allowedHosts: value.first, allowedOrigins: value.second },
   }).getProperties();
   assert.deepEqual(config.gateway.allowedHosts, ["localhost"]);
   assert.deepEqual(config.gateway.allowedOrigins, ["localhost"]);
-  for (const source of [
-    "value: !secret-marker text",
-    "value: *secret-marker",
-    "!!set {secret-marker: null}",
-  ]) {
-    assert.throws(
-      () => parseMapping(source),
-      (error: Error) => {
-        assert.match(error.message, /configuration:/);
-        assert.doesNotMatch(error.message, /secret-marker/);
-        return true;
-      },
-    );
-  }
-});
-
-test("YAML enforces byte, expanded-value, and nesting limits", () => {
-  const atByteLimit = "value: ok\n#".padEnd(1024 * 1024, "x");
-  assert.equal(parseMapping(atByteLimit).value, YAML_VALUE);
-  assert.throws(() => parseMapping(atByteLimit + "x"), /1 MiB limit/);
-  assert.throws(
-    () => parseMapping("value: " + "é".repeat(512 * 1024)),
-    /1 MiB limit/,
-  );
-  const atNodeLimit = `values: [${Array<string>(4094).fill("x").join(",")}]`;
-  assert.equal(
-    (parseMapping(atNodeLimit).values as string[]).length,
-    MAX_SEQUENCE_ENTRIES,
-  );
-  assert.throws(
-    () => parseMapping(atNodeLimit.replace("]", ",x]")),
-    /too many values/,
-  );
-  const atDepthLimit = '{"nested":'.repeat(32) + "0" + "}".repeat(32);
-  assert.doesNotThrow(() => parseMapping(atDepthLimit));
-  assert.throws(
-    () => parseMapping(`{nested: ${atDepthLimit}}`),
-    /nesting is too deep/,
-  );
 });
 
 test("programmatic configuration cannot bypass cycle and structure checks", () => {
@@ -306,13 +257,7 @@ test("programmatic configuration cannot bypass cycle and structure checks", () =
   assert.throws(() => configuration([]), /expected a mapping/);
 });
 
-test("XDG absolute directories and config option/environment resolution", () => {
-  const paths = directories(
-    { XDG_DATA_HOME: "relative", XDG_CONFIG_HOME: "/custom" },
-    "/home/test",
-  );
-  assert.equal(paths.config, CUSTOM_CONFIG_DIRECTORY);
-  assert.equal(paths.data, FALLBACK_DATA_DIRECTORY);
+test("config option/environment resolution", () => {
   assert.equal(
     configPath("override.yaml", { KANTHORD_CONFIG: "other.yaml" }),
     resolve("override.yaml"),

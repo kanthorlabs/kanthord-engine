@@ -33,6 +33,9 @@ engine/
 │   │   ├── json.ts             # Canonical JSON, digests, key derivation, and timestamps
 │   │   ├── identity.ts         # Prefixed entity identities and ULID schemas
 │   │   ├── values.ts           # JavaScript value predicates
+│   │   ├── version.ts          # Cached package version
+│   │   ├── xdg.ts              # Configuration, data, state, and cache directories
+│   │   ├── yaml.ts             # Bounded YAML mapping parsing
 │   │   ├── files.ts            # Private filesystem validation and publication
 │   │   ├── http.ts             # Shared HTTP methods, statuses, and media types
 │   │   └── test-support.ts     # Isolated temporary filesystem fixtures
@@ -50,7 +53,7 @@ engine/
 │   ├── gateway/                # HTTP transport, authentication, and invocation infrastructure
 │   │   ├── contract.ts         # Gateway operation declarations
 │   │   ├── index.ts            # Service composition, invocation factory, adapters, and schema
-│   │   ├── client.ts           # HTTP service client adapter
+│   │   ├── client.ts           # HTTP client, client configuration, and server version discovery
 │   │   ├── local.ts            # Local JWT issuance and OpenAPI generation without a server
 │   │   └── service.ts          # Private listener lifecycle and HTTP wiring
 │   └── apps/                   # Application entries and composition roots
@@ -59,10 +62,11 @@ engine/
 │       ├── cli/                # Non-interactive commands and client configuration
 │       │   ├── index.ts        # Commander dispatch and local configuration, JWT, and Gateway commands
 │       │   ├── constants.ts    # CLI command names and exit codes
-│       │   ├── client-config.ts # HTTP endpoint and credential resolution
 │       │   └── worker.ts       # Worker command group
-│       └── worker/             # [planned] Remote worker application using service clients
+│       └── worker/             # Remote worker application skeleton
+│           └── index.ts        # Client resolution, version check, and cancellable lifetime
 ├── static/                     # Packaged generated OpenAPI assets
+│   ├── openapi.yaml             # Root contract index and package version
 │   └── openapi/                # Service path items and shared schemas
 │       ├── gateway/            # Gateway operation documents
 │       ├── worker/             # Worker operation documents

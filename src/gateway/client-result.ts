@@ -2,6 +2,7 @@ import { ulid } from "ulid";
 import { errorSchema } from "../kernel/errors.ts";
 import {
   OperationResultType,
+  OperationLifetime,
   type Operation,
   type ClientOptions,
   type ServiceClient,
@@ -31,7 +32,13 @@ export function createClient<T extends Record<string, Operation>>(
             return {
               type: OperationResultType.Completed,
               status: result.status,
-              data: operation.output.parse(result.body),
+              data:
+                operation.lifetime === OperationLifetime.Stream &&
+                result.body instanceof Response
+                  ? result.body
+                  : operation.output.parse(
+                      JSON.parse(JSON.stringify(result.body)),
+                    ),
               idempotencyKey,
             };
           return {

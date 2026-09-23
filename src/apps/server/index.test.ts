@@ -283,6 +283,14 @@ test("server lifecycle returns errors, reports owned health and releases every r
     assert.deepEqual(await server.healthcheck(), { gateway: 503, store: 503, log: 503 });
     assert.equal(process.listenerCount('SIGTERM'), signals);
     assert.ok(await server.start() instanceof Error);
+    const { WorkerService } = await import(${JSON.stringify(new URL("../../worker/index.ts", import.meta.url).href)});
+    const originalRun = WorkerService.prototype.run;
+    const runFailure = new Error('worker run failed');
+    WorkerService.prototype.run = async () => runFailure;
+    const failedRun = new Server();
+    assert.equal(await failedRun.run(), runFailure);
+    assert.deepEqual(await failedRun.healthcheck(), { gateway: 503, store: 503, log: 503 });
+    WorkerService.prototype.run = originalRun;
     const broken = new Server(); const joined = broken.run();
     assert.equal(await broken.start(), null);
     const storeFailure = new Error('store cleanup failed');
@@ -291,6 +299,8 @@ test("server lifecycle returns errors, reports owned health and releases every r
     Store.prototype.close = function() { closeStore.call(this); throw storeFailure; };
     const closeLog = OperationalLog.prototype.close;
     OperationalLog.prototype.close = async function() { await closeLog.call(this); throw logFailure; };
+    const quiescing = broken.quiesce(); assert.equal(quiescing, broken.quiesce());
+    assert.equal(await quiescing, null);
     const stopping = broken.stop(); assert.equal(stopping, broken.stop());
     const error = await stopping;
     assert.ok(error instanceof AggregateError);
@@ -307,6 +317,77 @@ test("server lifecycle returns errors, reports owned health and releases every r
   assert.equal(result.stdout, LIFECYCLE_VERIFIED_OUTPUT);
   const reopened = new Store(paths.database);
   reopened.close();
+});
+
+test("server quiesces concurrently, drains with direct calls available, joins the chain and releases in reverse order", (t) => {
+  const paths = layout(temporary(t));
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    import assert from 'node:assert/strict';
+    import { Server } from ${JSON.stringify(new URL("./index.ts", import.meta.url).href)};
+    import { ProjectService } from ${JSON.stringify(new URL("../../project/index.ts", import.meta.url).href)};
+    import { WorkerService } from ${JSON.stringify(new URL("../../worker/index.ts", import.meta.url).href)};
+    import { GatewayService } from ${JSON.stringify(new URL("../../gateway/index.ts", import.meta.url).href)};
+    import { Store } from ${JSON.stringify(new URL("../../kernel/store.ts", import.meta.url).href)};
+    import { OperationalLog } from ${JSON.stringify(new URL("../../kernel/log.ts", import.meta.url).href)};
+    const server = new Server();
+    const events = [];
+    const gate = Promise.withResolvers();
+    let quiesced = 0;
+    const signalled = new Set();
+    const released = new Set();
+    for (const [name, type] of [['project', ProjectService], ['worker', WorkerService], ['gateway', GatewayService]]) {
+      const quiesce = type.prototype.quiesce;
+      type.prototype.quiesce = function() {
+        if (signalled.has(name)) return quiesce.call(this);
+        signalled.add(name);
+        events.push('quiesce-' + name);
+        const task = quiesce.call(this);
+        if (++quiesced === 3) gate.resolve();
+        return gate.promise.then(() => task);
+      };
+      const drain = type.prototype.drain;
+      type.prototype.drain = async function() {
+        if (!released.size) {
+          assert.equal(quiesced, 3);
+          assert.equal(server.store.healthcheck(), true);
+          assert.equal(server.log.healthcheck(), true);
+          const result = await server.gateway.invocation.invoke('gateway.openapi', { params: {}, query: {}, body: null });
+          assert.equal(result.status, 200);
+          events.push('drain-' + name);
+        }
+        await drain?.call(this);
+      };
+      const stop = type.prototype.stop;
+      type.prototype.stop = async function() {
+        if (!released.has(name)) {
+          released.add(name);
+          const result = await server.gateway.invocation.invoke('gateway.openapi', { params: {}, query: {}, body: null });
+          assert.equal(result.status, 503);
+          assert.equal(server.store.healthcheck(), true);
+          events.push('stop-' + name);
+        }
+        return stop.call(this);
+      };
+    }
+    const closeStore = Store.prototype.close;
+    Store.prototype.close = function() { events.push('store'); return closeStore.call(this); };
+    const closeLog = OperationalLog.prototype.close;
+    OperationalLog.prototype.close = function() { events.push('log'); return closeLog.call(this); };
+    assert.equal(await server.start(), null);
+    assert.equal(await server.stop(), null);
+    assert.deepEqual(events.slice(0, 3), ['quiesce-project', 'quiesce-worker', 'quiesce-gateway']);
+    assert.deepEqual(events.slice(3, 6).sort(), ['drain-gateway', 'drain-project', 'drain-worker']);
+    assert.deepEqual(events.slice(6), ['stop-gateway', 'stop-worker', 'stop-project', 'store', 'log']);
+  `,
+    ],
+    { env: paths.env, encoding: "utf8", timeout: 15000 },
+  );
+  assert.equal(result.status, ExitCode.Success, result.stderr);
 });
 
 test("the shutdown watchdog holds the event loop and exits the process when cleanup never settles", () => {

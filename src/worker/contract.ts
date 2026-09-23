@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   AccessPolicy,
+  StoreName,
+  OperationLifetime,
   emptyInput,
   type Operation,
 } from "../kernel/operation.ts";
@@ -27,6 +29,8 @@ export const WORKER_SERVICE_NAME = "worker";
 export const workerOperations = {
   register: {
     service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
     id: "worker.register",
     method: HttpMethod.Post,
     path: "/api/worker/register",

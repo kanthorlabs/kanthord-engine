@@ -106,7 +106,7 @@ test("a closed SQLite database is reported alongside other registered services",
     gateway: {
       ...gateway,
       authentication: 503,
-      idempotency: 503,
+      idempotency: 200,
       invocation: 503,
     },
     store: { sqlite: 503 },

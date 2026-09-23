@@ -16,7 +16,6 @@ import { CancellationContext } from "../kernel/context.ts";
 import { isString } from "../kernel/values.ts";
 import { HealthStatus } from "../kernel/service.ts";
 
-const NO_PENDING_KEYS = 0;
 const LIVE_DENYLIST_ENTRIES = 1;
 
 test("concurrent starts share startup and restart preserves locally issued human JWTs without storing credentials", async (t) => {
@@ -32,7 +31,10 @@ test("concurrent starts share startup and restart preserves locally issued human
     store,
     logger: pino({ enabled: false }),
   });
-  t.after(() => gateway.stop());
+  t.after(async () => {
+    await gateway.stop();
+    await gateway.invocation.stop();
+  });
   const start = gateway.start();
   assert.equal(start, gateway.start());
   assert.equal(await start, null);
@@ -51,15 +53,14 @@ test("concurrent starts share startup and restart preserves locally issued human
       .get(),
     undefined,
   );
-  for (const table of ["gateway_idempotency", "gateway_token_denylist"])
-    assert.deepEqual(
-      store.database.prepare(`SELECT * FROM ${table}`).all(),
-      [],
-    );
+  assert.deepEqual(
+    store.database.prepare("SELECT * FROM gateway_token_denylist").all(),
+    [],
+  );
   assert.equal(await gateway.stop(), null);
 });
 
-test("a failed listener releases resources and startup sweeps dead keys and expired bans", async (t) => {
+test("a failed listener releases resources and startup sweeps expired bans", async (t) => {
   const listener = createServer();
   await new Promise<void>((resolve) =>
     listener.listen(0, "127.0.0.1", resolve),
@@ -73,11 +74,6 @@ test("a failed listener releases resources and startup sweeps dead keys and expi
   t.after(() => store.close());
   store.migrate([{ service: "gateway", migrations: gatewayMigrations }]);
   store.transaction(({ database }) => {
-    database
-      .prepare(
-        "INSERT INTO gateway_idempotency VALUES (?, 'test', 'digest', 'caller', 'in_progress', NULL, ?)",
-      )
-      .run(ulid(), Date.now());
     const insert = database.prepare(
       "INSERT INTO gateway_token_denylist VALUES (?, ?, ?)",
     );
@@ -92,14 +88,10 @@ test("a failed listener releases resources and startup sweeps dead keys and expi
     }).getProperties(),
     logger: pino({ enabled: false }),
   });
+  t.after(() => gateway.invocation.stop());
   assert.match((await gateway.start())!.message, /cannot bind/);
   assert.equal(gateway.address(), undefined);
-  assert.equal(
-    store.database
-      .prepare("SELECT count(*) AS count FROM gateway_idempotency")
-      .get()?.count,
-    NO_PENDING_KEYS,
-  );
+  assert.equal(gateway.invocation.idempotency.healthcheck(), true);
   assert.equal(
     store.database
       .prepare("SELECT count(*) AS count FROM gateway_token_denylist")
@@ -124,6 +116,7 @@ test("cancellation before and during gateway startup returns an error after rele
       store,
       logger: pino({ enabled: false }),
     });
+    t.after(() => gateway.invocation.stop());
     if (before) context.cancel();
     const running = gateway.run(context);
     if (!before) context.cancel();
