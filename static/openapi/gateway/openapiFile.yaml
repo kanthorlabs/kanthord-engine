@@ -4,8 +4,7 @@ pathItem:
     operationId: gateway.openapiFile
     tags:
       - gateway
-    description:
-      Read a service-scoped or shared OpenAPI file referenced by the root
+    description: Read a service-scoped or shared OpenAPI file referenced by the root
       contract.
     x-access-policy: public
     x-timeout-ms: 30000
@@ -16,15 +15,13 @@ pathItem:
         in: path
         required: true
         schema:
-          $ref:
-            "#/components/schemas/gateway.openapiFile.Input/properties/params/propert\
+          $ref: "#/components/schemas/gateway.openapiFile.Input/properties/params/propert\
             ies/service"
       - name: file
         in: path
         required: true
         schema:
-          $ref:
-            "#/components/schemas/gateway.openapiFile.Input/properties/params/propert\
+          $ref: "#/components/schemas/gateway.openapiFile.Input/properties/params/propert\
             ies/file"
     responses:
       "200":

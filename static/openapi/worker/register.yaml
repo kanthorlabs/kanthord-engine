@@ -4,8 +4,7 @@ pathItem:
     operationId: worker.register
     tags:
       - worker
-    description:
-      Register a worker instance with a bearer machine JWT and an empty
+    description: Register a worker instance with a bearer machine JWT and an empty
       body. Returns its runtime identity, not a token. A client identity holds
       at most one live registration. Repeating the key replays that identity
       while live; a replay after the registration ends answers 409. Cancellation

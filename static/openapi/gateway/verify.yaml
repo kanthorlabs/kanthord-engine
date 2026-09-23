@@ -4,8 +4,7 @@ pathItem:
     operationId: gateway.verify
     tags:
       - gateway
-    description:
-      Verify the human bearer JWT and return its authenticated identity
+    description: Verify the human bearer JWT and return its authenticated identity
       without returning the token.
     x-access-policy: human
     x-timeout-ms: 10000
