@@ -182,11 +182,14 @@ restart behavior from this CLI specification. Runtime registrations themselves
 are in memory; a stale stored answer grants no renewed registration.
 
 **Target design:** registration must also check the binding's instance count in
-the same transaction as acceptance. Binding removal/unavailability and a ban end
-the registration; server restart also ends it. These rules need production
-integration beyond the current default collaborators. The current authentication
-path refuses a banned JWT or a binding that the Project resolver rejects; that
-refusal is not evidence of a completed registration-cleanup implementation.
+the same transaction as acceptance. Binding removal/unavailability and server
+restart end the registration. These rules need production integration beyond
+the current default collaborators. The current authentication path refuses a
+banned JWT or a binding that the Project resolver rejects; that refusal is not
+evidence of a completed registration-cleanup implementation. The [Gateway signing
+key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
+removes the denylist from the target and revokes every JWT after an increment
+of `gateway.tokenGeneration` and a restart.
 
 Source checks: [CLI integration tests](../../src/apps/server/cli-worker.test.ts),
 [registration integration tests](../../src/apps/server/gateway-registration.test.ts)
