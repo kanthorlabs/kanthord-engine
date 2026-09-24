@@ -142,7 +142,7 @@ results. The current [Gateway replay implementation](../../src/gateway/idempoten
 is in memory and bounded by its configured TTL; restart loses it. The shared
 [same-key retry rules](./other.md#idempotency-and-retries) apply, but that page's
 SQLite implementation note predates the in-memory implementation.
-This specification promises no exactly-once behavior across restart. Project create, credential create/rotate and rename replay remain **[blocked][project-contract]**. A binding-set edit has a version precondition,
+This specification promises no exactly-once behavior across restart. A project name is the natural key of project creation: a retry after a restart that names an existing project returns 409 with `project.name_conflict`, and the CLI prints the holder identity from `error.details`. A rename targets a project ID and commits in one transaction; the last write wins under the unique name. A retry after a restart checks the name holder again. Credential rotation updates its row in one transaction, and the last write wins. Credential create replay remains **[blocked][project-contract]** under [HANDOFF Project Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#project-service). A binding-set edit has a version precondition,
 but a retry after a committed edit and restart can encounter a stale version
 instead of replaying the old answer.
 
@@ -163,16 +163,16 @@ Blocked commands link their items in [HANDOFF Project Service](https://github.co
 
 | #   | Synopsis after `kanthord project`                                                        | Proposed HTTP route                                                    | Proposed operation ID                                             | Access/status                                                                                                                  |
 | --- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | `create --name <name> [M] [R]`                                                           | `POST /api/project`                                                    | `project.create` **[blocked][project-contract]**                  | `human`; proposed                                                                                                              |
+| 1   | `create --name <name> [M] [R]`                                                           | `POST /api/project`                                                    | `project.create`                                                  | `human`; proposed                                                                                                              |
 | 2   | `list [L] [R]`                                                                           | `GET /api/project`                                                     | `project.list`                                                    | `human`; proposed                                                                                                              |
 | 3   | `get <project-id> [R]`                                                                   | `GET /api/project/:projectId`                                          | `project.get`                                                     | `human`; proposed                                                                                                              |
-| 4   | `rename <project-id> --name <name> [M] [R]`                                              | `PATCH /api/project/:projectId`                                        | `project.rename` **[blocked][project-contract]**                  | `human`; proposed                                                                                                              |
+| 4   | `rename <project-id> --name <name> [M] [R]`                                              | `PATCH /api/project/:projectId`                                        | `project.rename`                                                  | `human`; proposed                                                                                                              |
 | 5   | `binding list <project-id> [--kind <kind> ...] [--state <state>] [L] [R]`                | `GET /api/project/:projectId/binding`                                  | `project.binding.list` **[blocked][project-contract]**            | `human`; proposed                                                                                                              |
 | 6   | `binding get <project-id> <binding-id> [R]`                                              | `GET /api/project/:projectId/binding/:bindingId`                       | `project.binding.get` **[blocked][project-contract]**             | `human`; proposed                                                                                                              |
 | 7   | `binding export <project-id> [R]`                                                        | `GET /api/project/:projectId/binding-set`                              | `project.bindingSet.get` **[blocked][project-contract]**          | `human`; proposed                                                                                                              |
 | 8   | `binding apply <project-id> --file <path> [M] [R]`                                       | `PUT /api/project/:projectId/binding-set`                              | `project.bindingSet.write` **[blocked][project-contract]**        | `human`; proposed                                                                                                              |
-| 9   | `binding revision list <project-id> <binding-id> [L] [R]`                                | `GET /api/project/:projectId/binding/:bindingId/revision`              | `project.bindingRevision.list` **[blocked][project-contract]**    | `human`; proposed                                                                                                              |
-| 10  | `binding revision get <project-id> <binding-id> <revision> [R]`                          | `GET /api/project/:projectId/binding/:bindingId/revision/:revision`    | `project.bindingRevision.get` **[blocked][project-contract]**     | `human`; proposed                                                                                                              |
+| 9   | `binding revision list <project-id> <binding-id> [L] [R]`                                | `GET /api/project/:projectId/binding/:bindingId/revision`              | `project.bindingRevision.list`                                    | `human`; proposed                                                                                                              |
+| 10  | `binding revision get <project-id> <binding-id> <revision> [R]`                          | `GET /api/project/:projectId/binding/:bindingId/revision/:revision`    | `project.bindingRevision.get`                                     | `human`; proposed                                                                                                              |
 | 11  | `credential create --file <path> [M] [R]`                                                | `POST /api/project/credential`                                         | `project.credential.create` **[blocked][project-contract]**       | `human`; proposed                                                                                                              |
 | 12  | `credential list [--type <type>] [--remote-identity <identity>] [L] [R]`                 | `GET /api/project/credential`                                          | `project.credential.list`                                         | `human`; proposed                                                                                                              |
 | 13  | `credential get <credential-id> [R]`                                                     | `GET /api/project/credential/:credentialId`                            | `project.credential.get`                                          | `human`; proposed                                                                                                              |
@@ -198,8 +198,8 @@ Inputs:
 
 - `<project-id>`: required `ProjectId` for `get` and `rename`; no default.
   Maps to path `projectId`.
-- `--name <name>`: required nonblank string for `create` and `rename`; no
-  default. Preserve the supplied value. Maps to body `name`. Name constraints remain **[blocked][project-contract]**; the client derives no slug or ID. Rename is a proposed convenience over the stored project name, not an
+- `--name <name>`: required string of 1 to 63 characters for `create` and `rename`: a lower-case letter first, then lower-case letters, digits and hyphens; no
+  default. Preserve the supplied value. Maps to body `name`. The client derives no slug or ID. Rename is a proposed convenience over the stored project name, not an
   already-declared lifecycle operation.
 - `list` has only the shared page and client options. No name filter, sort
   override, or current-project inference is implied. Lists use descending
@@ -212,8 +212,8 @@ other request fields. Read commands have no body. Proposed project metadata is
 
 Creation allocates a project identity and an empty binding set at version `0`.
 The server returns that version. A mission belongs intrinsically to its project; it is
-not a binding. Mission creation and rename concurrency remain **[blocked][project-contract]**.
-Rename keeps the same project identity and bindings.
+not a binding. Creation calls the Mission collaboration `createMission` in the same transaction. The mission starts empty at mission revision 0. No operation creates or deletes a mission.
+A project name is unique on the server and is the natural key of creation. Creation or rename to a name that another project holds returns 409 with code `project.name_conflict` and the holder identity in `error.details`. A retry of creation after a restart returns 409 when the name exists, and the CLI prints the holder identity. Rename commits in one transaction; the last write wins under the unique name. Rename keeps the same project identity and bindings.
 
 No deletion, archival, project membership, or ownership-transfer command is
 declared: those lifecycle policies have no basis in the Project design.
@@ -235,7 +235,7 @@ Inputs:
   These are the four currently designed kinds, not a permanently closed set.
 - `--state <state>`: optional enum on `binding list`, proposed values
   `current | removed | all`, default `current`; query `state`.
-  Historical availability remains **[blocked][project-contract]**.
+  The Project Service keeps a removed binding and every revision for the life of the project; `removed` and `all` include retained bindings.
 - [`--file`](./common-flags.md#--file): required for `apply`; content is the
   complete `BindingSetWrite` object defined below. No patch, merge, or partial-set mode.
 
@@ -260,7 +260,7 @@ read. Shell redirection of this ordinary JSON is permitted.
 `binding revision list` returns a page of immutable revision metadata;
 `binding revision get` returns the selected configuration and its
 `bindingId`, `revision`, and `createdAt`. Both report retained history, not an
-authorization grant. Retention and retired-binding reads remain **[blocked][project-contract]**. No revision rollback
+authorization grant. The Project Service keeps a removed binding and every revision for the life of the project. Both commands read the revisions of a removed binding. No sweep deletes them. No revision rollback
 command is proposed; copying an old configuration into a new complete-set
 write is subject to current validation.
 
@@ -488,7 +488,7 @@ transaction. The target rules are:
   the same binding name, under the [validation ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#validation).
   A human removes the old binding and adds a binding with another name in the
   same edit.
-- Removal keeps the binding rows. Retention remains **[blocked][project-contract]**.
+- Removal keeps the binding rows and every revision for the life of the project. No sweep deletes them.
 - Every committed write increments the binding-set version, even when the
   submitted set is identical. Empty and no-change submissions are still
   mutations, not read or validation commands.
@@ -583,7 +583,7 @@ Rotation changes material of the same record for the same remote identity;
 existing credential references remain valid. It returns the updated metadata
 and has no binding-set or binding-revision effect. Custody attributes creation
 and each material change to the authenticated human in its log. A credential leaves the server only through the [credential handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-credential-handover) or the direct acquisition grant.
-Rotation and OAuth refresh update the record in place and create no revision.
+Rotation and OAuth refresh update the record in place and create no revision. Rotation commits in one transaction, and the last write wins.
 
 A remote change requires replacement bindings in every project that names the record under the [Project lifecycle ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#revision-disablement-and-the-change-of-a-remote).
 The remote-change input and lifecycle remain **blocked** under [HANDOFF Project Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#project-service).
