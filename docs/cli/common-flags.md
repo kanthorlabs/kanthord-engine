@@ -213,9 +213,10 @@ default `100`, inclusive range `1..1000`. Reject fractions, nonnumeric values,
 and out-of-range values before sending work. It maps to query field `limit`.
 
 Only commands declaring pagination accept it. Each invocation requests one
-page, not an implicit traversal of all pages. See
-[pagination conventions](./other.md#pagination) for shared result metadata;
-ordering, consistency, and further metadata belong to the operation.
+page, not an implicit traversal of all pages. Every list uses keyset pagination
+in descending primary-key order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination),
+so the first page holds the newest records and a refresh shows new records.
+See [pagination conventions](./other.md#pagination) for shared result metadata.
 
 ## `--cursor`
 
@@ -225,7 +226,7 @@ field `cursor` and is accepted only on commands declaring pagination.
 
 Pass the server-returned value unchanged with the same operation, caller
 scope, resource, and filters. Do not decode, edit, synthesize, or substitute an
-entity ID for it. The server must reject a continuation from a different scope
-or filter set. Encoding, maximum length, expiry, ordering, and consistency
-under concurrent changes require the owning operation's contract; no frozen
-snapshot or work reservation is implied.
+entity ID for it. The shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination)
+uses descending primary-key order and a base64url last-key cursor that does not
+expire; a malformed cursor returns `400`. Lists take no snapshot or work
+reservation, and a refresh of the first page shows new records.

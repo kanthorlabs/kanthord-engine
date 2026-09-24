@@ -306,8 +306,9 @@ Use `span list` to assemble the readable trace. A trace has one root by design,
 but a lost root write can leave an unresolved root reference. Do not manufacture
 a root to fill that gap or fail otherwise readable child spans.
 
-Pagination and missing-root representation remain **[blocked][tracking-contract]**. A cursor is not a causal watermark and is
-not the extension's local ingestion cursor.
+Lists use the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
+Missing-root representation remains **[blocked][tracking-contract]**. A cursor is
+not a causal watermark and is not the extension's local ingestion cursor.
 
 ### `span list` and `span get`
 
@@ -348,8 +349,8 @@ attribute names can support object correlation, but their full canonical key
 registry remains **[blocked][tracking-contract]**.
 
 The response uses the same span projection and `{items, nextCursor}` envelope
-as `span list`. A continuation must retain the same trace and filter document;
-a cursor from another scope is rejected. Its cursor contract remains **[blocked][tracking-contract]**.
+as `span list`. A client keeps the same trace and filter document for a
+continuation. The shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination) applies.
 
 ### `text get`
 

@@ -96,12 +96,14 @@ requiredness, payload fields, bounds, and any explicit conversion such as
 [`--limit`](./common-flags.md#--limit) and
 [`--cursor`](./common-flags.md#--cursor) with their shared definitions.
 
-A list invocation requests one page. The owning operation defines the result
-collection and continuation fields, cursor validity, ordering, and consistency
-under concurrent changes. Do not assume snapshot semantics or silently traverse
-all pages. Preserve the same list scope and filters when using a continuation.
-The new service pages propose `items` and `nextCursor`, both required, with
-`nextCursor: null` on the final page; any additional metadata is service-owned.
+A list invocation requests one page. Every list uses keyset pagination in
+descending primary-key order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination),
+so the first page holds the newest records and a refresh shows new records.
+The base64url last-key cursor does not expire, a malformed cursor returns `400`,
+and a list takes no snapshot. Do not silently traverse all pages. Preserve the
+same list scope and filters when using a continuation. The result holds `items`
+and `nextCursor`, both required, with `nextCursor: null` on the final page;
+the service owns any additional metadata.
 These options are not implemented universal flags, and commands that return a
 bounded catalogue or a single object do not inherit them automatically.
 

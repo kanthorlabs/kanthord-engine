@@ -117,7 +117,7 @@ Every list result is `{ "items": [...], "nextCursor": null | string }`:
 both fields are required; `items` contains at most `limit` records and
 `nextCursor: null` ends the traversal. An empty list is successful. Each call
 reads one page; there is no implicit unbounded traversal or polling loop.
-Cursor contracts remain **[blocked][scheduler-contract]**; pagination reserves no work.
+The shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination) applies; pagination reserves no work.
 
 Mutation requests carry the key in `Idempotency-Key`. As a **proposed durable
 request mapping**, the CLI also sends body `requestId` equal to `request_`
@@ -186,8 +186,9 @@ kanthord scheduler queue list <project-id> [--limit <count>] [--cursor <opaque>]
 `<project-id>` is required, has no default and maps to path `projectId`.
 [`--limit`](./common-flags.md#--limit) and
 [`--cursor`](./common-flags.md#--cursor) have the shared definitions. There are
-no other query fields or JSON body. Returns a page of `QueueEntry` records in priority
-descending, then entry identity ascending order. Held-out entries remain
+no other query fields or JSON body. The list returns a page of `QueueEntry`
+records in descending entry-identity order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
+This inspection order does not change queue selection. Held-out entries remain
 visible so a human can understand a wait. Reading changes no entry.
 
 ### `queue peek`
@@ -199,8 +200,8 @@ kanthord scheduler queue peek <project-id>
 The required positional input maps to path `projectId` and has no default.
 No query or body is accepted. Returns the required field
 `{ "entry": QueueEntry | null }`, with `null` for an empty queue. It reads
-the first entry of the same order and removes nothing, including when that
-entry is held out. It neither predicts a particular instance's compatible
+the first entry in priority descending, then entry identity ascending order,
+and removes nothing, including when that entry is held out. It neither predicts a particular instance's compatible
 selection nor reserves a node for a subsequent pull.
 
 ### Proposed `QueueEntry` result
@@ -309,9 +310,9 @@ kanthord scheduler execution list <project-id> [--limit <count>] [--cursor <opaq
 
 Required `<project-id>` maps to path `projectId`, with no default. Only the
 shared pagination query is accepted; no body. Returns a page of
-`ExecutionRecord` values, including live and ended executions. Proposed
-inspection order is `createdAt` descending, then `executionId` ascending for
-a stable tie-break, not a causal order. It changes no claim or count.
+`ExecutionRecord` values, including live and ended executions. The list orders
+by `executionId` descending under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
+This inspection order establishes no causal order. It changes no claim or count.
 
 ### `execution get`
 
@@ -473,8 +474,9 @@ kanthord scheduler observation-obligation list <project-id> [--limit <count>] [-
 
 Required `<project-id>` maps to path `projectId`, with no default. Only the
 shared pagination query is accepted; no body. Returns a page of
-`ObservationObligation` records. Proposed order is `acceptedAt` ascending,
-then `obligationId` ascending. This makes outstanding durable work visible
+`ObservationObligation` records in descending `obligationId` order under the
+shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
+This makes outstanding durable work visible
 without starting, retrying, completing or taking an observer lease.
 
 ### `observation-obligation get`

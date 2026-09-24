@@ -91,8 +91,10 @@ commands without `[L]` reject pagination options.
 - `BindingId`: `binding_<ulid>`, under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
 - `CredentialId`: `credential_<ulid>`, under the same ruling.
 - `Revision` and binding-set `version`: JSON safe integers returned by the
-  service, copied without arithmetic by the caller. Their initial values and lower bounds remain **[blocked][project-contract]**. A supplied revision/version
-  must identify a value the server issued. No floating point or numeric string.
+  service, copied without arithmetic by the caller. A new project starts at
+  binding-set version `0`; its first write names version `0` and commits version `1`.
+  A new binding starts at revision `1`. Version `0` and revision `1` are the lower
+  bounds. A supplied revision/version must identify a value the server issued. No floating point or numeric string.
 - `Timestamp`: JSON safe integer of Unix milliseconds in UTC.
 - `WorkerName`, `AgentName`, and provider name: nonempty exact natural-key
   strings from the relevant supported catalog, not prefixed IDs. Versioned
@@ -200,17 +202,16 @@ Inputs:
   default. Preserve the supplied value. Maps to body `name`. Name constraints remain **[blocked][project-contract]**; the client derives no slug or ID. Rename is a proposed convenience over the stored project name, not an
   already-declared lifecycle operation.
 - `list` has only the shared page and client options. No name filter, sort
-  order, or current-project inference is implied. List ordering and cursor
-  consistency must be declared in the contract.
+  override, or current-project inference is implied. Lists use descending
+  primary-key order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
 
 `create` and `rename` each send exactly `{ "name": <string> }`; there are no
 other request fields. Read commands have no body. Proposed project metadata is
 `id`, `name`, `bindingSetVersion`, and `createdAt`, with the scalar types above.
 `list.items` holds that metadata; `get` returns one project.
 
-Creation allocates a project identity and proposes an initially empty binding
-set. The server returns the initial version rather than making the client
-assume it is `0` or `1`. A mission belongs intrinsically to its project; it is
+Creation allocates a project identity and an empty binding set at version `0`.
+The server returns that version. A mission belongs intrinsically to its project; it is
 not a binding. Mission creation and rename concurrency remain **[blocked][project-contract]**.
 Rename keeps the same project identity and bindings.
 
@@ -233,15 +234,15 @@ Inputs:
   values rather than changing their meaning. Maps to repeated query `kind`.
   These are the four currently designed kinds, not a permanently closed set.
 - `--state <state>`: optional enum on `binding list`, proposed values
-  `current | removed | replaced | all`, default `current`; query `state`.
+  `current | removed | all`, default `current`; query `state`.
   Historical availability remains **[blocked][project-contract]**.
 - [`--file`](./common-flags.md#--file): required for `apply`; content is the
   complete `BindingSetWrite` object defined below. No patch, merge, or partial-set mode.
 
 `binding list` returns a page of binding metadata and current configuration.
 `binding get` returns one binding, its current revision, configuration, and
-proposed metadata `id`, `projectId`, `kind`, `resourceIdentity`, `createdAt`,
-optional `removedAt`, and optional `replacedBy`. `resourceIdentity` is a
+proposed metadata `id`, `projectId`, `name`, `kind`, `resourceIdentity`, `createdAt`,
+and optional `removedAt`. `resourceIdentity` is a
 server-derived normalized string and is absent for worker bindings. Kind and
 state filters, `limit`, and `cursor` are the only list query fields; the reused
 provider-account views add their kind constraint as described below. Ordinary
@@ -251,8 +252,8 @@ required enum value and must reject a wrong-kind target.
 `binding export` reads one consistent, complete current set and prints exactly
 the proposed `BindingSetWrite` shape, ready to save to a named JSON file and
 edit. It is not paginated and contains no secret material. It includes the
-version used by `apply`. Existing entries receive stable-in-this-document
-local keys and their IDs. Output size limits and snapshot consistency need
+version used by `apply`. The `bindings` object uses binding names as its keys,
+and references use binding-name strings. Output size limits and snapshot consistency need
 contracts; concatenating pages of `binding list` is not a substitute for this
 read. Shell redirection of this ordinary JSON is permitted.
 
@@ -271,34 +272,64 @@ are absent by default, and `null` is invalid unless a future contract explicitly
 permits it. Each object is closed except template- or platform-owned objects
 whose schemas are explicitly blocked below.
 
-- `version`: **required**, `Revision`-like safe integer holding the exact
-  binding-set version previously read. No automatic fetch-and-retry or force
-  override on a stale version.
-- `bindings`: **required**, array of `BindingEdit`; `[]` explicitly requests
-  removal of every current binding and succeeds only if all reference
-  constraints allow it. There is no default empty array.
+- `version`: **required**, nonnegative safe integer holding the exact
+  binding-set version that the client reads. No automatic fetch-and-retry or
+  force override on a stale version.
+- `bindings`: **required**, object keyed by binding name. A human chooses each
+  name, unique inside its project. A name holds 1 to 63 characters: a lower-case
+  letter first, then lower-case letters, digits and hyphens. `{}` explicitly
+  requests removal of every current binding and succeeds only if all reference
+  constraints allow it. There is no default empty object.
 
-Each `BindingEdit` contains:
+Each `BindingEdit` value contains only:
 
-- `key`: **required**, nonblank string, unique within this submission. It is a
-  document-local reference label, not a persisted entity identity or a worker
-  name. Length and character bounds await the request schema.
-- `id`: **optional**, existing current `BindingId` in this project. Use it to
-  preserve the identity when the resource is unchanged. No default. Mutually
-  exclusive with `replaces`.
-- `replaces`: **optional**, current `BindingId` in this project. It explicitly
-  identifies the predecessor of a replacement. No default; mutually exclusive
-  with `id`. Omitting both proposes a new binding. A predecessor cannot be
-  retained or replaced twice in the same set.
 - `kind`: **required**, enum `repository | worker | provider_account | source`.
-  An existing identity cannot change kind.
 - `config`: **required**, the kind-specific object below.
 
-Every reference between bindings is a proposed `BindingRef` object with
-**exactly one required member**: `bindingId` (`BindingId` retained in this
-submitted set), or `key` (nonblank string matching an entry's local `key`).
-There is no default and no revision field. References never identify a
-different project. The local-key allocation and repointing protocol remains **[blocked][project-contract]**.
+Every reference between bindings is a binding-name string of the same
+submission, for example `"providerAccount": "openai-atlas"`. A reference holds
+no revision and names no different project. The [binding-set write ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-write-of-a-binding-set)
+defines the comparison with the stored current set and the resolution of
+references to stored identities.
+
+This example uses the proposed kind-specific fields below:
+
+```json
+{
+  "version": 0,
+  "bindings": {
+    "kanthord-repo": {
+      "kind": "repository",
+      "config": {
+        "available": true,
+        "platform": "github",
+        "address": "git@github.com:kanthorlabs/kanthord.git",
+        "strategy": { "baseBranch": "main", "actions": [] },
+        "credentials": {}
+      }
+    },
+    "openai-atlas": {
+      "kind": "provider_account",
+      "config": {
+        "available": true,
+        "provider": "openai",
+        "account": "org-atlas",
+        "credential": "credential_01J8Z3N5K7Q2W4E6R8T0Y2V4X6",
+        "default": true
+      }
+    },
+    "general-main": {
+      "kind": "worker",
+      "config": {
+        "available": true,
+        "worker": "general@1",
+        "instanceCount": 1,
+        "entries": [{ "agent": "swe@1", "providerAccount": "openai-atlas" }]
+      }
+    }
+  }
+}
+```
 
 Common to every `config`:
 
@@ -345,8 +376,8 @@ Each proposed `PolicyAction` contains:
   wire enum. The accepted action set remains **[blocked][project-contract]**.
 - `follows`: **required**, one of two proposed closed shapes, with no default:
   - `type`: required enum value `assessment_passed`, with no other members.
-  - `type`: required enum value `action_end_state`; required `binding` of type
-    `BindingRef`; required nonblank string `actionKey`; no other members. This
+  - `type`: required enum value `action_end_state`; required `binding` as a
+    binding-name string; required nonblank string `actionKey`; no other members. This
     identifies another configured action of the same node. Dangling references
     and invalid dependency cycles fail validation.
 - `expectedEndState`: **required**, platform-owned nonempty state string; no
@@ -379,7 +410,7 @@ A worker binding's `config` adds:
 Each `AgentEntry` contains:
 
 - `agent`: **required**, exact `AgentName` declared by this worker; no default.
-- `providerAccount`: **optional**, `BindingRef` to a provider-account binding;
+- `providerAccount`: **optional**, binding-name string for a provider-account binding;
   absent means use the project's default account for the provider named by
   this agent's template default configuration. It does not mean choose any
   available account.
@@ -424,8 +455,8 @@ binding identity and its rotation counter. Proposed `config` fields are:
 
 - `platform`: **required**, supported platform string; no default. Only GitHub
   has a first-version platform design.
-- `repository`: **required for the proposed GitHub source**, `BindingRef` to
-  its repository binding; no default. This field and association are a wire
+- `repository`: **required for the proposed GitHub source**, binding-name string
+  for its repository binding; no default. This field and association are a wire
   proposal pending the source schema, not an established payload contract.
 - `webhookSecretRotation`: **required**, integer, no default. Proposed domain
   is a nonnegative safe integer; an initial counter and permitted increment
@@ -445,30 +476,30 @@ transaction. The target rules are:
 - One binding per repository, provider account, and delivery source; any
   number per worker. Resource identity is derived from configuration and
   normalized across SSH/HTTPS addresses of the same repository.
-- No reference to an absent, removed, replaced, wrong-kind, or other-project
-  binding. Replacements must repoint every dependent binding in the same edit.
-  Constraints involving references owned by other services need an explicit
-  contract; the CLI must not silently rewrite mission nodes.
-- Unchanged configuration keeps its revision. Changed configuration of the
-  same resource, including availability or credential reference, creates a
-  revision while preserving identity. Canonical JSON property reordering
-  creates no revision. Proposed document-local references are resolved to
-  server IDs before this comparison and storage; changing a local `key` alone
-  must not revise a binding. Read results carry persistent binding references,
-  not transient submission keys.
-- A changed resource gets a replacement identity. The worker-name replacement rule remains **[blocked][project-contract]**. An entry using `id` cannot disguise a replacement.
-- Omitted current bindings are removed and retain their rows. A removed
-  binding has no successor; a replacement records its successor. Retention remains **[blocked][project-contract]**.
+- The write refuses a reference to an absent, removed, wrong-kind, or other-project
+  binding. A reference names a binding in the submission. Constraints involving
+  references that other services own need an explicit contract; the CLI does not
+  silently rewrite mission nodes.
+- The [binding-set write ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-write-of-a-binding-set)
+  defines identity and revision comparison by binding name. The transaction
+  resolves references to identities before configuration comparison and storage.
+  Ordinary read results carry persistent binding references; export uses names.
+- The write refuses a change to the worker of an existing worker binding under
+  the same binding name, under the [validation ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#validation).
+  A human removes the old binding and adds a binding with another name in the
+  same edit.
+- Removal keeps the binding rows. Retention remains **[blocked][project-contract]**.
 - Every committed write increments the binding-set version, even when the
   submitted set is identical. Empty and no-change submissions are still
   mutations, not read or validation commands.
 
 Proposed result fields are `projectId`, the new `bindingSetVersion`, `bindings`
-(current binding metadata/configurations), and `changes`. Each `changes` item
-has required `kind` (`created | revised | replaced | removed | unchanged`),
-required `bindingId`, and optional `previousBindingId` for a replacement.
-An optional `key` echoes the submission label for an allocated binding. Exact
-result schemas and stable mapping of local keys require contract review.
+(an object keyed by binding name with current binding metadata/configurations),
+and `changes`. Each `bindings` value includes its `id`, so the result maps each
+current binding name to its identity. Each `changes` item has required `kind`
+(`created | revised | removed | unchanged`) and required `bindingId`.
+A resource change produces a removal and a creation. Exact result schemas
+require contract review.
 
 Use this one write operation to add repositories, add workers, configure
 agents, allocate provider accounts, change repository strategy, switch a

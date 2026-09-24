@@ -209,13 +209,13 @@ Disabled-source and incompatible-create statuses remain **[blocked][intake-contr
 
 **Request and validation:** no body or positional argument. Accept only the
 source binding and kind filters and shared pagination. Validate identities,
-closed-set values and cursor scope; the filters select stored subscriptions,
+closed-set values and the cursor format; the filters select stored subscriptions,
 not live acquisitions alone.
 
 **Effects and idempotency:** read one bounded page and change nothing. Return
 `{items, nextCursor}` using the subscription projection; the
 [pagination conventions](./other.md#pagination) apply. This read takes no
-idempotency key. Pagination remains **[blocked][intake-contract]**.
+idempotency key. The shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination) applies.
 
 **Statuses:** `200`, including an empty page; `400` for invalid input or cursor.
 An empty result means no matching stored subscriptions, not a failed request.
@@ -331,11 +331,11 @@ The list returns metadata only. No output contains a credential.
 
 **Request and validation:** no positional argument or body. Accept the
 subscription and delivery status filters and shared pagination. Validate the
-subscription identity, the closed delivery status set and cursor scope.
+subscription identity, the closed delivery status set and the cursor format.
 
 **Effects and idempotency:** return one bounded `{items, nextCursor}` page of
 delivery projections. Read only; take no idempotency key. Parked deliveries
-remain visible; filtering does not retry or acknowledge one. Pagination remains **[blocked][intake-contract]**; read bounds remain **[blocked][intake-bounds]**.
+remain visible; filtering does not retry or acknowledge one. The shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination) applies; read bounds remain **[blocked][intake-bounds]**.
 
 **Statuses:** `200`, including an empty page; `400` for invalid input or cursor.
 No transport failure becomes an empty successful page.

@@ -232,7 +232,8 @@ kanthord worker list [--limit <count>] [--cursor <opaque>]
 No positional arguments or filters. Required token: human JWT. Request:
 `params: {}`, `query: { limit, cursor? }`, no body. `limit` and `cursor` use the
 shared types, requiredness, defaults and validation. Proposed HTTP `200` returns
-one page of worker summaries in exact-name ascending order. Each item contains
+one page of worker summaries in descending primary-key order by exact name,
+under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination). Each item contains
 `name: WorkerName`, `host: "kanthord" | "external-harness"`,
 `declaredNodeStates: string[]` and `requiredNodeFormat: string[]`.
 
@@ -331,9 +332,10 @@ kanthord worker instance list [--project <project-id>] [--binding <binding-id>] 
 | [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Shared pagination flags                                                       | Shared query mapping.                                                                                                    |
 
 Required token: human JWT. Empty params, absent body. Proposed HTTP `200` returns
-one page of the instance records defined below, ordered by runtime identity for
-pagination only. No ULID ordering is a lifecycle chronology. This is a live
-inventory, not a persistent history; subsequent pages may observe pool changes.
+one page of the instance records defined below in descending runtime-identity
+order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
+No ULID ordering is a lifecycle chronology. This is a live inventory, not a
+persistent history; subsequent pages reflect pool changes.
 
 ### `instance get <runtime-identity>`
 
@@ -446,8 +448,9 @@ of a registered external-harness instance. Scheduler must establish that the
 execution is the caller's live claim. A steps claim cannot make the action tool
 eligible by naming another execution.
 
-Proposed HTTP `200` returns a page of tools available to that execution in name
-order. Each item contains `name: ToolName`, `description: string`,
+Proposed HTTP `200` returns a page of tools available to that execution in
+descending primary-key order by name under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
+Each item contains `name: ToolName`, `description: string`,
 `inputSchema: object`, `outputSchema: object`, and `mutation: boolean`. Assessment-state filtering remains **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service). Listing grants no authority; invocation repeats all admission checks.
 
 ### `mcp tool call <tool-name> --file <path>`
