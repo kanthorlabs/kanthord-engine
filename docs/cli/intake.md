@@ -409,7 +409,7 @@ delivery and bounds retention of resolved deliveries. It promises durability
 for accepted deliveries, not receipt of every update a platform produces.
 
 The [Gateway delivery ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#delivery-bytes-and-body-limits) requires `/hooks/*` support and exact bytes without JSON validation.
-Receipt implementation remains **blocked** under the [HANDOFF command table item](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#architecture).
+Receipt implementation remains **blocked** under the [HANDOFF Intake Service item](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#intake-service).
 
 The receipt operation and verification failure contract remain **[blocked][intake-contract]**.
 Scheduler delivery admission is a separate service operation, not this

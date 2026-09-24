@@ -170,8 +170,6 @@ listed by a command. Read requests have no body. Every route in this table is
 | `observation-obligation list <project-id> [--limit <count>] [--cursor <opaque>]` | `scheduler.observation-obligation.list` **[blocked][scheduler-contract]** | `GET /api/scheduler/project/:projectId/observation-obligation`               | `human`; read                                                                                                                                          |
 | `observation-obligation get <project-id> <obligation-id>`                        | `scheduler.observation-obligation.get` **[blocked][scheduler-contract]**  | `GET /api/scheduler/project/:projectId/observation-obligation/:obligationId` | `human`; read                                                                                                                                          |
 
-Operation adoption remains **blocked** under the [HANDOFF command table item](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#architecture).
-
 These read operations are proposed operational visibility, not an existing
 authorization to inspect service tables directly. `claim get` provides a
 machine-scoped view of the claim held in an execution record; it introduces
