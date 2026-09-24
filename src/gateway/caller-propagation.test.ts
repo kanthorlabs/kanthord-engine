@@ -28,7 +28,7 @@ test("one direct client forwards each call's identity without retaining a previo
     assert.ok(result.type === OperationResultType.Completed);
     assert.deepEqual(result.data, {
       kind: IdentityKind.Human,
-      accountId: username,
+      sub: username,
       name: username,
     });
     for (const options of [{}, { identity: { ...identity } }]) {

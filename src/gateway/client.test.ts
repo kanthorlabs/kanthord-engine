@@ -1,12 +1,45 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Diagnostic } from "../kernel/errors.ts";
+import { OperationResultType } from "../kernel/operation.ts";
 import { packageVersion } from "../kernel/version.ts";
 import { gatewayOperations } from "./contract.ts";
 import { httpClient, readServerVersion } from "./client.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const VERSION_UNAVAILABLE = "gateway.client.version_unavailable";
+
+test("verification client preserves JWT business properties and rejects aliases and metadata", async () => {
+  const claims = { kind: "human", sub: " ulrich ", name: " Ulrich " };
+  const input = { params: {}, query: {}, body: null };
+  const client = httpClient(
+    gatewayOperations,
+    "http://localhost",
+    undefined,
+    async () => Response.json(claims),
+  );
+  const result = await client.verify(input);
+  assert.ok(result.type === OperationResultType.Completed);
+  assert.deepEqual(result.data, claims);
+
+  const invalidResponses = [
+    { kind: claims.kind, accountId: claims.sub, name: claims.name },
+    { ...claims, accountId: claims.sub },
+    { ...claims, iat: 0, exp: 1, jti: "session" },
+  ];
+  for (let index = 0; index < invalidResponses.length; index++) {
+    const invalidClient = httpClient(
+      gatewayOperations,
+      "http://localhost",
+      undefined,
+      async () => Response.json(invalidResponses[index]),
+    );
+    assert.deepEqual(await invalidClient.verify(input), {
+      type: OperationResultType.Indeterminate,
+      idempotencyKey: undefined,
+    });
+  }
+});
 
 test("server version is the package version served through the OpenAPI operation", async (t) => {
   const fixture = await gatewayFixture(t);

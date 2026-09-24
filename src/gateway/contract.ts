@@ -48,7 +48,7 @@ export const gatewayOperations = {
     input: emptyInput,
     output: z.strictObject({
       kind: z.literal(IdentityKind.Human),
-      accountId: z.string().min(1).max(MAX_HUMAN_USERNAME_LENGTH),
+      sub: z.string().min(1).max(MAX_HUMAN_USERNAME_LENGTH),
       name: z
         .string()
         .min(1)
@@ -56,7 +56,7 @@ export const gatewayOperations = {
         .refine((value) => !!value.trim()),
     }),
     description:
-      "Verify the human bearer JWT and return its authenticated identity without returning the token.",
+      "Verify the human bearer JWT and return its kind, sub and name claims without aliases, the token or token metadata.",
   },
   openapi: {
     ...base,

@@ -205,7 +205,7 @@ class Run:
         self.env["E2E_PORT"] = str(port)
         prepared = self.helper("""
           import { loadConfig } from './dist/config/index.js';
-          import { writePrivate } from './dist/shared/files.js';
+          import { writePrivate } from './dist/kernel/files.js';
           import { randomBytes } from 'node:crypto';
           import { stringify } from 'yaml';
           const file = process.env.KANTHORD_CONFIG;
@@ -246,7 +246,7 @@ class Run:
         observations = []
         for name, token, username in [("default", default, "kanthorlabs"), ("explicit", custom, self.tag)]:
             status, body = self.request("/api/auth/verify", token)
-            expected = {"kind": "human", "accountId": username, "name": username}
+            expected = {"kind": "human", "sub": username, "name": username}
             require(status == 200 and json.loads(body) == expected, "Valid token API verification failed")
             cli = self.verify(token)
             require(cli.returncode == 0 and json.loads(cli.stdout) == expected, "Valid token CLI verification failed")
@@ -277,13 +277,14 @@ class Run:
             resolved = self.verify(None)
         finally:
             del self.env["KANTHORD_TOKEN"]
-        require(resolved.returncode == 0 and json.loads(resolved.stdout) == {"kind": "human", "accountId": self.tag, "name": self.tag}, "Environment token verification failed")
+        require(resolved.returncode == 0 and json.loads(resolved.stdout) == {"kind": "human", "sub": self.tag, "name": self.tag}, "Environment token verification failed")
         for name in ["jwt", "login", "logout"]:
             removed = self.command(["gateway", name])
             require(removed.returncode == 1 and not removed.stdout, "Removed gateway command remains available")
         require(not (self.home / "config/kanthord/cli.yaml").exists(), "CLI unexpectedly saved credentials")
         status, contract = self.request("/api/openapi/gateway/verify.yaml")
         require(status == 200 and "gateway.verify" in contract and "x-access-policy: human" in contract and "bearerAuth:" in contract, "Published verification contract missing")
+        require("sub:" in contract and "name:" in contract and "accountId" not in contract, "Published verification contract must preserve JWT property names")
         worker_status, worker_contract = self.request("/api/openapi/worker/register.yaml")
         require(worker_status == 200 and "worker.register" in worker_contract, "Published worker registration contract missing")
         root_status, root_contract = self.request("/api/openapi.yaml")

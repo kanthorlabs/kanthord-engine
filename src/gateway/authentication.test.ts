@@ -60,7 +60,7 @@ test("issuance preserves human subjects and names, and generates fresh machine s
   assert.equal(response.status, HttpStatus.OK);
   assert.deepEqual(await response.json(), {
     kind: IdentityKind.Human,
-    accountId: HUMAN_USERNAME,
+    sub: HUMAN_USERNAME,
     name: HUMAN_NAME,
   });
   const rechecked = await fixture.gateway.authentication.recheck(

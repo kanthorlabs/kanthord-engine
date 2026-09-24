@@ -4,8 +4,8 @@ pathItem:
     operationId: gateway.verify
     tags:
       - gateway
-    description: Verify the human bearer JWT and return its authenticated identity
-      without returning the token.
+    description: Verify the human bearer JWT and return its kind, sub and name
+      claims without aliases, the token or token metadata.
     x-access-policy: human
     x-timeout-ms: 10000
     x-mutation: false
@@ -66,7 +66,7 @@ components:
         kind:
           type: string
           const: human
-        accountId:
+        sub:
           type: string
           minLength: 1
           maxLength: 64
@@ -76,6 +76,6 @@ components:
           maxLength: 64
       required:
         - kind
-        - accountId
+        - sub
         - name
       additionalProperties: false

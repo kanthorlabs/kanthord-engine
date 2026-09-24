@@ -32,7 +32,7 @@ export function registerGatewayOperations(
     if (!isHumanIdentity(caller.identity)) throw unauthorized();
     return {
       kind: caller.identity.kind,
-      accountId: caller.identity.accountId,
+      sub: caller.identity.accountId,
       name: caller.identity.name,
     };
   });

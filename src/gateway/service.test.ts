@@ -571,7 +571,7 @@ test("client disconnect reaches waiting handlers", async (t) => {
   await request;
 });
 
-test("the verification API returns only the authenticated human identity and requires a bearer token", async (t) => {
+test("the verification API returns only JWT-named business properties and requires a bearer token", async (t) => {
   const fixture = await gatewayFixture(t);
   const client = httpClient(gatewayOperations, fixture.endpoint, fixture.token);
   const result = await client.verify({ params: {}, query: {}, body: null });
@@ -579,7 +579,7 @@ test("the verification API returns only the authenticated human identity and req
   if (result.type === OperationResultType.Completed)
     assert.deepEqual(result.data, {
       kind: "human",
-      accountId: KANTHORD_AUTH_USERNAME,
+      sub: KANTHORD_AUTH_USERNAME,
       name: KANTHORD_AUTH_USERNAME,
     });
   for (const headers of [{}, { Authorization: "Bearer invalid" }]) {
