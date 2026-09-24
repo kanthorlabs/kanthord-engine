@@ -27,9 +27,11 @@ business effect.
 **Proposed:** every command below, every command spelling, operation identifier,
 route, field name, response projection, HTTP status and numeric value in this
 page's contract. Design vocabulary and ownership requirements constrain these
-proposals; they do not establish an implemented wire contract. **Open** marks a
-decision that the design does not make, not a default or permission to accept
-arbitrary input. The dated source snapshot above is the only implemented claim.
+proposals; they do not establish an implemented wire contract.
+Blocked contracts link their [HANDOFF items][intake-contract] and supply no implicit defaults. The dated source snapshot above is the only implemented claim.
+
+[intake-contract]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#intake-service
+[intake-bounds]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery
 
 ## Command table
 
@@ -42,16 +44,16 @@ model. A machine token authorizes no Intake command. An operation serves one
 caller kind, so any future machine read needs a separate operation rather than
 a second caller kind on these operations.
 
-| Command after `kanthord intake`          | Proposed operation            | Proposed HTTP route                                     | Access  | Output and effects                                                                                                        |
-| ---------------------------------------- | ----------------------------- | ------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `subscription create`                    | `intake.subscription.create`  | `POST /api/intake/subscription`                         | `human` | Mutation; creates one subscription per source binding and kind, or returns the existing subscription.                     |
-| `subscription list`                      | `intake.subscription.list`    | `GET /api/intake/subscription`                          | `human` | Bounded page, optionally filtered by source binding and kind.                                                             |
-| `subscription get <subscription-id>`     | `intake.subscription.get`     | `GET /api/intake/subscription/:subscriptionId`          | `human` | Desired state, observed state and reason, kind, source binding and kind-specific state.                                   |
-| `subscription enable <subscription-id>`  | `intake.subscription.enable`  | `POST /api/intake/subscription/:subscriptionId/enable`  | `human` | Mutation; records desired state `enabled` and returns the current observed state without waiting.                         |
-| `subscription disable <subscription-id>` | `intake.subscription.disable` | `POST /api/intake/subscription/:subscriptionId/disable` | `human` | Mutation; records desired state `disabled` and returns the current observed state without waiting.                        |
-| `subscription retire <subscription-id>`  | `intake.subscription.retire`  | `POST /api/intake/subscription/:subscriptionId/retire`  | `human` | Mutation; records retirement, with observed state moving through `retiring`; preserves kind-specific state for the audit. |
-| `delivery list`                          | `intake.delivery.list`        | `GET /api/intake/delivery`                              | `human` | Bounded page, optionally filtered by subscription and delivery status.                                                    |
-| `delivery get <delivery-id>`             | `intake.delivery.get`         | `GET /api/intake/delivery/:deliveryId`                  | `human` | One delivery and its verification result, handoff progress and recorded disposition; payload inclusion is Open.           |
+| Command after `kanthord intake`          | Proposed operation                                           | Proposed HTTP route                                     | Access  | Output and effects                                                                                                                             |
+| ---------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `subscription create`                    | `intake.subscription.create` **[blocked][intake-contract]**  | `POST /api/intake/subscription`                         | `human` | Mutation; creates one subscription per source binding and kind, or returns the existing subscription.                                          |
+| `subscription list`                      | `intake.subscription.list` **[blocked][intake-contract]**    | `GET /api/intake/subscription`                          | `human` | Bounded page, optionally filtered by source binding and kind.                                                                                  |
+| `subscription get <subscription-id>`     | `intake.subscription.get` **[blocked][intake-contract]**     | `GET /api/intake/subscription/:subscriptionId`          | `human` | Desired state, observed state and reason, kind, source binding and kind-specific state.                                                        |
+| `subscription enable <subscription-id>`  | `intake.subscription.enable` **[blocked][intake-contract]**  | `POST /api/intake/subscription/:subscriptionId/enable`  | `human` | Mutation; records desired state `enabled` and returns the current observed state without waiting.                                              |
+| `subscription disable <subscription-id>` | `intake.subscription.disable` **[blocked][intake-contract]** | `POST /api/intake/subscription/:subscriptionId/disable` | `human` | Mutation; records desired state `disabled` and returns the current observed state without waiting.                                             |
+| `subscription retire <subscription-id>`  | `intake.subscription.retire` **[blocked][intake-contract]**  | `POST /api/intake/subscription/:subscriptionId/retire`  | `human` | Mutation; records retirement, with observed state moving through `retiring`; preserves kind-specific state for the audit.                      |
+| `delivery list`                          | `intake.delivery.list` **[blocked][intake-contract]**        | `GET /api/intake/delivery`                              | `human` | Bounded page, optionally filtered by subscription and delivery status.                                                                         |
+| `delivery get <delivery-id>`             | `intake.delivery.get` **[blocked][intake-contract]**         | `GET /api/intake/delivery/:deliveryId`                  | `human` | One delivery and its verification result, handoff progress and recorded disposition; payload inclusion remains **[blocked][intake-contract]**. |
 
 Every command declares a `unary` lifetime: one request and one answer. A
 subscription of kind `stream` does not turn its management command into a
@@ -116,14 +118,14 @@ headings. Intake-specific applicability and requirements are:
 | [`--idempotency-key`](./common-flags.md#--idempotency-key)                       | Create, enable, disable and retire only.                                                                                                                            |
 | [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | The subscription and delivery lists only.                                                                                                                           |
 
-| Argument or flag             | Requiredness and type                                              | Default                          | Validation and request mapping                                                                                                     |
-| ---------------------------- | ------------------------------------------------------------------ | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `<subscription-id>`          | Required subscription identity on get, enable, disable and retire. | None                             | Map to `params.subscriptionId`; validate the declared entity prefix and canonical ULID. Prefix is Open.                            |
-| `<delivery-id>`              | Required delivery identity on get.                                 | None                             | Map to `params.deliveryId`; this names an Intake delivery, not a platform delivery identity or a Scheduler record. Prefix is Open. |
-| `--source-binding <id>`      | Optional source binding identity on `subscription list`.           | Absent: no source binding filter | Send `query.sourceBindingId`; Project owns the prefix declaration.                                                                 |
-| `--kind <kind>`              | Optional subscription kind on `subscription list`.                 | Absent: all kinds                | Send `query.kind`; closed set `webhook`, `poll`, `stream`.                                                                         |
-| `--subscription <id>`        | Optional subscription identity on `delivery list`.                 | Absent: no subscription filter   | Send `query.subscriptionId`; use the subscription identity scalar.                                                                 |
-| `--status <delivery-status>` | Optional delivery status on `delivery list`.                       | Absent: all statuses             | Send `query.status`; closed set `pending`, `dispatched`, `accepted`, `refused`, `parked`.                                          |
+| Argument or flag             | Requiredness and type                                              | Default                          | Validation and request mapping                                                                                       |
+| ---------------------------- | ------------------------------------------------------------------ | -------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `<subscription-id>`          | Required subscription identity on get, enable, disable and retire. | None                             | Map to `params.subscriptionId`. Prefix validation remains **[blocked][intake-contract]**.                            |
+| `<delivery-id>`              | Required delivery identity on get.                                 | None                             | Map to `params.deliveryId`; this names an Intake delivery. Prefix validation remains **[blocked][intake-contract]**. |
+| `--source-binding <id>`      | Optional source binding identity on `subscription list`.           | Absent: no source binding filter | Send `query.sourceBindingId`; Project owns the prefix declaration.                                                   |
+| `--kind <kind>`              | Optional subscription kind on `subscription list`.                 | Absent: all kinds                | Send `query.kind`; closed set `webhook`, `poll`, `stream`.                                                           |
+| `--subscription <id>`        | Optional subscription identity on `delivery list`.                 | Absent: no subscription filter   | Send `query.subscriptionId`; use the subscription identity scalar.                                                   |
+| `--status <delivery-status>` | Optional delivery status on `delivery list`.                       | Absent: all statuses             | Send `query.status`; closed set `pending`, `dispatched`, `accepted`, `refused`, `parked`.                            |
 
 Supplied filters combine by AND. A filter grants no authority. An omitted
 optional filter stays absent rather than becoming `null`. The commands follow
@@ -135,16 +137,13 @@ and change no client or server configuration.
 Opaque entity identities have the form `<prefix>_<ulid>`. Validation uses the
 [shared identity scalar](../../src/kernel/identity.ts) and checks the exact
 entity prefix and canonical uppercase ULID; a bare ULID or another kind's
-prefix is invalid. The implementation sibling of the Intake Service declares
-the subscription and delivery prefixes; both remain **Open**. This follows the
-[HANDOFF Project binding-prefix item](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#project-service)
-and [Worker runtime-prefix item](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service):
-a required identity does not license the CLI to invent its prefix.
+prefix is invalid.
+Subscription and delivery prefixes remain **blocked** under [HANDOFF Intake Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#intake-service).
+A source binding uses `binding_<ulid>` under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
 
 A platform delivery identity and a webhook registration identity retain their
 protocol-defined representations, not an invented entity prefix. Checkpoint
-and resume position representations belong to the platform transport contract
-and remain Open. Received time follows the
+and resume position representations remain **[blocked][intake-contract]**. Received time follows the
 [shared identity and time rules](./other.md#shared-identity-and-time-rules).
 Handoff attempt count is a nonnegative safe JSON integer. Neither received time
 nor a ULID establishes causal order.
@@ -162,12 +161,12 @@ shared file rules apply. The adopted schema must be closed, including each
 kind-specific object; its missing field names block implementation rather than
 permit arbitrary JSON.
 
-| File field                           | Requiredness and type                                          | Default                                        | Validation and meaning                                                                                                             |
-| ------------------------------------ | -------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `sourceBindingId`                    | Required source binding identity.                              | None                                           | Must resolve to a source binding of the Project Service. The binding determines the project.                                       |
-| `kind`                               | Required enum string.                                          | None                                           | Closed set `webhook`, `poll`, `stream`; selects the acquisition kind.                                                              |
-| `desiredState`                       | Optional enum string; omission behavior Open.                  | Open; candidate `disabled`                     | Closed set `enabled`, `disabled`; rejection of `enabled` under a disabled source binding is Open.                                  |
-| Kind-specific object; wire name Open | Object selected by `kind`; exact requiredness and fields Open. | Open; no implicit endpoint, interval or target | The poll endpoint and interval, stream target and any webhook registration configuration need declared field names and validation. |
+| File field           | Requiredness and type                                     | Default                        | Validation and meaning                                                                                                                                                         |
+| -------------------- | --------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sourceBindingId`    | Required source binding identity.                         | None                           | Must resolve to a source binding of the Project Service. The binding determines the project.                                                                                   |
+| `kind`               | Required enum string.                                     | None                           | Closed set `webhook`, `poll`, `stream`; selects the acquisition kind.                                                                                                          |
+| `desiredState`       | Optional enum string                                      | **[blocked][intake-contract]** | Closed set `enabled`, `disabled`; omission and disabled-source admission await the state contract.                                                                             |
+| Kind-specific object | Object selected by `kind`; **[blocked][intake-contract]** | No implicit endpoint or target | The poll interval is 60 seconds. Other configuration fields remain **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#intake-service)**. |
 
 The file accepts no credential, acquisition grant, verification secret,
 verification result, observed state, checkpoint, resume position, platform
@@ -182,22 +181,14 @@ All request and response shapes and HTTP statuses in this section are
 **Proposed**. Mutations return after recording their own effect, not after
 acquisition succeeds. The subscription read projection contains
 `subscriptionId`, `sourceBindingId`, `kind`, `desiredState`, `observedState`, and
-`observedStateReason`. A reason explains a failed acquisition; the representation
-of no reason remains Open. The kind-specific state contains
-`registrationIdentity` for a webhook, `checkpoint` for a poll, or
-`resumePosition` for a stream. Their protocol schemas and representations
-before first acquisition remain Open; they expose no acquisition material.
+`observedStateReason`. The kind-specific state contains `registrationIdentity` for a webhook, `checkpoint` for a poll, or `resumePosition` for a stream.
+Reason and protocol state schemas remain **[blocked][intake-contract]**; they expose no acquisition material.
 
 ### `subscription create`
 
 **Request and validation:** send the file object described above. Validate the
 source binding and the kind-specific configuration before creating the record.
-**Open:** decide whether an omitted `desiredState` defaults to `disabled`, the
-candidate value; the design states that a human sets the desired state.
-Command-time rejection of an enabled request under a disabled source binding
-is also Open, with validation failure as the candidate. The design requires
-source binding disablement to revoke the grant and disable every subscription
-under that binding; it does not decide command-time rejection.
+Desired-state omission and disabled-source admission remain **[blocked][intake-contract]**.
 
 **Effects and idempotency:** create one subscription for one source binding and
 one subscription kind. The pair is the proposed natural key, following the
@@ -211,11 +202,8 @@ acquisition grant and registers or opens the acquisition afterwards.
 
 **Response and statuses:** return the subscription projection with HTTP `201`
 for creation or `200` for the existing subscription. Invalid fields receive
-`400`; an unknown source binding receives `404`. **Open:** rejection of an
-enabled request under a disabled source binding, with `400` as the candidate
-status. Conflict handling for different configuration
-under an existing natural key remains Open; an ordinary repeat is not a
-uniqueness error. Shared authentication and replay failures apply below.
+`400`; an unknown source binding receives `404`.
+Disabled-source and incompatible-create statuses remain **[blocked][intake-contract]**. Shared authentication and replay failures apply below.
 
 ### `subscription list`
 
@@ -227,8 +215,7 @@ not live acquisitions alone.
 **Effects and idempotency:** read one bounded page and change nothing. Return
 `{items, nextCursor}` using the subscription projection; the
 [pagination conventions](./other.md#pagination) apply. This read takes no
-idempotency key. Ordering and consistency under concurrent reconciliation
-remain Open; a continuation implies no frozen snapshot.
+idempotency key. Pagination remains **[blocked][intake-contract]**.
 
 **Statuses:** `200`, including an empty page; `400` for invalid input or cursor.
 An empty result means no matching stored subscriptions, not a failed request.
@@ -250,10 +237,8 @@ an acquisition stays active after the read.
 ### `subscription enable <subscription-id>`
 
 **Request and validation:** use `params.subscriptionId`, with no query or body.
-Validate the identity and subscription. **Open:** decide whether to reject an
-enable request under a disabled source binding at command time; validation
-failure is the candidate. Source binding disablement revokes the grant and
-disables every subscription under it, but does not settle this admission rule.
+Validate the identity and subscription.
+Disabled-source admission remains **[blocked][intake-contract]**.
 
 **Effects and idempotency:** set desired state to `enabled` and return at once
 with the recorded desired state and current observed state. The command never
@@ -268,8 +253,7 @@ the latest state.
 
 **Statuses:** `200` with `subscriptionId`, `desiredState`, `observedState` and
 `observedStateReason`; `400` for invalid input; `404` for an unknown subscription.
-**Open:** rejection under a disabled source binding, with `400` as the candidate
-status.
+Disabled-source status remains **[blocked][intake-contract]**.
 
 ### `subscription disable <subscription-id>`
 
@@ -306,8 +290,7 @@ position for the audit; retirement deletes neither those records nor unresolved
 deliveries. The command does not wait for platform cleanup.
 
 **Statuses:** `200` with the subscription projection, `400` for invalid input,
-or `404` for an unknown subscription. The final retirement representation,
-interaction with desired state, and later create/enable admission remain Open.
+or `404` for an unknown subscription. Retirement semantics remain **[blocked][intake-contract]**.
 There is no invented `retired` observed state in the closed set.
 
 ### Reconciler and acquisition grant boundary
@@ -319,19 +302,21 @@ registration result requires a read of platform registrations before any retry,
 so a lost answer creates no second registration. A poll checkpoint advances
 only with the commit that stores every delivery of the batch.
 
-The Intake Service requests acquisition under its own service identity through
-Project operations, not through a store read or the human's JWT. Acquisition
-grant kinds are `webhook-register`, `poll`, `stream-open`; they are not the
-subscription kind enum. A grant serves one session of one subscription and
-ends with the session, source binding disablement, credential-record rotation,
-or its maximum lifetime. The Project Service records the grant and owns its
-scope, lifetime and revocation.
+The Intake Service calls `project.acquisition_grant` through the direct adapter with its own service identity and the `service` policy.
+Grant kinds are `webhook-register`, `poll` and `stream-open`; they differ from the subscription kind enum.
+A grant serves one subscription session and has a maximum lifetime of 24 hours.
+Session end, binding disablement or removal, credential rotation and expiry end the grant.
+The [acquisition grant ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-acquisition-grant) owns its record and revocation.
+The reconciler holds the grant and material in memory and calls `project.acquisition_grant_end` when the session ends.
+Project calls `intake.grant_revoked` with `service` access; the handler closes acquisition, drops material and answers 204.
+The [Intake acquisition ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/intake-service.impl.md#the-acquisition-grant) governs the next reconciliation.
 
 A revoked grant makes the Intake Service close the acquisition at once and set
 observed state `failed` with a reason. Revocation for source binding disablement
 disables every subscription under that binding. The CLI cannot override the
-grant or reset the observed state. Service identity minting and propagation
-remain an implementation gate, not permission to impersonate the human.
+grant or reset the observed state.
+The composition root mints the service identity; direct calls carry it in `ClientOptions.identity`.
+The [service identity ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/intake-service.impl.md#the-service-identity) grants no human impersonation.
 
 ## Delivery commands
 
@@ -339,9 +324,8 @@ These **Proposed** reads inspect Intake-owned handoff progress. They create no
 Scheduler obligation and perform no business effect. The delivery projection
 contains `deliveryId`, `subscriptionId`, `platformDeliveryId`, `receivedAt`,
 `verificationResult`, `status`, `disposition`, and `handoffAttemptCount`.
-Verification-result schema and the representation of an unrecorded disposition
-remain Open. Whether get returns the bounded payload is also Open; listing
-returns metadata only. No output contains a credential.
+Delivery schemas and payload inclusion remain **[blocked][intake-contract]**.
+The list returns metadata only. No output contains a credential.
 
 ### `delivery list`
 
@@ -351,9 +335,7 @@ subscription identity, the closed delivery status set and cursor scope.
 
 **Effects and idempotency:** return one bounded `{items, nextCursor}` page of
 delivery projections. Read only; take no idempotency key. Parked deliveries
-remain visible; filtering does not retry or acknowledge one. Ordering and
-consistency under concurrent handoff or resolved-delivery retention remain
-Open.
+remain visible; filtering does not retry or acknowledge one. Pagination remains **[blocked][intake-contract]**; read bounds remain **[blocked][intake-bounds]**.
 
 **Statuses:** `200`, including an empty page; `400` for invalid input or cursor.
 No transport failure becomes an empty successful page.
@@ -368,8 +350,7 @@ not a substitute for that identity.
 received time, verification result, delivery status, recorded disposition and
 handoff attempt count in the delivery projection. The subscription resolves
 its source binding and exactly one project. Read only; take no idempotency key.
-The bounded payload's inclusion, representation and redaction need a decision
-before the response schema ships.
+Payload inclusion remains **[blocked][intake-contract]**.
 
 **Statuses:** `200` with the delivery, `400` for an invalid identity, or `404`
 with `intake.delivery.not_found` when no retained delivery has that identity.
@@ -389,7 +370,8 @@ handoff. A refusal also ends it and remains visible to a human. The Intake
 Service retries a declared failure or an indeterminate result with backoff;
 a terminal `refused` disposition is not a transient invocation failure. After
 a bounded count of failed attempts, it parks the delivery. A parked delivery
-never expires. After acceptance, the Intake Service asks nothing further about the delivery.
+never expires.
+A human action on a parked delivery remains **[blocked][intake-contract]**; handoff bounds remain **[blocked][intake-bounds]**. After acceptance, the Intake Service asks nothing further about the delivery.
 
 Acceptance transfers every effect obligation to Scheduler; it promises no
 execution and needs no live worker. Scheduler invokes Worker payload decoding
@@ -403,13 +385,11 @@ recommendation is not an adopted fifth disposition or a CLI command.
 
 ## Routes without a command
 
-**Proposed webhook receipt:** `POST /hooks/...` carries the source binding
-identity in the path; the exact path remains **Open** until
-`intake-service.impl.md` declares it. The route uses access policy `delivery`,
+The webhook receipt uses `POST /hooks/<binding id>` under the [delivery verification ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-verification-of-a-delivery). The route uses access policy `delivery`,
 as declared by [Gateway access policy](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#access-policy).
 `delivery` means no JWT and verification by the Project Service with the
 secret of the source binding named in the path; it mints no human or machine
-caller. The Intake Service never reads that secret or acts as verifier.
+caller. The Intake Service never acts as verifier; its webhook registration uses the secret that the acquisition grant returns.
 The Gateway handler reads the exact bytes and passes the body and headers
 unchanged to the Intake Service, following
 [Delivery bytes and body limits](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#delivery-bytes-and-body-limits).
@@ -418,8 +398,8 @@ The order is verification, then durable storage, then acknowledgement to the
 platform. A stream message follows the same order. The Intake Service acknowledges only
 what it stores durably. Beyond the unresolved-delivery capacity bound, the
 webhook receives a retryable refusal, never an acknowledgement followed by a
-drop. Exact acknowledgement and refusal HTTP statuses, protocol headers and
-body bounds remain Open. No CLI command calls the receipt route or simulates
+drop. Receipt statuses and protocol headers remain **[blocked][intake-contract]**.
+The [Gateway body limit](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#delivery-bytes-and-body-limits) is 50 MiB for a delivery operation. No CLI command calls the receipt route or simulates
 a platform signature with a human JWT.
 
 A poll and a stream have no receipt route because the Intake Service initiates
@@ -428,14 +408,10 @@ observed state `failed` and reason capacity. The Intake Service never removes an
 delivery and bounds retention of resolved deliveries. It promises durability
 for accepted deliveries, not receipt of every update a platform produces.
 
-Two implementation gates remain:
+The [Gateway delivery ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#delivery-bytes-and-body-limits) requires `/hooks/*` support and exact bytes without JSON validation.
+Receipt implementation remains **blocked** under the [HANDOFF command table item](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#architecture).
 
-- The operation registry today requires `/api/*` paths and needs support for
-  the `/hooks/*` group. A path prefix supplies no access policy.
-- The raw-byte adapter exception must bypass JSON parsing and body schema
-  validation for this route.
-
-The operation identifier and verification failure contract remain Open.
+The receipt operation and verification failure contract remain **[blocked][intake-contract]**.
 Scheduler delivery admission is a separate service operation, not this
 platform-facing route or a CLI submit command.
 
@@ -471,67 +447,11 @@ Error codes follow the architecture rule
 parts, lower-case words with underscores within a part, and the owning service
 as namespace. Proposed Intake codes are:
 
-| Proposed code                                 | Condition and status                                                                                                                                                                    |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `intake.subscription.duplicate_kind`          | A uniqueness conflict on source binding and kind, proposed `409`; ordinary natural-key repeats return the existing subscription. The precise incompatible-input condition remains Open. |
-| `intake.subscription.source_binding_disabled` | Open: decide whether to reject an enable or enabled-create request under a disabled source binding; candidate validation failure `400`.                                                 |
-| `intake.delivery.not_found`                   | No retained Intake delivery matches the get identity; proposed `404`.                                                                                                                   |
-
-## Open decisions and implementation gates
-
-1. **Identity prefixes:** the Intake implementation sibling must declare the
-   subscription and delivery prefixes; Project must declare the source binding
-   prefix. Follow the HANDOFF Project and Worker prefix pattern cited above,
-   not a guessed prefix derived from a noun.
-2. **Kind-specific configuration:** declare the object and field names, types,
-   requiredness, poll endpoint and interval, stream target, webhook registration
-   inputs, validation and protocol state schemas. Set file/body bounds and the
-   absent-state and verification-result representations. No secret belongs in
-   this create file.
-3. **Payload reads:** decide whether `delivery get` returns the bounded payload,
-   and declare its representation, size and redaction rules. No implicit payload
-   field or reveal flag resolves this decision.
-4. **Parked delivery action:** decide whether a human can issue `delivery retry`
-   for a parked delivery, and with what authority, idempotency and state change.
-   The design promises visibility and no expiry, but states no human action.
-   There is no proposed retry command until that decision exists.
-5. **Inbound requests and consumer boundary:** every delivery goes to the
-   delivery admission of the Scheduler Service; a subscription names no
-   consumer. Adding a consumer needs a design revision of `intake-service.md`.
-   Complete the [HANDOFF inbound request contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery);
-   the current four dispositions authorize no fifth work-request disposition.
-6. **Numerical bounds:** implementation epics set the unresolved-delivery
-   capacity bound and poll interval bounds. Also set handoff attempt/backoff
-   bounds, acquisition deadlines, grant maximum lifetime, resolved-delivery
-   retention and bounded read sizes. The
-   [HANDOFF numerical acceptance-bounds item](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)
-   explicitly calls for the unresolved-delivery bound; it supplies no number
-   and settles no poll interval. This page invents none.
-7. **State:** settle incompatible create input under the natural key, omission
-   of `desiredState` (candidate `disabled`), command-time rejection under a
-   disabled source binding, retirement's final representation and later
-   create/enable behavior. Preserve the closed observed
-   state set and the audit state. Declare pagination ordering and cursor validity.
-8. **CLI dispatcher:** register the `intake` group and its nested commands in
-   `src/apps/cli/index.ts`; currently even group help is absent. Adopt the
-   command table in `intake-service.impl.md`, which phase 2 writes under the
-   [HANDOFF Architecture item, “Complete the command table of the group of each service”](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#architecture).
-   Adopt the surface in `intake-service.impl.md` and in the shared CLI documentation of this directory.
-9. **Operations and OpenAPI:** declare every operation in a future
-   `src/intake/contract.ts`, including access, unary lifetime, cancellation,
-   mutation, store, timeout, input/output schemas and statuses. Generate each
-   operation's OpenAPI file under `static/openapi/intake/`, indexed by
-   `static/openapi.yaml`; no hand-written route table replaces the registry.
-   Add `/hooks/*` registry support and the raw-byte adapter exception for the
-   `delivery` webhook receipt. Declare service identity minting and propagation
-   for acquisition grants and Scheduler delivery admission; a human command
-   supplies no service identity by flag.
-
-Before shipping, test help without a server, validation, human-only access,
-natural-key repeats across restart, immediate desired-state answers, grant
-revocation, exact-byte verification before storage and acknowledgement,
-capacity refusal, handoff deduplication and parked-delivery retention. Generated
-OpenAPI and adapter responses must agree with the adopted operation contracts.
+| Proposed code                                 | Condition and status                                                                                                                                                                                  |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `intake.subscription.duplicate_kind`          | A uniqueness conflict on source binding and kind, proposed `409`; ordinary natural-key repeats return the existing subscription. Incompatible-input admission remains **[blocked][intake-contract]**. |
+| `intake.subscription.source_binding_disabled` | Disabled-source admission remains **[blocked][intake-contract]**.                                                                                                                                     |
+| `intake.delivery.not_found`                   | No retained Intake delivery matches the get identity; proposed `404`.                                                                                                                                 |
 
 ## Optional design provenance
 

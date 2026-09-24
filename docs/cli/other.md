@@ -137,11 +137,16 @@ file's fields use those contracts; its location and file checks follow below.
 
 ### `cli.yaml` and its effects
 
+The target file holds `endpoint`, `token` and `masterKey` under the [client configuration ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-configuration-file).
+Only `serve worker` reads `masterKey`; service-group commands ignore it.
+It holds the server's 32-byte key in base64 and accepts no option or environment override.
+The source snapshot below does not override that contract.
+
 The path is `<XDG configuration directory>/kanthord/cli.yaml`, normally
 `~/.config/kanthord/cli.yaml`. There is no `--client-config` path option and
 `KANTHORD_CONFIG` does not select this file. An absent file is allowed. When
-present, the file contains one YAML mapping with only the optional `endpoint`
-and `token` fields; unknown fields are invalid. It shares the bounded YAML
+present, the current source accepts only optional `endpoint` and `token` fields in one YAML mapping.
+The target also accepts `masterKey` as stated above. It shares the bounded YAML
 parser described under [server configuration](#server-configuration).
 
 The operator supplies the file manually. Current file checks require a regular
@@ -248,8 +253,8 @@ effects across server restarts.
 
 Some domain operations additionally need a durable `requestId`. The proposed
 Mission import/unblock and Scheduler mutation contracts derive it as
-`request_<same-key-ulid>` from the CLI's bare idempotency key. That mapping needs
-adoption by each owner and does not apply to every mutation. It is distinct
+`request_<same-key-ulid>` from the CLI's bare idempotency key. That mapping remains **blocked** under [HANDOFF Mission Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#mission-service) and [Scheduler Service and delivery](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery).
+It does not apply to every mutation. It is distinct
 from Gateway's transport `X-Request-Id`, which identifies one HTTP request;
 transport correlation alone never deduplicates a domain effect.
 
@@ -264,8 +269,7 @@ ban affects later verification and cancels no request already verified.
 Stopping the CLI, closing a connection, restarting the server, and generating
 another JWT are not JWT revocation. Domain cancellation, claim revocation,
 registration termination, and token revocation require their owning contract;
-one must not be inferred from another. The session-ban route and its authority
-remain an open user-management decision, not an invented CLI command.
+one must not be inferred from another. The session-ban route remains **blocked** under [HANDOFF Gateway Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#gateway-service).
 
 **Current signal behavior:** `serve server` installs graceful-stop handlers.
 The one-shot remote CLI commands do not establish a shared signal-handling or
@@ -467,17 +471,15 @@ any worker. There is no implemented worker-runtime entry point.
   omitting it selects `server`, not a worker.
 - [`--config`](./common-flags.md#--config): currently a syntactically accepted
   optional option of `serve`, with the shared path resolution used by server mode. Its meaning
-  and necessity for the remote worker runtime remain **open**. Acceptance by
-  the common parser must not imply that a remote worker needs the server's
-  master key or reads the server database.
+  for the remote worker runtime remains **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service).
+  The worker application requires `masterKey` from the client configuration file and reads no server database.
 - Endpoint: **target requirement**, one resolved server endpoint with the
   [`--endpoint`](./common-flags.md#--endpoint) resolution. Worker-specific option
-  declarations and placement remain **open**; `--endpoint` is not accepted by
-  `serve` today.
+  declarations remain **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service).
 - Machine JWT: **target requirement**, using
   [`--token`](./common-flags.md#--token) resolution. Authentication and registration
-  require a valid machine token. Worker-specific flag declarations and missing-token diagnostics remain
-  **open**; `--token` is not accepted by `serve` today.
+  require a valid machine token.
+  Worker-specific flags remain **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service).
 - [`--help`](./common-flags.md#--help): implemented help for the `serve` command;
   prints the current server-only description without starting an application.
 
@@ -489,15 +491,10 @@ operation; a mismatch must refuse startup with both versions in the diagnostic.
 There is no local-database bypass. Service pages own the operation mappings and
 access rules; an undeclared operation is not a usable route.
 
-**Open runtime contract:** provider access, repository operations, effective
-agent configuration, tool/verification trust boundaries, workspace location,
-global-prompt configuration, worker death and registration recovery, and
-claim-revocation stop behavior. These decisions are needed before specifying
-additional runtime arguments, files, readiness output, shutdown behavior, and
-retry/restart policy. No default workspace path, automatic deregistration on
-death, or approved provider/agent flags are supplied here. Target startup
-failures must exit nonzero; precise future worker output and signal semantics
-are not implemented guarantees.
+The [Worker sibling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md) rules credential handover, workspace, prompt configuration, heartbeat expiry and containment.
+`masterKey` has no environment variable or option under the [client configuration ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-configuration-file).
+Runtime option and lifecycle details remain **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service).
+Stop enforcement and recovery remain **blocked** under [HANDOFF B9](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#b9-failure-and-recovery).
 
 ## Local JWT issuance
 
@@ -541,8 +538,8 @@ kanthord jwt --binding <binding> [--name <display>] [--config <path>]
 
 - `--binding <binding>`: required to select machine mode; string, no default;
   currently nonblank and 1–128 characters with the exact value preserved.
-  Current local validation does not enforce a binding entity prefix. The design
-  leaves that prefix unresolved; do not invent one here.
+  Current local validation does not enforce a binding entity prefix.
+  The target requires `binding_<ulid>` under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
 - `username`: forbidden with `--binding`. Even a valid human username produces
   `cli.jwt.username_with_binding` and no token.
 - `--name <display>`: optional nonblank string of 1–64 characters; default the
@@ -565,8 +562,8 @@ derive the signing key using HKDF-SHA-256 with an empty salt and the label
 `gateway/jwt-hs256/v1`, and sign with HS256. Both include `iat` and `exp` in
 JWT Unix seconds and a fresh bare ULID `jti`; `exp = iat + gateway.tokenLifetime`.
 The CLI has no lifetime, algorithm, issuer, audience, custom-claims, subject-ID,
-or signing-key override flags. The complete future JWT header/claim
-requiredness and unexpected-claim policy remain an open Gateway contract item.
+or signing-key override flags.
+The [Gateway JWT ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-jwt) declares the closed header and claim contract.
 
 After argument validation and the username/binding conflict check, stdout must
 be a terminal. A file, pipe, command substitution, or other non-terminal stdout
@@ -618,7 +615,7 @@ here, including client precedence/validation and the unimplemented worker
 application. The proposed shared flags must appear only on commands that
 implement them. Help is not an extra root name or a reason to load secrets.
 
-## Sources and remaining gaps
+## Sources
 
 Local implementation references:
 
@@ -635,13 +632,6 @@ Local implementation references:
 - [Local JWT generation](../../src/gateway/local.ts),
   [server composition and lifetime](../../src/apps/server/index.ts), and
   [launcher](../../bin/kanthord.mjs).
-
-The open work is explicit: worker runtime inputs and lifecycle; complete JWT
-claim/header policy and binding prefix; denylist administration authority;
-and adoption of the
-proposed pagination, payload-file, output, and per-mutation key conventions by
-each new command. Future commands require real declared operations and access
-policies before a CLI adapter can make them available.
 
 Optional provenance, not required reading for this specification:
 [architecture implementation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md),

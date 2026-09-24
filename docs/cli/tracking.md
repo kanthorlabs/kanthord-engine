@@ -30,7 +30,9 @@ reading, but declares no Tracking command table or wire schema. Listing,
 individual span/text retrieval, and filtered queries are proposed projections
 of that read capability. Each needs an owning `contract.ts` operation and
 generated OpenAPI before implementation. A proposed route is not a published
-route. The open decisions at the end remain implementation blockers.
+route. Command contracts remain **blocked** under [HANDOFF Tracking Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#tracking-service).
+
+[tracking-contract]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#tracking-service
 
 ## Command table
 
@@ -41,20 +43,20 @@ and projectless traces use the same read policy. Ingestion checks the requester'
 current authorization for each record's resolved project, independently of the
 claim's state.
 
-| Command after `kanthord tracking` | Proposed operation          | Proposed HTTP route                             | Access  | Output and effects                                                                        |
-| --------------------------------- | --------------------------- | ----------------------------------------------- | ------- | ----------------------------------------------------------------------------------------- |
-| `telemetry ingest`                | `tracking.telemetry.ingest` | `POST /api/tracking/telemetry/ingest`           | `human` | Mutates telemetry only; returns one disposition per submitted record and a batch summary. |
-| `trace list`                      | `tracking.trace.list`       | `GET /api/tracking/trace`                       | `human` | Bounded page of trace summaries, optionally filtered by project or execution.             |
-| `trace get`                       | `tracking.trace.get`        | `GET /api/tracking/trace/:traceId`              | `human` | Trace header and known root reference; spans are read through bounded pages.              |
-| `span list`                       | `tracking.span.list`        | `GET /api/tracking/trace/:traceId/span`         | `human` | Bounded page of stored spans in one trace.                                                |
-| `span get`                        | `tracking.span.get`         | `GET /api/tracking/trace/:traceId/span/:spanId` | `human` | One stored span, including its provenance and unresolved references.                      |
-| `span query`                      | `tracking.span.query`       | `POST /api/tracking/trace/:traceId/span/query`  | `human` | Read-only bounded query over stored spans; no mutation or derived measurement.            |
-| `text get`                        | `tracking.text.get`         | `GET /api/tracking/trace/:traceId/text/:textId` | `human` | One telemetry text or its known-expired/unknown state.                                    |
+| Command after `kanthord tracking` | Proposed operation                                           | Proposed HTTP route                             | Access  | Output and effects                                                                        |
+| --------------------------------- | ------------------------------------------------------------ | ----------------------------------------------- | ------- | ----------------------------------------------------------------------------------------- |
+| `telemetry ingest`                | `tracking.telemetry.ingest` **[blocked][tracking-contract]** | `POST /api/tracking/telemetry/ingest`           | `human` | Mutates telemetry only; returns one disposition per submitted record and a batch summary. |
+| `trace list`                      | `tracking.trace.list` **[blocked][tracking-contract]**       | `GET /api/tracking/trace`                       | `human` | Bounded page of trace summaries, optionally filtered by project or execution.             |
+| `trace get`                       | `tracking.trace.get` **[blocked][tracking-contract]**        | `GET /api/tracking/trace/:traceId`              | `human` | Trace header and known root reference; spans are read through bounded pages.              |
+| `span list`                       | `tracking.span.list` **[blocked][tracking-contract]**        | `GET /api/tracking/trace/:traceId/span`         | `human` | Bounded page of stored spans in one trace.                                                |
+| `span get`                        | `tracking.span.get` **[blocked][tracking-contract]**         | `GET /api/tracking/trace/:traceId/span/:spanId` | `human` | One stored span, including its provenance and unresolved references.                      |
+| `span query`                      | `tracking.span.query` **[blocked][tracking-contract]**       | `POST /api/tracking/trace/:traceId/span/query`  | `human` | Read-only bounded query over stored spans; no mutation or derived measurement.            |
+| `text get`                        | `tracking.text.get` **[blocked][tracking-contract]**         | `GET /api/tracking/trace/:traceId/text/:textId` | `human` | One telemetry text or its known-expired/unknown state.                                    |
 
 The `POST` query is a read: it declares `mutation: false` and takes no
 idempotency key. Ingestion declares `mutation: true`. No CLI command exposes
 the internal server telemetry sink as a way to impersonate a service producer.
-The sink's caller authority remains a separate unresolved contract.
+The sink uses a service identity through the direct adapter under the [invocation ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-operation-and-its-two-entry-adapters).
 
 ## Synopses
 
@@ -109,14 +111,14 @@ requiring a value cannot be supplied as a bare switch. Unless a row states
 otherwise, an omitted optional value stays absent rather than being sent as
 `null`.
 
-| Argument or flag             | Requiredness and type                               | Default                        | Validation and request mapping                                                                                                    |
-| ---------------------------- | --------------------------------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `<trace-id>`                 | Required `TraceID` positional argument              | None                           | Map to `params.traceId`; exact entity-kind validation awaits Tracking's prefix declaration. No trace-name lookup or bare ULID.    |
-| `<span-id>`                  | Required `SpanID` positional argument on `span get` | None                           | Map to `params.spanId`; the span must belong to the named trace. Prefix declaration is open.                                      |
-| `<text-id>`                  | Required `TextID` positional argument on `text get` | None                           | Map to `params.textId`; the text must belong to the named trace. Prefix declaration is open.                                      |
-| `--project <project-id>`     | Optional `ProjectID` on `trace list`                | Absent: no project filter      | Send `query.projectId`. Incompatible with `--projectless`; a filter grants no authority.                                          |
-| `--projectless`              | Optional boolean switch on `trace list`             | `false`: no projectless filter | When present, send `query.projectless=true`. Select only traces belonging to no project; incompatible with `--project`.           |
-| `--execution <execution-id>` | Optional `ExecutionID` on `trace list`              | Absent: no execution filter    | Send `query.executionId`. Combine supplied filters by AND. Correlation grants no authority; execution prefix declaration is open. |
+| Argument or flag             | Requiredness and type                               | Default                        | Validation and request mapping                                                                                                                                    |
+| ---------------------------- | --------------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<trace-id>`                 | Required `TraceID` positional argument              | None                           | Map to `params.traceId`; exact entity-kind validation awaits Tracking's prefix declaration. No trace-name lookup or bare ULID.                                    |
+| `<span-id>`                  | Required `SpanID` positional argument on `span get` | None                           | Map to `params.spanId`; the span belongs to the named trace. Prefix declaration remains **[blocked][tracking-contract]**.                                         |
+| `<text-id>`                  | Required `TextID` positional argument on `text get` | None                           | Map to `params.textId`; the text belongs to the named trace. Prefix declaration remains **[blocked][tracking-contract]**.                                         |
+| `--project <project-id>`     | Optional `ProjectID` on `trace list`                | Absent: no project filter      | Send `query.projectId`. Incompatible with `--projectless`; a filter grants no authority.                                                                          |
+| `--projectless`              | Optional boolean switch on `trace list`             | `false`: no projectless filter | When present, send `query.projectless=true`. Select only traces belonging to no project; incompatible with `--project`.                                           |
+| `--execution <execution-id>` | Optional `ExecutionID` on `trace list`              | Absent: no execution filter    | Send `query.executionId`. Combine supplied filters by AND. Correlation grants no authority; execution prefix validation remains **[blocked][tracking-contract]**. |
 
 The [shared client-file rules](./other.md#cliyaml-and-its-effects) apply.
 These commands neither open server databases nor update client/server
@@ -131,13 +133,9 @@ configuration.
   are invalid entity IDs.
 - `ProjectID` uses the declared `project_` prefix. `TraceID`, `SpanID`, `TextID`,
   `ExecutionID`, and producer-minted `RecordID` are symbolic types here, not new
-  prefix declarations. Their owning contracts must settle the prefixes before
-  validation or runnable examples can be published. In particular this page
-  invents no `trace_`, `span_`, or execution prefix. Record identity generation
-  also needs an explicit producer-side contract.
+  prefix declarations. Their identity contracts remain **[blocked][tracking-contract]**.
 - OpenTelemetry reuse does not by itself declare W3C hexadecimal trace/span
-  IDs as the entity IDs accepted here. Any mapping to protocol identities needs
-  its own contract; accepting arbitrary strings is not the fallback.
+  IDs as the entity IDs accepted here. Protocol mapping remains **[blocked][tracking-contract]**.
 - `Timestamp` composes the
   [shared timestamp scalar](../../src/kernel/json.ts): a JSON integer of Unix
   milliseconds in UTC, in `0..Number.MAX_SAFE_INTEGER`. Neither a timestamp nor
@@ -147,7 +145,7 @@ configuration.
   number, or an array of a single primitive kind. Objects, `null`, nested
   arrays, and mixed-kind arrays are invalid. The safe-integer restriction is a
   proposed JSON representation constraint. Empty arrays are proposed as
-  valid; their element-kind representation needs adoption in the contract.
+  valid; their element-kind representation remains **[blocked][tracking-contract]**.
   Attribute names reuse OpenTelemetry conventions; kanthord identity
   attributes use the `kanthord.` namespace. Identity values name objects and
   never embed their contents.
@@ -171,9 +169,7 @@ next human-issued ingestion. A reader reports an incomplete tail and never
 repairs it; the writer owns repair.
 
 The JSON file below is a **proposed batch interchange format**, not the log's
-newline-framed storage format. Exporting a snapshot, splitting it into batches,
-and applying acknowledgements back to the extension's local cursor still need
-a packaging contract. Repeating this command for a later batch requires its
+newline-framed storage format. External ingestion packaging remains **blocked** under the [HANDOFF harness-integration item](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery). Repeating this command for a later batch requires its
 own idempotency key. It creates no server-side ingestion job, progress resource,
 or resumable upload session.
 
@@ -185,8 +181,7 @@ supplies no numerical values. Proposed limits for this command are a
 `1 MiB` file/request body, `1..1000` records, and `64 KiB` per encoded record.
 The implementation must bound both original file bytes and transmitted JSON
 bytes. Reject an oversized file before dispatch; do not silently truncate prose
-or drop records to make it fit. These caps do not settle the separate bound on
-all records of an execution, the extension's log/segment limits, or retention.
+or drop records to make it fit. Execution, log, segment and retention bounds remain **[blocked][tracking-contract]**.
 
 Objects are strict at the envelope and record-schema levels: reject duplicate
 JSON member names, unknown fields, invalid Unicode, and invalid types. Attribute
@@ -197,7 +192,7 @@ moderation, assessment, or evidence-validation policy.
 | Field                   | Requiredness and type                           | Default | Validation and meaning                                                                                                                                  |
 | ----------------------- | ----------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `records`               | Required array of span or text records          | None    | `1..1000` entries, subject to the byte caps. Order is delivery order, not causal order.                                                                 |
-| `records[].recordId`    | Required `RecordID` string                      | None    | Producer-minted stable record identity; retain it on redelivery. Prefix and minting contract remain open.                                               |
+| `records[].recordId`    | Required `RecordID` string                      | None    | Producer-minted stable record identity; retain it on redelivery. The identity contract remains **[blocked][tracking-contract]**.                        |
 | `records[].executionId` | Required `ExecutionID` string                   | None    | Correlates the external execution; must resolve consistently with `traceId`. A claim need not still be live.                                            |
 | `records[].traceId`     | Required `TraceID` string                       | None    | Existing server-assigned trace of that execution. The service resolves its project from its own records; the request assigns neither project nor trace. |
 | `records[].kind`        | Required enum string, proposed `span` or `text` | None    | Selects exactly one variant below. A text record has no span-variant fields and vice versa.                                                             |
@@ -224,7 +219,7 @@ span-record schema.
 | `events[].name`       | Required nonempty string                          | None                              | Proposed maximum 256 UTF-8 bytes; names the observed event.                                                                                                                                                                                                                   |
 | `events[].time`       | Required `Timestamp`                              | None                              | Proposed explicit event observation time.                                                                                                                                                                                                                                     |
 | `events[].attributes` | Optional attribute object                         | Absent: no attributes             | Same name, value-kind, count, and aggregate-byte constraints as `attributes`.                                                                                                                                                                                                 |
-| `status`              | Optional enum string: `Unset`, `Ok`, `Error`      | Absent: supplies no status update | Preserve an existing status; never treat an omitted value as an overwrite. Display an unset result as `Unset` when no status was recorded. Exact start/end status update rules remain a contract gap.                                                                         |
+| `status`              | Optional enum string: `Unset`, `Ok`, `Error`      | Absent: supplies no status update | Preserve an existing status; never treat an omitted value as an overwrite. Display an unset result as `Unset` when no status was recorded. Status update rules remain **[blocked][tracking-contract]**.                                                                       |
 | `links`               | Optional array of link objects                    | Absent: adds nothing              | Proposed maximum 128 entries. A link refers to a span in another trace and names no project.                                                                                                                                                                                  |
 | `links[].traceId`     | Required `TraceID`                                | None                              | Target trace reference; proposed validation requires a different trace from the containing record. No linked-trace completeness guarantee.                                                                                                                                    |
 | `links[].spanId`      | Required `SpanID`                                 | None                              | Target span reference. Naming it changes no span or authority.                                                                                                                                                                                                                |
@@ -233,9 +228,7 @@ span-record schema.
 Optional collection omission means no contribution, not deletion. An empty
 collection contributes nothing. A start-only record makes an unfinished span
 readable immediately; it does not wait for its end or for the root to close.
-Changing a previously set value is not an update facility. The exact merge
-rules for repeated, identical values and status finalization must be declared
-before this proposed representation is implemented.
+Changing a previously set value is not an update facility. Merge and status-finalization rules remain **blocked** under [HANDOFF Tracking Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#tracking-service).
 
 #### Text record fields (`kind: "text"`)
 
@@ -245,8 +238,7 @@ before this proposed representation is implemented.
 | `text`   | Required well-formed Unicode string | None    | Proposed to allow an empty capture. Encoded record must fit `64 KiB`; no prose-based rejection, truncation, automatic evidence creation, or content interpretation. |
 
 The file has no producer selector, project selector, retention override,
-trace-creation switch, or overwrite switch. Chunking a larger transcript and
-its reference model are unresolved; the CLI must not silently invent them.
+trace-creation switch, or overwrite switch. Large transcripts remain **blocked** under [HANDOFF Tracking Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#tracking-service).
 
 ### Acknowledgement, effects, and retry
 
@@ -276,7 +268,8 @@ receiving a disposition, for both `Stored` and `Refused`. It updates its local
 cursor after the answer, so a crash before that update can repeat delivery.
 Records discarded by the local bound are reported as discarded, not retained.
 This file-oriented CLI has no authority to advance an extension's cursor and
-cannot infer its discarded count; that acknowledgement handoff remains open.
+cannot infer its discarded count.
+Acknowledgement handoff remains **blocked** under the [HANDOFF harness-integration item](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery).
 
 The service stores no ingestion progress between calls. Reuse both record IDs
 and the same `--idempotency-key` when retrying the same invocation with the same
@@ -285,21 +278,17 @@ does not request replay of the previous invocation. Target Gateway replay is in
 memory and bounded by its TTL; after expiry or restart the handler runs again,
 with Tracking's record deduplication providing the separate natural-key guard.
 Reusing a key with changed input or while the original call is in progress can
-return HTTP 409. The current replay implementation differs; see
-[shared replay status](./other.md#idempotency-and-retries).
+return HTTP 409. The [shared replay rules](./other.md#idempotency-and-retries) apply.
 
 The proposed CLI prints the generated key on success and in failure diagnostics.
 An indeterminate answer preserves uncertainty and requires retry with that key;
 it must not invent `Stored` or `Refused` entries. Local cancellation stops
-further client work and does not undo already stored telemetry. Numeric call
-timeouts, bounded retry policy, and partial acknowledgement/error envelopes
-remain to be declared. The command does not silently retry forever.
+further client work and does not undo already stored telemetry. Timeouts and partial acknowledgements remain **[blocked][tracking-contract]**. The command does not silently retry forever.
 
 ## Trace, span, and text reads
 
 Read commands print JSON and change no domain record. Proposed HTTP success is
-200; status/error mappings for unknown or expired trace/span identities still
-need an operation contract. No flag upgrades telemetry to evidence or converts
+200; status mappings remain **[blocked][tracking-contract]**. No flag upgrades telemetry to evidence or converts
 unknown state to an outcome.
 
 ### `trace list` and `trace get`
@@ -317,8 +306,7 @@ Use `span list` to assemble the readable trace. A trace has one root by design,
 but a lost root write can leave an unresolved root reference. Do not manufacture
 a root to fill that gap or fail otherwise readable child spans.
 
-Pagination ordering, consistency under new arrivals/retention, and missing-root
-wire representation remain open. A cursor is not a causal watermark and is
+Pagination and missing-root representation remain **[blocked][tracking-contract]**. A cursor is not a causal watermark and is
 not the extension's local ingestion cursor.
 
 ### `span list` and `span get`
@@ -334,8 +322,8 @@ distinguish server-observed telemetry from external-harness assertions.
 The renderer preserves unresolved parents and links. It does not reject a page
 because a referenced span is absent, expired, or arrived later. No inferred
 duration, success classification, ancestry verification, or reconstructed prose
-is added. Producer wire shape, historical claimant attribution, and the precise
-unresolved-reference representation are open contract decisions.
+is added. Producer and reference schemas remain **blocked** under [HANDOFF Tracking Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#tracking-service).
+Historical claimant attribution follows [Scheduler Claims and counts](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#claims-and-counts).
 
 ### `span query`: bounded structured inspection
 
@@ -357,12 +345,11 @@ combine by AND. Only equality and `hasEnd` are proposed; SQL, full-text search,
 regex, grouping, aggregation, measurement derivation, wall-clock ranges, and
 cross-project joins have no command contract here. Registered identity
 attribute names can support object correlation, but their full canonical key
-registry is still open: do not guess a key for each object kind.
+registry remains **[blocked][tracking-contract]**.
 
 The response uses the same span projection and `{items, nextCursor}` envelope
 as `span list`. A continuation must retain the same trace and filter document;
-a cursor from another scope is rejected. Its exact ordering and snapshot rules
-remain the same open decisions as the lists.
+a cursor from another scope is rejected. Its cursor contract remains **[blocked][tracking-contract]**.
 
 ### `text get`
 
@@ -375,20 +362,13 @@ expired, not unknown. The store retains the identity needed for that distinction
 
 The text retention is no longer than span retention, but neither duration is a
 CLI default. The vocabulary's ninety-day span and seven-day text examples are
-not configuration values. The start of text retention remains undecided.
-Missing whole-trace behavior, maximum retrieved text size, and any chunked read
-contract still need decisions. Transcript telemetry becomes evidence only
+not configuration values. Retention and large-text read contracts remain **[blocked][tracking-contract]**. Transcript telemetry becomes evidence only
 through the separately authorized Mission/Worker evidence workflow.
 
 ## Streaming and operational inspection boundaries
 
-The design's read API does not yet define a Tracking stream command. Live
-streaming of a running, server-hosted turn is deferred work. No `trace stream`,
-`tail`, subscription, replay token, polling loop, or streaming HTTP route is
-declared by this page. Before adding one, the owner must define event schemas,
-starting position, ordering, resume/loss behavior, limits, timeout, access, and
-cancellation. The general Gateway model supports one-way server-sent events;
-that mechanism alone establishes none of these Tracking semantics.
+Hosted streaming remains **blocked** under [HANDOFF Worker Service, Next phase](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#next-phase).
+This page declares no stream command.
 
 An external harness keeps its capture locally until a human issues an import.
 A reader can subsequently see admitted records; this is not live streaming of
@@ -433,44 +413,6 @@ when available, without printing tokens or the submitted telemetry content.
 An indeterminate mutation is distinguished from a known refusal and carries
 the reusable idempotency key. This proposal uses the shared `0`/`1` exit codes;
 the partial-output format must be adopted with the operation contract.
-
-## Open decisions and implementation gates
-
-1. **Operations and schemas:** adopt or revise every proposed command, route,
-   operation ID, strict input shape, read projection, HTTP status, and timeout;
-   implement declarations and publish generated OpenAPI. No Tracking route is
-   currently available to back any of the seven commands.
-2. **Identities:** declare trace, span, text, ingestion-record, and execution
-   identity prefixes and minting responsibility; settle any OpenTelemetry
-   protocol-ID mapping. Declare the complete canonical identity-attribute key
-   registry instead of inferring it from object names.
-3. **Record admission and merge:** settle identical record IDs with different
-   bytes, duplicate IDs within one batch, status finalization without replacing
-   a set value, repeat values across incremental span records, and text identity
-   conflicts. Declare structural refusal codes and malformed-batch versus
-   per-record failure boundaries. Preserve out-of-order admission.
-4. **Bounds and large text:** ratify or replace the explicitly proposed CLI
-   byte/count limits; set the design-required per-execution, local-log, segment,
-   per-record, and `fsync` bounds. Define large transcript/chunk handling and
-   bounded read outputs. No proposed number in this page settles those gaps.
-5. **External ingestion packaging:** define snapshot export, extension invocation,
-   acknowledgement handoff, cursor persistence, bounded retries/deadlines, and
-   retained/discarded summaries for a complete finite import. The CLI's batch
-   summary cannot stand in for the extension's full local-store result.
-6. **Read/query contracts:** ratify list and equality-query projections; specify
-   ordering, cursor limits/validity, concurrent arrival/expiry behavior, unknown
-   versus expired resource status, and unresolved-reference encoding. A filter
-   is not an authorization boundary or evidence of completeness.
-7. **Retention:** declare server configuration fields and durations, text
-   retention's starting event, trace-expiry resolution and tombstone lifetime.
-   No maintenance command follows automatically from this work.
-8. **Authority and provenance:** preserve ended-claim ingestion and historical
-   claimant attribution after registration ends. Declare the identity under
-   which server background telemetry producers invoke their sink operation;
-   this human import proposal does not resolve that architecture gap.
-9. **Hosted streaming:** the deferred server-hosted live-turn feature needs an
-   owned stream contract before a command can be specified. External-harness
-   ingestion remains finite and human-issued.
 
 ## Optional design provenance
 

@@ -67,16 +67,14 @@ objects. JSON schemas and their eventual size bounds belong in `contract.ts`.
   [shared identity scalar](../../src/kernel/identity.ts), not a bare ULID.
 - `<execution-id>`, `<obligation-id>`, node IDs, external
   object IDs and binding IDs are required nonblank opaque strings wherever
-  used below. Copy them from their owner's response. Their owning contracts
-  must declare the final prefixes and length bounds before these proposals
-  become executable schemas; this page invents no prefix for them.
+  used below. Copy them from their owner's response. Their prefix contracts remain **[blocked][scheduler-contract]**.
+  Binding IDs use `binding_<ulid>` under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
 - `runtimeIdentity` is the opaque string returned by Worker registration.
   Current [Worker code](../../src/worker/registrations.ts) generates
   `runtime_identity_<ulid>`, but its
   [published input/output declaration](../../src/worker/contract.ts) only
-  validates a nonblank string of at most 128 characters. The design's runtime
-  prefix decision remains open; this page does not turn that implementation
-  detail into a new Scheduler identity convention.
+  validates a nonblank string of at most 128 characters.
+  The target prefix is `worker_instance_` under the [Worker identity ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-identities-of-the-worker-service).
 - `attempt` is a positive safe integer counter belonging to the node, not a
   new opaque identity. `pinnedRevision` is a positive safe JSON integer
   revision counter, aligned with the [Mission proposal](./mission.md) and
@@ -119,17 +117,14 @@ Every list result is `{ "items": [...], "nextCursor": null | string }`:
 both fields are required; `items` contains at most `limit` records and
 `nextCursor: null` ends the traversal. An empty list is successful. Each call
 reads one page; there is no implicit unbounded traversal or polling loop.
-Cursor encoding and behavior during concurrent changes remain implementation
-decisions; these proposals promise neither a frozen multi-page snapshot nor
-that pagination reserves work.
+Cursor contracts remain **[blocked][scheduler-contract]**; pagination reserves no work.
 
 Mutation requests carry the key in `Idempotency-Key`. As a **proposed durable
 request mapping**, the CLI also sends body `requestId` equal to `request_`
 followed by that key. It generates this field; it is not an editable JSON-file
 field. This preserves one domain request identity when an explicit key is
 reused by another CLI process. It is separate from Gateway's per-transport
-`X-Request-Id`. The owning contract must approve this mapping rather than
-assuming Gateway replay alone satisfies Scheduler's durable obligations.
+`X-Request-Id`. The durable-request mapping remains **[blocked][scheduler-contract]**.
 
 The Scheduler must bind a request identity to its validated payload and caller
 scope. Reusing it with different input is a conflict. An accepted work pull
@@ -141,11 +136,9 @@ accepted pull result, and replay restores no authority. A no-work result ends
 that logical request: a later search uses a new key/request identity. Renewal
 and release need their own accepted-request replay to avoid repeated effects.
 
-Current [Gateway replay code](../../src/gateway/idempotency.ts) stores records
-in SQLite, whereas the future architecture specifies an in-memory TTL cache
-and handler-owned natural-key idempotency. That implementation/design gap
-must be reconciled. Neither mechanism by itself is a shipped Scheduler replay
-contract, nor permission to carry a claim across a runtime-registration boundary.
+The [Gateway replay component](../../src/gateway/idempotency.ts) holds records in memory with a TTL.
+The [idempotency ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#idempotency-of-a-mutation) also requires handler-owned natural-key idempotency.
+Neither mechanism transfers a claim across a runtime-registration boundary.
 
 No command automatically retries. A client can retry an uncertain mutation
 with the same inputs and explicit key. A timeout, disconnect or Ctrl-C ends
@@ -155,6 +148,8 @@ If acquisition committed before disconnection, the claimant recovers the
 original answer by replay rather than issuing a fresh pull. Shutdown stops
 new claims, cancels waiting pulls, and preserves accepted obligations.
 
+[scheduler-contract]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery
+
 ## Command inventory and proposed operation mapping
 
 The literal service prefix is `/api/scheduler`. Path variables become required
@@ -162,20 +157,20 @@ path parameters with the scalar rules above; query fields are only those
 listed by a command. Read requests have no body. Every route in this table is
 **proposed, pending the owning operation declaration and generated OpenAPI**.
 
-| Command suffix / synopsis                                                        | Operation identifier                    | HTTP route                                                                   | Access / effect                                                                           |
-| -------------------------------------------------------------------------------- | --------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `queue list <project-id> [--limit <count>] [--cursor <opaque>]`                  | `scheduler.queue.list`                  | `GET /api/scheduler/project/:projectId/queue`                                | `human`; read                                                                             |
-| `queue peek <project-id>`                                                        | `scheduler.queue.peek`                  | `GET /api/scheduler/project/:projectId/queue/peek`                           | `human`; read                                                                             |
-| `work pull --file <path> [--idempotency-key <key>]`                              | `scheduler.work.pull`                   | `POST /api/scheduler/work/pull`                                              | `client`; mutation, bounded wait                                                          |
-| `claim get <execution-id>`                                                       | `scheduler.claim.get`                   | `GET /api/scheduler/claim/:executionId`                                      | `client`; owned claim read (open; the command table of the Scheduler group is undeclared) |
-| `execution list <project-id> [--limit <count>] [--cursor <opaque>]`              | `scheduler.execution.list`              | `GET /api/scheduler/project/:projectId/execution`                            | `human`; read                                                                             |
-| `execution get <execution-id>`                                                   | `scheduler.execution.get`               | `GET /api/scheduler/execution/:executionId`                                  | `human`; read (open; the command table of the Scheduler group is undeclared)              |
-| `execution renew-lease <execution-id> [--idempotency-key <key>]`                 | `scheduler.execution.renew-lease`       | `POST /api/scheduler/execution/:executionId/renew-lease`                     | `client`; owned live execution mutation                                                   |
-| `execution release <execution-id> --file <path> [--idempotency-key <key>]`       | `scheduler.execution.release`           | `POST /api/scheduler/execution/:executionId/release`                         | `client`; owned live execution mutation                                                   |
-| `observation-obligation list <project-id> [--limit <count>] [--cursor <opaque>]` | `scheduler.observation-obligation.list` | `GET /api/scheduler/project/:projectId/observation-obligation`               | `human`; read                                                                             |
-| `observation-obligation get <project-id> <obligation-id>`                        | `scheduler.observation-obligation.get`  | `GET /api/scheduler/project/:projectId/observation-obligation/:obligationId` | `human`; read                                                                             |
+| Command suffix / synopsis                                                        | Operation identifier                                                      | HTTP route                                                                   | Access / effect                                                                                                                                        |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `queue list <project-id> [--limit <count>] [--cursor <opaque>]`                  | `scheduler.queue.list` **[blocked][scheduler-contract]**                  | `GET /api/scheduler/project/:projectId/queue`                                | `human`; read                                                                                                                                          |
+| `queue peek <project-id>`                                                        | `scheduler.queue.peek` **[blocked][scheduler-contract]**                  | `GET /api/scheduler/project/:projectId/queue/peek`                           | `human`; read                                                                                                                                          |
+| `work pull --file <path> [--idempotency-key <key>]`                              | `scheduler.work.pull` **[blocked][scheduler-contract]**                   | `POST /api/scheduler/work/pull`                                              | `client`; mutation, bounded wait                                                                                                                       |
+| `claim get <execution-id>`                                                       | `scheduler.claim.get`                                                     | `GET /api/scheduler/claim/:executionId`                                      | `client`; owned claim read; **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)** |
+| `execution list <project-id> [--limit <count>] [--cursor <opaque>]`              | `scheduler.execution.list` **[blocked][scheduler-contract]**              | `GET /api/scheduler/project/:projectId/execution`                            | `human`; read                                                                                                                                          |
+| `execution get <execution-id>`                                                   | `scheduler.execution.get`                                                 | `GET /api/scheduler/execution/:executionId`                                  | `human`; read; **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)**              |
+| `execution renew-lease <execution-id> [--idempotency-key <key>]`                 | `scheduler.execution.renew-lease` **[blocked][scheduler-contract]**       | `POST /api/scheduler/execution/:executionId/renew-lease`                     | `client`; owned live execution mutation                                                                                                                |
+| `execution release <execution-id> --file <path> [--idempotency-key <key>]`       | `scheduler.execution.release` **[blocked][scheduler-contract]**           | `POST /api/scheduler/execution/:executionId/release`                         | `client`; owned live execution mutation                                                                                                                |
+| `observation-obligation list <project-id> [--limit <count>] [--cursor <opaque>]` | `scheduler.observation-obligation.list` **[blocked][scheduler-contract]** | `GET /api/scheduler/project/:projectId/observation-obligation`               | `human`; read                                                                                                                                          |
+| `observation-obligation get <project-id> <obligation-id>`                        | `scheduler.observation-obligation.get` **[blocked][scheduler-contract]**  | `GET /api/scheduler/project/:projectId/observation-obligation/:obligationId` | `human`; read                                                                                                                                          |
 
-The access policy of every Scheduler inspection command is open until the implementation sibling of the Scheduler Service declares its command table. HANDOFF.md of the design set holds the item "Complete the command table of the group of each service".
+Operation adoption remains **blocked** under the [HANDOFF command table item](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#architecture).
 
 These read operations are proposed operational visibility, not an existing
 authorization to inspect service tables directly. `claim get` provides a
@@ -216,7 +211,7 @@ Every field below is required in a result; none has a client default.
 
 | Field                 | Type and validation / meaning                                                                             |
 | --------------------- | --------------------------------------------------------------------------------------------------------- |
-| `entryId`             | Opaque time-ordered entry identity; prefix awaits Scheduler's identity declaration.                       |
+| `entryId`             | Opaque time-ordered entry identity; its prefix remains **[blocked][scheduler-contract]**.                 |
 | `projectId`, `nodeId` | Project and Mission node references. Only an initiative or objective can be queued; never a task.         |
 | `claimKind`           | Enum `steps` or `evaluation`, admitted by Mission state.                                                  |
 | `priority`            | Safe integer copied from the Mission-owned priority. An absent node priority is Mission's default `0`.    |
@@ -288,8 +283,9 @@ are rechecked after waiting, including a binding disabled during the wait.
 Both are successful results, proposed HTTP `200`; the CLI adds its key.
 No-work opens no attempt, creates no execution and consumes no live count.
 The harness backs off before a new logical pull. Waiting holds no lock,
-processor permit or node reservation. Freshness of the healthcheck after a
-long wait remains an open design decision, not a client-provided timestamp.
+processor permit or node reservation.
+The Scheduler repeats the healthcheck immediately before the claim commits, under [Claims and counts](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#claims-and-counts).
+A failed check returns the pull empty.
 
 ## Claims and execution inspection
 
@@ -346,17 +342,15 @@ fields are server-owned; the caller supplies none when acquiring work.
 | `lease`                              | Object with required `expiresAt` timestamp, `renewedAt` timestamp or `null`, and `lossDeclaredAt` timestamp or `null`. Scheduler alone determines expiry.                                                                                                                                                                 |
 | `createdAt`                          | Claim acceptance timestamp.                                                                                                                                                                                                                                                                                               |
 | `endedAt`                            | End timestamp or `null` while live.                                                                                                                                                                                                                                                                                       |
-| `traceId`, `rootSpanId`              | Opaque owner-returned `TraceID` and `SpanID` strings respectively; prefix declarations and any protocol mapping remain pending with Tracking.                                                                                                                                                                             |
+| `traceId`, `rootSpanId`              | Opaque owner-returned `TraceID` and `SpanID` strings respectively; identity validation remains **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#tracking-service)**.                                                                                                              |
 
 Trace and span validation follows
 [Tracking's identity and timestamp rules](./tracking.md#identity-and-timestamp-validation).
 OpenTelemetry reuse does not specify their wire representation; this proposal
 requires neither W3C hexadecimal IDs nor an invented entity prefix.
 
-The attribution copy addresses the design's outstanding historical-attribution
-requirement: ending a registration must not erase which program performed
-the work. It is a proposal for the future execution record, not implemented
-storage. A display name authenticates and groups nothing.
+The attribution copy follows [Claims and counts](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#claims-and-counts) and survives deregistration.
+A display name authenticates and groups nothing.
 
 ## Lease renewal and release
 
@@ -445,10 +439,7 @@ double-decrementing a count or creating a second entry. This receipt is not
 an outcome record or an assertion that the node is immediately claimable.
 
 There is no `failure`, `cannotProgress`, `retryBudget`, `force` or arbitrary
-target-state field. Reviewer loss, failed/uncertain repository actions and
-machinery failure have unresolved dispositions. They must not be encoded
-as a fabricated assessment, an unconditional further-work release, a
-human unblock or a new retry policy through this command.
+target-state field. Failure dispositions remain **blocked** under [HANDOFF Cannot progress](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#cannot-progress).
 
 ### Liveness, epochs and cancellation boundaries
 
@@ -464,19 +455,13 @@ Loss revokes authority at the loss declaration, not at a replacement claim.
 Both paths remove the execution from its claimant count. An already-admitted
 remote operation follows Project's rules; revocation does not undo it.
 
-**No lease/claim epoch field or renewal duration has been declared in the
-Scheduler design or current source.** This specification therefore exposes
-no client-selected epoch and invents no epoch reset/increment semantics. If
-the implementation adds fencing epochs, their owner, wire scalar, comparison
-and replay rules must be declared before a corresponding field is required.
-Unix epoch milliseconds above describe time representation, not a fencing
-token. The declared liveness fence today is the execution/current-claim
-comparison and accepted revocation/loss.
+Lease duration and renewal cadence remain **[blocked][scheduler-contract]**.
+The command exposes no client-selected epoch.
+The execution/current-claim comparison and accepted revocation or loss govern liveness under the [Scheduler design](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#liveness).
 
 Expiry is not proof that a runtime stopped. A stopped or revoked execution
 must publish no later effect, and Mission/Project refuse stale admission.
-Physical-stop enforcement and safe reuse of capacity/workspaces after loss
-remain open. Inspection, cancellation and renewal commands make no stronger
+Physical stop and safe reuse remain **blocked** under [HANDOFF SC5](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service). Inspection, cancellation and renewal commands make no stronger
 guarantee. There is no generic Scheduler cancellation command: a transport
 cancel is not a release, and a human pauses/discards through Mission.
 
@@ -509,20 +494,20 @@ accepted observation record remains a different resource.
 
 All fields are required; nullable fields remain present with `null`.
 
-| Field                                           | Type and meaning                                                                                                                                                                                                                                                    |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `obligationId`, `projectId`, `externalObjectId` | Opaque references; the external object determines correlation and service-identity resolution.                                                                                                                                                                      |
-| `acceptedAt`                                    | Durable obligation acceptance timestamp.                                                                                                                                                                                                                            |
-| `lease`                                         | Same timestamp shape as `ExecutionRecord.lease`, or `null` before an observer holds it; when the lease establishes is open. HANDOFF.md of the design set holds the item "Declare the lease lifecycle of an observation obligation". This lease is not a node claim. |
-| `completedAt`                                   | Timestamp or `null` while durable completion has not been established.                                                                                                                                                                                              |
-| `observationId`                                 | Opaque Mission observation reference or `null` while no accepted observation is associated. Its prefix remains Mission-owned.                                                                                                                                       |
+| Field                                           | Type and meaning                                                                                                                                                                                                                                                            |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `obligationId`, `projectId`, `externalObjectId` | Opaque references; the external object determines correlation and service-identity resolution.                                                                                                                                                                              |
+| `acceptedAt`                                    | Durable obligation acceptance timestamp.                                                                                                                                                                                                                                    |
+| `lease`                                         | Same timestamp shape as `ExecutionRecord.lease`, or `null` before an observer holds it; the lease start remains **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)**. This lease is not a node claim. |
+| `completedAt`                                   | Timestamp or `null` while durable completion has not been established.                                                                                                                                                                                                      |
+| `observationId`                                 | Opaque Mission observation reference or `null` while no accepted observation is associated. Its prefix remains Mission-owned.                                                                                                                                               |
 
 The observer has no claimant and no execution ID. It reads through Worker's
 platform connector under the narrowly authorized service identity resolved
 from the external object, folds platform state and submits the observation
 to Mission. It never decides the node's outcome. This proposal offers no
-manual `observe`, `complete`, `retry` or lease-stealing command: the identity
-minting path and recovery of a lost observer need their owning contracts.
+manual `observe`, `complete`, `retry` or lease-stealing command: observer recovery remains **blocked** under [HANDOFF C1](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service).
+The [service identity ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-operation-and-its-two-entry-adapters) governs observer identity.
 
 ## Delivery admission
 
@@ -551,10 +536,8 @@ delivery reconciles against the node's external objects, not automatically its
 newest attempt. An observation needs the authorized observer path, not a node
 claim. A platform signature grants no authority to edit WHAT, unblock, override
 or execute. New WHAT creates no node and is not a scheduling request; its
-inbound request contract remains Open.
-
-**Open:** decide whether Scheduler exposes a read of admission dispositions per
-project. The design names no such read, so this page proposes no command for it.
+inbound request contract remains **blocked** under [HANDOFF Scheduler Service and delivery](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery).
+A read of admission dispositions remains **blocked** under that same item; this page proposes no command.
 
 ### Delivery is an ingress operation, not a generic CLI mutation
 
@@ -587,55 +570,6 @@ signed delivery, and a human or machine token is not delivery verification.
 - **Human recovery and outcomes:** unblock, pause, resume, discard, priority
   and override belong to Mission's human authority path. Scheduler inspection
   and machine lease operations cannot take their place.
-
-## Open implementation and design decisions
-
-The future command contract must resolve these dependencies explicitly:
-
-1. **Wire declarations:** Scheduler entity prefixes, adoption of the proposed
-   Mission integer revision scalar, Tracking identity prefixes/protocol mapping,
-   final request/response schemas, operation IDs/routes, status/error codes,
-   body bounds, cursor consistency/retention and the proposed durable-request
-   mapping. Only pull's 90-second wait/120-second route bounds are currently
-   specified; lease duration, renewal cadence and other route timeouts need
-   values. The 1,000-active-project target has no numerical discovery-lag or
-   claim-latency acceptance bounds yet. Intake owns the unresolved-delivery
-   capacity bound.
-2. **Identity and attribution:** the identity under which hosted background
-   producers call peer operations, observer identity minting, and durable
-   client/name attribution after registration ends. This page grants no
-   human impersonation to a service loop and no machine operation to a
-   fabricated identity. A dead remote worker's registration lifetime and
-   delayed healthcheck freshness remain unresolved.
-3. **Loss and physical stop:** observation-obligation recovery after loss
-   (**C1**), safe capacity/workspace reuse after a runtime returns (**SC5**),
-   worker stop behavior after revocation (**W5**), and reviewer loss out of
-   `Evaluating`. Lease expiry and count removal do not settle physical stop.
-4. **Cannot-progress and budgets:** provider errors, invalid handoffs,
-   verification timeouts, failed commit/push, unsupported context size,
-   no-progress further-work repetition, continuation authority and bounds,
-   resumption charging/reset, outcomes without assessments and budget
-   exhaustion. The failure/recovery effort has not approved a third release
-   form or automatic human unblock.
-5. **Uncertain actions and observations:** reconciliation of effects after
-   revocation and lost acknowledgements, durable action identity, incomplete
-   evaluation resumption, observation deduplication for unchanged state
-   (**C3**), reversing platform state (**C5**), an external request with no
-   end state (**C6**), stale assessment recovery, interrupted closure, and
-   human-control/completion precedence. A release receipt settles none of
-   those uncertain outcomes.
-6. **Inbound classification:** source-binding configuration, linked-human
-   mapping and the postponed new-WHAT work-request design. Intake owns
-   platform-specific receipt. A Scheduler read of admission dispositions per
-   project remains Open because the design names no such read. Four existing
-   dispositions do not authorize silently adding a fifth, creating nodes from
-   delivery text or retaining requests forever.
-
-Before shipping, declare the public operations in Scheduler's `contract.ts`,
-preserve the transaction-only collaborations, implement the CLI HTTP adapter,
-and publish matching OpenAPI. Help, validation, access enforcement, durable
-replay and cancellation tests must agree with the adopted contract; the
-inventory alone is not evidence that those mechanisms are implemented.
 
 ## Design provenance
 

@@ -39,6 +39,9 @@ kanthord gateway [--endpoint <url>] verify [--token <jwt>] [-h|--help]
 ```
 
 The inherited `--endpoint` option also works after `verify`.
+The command resolves the endpoint and token through the client configuration precedence.
+`--token` overrides the environment and operator-supplied client file; `--endpoint` selects the target server.
+An invocation without a resolved token receives HTTP 401.
 
 ### Arguments, options, and defaults
 
@@ -145,6 +148,11 @@ client file therefore cannot block this local generator.
 
 ### Input and local filesystem effects
 
+The target command writes OpenAPI files for every declared service operation, including `worker.register`.
+The [operation registry ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-operation-registry) declares `static/openapi/index.yaml` and `/api/openapi/index.yaml`.
+It requires the package version in the index and directory-path output.
+The source snapshot below does not override that target.
+
 The generator uses the operation declarations imported into the CLI, currently
 all four Gateway operations and `worker.register`. It emits OpenAPI `3.1.0`
 YAML from their schemas, access policies, timeouts, mutation flags, responses,
@@ -227,21 +235,21 @@ Failure to read a published index or allowed fragment returns
 files. The health and OpenAPI routes are public but still subject to host,
 readiness, validation, and timeout checks.
 
-## Planned scope and explicit gaps
+## Command scope
 
 The target Gateway command table remains the two commands above. The health
 endpoint alone does not justify adding a CLI command. Worker registration and
 other services' operations retain their owning command groups. Removed login,
 logout, and rotation commands are not part of this specification.
 
-| Topic                      | Current source versus design / future decision                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenAPI artifact and URLs  | The ruled target is a directory of service-scoped files. Source implements that contract with a root index at `static/openapi.yaml` and references under `static/openapi/`, served at `/api/openapi.yaml` and `/api/openapi/:service/:file`. Whether `gateway-service.impl.md` or the engine repairs the served path is open. HANDOFF.md of the design set holds the item "Ruled: the OpenAPI contract is a directory of service-scoped files". A root index does not make the contract single-file. |
-| OpenAPI package version    | Architecture calls for publishing the package version in the index for worker/server compatibility checks. The emitter currently hardcodes `info.version: 1.0.0`; the package version is different. Package-version publication and compatibility enforcement must not be inferred from this generator.                                                                                                                                                                                              |
-| Help completeness          | The target requires help to state every default and validation rule. Current `--endpoint` help says only “Server endpoint”; this page specifies behavior that help still needs to expose. The inherited unused endpoint option also appears in local `openapi` help.                                                                                                                                                                                                                                 |
-| Credential validation      | The server verification checks above are implemented. Local validation of option/environment token values is weaker than the client-file schema. The complete JWT header/claim contract, issuer/audience requirements, and treatment of unexpected claims remain open design work; this page does not claim those checks exist. Global issuance syntax stays in [other commands](./other.md).                                                                                                        |
-| User management and bans   | Account administration, provisioning, recovery, and authority/route for a session ban remain postponed. An internal denylist method is not an exposed operation or a planned CLI command. No user, session-list, revoke, or ban command is specified.                                                                                                                                                                                                                                                |
-| Future services in OpenAPI | The current CLI explicitly assembles Gateway and Worker contracts. A future declared service must be added to the emission set and published files as well as server routing; the generator does not scan source directories automatically.                                                                                                                                                                                                                                                          |
+| Topic                      | Current source versus design / future decision                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAPI artifact and URLs  | The ruled target is a directory of service-scoped files. Source implements that contract with a root index at `static/openapi.yaml` and references under `static/openapi/`, served at `/api/openapi.yaml` and `/api/openapi/:service/:file`. The engine follows the [operation registry ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-operation-registry). A root index does not make the contract single-file. |
+| OpenAPI package version    | Architecture calls for publishing the package version in the index for worker/server compatibility checks. The emitter currently hardcodes `info.version: 1.0.0`; the package version is different. Package-version publication and compatibility enforcement must not be inferred from this generator.                                                                                                                                                                 |
+| Help completeness          | The target requires help to state every default and validation rule. Current `--endpoint` help says only “Server endpoint”; this page specifies behavior that help still needs to expose. The inherited unused endpoint option also appears in local `openapi` help.                                                                                                                                                                                                    |
+| Credential validation      | The server verification checks above are implemented. Local validation of option/environment token values is weaker than the client-file schema. The [JWT ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-jwt) declares the closed header and claim contract. Global issuance syntax stays in [other commands](./other.md).                                                                                       |
+| User management and bans   | User management remains **blocked** under [HANDOFF Gateway Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#gateway-service). An internal denylist method is not an exposed operation or a planned CLI command. No user, session-list, revoke, or ban command is specified.                                                                                                                                                        |
+| Future services in OpenAPI | The current CLI explicitly assembles Gateway and Worker contracts. A future declared service must be added to the emission set and published files as well as server routing; the generator does not scan source directories automatically.                                                                                                                                                                                                                             |
 
 ## Implementation references
 

@@ -1,7 +1,6 @@
 # Worker CLI specification
 
-This is the future specification for `kanthord worker`. It contains **10 command
-leaves: 1 implemented command and 9 proposed commands**. The proposed command
+This is the future specification for `kanthord worker`. It contains **12 command leaves: 1 implemented command and 11 proposed commands**. The proposed command
 names, routes, operation IDs, access policies, JSON fields and defaults below are
 design proposals, not published API or working CLI commands. The behavioral
 requirements identified as **target design** come from the Worker design; their
@@ -90,35 +89,41 @@ and an idempotency key alone cannot reconcile an uncertain repository write.
 | `AgentName`                | Nonempty exact role/version key declared by the selected worker, such as `swe@1`; never a worker name. Unknown or mismatched names fail lookup.                                                                                                              |
 | `ProjectId`                | Opaque `project_<ulid>` identity using the declared project prefix.                                                                                                                                                                                          |
 | `RuntimeIdentity`          | Opaque server-returned runtime identity. Current generation uses `runtime_identity_<ulid>`, but the current wire schema accepts a nonblank string of length `1..128`; it does not enforce that prefix. Proposed consumers retain the returned value exactly. |
-| `BindingId`, `ExecutionId` | Opaque server-returned identities of the appropriate owning service. The final prefix validation is blocked until those owners declare it; this proposal invents no binding or execution prefix. Names such as `general-main` are not identity substitutes.  |
+| `BindingId`, `ExecutionId` | `BindingId` uses `binding_<ulid>`. Execution identity validation remains **[blocked][worker-contract]**.                                                                                                                                                     |
 | `ToolName`                 | One exact published tool name from the proposed tool catalog below; no arbitrary platform method name.                                                                                                                                                       |
 
 An entity identity follows `<declared-prefix>_<ulid>`, where the ULID is canonical
 uppercase and matches `[0-7][0-9A-HJKMNP-TV-Z]{25}`. Validate the expected entity
 kind, not just the suffix. A bare ULID is valid for an idempotency key only.
 Worker/agent names and MCP session IDs retain their natural-key/protocol forms.
-The outstanding design declaration of the runtime prefix must be reconciled
-with the current generator before a stricter output schema is published.
+The target runtime identity is `worker_instance_<ulid>` under the [Worker identity ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-identities-of-the-worker-service).
+
+[worker-contract]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service
 
 ## Command inventory
 
-`P` means proposed; `I` means implemented syntax and operation. All paths in `P`
-rows are proposed unversioned paths, not claims about the current OpenAPI.
+`P` means proposed; `I` means implemented syntax and operation.
+Heartbeat and handover retain their ruled routes; other `P` paths remain proposals, not claims about the current OpenAPI.
 `human` authenticates a human JWT. `client` authenticates a machine JWT and requires
 a live registration unless an explicit exception is stated.
 
-| Status | Command after `kanthord worker`           | Route                                                   | Operation ID                                 | Access / registration                                                            |
-| ------ | ----------------------------------------- | ------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
-| I      | `register`                                | `POST /api/worker/register`                             | `worker.register`                            | `client`; `requiresRegistration: false`                                          |
-| P      | `list`                                    | `GET /api/worker/catalog`                               | `worker.catalog.list`                        | `human`                                                                          |
-| P      | `get <worker-name>`                       | `GET /api/worker/catalog/:workerName`                   | `worker.catalog.get`                         | `human`                                                                          |
-| P      | `agent get <worker-name> <agent-name>`    | `GET /api/worker/catalog/:workerName/agent/:agentName`  | `worker.agent.get`                           | `human`                                                                          |
-| P      | `instance list`                           | `GET /api/worker/instance`                              | `worker.instance.list`                       | `human`                                                                          |
-| P      | `instance get <runtime-identity>`         | `GET /api/worker/instance/:runtimeIdentity`             | `worker.instance.get`                        | `human`                                                                          |
-| P      | `instance healthcheck <runtime-identity>` | `GET /api/worker/instance/:runtimeIdentity/healthcheck` | `worker.instance.healthcheck`                | `human`                                                                          |
-| P      | `instance deregister <runtime-identity>`  | `POST /api/worker/instance/:runtimeIdentity/deregister` | `worker.instance.deregister`                 | `client`; proposed `requiresRegistration: false`, with explicit ownership checks |
-| P      | `mcp tool list`                           | `GET /api/worker/mcp/tool`                              | `worker.mcp.tool.list`                       | `client`; live registration and own live execution                               |
-| P      | `mcp tool call <tool-name> --file <path>` | Three concrete `POST` routes in the tool mapping below  | Three static tool operations in that mapping | `client`; live registration and own live execution; further per-tool checks      |
+| Status | Command after `kanthord worker`           | Route                                                   | Operation ID                                                 | Access / registration                                                            |
+| ------ | ----------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| I      | `register`                                | `POST /api/worker/register`                             | `worker.register`                                            | `client`; `requiresRegistration: false`                                          |
+| P      | `heartbeat [--token <jwt>]`               | `POST /api/worker/heartbeat`                            | `worker.heartbeat`                                           | `client`; live registration                                                      |
+| P      | `handover [--token <jwt>]`                | `POST /api/worker/handover`                             | `worker.handover`                                            | `client`; live registration and live execution                                   |
+| P      | `list`                                    | `GET /api/worker/catalog`                               | `worker.catalog.list` **[blocked][worker-contract]**         | `human`                                                                          |
+| P      | `get <worker-name>`                       | `GET /api/worker/catalog/:workerName`                   | `worker.catalog.get` **[blocked][worker-contract]**          | `human`                                                                          |
+| P      | `agent get <worker-name> <agent-name>`    | `GET /api/worker/catalog/:workerName/agent/:agentName`  | `worker.agent.get` **[blocked][worker-contract]**            | `human`                                                                          |
+| P      | `instance list`                           | `GET /api/worker/instance`                              | `worker.instance.list` **[blocked][worker-contract]**        | `human`                                                                          |
+| P      | `instance get <runtime-identity>`         | `GET /api/worker/instance/:runtimeIdentity`             | `worker.instance.get` **[blocked][worker-contract]**         | `human`                                                                          |
+| P      | `instance healthcheck <runtime-identity>` | `GET /api/worker/instance/:runtimeIdentity/healthcheck` | `worker.instance.healthcheck` **[blocked][worker-contract]** | `human`                                                                          |
+| P      | `instance deregister <runtime-identity>`  | `POST /api/worker/instance/:runtimeIdentity/deregister` | `worker.instance.deregister` **[blocked][worker-contract]**  | `client`; proposed `requiresRegistration: false`, with explicit ownership checks |
+| P      | `mcp tool list`                           | `GET /api/worker/mcp/tool`                              | `worker.mcp.tool.list` **[blocked][worker-contract]**        | `client`; live registration and own live execution                               |
+| P      | `mcp tool call <tool-name> --file <path>` | Three concrete `POST` routes in the tool mapping below  | Three static tool operations; **[blocked][worker-contract]** | `client`; live registration and own live execution; further per-tool checks      |
+
+`credential` runs inside the `worker` application alone and is no CLI command.
+Its operation is `worker.credential` at `POST /api/worker/credential`, with `client` access and a live execution requirement.
 
 Catalog and operator inspection routes using `human` are a proposed addition to
 the existing client-oriented Worker surface. Every authenticated human has the
@@ -137,6 +142,11 @@ There are no positional arguments. [`--token`](./common-flags.md#--token),
 [`--idempotency-key`](./common-flags.md#--idempotency-key), and
 [`--help`](./common-flags.md#--help) use the shared definitions. Registration
 requires a machine token; the shared reference records its local preflight.
+The command registers a worker instance under the client identity of its machine JWT.
+`--token` overrides `KANTHORD_TOKEN` and the `token` field of the client configuration file.
+A missing token stops the command without a prompt or a request.
+The worker runtime can call the route directly with its machine JWT.
+The [registration contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#worker-instance-registration) owns JWT verification, instance-count admission and replay.
 
 | Request location         | Requiredness / type / default                                             | Validation                                                                                         |
 | ------------------------ | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -150,8 +160,8 @@ limit, and returns HTTP `200` with `{ "runtimeIdentity": "..." }`. The body limi
 does not permit a registration payload. The runtime identity must be a nonblank
 string of length `1..128` under the current output schema.
 
-The CLI prints exactly one line with `runtimeIdentity` and `idempotencyKey`, saves
-no configuration and prints no token. Registration creates no client identity,
+The CLI prints one JSON line with `runtimeIdentity` and `idempotencyKey`, saves no configuration and prints no token.
+Success exits with zero; failure exits with a non-zero status. Registration creates no client identity,
 worker definition or human account. The credential comes from local `jwt`
 issuance described in [other commands](./other.md).
 
@@ -182,6 +192,31 @@ Source checks: [CLI integration tests](../../src/apps/server/cli-worker.test.ts)
 [registration integration tests](../../src/apps/server/gateway-registration.test.ts)
 and [Worker tests](../../src/worker/service.test.ts). The binding/capacity tests
 use injected collaborators and do not establish a production binding store.
+
+## `heartbeat`
+
+```text
+kanthord worker [--endpoint <url>] heartbeat [--token <jwt>]
+```
+
+The proposed command calls `POST /api/worker/heartbeat`, operation `worker.heartbeat`, with `client` access and an empty body.
+The operation requires a live registration and answers 204.
+Every authenticated request of the registered client identity renews its heartbeat.
+`worker.heartbeatWindow` defaults to 300 s; a sweep every 30 s ends expired registrations and frees their slots.
+The [registration heartbeat](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#registration-heartbeat) rules expiry, renewed registration and execution loss.
+The [Worker configuration](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#configuration) rules the window default.
+
+## `handover`
+
+```text
+kanthord worker [--endpoint <url>] handover [--token <jwt>]
+```
+
+The proposed command calls `POST /api/worker/handover`, operation `worker.handover`, with `client` access and an empty body.
+The operation requires a live execution and returns an AES-256-GCM envelope.
+The command prints only a status and never prints the envelope.
+The [credential handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-credential-handover) rules the application call after a claim and before inference.
+The [Project handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-credential-handover) rules the envelope and credential report.
 
 ## Catalog and agent inspection — proposed
 
@@ -268,8 +303,8 @@ disabled or revoked selected accounts cannot silently fall back to another.
 An external worker declares no native agent configuration or prompts; looking up
 a native agent under it returns proposed `404`. Prompt/default changes require a
 new worker version. This command neither composes the prompt of an execution nor
-reads a local `AGENTS.md`/`CLAUDE.md`. The global-prompt configuration field and
-prompt bounds remain open design decisions.
+reads a local `AGENTS.md`/`CLAUDE.md`. The [Worker configuration](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#configuration) declares `worker.globalPrompt`.
+Prompt bounds remain **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service).
 
 ## Instance inspection and lifecycle — proposed
 
@@ -347,9 +382,8 @@ The target checks depend on host/placement:
   harness's provider configuration.
 
 The result grants no claim or resource access and proves neither idleness nor
-physical liveness. It is not a provider network probe. The Scheduler still needs
-a fresh healthcheck at claim admission; the freshness rule for a waiting pull
-and provider-account probe semantics remain unresolved.
+physical liveness. It is not a provider network probe. The Scheduler repeats the healthcheck immediately before the claim commits, under [Claims and counts](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#claims-and-counts).
+Provider-account checks remain **blocked** under [HANDOFF Cannot progress](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#cannot-progress).
 
 ### `instance deregister <runtime-identity>`
 
@@ -392,12 +426,8 @@ are GitHub pull-request retrieval and review-comment listing. The only exposed
 write is the action-performer tool, available to external harnesses only. Native
 reviewers invoke the action performer from their evaluation method.
 
-The two commands below propose a **REST projection of that external-harness tool
-surface** so the CLI remains a REST client. This adapter needs explicit approval
-and implementation; it is not an existing route or a third unconstrained caller
-of the internal action performer. It must enforce the same tool allowlist,
-external-harness restriction and claim checks as MCP. If this projection is not
-approved, harnesses use MCP directly and these two CLI commands stay deferred.
+The proposed REST projection remains **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service).
+It preserves the MCP tool allowlist, external-harness restriction and claim checks.
 
 ### `mcp tool list`
 
@@ -415,7 +445,7 @@ eligible by naming another execution.
 
 Proposed HTTP `200` returns a page of tools available to that execution in name
 order. Each item contains `name: ToolName`, `description: string`,
-`inputSchema: object`, `outputSchema: object`, and `mutation: boolean`. Whether the tool list filters the action tool by the assessment state of the claim is open. HANDOFF.md of the design set holds the item "Complete the command table of the group of each service". Listing grants no authority; invocation repeats all admission checks.
+`inputSchema: object`, `outputSchema: object`, and `mutation: boolean`. Assessment-state filtering remains **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service). Listing grants no authority; invocation repeats all admission checks.
 
 ### `mcp tool call <tool-name> --file <path>`
 
@@ -441,11 +471,11 @@ The wire operation's mutation declaration cannot depend on unvalidated input.
 The three tool calls therefore have separate proposed static operation
 declarations at concrete paths:
 
-| Tool / concrete path suffix after `/api/worker/mcp/tool/` | Operation ID                                    | Mutation | Access                                                                              |
-| --------------------------------------------------------- | ----------------------------------------------- | -------- | ----------------------------------------------------------------------------------- |
-| `github-pull-request-get/call`                            | `worker.mcp.githubPullRequestGet`               | `false`  | `client`, own live external-harness execution                                       |
-| `github-pull-request-review-comment-list/call`            | `worker.mcp.githubPullRequestReviewCommentList` | `false`  | `client`, own live external-harness execution                                       |
-| `repository-action-request/call`                          | `worker.mcp.repositoryActionRequest`            | `true`   | `client`, own live external-harness evaluation claim and current passing assessment |
+| Tool / concrete path suffix after `/api/worker/mcp/tool/` | Operation ID                                                                   | Mutation | Access                                                                              |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------ | -------- | ----------------------------------------------------------------------------------- |
+| `github-pull-request-get/call`                            | `worker.mcp.githubPullRequestGet` **[blocked][worker-contract]**               | `false`  | `client`, own live external-harness execution                                       |
+| `github-pull-request-review-comment-list/call`            | `worker.mcp.githubPullRequestReviewCommentList` **[blocked][worker-contract]** | `false`  | `client`, own live external-harness execution                                       |
+| `repository-action-request/call`                          | `worker.mcp.repositoryActionRequest` **[blocked][worker-contract]**            | `true`   | `client`, own live external-harness evaluation claim and current passing assessment |
 
 All three use `POST` with the strict JSON body above. There is no fourth generic
 invocation operation. The one CLI command dispatches to the selected declaration.
@@ -488,13 +518,11 @@ platform write. It owns any independent checkout needed for that operation.
 
 The tool call does not release the execution. The target permits a reviewer
 release after a result containing only submitted objects and prerequisite waits;
-Scheduler records the corresponding wait fact. No release/retry rule is defined
-for failed-before-effect or uncertain items. In-memory serialization and CLI
-idempotency do not supply the missing durable action identity or reconciliation.
+Scheduler records the corresponding wait fact. Failure release and recovery remain **blocked** under [HANDOFF B9](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#b9-failure-and-recovery).
 
 ### MCP transport requirements outside the CLI inventory
 
-The actual MCP endpoint path and its operation declarations remain unchosen.
+The MCP endpoint and declarations remain **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service).
 Target transport is MCP v2 Streamable HTTP mounted on the Gateway listener:
 one endpoint accepts `POST`, `GET` and `DELETE`; each JSON-RPC client message uses
 a new `POST`. Responses are JSON or a continuing event stream. Initialization
@@ -509,37 +537,9 @@ lease/agent loops, workspace cleanup or collaboration functions. The proposed
 tool projection exposes no direct platform write and no raw git push, merge,
 credential export or caller-selected remote destination.
 
-## Decisions still required
+## Design provenance
 
-These gaps remain open; command proposals above do not settle them:
-
-1. **Remote `worker` placement:** provider access, repository operations,
-   effective-configuration resolution and execution containment through the
-   public API. Registration does not prove a remote native runtime can execute.
-2. **Dead registration:** how a crashed application relinquishes its registration
-   and capacity. There is no declared registration heartbeat, expiry, takeover,
-   force-delete or automatic replacement. A new-key registration by the same
-   still-registered client currently conflicts.
-3. **Failure and recovery:** cannot-progress disposition, bounded continuation,
-   reviewer loss/resumption, durable action dispatch identity, lost acknowledgments,
-   uncertain-effect reconciliation, effects completing after revocation, physical
-   stop enforcement and safe workspace reuse. An uncertain action stays uncertain.
-4. **Schema completion:** owning declarations for binding/execution identities,
-   reconciliation of the runtime prefix, exact worker defaults and budgets,
-   configuration constraints, platform tool outputs and action-result referenced
-   records. No illustrative model name, prefix or budget is a default.
-5. **Health and runtime configuration:** waiting-pull health freshness,
-   provider-account checks, global-prompt field/format/default/bounds and workspace
-   root. The current empty Worker fragment answers none of these.
-6. **Public surface decisions:** approve these proposed human inspection routes,
-   self-deregistration retry semantics and REST-to-MCP projection; select the real
-   MCP endpoint and declarations. The target service command table is incomplete.
-7. **Implementation convergence:** production binding/capacity integration,
-   registration invalidation and the target process-local idempotency store.
-   Scheduler must retain client identity and display-name attribution in the
-   execution record after the runtime registration ends.
-
-Optional design provenance, not prerequisites for reading this engine-local spec:
+Optional design provenance:
 [Worker design](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.md),
 [Worker vocabulary](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.vocabulary.md),
 [Worker implementation rulings](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md),

@@ -41,8 +41,7 @@ The pages distinguish three kinds of information:
 - **Planned or proposed:** target behavior grounded in the service design.
   Command spellings, request fields, routes, and defaults introduced by this
   specification are proposals until the owning operation contract adopts them.
-- **Open or blocked:** a design decision is still needed. The page names the
-  missing decision instead of giving it an invented default.
+- **Open or blocked:** an open decision lives in the root [HANDOFF](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md). A blocked row links its item.
 
 Inspected 2026-09-24: the source currently supplies `config init|validate|show`, `serve` with the
 `server` application, human and machine `jwt` generation, `worker register`,
