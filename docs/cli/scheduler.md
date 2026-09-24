@@ -1,0 +1,650 @@
+# Scheduler CLI specification
+
+This is the proposed `kanthord scheduler` command surface for engine
+contributors. See the [CLI index](./README.md) and
+[shared conventions](./other.md). The contracts below are self-contained;
+provenance links at the end provide design context.
+
+## Status and ownership
+
+**Implemented, inspected 2026-09-23:** the Scheduler group prints help and
+accepts `--endpoint`. It has no service subcommands. The
+[CLI dispatcher](../../src/apps/cli/index.ts) creates that placeholder; the
+[server composition](../../src/apps/server/index.ts) constructs Project,
+Worker and Gateway only. There is no Scheduler source directory, operation
+declaration, migration or generated Scheduler OpenAPI document.
+
+**Proposed:** every command, operation identifier, route, request field and
+response shape below, except the existing group help. These are candidates for
+the future Scheduler implementation contract and OpenAPI, not callable APIs.
+The ownership and admission requirements stated here come from the service
+design. Open recovery decisions remain open, even where a candidate command
+shape is otherwise complete.
+
+The Scheduler owns queue entries, claims, execution records, leases,
+live-execution accounting, wait records, delivery admission and observation
+obligations. Mission owns nodes, attempts, pinned revisions, evidence,
+assessments, outcomes, external objects and accepted observation records.
+Worker owns registrations, runtime identities, healthchecks, compatibility
+declarations and execution hosting. Project owns bindings, configured counts,
+resource authorization and delivery verification.
+
+The proposed public surface has **10 remote commands**: seven read operations
+and three mutations. Group/resource help is local and calls no operation.
+
+## Shared input, output and access rules
+
+Every synopsis below starts with `kanthord scheduler`. Every remote command
+also accepts the following options; their omission from a compact synopsis
+does not remove them.
+
+Shared syntax, types, defaults, and validation are defined by each linked flag.
+Only the applicability and Scheduler-specific requirements are listed here.
+
+| Common flag                                                                      | Applies to / Scheduler requirement                                                                                          |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| [`--endpoint`](./common-flags.md#--endpoint)                                     | Every remote command.                                                                                                       |
+| [`--token`](./common-flags.md#--token)                                           | Every remote command requires a resolved token of the identity kind in its access policy. Missing credentials fail locally. |
+| [`--help`](./common-flags.md#--help)                                             | Every group and leaf.                                                                                                       |
+| [`--idempotency-key`](./common-flags.md#--idempotency-key)                       | The three mutations only.                                                                                                   |
+| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Paginated `list` commands only.                                                                                             |
+| [`--file`](./common-flags.md#--file)                                             | Required on `work pull` and `execution release`; their sections define the JSON fields.                                     |
+
+These commands accept no `--config`. They open no engine database and do not
+read server configuration. Options, positional arguments and JSON fields not
+declared here are rejected before sending the request. Optional JSON fields
+are omitted when absent unless their table supplies a default; `null` is
+invalid unless explicitly allowed. Arrays are ordered JSON arrays, not
+comma-separated strings. All request objects are closed, including nested
+objects. JSON schemas and their eventual size bounds belong in `contract.ts`.
+
+### Identifiers, timestamps and revisions
+
+- `<project-id>` is a required opaque project identity, using the declared
+  `project_<ulid>` convention. `<request-id>` uses `request_<ulid>` and a
+  client identity uses the declared `client_identity_<ulid>` convention.
+  The ULID suffix is canonical uppercase and 26 characters long. Use the
+  [shared identity scalar](../../src/kernel/identity.ts), not a bare ULID.
+- `<execution-id>`, `<obligation-id>`, node IDs, external
+  object IDs and binding IDs are required nonblank opaque strings wherever
+  used below. Copy them from their owner's response. Their owning contracts
+  must declare the final prefixes and length bounds before these proposals
+  become executable schemas; this page invents no prefix for them.
+- `runtimeIdentity` is the opaque string returned by Worker registration.
+  Current [Worker code](../../src/worker/registrations.ts) generates
+  `runtime_identity_<ulid>`, but its
+  [published input/output declaration](../../src/worker/contract.ts) only
+  validates a nonblank string of at most 128 characters. The design's runtime
+  prefix decision remains open; this page does not turn that implementation
+  detail into a new Scheduler identity convention.
+- `attempt` is a positive safe integer counter belonging to the node, not a
+  new opaque identity. `pinnedRevision` is a positive safe JSON integer
+  revision counter, aligned with the [Mission proposal](./mission.md) and
+  pending adoption in its owning contract. Clients never choose either on a pull.
+- Every server-defined timestamp below is a nonnegative safe JSON integer
+  of **Unix epoch milliseconds in UTC**. A nullable timestamp uses `null`
+  when its event has not occurred. A duration is measured with a monotonic clock. JWT timestamps retain their separate seconds unit.
+- Neither a timestamp nor a ULID is a general causal-order proof. Queue order
+  has its explicit priority/entry ordering rule; revision and claim checks
+  establish currency elsewhere.
+
+### Access policies
+
+`human` means a Gateway-verified human JWT under the existing equal-human
+authority rule. This proposal uses it for project-wide inspection. A human
+token does not become a worker by supplying a runtime or execution ID.
+
+`client` means a Gateway-verified machine JWT and a live Worker registration.
+Gateway resolves its project and worker binding, and Worker vouches for the
+runtime association. A caller-supplied identifier must match that association.
+Claim inspection, renewal and release additionally require that the execution
+belongs to that client identity and runtime. They transfer no execution to
+another registration. Current access-policy names are defined in the
+[operation contract](../../src/kernel/operation.ts).
+
+Delivery ingress uses `delivery` verification, described in [Intake](./intake.md#routes-without-a-command). A
+platform signature is neither a human JWT nor an execution identity. No
+command here accepts a caller-supplied service identity or linked-human identity.
+
+### Results, pagination, retries and cancellation
+
+Successful reads print one JSON value and exit zero. A successful mutation
+prints its result with an additional CLI field `idempotencyKey`, and exits
+zero. Help exits zero. Input, authentication, authorization and operation
+failures exit nonzero with a diagnostic; an indeterminate result also exits
+nonzero and prints the retry key without claiming that no effect occurred.
+Tokens and delivery verification material never appear in these outputs.
+
+Every list result is `{ "items": [...], "nextCursor": null | string }`:
+both fields are required; `items` contains at most `limit` records and
+`nextCursor: null` ends the traversal. An empty list is successful. Each call
+reads one page; there is no implicit unbounded traversal or polling loop.
+Cursor encoding and behavior during concurrent changes remain implementation
+decisions; these proposals promise neither a frozen multi-page snapshot nor
+that pagination reserves work.
+
+Mutation requests carry the key in `Idempotency-Key`. As a **proposed durable
+request mapping**, the CLI also sends body `requestId` equal to `request_`
+followed by that key. It generates this field; it is not an editable JSON-file
+field. This preserves one domain request identity when an explicit key is
+reused by another CLI process. It is separate from Gateway's per-transport
+`X-Request-Id`. The owning contract must approve this mapping rather than
+assuming Gateway replay alone satisfies Scheduler's durable obligations.
+
+The Scheduler must bind a request identity to its validated payload and caller
+scope. Reusing it with different input is a conflict. An accepted work pull
+replays its original result before new admission checks inside Scheduler,
+without a second execution or count. Gateway authentication still applies.
+The scope includes project, claimant binding and runtime identity; another
+instance receives no accepted execution. Even an ended claim keeps its
+accepted pull result, and replay restores no authority. A no-work result ends
+that logical request: a later search uses a new key/request identity. Renewal
+and release need their own accepted-request replay to avoid repeated effects.
+
+Current [Gateway replay code](../../src/gateway/idempotency.ts) stores records
+in SQLite, whereas the future architecture specifies an in-memory TTL cache
+and handler-owned natural-key idempotency. That implementation/design gap
+must be reconciled. Neither mechanism by itself is a shipped Scheduler replay
+contract, nor permission to carry a claim across a runtime-registration boundary.
+
+No command automatically retries. A client can retry an uncertain mutation
+with the same inputs and explicit key. A timeout, disconnect or Ctrl-C ends
+the wait for a response; it undoes no committed claim, release or renewal.
+A cancelled waiting pull leaves no uncommitted reservation.
+If acquisition committed before disconnection, the claimant recovers the
+original answer by replay rather than issuing a fresh pull. Shutdown stops
+new claims, cancels waiting pulls, and preserves accepted obligations.
+
+## Command inventory and proposed operation mapping
+
+The literal service prefix is `/api/scheduler`. Path variables become required
+path parameters with the scalar rules above; query fields are only those
+listed by a command. Read requests have no body. Every route in this table is
+**proposed, pending the owning operation declaration and generated OpenAPI**.
+
+| Command suffix / synopsis                                                        | Operation identifier                    | HTTP route                                                                   | Access / effect                                                                           |
+| -------------------------------------------------------------------------------- | --------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `queue list <project-id> [--limit <count>] [--cursor <opaque>]`                  | `scheduler.queue.list`                  | `GET /api/scheduler/project/:projectId/queue`                                | `human`; read                                                                             |
+| `queue peek <project-id>`                                                        | `scheduler.queue.peek`                  | `GET /api/scheduler/project/:projectId/queue/peek`                           | `human`; read                                                                             |
+| `work pull --file <path> [--idempotency-key <key>]`                              | `scheduler.work.pull`                   | `POST /api/scheduler/work/pull`                                              | `client`; mutation, bounded wait                                                          |
+| `claim get <execution-id>`                                                       | `scheduler.claim.get`                   | `GET /api/scheduler/claim/:executionId`                                      | `client`; owned claim read (open; the command table of the Scheduler group is undeclared) |
+| `execution list <project-id> [--limit <count>] [--cursor <opaque>]`              | `scheduler.execution.list`              | `GET /api/scheduler/project/:projectId/execution`                            | `human`; read                                                                             |
+| `execution get <execution-id>`                                                   | `scheduler.execution.get`               | `GET /api/scheduler/execution/:executionId`                                  | `human`; read (open; the command table of the Scheduler group is undeclared)              |
+| `execution renew-lease <execution-id> [--idempotency-key <key>]`                 | `scheduler.execution.renew-lease`       | `POST /api/scheduler/execution/:executionId/renew-lease`                     | `client`; owned live execution mutation                                                   |
+| `execution release <execution-id> --file <path> [--idempotency-key <key>]`       | `scheduler.execution.release`           | `POST /api/scheduler/execution/:executionId/release`                         | `client`; owned live execution mutation                                                   |
+| `observation-obligation list <project-id> [--limit <count>] [--cursor <opaque>]` | `scheduler.observation-obligation.list` | `GET /api/scheduler/project/:projectId/observation-obligation`               | `human`; read                                                                             |
+| `observation-obligation get <project-id> <obligation-id>`                        | `scheduler.observation-obligation.get`  | `GET /api/scheduler/project/:projectId/observation-obligation/:obligationId` | `human`; read                                                                             |
+
+The access policy of every Scheduler inspection command is open until the implementation sibling of the Scheduler Service declares its command table. HANDOFF.md of the design set holds the item "Complete the command table of the group of each service".
+
+These read operations are proposed operational visibility, not an existing
+authorization to inspect service tables directly. `claim get` provides a
+machine-scoped view of the claim held in an execution record; it introduces
+neither a separate claim identity nor a second acquisition path.
+
+## Queue discovery
+
+### `queue list`
+
+```text
+kanthord scheduler queue list <project-id> [--limit <count>] [--cursor <opaque>]
+```
+
+`<project-id>` is required, has no default and maps to path `projectId`.
+[`--limit`](./common-flags.md#--limit) and
+[`--cursor`](./common-flags.md#--cursor) have the shared definitions. There are
+no other query fields or JSON body. Returns a page of `QueueEntry` records in priority
+descending, then entry identity ascending order. Held-out entries remain
+visible so a human can understand a wait. Reading changes no entry.
+
+### `queue peek`
+
+```text
+kanthord scheduler queue peek <project-id>
+```
+
+The required positional input maps to path `projectId` and has no default.
+No query or body is accepted. Returns the required field
+`{ "entry": QueueEntry | null }`, with `null` for an empty queue. It reads
+the first entry of the same order and removes nothing, including when that
+entry is held out. It neither predicts a particular instance's compatible
+selection nor reserves a node for a subsequent pull.
+
+### Proposed `QueueEntry` result
+
+Every field below is required in a result; none has a client default.
+
+| Field                 | Type and validation / meaning                                                                             |
+| --------------------- | --------------------------------------------------------------------------------------------------------- |
+| `entryId`             | Opaque time-ordered entry identity; prefix awaits Scheduler's identity declaration.                       |
+| `projectId`, `nodeId` | Project and Mission node references. Only an initiative or objective can be queued; never a task.         |
+| `claimKind`           | Enum `steps` or `evaluation`, admitted by Mission state.                                                  |
+| `priority`            | Safe integer copied from the Mission-owned priority. An absent node priority is Mission's default `0`.    |
+| `heldOut`             | Boolean; an entry waiting on a named fact is excluded from selection while that fact remains unsatisfied. |
+| `waitFor`             | `WaitFact` defined under release, or `null` when there is no recorded wait.                               |
+
+A priority change preserves the entry identity. Holding out an entry also
+preserves it; a release with further work creates a new entry. Membership
+means claimable work subject to the wait record, not necessarily Mission
+state `Available`. Neither priority, age, inspection nor a stale entry admits
+a claim. Mission state and every admission condition are rechecked at claim.
+
+## Work acquisition
+
+### `work pull`
+
+```text
+kanthord scheduler work pull --file <path> [--idempotency-key <key>]
+```
+
+There are no positional arguments or query fields. The required file supplies
+the following proposed fields. The CLI adds the generated `requestId` defined
+above to form the HTTP JSON body.
+
+| JSON file field   | Requiredness / type     | Default and validation                                                                    |
+| ----------------- | ----------------------- | ----------------------------------------------------------------------------------------- |
+| `workerBindingId` | Required opaque string. | No default. Must equal the binding authenticated from the machine JWT.                    |
+| `runtimeIdentity` | Required opaque string. | No default. Must equal that client's live Worker registration and belong to that binding. |
+
+The Scheduler parks a pull that finds no work for at most 90 s and then answers with no work. The client chooses no wait. The route timeout is 120 s.
+
+The authenticated binding determines the project. The file accepts no project
+override, node/mission selector, priority, claim kind, worker-name override,
+declared-state override, health assertion, node format, attempt or revision.
+An external harness's orchestrator uses the same pull as any other instance;
+it cannot acquire a chosen node or authorize its own claim.
+
+**Admission and effect:**
+
+1. Worker vouches for the runtime association, a fresh instance healthcheck
+   and the worker's published compatibility declarations. The instance has
+   at most one outstanding pull or one live execution.
+2. Scheduler selects the first non-held-out entry that the claimant admits
+   in the project's queue order. Compatibility includes exact worker name,
+   declared node state and required node format, using the pinned revision
+   of an open attempt or the current revision before the first claim.
+3. Selection and claim are one atomic acquisition. They recheck Mission
+   state, readiness/continuation, the wait fact, binding availability and
+   count, compatibility and one-claim-per-node exclusion. A node must be
+   `Available` for a steps claim or eligible `Waiting`/`External.Requested`
+   for an evaluation claim. A `Blocked`, `Paused`, `Pending`, terminal or
+   incompatible node cannot be forced through this path.
+4. An accepted claim mints the execution identity and counts one execution
+   against the claimant binding. One runtime holds at most one execution;
+   the binding admits fewer live executions than its configured count.
+   Scheduler adds no project-wide cap or retry budget. Mission performs the
+   transition, attempt opening when needed, and revision pin atomically.
+
+A claim serializes with block, pause, graph/import and binding changes. The
+worker's declared capability for both kinds gives it no preference to review
+its own steps. Hosted reviewers pull independently. All admission conditions
+are rechecked after waiting, including a binding disabled during the wait.
+
+**Proposed result:** exactly one of these closed objects:
+
+- `{ "kind": "claimed", "execution": ExecutionRecord }`.
+- `{ "kind": "no-work" }`.
+
+Both are successful results, proposed HTTP `200`; the CLI adds its key.
+No-work opens no attempt, creates no execution and consumes no live count.
+The harness backs off before a new logical pull. Waiting holds no lock,
+processor permit or node reservation. Freshness of the healthcheck after a
+long wait remains an open design decision, not a client-provided timestamp.
+
+## Claims and execution inspection
+
+### `claim get`
+
+```text
+kanthord scheduler claim get <execution-id>
+```
+
+Required opaque `<execution-id>` maps to path `executionId`; no default,
+query or body. Returns an `ExecutionRecord` for the authenticated client's
+own runtime. It can report that the execution has ended while that same
+registration remains live; it grants no authority from the historical result.
+A different client or runtime cannot use this command to take or renew the
+claim. After registration ends, use human execution inspection for history.
+This read is a snapshot; every later execution operation rechecks liveness.
+
+### `execution list`
+
+```text
+kanthord scheduler execution list <project-id> [--limit <count>] [--cursor <opaque>]
+```
+
+Required `<project-id>` maps to path `projectId`, with no default. Only the
+shared pagination query is accepted; no body. Returns a page of
+`ExecutionRecord` values, including live and ended executions. Proposed
+inspection order is `createdAt` descending, then `executionId` ascending for
+a stable tie-break, not a causal order. It changes no claim or count.
+
+### `execution get`
+
+```text
+kanthord scheduler execution get <execution-id>
+```
+
+Required opaque `<execution-id>` maps to path `executionId`; no default,
+query or body. Returns one `ExecutionRecord`, or a not-found failure. It is
+human inspection across registrations and server restarts. It does not
+impersonate the recorded claimant or perform an execution operation.
+
+### Proposed `ExecutionRecord` result
+
+All fields below are required unless the row explicitly says optional. Result
+fields are server-owned; the caller supplies none when acquiring work.
+
+| Field                                | Type and meaning                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `executionId`, `projectId`, `nodeId` | Opaque references with the identifier rules above.                                                                                                                                                                                                                                                                        |
+| `claimant`                           | Object with required `workerBindingId` and `runtimeIdentity` strings. For a registered instance, also requires `clientId` (`client_identity_<ulid>`) and `name` (nonblank string, 1–64 characters) copied at claim acceptance. These two attribution fields are absent for a hosted instance without a registered client. |
+| `claimKind`                          | Enum `steps` or `evaluation`, fixed for the entire lifetime of the claim.                                                                                                                                                                                                                                                 |
+| `attempt`                            | Positive safe integer counter of the node's attempt.                                                                                                                                                                                                                                                                      |
+| `pinnedRevision`                     | Positive safe JSON integer revision counter; proposed scalar pending adoption with Mission.                                                                                                                                                                                                                               |
+| `claimState`                         | Proposed inspection enum `live`, `released`, `revoked` or `lost`. These are claim lifecycle labels, not new Mission node states. `lost` records the accepted loss declaration.                                                                                                                                            |
+| `lease`                              | Object with required `expiresAt` timestamp, `renewedAt` timestamp or `null`, and `lossDeclaredAt` timestamp or `null`. Scheduler alone determines expiry.                                                                                                                                                                 |
+| `createdAt`                          | Claim acceptance timestamp.                                                                                                                                                                                                                                                                                               |
+| `endedAt`                            | End timestamp or `null` while live.                                                                                                                                                                                                                                                                                       |
+| `traceId`, `rootSpanId`              | Opaque owner-returned `TraceID` and `SpanID` strings respectively; prefix declarations and any protocol mapping remain pending with Tracking.                                                                                                                                                                             |
+
+Trace and span validation follows
+[Tracking's identity and timestamp rules](./tracking.md#identity-and-timestamp-validation).
+OpenTelemetry reuse does not specify their wire representation; this proposal
+requires neither W3C hexadecimal IDs nor an invented entity prefix.
+
+The attribution copy addresses the design's outstanding historical-attribution
+requirement: ending a registration must not erase which program performed
+the work. It is a proposal for the future execution record, not implemented
+storage. A display name authenticates and groups nothing.
+
+## Lease renewal and release
+
+### `execution renew-lease`
+
+```text
+kanthord scheduler execution renew-lease <execution-id> [--idempotency-key <key>]
+```
+
+Required opaque `<execution-id>` maps to path `executionId`, with no default.
+There is no query or input file. The HTTP body is the closed generated object
+`{ "requestId": "request_<same-key-ulid>" }`. No expiry, duration, claimant,
+priority or replacement execution is accepted from the caller.
+
+The authenticated holder renews its current live claim. Proposed success is
+HTTP `200` with `{ "executionId": string, "lease": Lease }`, both fields
+required and `Lease` shaped as the `ExecutionRecord.lease` object. Scheduler
+chooses the renewed expiry under its eventual lease policy. Replay of the
+same request returns the same accepted renewal rather than extending it
+again; a later renewal uses a new key. A replayed acknowledgement of an old
+renewal does not prove present liveness.
+
+Renewal serializes with loss declaration, release, revocation and completion.
+A new renewal of an ended, revoked or lost claim fails. Renewal consumes no
+additional count and changes no attempt or claim kind. A hosted execution's
+renewal loop runs outside its agent at an interval shorter than lease expiry;
+this one-shot command supplies a primitive for an external orchestrator, not
+a scheduler loop or a daemon.
+
+### `execution release`
+
+```text
+kanthord scheduler execution release <execution-id> --file <path> [--idempotency-key <key>]
+```
+
+Required opaque `<execution-id>` maps to path `executionId`, with no default.
+No query fields are accepted. The required file supplies the following fields;
+the CLI adds `requestId` using the shared mapping.
+
+| JSON file field | Requiredness / type         | Default and validation                                                                                                                                                                                                         |
+| --------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `furtherWork`   | Required boolean.           | No default. `false` declares no further work for this release; it does not assert success, close an attempt or manufacture an assessment. `true` requests the supported further-work path of the current claim kind.           |
+| `waitFor`       | Optional `WaitFact` object. | Absent means no named wait. Permitted only with `furtherWork: true`; must describe an admitted fact of this node/attempt. The server checks the named fact against Mission, not the caller's assertion that it is unsatisfied. |
+
+`WaitFact` is exactly one of these proposed closed objects:
+
+| Form                      | Required fields and validation                                                                                                                                                                                                                                                                                                    |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Child-set terminal fact   | `type: "children-terminal"`; `childNodeIds: string[]`, nonempty and unique. Each ID names a member of the Mission-owned child set relevant to the continuation. The server verifies the whole required set, so omitting a required child cannot satisfy a wait early. Terminal-state meaning comes from Mission.                  |
+| External observation fact | `type: "external-observation"`; `externalObjectId: string`. It names the external object whose accepted observation is required for this continuation. The server derives the required end state from the recorded action/prerequisite. The caller supplies neither an arbitrary platform address nor an invented observed state. |
+
+The child-set representation must remain tied to Mission's graph: a graph
+change rechecks the wait rather than treating this submitted list as permanent
+authority. An external-object reference is checked against its recorded node,
+attempt and action; reusing a remote pull-request number across attempts is
+not sufficient correlation.
+
+**Effects and prerequisites:**
+
+- A release durably ends the execution and removes its live-execution count.
+  Mission routes the release using its accepted facts. A supported release
+  leaves the attempt open; it never opens a replacement attempt by itself.
+- A steps release with no further work requires the evidence and task-result
+  obligations owned by Mission/Worker. A steps release with further work and
+  no wait requires the accepted run output and checkpoint/push obligations
+  of Worker. Those records are submitted through their owning services; the
+  release body contains no evidence, assessment, outcome or shell command.
+- A reviewer release is supported only after the current passing assessment
+  and the action-performer path allow it: returned items consist solely of
+  submitted external objects and actions awaiting prerequisites. If an
+  action awaits a prerequisite, the release names its observation wait fact.
+  When all requests are submitted, Mission routes the release to
+  `External.Requested`. A passing assessment with no required external action
+  already ends the claim; no fresh release is needed to declare completion.
+- A release with further work creates the appropriate new queue entry. A
+  named wait records the fact and holds the entry out. The write reads current
+  accepted facts in the same serialized transaction: an already-satisfied
+  fact satisfies the wait immediately, and a concurrent fact cannot be lost.
+  Mission releases the hold in the transaction accepting the fact. The next
+  compatible pull receives the continuation; there is no pushed assignment.
+
+Proposed success is HTTP `200` with required fields
+`{ "executionId": string, "releasedAt": timestamp }`; the CLI adds its key.
+A duplicate returns the accepted release without ending a second execution,
+double-decrementing a count or creating a second entry. This receipt is not
+an outcome record or an assertion that the node is immediately claimable.
+
+There is no `failure`, `cannotProgress`, `retryBudget`, `force` or arbitrary
+target-state field. Reviewer loss, failed/uncertain repository actions and
+machinery failure have unresolved dispositions. They must not be encoded
+as a fabricated assessment, an unconditional further-work release, a
+human unblock or a new retry policy through this command.
+
+### Liveness, epochs and cancellation boundaries
+
+Lease validity, Worker healthcheck, observed telemetry progress and Mission
+readiness are separate facts. A healthcheck and silent logs establish no live
+claim and no failed assessment. A provider outage authorizes no substitution
+and creates no block condition by itself.
+
+The live execution identity must match the node's current claim. Human pause,
+discard and the applicable success override revoke the claim through Mission;
+the revocation is accepted before a later operation's admission can read it.
+Loss revokes authority at the loss declaration, not at a replacement claim.
+Both paths remove the execution from its claimant count. An already-admitted
+remote operation follows Project's rules; revocation does not undo it.
+
+**No lease/claim epoch field or renewal duration has been declared in the
+Scheduler design or current source.** This specification therefore exposes
+no client-selected epoch and invents no epoch reset/increment semantics. If
+the implementation adds fencing epochs, their owner, wire scalar, comparison
+and replay rules must be declared before a corresponding field is required.
+Unix epoch milliseconds above describe time representation, not a fencing
+token. The declared liveness fence today is the execution/current-claim
+comparison and accepted revocation/loss.
+
+Expiry is not proof that a runtime stopped. A stopped or revoked execution
+must publish no later effect, and Mission/Project refuse stale admission.
+Physical-stop enforcement and safe reuse of capacity/workspaces after loss
+remain open. Inspection, cancellation and renewal commands make no stronger
+guarantee. There is no generic Scheduler cancellation command: a transport
+cancel is not a release, and a human pauses/discards through Mission.
+
+## Observation-obligation inspection
+
+### `observation-obligation list`
+
+```text
+kanthord scheduler observation-obligation list <project-id> [--limit <count>] [--cursor <opaque>]
+```
+
+Required `<project-id>` maps to path `projectId`, with no default. Only the
+shared pagination query is accepted; no body. Returns a page of
+`ObservationObligation` records. Proposed order is `acceptedAt` ascending,
+then `obligationId` ascending. This makes outstanding durable work visible
+without starting, retrying, completing or taking an observer lease.
+
+### `observation-obligation get`
+
+```text
+kanthord scheduler observation-obligation get <project-id> <obligation-id>
+```
+
+Both positional IDs are required, with no default, and map to `projectId` and
+`obligationId`. No query or body. Returns one `ObservationObligation` in that
+project, or a not-found failure. This is a Scheduler obligation; Mission's
+accepted observation record remains a different resource.
+
+### Proposed `ObservationObligation` result
+
+All fields are required; nullable fields remain present with `null`.
+
+| Field                                           | Type and meaning                                                                                                                                                                                                                                                    |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `obligationId`, `projectId`, `externalObjectId` | Opaque references; the external object determines correlation and service-identity resolution.                                                                                                                                                                      |
+| `acceptedAt`                                    | Durable obligation acceptance timestamp.                                                                                                                                                                                                                            |
+| `lease`                                         | Same timestamp shape as `ExecutionRecord.lease`, or `null` before an observer holds it; when the lease establishes is open. HANDOFF.md of the design set holds the item "Declare the lease lifecycle of an observation obligation". This lease is not a node claim. |
+| `completedAt`                                   | Timestamp or `null` while durable completion has not been established.                                                                                                                                                                                              |
+| `observationId`                                 | Opaque Mission observation reference or `null` while no accepted observation is associated. Its prefix remains Mission-owned.                                                                                                                                       |
+
+The observer has no claimant and no execution ID. It reads through Worker's
+platform connector under the narrowly authorized service identity resolved
+from the external object, folds platform state and submits the observation
+to Mission. It never decides the node's outcome. This proposal offers no
+manual `observe`, `complete`, `retry` or lease-stealing command: the identity
+minting path and recovery of a lost observer need their owning contracts.
+
+## Delivery admission
+
+The Intake Service receives every platform delivery and owns the delivery
+record. Its inspection commands live in [Intake](./intake.md#delivery-commands).
+The Scheduler owns the delivery admission operation that the Intake Service
+calls. Admission records its decision durably before answering and returns one
+of four dispositions: `accepted as an observation`, `accepted as a human act`,
+`refused`, or `duplicate`. A repeat with the same delivery identity and content
+returns the recorded disposition; different content under that identity
+receives a refusal.
+
+Acceptance transfers every effect obligation to the Scheduler. Acceptance as
+an observation creates an observation obligation; acceptance as a human act
+invokes Mission under the linked human identity. Refusal admits no effect,
+and a duplicate creates no second effect. The Scheduler preserves every
+obligation whose effect lacks durable acceptance and deduplicates effects per
+project and per external object across subscription kinds and redeliveries.
+Admission needs no live worker and promises no execution. Worker decodes the
+platform payload; Scheduler core consumes that decoded delivery rather than
+interpreting platform JSON.
+
+The observer resolves the repository binding, object address, node and attempt;
+correlation needs no surviving originating runtime. An ambiguous or out-of-order
+delivery reconciles against the node's external objects, not automatically its
+newest attempt. An observation needs the authorized observer path, not a node
+claim. A platform signature grants no authority to edit WHAT, unblock, override
+or execute. New WHAT creates no node and is not a scheduling request; its
+inbound request contract remains Open.
+
+**Open:** decide whether Scheduler exposes a read of admission dispositions per
+project. The design names no such read, so this page proposes no command for it.
+
+### Delivery is an ingress operation, not a generic CLI mutation
+
+No CLI `delivery submit` or `observation submit` exists. A JSON file is not a
+signed delivery, and a human or machine token is not delivery verification.
+[Intake documents the receipt route](./intake.md#routes-without-a-command).
+
+## Service collaborations and loops excluded from the command surface
+
+- **Queue insert/delete/reorder:** Mission writes affected entries, including
+  dependency and parent effects, within the transaction committing the
+  accepted fact. Its public collaboration is a co-location contract, not a
+  routable command that can detach queue membership from Mission state.
+  Priority edits remain human Mission operations.
+- **Direct claim/acquire/assign:** only work pull invokes the atomic claim
+  operation. No command chooses a node and creates a claim, rewrites an
+  execution record, raises a count, selects a reviewer or bypasses readiness.
+- **On-demand request:** a server service may ask to serve an already-queued
+  node to the next compatible pull ahead of order. The request owns no claim,
+  waits boundedly for a claim and still obeys admission. No external authority
+  or CLI operation is declared here; it is not a human `run-node` escape hatch.
+- **Wakeups, pool turns, wait satisfaction and loss sweeps:** these are
+  Scheduler-owned processing. An idle project consumes no turn, a waiting
+  pull holds no permit, and one execution occupies no scheduling processor.
+  There is no public `tick`, `drain`, `force-release`, `declare-loss`,
+  `reset-epoch`, `reset-budget` or arbitrary held-out-entry removal.
+- **External action performance:** Worker derives action operands from the
+  attempt and evidence, and Mission owns resulting records. It is not
+  Scheduler delivery admission or a queue write.
+- **Human recovery and outcomes:** unblock, pause, resume, discard, priority
+  and override belong to Mission's human authority path. Scheduler inspection
+  and machine lease operations cannot take their place.
+
+## Open implementation and design decisions
+
+The future command contract must resolve these dependencies explicitly:
+
+1. **Wire declarations:** Scheduler entity prefixes, adoption of the proposed
+   Mission integer revision scalar, Tracking identity prefixes/protocol mapping,
+   final request/response schemas, operation IDs/routes, status/error codes,
+   body bounds, cursor consistency/retention and the proposed durable-request
+   mapping. Only pull's 90-second wait/120-second route bounds are currently
+   specified; lease duration, renewal cadence and other route timeouts need
+   values. The 1,000-active-project target has no numerical discovery-lag or
+   claim-latency acceptance bounds yet. Intake owns the unresolved-delivery
+   capacity bound.
+2. **Identity and attribution:** the identity under which hosted background
+   producers call peer operations, observer identity minting, and durable
+   client/name attribution after registration ends. This page grants no
+   human impersonation to a service loop and no machine operation to a
+   fabricated identity. A dead remote worker's registration lifetime and
+   delayed healthcheck freshness remain unresolved.
+3. **Loss and physical stop:** observation-obligation recovery after loss
+   (**C1**), safe capacity/workspace reuse after a runtime returns (**SC5**),
+   worker stop behavior after revocation (**W5**), and reviewer loss out of
+   `Evaluating`. Lease expiry and count removal do not settle physical stop.
+4. **Cannot-progress and budgets:** provider errors, invalid handoffs,
+   verification timeouts, failed commit/push, unsupported context size,
+   no-progress further-work repetition, continuation authority and bounds,
+   resumption charging/reset, outcomes without assessments and budget
+   exhaustion. The failure/recovery effort has not approved a third release
+   form or automatic human unblock.
+5. **Uncertain actions and observations:** reconciliation of effects after
+   revocation and lost acknowledgements, durable action identity, incomplete
+   evaluation resumption, observation deduplication for unchanged state
+   (**C3**), reversing platform state (**C5**), an external request with no
+   end state (**C6**), stale assessment recovery, interrupted closure, and
+   human-control/completion precedence. A release receipt settles none of
+   those uncertain outcomes.
+6. **Inbound classification:** source-binding configuration, linked-human
+   mapping and the postponed new-WHAT work-request design. Intake owns
+   platform-specific receipt. A Scheduler read of admission dispositions per
+   project remains Open because the design names no such read. Four existing
+   dispositions do not authorize silently adding a fifth, creating nodes from
+   delivery text or retaining requests forever.
+
+Before shipping, declare the public operations in Scheduler's `contract.ts`,
+preserve the transaction-only collaborations, implement the CLI HTTP adapter,
+and publish matching OpenAPI. Help, validation, access enforcement, durable
+replay and cancellation tests must agree with the adopted contract; the
+inventory alone is not evidence that those mechanisms are implemented.
+
+## Design provenance
+
+- [Scheduler rules](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md)
+  and [vocabulary](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.vocabulary.md).
+- [Architecture implementation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md)
+  and [Gateway implementation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md).
+- [Worker lifecycle](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.md),
+  [Mission transitions](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.md)
+  and [Project authority](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.md).
+- [Open design handoff](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md),
+  especially Scheduler/delivery and B9 failure/recovery.

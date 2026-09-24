@@ -1,0 +1,649 @@
+# Other commands and shared CLI conventions
+
+[CLI specification index](./README.md) · [Gateway commands and JWT use](./gateway.md)
+
+This contributor specification owns `config`, `serve`, `jwt`, help behavior,
+and the conventions inherited by all six service-command pages.
+[Common flags](./common-flags.md) owns shared flag syntax, defaults, and
+validation; this page links to those definitions. The specification is
+self-contained in an engine checkout. It describes the working tree inspected
+on 2026-09-23, the future requirements in the design material, and proposed CLI
+syntax separately; it is not a claim that the target surface is implemented.
+
+## Status vocabulary
+
+- **Implemented:** verified against the current source linked below.
+- **Target requirement:** specified in the architecture or Gateway design
+  material, but not necessarily implemented. An unresolved handoff item stays
+  unresolved even where a target command needs it.
+- **PROPOSED:** a command-line spelling, parameter convention, or rendering
+  adopted consistently across these new CLI specifications. It needs adoption
+  in the owning operation and implementation before becoming a shipped promise.
+- **Open:** the required design decision has no settled answer. No example or
+  placeholder supplies approval, a default, or an executable contract for it.
+
+## Command inventory
+
+There are seven application/issuance forms below: three configuration commands,
+two `serve` application forms, and two modes of the single `jwt` command.
+Help is a parser facility, not a fourth global command.
+
+1. `kanthord config init [--config <path>]` — implemented; local, no route.
+2. `kanthord config validate [--config <path>]` — implemented; local, no route.
+3. `kanthord config show [--config <path>]` — implemented; local, no route.
+4. `kanthord serve [server] [--config <path>]` — implemented; local application
+   startup, no outbound API route. Opens the server's HTTP listener.
+5. `kanthord serve worker` — target application; currently rejected. Startup is
+   local; the future runtime calls public API operations afterward.
+6. `kanthord jwt [username] [--name <display>] [--config <path>]` — implemented
+   human issuance; local, no route.
+7. `kanthord jwt --binding <binding> [--name <display>] [--config <path>]` —
+   implemented machine issuance; local, no route.
+
+Service commands, including local `gateway openapi`, are specified by their
+owning pages in the [index](./README.md).
+
+## Shared conventions
+
+### Closed root names and option scope
+
+**Implemented and target requirement:** the three global root names are
+`config`, `serve`, and `jwt`. The six service root names are `project`, `mission`,
+`scheduler`, `worker`, `tracking`, and `gateway`. These are disjoint, closed sets.
+`server` and the application form of `worker` are operands of `serve`, never new
+root commands. `cli` is not a `serve` operand. Current `project`, `mission`,
+`scheduler`, and `tracking` groups expose help only.
+
+- [`--config`](./common-flags.md#--config) selects server configuration only
+  where the local command declares it; service commands reject it.
+- [`--endpoint`](./common-flags.md#--endpoint) selects a remote server;
+  inherited parser acceptance does not make a local command remote.
+- [`--token`](./common-flags.md#--token) applies only to remote commands that
+  declare it, currently `gateway verify` and `worker register`.
+- [`--help`](./common-flags.md#--help) is the common help option.
+  No universal `--json`, `--dry-run`,
+  `--yes`, or `--version` option is declared by this specification or implemented
+  by the current CLI.
+- **PROPOSED:** nested resource names use singular nouns, such as `binding`,
+  `instance`, or `trace`. A plural collection in an API path does not change
+  the singular CLI resource name.
+
+### Non-interactive inputs
+
+**Implemented and target requirement:** commands read no terminal prompts,
+confirmations, passwords, or missing arguments. Missing required values,
+unknown options, unknown command names, and excess positional arguments fail
+with a diagnostic and a nonzero exit before command work. File and environment
+inputs supply only their declared values, with no interactive fallback.
+
+In syntax examples, `<value>` means a required value when that operand or
+option is used; `[value]` or `[--option <value>]` means optional input. Each
+command's definition establishes whether the option itself is required. Quote
+values containing spaces using the invoking shell. Help and argument parsing
+need no running server. The JWT stdout terminal requirement is an output
+restriction, not an interactive input flow.
+
+### File input
+
+The proposed [`--file`](./common-flags.md#--file) reference defines path
+resolution, allowed sources, and local validation. The owning command defines
+requiredness, payload fields, bounds, and any explicit conversion such as
+[Mission imports](./mission.md#import-3-commands).
+
+### Pagination
+
+**PROPOSED for commands declaring pagination:** use
+[`--limit`](./common-flags.md#--limit) and
+[`--cursor`](./common-flags.md#--cursor) with their shared definitions.
+
+A list invocation requests one page. The owning operation defines the result
+collection and continuation fields, cursor validity, ordering, and consistency
+under concurrent changes. Do not assume snapshot semantics or silently traverse
+all pages. Preserve the same list scope and filters when using a continuation.
+The new service pages propose `items` and `nextCursor`, both required, with
+`nextCursor: null` on the final page; any additional metadata is service-owned.
+These options are not implemented universal flags, and commands that return a
+bounded catalogue or a single object do not inherit them automatically.
+
+### Shared identity and time rules
+
+Opaque entity identities retain the complete `<declared-prefix>_<ulid>` value
+returned by their owner. Natural keys, protocol identities, and transport
+idempotency keys retain their separate formats. An undeclared entity prefix or
+protocol mapping is an open contract dependency, not permission to invent one.
+Server-defined timestamps are nonnegative safe JSON integers of Unix
+milliseconds in UTC; JWT `iat` and `exp` use their protocol's seconds instead.
+Neither timestamps nor ULIDs establish causal order. Revision and attempt
+counters follow their service's declared ordering rules.
+
+The proposed single-record read verb is `get`; `list` reads a collection.
+Existing spellings such as global `config show` and `gateway verify` retain
+their command-specific meaning. CLI flags use kebab-case and proposed wire
+fields use camelCase, including `executionId` across service boundaries.
+
+## Client configuration
+
+**Implemented:** remote service commands use
+[client.ts](../../src/gateway/client.ts). Server configuration
+and client configuration are different files with different precedence rules.
+A remote command needs no `kanthord.yaml` and opens no server database.
+
+### Endpoint and token contract
+
+The [`--endpoint`](./common-flags.md#--endpoint) and
+[`--token`](./common-flags.md#--token) references define independent resolution,
+defaults, validation, and command-specific preflight exceptions. The client
+file's fields use those contracts; its location and file checks follow below.
+
+### `cli.yaml` and its effects
+
+The path is `<XDG configuration directory>/kanthord/cli.yaml`, normally
+`~/.config/kanthord/cli.yaml`. There is no `--client-config` path option and
+`KANTHORD_CONFIG` does not select this file. An absent file is allowed. When
+present, the file contains one YAML mapping with only the optional `endpoint`
+and `token` fields; unknown fields are invalid. It shares the bounded YAML
+parser described under [server configuration](#server-configuration).
+
+The operator supplies the file manually. Current file checks require a regular
+file owned by the running user with exact mode `0600`, reject symlinks and
+special permission bits, and validate the opened descriptor using
+`O_NOFOLLOW`. A narrower mode is rejected as well as a wider one. The resolver
+reads and validates a present file even when flags override both values, so
+an invalid file still fails the invocation.
+
+The current CLI reads this file and provides no client-config create, update,
+delete, login, logout, credential-saving, or secret-rotation commands. The server never
+reads it. Issuing or using a token does not save it here. Local service commands
+that do not resolve a client, notably `gateway openapi`, do not read it.
+
+**Target requirement:** the future worker application uses the same
+[`--endpoint`](./common-flags.md#--endpoint) and
+[`--token`](./common-flags.md#--token) resolution rules. This establishes
+resolution, not a completed worker-runtime argument contract; see
+[serve worker](#serve-worker).
+
+## Output and exit behavior
+
+**Implemented:** `runCLI` uses exit `0` for success and `1` for handled failures.
+Commander help exits `0`; parsing failures exit nonzero. A caught CLI or domain
+failure writes a diagnostic to stderr. Coded diagnostics use the owning
+`cli`, `system`, or service namespace; Commander syntax diagnostics are not a
+uniform JSON envelope. The launcher rejects unsupported Node.js versions with
+one stderr line and a nonzero exit before loading the application. The supported
+range is `>=24.15.0 <25`.
+
+Current domain results (`gateway verify`, `worker register`) are one JSON value
+followed by a newline on stdout. `worker register` includes its idempotency key.
+Local output has explicit exceptions: help is text, `config init` and
+`config validate` print status/path text, `config show` prints masked YAML, and
+`jwt` prints a raw token only to terminal stdout. `serve` is long-running and
+produces operational logs, not a domain-result JSON object.
+
+**PROPOSED:** new unary domain commands follow the existing JSON result style
+without requiring a `--json` flag. Their owning pages define the exact result
+shape. Diagnostics go to stderr and preserve failure without echoing tokens,
+secret file fields, or configuration excerpts. New remote mutations expose the
+effective idempotency key in their documented success metadata and in a safe
+failure/indeterminate diagnostic, following `worker register`.
+
+**PROPOSED, only where an owning page declares a streaming operation:** an open
+stream may render one JSON record per line on stdout so consumers can process
+bounded records before the stream ends. This is a CLI rendering choice, not a
+change from the API's server-sent-event transport. That page must name record
+fields, ordering, end conditions, and partial-output behavior. No universal
+watch or stream option is implied. An interrupted stream may already have
+written records and must not claim complete output.
+
+### Completed, Failure, and Indeterminate
+
+Both adapters expose the result distinction in
+[operation.ts](../../src/kernel/operation.ts) and
+[client-result.ts](../../src/gateway/client-result.ts):
+
+- **`Completed`:** the expected response status and a valid operation output
+  were received. Print the declared domain result and exit `0`. Completion is
+  the operation's completion, not proof that every downstream workflow ended.
+- **`Failure`:** a structured failure response was received, or local input
+  validation produced one. Emit a diagnostic and exit nonzero. Its meaning is
+  owned by the operation; a failure in a multi-operation workflow does not undo
+  a completed peer effect.
+- **`Indeterminate`:** no trustworthy result could be established, including
+  transport loss or an unparseable/unexpected response. Emit an explicit
+  indeterminate diagnostic and exit nonzero. Do not report either success or
+  "nothing happened." A mutation may have committed before its answer was lost.
+
+Current CLI commands map `Failure` and `Indeterminate` to exit `1`; there is no
+dedicated indeterminate exit code. These names describe the adapter contract,
+not a universal CLI output envelope. Local commands have no remote
+`OperationResult`; their command-specific effects and errors apply.
+
+A proposed batch command may declare exit `1` for an unsuccessful domain result
+while preserving a valid completed response on stdout. For example,
+[Tracking ingestion](./tracking.md#output-and-failure-conventions) reports refused
+records this way. The transport result remains `Completed`; it must not be
+misreported as an API failure or an indeterminate response.
+
+### Idempotency and retries
+
+The [`--idempotency-key`](./common-flags.md#--idempotency-key) reference owns
+key syntax, generation, header mapping, and explicit cross-invocation reuse.
+The following rules govern replay and recovery rather than flag parsing.
+A changed effect needs a new logical invocation and key, after resolving any
+uncertainty about the original effect.
+
+**Implemented:** replay is in memory, scoped to the caller and one
+server process, with `gateway.idempotencyTtl` defaulting to `86400` seconds.
+An in-progress key or a key reused for a different operation/payload produces
+HTTP `409`. A completed record replays within its lifetime, subject to operation rules
+such as worker registration still being live. Restart or expiry can run the
+handler again; each mutation needs its owner's natural-key idempotence and
+recovery rule. Replay is not durable recovery.
+
+The CLI currently performs no automatic request retry. This specification adds
+none. On an indeterminate result or an in-progress conflict, inspect the owning
+resource or follow its declared reconciliation procedure before proceeding.
+Do not blindly retry with a new key, loop indefinitely on 409, assume a timeout
+rolled back a mutation, or claim that reusing a key guarantees exactly-once
+effects across server restarts.
+
+Some domain operations additionally need a durable `requestId`. The proposed
+Mission import/unblock and Scheduler mutation contracts derive it as
+`request_<same-key-ulid>` from the CLI's bare idempotency key. That mapping needs
+adoption by each owner and does not apply to every mutation. It is distinct
+from Gateway's transport `X-Request-Id`, which identifies one HTTP request;
+transport correlation alone never deduplicates a domain effect.
+
+### Cancellation is not revocation
+
+**Target requirement:** cancellation requests an end to waiting or work; it
+does not prove cleanup has finished and undoes no committed effect. Cancelling
+a work pull releases no committed claim and ends no accepted obligation.
+Closing an MCP stream ends the connection, not the domain session. A token
+ban affects later verification and cancels no request already verified.
+
+Stopping the CLI, closing a connection, restarting the server, and generating
+another JWT are not JWT revocation. Domain cancellation, claim revocation,
+registration termination, and token revocation require their owning contract;
+one must not be inferred from another. The session-ban route and its authority
+remain an open user-management decision, not an invented CLI command.
+
+**Current signal behavior:** `serve server` installs graceful-stop handlers.
+The one-shot remote CLI commands do not establish a shared signal-handling or
+reconciliation protocol. An OS signal can terminate the CLI without a printed
+result or the normal handled exit `1`; it does not establish the server-side
+outcome. Future wait/stream commands must specify their cancellation behavior
+and partial-output rules explicitly.
+
+## Server configuration
+
+The three `config` commands, `serve server`, and `jwt` share this implemented
+configuration contract from [config/index.ts](../../src/config/index.ts).
+
+### Path, values, and permissions
+
+[`--config`](./common-flags.md#--config) defines configuration-path resolution,
+defaults, and validation. It does not select `cli.yaml`.
+
+The four XDG roots are `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, and
+`XDG_CACHE_HOME`, defaulting respectively to `~/.config`, `~/.local/share`,
+`~/.local/state`, and `~/.cache`; each engine directory appends `kanthord`.
+A relative XDG variable is ignored in favor of its default. Changing the
+configuration-file path does not move the data or state directories.
+
+Values come from the file, then the schema defaults. There are no environment
+bindings or option overrides for server field values. `KANTHORD_ENDPOINT` does
+not change `gateway.bind` or `gateway.port`. Configuration is read at startup,
+and an edit takes effect on the next start. **Target requirement:** a relative
+path-valued field inside the configuration resolves against the data directory;
+the current schema declares no such field.
+
+Reads require a user-owned regular `0600` file and a user-owned `0700` containing
+directory. Exact modes are checked, including rejection of special bits and
+symlinks at audited paths. Reads validate the descriptor opened with
+`O_NOFOLLOW`. Existing objects are never repaired. These are POSIX filesystem
+checks, not an audit of every ancestor directory.
+
+### Document and field validation
+
+The file is one YAML mapping with unique string keys. Parsing rejects malformed
+YAML, additional documents, warnings, cyclic aliases, and non-mapping roots.
+The current parser limits source size to 1 MiB, traversed values to 4096,
+container nesting to 32, and YAML alias expansion through a limit of 100.
+Unknown schema fields fail strict validation. Diagnostics report field paths
+and reasons without field values or YAML excerpts.
+
+The implemented fields are:
+
+- `masterKey`: required canonical base64 encoding of exactly 32 bytes. There
+  is no usable default. `config init` generates it using `crypto.randomBytes`.
+- `log.level`: optional enum `trace|debug|info|warn|error|fatal`, default `info`.
+- `log.destination`: optional enum `stderr|file`, default `stderr`; `file` uses
+  `kanthord.log` in the XDG state directory.
+- `gateway.bind`: optional loopback-IP string, default `127.0.0.1`; current
+  validation accepts IPv4 `127.*` loopback addresses and `::1`.
+- `gateway.port`: optional Convict `port`, default `31415`.
+- `gateway.allowedHosts`: optional array of nonempty strings, default
+  `["127.0.0.1:31415", "localhost:31415"]`.
+- `gateway.allowedOrigins`: optional array of nonempty strings, default `[]`.
+- `gateway.tokenLifetime`: optional Convict `nat` in seconds, default
+  `31536000` (one year). Local issuance additionally requires a nonnegative safe
+  integer; zero produces an immediately expiring token.
+- `gateway.idempotencyTtl`: optional positive safe integer in seconds, default
+  `86400`. The idempotency component uses it as the TTL of an in-memory record.
+
+The current Project and Worker fragments are empty and add no YAML sections.
+See [Gateway](./gateway.md) for authentication context.
+
+## Configuration commands
+
+All three commands have **no positional arguments**. Their only command input
+is [`--config`](./common-flags.md#--config), inherited from `config` with the
+shared path contract. [`--help`](./common-flags.md#--help) prints help instead
+of performing the operation. No force/overwrite option exists. Each command is local, calls no API route, starts no server, and opens
+no database. None reads or writes `cli.yaml`.
+
+### `config init`
+
+```text
+kanthord config init [--config <path>]
+```
+
+**Implemented; route/access: none, local filesystem.** The destination must be
+absent. Build a whole document with every current default and a newly generated
+master key, validate it in memory, and then publish it. The invocation itself
+authorizes creation; stdin and stdout may both be redirected.
+
+Create the destination directory at `0700` when absent. Write a same-directory
+temporary file at `0600`, flush and close it, hard-link it to the destination
+without replacement, and unlink the temporary file. An existing destination
+fails without overwriting it; a publication failure does not leave a partially
+written destination. A directory created before failure can remain.
+
+On success stdout is exactly `Created <absolute-path>\n` and exit is `0`.
+It prints no generated configuration or secret. Invalid permissions, an existing
+destination, or a write/publication failure produces a diagnostic and exit `1`.
+Output/cleanup failure after publication does not undo an already created file;
+inspect the destination instead of assuming a failed invocation wrote nothing.
+
+### `config validate`
+
+```text
+kanthord config validate [--config <path>]
+```
+
+**Implemented; route/access: none, local filesystem.** Read and validate the
+selected stored configuration with defaults and strict schema validation. The
+file must exist. Validation covers its document, field values, and the private
+file/containing-directory checks; it is not a startup probe, listener bind test,
+database lock check, or remote authentication test.
+
+On success stdout is exactly `Valid configuration: <absolute-path>\n` and exit
+is `0`. On failure stderr reports the safe parse/permission diagnostic or the
+collected invalid fields and exit is `1`. No file is created, repaired, or
+modified. An absent file diagnostic includes its resolved path and the
+`kanthord config init` command that can create it.
+
+### `config show`
+
+```text
+kanthord config show [--config <path>]
+```
+
+**Implemented; route/access: none, local filesystem.** Read and validate the
+selected file as for `config validate`. Print effective configuration, including
+schema defaults, as YAML on stdout, with sensitive fields replaced by
+`[Sensitive]`. There is no reveal-secret option and no terminal requirement.
+
+Exit is `0` after successful output or `1` with a safe diagnostic on failure.
+It writes no configuration, client file, or database. This is the effective
+configuration of this invocation, not an inspection of a running server's
+already loaded configuration.
+
+## Application startup
+
+### `serve server`
+
+```text
+kanthord serve [server] [--config <path>]
+```
+
+**Implemented; route/access: none for startup, local runtime.** This invocation
+constructs the server rather than calling an API operation.
+
+- `application`: optional positional enum; implemented accepted value `server`,
+  default `server`. Any other supplied value currently fails with
+  `cli.serve.unsupported_application`. The target enum also includes `worker`,
+  discussed separately below.
+- [`--config`](./common-flags.md#--config): the selected file must exist and
+  validate.
+- [`--help`](./common-flags.md#--help): no runtime is started.
+
+Load configuration, open the operational log, acquire the exclusive operational
+database, apply migrations, compose the currently implemented Project, Worker,
+and Gateway services, and open the listener only after domain startup. Starting
+the current composition does not establish implementation of the future
+Mission, Scheduler, Tracking, or native-worker runtime contracts.
+
+Files/effects: validate or create the XDG configuration, data, and state
+directories as needed; read the selected configuration; open/create
+`kanthord.db` and its SQLite `-wal`/`-shm` sidecars in the data directory; and
+append/create `kanthord.log` in the state directory when `log.destination` is
+`file`. Private files/directories follow the `0600`/`0700` ownership rules.
+The cache directory has no current server-owned output. The server writes
+neither its configuration nor `cli.yaml` and issues no JWT. Future file owners,
+including Tracking storage, need their own implemented lifecycle.
+
+Output: operational JSON log records go to stderr by default or the configured
+log file. Startup prints no token and requires no terminal. A successfully
+running process remains alive rather than exiting after readiness. A missing
+or invalid configuration, permissions failure, database lock contention,
+migration failure, or listener failure stops startup and exits `1`; startup
+releases resources already acquired. Committed migrations are not rolled back
+by later startup failure.
+
+`SIGINT` and `SIGTERM` request shutdown. A successful graceful stop exits `0`;
+a lifecycle/cleanup failure exits `1`. The current stop has a 10-second
+watchdog that exits `1` on expiry. `SIGHUP` reopens the configured log destination,
+not the configuration; reopen failure initiates shutdown. Fatal uncaught errors
+terminate nonzero through the fatal handler rather than normal graceful cleanup.
+
+**Target requirement, not a statement that all phases are implemented:**
+shutdown quiesces all producers, drains with peer dependencies available,
+joins the invocation chain, and releases resources in reverse construction
+order. Stopping preserves accepted obligations and does not revoke tokens or
+undo completed work.
+
+### `serve worker`
+
+```text
+kanthord serve worker
+```
+
+**Target application; current result:** exit `1` with
+`cli.serve.unsupported_application`, before loading configuration or starting
+any worker. There is no implemented worker-runtime entry point.
+
+- `application`: the literal `worker` is required to select this future mode;
+  omitting it selects `server`, not a worker.
+- [`--config`](./common-flags.md#--config): currently a syntactically accepted
+  optional option of `serve`, with the shared path resolution used by server mode. Its meaning
+  and necessity for the remote worker runtime remain **open**. Acceptance by
+  the common parser must not imply that a remote worker needs the server's
+  master key or reads the server database.
+- Endpoint: **target requirement**, one resolved server endpoint with the
+  [`--endpoint`](./common-flags.md#--endpoint) resolution. Worker-specific option
+  declarations and placement remain **open**; `--endpoint` is not accepted by
+  `serve` today.
+- Machine JWT: **target requirement**, using
+  [`--token`](./common-flags.md#--token) resolution. Authentication and registration
+  require a valid machine token. Worker-specific flag declarations and missing-token diagnostics remain
+  **open**; `--token` is not accepted by `serve` today.
+- [`--help`](./common-flags.md#--help): implemented help for the `serve` command;
+  prints the current server-only description without starting an application.
+
+The target startup is local and has no single "serve worker" REST route. The
+runtime subsequently uses HTTP service clients for version discovery,
+registration, work acquisition, evidence, telemetry, and MCP operations. The
+package version must match the version published by the server's OpenAPI-index
+operation; a mismatch must refuse startup with both versions in the diagnostic.
+There is no local-database bypass. Service pages own the operation mappings and
+access rules; an undeclared operation is not a usable route.
+
+**Open runtime contract:** provider access, repository operations, effective
+agent configuration, tool/verification trust boundaries, workspace location,
+global-prompt configuration, worker death and registration recovery, and
+claim-revocation stop behavior. These decisions are needed before specifying
+additional runtime arguments, files, readiness output, shutdown behavior, and
+retry/restart policy. No default workspace path, automatic deregistration on
+death, or approved provider/agent flags are supplied here. Target startup
+failures must exit nonzero; precise future worker output and signal semantics
+are not implemented guarantees.
+
+## Local JWT issuance
+
+JWT issuance is one implemented top-level command with two mutually exclusive
+modes. Both call **no route**, require **no running server**, open **no database**,
+and write **no file**. Possession of the validated server configuration provides
+the signing material; there is no API access policy to pass on this local path.
+Gateway owns subsequent JWT verification and access policy; see
+[Gateway commands and JWT use](./gateway.md).
+
+### Human token
+
+```text
+kanthord jwt [username] [--name <display>] [--config <path>]
+```
+
+- `username`: optional positional string, default `kanthorlabs`, the exported
+  `KANTHORD_AUTH_USERNAME` **constant**. It is not an environment-variable
+  fallback. Must be nonblank and 1–64 characters. Current validation uses
+  JavaScript string length, checks `trim()` only for blankness, and preserves
+  the exact supplied value rather than trimming it.
+- `--name <display>`: optional string, default the selected username. Same
+  nonblank/1–64-character validation and exact-value preservation. It labels
+  the identity and grants no authority.
+- [`--config`](./common-flags.md#--config): the selected server configuration
+  must exist.
+- `--binding <binding>`: absent in human mode. Supplying it selects machine
+  mode; combining it with a username is an error, not two issuance requests.
+- [`--help`](./common-flags.md#--help): displays the default username and
+  resolved configuration path.
+
+Generate claims `kind: "human"`, `sub: <username>`, and `name: <display>`, with
+no `binding`. Reissuing for the same username preserves that subject but
+generates a fresh `jti`. It creates no account or password record.
+
+### Machine token
+
+```text
+kanthord jwt --binding <binding> [--name <display>] [--config <path>]
+```
+
+- `--binding <binding>`: required to select machine mode; string, no default;
+  currently nonblank and 1–128 characters with the exact value preserved.
+  Current local validation does not enforce a binding entity prefix. The design
+  leaves that prefix unresolved; do not invent one here.
+- `username`: forbidden with `--binding`. Even a valid human username produces
+  `cli.jwt.username_with_binding` and no token.
+- `--name <display>`: optional nonblank string of 1–64 characters; default the
+  newly generated client identity. Same validation/preservation as human mode.
+- [`--config`](./common-flags.md#--config): the selected file must exist.
+- [`--help`](./common-flags.md#--help): no issuance or runtime startup.
+
+Generate claims `kind: "client"`, `sub: "client_identity_<ulid>"`,
+`binding: <binding>`, and `name: <display>`. Every successful invocation uses a
+fresh canonical client-identity ULID and `jti`. It creates no client identity
+row and no worker-instance registration. Local issuance cannot check whether
+the named binding exists or is available; Gateway checks it on later use, and
+a token for an absent/unavailable binding fails verification. Registration is
+a separate Worker operation.
+
+### Signing, output, errors, and persistence
+
+**Implemented:** both modes read the validated whole server configuration,
+derive the signing key using HKDF-SHA-256 with an empty salt and the label
+`gateway/jwt-hs256/v1`, and sign with HS256. Both include `iat` and `exp` in
+JWT Unix seconds and a fresh bare ULID `jti`; `exp = iat + gateway.tokenLifetime`.
+The CLI has no lifetime, algorithm, issuer, audience, custom-claims, subject-ID,
+or signing-key override flags. The complete future JWT header/claim
+requiredness and unexpected-claim policy remain an open Gateway contract item.
+
+After argument validation and the username/binding conflict check, stdout must
+be a terminal. A file, pipe, command substitution, or other non-terminal stdout
+fails with `cli.output.terminal_required` and exit `1`, before configuration
+loading and token signing. Stdin need not be a terminal and is never read.
+
+On success stdout contains only `<JWT>\n` and exit is `0`; no JSON envelope,
+expiry annotation, or secret is printed to stderr. Invalid inputs, an absent or
+invalid configuration, failed terminal check, or signing failure exits nonzero
+without a successful token result. There is no output-file option or automatic
+client-config persistence. Terminal-only output does not detect a terminal
+recorder.
+
+Issuance and server restart revoke no earlier token. A token remains usable
+subject to verification, expiry, denylist state, and, for machines, binding
+availability. Replacing `masterKey` invalidates tokens and also affects every
+other key derived from it; this specification adds no secret-rotation command
+or recovery workflow. A lost machine token cannot be reissued with the same
+client identity through this CLI; new issuance creates a new identity and its
+registration/capacity consequences belong to Worker.
+
+## Help semantics
+
+The [`--help`](./common-flags.md#--help) reference defines the implemented
+parser option and its no-work behavior. Command-specific forms are:
+
+- `kanthord -h` or `kanthord --help`: print root help to stdout and exit `0`.
+  List exactly the three global names and six service groups. There is no
+  top-level `help` command; `kanthord help` currently fails as excess input.
+- `kanthord` with no command: print root help to stdout and exit `1`; start no
+  application. This differs deliberately from an explicit help request.
+- `kanthord <group> --help`: print that group's commands and applicable options
+  and exit `0`. A bare `config` or service group also displays group help and
+  exits `0`; a bare `serve` starts the server, and a bare `jwt` attempts default
+  human issuance.
+- `kanthord <group> <command> --help`, `kanthord serve --help`, and
+  `kanthord jwt --help`: print command-specific help and exit `0` rather than
+  performing the command. There are no additional help operands or required
+  credentials.
+- `config` and each of `config init`, `validate`, and `show` append
+  `Configuration file: <absolute-path>` for this invocation, even if the file
+  is absent. `jwt` currently appends the same line. `serve` help does not
+  currently append it. The path is not a claim about a running server.
+
+**Target requirement:** every command's help must declare all positional
+arguments and options, requiredness, validation, and defaults, including the
+inherited options applicable to it. Current help lacks some detail recorded
+here, including client precedence/validation and the unimplemented worker
+application. The proposed shared flags must appear only on commands that
+implement them. Help is not an extra root name or a reason to load secrets.
+
+## Sources and remaining gaps
+
+Local implementation references:
+
+- [CLI dispatch](../../src/apps/cli/index.ts),
+  [root names and exits](../../src/apps/cli/constants.ts), and
+  [CLI behavior tests](../../src/apps/cli/index.test.ts).
+- [Client resolution](../../src/gateway/client.ts),
+  [Worker registration command](../../src/apps/cli/worker.ts), and
+  [HTTP adapter](../../src/gateway/client.ts).
+- [Configuration assembly](../../src/config/index.ts),
+  [global schema](../../src/config/global.ts),
+  [Gateway schema](../../src/gateway/config.ts), and
+  [private filesystem handling](../../src/kernel/files.ts).
+- [Local JWT generation](../../src/gateway/local.ts),
+  [server composition and lifetime](../../src/apps/server/index.ts), and
+  [launcher](../../bin/kanthord.mjs).
+
+The open work is explicit: worker runtime inputs and lifecycle; complete JWT
+claim/header policy and binding prefix; denylist administration authority;
+and adoption of the
+proposed pagination, payload-file, output, and per-mutation key conventions by
+each new command. Future commands require real declared operations and access
+policies before a CLI adapter can make them available.
+
+Optional provenance, not required reading for this specification:
+[architecture implementation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md),
+[Gateway implementation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md),
+and [open design handoff](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md).
