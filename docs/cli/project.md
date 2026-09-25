@@ -191,7 +191,7 @@ Blocked commands link their items in [HANDOFF Project Service](https://github.co
 | 22  | `credential login-status <session> [R]`                                                                | `GET /api/project/credential/login/:sessionId`                         | `project.credential.login_status`                          | `human`; proposed route                                                                                                        |
 | 23  | `provider check --base-url <url> --credential <credential-id> [R]`                                     | `POST /api/project/provider/check`                                     | `project.provider.check`                                   | `human`; proposed route                                                                                                        |
 
-- Rows 5 to 8 remain blocked only because the source configuration awaits the source-binding item.
+- Rows 5 to 8 keep their marks for the source configuration and the storage credential record type in HANDOFF.
 - The credential routes and the provider check are server-wide; they contain no `projectId`.
 - The static path `/api/project/provider/check`, like `/credential`, must not fall under `/:projectId`.
 - Provider-account views reuse the binding operations and add a required kind constraint; they create no second provider-account store.
@@ -234,10 +234,10 @@ Inputs:
 - `<revision>`: required `Revision` on revision `get`; no default; path
   `revision`, encoded as its decimal integer. It must belong to that binding.
 - `--kind <kind>`: optional, **repeatable scalar flag** on `binding list`.
-  Proposed wire enum `repository | worker | provider_account | source`.
+  Proposed wire enum `repository | worker | provider_account | source | storage`.
   Absent means all supported kinds. Repeated values are ORed; reject duplicate
   values rather than changing their meaning. Maps to repeated query `kind`.
-  These are the four currently designed kinds, not a permanently closed set.
+  These are the five kinds, not a permanently closed set.
 - `--state <state>`: optional enum on `binding list`, proposed values
   `current | removed | all`, default `current`; query `state`.
   The Project Service keeps a removed binding and every revision for the life of the project; `removed` and `all` include retained bindings.
@@ -287,7 +287,7 @@ whose schemas are explicitly blocked below.
 
 Each `BindingEdit` value contains only:
 
-- `kind`: **required**, enum `repository | worker | provider_account | source`.
+- `kind`: **required**, enum `repository | worker | provider_account | source | storage`.
 - `config`: **required**, the kind-specific object below.
 
 Every reference between bindings is a binding-name string of the same
@@ -357,7 +357,7 @@ The repository credential in this example is an `api_key` of GitHub.
 
 Common to every `config`:
 
-- `available` applies to the repository, provider account and source kinds. It is a required boolean with no default.
+- `available` applies to the repository, provider account, source and storage kinds. It is a required boolean with no default.
 - `false` prevents subsequent resolution. It revokes no upstream authority and cancels no operation in flight.
 - A worker binding holds no `available`; `instanceCount: 0` makes it unavailable.
 
@@ -476,6 +476,33 @@ explicitly selected disabled or revoked account prevents use; it authorizes
 no fallback. With no explicit account and no applicable default, the effective
 configuration is invalid. No implicit choice of the first account is allowed.
 
+### Storage configuration
+
+A `storage` binding names one S3-compatible bucket for the object evidence of its project.
+A project holds at most one current storage binding.
+Its `config` holds `available` and these required fields, with no defaults:
+
+- `endpoint`: URL of the S3-compatible service.
+- `bucket`: nonblank bucket name, such as `atlas-evidence`.
+- `region`: nonblank region.
+- `prefix`: text for the server-generated object-key prefix.
+- `credential`: `CredentialId` reference to a custody record, never inline secret material.
+
+Its credential record type follows the [HANDOFF Mission item](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#mission-service) and remains **blocked**.
+This configuration declares no credential record type.
+The service validates field types, the endpoint URL, the custody reference and project cardinality at write and resolution.
+An absent field, invalid value or second storage binding refuses the write.
+The binding write probes no store capability.
+kanthord enforces no object immutability; it records the object version when the store returns one.
+A human who disables versioning accepts that choice.
+Without a storage binding, only inline evidence content is accepted.
+
+Custody mints a presigned grant inside `use` for one operation on one object.
+A PUT grant expires after 1 hour; authorized readers receive a presigned GET through their kanthord component.
+The URL is an API answer, never part of the credential handover or the agent context.
+The storage credential stays in server custody.
+[Mission upload](./mission.md#host-local-evidence-upload) defines begin, direct PUT and complete.
+
 ### Source configuration — partially blocked
 
 The general design requires one binding per accepted delivery source. The
@@ -502,7 +529,7 @@ Project transaction. It compares the supplied version with the current
 version and refuses a stale one. No network operation belongs in that
 transaction. The target rules are:
 
-- One binding per repository, provider account and delivery source; any number per worker.
+- One binding per repository, provider account and delivery source; any number per worker; at most one storage binding per project.
 - Resource identity derives from configuration. A repository identity derives from its SSH address alone.
 - Every repository binding write performs one `git ls-remote` with a 30 s deadline before the transaction.
 - A failed or timed-out read refuses the write with `project.bindings.repository.ssh_unreachable`.
