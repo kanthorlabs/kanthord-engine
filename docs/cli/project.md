@@ -3,8 +3,9 @@
 [CLI specification index](./README.md) · [Shared conventions](./other.md)
 
 This contributor specification covers the future `kanthord project` group:
-project identity, resource bindings, repository policy, provider-account and
-agent configuration, credential custody, and source verification secrets.
+project identity, resource bindings, repository policy, worker binding entries
+and source verification secrets. [Worker](./worker.md) owns agent enablement and
+effective configuration resolution. [Credential](./credential.md) covers custody.
 It is self-contained in an engine checkout.
 
 **Status: no Project operation command is implemented.**
@@ -24,7 +25,7 @@ The working tree inspected on 2026-09-23 contains:
   registers nothing. Its binding lookup delegates to an injected collaborator
   or returns `null`. Its lifecycle health probe is not a provider healthcheck.
 - [No Project migrations or configuration fields](../../src/project/index.ts).
-  The target binding store and custody described below are not present here.
+  The target binding store described below is not present here.
 - A [CLI help group](../../src/apps/cli/index.ts) with the existing spelling
   `kanthord project [--endpoint <url>]` and Commander `--help`. Invoking the group
   prints help and calls no route. The group currently has no leaf commands and
@@ -33,15 +34,15 @@ The working tree inspected on 2026-09-23 contains:
   explicitly asserts zero operations and no configured binding resolution.
 
 The [command inventory](#proposed-command-inventory-and-synopsis) proposes
-**23 leaf commands**, including the blocked secret-display command. The existing help group is not counted. The
+**13 leaf commands**, including the blocked secret-display command. The existing help group is not counted. The
 [calling convention](#common-proposed-calling-convention) defines the shared
 options used by those synopses; the resource sections define their inputs,
 results, and effects without repeating the command syntax.
 
 The proposal preserves the existing group spelling and `--endpoint` option.
-All additions remain under `project`; the complete top-level set stays
-`project`, `mission`, `scheduler`, `intake`, `worker`, `tracking`, `gateway`, `config`,
-`serve`, and `jwt`.
+All commands on this page belong under `project`. The [command surface](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-command-surface)
+declares three global commands, seven service groups and the shared component
+group `credential`.
 
 ## Common proposed calling convention
 
@@ -51,7 +52,7 @@ starts with `kanthord project` and uses the
 
 | Named flag set                                                   | Applies to            |
 | ---------------------------------------------------------------- | --------------------- |
-| [`[R]` — Remote flags](./common-flags.md#remote-flags-r)         | All 23 remote leaves. |
+| [`[R]` — Remote flags](./common-flags.md#remote-flags-r)         | All 13 remote leaves. |
 | [`[M]` — Mutation flags](./common-flags.md#mutation-flags-m)     | Mutations only.       |
 | [`[L]` — Pagination flags](./common-flags.md#pagination-flags-l) | Paginated lists only. |
 
@@ -89,7 +90,7 @@ commands without `[L]` reject pagination options.
 - `ProjectId`: opaque `project_<ulid>` string; the ULID suffix is canonical,
   uppercase, and 26 characters. Reject bare ULIDs and other entity prefixes.
 - `BindingId`: `binding_<ulid>`, under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
-- `CredentialId`: `credential_<ulid>`, under the same ruling.
+- `CredentialId`: `credential_<ulid>`, under the [custody record contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-record).
 - `Revision` and binding-set `version`: positive JSON safe integers that the service returns; the caller copies them without arithmetic.
   A new project starts at binding-set version `1`.
   Its first write names version `1` and commits version `2`.
@@ -98,17 +99,10 @@ commands without `[L]` reject pagination options.
   A supplied revision or version identifies a value from the server.
   The server rejects a fraction or a numeric string.
 - `Timestamp`: JSON safe integer of Unix milliseconds in UTC.
-- `WorkerName`, `AgentName`, and provider name: nonempty exact natural-key
+- `WorkerName` and `AgentName`: nonempty exact natural-key
   strings from the relevant supported catalog, not prefixed IDs. Versioned
   names such as `general@1` are whole keys. No alias expansion or latest-version
   default is proposed.
-- `RemoteIdentity`: nonempty string with three nonempty colon-separated parts,
-  `<platform>:<identity-kind>:<identifier>`. The identifier is a displayed
-  login, slug, or path, not an upstream numeric ID. First-version examples
-  include `github:user:ulrich`, `github:repository:kanthorlabs/kanthord`, and
-  `openai:organization:org-kanthorlabs`. Supported combinations require a
-  platform declaration. This records human intent; the server does not ask the
-  remote to confirm it and derives no system authorization from it.
 
 The local [identity helper](../../src/kernel/identity.ts) supplies the prefixed-ULID mechanism; the Project sibling declares the entity prefixes.
 
@@ -116,7 +110,7 @@ The local [identity helper](../../src/kernel/identity.ts) supplies the prefixed-
 
 Every proposed route in the inventory declares **`human` access**. An
 authenticated human has server-wide human authority, including all projects
-and shared credential metadata. No project-member role, owner-only privilege,
+and their binding configuration. No project-member role, owner-only privilege,
 or per-project ACL is assumed. A machine JWT does not authorize configuration
 or secret selection. A caller-supplied project, binding, or actor field is not
 authentication; requests contain no `caller` or `humanIdentity` override.
@@ -144,9 +138,7 @@ results. The current [Gateway replay implementation](../../src/gateway/idempoten
 is in memory and bounded by its configured TTL; restart loses it. The shared
 [same-key retry rules](./other.md#idempotency-and-retries) apply, but that page's
 SQLite implementation note predates the in-memory implementation.
-This specification promises no exactly-once behavior across restart. A project name is the natural key of project creation: a retry after a restart that names an existing project returns 409 with `project.name_conflict`, and the CLI prints the holder identity from `error.details`. A rename targets a project ID and commits in one transaction; the last write wins under the unique name. A retry after a restart checks the name holder again. Credential rotation updates its row in one transaction, and the last write wins. The credential name is the natural key of creation.
-A retry after a restart that names a taken name returns 409 with `project.credential.name_conflict`.
-The CLI prints the holder identity from `error.details`. A binding-set edit has a version precondition,
+This specification promises no exactly-once behavior across restart. A project name is the natural key of project creation: a retry after a restart that names an existing project returns 409 with `project.name_conflict`, and the CLI prints the holder identity from `error.details`. A rename targets a project ID and commits in one transaction; the last write wins under the unique name. A retry after a restart checks the name holder again. A binding-set edit has a version precondition,
 but a retry after a committed edit and restart can encounter a stale version
 instead of replaying the old answer.
 
@@ -155,47 +147,34 @@ instead of replaying the old answer.
 ## Proposed command inventory and synopsis
 
 Every entry below is **unimplemented**.
-The OAuth operation IDs follow the root ruling; their HTTP paths remain proposed.
-Other operation IDs and paths remain proposed.
+Operation IDs and paths remain proposed.
 The current empty Project contract publishes none of these routes. Each row is one leaf command; its synopsis follows `kanthord project`
 and includes every positional argument, command-specific option, and applicable
 shared-option marker. Route parameters are placeholders, and path resource
 names are singular.
 
-All 23 commands have `[R]` and `human` access. The seven mutations have `[M]`; the six paginated lists have `[L]`.
+All 13 commands have `[R]` and `human` access. The three mutations have `[M]`; the four paginated lists have `[L]`.
 Blocked commands link their items in [HANDOFF Project Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#project-service).
 
-| #   | Synopsis after `kanthord project`                                                                      | Proposed HTTP route                                                    | Proposed operation ID                                      | Access/status                                                                                                                  |
-| --- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | `create --name <name> [M] [R]`                                                                         | `POST /api/project`                                                    | `project.create`                                           | `human`; proposed                                                                                                              |
-| 2   | `list [L] [R]`                                                                                         | `GET /api/project`                                                     | `project.list`                                             | `human`; proposed                                                                                                              |
-| 3   | `get <project-id> [R]`                                                                                 | `GET /api/project/:projectId`                                          | `project.get`                                              | `human`; proposed                                                                                                              |
-| 4   | `rename <project-id> --name <name> [M] [R]`                                                            | `PATCH /api/project/:projectId`                                        | `project.rename`                                           | `human`; proposed                                                                                                              |
-| 5   | `binding list <project-id> [--kind <kind> ...] [--state <state>] [L] [R]`                              | `GET /api/project/:projectId/binding`                                  | `project.binding.list` **[blocked][project-contract]**     | `human`; proposed                                                                                                              |
-| 6   | `binding get <project-id> <binding-id> [R]`                                                            | `GET /api/project/:projectId/binding/:bindingId`                       | `project.binding.get` **[blocked][project-contract]**      | `human`; proposed                                                                                                              |
-| 7   | `binding export <project-id> [R]`                                                                      | `GET /api/project/:projectId/binding-set`                              | `project.bindingSet.get` **[blocked][project-contract]**   | `human`; proposed                                                                                                              |
-| 8   | `binding apply <project-id> --file <path> [M] [R]`                                                     | `PUT /api/project/:projectId/binding-set`                              | `project.bindingSet.write` **[blocked][project-contract]** | `human`; proposed                                                                                                              |
-| 9   | `binding revision list <project-id> <binding-id> [L] [R]`                                              | `GET /api/project/:projectId/binding/:bindingId/revision`              | `project.bindingRevision.list`                             | `human`; proposed                                                                                                              |
-| 10  | `binding revision get <project-id> <binding-id> <revision> [R]`                                        | `GET /api/project/:projectId/binding/:bindingId/revision/:revision`    | `project.bindingRevision.get`                              | `human`; proposed                                                                                                              |
-| 11  | `credential create --file <path> [M] [R]`                                                              | `POST /api/project/credential`                                         | `project.credential.create`                                | `human`; proposed                                                                                                              |
-| 12  | `credential list [--type <type>] [--remote-identity <identity>] [L] [R]`                               | `GET /api/project/credential`                                          | `project.credential.list`                                  | `human`; proposed                                                                                                              |
-| 13  | `credential get <credential-id> [R]`                                                                   | `GET /api/project/credential/:credentialId`                            | `project.credential.get`                                   | `human`; proposed                                                                                                              |
-| 14  | `credential rotate <credential-id> --file <path> [M] [R]`                                              | `PUT /api/project/credential/:credentialId/material`                   | `project.credential.rotate`                                | `human`; proposed                                                                                                              |
-| 15  | `provider-account list <project-id> [L] [R]`                                                           | `GET /api/project/:projectId/binding?kind=provider_account`            | `project.binding.list`                                     | `human`; proposed                                                                                                              |
-| 16  | `provider-account get <project-id> <binding-id> [R]`                                                   | `GET /api/project/:projectId/binding/:bindingId?kind=provider_account` | `project.binding.get`                                      | `human`; proposed                                                                                                              |
-| 17  | `agent list <project-id> <worker-binding-id> [L] [R]`                                                  | `GET /api/project/:projectId/binding/:bindingId/agent`                 | `project.agentConfiguration.list`                          | `human`; proposed                                                                                                              |
-| 18  | `agent get <project-id> <worker-binding-id> <agent-name> [R]`                                          | `GET /api/project/:projectId/binding/:bindingId/agent/:agentName`      | `project.agentConfiguration.get`                           | `human`; proposed                                                                                                              |
-| 19  | `source secret get <project-id> <source-binding-id> [R]`                                               | `GET /api/project/:projectId/binding/:bindingId/secret`                | `project.sourceSecret.get`                                 | `human`; proposed, **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#project-service)** |
-| 20  | `credential login <provider> [--mode browser\|device] --name <name> --remote-identity <value> [M] [R]` | `POST /api/project/credential/login`                                   | `project.credential.login`                                 | `human`; proposed route                                                                                                        |
-| 21  | `credential login-code <session> <value> [M] [R]`                                                      | `POST /api/project/credential/login/:sessionId/code`                   | `project.credential.login_code`                            | `human`; proposed route                                                                                                        |
-| 22  | `credential login-status <session> [R]`                                                                | `GET /api/project/credential/login/:sessionId`                         | `project.credential.login_status`                          | `human`; proposed route                                                                                                        |
-| 23  | `provider check --base-url <url> --credential <credential-id> [R]`                                     | `POST /api/project/provider/check`                                     | `project.provider.check`                                   | `human`; proposed route                                                                                                        |
+| #   | Synopsis after `kanthord project`                                         | Proposed HTTP route                                                 | Proposed operation ID                                      | Access/status                                                                                                                  |
+| --- | ------------------------------------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | `create --name <name> [M] [R]`                                            | `POST /api/project`                                                 | `project.create`                                           | `human`; proposed                                                                                                              |
+| 2   | `list [L] [R]`                                                            | `GET /api/project`                                                  | `project.list`                                             | `human`; proposed                                                                                                              |
+| 3   | `get <project-id> [R]`                                                    | `GET /api/project/:projectId`                                       | `project.get`                                              | `human`; proposed                                                                                                              |
+| 4   | `rename <project-id> --name <name> [M] [R]`                               | `PATCH /api/project/:projectId`                                     | `project.rename`                                           | `human`; proposed                                                                                                              |
+| 5   | `binding list <project-id> [--kind <kind> ...] [--state <state>] [L] [R]` | `GET /api/project/:projectId/binding`                               | `project.binding.list` **[blocked][project-contract]**     | `human`; proposed                                                                                                              |
+| 6   | `binding get <project-id> <binding-id> [R]`                               | `GET /api/project/:projectId/binding/:bindingId`                    | `project.binding.get` **[blocked][project-contract]**      | `human`; proposed                                                                                                              |
+| 7   | `binding export <project-id> [R]`                                         | `GET /api/project/:projectId/binding-set`                           | `project.bindingSet.get` **[blocked][project-contract]**   | `human`; proposed                                                                                                              |
+| 8   | `binding apply <project-id> --file <path> [M] [R]`                        | `PUT /api/project/:projectId/binding-set`                           | `project.bindingSet.write` **[blocked][project-contract]** | `human`; proposed                                                                                                              |
+| 9   | `binding revision list <project-id> <binding-id> [L] [R]`                 | `GET /api/project/:projectId/binding/:bindingId/revision`           | `project.bindingRevision.list`                             | `human`; proposed                                                                                                              |
+| 10  | `binding revision get <project-id> <binding-id> <revision> [R]`           | `GET /api/project/:projectId/binding/:bindingId/revision/:revision` | `project.bindingRevision.get`                              | `human`; proposed                                                                                                              |
+| 11  | `agent list <project-id> <worker-binding-id> [L] [R]`                     | `GET /api/project/:projectId/binding/:bindingId/agent`              | `project.agentConfiguration.list`                          | `human`; proposed                                                                                                              |
+| 12  | `agent get <project-id> <worker-binding-id> <agent-name> [R]`             | `GET /api/project/:projectId/binding/:bindingId/agent/:agentName`   | `project.agentConfiguration.get`                           | `human`; proposed                                                                                                              |
+| 13  | `source secret get <project-id> <source-binding-id> [R]`                  | `GET /api/project/:projectId/binding/:bindingId/secret`             | `project.sourceSecret.get`                                 | `human`; proposed, **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#project-service)** |
 
 - Rows 5 to 8 keep their marks for the source configuration in HANDOFF, not the storage credential record type.
-- The credential routes and the provider check are server-wide; they contain no `projectId`.
-- The static path `/api/project/provider/check`, like `/credential`, must not fall under `/:projectId`.
-- Provider-account views reuse the binding operations and add a required kind constraint; they create no second provider-account store.
-- There are 21 distinct route operations for the 23 CLI leaves.
+- Server-wide credential routes belong to `/api/credential`; provider check belongs to `/api/worker/provider/check`. Neither route is under `/api/project`.
+- There are 13 distinct route operations for the 13 CLI leaves.
 
 ## Project resource
 
@@ -234,10 +213,10 @@ Inputs:
 - `<revision>`: required `Revision` on revision `get`; no default; path
   `revision`, encoded as its decimal integer. It must belong to that binding.
 - `--kind <kind>`: optional, **repeatable scalar flag** on `binding list`.
-  Proposed wire enum `repository | worker | provider_account | source | storage`.
+  Proposed wire enum `repository | worker | source | storage`.
   Absent means all supported kinds. Repeated values are ORed; reject duplicate
   values rather than changing their meaning. Maps to repeated query `kind`.
-  These are the five kinds, not a permanently closed set.
+  These are the four binding kinds.
 - `--state <state>`: optional enum on `binding list`, proposed values
   `current | removed | all`, default `current`; query `state`.
   The Project Service keeps a removed binding and every revision for the life of the project; `removed` and `all` include retained bindings.
@@ -249,10 +228,8 @@ Inputs:
 proposed metadata `id`, `projectId`, `name`, `kind`, `resourceIdentity`, `createdAt`,
 and optional `removedAt`. `resourceIdentity` is a
 server-derived normalized string and is absent for worker bindings. Kind and
-state filters, `limit`, and `cursor` are the only list query fields; the reused
-provider-account views add their kind constraint as described below. Ordinary
-`binding get` has no kind query; the provider-account variant supplies one
-required enum value and must reject a wrong-kind target.
+state filters, `limit`, and `cursor` are the only list query fields.
+`binding get` has no kind query.
 
 `binding export` reads one consistent, complete current set and prints exactly
 the proposed `BindingSetWrite` shape, ready to save to a named JSON file and
@@ -287,11 +264,11 @@ whose schemas are explicitly blocked below.
 
 Each `BindingEdit` value contains only:
 
-- `kind`: **required**, enum `repository | worker | provider_account | source | storage`.
+- `kind`: **required**, enum `repository | worker | source | storage`.
 - `config`: **required**, the kind-specific object below.
 
 Every reference between bindings is a binding-name string of the same
-submission, for example `"providerAccount": "openai-atlas"`. A reference holds
+submission, for example `"repository": "kanthord-repo"` in a source configuration. A reference holds
 no revision and names no different project. The [binding-set write ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-write-of-a-binding-set)
 defines the comparison with the stored current set and the resolution of
 references to stored identities.
@@ -318,35 +295,13 @@ This example uses the proposed kind-specific fields below:
         "credential": "credential_01J8Z3N5K7Q2W4E6R8T0Y2V4X7"
       }
     },
-    "openai-atlas": {
-      "kind": "provider_account",
-      "config": {
-        "available": true,
-        "provider": "openai",
-        "account": "org-atlas",
-        "credential": "credential_01J8Z3N5K7Q2W4E6R8T0Y2V4X6",
-        "default": true
-      }
-    },
-    "atlas-llm": {
-      "kind": "provider_account",
-      "config": {
-        "available": true,
-        "provider": "openai-compatible",
-        "baseUrl": "https://llm.atlas.internal/v1",
-        "models": [
-          { "id": "qwen3-coder", "contextWindow": 32768, "maxTokens": 8192 }
-        ],
-        "credential": "credential_01J8Z3N5K7Q2W4E6R8T0Y2V4X8",
-        "default": false
-      }
-    },
     "general-main": {
       "kind": "worker",
       "config": {
         "worker": "general@1",
         "instanceCount": 1,
-        "entries": [{ "agent": "swe@1", "providerAccount": "openai-atlas" }]
+        "resourceBudget": { "turns": 50, "wallTimeMs": 1800000 },
+        "entries": [{ "agent": "swe@1", "reasoningEffort": "high" }]
       }
     }
   }
@@ -357,7 +312,7 @@ The repository credential in this example is an `api_key` of GitHub.
 
 Common to every `config`:
 
-- `available` applies to the repository, provider account, source and storage kinds. It is a required boolean with no default.
+- `available` applies to the repository, source and storage kinds. It is a required boolean with no default.
 - `false` prevents subsequent resolution. It revokes no upstream authority and cancels no operation in flight.
 - A worker binding holds no `available`; `instanceCount: 0` makes it unavailable.
 
@@ -369,7 +324,7 @@ Common to every `config`:
 - `address`: **required**, nonblank SSH repository address; no default. An HTTPS address fails. The adapter validates and normalizes the repository address.
 - Unsupported addresses and contradictory platform/address combinations fail.
 - `strategy`: **required**, `RepositoryStrategy` object below. It has no inferred base branch, action or trigger.
-- `credential`: **required**, one `CredentialId` of type `api_key` of the platform; no default. It serves every platform action and the observer read. Git uses the SSH configuration of the host.
+- `credential`: **required**, one `CredentialId` of platform `github` and type `api_key`; no default. It serves every platform action and the observer read. Git uses the SSH configuration of the host.
 - `projectPrompt`: **optional**, string, absent by default. Absence contributes no binding-provided prompt to Worker prompt composition.
 - The project prompt holds at most 32768 UTF-8 bytes. A larger value refuses the write with `project.bindings.repository.project_prompt_too_large`.
 - The JSON file holds the prompt text, not a client-side path.
@@ -401,7 +356,7 @@ Coverage and suitability follow [Repository configuration and policy](https://gi
 - Every repository binding requires one platform API key, even for a repository that permits a public read.
 - No public-read input exists, and an absent credential refuses the write.
 - Git operations use the SSH configuration of the host and require no credential reference.
-- Provider inference accepts `api_key` and `oauth` as the [credential store record](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-record) rules.
+- Custody checks that the credential has platform `github`, under [suitability](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#suitability).
 - These checks read no secret material and assert no narrower upstream scope.
 
 ### Worker and agent configuration — proposed fields
@@ -412,69 +367,40 @@ A worker binding's `config` adds:
   static template. The planned initial native templates are `general@1` and
   `reviewer@1`; examples involving `tdd@1` do not make that worker available.
 - `instanceCount`: **required**, integer from 0 to 64; no default. The value 0 makes the binding unavailable. An invalid value refuses the write with `project.bindings.worker.instance_count_range`.
+- `resourceBudget`: **optional** for a native worker, `{ turns, wallTimeMs }`.
+  Both fields are required positive safe integers. Absence uses the template
+  budget; presence overrides it. [Stop and budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#stop-and-budget)
+  sets both native defaults to `{ turns: 200, wallTimeMs: 7200000 }`.
+  External-harness workers declare no resource budget and reject this field.
 - `entries`: **optional**, array of `AgentEntry`, absent by default, meaning
-  every declared native agent uses its template defaults. Agent names must be
-  unique. An external-harness worker **forbids** this field: its harness selects
-  and authenticates inference outside Project resolution.
+  every native agent uses its enabled global enablement's default configuration.
+  Agent names must be unique. An external-harness worker forbids this field:
+  its harness selects and authenticates inference.
 
-Each `AgentEntry` contains:
+Each `AgentEntry` has required `agent`, the exact `AgentName` declared by the
+worker, and one of the two [entry forms](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.vocabulary.md#entry):
 
-- `agent`: **required**, exact `AgentName` declared by this worker; no default.
-- `providerAccount`: **optional**, binding-name string for a provider-account binding;
-  absent means use the project's default account for the provider named by
-  this agent's template default configuration. It does not mean choose any
-  available account.
-- `modelIdentifier`: **optional**, nonblank model-identifier string, absent means the
-  template default. Selecting an account at a different provider makes this
-  field required. Validation checks the effective configuration as a whole.
-- `reasoningEffort`: **optional**, enum `off | minimal | low | medium | high | xhigh | max`; absence selects the template default.
+- Tuning: `modelIdentifier`, `reasoningEffort` or both. It keeps the default
+  agent provider and inherits each absent value from the enablement.
+- Complete: `agentProvider`, `modelIdentifier` and `reasoningEffort`, all
+  required. It inherits nothing. `agentProvider` names a provider of this
+  agent's enablement, not an arbitrary credential.
 
-The [worker template registry](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-worker-template-registry) defines the override rules.
+`modelIdentifier` is a nonblank string. `reasoningEffort` is one of `off`,
+`minimal`, `low`, `medium`, `high`, `xhigh`, `max`. An entry holds no `options`.
+The write refuses nonempty `options`; the native option schemas are empty.
 
-- An entry must override at least one of `providerAccount`, `modelIdentifier` and `reasoningEffort`.
-- The write and the resolution check the reasoning effort against the levels of the effective model.
-- An unsupported level refuses use with `project.bindings.worker.reasoning_effort_unsupported` under the [validation rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#validation).
-- `general@1` and `reviewer@1` declare no further option; their option schema is empty.
-- The template has no configuration version of its own; the whole worker name selects its declaration.
-- A worker binding holds no provider account at its root.
-- Two bindings of the same worker can have equal configuration and independent instance counts.
-
-### Provider-account configuration — proposed fields
-
-- `provider`: **required**, a pi-ai 0.86.0 built-in provider id or `openai-compatible`; no default.
-- `account`: **required** for a built-in provider and forbidden for `openai-compatible`. It is a nonblank string with no default. The service trims it and keeps its case, because provider account ids are case-sensitive.
-- `baseUrl`: **required** for `openai-compatible` and forbidden otherwise. It is the server base URL, with scheme `https` or `http`, no query and no fragment.
-- `models`: **required** for `openai-compatible` and forbidden otherwise. It is the model list that the human approves after the provider check.
-- `credential`: **required**, `CredentialId` suitable for the model inference call; no default. The record type must match an auth type of the provider. `apiKey` maps to `api_key`, and `oauth` maps to `oauth`. The custom provider accepts `api_key` only.
-- `default`: **required**, boolean; no default. A project has at most one default account per provider. A complete-set edit changes the default and clears the other mark.
-
-Each custom model entry holds:
-
-- `id`: **required**, a model id from the check answer at approval.
-- `contextWindow`: **required**, positive integer; the human enters it at review.
-- `maxTokens`: **required**, positive integer, at most `contextWindow`; the human enters it at review.
-- `reasoning`: **optional**, boolean, default `false`.
-- `input`: **optional**, subset of `text | image`, default `["text"]`.
-- No cost field; the resolution sets zero cost rates.
-
-The [provider contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-of-an-execution) and the [validation rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#validation) define the catalogs and custom provider.
-
-- A built-in provider id is a member of `getBuiltinProviders()` of `@earendil-works/pi-ai` at 0.86.0.
-- The effective `modelIdentifier` is a member of `getBuiltinModels(provider)`, or of `models` of the binding for `openai-compatible`.
-- The write and the resolution check both catalogs; a pi version bump changes both catalogs.
-- Resource identity examples are `openai:account:org-atlas` and `openai-compatible:account:llm.atlas.internal`.
-- The custom provider account is the lower-cased host of its base URL, without the scheme, port, path or version.
-- A host change replaces the binding. A change of the scheme, port, path or model list creates a revision.
-- Before the `BEGIN IMMEDIATE` transaction, the write calls `GET <baseUrl>/models` once per added or changed `openai-compatible` configuration.
-- The call uses custody `use` with a 10 s deadline.
-- A connection other than `ok` refuses the write with `project.bindings.provider.unreachable`; the error names the connection value.
-- An absent model id refuses the write with `project.bindings.provider.model_unknown`; the error names the id.
-- An unchanged binding makes no call. The resolution makes no network call.
-
-The selected provider account determines an agent's effective provider. An
-explicitly selected disabled or revoked account prevents use; it authorizes
-no fallback. With no explicit account and no applicable default, the effective
-configuration is invalid. No implicit choice of the first account is allowed.
+The [Worker validation contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#agent-configuration-validation)
+checks the allowlist before the merge and the whole configuration after it.
+The Project write calls `validateEntry` for every agent, including an agent
+without an explicit entry, inside the transaction. A write is refused when an
+agent of the worker has no enabled enablement; the refusal names the agent.
+The proposed code is `worker.agent.enablement.unavailable`. Model and reasoning
+validation use the proposed Worker codes in [Worker](./worker.md#agent-enablement-refusals--proposed).
+The Project Service holds entries and asks the Worker Service for effective
+configuration; it resolves none itself. A later disablement refuses resolution
+and leaves the worker binding in place.
+Two bindings of one worker can have equal configuration and independent counts.
 
 ### Storage configuration
 
@@ -488,9 +414,13 @@ Its `config` holds `available` and these required fields, with no defaults:
 - `prefix`: text for the server-generated object-key prefix.
 - `credential`: `CredentialId` reference to a custody record, never inline secret material.
 
-`credential` names a record of type `s3_access_key` under the [storage configuration contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#storage-configuration).
+`credential` names a record of platform `s3` and type `s3_access_key` under the [storage configuration contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#storage-configuration).
 The [credential type contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-record) defines its key pair, suitability and session-token exclusion.
 The service validates field types, the endpoint URL, the custody reference and project cardinality at write and resolution.
+Its use check sends `{ credential, platform: s3 }` to custody and compares no
+metadata. The endpoint, bucket, region and prefix here serve work; credential
+metadata serves the healthcheck. A key for another S3 service can pass the use
+check and fail at its first upload.
 An absent field, invalid value or second storage binding refuses the write.
 The binding write probes no store capability.
 kanthord enforces no object immutability; it records the object version when the store returns one.
@@ -529,7 +459,7 @@ Project transaction. It compares the supplied version with the current
 version and refuses a stale one. No network operation belongs in that
 transaction. The target rules are:
 
-- One binding per repository, provider account and delivery source; any number per worker; at most one storage binding per project.
+- One binding per repository and delivery source; any number per worker; at most one storage binding per project.
 - Resource identity derives from configuration. A repository identity derives from its SSH address alone.
 - Every repository binding write performs one `git ls-remote` with a 30 s deadline before the transaction.
 - A failed or timed-out read refuses the write with `project.bindings.repository.ssh_unreachable`.
@@ -560,8 +490,8 @@ A resource change produces a removal and a creation. Exact result schemas
 require contract review.
 
 Use this one write operation to add repositories, add workers, configure
-agents, allocate provider accounts, change repository strategy, switch a
-default provider account, set instance counts, enable/disable a binding,
+agent entries, change repository strategy, set resource budgets and instance
+counts, enable/disable a binding,
 replace a resource, remove a binding, or rotate a source counter. There is no
 separate partial-update route for each field. A future convenience command
 would still need the same explicit version and atomic complete-set semantics.
@@ -571,149 +501,33 @@ and validates current bindings again, records the revisions it selected, and
 authorizes one use only. A previously recorded revision cannot bypass later
 disablement, replacement, revocation, or claim loss.
 
-## Credential records and custody
-
-Inputs:
-
-- `<credential-id>`: required `CredentialId` on `get` and `rotate`, no default;
-  path `credentialId`. A record is shared server-wide, not scoped by a project.
-- `--type <type>`: optional single-use enum on `list`, proposed values
-  `api_key | oauth | s3_access_key`; absence selects all three supported types; query `type`.
-- `--remote-identity <identity>`: optional single-use `RemoteIdentity` on
-  `list`, absent means no identity filter; exact-match query `remoteIdentity`.
-- [`--file`](./common-flags.md#--file): required on `create` and `rotate`. Its
-  proposed secret-file policy is a regular non-symlink file at mode `0600`,
-  validated before reading;
-  no silent permission repair. This policy needs adoption alongside the
-  material schema. The contents are sent to custody and never echoed.
-
-### OAuth login
-
-```text
-kanthord project credential login <provider> [--mode browser|device] --name <name> --remote-identity <value> [M] [R]
-kanthord project credential login-code <session> <value> [M] [R]
-kanthord project credential login-status <session> [R]
-```
-
-The [OAuth login ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-oauth-login) declares all three operations with `human` access.
-The inventory proposes their HTTP paths; the operations remain unimplemented.
-`login` sends the provider id, mode, credential name and remote identity to `project.credential.login`.
-`--name <name>` is required, has no default and uses the credential name form of the creation body below.
-The login session checks the credential name at the start and at the commit.
-A taken name answers 409 `project.credential.name_conflict` with the holder identity in `error.details`.
-The proposed mode mapping sends `device_code` for `device`; `browser` retains its spelling.
-A provider with one mode ignores the input mode.
-The command prints the session identity, address to open and code, one per line, and exits with zero.
-`login-code` sends the session identity and value to `project.credential.login_code`.
-The value is a code or a redirect URL, not a record secret, so it travels on the command line.
-The operation answers 409 when the session awaits no value.
-`login-status` reads `project.credential.login_status` and prints the state, last message and failure reason as JSON.
-A session identity has the form `login_session_<ulid>`; a session expires after 15 minutes.
-A second pending session for the same provider and human receives 409.
-No command reads a prompt or outputs a token.
-The shared JSON output convention does not replace the line output of `login`.
-
-### Credential request files — proposed schemas
-
-Creation body:
-
-- `name`: **required**, credential name, 1 to 63 characters; no default. A lower-case letter comes first, then lower-case letters, digits and hyphens.
-- `type`: **required**, `api_key` or `s3_access_key` for direct entry, no default. OAuth entry uses the login session.
-- `remoteIdentity`: **required**, `RemoteIdentity`, no default. The platform and
-  record type must be consistent with the supported type registry.
-- `material`: **required**, closed type-specific object, no default:
-  - For `api_key`: required `apiKey`, nonempty string containing a supported
-    git-platform personal access token or model-provider key. No default;
-    preserve exact bytes represented by the JSON string. Provider-specific
-    syntax and size bounds require the type schema.
-  - For `s3_access_key`: required `accessKeyId` and `secretAccessKey`; no session token.
-    The [credential record contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-record) defines the stored shape.
-
-Rotation body:
-
-- `material`: **required**, the type-specific object that the record type determines. No default.
-  The body has no `name`, `type`, `remoteIdentity`, binding reference or credential ID; the path identifies the record.
-
-The [Project lifecycle ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#revision-disablement-and-rotation) permits material replacement behind a stable credential reference.
-This command provides no way to rotate `masterKey`.
-
-Creation returns metadata with proposed fields `id`, `name`, `type`, `remoteIdentity`,
-`createdAt`, and `updatedAt`. `get` returns that metadata and `list.items`
-contains it. No result contains material, ciphertext, nonce, authentication
-headers, or a reusable grant. These commands do not test upstream access.
-
-Rotation changes material of the same record for the same remote identity;
-existing credential references remain valid. It returns the updated metadata
-and has no binding-set or binding-revision effect. Custody attributes creation
-and each material change to the authenticated human in its log. A credential leaves the server only through the [credential handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-handover) or the direct acquisition grant.
-Rotation and OAuth refresh update the record in place and create no revision. Rotation commits in one transaction, and the last write wins.
-
-The [remote identity contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-remote-identity-of-a-record) defines the endpoint-host platform for `s3_access_key`.
-Its example is `s3.eu-central-1.amazonaws.com:user:kanthord-evidence`.
-The remote identity of a credential store record never changes; rotation keeps it.
-A credential for another remote is a new record from `credential create`.
-Each binding adopts it with a `binding apply` that changes its `credential`, which creates a revision.
-
-There is no credential export, delete, local-revocation, refresh,
-GitHub-App-token mint, or master-key-rotation command. Upstream revocation and
-expiry are different events from local disablement and material rotation.
-Their failure recording and recovery behavior are still design work, not
-commands with invented semantics.
-
-## Provider check
-
-The [provider check contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-provider-check) defines `project.provider.check`, a server-wide read with `human` access.
-Its proposed route is `POST /api/project/provider/check`, with no project or binding.
-
-Input:
-
-- `--base-url <url>`: required; body field `baseUrl`. The URL scheme is `https` or `http`; a query or a fragment is invalid.
-- `--credential <credential-id>`: required `CredentialId`; body field `credential`. The record type is `api_key`.
-- The body holds only `{ baseUrl, credential }`. The command uses `[R]` and no `[M]`.
-
-Output and errors:
-
-- HTTP 200 holds `connection`: `ok`, `unauthorized`, `unreachable` or `invalid_response`.
-- `ok` means the answer has the OpenAI list shape.
-- `unauthorized` means remote HTTP 401 or 403.
-- `unreachable` means a network failure or the 10 s deadline.
-- `invalid_response` means the answer does not have the OpenAI list shape.
-- `models` is present only with `ok`; each entry holds `id`, `ownedBy` and `created`.
-- HTTP 400 answers invalid input or a record type other than `api_key`.
-- HTTP 404 answers an unknown credential.
-- The answer holds no key material.
-
-## Provider accounts and effective agent views
+## Effective agent views
 
 Inputs:
 
 - `<project-id>`: required `ProjectId` on each command, no default; path
   `projectId`.
-- `<binding-id>`: required `BindingId` on provider-account `get`, no default;
-  path `bindingId`. Must be a provider-account binding of this project.
 - `<worker-binding-id>`: required `BindingId` on both agent commands, no
   default; path `bindingId`. Must be a worker binding of this project.
 - `<agent-name>`: required `AgentName` on agent `get`, no default; path
   `agentName`. Must be declared by the selected native worker template.
 
-No command here has a body or mutation/replay option. The provider-account
-commands inject `kind=provider_account` into the binding routes. Their list
-uses `state=current` and exposes no additional filter flags. Results are the
-same binding records, with `default`, `available`, provider and credential reference.
-A built-in provider has `account`; a custom provider has `baseUrl` and `models`.
-These commands list no provider credentials and create no independent provider resource.
-
-Agent views propose read-only inspection of template defaults, explicit
-overrides, and the resulting configuration for this project binding. These
+No command here has a body or mutation/replay option.
+Agent views propose read-only inspection of enablement defaults, binding
+entries and the effective configuration that the Worker Service supplies. These
 are not the global worker/agent catalogs, which belong to the Worker CLI.
 The list pages the declared agents of the selected template; `get` selects
 one. Proposed item fields are:
 
 - `agent`, `worker`, `workerBindingId`, and `bindingSetVersion`.
-- `defaults` and `overrides`, whose exact fields are the template's schema.
-- `effective`, present only when the service can form and validate the configuration. It holds the resolved provider-account binding, model and `reasoningEffort`. The response must not replace an invalid result with a fallback.
-- `revisions`, an array of `{ bindingId, revision }` for the inspected dependency
-  chain, including selected provider account and applicable default account.
+- `defaults`: the enablement's `agentProvider`, `modelIdentifier` and `reasoningEffort`, or `null` when no enablement exists.
+- `entry`: the binding's tuning or complete entry, or `null` when absent.
+- `effective`, present only when the Worker Service resolves and validates it:
+  `agentProvider`, `provider`, `credential`, `modelIdentifier` and `reasoningEffort`.
+  An invalid result permits no fallback.
+- `revisions`: proposed object with `workerBinding`, `entry`, `enablement` and
+  `credentialMetadata` revision values supplied by the Worker snapshot.
+  `entry` is the binding revision when an entry exists, otherwise `null`.
 - `valid`, boolean; and `issues`, an array of proposed `{ path, code }` objects
   describing invalid configuration without secret values. `path` is an array
   of field-name strings and `code` is a nonempty diagnostic-code string.
@@ -725,7 +539,9 @@ effective native-agent configuration for that binding. These views neither
 mint an authorization grant nor authorize inference. They make no remote
 healthcheck, reserve no capacity, and do not validate a live execution claim.
 
-The provider account check is the [resource healthcheck](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-resource-healthcheck) that the Gateway health report runs; this page specifies no healthcheck command.
+The [agent provider healthcheck](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#agent-provider-healthcheck)
+belongs to the Worker Service and the Gateway health report. This page specifies
+no healthcheck command.
 
 ## Source verification secret
 
@@ -752,7 +568,7 @@ update is implied. The source schema and secret display remain **[blocked][proje
   one-use grants, `use(grant, request)`, and credential-reference validation are
   runtime mechanisms. This page creates no `resolve`, `authorize`, `grant`,
   `use`, or generic execute-with-credential command from them.
-- Execution custody derives a remote destination from the checked binding. The human provider check accepts `baseUrl` under its separate contract.
+- Custody derives a remote destination from the authorized entity. The human provider check belongs to Worker and accepts only a credential reference.
 - Git operations, platform actions and inference stay in their execution protocols. A local commit, branch and merge are not authenticated capabilities.
 - A machine execution must satisfy binding and live-claim checks on each use.
   An external harness also needs the matching authenticated client, live

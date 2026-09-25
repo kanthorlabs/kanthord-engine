@@ -1,6 +1,6 @@
 # Worker CLI specification
 
-This is the future specification for `kanthord worker`. It contains **12 command leaves: 1 implemented command and 11 proposed commands**. The proposed command
+This is the future specification for `kanthord worker`. It contains **20 command leaves: 1 implemented command and 19 proposed commands**. The proposed command
 names, routes, operation IDs, access policies, JSON fields and defaults below are
 design proposals, not published API or working CLI commands. The behavioral
 requirements identified as **target design** come from the Worker design; their
@@ -9,7 +9,9 @@ presence here does not establish implementation.
 See the [CLI index](./README.md) for shared conventions and
 [other commands](./other.md) for `serve worker`, server configuration and local
 `jwt` issuance. Worker binding edits, instance counts, availability, agent
-overrides and effective configuration resolution belong to [Project](./project.md).
+entries and effective configuration inspection belong to [Project](./project.md).
+The Worker Service owns agent enablement and effective configuration resolution.
+[Credential](./credential.md) covers credential management.
 Work pull, claims, execution records, lease renewal and release belong to
 [Scheduler](./scheduler.md).
 
@@ -49,14 +51,14 @@ or accepts `--config`.
 Shared syntax, types, defaults, and validation are defined by each linked flag.
 Only applicability and Worker-specific requirements are listed here.
 
-| Common flag                                                                      | Applies to / Worker requirement                                                         |
-| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| [`--endpoint`](./common-flags.md#--endpoint)                                     | Every command; inherited from the `worker` group.                                       |
-| [`--token`](./common-flags.md#--token)                                           | Every operation requires a nonblank resolved token matching its human or client policy. |
-| [`--idempotency-key`](./common-flags.md#--idempotency-key)                       | Mutations only; implemented registration retains the `<ulid>` help spelling.            |
-| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Each list command.                                                                      |
-| [`--file`](./common-flags.md#--file)                                             | Required only for `mcp tool call`; the selected tool's schema is defined below.         |
-| [`--help`](./common-flags.md#--help)                                             | Every group and leaf.                                                                   |
+| Common flag                                                                      | Applies to / Worker requirement                                                                                 |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| [`--endpoint`](./common-flags.md#--endpoint)                                     | Every command; inherited from the `worker` group.                                                               |
+| [`--token`](./common-flags.md#--token)                                           | Every operation requires a nonblank resolved token matching its human or client policy.                         |
+| [`--idempotency-key`](./common-flags.md#--idempotency-key)                       | Mutations only; implemented registration retains the `<ulid>` help spelling.                                    |
+| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Each list command.                                                                                              |
+| [`--file`](./common-flags.md#--file)                                             | Required for `agent enablement put`, `agent enablement provider add` and `mcp tool call`; schemas appear below. |
+| [`--help`](./common-flags.md#--help)                                             | Every group and leaf.                                                                                           |
 
 The [shared client-file rules](./other.md#cliyaml-and-its-effects) apply.
 Commands do not save or rewrite that file.
@@ -86,7 +88,7 @@ and an idempotency key alone cannot reconcile an uncertain repository write.
 | Value                      | Type and validation                                                                                                                                                                                                                                                                                         |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `WorkerName`               | Nonempty exact versioned catalog key, such as `general@1`. Required version; no implicit latest version or alias. Unknown names fail lookup. This is a natural key, not a ULID.                                                                                                                             |
-| `AgentName`                | Nonempty exact role/version key declared by the selected worker, such as `swe@1`; never a worker name. Unknown or mismatched names fail lookup.                                                                                                                                                             |
+| `AgentName`                | Nonempty exact role/version key in the agent catalog, such as `swe@1`; never a worker name. Unknown names fail lookup.                                                                                                                                                                                      |
 | `ProjectId`                | Opaque `project_<ulid>` identity using the declared project prefix.                                                                                                                                                                                                                                         |
 | `RuntimeIdentity`          | Opaque server-returned runtime identity. Current generation uses `runtime_identity_<ulid>`, but the current wire schema accepts a nonblank string of length `1..128`; it does not enforce that prefix. Proposed consumers retain the returned value exactly.                                                |
 | `BindingId`, `ExecutionId` | `BindingId` uses `binding_<ulid>`. `ExecutionId` uses `execution_<ulid>` under the [Scheduler identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-identities-of-the-scheduler-service), validated with `identitySchema("execution")` of the kernel. |
@@ -103,30 +105,47 @@ The target runtime identity is `worker_instance_<ulid>` under the [Worker identi
 ## Command inventory
 
 `P` means proposed; `I` means implemented syntax and operation.
-Heartbeat and handover retain their ruled routes; other `P` paths remain proposals, not claims about the current OpenAPI.
+Heartbeat, handover, the five inspection reads and provider check use their ruled routes. Other `P` paths remain proposals, not current OpenAPI declarations.
 `human` authenticates a human JWT. `client` authenticates a machine JWT and requires
 a live registration unless an explicit exception is stated.
 
-| Status | Command after `kanthord worker`           | Route                                                   | Operation ID                                                                                                     | Access / registration                                                            |
-| ------ | ----------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| I      | `register`                                | `POST /api/worker/register`                             | `worker.register`                                                                                                | `client`; `requiresRegistration: false`                                          |
-| P      | `heartbeat [--token <jwt>]`               | `POST /api/worker/heartbeat`                            | `worker.heartbeat`                                                                                               | `client`; live registration                                                      |
-| P      | `handover [--token <jwt>]`                | `POST /api/worker/handover`                             | `worker.handover`                                                                                                | `client`; live registration and live execution                                   |
-| P      | `list`                                    | `GET /api/worker/catalog`                               | `worker.catalog.list` **[blocked][worker-contract]**                                                             | `human`                                                                          |
-| P      | `get <worker-name>`                       | `GET /api/worker/catalog/:workerName`                   | `worker.catalog.get` **[blocked][worker-contract]**                                                              | `human`                                                                          |
-| P      | `agent get <worker-name> <agent-name>`    | `GET /api/worker/catalog/:workerName/agent/:agentName`  | `worker.agent.get` **[blocked][worker-contract]**                                                                | `human`                                                                          |
-| P      | `instance list`                           | `GET /api/worker/instance`                              | `worker.instance.list` **[blocked][worker-contract]**                                                            | `human`                                                                          |
-| P      | `instance get <runtime-identity>`         | `GET /api/worker/instance/:runtimeIdentity`             | `worker.instance.get` **[blocked][worker-contract]**                                                             | `human`                                                                          |
-| P      | `instance healthcheck <runtime-identity>` | `GET /api/worker/instance/:runtimeIdentity/healthcheck` | `worker.instance.healthcheck` **[blocked][worker-contract]**                                                     | `human`                                                                          |
-| P      | `instance deregister <runtime-identity>`  | `POST /api/worker/instance/:runtimeIdentity/deregister` | `worker.instance.deregister` **[blocked][worker-contract]**                                                      | `client`; proposed `requiresRegistration: false`, with explicit ownership checks |
-| P      | `mcp tool list`                           | `GET /api/worker/mcp/tool`                              | `worker.mcp.tool.list` **[blocked][worker-contract]** (platform outputs and action-result record schemas)        | `client`; live registration and own live execution                               |
-| P      | `mcp tool call <tool-name> --file <path>` | Three concrete `POST` routes in the tool mapping below  | Three static tool operations; **[blocked][worker-contract]** (platform outputs and action-result record schemas) | `client`; live registration and own live execution; further per-tool checks      |
+| Status | Command after `kanthord worker`           | Route                                                   | Operation ID                                                                                | Access / registration                                                            |
+| ------ | ----------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| I      | `register`                                | `POST /api/worker/register`                             | `worker.register`                                                                           | `client`; `requiresRegistration: false`                                          |
+| P      | `heartbeat [--token <jwt>]`               | `POST /api/worker/heartbeat`                            | `worker.heartbeat`                                                                          | `client`; live registration                                                      |
+| P      | `handover [--token <jwt>]`                | `POST /api/worker/handover`                             | `worker.handover`                                                                           | `client`; live registration and live execution                                   |
+| P      | `list`                                    | `GET /api/worker/catalog`                               | `worker.catalog.list`                                                                       | `human`                                                                          |
+| P      | `get <worker-name>`                       | `GET /api/worker/catalog/:workerName`                   | `worker.catalog.get`                                                                        | `human`                                                                          |
+| P      | `agent get <agent-name>`                  | `GET /api/worker/agent/:agentName`                      | `worker.agent.get`                                                                          | `human`                                                                          |
+| P      | `instance list`                           | `GET /api/worker/instance`                              | `worker.instance.list`                                                                      | `human`                                                                          |
+| P      | `instance get <runtime-identity>`         | `GET /api/worker/instance/:runtimeIdentity`             | `worker.instance.get`                                                                       | `human`                                                                          |
+| P      | `instance deregister <runtime-identity>`  | `POST /api/worker/instance/:runtimeIdentity/deregister` | `worker.instance.deregister` **[blocked][worker-contract]**                                 | `client`; proposed `requiresRegistration: false`, with explicit ownership checks |
+| P      | `mcp tool list`                           | `GET /api/worker/mcp/tool`                              | `worker.mcp.tool.list` **[blocked][worker-contract]** (action-result record schemas)        | `client`; live registration and own live execution                               |
+| P      | `mcp tool call <tool-name> --file <path>` | Three concrete `POST` routes in the tool mapping below  | Three static tool operations; **[blocked][worker-contract]** (action-result record schemas) | `client`; live registration and own live execution; further per-tool checks      |
+
+The inventory includes these nine **proposed** commands. `[R]`, `[M]` and
+`[L]` use the [common synopsis definitions](./common-flags.md#synopsis-markers).
+
+| Status | Command after `kanthord worker`                                         | Route                                                                   | Operation ID                              | Access / registration |
+| ------ | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------- | --------------------- |
+| P      | `agent enablement list [L] [R]`                                         | `GET /api/worker/agent/enablement`                                      | `worker.agent.enablement.list`            | `human`; proposed     |
+| P      | `agent enablement get <agent-name> [R]`                                 | `GET /api/worker/agent/enablement/:agentName`                           | `worker.agent.enablement.get`             | `human`; proposed     |
+| P      | `agent enablement put <agent-name> --file <path> [M] [R]`               | `PUT /api/worker/agent/enablement/:agentName`                           | `worker.agent.enablement.put`             | `human`; proposed     |
+| P      | `agent enablement enable <agent-name> [M] [R]`                          | `POST /api/worker/agent/enablement/:agentName/enable`                   | `worker.agent.enablement.enable`          | `human`; proposed     |
+| P      | `agent enablement disable <agent-name> [M] [R]`                         | `POST /api/worker/agent/enablement/:agentName/disable`                  | `worker.agent.enablement.disable`         | `human`; proposed     |
+| P      | `agent enablement remove <agent-name> [M] [R]`                          | `DELETE /api/worker/agent/enablement/:agentName`                        | `worker.agent.enablement.remove`          | `human`; proposed     |
+| P      | `agent enablement provider add <agent-name> --file <path> [M] [R]`      | `POST /api/worker/agent/enablement/:agentName/provider`                 | `worker.agent.enablement.provider.add`    | `human`; proposed     |
+| P      | `agent enablement provider remove <agent-name> <provider-name> [M] [R]` | `DELETE /api/worker/agent/enablement/:agentName/provider/:providerName` | `worker.agent.enablement.provider.remove` | `human`; proposed     |
+| P      | `provider check --credential <credential-name> [R]`                     | `POST /api/worker/provider/check`                                       | `worker.provider.check`                   | `human`; proposed     |
+
+The static `/api/worker/agent/enablement` path takes precedence over `/:agentName`.
 
 `credential` runs inside the `worker` application alone and is no CLI command.
 Its operation is `worker.credential` at `POST /api/worker/credential`, with `client` access and a live execution requirement.
 
-Catalog and operator inspection routes using `human` are a proposed addition to
-the existing client-oriented Worker surface. Every authenticated human has the
+The five human reads follow [inspection operations](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#inspection-operations).
+Each is `unary`, has `mutation: false` and a default timeout of 30 s, and reads
+no table of another service. The linked section is a pending root anchor. Every authenticated human has the
 server-owner authority of the target design; this table introduces no project
 membership or administrator role. Machine inspection/calls remain scoped to the
 authenticated client and claim and gain no authority from caller-supplied IDs.
@@ -265,49 +284,227 @@ Proposed HTTP `200` returns the summary fields plus:
 
 - `harness: string` for an external worker, naming its hosting harness.
 - `method: "steps" | "evaluation"` and `agentName: AgentName` for a native worker.
-- `resourceBudget: { turns: integer, wallTimeMs: integer }` for a native worker,
-  with positive values taken from its actual declared contract. No numerical
-  budget is chosen here.
+- `resourceBudget: { turns: integer, wallTimeMs: integer }` for a native worker.
+  `general@1` and `reviewer@1` declare `{ turns: 200, wallTimeMs: 7200000 }`.
+  Both fields are positive safe integers. A native worker binding can override
+  the default. [Stop and budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#stop-and-budget)
+  defines a turn as one `turn_end` event and wall time from claim response to release.
+  `claude@1` and `opencode@1` declare no resource budget.
 
 Absent/inapplicable native fields are omitted for externally hosted workers. The
 result changes no registration, pool, project configuration or scheduling state.
-An unknown exact worker name returns proposed `404`.
+An unknown exact worker name returns `404 worker.catalog.not_found`.
 
-### `agent get <worker-name> <agent-name>`
+### `agent get <agent-name>`
 
 ```text
-kanthord worker agent get <worker-name> <agent-name>
+kanthord worker agent get <agent-name>
 ```
 
-| Input         | Requiredness / type / default     | Mapping and validation                                |
-| ------------- | --------------------------------- | ----------------------------------------------------- |
-| `worker-name` | Required `WorkerName`; no default | `params.workerName`; exact native worker declaration. |
-| `agent-name`  | Required `AgentName`; no default  | `params.agentName`; must be the agent of that worker. |
+`agent-name` is required `AgentName`, with no default, and maps to
+`params.agentName`. The key names one catalog declaration, not a worker binding.
+Required token: human JWT. Empty query, absent body. HTTP `200` returns
+`agentName` and the following declaration/configuration fields:
 
-Required token: human JWT. Empty query, absent body. Proposed HTTP `200` returns
-`workerName`, `agentName` and the following declaration/configuration fields:
+| Result field          | Type and meaning                                                                                                                                                                                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `configurationSchema` | JSON Schema draft 2020-12 object describing the effective configuration: every allowed field, its type, requiredness and enumeration. Its `description` states the whole-configuration constraint that the Worker Service checks; JSON Schema validates no cross-field lookup. |
+| `overridableFields`   | Array of field paths allowed in a Project override; no wildcard permission to add fields. For `swe@1` and `re@1` it is `["agentProvider", "modelIdentifier", "reasoningEffort"]`.                                                                                              |
+| `enablement`          | The [agent enablement record](#agent-enablement-record--proposed), or `null` when no record exists.                                                                                                                                                                            |
+| `basePrompt`          | Optional string; the exact worker-declared shared prompt, omitted if absent.                                                                                                                                                                                                   |
+| `agentPrompt`         | Required string; exact worker-declared role prompt.                                                                                                                                                                                                                            |
+| `tools`               | Array of permitted tool declarations; each item has `name: string`, `source` (one of `builtin`, `kanthord-mcp`) and `inputSchema: object`. Project-added tools are inspected through Project configuration instead.                                                            |
 
-| Result field           | Type and meaning                                                                                                                                                                                                    |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `defaultConfiguration` | Object with `provider: string`, `modelIdentifier: string`, `reasoningEffort: string` and `options: object`; actual worker-declared defaults, not values invented by this specification.                             |
-| `configurationSchema`  | JSON Schema object describing every allowed field, its type, requiredness, default and validation. It must also describe constraints which the template checks as a whole.                                          |
-| `overridableFields`    | Array of field paths allowed in a Project override; no wildcard permission to add fields.                                                                                                                           |
-| `basePrompt`           | Optional string; the exact worker-declared shared prompt, omitted if absent.                                                                                                                                        |
-| `agentPrompt`          | Required string; exact worker-declared role prompt.                                                                                                                                                                 |
-| `tools`                | Array of permitted tool declarations; each item has `name: string`, `source` (one of `builtin`, `kanthord-mcp`) and `inputSchema: object`. Project-added tools are inspected through Project configuration instead. |
+The [configuration schema](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#configuration-schema)
+is emitted by `z.toJSONSchema` of `zod` at 4.4.3 from the effective-configuration
+schema. Its root is an object with `additionalProperties: false` and five required properties:
 
-This is the inspection of the worker's **default** configuration and contract.
-It is never the effective configuration of a bare agent name. Inspect a binding's
-overrides, resolved provider account, model and revisions through
-[Project](./project.md), where configuration is named through a worker binding.
-A different provider account requires a compatible model selection; missing,
-disabled or revoked selected accounts cannot silently fall back to another.
+| Property          | Schema                                                                      |
+| ----------------- | --------------------------------------------------------------------------- |
+| `agentProvider`   | `string`; name of an agent provider in the enablement                       |
+| `provider`        | `string`, enum `github-copilot`, `openai`, `anthropic`, `openai-compatible` |
+| `credential`      | `string`; a credential name                                                 |
+| `modelIdentifier` | `string`                                                                    |
+| `reasoningEffort` | enum `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`              |
 
-An external worker declares no native agent configuration or prompts; looking up
-a native agent under it returns proposed `404`. Prompt/default changes require a
-new worker version. This command neither composes the prompt of an execution nor
+No property carries a `default`; the schema holds no `options`.
+Its `description` requires model membership in `getBuiltinModels(provider)` of
+pi-ai 0.86.0 or the `models` metadata of the `openai-compatible` credential.
+It also requires effort membership in that model's supported reasoning levels.
+JSON Schema validates neither lookup. The Worker Service enforces them at the
+enablement write, at the worker binding write through `validateEntry`, and at
+resolution. The instance healthcheck reports whether the effective configuration resolves.
+
+This command inspects a catalog declaration and its global enablement, not the
+effective configuration of a bare agent name. Inspect binding entries, effective
+configuration and revisions through [Project](./project.md). Project asks the
+Worker Service for that configuration. An absent or disabled enablement refuses
+use, including a complete entry; no fallback selects another credential.
+
+An external worker declares no agent and needs no enablement. An unknown agent
+name returns `404 worker.agent.not_found`. Catalog prompt changes require a
+new worker version. An enablement default change creates a revision.
+This command neither composes the prompt of an execution nor
 reads a local `AGENTS.md`/`CLAUDE.md`. The [Worker configuration](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#configuration) declares `worker.globalPrompt`.
 Each global prompt source and project prompt source holds at most 32768 UTF-8 bytes under the [Worker implementation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md).
+
+## Agent enablement record — proposed
+
+The [agent configuration rules](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.md#agent-configuration)
+own these records. The following wire fields and command spellings are proposed.
+An enablement is global to the server, belongs to no project and is keyed by
+`agentName: AgentName`. It holds:
+
+| Field                  | Type and meaning                                                                                                                                                                                                                                                                                                       |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agentName`            | Exact catalog key; no separate enablement identity.                                                                                                                                                                                                                                                                    |
+| `state`                | `enabled` or `disabled`. An absent record also denies use.                                                                                                                                                                                                                                                             |
+| `agentProviders`       | Nonempty array of `{ name, provider, credential }`. Each name is nonblank and unique inside this enablement. `provider` is `github-copilot`, `openai`, `anthropic` or `openai-compatible`. `credential` is a credential name in custody; its platform must equal the provider. No model list or secret is stored here. |
+| `defaultConfiguration` | Required `{ agentProvider, modelIdentifier, reasoningEffort }`. The human supplies all three; no catalog default applies. The name selects an agent provider of this enablement.                                                                                                                                       |
+| `revision`             | Positive safe integer; every change creates a revision.                                                                                                                                                                                                                                                                |
+
+`modelIdentifier` is a nonblank string. The reasoning-effort enum is the one in
+`configurationSchema`. All request objects are closed. An agent provider's
+`provider` is fixed; another provider needs another agent provider. A change of
+its `credential` through `put` creates a revision.
+
+The Worker Service validates the allowlist before merge and the whole effective
+configuration after it, under [configuration validation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#agent-configuration-validation).
+It checks the provider catalog or credential metadata and the established
+reasoning levels. An empty metadata model list permits no model selection.
+It reads metadata through custody, never a secret, and makes no write-time
+remote call. An entry holds no `options`.
+
+A configuration change checks every dependent worker binding, including those
+without an explicit entry. `entriesOfAgent(tx, agentName)` and
+`validateEntry(tx, workerName, entry)` keep that check and the write in one
+transaction under the [collaboration contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-operation-and-its-two-entry-adapters).
+A change that invalidates a dependent binding fails and lists those bindings.
+A tuning entry follows unchanged default fields at its next resolution.
+
+All commands below use `human` access. Required names have no default.
+`<agent-name>` maps to `params.agentName`; `<provider-name>` maps to
+`params.providerName`. Mutations use the shared replay key and print it.
+Proposed reads and writes are unary. Unless stated otherwise, query is empty,
+body is absent and success answers HTTP `200` with the enablement record.
+
+### `agent enablement list`
+
+Uses `[L] [R]`, no positional arguments and no filters. Query holds `limit` and
+optional `cursor`. Returns `{ items, nextCursor }`, paged by agent name in
+descending order. It lists records, not catalog agents without an enablement.
+
+### `agent enablement get <agent-name>`
+
+Uses `[R]`. Returns one enablement. An absent record answers the proposed
+`404 worker.agent.enablement.not_found`; `agent get` instead returns a null
+`enablement` for a catalog agent without a record.
+
+### `agent enablement put <agent-name> --file <path>`
+
+Uses `[M] [R]`. The required file supplies exactly
+`{ agentProviders, defaultConfiguration }`, with both fields required and no
+default. It creates or replaces the complete configuration. Proposed creation
+sets `state: enabled`; replacement preserves the record's state. The explicit
+`enable` and `disable` commands change that state. Omitted agent providers are
+removals and must pass the dependency check. A retained name cannot change its
+provider. A credential change is a revision. The answer is the saved record.
+
+### `agent enablement enable <agent-name>`
+
+Uses `[M] [R]`. Sets an existing record to `enabled` after configuration
+validation. It creates no missing record and selects no default value for the
+human. It returns the enabled record.
+
+### `agent enablement disable <agent-name>`
+
+Uses `[M] [R]`. Sets an existing record to `disabled` and returns it.
+Disablement is the only stop switch; it is allowed with dependent bindings.
+It refuses every later resolution, including a complete entry, so the instance
+healthcheck fails and no claim follows. Bindings remain. It recalls no handover
+in flight. An agent provider has no independent disablement.
+
+### `agent enablement remove <agent-name>`
+
+Uses `[M] [R]`. Removal fails while any worker binding of a worker that references
+this agent exists. The refusal lists those bindings. The dependency check and
+removal commit in one transaction. Proposed success is
+`{ agentName, removed: true }`, not an enablement record.
+
+### `agent enablement provider add <agent-name> --file <path>`
+
+Uses `[M] [R]`. The required file supplies exactly `{ name, provider, credential }`,
+with all fields required. It adds a named agent provider to an existing record
+and returns the revised enablement. A duplicate name fails. Use `put` to revise
+a credential reference or default configuration.
+
+### `agent enablement provider remove <agent-name> <provider-name>`
+
+Uses `[M] [R]`. Removes one named agent provider and returns the revised record.
+Removal fails while a default configuration or binding entry names it, and the
+refusal lists those dependents. The check and removal are atomic. An enablement
+must still hold at least one agent provider.
+
+### Agent enablement refusals — proposed
+
+These code spellings and HTTP mappings are proposed; the linked design owns the
+refusals. `error.details` names the agent and lists affected bindings or other
+dependents when applicable. No error holds secret material.
+
+| HTTP | Proposed code                                             | Condition                                                                                   |
+| ---- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 404  | `worker.agent.enablement.not_found`                       | No enablement exists.                                                                       |
+| 400  | `worker.agent.enablement.unavailable`                     | An agent has no enabled enablement at binding write or resolution; details name that agent. |
+| 409  | `worker.agent.enablement.invalidates_bindings`            | A configuration change invalidates dependent worker bindings; details list them.            |
+| 409  | `worker.agent.enablement.in_use`                          | Enablement removal has dependent worker bindings; details list them.                        |
+| 409  | `worker.agent.enablement.provider.name_conflict`          | Agent provider name already exists.                                                         |
+| 404  | `worker.agent.enablement.provider.not_found`              | A selected agent provider is absent.                                                        |
+| 409  | `worker.agent.enablement.provider.fixed`                  | A retained agent provider changes its provider.                                             |
+| 409  | `worker.agent.enablement.provider.in_use`                 | Removal has dependent defaults or entries; details list them.                               |
+| 400  | `worker.agent.enablement.provider.required`               | A write leaves no agent provider.                                                           |
+| 400  | `worker.agent.configuration.override_not_allowed`         | Entry has a field outside the allowlist, including nonempty `options`.                      |
+| 400  | `worker.agent.configuration.invalid`                      | Configuration shape or entry form is invalid.                                               |
+| 400  | `worker.agent.configuration.model_unknown`                | Model is absent from the selected catalog or metadata.                                      |
+| 400  | `worker.agent.configuration.reasoning_effort_unsupported` | No source establishes the requested reasoning level for the selected model.                 |
+| 400  | `worker.agent.configuration.credential_unsuitable`        | Custody refuses the credential/platform pair.                                               |
+
+Unknown catalog agents use `404 worker.agent.not_found`.
+
+## `provider check` — proposed
+
+```text
+kanthord worker provider check --credential <credential-name> [R]
+```
+
+The [provider check contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-provider-check)
+declares `worker.provider.check`, a server-wide read under `human` access, at
+`POST /api/worker/provider/check`. It has no project or binding.
+`--credential` is required, with no default, and uses the credential name form
+in [Credential](./credential.md#names-and-identities). The body is exactly
+`{ credential }`; params and query are empty. No raw key or base URL reaches
+this operation. It accepts only an `openai-compatible` credential and reads
+`baseUrl` through custody. Custody attaches auth inside `use` and caches nothing.
+The call `GET <baseUrl>/models` has a 10 s deadline. No mutation key is accepted.
+
+HTTP `200` answers `connection`:
+
+- `ok`: the remote answers the OpenAI list shape.
+- `unauthorized`: the remote answers 401 or 403.
+- `unreachable`: a network failure or deadline prevents the answer.
+- `invalid_response`: the answer lacks the OpenAI list shape.
+
+Only `ok` holds `models`, an array of `{ id, ownedBy, created }`.
+The answer supplies model ids, not approved limits or reasoning levels, and no
+key. The human saves approved models through a credential metadata revision.
+HTTP 400 answers invalid input or an unsuitable credential; HTTP 404 answers an
+unknown credential. Proposed codes are `worker.provider.invalid_input`,
+`worker.provider.credential_unsuitable` and `worker.provider.credential_not_found`.
+
+Each agent provider also has a report-only [resource healthcheck](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#agent-provider-healthcheck).
+The health report groups probes by provider endpoint and credential and attributes
+each result. `GET /models` proves model-list access only. This check belongs to
+neither the liveness answer nor the claim path and changes no instance healthcheck.
+No check refreshes OAuth; an expired access token reports `unknown`.
 
 ## Instance inspection and lifecycle — proposed
 
@@ -335,6 +532,7 @@ one page of the instance records defined below in descending runtime-identity
 order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
 No ULID ordering is a lifecycle chronology. This is a live inventory, not a
 persistent history; subsequent pages reflect pool changes.
+A binding outside the supplied project answers HTTP `400`.
 
 ### `instance get <runtime-identity>`
 
@@ -345,7 +543,7 @@ kanthord worker instance get <runtime-identity>
 Required `runtime-identity: RuntimeIdentity`, no default; maps to
 `params.runtimeIdentity`. Required token: human JWT. Empty query, absent body.
 Proposed HTTP `200` returns one instance record; unknown or ended instances return
-proposed `404` rather than a historical execution record.
+`404 worker.instance.not_found` rather than a historical execution record.
 
 The proposed instance record contains:
 
@@ -362,32 +560,6 @@ The proposed instance record contains:
 
 Both commands are read-only. Durable execution and trace attribution are queried
 through Scheduler and Tracking. They do not infer a dead process from silence.
-
-### `instance healthcheck <runtime-identity>`
-
-```text
-kanthord worker instance healthcheck <runtime-identity>
-```
-
-Required `runtime-identity: RuntimeIdentity`, no default; maps to
-`params.runtimeIdentity`. Required token: human JWT. Empty query, absent body.
-This proposed read evaluates the current Worker instance healthcheck and returns
-HTTP `200` with `runtimeIdentity`, `passed: boolean`,
-`checkedAt: integer` (Unix milliseconds in UTC), and `checks`, an array of
-`{ name: "configuration" | "registration", passed: boolean, reason?: string }`.
-The optional reason is a non-secret diagnostic code. No absent check is treated
-as successful; inapplicable checks are omitted. Unknown instances return `404`.
-
-The target checks depend on host/placement:
-
-- `server`: the native agent's effective configuration resolves.
-- `worker`: that configuration resolves and registration is live.
-- External harness: registration is live; kanthord does not validate the
-  harness's provider configuration.
-
-The result grants no claim or resource access and proves neither idleness nor
-physical liveness. It is not a provider network probe. The Scheduler repeats the healthcheck immediately before the claim commits, under [Claims and counts](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#claims-and-counts).
-The provider account check is a [resource healthcheck](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.md#resource-healthcheck) of the Project Service, run by the health report and separate from this instance healthcheck; a failed provider account check changes no instance healthcheck.
 
 ### `instance deregister <runtime-identity>`
 
@@ -478,25 +650,37 @@ declarations at concrete paths:
 
 | Tool / concrete path suffix after `/api/worker/mcp/tool/` | Operation ID                                                                                       | Mutation | Access                                                                              |
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------- |
-| `github-pull-request-get/call`                            | `worker.mcp.githubPullRequestGet` **[blocked][worker-contract]** (platform outputs)                | `false`  | `client`, own live external-harness execution                                       |
-| `github-pull-request-review-comment-list/call`            | `worker.mcp.githubPullRequestReviewCommentList` **[blocked][worker-contract]** (platform outputs)  | `false`  | `client`, own live external-harness execution                                       |
+| `github-pull-request-get/call`                            | `worker.mcp.githubPullRequestGet`                                                                  | `false`  | `client`, own live external-harness execution                                       |
+| `github-pull-request-review-comment-list/call`            | `worker.mcp.githubPullRequestReviewCommentList`                                                    | `false`  | `client`, own live external-harness execution                                       |
 | `repository-action-request/call`                          | `worker.mcp.repositoryActionRequest` **[blocked][worker-contract]** (action-result record schemas) | `true`   | `client`, own live external-harness evaluation claim and current passing assessment |
 
 All three use `POST` with the strict JSON body above. There is no fourth generic
 invocation operation. The one CLI command dispatches to the selected declaration.
 
-| Tool                                      | `arguments` fields and validation                                                                                                                                                                                      | Result / effect                                                                                                                                                                                      |
-| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `github-pull-request-get`                 | Required `pullRequestNumber: integer`, positive safe integer, no default; no other fields                                                                                                                              | Read the pull request through the permitted GitHub implementation. Derive the repository from the claim's pinned node repository binding; Project authorizes that resource operation before custody. |
-| `github-pull-request-review-comment-list` | Required `pullRequestNumber: integer`, positive safe integer, no default; optional `limit: integer`, default `100`, range `1..1000`; optional `cursor: string`, nonempty opaque server cursor, absent means first page | One page of review comments through the same authorized binding. The CLI's file fields carry pagination here because it is a tool invocation, not a CLI list command.                                |
-| `repository-action-request`               | Empty object `{}`; no action name, branch, address, commit, repository selector or policy override                                                                                                                     | Pass only the execution identity to the action performer. It derives every operand from the attempt records and evidence snapshot, and requests eligible configured actions.                         |
+| Tool                                      | `arguments` fields and validation                                                                                                                                                                                                                                                  | Result / effect                                                                                                                                                                                      |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `github-pull-request-get`                 | Required `pullRequestNumber: integer`, positive safe integer, no default; no other fields                                                                                                                                                                                          | Read the pull request through the permitted GitHub implementation. Derive the repository from the claim's pinned node repository binding; Project authorizes that resource operation before custody. |
+| `github-pull-request-review-comment-list` | Required `pullRequestNumber: integer`, positive safe integer, no default; optional `limit: integer`, default `100`, range `1..100`; a cursor binds the page size, and a differing `limit` fails; optional `cursor: string`, nonempty opaque server cursor, absent means first page | One page of review comments through the same authorized binding. The CLI's file fields carry pagination here because it is a tool invocation, not a CLI list command.                                |
+| `repository-action-request`               | Empty object `{}`; no action name, branch, address, commit, repository selector or policy override                                                                                                                                                                                 | Pass only the execution identity to the action performer. It derives every operand from the attempt records and evidence snapshot, and requests eligible configured actions.                         |
 
 Proposed read-tool success returns HTTP `200` and
 `{ "toolName": "...", "result": ... }`. Pull-request results use the GitHub
 method's published result schema; comment results use `items` and `nextCursor`
-with the method's published comment schema. These method schemas must be pinned
-and included in tool discovery before the tools ship; this document defines no
-invented common platform result schema.
+with the method's published comment schema. The
+[platform implementation contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#platform-connector-and-platform-implementations)
+pins the versions, endpoints and schema source; this document defines no invented
+common platform result schema.
+
+The GitHub implementation uses `octokit` at 5.0.5 and `X-GitHub-Api-Version: 2022-11-28`.
+Pull request read calls `GET /repos/{owner}/{repo}/pulls/{pull_number}`; review
+comment list calls `GET /repos/{owner}/{repo}/pulls/{pull_number}/comments`.
+Both endpoint bodies stay unchanged. Discovery embeds their dereferenced response
+schemas from `@octokit/openapi` at 23.0.2 under `result`, extracted at build time.
+The comment `limit` maps to `per_page`. Its cursor is base64url canonical JSON
+`{ page, perPage }`. A differing `limit` answers HTTP 400
+`worker.platform.github.cursor_page_size_mismatch`. `nextCursor` is `null` without
+a `rel="next"` link. A result class answers `worker.platform.github.<class>`
+with the HTTP status and GitHub message.
 
 Proposed action success returns HTTP `200` with `toolName` and `items`. The
 proposed item discriminant is `kind`, with exactly four values:

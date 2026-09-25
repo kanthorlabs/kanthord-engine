@@ -9,14 +9,15 @@ not the public reference for the commands currently available.
 
 ## Command documents
 
-Each service owns one document. [Common flags](common-flags.md) defines shared
+Each service or shared component owns one group document. [Common flags](common-flags.md) defines shared
 flag names, syntax, defaults, validation, and synopsis markers. Link directly
 to its flag-name headings instead of repeating those definitions. Shared
-non-flag conventions and commands outside service groups live in `other.md`.
+non-flag conventions and commands outside these groups live in `other.md`.
 
 | Command group                  | Owning document                                   | Scope                                                                                                   |
 | ------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `project`                      | [Project Service](project.md)                     | Projects, permitted resources, bindings, policy, and credential custody.                                |
+| `project`                      | [Project Service](project.md)                     | Projects, permitted resources, bindings, policy, and worker binding entries.                            |
+| `credential`                   | [Custody](credential.md)                          | Server-wide credential records, metadata revisions and OAuth login sessions.                            |
 | `mission`                      | [Mission Service](mission.md)                     | Mission graph, criterion, evidence, assessments, outcomes, and human controls.                          |
 | `scheduler`                    | [Scheduler Service](scheduler.md)                 | Work pull, executions, claims, leases, and scheduling inspection.                                       |
 | `intake`                       | [Intake Service](intake.md)                       | Subscriptions, deliveries, and acquisition through a webhook, a poll or a stream.                       |
@@ -25,9 +26,13 @@ non-flag conventions and commands outside service groups live in `other.md`.
 | `gateway`                      | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
 | `config`, `serve`, `jwt`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules. |
 
+The Project inventory has 13 proposed leaves. The Credential inventory has 8
+proposed leaves. The Worker inventory has 20 leaves: 1 implemented and 19 proposed.
+These three groups contain 41 leaves in total.
+
 Start with [common flags](common-flags.md) and
-[shared conventions](other.md), then read the owning service page.
-Each service page inventories its commands, links to the common flags it uses,
+[shared conventions](other.md), then read the owning group page.
+Each group page inventories its commands, links to the common flags it uses,
 and defines command-specific arguments, requirements, and exceptions. An
 optional argument has no implicit value unless its definition gives a default.
 
@@ -49,7 +54,7 @@ Inspected 2026-09-24: the source currently supplies `config init|validate|show`,
 and `tracking` groups currently provide help only. The `intake` group is not registered in the dispatcher, even for help. `serve worker` is implemented; it checks the server version and waits for cancellation, but does not register, pull, or execute work. Registration also depends on server-side collaborators; a CLI
 parser and an operation declaration alone do not establish a working journey.
 
-New remote commands must be backed by an operation in their owning service's
+New remote commands must be backed by an operation in their owning component's
 `contract.ts`, exposed through Gateway and included in the generated OpenAPI
 contract before implementation is considered complete. The proposed route
 tables in these documents are not evidence that those endpoints exist today.
@@ -59,11 +64,12 @@ and [Worker contract](../../src/worker/contract.ts); dispatch is in the
 
 ## Ownership rules
 
-- Keep the three global command names and seven service groups listed above.
+- Keep the three global command names, seven service groups and one shared
+  component group listed above, as the [command surface](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-command-surface) declares.
   Application names are operands of `serve`, not additional top-level commands.
-- A remote command calls the operation of the service that owns its effect.
-  Gateway authenticates and routes the request; it does not acquire that
-  service's authority.
+- A remote command calls the operation of the service or shared component that
+  owns its effect. Gateway authenticates and routes the request; it does not
+  acquire that owner's authority.
 - Cross-service workflows compose commands. They do not imply an atomic
   transaction across operations.
 - Internal collaborations, background loops, and provider webhook deliveries
@@ -74,8 +80,8 @@ and [Worker contract](../../src/worker/contract.ts); dispatch is in the
 - Preserve the human/machine distinction. A flag carrying an identity is not
   authentication, and a client cannot grant itself authority by naming a
   project, runtime instance, execution, or claim.
-- A later service command belongs in its service's existing file. A later
-  non-service command belongs in `other.md` and requires a deliberate change
+- A later service or shared component command belongs in its owner's group
+  file. A global command belongs in `other.md` and requires a deliberate change
   to the closed top-level command set when applicable.
 
 ## Maintaining the specification
