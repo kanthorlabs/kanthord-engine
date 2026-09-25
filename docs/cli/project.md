@@ -694,7 +694,7 @@ effective native-agent configuration for that binding. These views neither
 mint an authorization grant nor authorize inference. They make no remote
 healthcheck, reserve no capacity, and do not validate a live execution claim.
 
-Provider healthcheck remains **blocked** under [HANDOFF Cannot progress](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#cannot-progress); this page specifies no healthcheck command.
+The provider account check is the [resource healthcheck](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-resource-healthcheck) that the Gateway health report runs; this page specifies no healthcheck command.
 
 ## Source verification secret
 

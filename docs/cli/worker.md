@@ -388,7 +388,7 @@ The target checks depend on host/placement:
 
 The result grants no claim or resource access and proves neither idleness nor
 physical liveness. It is not a provider network probe. The Scheduler repeats the healthcheck immediately before the claim commits, under [Claims and counts](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#claims-and-counts).
-Provider-account checks remain **blocked** under [HANDOFF Cannot progress](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#cannot-progress).
+The provider account check is a [resource healthcheck](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.md#resource-healthcheck) of the Project Service, run by the health report and separate from this instance healthcheck; a failed provider account check changes no instance healthcheck.
 
 ### `instance deregister <runtime-identity>`
 

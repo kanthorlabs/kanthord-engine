@@ -383,12 +383,15 @@ services and derives no measurement. Drop/discard counters are telemetry and
 can themselves be absent. There is no declared counter-query schema or dedicated
 Tracking statistics/status operation.
 
-Server component health belongs to the existing `gateway.healthcheck` operation,
-`GET /api/healthcheck`, access `public`, declared in the
+Server component health belongs to the ruled [`gateway.liveness` operation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#component-healthchecks),
+`GET /api/liveness`, access `public`; the current source still serves this
+contract as `gateway.healthcheck` at `GET /api/healthcheck`, declared in the
 [Gateway contract](../../src/gateway/contract.ts). It reports registered
-components, not fictitious health for an absent Tracking service. See
-[shared operational commands](./other.md) for the CLI-wide conventions. The
-operational log is separate from telemetry; this group provides no log-tail API.
+components, not fictitious health for an absent Tracking service. Tracking is
+an internal component, not an external resource, so it has no resource
+healthcheck. See [shared operational commands](./other.md) for the CLI-wide
+conventions. The operational log is separate from telemetry; this group
+provides no log-tail API.
 
 Retention is server-wide and separately configured for spans and text. The
 working tracer's future `tracking.db` is separate from operational state, with
