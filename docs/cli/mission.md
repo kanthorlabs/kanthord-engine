@@ -315,19 +315,19 @@ authorship/approval. Attribution records the submitting human only.
 
 ### Human controls and history — 11 commands
 
-| #   | Synopsis after `kanthord mission`                   | Proposed HTTP route                                | Proposed operation                                             | Access |
-| --- | --------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------- | ------ |
-| 21  | `node priority set <node-id> --file <path> [M]`     | `POST /api/mission/node/:nodeId/priority`          | `mission.node.priority.set` **[blocked][mission-contract]**    | H      |
-| 22  | `node priority list <node-id> [L]`                  | `GET /api/mission/node/:nodeId/priority`           | `mission.node.priority.list` **[blocked][mission-contract]**   | H      |
-| 23  | `node pause <node-id> --file <path> [M]`            | `POST /api/mission/node/:nodeId/pause`             | `mission.node.pause` **[blocked][mission-recovery]**           | H      |
-| 24  | `node resume <node-id> --file <path> [M]`           | `POST /api/mission/node/:nodeId/resume`            | `mission.node.resume` **[blocked][mission-contract]**          | H      |
-| 25  | `node block <node-id> --file <path> [M]`            | `POST /api/mission/node/:nodeId/block`             | `mission.node.block` **[blocked][mission-contract]**           | H      |
-| 26  | `node unblock <node-id> --file <path> [M]`          | `POST /api/mission/node/:nodeId/unblock`           | `mission.node.unblock` **[blocked][mission-contract]**         | H      |
-| 27  | `node mark-ready <node-id> --file <path> [M]`       | `POST /api/mission/node/:nodeId/mark-ready`        | `mission.node.markReady` **[blocked][mission-contract]**       | H      |
-| 28  | `node override-success <node-id> --file <path> [M]` | `POST /api/mission/node/:nodeId/override-success`  | `mission.node.overrideSuccess` **[blocked][mission-contract]** | H      |
-| 29  | `node discard <node-id> --file <path> [M]`          | `POST /api/mission/node/:nodeId/discard`           | `mission.node.discard` **[blocked][mission-contract]**         | H      |
-| 30  | `unblock list <node-id> [L]`                        | `GET /api/mission/node/:nodeId/unblock`            | `mission.unblock.list` **[blocked][mission-contract]**         | H      |
-| 31  | `unblock get <node-id> <request-id>`                | `GET /api/mission/node/:nodeId/unblock/:requestId` | `mission.unblock.get` **[blocked][mission-contract]**          | H      |
+| #   | Synopsis after `kanthord mission`                             | Proposed HTTP route                                | Proposed operation                                           | Access |
+| --- | ------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------ | ------ |
+| 21  | `node priority set <node-id> --file <path> [M]`               | `POST /api/mission/node/:nodeId/priority`          | `mission.node.priority.set` **[blocked][mission-contract]**  | H      |
+| 22  | `node priority list <node-id> [L]`                            | `GET /api/mission/node/:nodeId/priority`           | `mission.node.priority.list` **[blocked][mission-contract]** | H      |
+| 23  | `node pause <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/pause`             | `mission.node.pause` **[blocked][mission-recovery]**         | H      |
+| 24  | `node resume <node-id> --file <path> [M]`                     | `POST /api/mission/node/:nodeId/resume`            | `mission.node.resume` **[blocked][mission-contract]**        | H      |
+| 25  | `node block <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/block`             | `mission.node.block` **[blocked][mission-contract]**         | H      |
+| 26  | `node unblock <node-id> --file <path> [M]`                    | `POST /api/mission/node/:nodeId/unblock`           | `mission.node.unblock` **[blocked][mission-contract]**       | H      |
+| 27  | `node ready <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/ready`             | `mission.node.ready` **[blocked][mission-contract]**         | H      |
+| 28  | `node override <node-id> --result <result> --file <path> [M]` | `POST /api/mission/node/:nodeId/override`          | `mission.node.override` **[blocked][mission-contract]**      | H      |
+| 29  | `node discard <node-id> --file <path> [M]`                    | `POST /api/mission/node/:nodeId/discard`           | `mission.node.discard` **[blocked][mission-contract]**       | H      |
+| 30  | `unblock list <node-id> [L]`                                  | `GET /api/mission/node/:nodeId/unblock`            | `mission.unblock.list` **[blocked][mission-contract]**       | H      |
+| 31  | `unblock get <node-id> <request-id>`                          | `GET /api/mission/node/:nodeId/unblock/:requestId` | `mission.unblock.get` **[blocked][mission-contract]**        | H      |
 
 `<node-id>` is required; state-changing controls accept initiatives/objectives
 only. `<request-id>` is the accepted unblock's required `RequestId`.
@@ -366,20 +366,21 @@ only. `<request-id>` is the accepted unblock's required `RequestId`.
   The Mission Service keeps every accepted unblock request for that lifetime.
   A repeat with the same request identifier and payload digest returns the stored result.
   Another digest answers 409 `mission.request.payload_mismatch`.
-- Mark-ready accepts `HumanAct`, returns `ControlResult`, and means only the
+- Ready accepts `HumanAct`, returns `ControlResult`, and means only the
   human assertion that this execution needs no further work. It requires
   `Available` and readiness: every task has a current outcome of the objective's
   open attempt, or every objective of an initiative is terminal, and no action
   is unresolved. Child success is not required. It opens attempt 1 only when
   none exists, freezes its facts and reaches `Waiting`; it does not publish an
   assessment. The counter-zero case remains **blocked** under [HANDOFF Mission Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#mission-service).
-- Override-success accepts `SuccessOverride`, returns `ControlResult`, and
-  creates an outcome with human-assertion basis and `success`, referencing any
+- Override accepts `Override`, returns `ControlResult`, and
+  creates an outcome with human-assertion basis and the requested `result`, referencing any
   previous outcome it replaces. Eligible states in the current design are
   `Pending`, `Available`, `Executing`, `Waiting`, `Blocked`, `Paused`,
   `External.Success`, `External.Failed`. It is not defined from `Evaluating` or
   `External.Requested`, and cannot reach a terminal node. Any supplied landed
   commit becomes evidence attributed to the human without repository checking.
+  `--result` is required, and its closed set is `success`. The CLI sets `result` from `--result`, and it refuses a `--file` that holds a `result` member before a request, under [`--file`](common-flags.md#--file).
 - Discard accepts `HumanAct`, returns `ControlResult`, and creates a
   human-assertion outcome with `undetermined`, closing an attempt when one is open and writing the task outcomes that the outcome and completion rules of the design require; from `Blocked`, no attempt closes. Eligible states are `Pending`, `Available`,
   `Executing`, `Waiting`, `Evaluating`, `Blocked`, `Paused`, `External.Success`,
@@ -627,8 +628,8 @@ Grammar, whole-mission import, create admission and request retention have no op
 - `mission.node.resume` keeps its mark for human-control race precedence and `ControlResult` sub-schemas.
 - `mission.node.block` keeps its mark for no-attempt outcomes, task-outcome schemas and human-control race precedence.
 - `mission.node.unblock` keeps its mark for human-control race precedence, `Actor` and content-change schemas, not request retention.
-- `mission.node.markReady` keeps its mark for counter-zero readiness and outcome schemas.
-- `mission.node.overrideSuccess` keeps its mark for repository evidence formats, no-attempt outcomes and human-control race precedence.
+- `mission.node.ready` keeps its mark for counter-zero readiness and outcome schemas.
+- `mission.node.override` keeps its mark for repository evidence formats, no-attempt outcomes and human-control race precedence.
 - `mission.node.discard` keeps its mark for no-attempt outcomes, task-outcome schemas and human-control race precedence.
 - `mission.unblock.list` and `mission.unblock.get` keep their marks for `Actor`, not request retention.
 - `mission.execution.unblock.get` keeps its mark for execution identity and `Actor`, not request retention.
@@ -715,14 +716,14 @@ The [mission change contract](https://github.com/kanthorlabs/kanthord/blob/main/
 
 ### Human actions
 
-| Schema            | Fields, requiredness and validation                                                                                                                                                                                                                                                                                                                                       |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `HumanAct`        | Required `reason: Text`, `expectedState: State`, `expectedAttempt: positive integer \| null`. Null explicitly asserts no attempt ever opened; a positive value identifies the current/latest node attempt, including the closed attempt on a blocked node. The specific command's state rules apply; no default current target.                                           |
-| `PrioritySet`     | Required `value: signed safe integer`, `reason: Text`. No expected content revision: priority lives outside it. Any signed safe integer is valid, with no narrower bound. Only initiatives and objectives accept priority. A task write answers `mission.node.priority_task`. The service requires a nonterminal node with no live claim at commit.                       |
-| `SuccessOverride` | Every field of `HumanAct`, plus optional `landedCommit: RepositoryAddress`. Absence asserts success without landed-commit evidence; it does not infer a commit. A supplied commit is permitted only for the objective's repository binding. Existing evidence remains; the actor/time/basis/result are server-authored.                                                   |
-| `Unblock`         | Required `blockedAttempt: nonnegative integer`, `expectedRevision: positive integer`. Zero means the counter-zero blocked case. Optional `change: UnblockChange`; omission preserves current content. CLI supplies the durable `requestId` derived from `[M]`, not the JSON file. No independent direction/recommendation field.                                          |
-| `UnblockChange`   | Required `content: Content` with all five fields, `tasks: TaskContent[]` for objectives (forbidden for initiatives), `reason: Text`. This proposed complete revision replacement can change existing task content; the task-ID set must match current containment. Structural graph edits use their own operations. Change does not bypass human edit or terminal checks. |
-| `TaskContent`     | Required `id: NodeId` of a current child task, `file: PlanFileName` and `content: Content` valid for a task. Unique task IDs, all current tasks represented in an objective's `UnblockChange`. Task content holds all five fields, with an empty `bindings` list. No task revision exists.                                                                                |
+| Schema          | Fields, requiredness and validation                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HumanAct`      | Required `reason: Text`, `expectedState: State`, `expectedAttempt: positive integer \| null`. Null explicitly asserts no attempt ever opened; a positive value identifies the current/latest node attempt, including the closed attempt on a blocked node. The specific command's state rules apply; no default current target.                                                                                                                    |
+| `PrioritySet`   | Required `value: signed safe integer`, `reason: Text`. No expected content revision: priority lives outside it. Any signed safe integer is valid, with no narrower bound. Only initiatives and objectives accept priority. A task write answers `mission.node.priority_task`. The service requires a nonterminal node with no live claim at commit.                                                                                                |
+| `Override`      | Every field of `HumanAct`, plus required `result` with the closed set `success`, and optional `landedCommit: RepositoryAddress`, admitted only with `result: success`. Absence of `landedCommit` asserts success without landed-commit evidence; it does not infer a commit. A supplied commit is permitted only for the objective's repository binding. Existing evidence remains; the actor, time, basis and outcome record are server-authored. |
+| `Unblock`       | Required `blockedAttempt: nonnegative integer`, `expectedRevision: positive integer`. Zero means the counter-zero blocked case. Optional `change: UnblockChange`; omission preserves current content. CLI supplies the durable `requestId` derived from `[M]`, not the JSON file. No independent direction/recommendation field.                                                                                                                   |
+| `UnblockChange` | Required `content: Content` with all five fields, `tasks: TaskContent[]` for objectives (forbidden for initiatives), `reason: Text`. This proposed complete revision replacement can change existing task content; the task-ID set must match current containment. Structural graph edits use their own operations. Change does not bypass human edit or terminal checks.                                                                          |
+| `TaskContent`   | Required `id: NodeId` of a current child task, `file: PlanFileName` and `content: Content` valid for a task. Unique task IDs, all current tasks represented in an objective's `UnblockChange`. Task content holds all five fields, with an empty `bindings` list. No task revision exists.                                                                                                                                                         |
 
 Preconditions in `HumanAct` are proposed concurrency protection, not permission
 to invent transitions missing from the design. The counter-zero outcome format remains **[blocked][mission-contract]**.
