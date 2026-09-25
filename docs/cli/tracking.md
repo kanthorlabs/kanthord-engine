@@ -111,14 +111,14 @@ requiring a value cannot be supplied as a bare switch. Unless a row states
 otherwise, an omitted optional value stays absent rather than being sent as
 `null`.
 
-| Argument or flag             | Requiredness and type                               | Default                        | Validation and request mapping                                                                                                                                    |
-| ---------------------------- | --------------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<trace-id>`                 | Required `TraceID` positional argument              | None                           | Map to `params.traceId`; exact entity-kind validation awaits Tracking's prefix declaration. No trace-name lookup or bare ULID.                                    |
-| `<span-id>`                  | Required `SpanID` positional argument on `span get` | None                           | Map to `params.spanId`; the span belongs to the named trace. Prefix declaration remains **[blocked][tracking-contract]**.                                         |
-| `<text-id>`                  | Required `TextID` positional argument on `text get` | None                           | Map to `params.textId`; the text belongs to the named trace. Prefix declaration remains **[blocked][tracking-contract]**.                                         |
-| `--project <project-id>`     | Optional `ProjectID` on `trace list`                | Absent: no project filter      | Send `query.projectId`. Incompatible with `--projectless`; a filter grants no authority.                                                                          |
-| `--projectless`              | Optional boolean switch on `trace list`             | `false`: no projectless filter | When present, send `query.projectless=true`. Select only traces belonging to no project; incompatible with `--project`.                                           |
-| `--execution <execution-id>` | Optional `ExecutionID` on `trace list`              | Absent: no execution filter    | Send `query.executionId`. Combine supplied filters by AND. Correlation grants no authority; execution prefix validation remains **[blocked][tracking-contract]**. |
+| Argument or flag             | Requiredness and type                               | Default                        | Validation and request mapping                                                                                                                                                                                                                                                                           |
+| ---------------------------- | --------------------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<trace-id>`                 | Required `TraceID` positional argument              | None                           | Map to `params.traceId`; exact entity-kind validation awaits Tracking's prefix declaration. No trace-name lookup or bare ULID.                                                                                                                                                                           |
+| `<span-id>`                  | Required `SpanID` positional argument on `span get` | None                           | Map to `params.spanId`; the span belongs to the named trace. Prefix declaration remains **[blocked][tracking-contract]**.                                                                                                                                                                                |
+| `<text-id>`                  | Required `TextID` positional argument on `text get` | None                           | Map to `params.textId`; the text belongs to the named trace. Prefix declaration remains **[blocked][tracking-contract]**.                                                                                                                                                                                |
+| `--project <project-id>`     | Optional `ProjectID` on `trace list`                | Absent: no project filter      | Send `query.projectId`. Incompatible with `--projectless`; a filter grants no authority.                                                                                                                                                                                                                 |
+| `--projectless`              | Optional boolean switch on `trace list`             | `false`: no projectless filter | When present, send `query.projectless=true`. Select only traces belonging to no project; incompatible with `--project`.                                                                                                                                                                                  |
+| `--execution <execution-id>` | Optional `ExecutionID` on `trace list`              | Absent: no execution filter    | Send `query.executionId`. Combine supplied filters by AND. Correlation grants no authority. `ExecutionID` uses `execution_<ulid>` under the [Scheduler identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-identities-of-the-scheduler-service). |
 
 The [shared client-file rules](./other.md#cliyaml-and-its-effects) apply.
 These commands neither open server databases nor update client/server
@@ -131,9 +131,10 @@ configuration.
   [shared identity scalar](../../src/kernel/identity.ts) validates the exact
   entity prefix as well as the suffix. Bare ULIDs and a different kind's prefix
   are invalid entity IDs.
-- `ProjectID` uses the declared `project_` prefix. `TraceID`, `SpanID`, `TextID`,
-  `ExecutionID`, and producer-minted `RecordID` are symbolic types here, not new
-  prefix declarations. Their identity contracts remain **[blocked][tracking-contract]**.
+- `ProjectID` uses the declared `project_` prefix. `ExecutionID` uses
+  `execution_<ulid>` under the [Scheduler identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-identities-of-the-scheduler-service).
+  `TraceID`, `SpanID`, `TextID`, and producer-minted `RecordID` are symbolic types
+  here, not new prefix declarations. Their identity contracts remain **[blocked][tracking-contract]**.
 - OpenTelemetry reuse does not by itself declare W3C hexadecimal trace/span
   IDs as the entity IDs accepted here. Protocol mapping remains **[blocked][tracking-contract]**.
 - `Timestamp` composes the

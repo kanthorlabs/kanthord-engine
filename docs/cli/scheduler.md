@@ -50,6 +50,8 @@ Only the applicability and Scheduler-specific requirements are listed here.
 | [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Paginated `list` commands only.                                                                                             |
 | [`--file`](./common-flags.md#--file)                                             | Required on `work pull` and `execution release`; their sections define the JSON fields.                                     |
 
+Every route follows the [Scheduler operation contracts](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#operation-contracts): 30 s by default, 120 s with a 90 s wait window on `work pull`, 10 MiB on a body.
+
 These commands accept no `--config`. They open no engine database and do not
 read server configuration. Options, positional arguments and JSON fields not
 declared here are rejected before sending the request. Optional JSON fields
@@ -57,6 +59,7 @@ are omitted when absent unless their table supplies a default; `null` is
 invalid unless explicitly allowed. Arrays are ordered JSON arrays, not
 comma-separated strings. All request objects are closed, including nested
 objects. JSON schemas and their eventual size bounds belong in `contract.ts`.
+The [Scheduler operation contracts](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#operation-contracts) declare the shapes below.
 
 ### Identifiers, timestamps and revisions
 
@@ -65,9 +68,10 @@ objects. JSON schemas and their eventual size bounds belong in `contract.ts`.
   client identity uses the declared `client_identity_<ulid>` convention.
   The ULID suffix is canonical uppercase and 26 characters long. Use the
   [shared identity scalar](../../src/kernel/identity.ts), not a bare ULID.
-- `<execution-id>`, `<obligation-id>`, node IDs, external
-  object IDs and binding IDs are required nonblank opaque strings wherever
-  used below. Copy them from their owner's response. Their prefix contracts remain **[blocked][scheduler-contract]**.
+- `<execution-id>` uses `execution_<ulid>` and `<obligation-id>` uses
+  `observation_obligation_<ulid>` under the [Scheduler identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-identities-of-the-scheduler-service).
+  Node IDs, external object IDs and binding IDs use the prefixes of their owners;
+  copy them from the owner's response.
   Binding IDs use `binding_<ulid>` under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
 - `runtimeIdentity` is the opaque string returned by Worker registration.
   Current [Worker code](../../src/worker/registrations.ts) generates
@@ -96,7 +100,13 @@ token does not become a worker by supplying a runtime or execution ID.
 Gateway resolves its project and worker binding, and Worker vouches for the
 runtime association. A caller-supplied identifier must match that association.
 Claim inspection, renewal and release additionally require that the execution
-belongs to that client identity and runtime. They transfer no execution to
+belongs to that client identity and runtime.
+Renewal and release declare the live-execution requirement, so the invocation
+chain proves it before the handler; `claim get` declares none and its handler
+checks ownership, or answers 403 `scheduler.execution.not_owner`. No handler
+repeats the proof. A holder whose release answer was lost reads `claim get`
+after a refused retry.
+They transfer no execution to
 another registration. Current access-policy names are defined in the
 [operation contract](../../src/kernel/operation.ts).
 
@@ -119,12 +129,14 @@ both fields are required; `items` contains at most `limit` records and
 reads one page; there is no implicit unbounded traversal or polling loop.
 The shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination) applies; pagination reserves no work.
 
-Mutation requests carry the key in `Idempotency-Key`. As a **proposed durable
-request mapping**, the CLI also sends body `requestId` equal to `request_`
-followed by that key. It generates this field; it is not an editable JSON-file
-field. This preserves one domain request identity when an explicit key is
-reused by another CLI process. It is separate from Gateway's per-transport
-`X-Request-Id`. The durable-request mapping remains **[blocked][scheduler-contract]**.
+Mutation requests carry the key in `Idempotency-Key`. On `work pull` and
+`execution renew-lease` the CLI also sends body `requestId` equal to `request_`
+followed by that key, under the [durable requests](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#durable-requests) of the Scheduler.
+`execution release` carries no request identifier; it is idempotent by the
+execution identity. The CLI generates `requestId`; it is not an editable
+JSON-file field. This preserves one domain request identity when an explicit
+key is reused by another CLI process. It is separate from Gateway's
+per-transport `X-Request-Id`.
 
 The Scheduler must bind a request identity to its validated payload and caller
 scope. Reusing it with different input is a conflict. An accepted work pull
@@ -190,6 +202,7 @@ no other query fields or JSON body. The list returns a page of `QueueEntry`
 records in descending entry-identity order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
 This inspection order does not change queue selection. Held-out entries remain
 visible so a human can understand a wait. Reading changes no entry.
+The list is a live view of current entries and holds no history.
 
 ### `queue peek`
 
@@ -210,7 +223,7 @@ Every field below is required in a result; none has a client default.
 
 | Field                 | Type and validation / meaning                                                                             |
 | --------------------- | --------------------------------------------------------------------------------------------------------- |
-| `entryId`             | Opaque time-ordered entry identity; its prefix remains **[blocked][scheduler-contract]**.                 |
+| `entryId`             | `work_queue_entry_<ulid>`; the ULID carries the creation time of the entry.                               |
 | `projectId`, `nodeId` | Project and Mission node references. Only an initiative or objective can be queued; never a task.         |
 | `claimKind`           | Enum `steps` or `evaluation`, admitted by Mission state.                                                  |
 | `priority`            | Safe integer copied from the Mission-owned priority. An absent node priority is Mission's default `0`.    |
@@ -313,6 +326,8 @@ shared pagination query is accepted; no body. Returns a page of
 `ExecutionRecord` values, including live and ended executions. The list orders
 by `executionId` descending under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
 This inspection order establishes no causal order. It changes no claim or count.
+The list holds every execution of the project for the life of the project,
+under the [Scheduler retention](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#retention).
 
 ### `execution get`
 
@@ -337,7 +352,7 @@ fields are server-owned; the caller supplies none when acquiring work.
 | `claimKind`                          | Enum `steps` or `evaluation`, fixed for the entire lifetime of the claim.                                                                                                                                                                                                                                                 |
 | `attempt`                            | Positive safe integer counter of the node's attempt.                                                                                                                                                                                                                                                                      |
 | `pinnedRevision`                     | Positive safe JSON integer revision counter; proposed scalar pending adoption with Mission.                                                                                                                                                                                                                               |
-| `claimState`                         | Proposed inspection enum `live`, `released`, `revoked` or `lost`. These are claim lifecycle labels, not new Mission node states. `lost` records the accepted loss declaration.                                                                                                                                            |
+| `claimState`                         | Proposed inspection enum `live`, `released`, `revoked` or `lost`. These are claim lifecycle labels, not new Mission node states. `lost` records the accepted loss declaration. The closed set remains **[blocked][scheduler-contract]** under the request and response schemas (claim state) question.                    |
 | `lease`                              | Object with required `expiresAt` timestamp, `renewedAt` timestamp or `null`, and `lossDeclaredAt` timestamp or `null`. Scheduler alone determines expiry.                                                                                                                                                                 |
 | `createdAt`                          | Claim acceptance timestamp.                                                                                                                                                                                                                                                                                               |
 | `endedAt`                            | End timestamp or `null` while live.                                                                                                                                                                                                                                                                                       |
@@ -369,7 +384,8 @@ HTTP `200` with `{ "executionId": string, "lease": Lease }`, both fields
 required and `Lease` shaped as the `ExecutionRecord.lease` object. Scheduler
 chooses the renewed expiry under its eventual lease policy. Replay of the
 same request returns the same accepted renewal rather than extending it
-again; a later renewal uses a new key. A replayed acknowledgement of an old
+again; a later renewal uses a new key. A key that a later renewal superseded
+answers 409 `scheduler.execution.renewal_superseded`. A replayed acknowledgement of an old
 renewal does not prove present liveness.
 
 Renewal serializes with loss declaration, release, revocation and completion.
@@ -386,8 +402,7 @@ kanthord scheduler execution release <execution-id> --file <path> [--idempotency
 ```
 
 Required opaque `<execution-id>` maps to path `executionId`, with no default.
-No query fields are accepted. The required file supplies the following fields;
-the CLI adds `requestId` using the shared mapping.
+No query fields are accepted. The required file supplies the following fields.
 
 | JSON file field | Requiredness / type         | Default and validation                                                                                                                                                                                                         |
 | --------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -396,10 +411,10 @@ the CLI adds `requestId` using the shared mapping.
 
 `WaitFact` is exactly one of these proposed closed objects:
 
-| Form                      | Required fields and validation                                                                                                                                                                                                                                                                                                    |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Child-set terminal fact   | `type: "children-terminal"`; `childNodeIds: string[]`, nonempty and unique. Each ID names a member of the Mission-owned child set relevant to the continuation. The server verifies the whole required set, so omitting a required child cannot satisfy a wait early. Terminal-state meaning comes from Mission.                  |
-| External observation fact | `type: "external-observation"`; `externalObjectId: string`. It names the external object whose accepted observation is required for this continuation. The server derives the required end state from the recorded action/prerequisite. The caller supplies neither an arbitrary platform address nor an invented observed state. |
+| Form                      | Required fields and validation                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Child-set terminal fact   | `type: "children-terminal"`; `childNodeIds: string[]`, nonempty and unique. Each ID names a member of the Mission-owned child set relevant to the continuation. The server verifies the whole required set, so omitting a required child cannot satisfy a wait early. Terminal-state meaning comes from Mission. The form remains **[blocked][scheduler-contract]** under the request and response schemas (child-set wait fact) question.                         |
+| External observation fact | `type: "external-observation"`; `externalObjectId: string`. It names the external object whose accepted observation is required for this continuation. The server derives the required end state from the recorded action/prerequisite. The caller supplies neither an arbitrary platform address nor an invented observed state. An accepted observation that already establishes the end state satisfies the wait at once; the release is accepted, not refused. |
 
 The child-set representation must remain tied to Mission's graph: a graph
 change rechecks the wait rather than treating this submitted list as permanent
@@ -433,9 +448,12 @@ not sufficient correlation.
 
 Proposed success is HTTP `200` with required fields
 `{ "executionId": string, "releasedAt": timestamp }`; the CLI adds its key.
-A duplicate returns the accepted release without ending a second execution,
-double-decrementing a count or creating a second entry. This receipt is not
-an outcome record or an assertion that the node is immediately claimable.
+At the handler, a duplicate returns the accepted release without ending a second
+execution, double-decrementing a count or creating a second entry. A duplicate
+with another payload answers 409 `scheduler.execution.release_conflict`.
+The invocation chain refuses a retry after the claim ends before the handler;
+the holder reads `claim get` for the accepted end. This receipt is not an outcome
+record or an assertion that the node is immediately claimable.
 
 There is no `failure`, `cannotProgress`, `retryBudget`, `force` or arbitrary
 target-state field. Failure dispositions remain **blocked** under [HANDOFF Cannot progress](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#cannot-progress).

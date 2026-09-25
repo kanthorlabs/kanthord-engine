@@ -401,7 +401,7 @@ Coverage and suitability follow [Repository configuration and policy](https://gi
 - Every repository binding requires one platform API key, even for a repository that permits a public read.
 - No public-read input exists, and an absent credential refuses the write.
 - Git operations use the SSH configuration of the host and require no credential reference.
-- Provider inference accepts `api_key` and `oauth` as the [credential store record](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-credential-store-record) rules.
+- Provider inference accepts `api_key` and `oauth` as the [credential store record](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-record) rules.
 - These checks read no secret material and assert no narrower upstream scope.
 
 ### Worker and agent configuration — proposed fields
@@ -429,7 +429,7 @@ Each `AgentEntry` contains:
   field required. Validation checks the effective configuration as a whole.
 - `reasoningEffort`: **optional**, enum `off | minimal | low | medium | high | xhigh | max`; absence selects the template default.
 
-The [worker template registry](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-worker-template-registry) defines the override rules.
+The [worker template registry](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-worker-template-registry) defines the override rules.
 
 - An entry must override at least one of `providerAccount`, `modelIdentifier` and `reasoningEffort`.
 - The write and the resolution check the reasoning effort against the levels of the effective model.
@@ -457,7 +457,7 @@ Each custom model entry holds:
 - `input`: **optional**, subset of `text | image`, default `["text"]`.
 - No cost field; the resolution sets zero cost rates.
 
-The [provider contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-credential-store-of-an-execution) and the [validation rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#validation) define the catalogs and custom provider.
+The [provider contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-of-an-execution) and the [validation rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#validation) define the catalogs and custom provider.
 
 - A built-in provider id is a member of `getBuiltinProviders()` of `@earendil-works/pi-ai` at 0.86.0.
 - The effective `modelIdentifier` is a member of `getBuiltinModels(provider)`, or of `models` of the binding for `openai-compatible`.
@@ -489,7 +489,7 @@ Its `config` holds `available` and these required fields, with no defaults:
 - `credential`: `CredentialId` reference to a custody record, never inline secret material.
 
 `credential` names a record of type `s3_access_key` under the [storage configuration contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#storage-configuration).
-The [credential type contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-credential-store-record) defines its key pair, suitability and session-token exclusion.
+The [credential type contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-record) defines its key pair, suitability and session-token exclusion.
 The service validates field types, the endpoint URL, the custody reference and project cardinality at write and resolution.
 An absent field, invalid value or second storage binding refuses the write.
 The binding write probes no store capability.
@@ -595,7 +595,7 @@ kanthord project credential login-code <session> <value> [M] [R]
 kanthord project credential login-status <session> [R]
 ```
 
-The [OAuth login ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-oauth-login) declares all three operations with `human` access.
+The [OAuth login ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-oauth-login) declares all three operations with `human` access.
 The inventory proposes their HTTP paths; the operations remain unimplemented.
 `login` sends the provider id, mode, credential name and remote identity to `project.credential.login`.
 `--name <name>` is required, has no default and uses the credential name form of the creation body below.
@@ -627,7 +627,7 @@ Creation body:
     preserve exact bytes represented by the JSON string. Provider-specific
     syntax and size bounds require the type schema.
   - For `s3_access_key`: required `accessKeyId` and `secretAccessKey`; no session token.
-    The [credential record contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-credential-store-record) defines the stored shape.
+    The [credential record contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-record) defines the stored shape.
 
 Rotation body:
 
@@ -645,10 +645,10 @@ headers, or a reusable grant. These commands do not test upstream access.
 Rotation changes material of the same record for the same remote identity;
 existing credential references remain valid. It returns the updated metadata
 and has no binding-set or binding-revision effect. Custody attributes creation
-and each material change to the authenticated human in its log. A credential leaves the server only through the [credential handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-credential-handover) or the direct acquisition grant.
+and each material change to the authenticated human in its log. A credential leaves the server only through the [credential handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-handover) or the direct acquisition grant.
 Rotation and OAuth refresh update the record in place and create no revision. Rotation commits in one transaction, and the last write wins.
 
-The [remote identity contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-remote-identity-of-a-record) defines the endpoint-host platform for `s3_access_key`.
+The [remote identity contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-remote-identity-of-a-record) defines the endpoint-host platform for `s3_access_key`.
 Its example is `s3.eu-central-1.amazonaws.com:user:kanthord-evidence`.
 The remote identity of a credential store record never changes; rotation keeps it.
 A credential for another remote is a new record from `credential create`.
@@ -662,7 +662,7 @@ commands with invented semantics.
 
 ## Provider check
 
-The [provider check contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-provider-check) defines `project.provider.check`, a server-wide read with `human` access.
+The [provider check contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-provider-check) defines `project.provider.check`, a server-wide read with `human` access.
 Its proposed route is `POST /api/project/provider/check`, with no project or binding.
 
 Input:
