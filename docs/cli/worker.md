@@ -1,6 +1,6 @@
 # Worker CLI specification
 
-This is the future specification for `kanthord worker`. It contains **20 command leaves: 1 implemented command and 19 proposed commands**. The proposed command
+This is the future specification for `kanthord worker`. It contains **18 command leaves: 1 implemented command and 17 proposed commands**. The proposed command
 names, routes, operation IDs, access policies, JSON fields and defaults below are
 design proposals, not published API or working CLI commands. The behavioral
 requirements identified as **target design** come from the Worker design; their
@@ -51,14 +51,14 @@ or accepts `--config`.
 Shared syntax, types, defaults, and validation are defined by each linked flag.
 Only applicability and Worker-specific requirements are listed here.
 
-| Common flag                                                                      | Applies to / Worker requirement                                                                                 |
-| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| [`--endpoint`](./common-flags.md#--endpoint)                                     | Every command; inherited from the `worker` group.                                                               |
-| [`--token`](./common-flags.md#--token)                                           | Every operation requires a nonblank resolved token matching its human or client policy.                         |
-| [`--idempotency-key`](./common-flags.md#--idempotency-key)                       | Mutations only; implemented registration retains the `<ulid>` help spelling.                                    |
-| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Each list command.                                                                                              |
-| [`--file`](./common-flags.md#--file)                                             | Required for `agent enablement put`, `agent enablement provider add` and `mcp tool call`; schemas appear below. |
-| [`--help`](./common-flags.md#--help)                                             | Every group and leaf.                                                                                           |
+| Common flag                                                                      | Applies to / Worker requirement                                                                |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| [`--endpoint`](./common-flags.md#--endpoint)                                     | Every command; inherited from the `worker` group.                                              |
+| [`--token`](./common-flags.md#--token)                                           | Every operation requires a nonblank resolved token matching its human or client policy.        |
+| [`--idempotency-key`](./common-flags.md#--idempotency-key)                       | Mutations only; implemented registration retains the `<ulid>` help spelling.                   |
+| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Each list command.                                                                             |
+| [`--file`](./common-flags.md#--file)                                             | Required for `agent enablement put` and `agent enablement provider add`; schemas appear below. |
+| [`--help`](./common-flags.md#--help)                                             | Every group and leaf.                                                                          |
 
 The [shared client-file rules](./other.md#cliyaml-and-its-effects) apply.
 Commands do not save or rewrite that file.
@@ -92,7 +92,6 @@ and an idempotency key alone cannot reconcile an uncertain repository write.
 | `ProjectId`                | Opaque `project_<ulid>` identity using the declared project prefix.                                                                                                                                                                                                                                         |
 | `RuntimeIdentity`          | Opaque server-returned runtime identity. Current generation uses `runtime_identity_<ulid>`, but the current wire schema accepts a nonblank string of length `1..128`; it does not enforce that prefix. Proposed consumers retain the returned value exactly.                                                |
 | `BindingId`, `ExecutionId` | `BindingId` uses `binding_<ulid>`. `ExecutionId` uses `execution_<ulid>` under the [Scheduler identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-identities-of-the-scheduler-service), validated with `identitySchema("execution")` of the kernel. |
-| `ToolName`                 | One exact published tool name from the proposed tool catalog below; no arbitrary platform method name.                                                                                                                                                                                                      |
 
 An entity identity follows `<declared-prefix>_<ulid>`, where the ULID is canonical
 uppercase and matches `[0-7][0-9A-HJKMNP-TV-Z]{25}`. Validate the expected entity
@@ -100,28 +99,25 @@ kind, not just the suffix. A bare ULID is valid for an idempotency key only.
 Worker/agent names and MCP session IDs retain their natural-key/protocol forms.
 The target runtime identity is `worker_instance_<ulid>` under the [Worker identity ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-identities-of-the-worker-service).
 
-[worker-contract]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service
-
 ## Command inventory
 
 `P` means proposed; `I` means implemented syntax and operation.
-Heartbeat, handover, the five inspection reads and provider check use their ruled routes. Other `P` paths remain proposals, not current OpenAPI declarations.
-`human` authenticates a human JWT. `client` authenticates a machine JWT and requires
-a live registration unless an explicit exception is stated.
+Heartbeat, handover, deregistration, the five inspection reads and provider check use their ruled routes. Other `P` paths remain proposals, not current OpenAPI declarations.
+`human` authenticates a human JWT. `client` authenticates a machine JWT.
+Live registration and execution requirements appear per operation; registration
+and deregistration require no live registration.
 
-| Status | Command after `kanthord worker`           | Route                                                   | Operation ID                                                                       | Access / registration                                                            |
-| ------ | ----------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| I      | `register`                                | `POST /api/worker/register`                             | `worker.register`                                                                  | `client`; `requiresRegistration: false`                                          |
-| P      | `heartbeat [--token <jwt>]`               | `POST /api/worker/heartbeat`                            | `worker.heartbeat`                                                                 | `client`; live registration                                                      |
-| P      | `handover [--token <jwt>]`                | `POST /api/worker/handover`                             | `worker.handover`                                                                  | `client`; live registration and live execution                                   |
-| P      | `list`                                    | `GET /api/worker/catalog`                               | `worker.catalog.list`                                                              | `human`                                                                          |
-| P      | `get <worker-name>`                       | `GET /api/worker/catalog/:workerName`                   | `worker.catalog.get`                                                               | `human`                                                                          |
-| P      | `agent get <agent-name>`                  | `GET /api/worker/agent/:agentName`                      | `worker.agent.get`                                                                 | `human`                                                                          |
-| P      | `instance list`                           | `GET /api/worker/instance`                              | `worker.instance.list`                                                             | `human`                                                                          |
-| P      | `instance get <runtime-identity>`         | `GET /api/worker/instance/:runtimeIdentity`             | `worker.instance.get`                                                              | `human`                                                                          |
-| P      | `instance deregister <runtime-identity>`  | `POST /api/worker/instance/:runtimeIdentity/deregister` | `worker.instance.deregister` **[blocked][worker-contract]**                        | `client`; proposed `requiresRegistration: false`, with explicit ownership checks |
-| P      | `mcp tool list`                           | `GET /api/worker/mcp/tool`                              | `worker.mcp.tool.list` **[blocked][worker-contract]** (assessment-state filtering) | `client`; live registration and own live execution                               |
-| P      | `mcp tool call <tool-name> --file <path>` | Three concrete `POST` routes in the tool mapping below  | Three static tool operations                                                       | `client`; live registration and own live execution; further per-tool checks      |
+| Status | Command after `kanthord worker`          | Route                                          | Operation ID                 | Access / registration                                                             |
+| ------ | ---------------------------------------- | ---------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------- |
+| I      | `register`                               | `POST /api/worker/register`                    | `worker.register`            | `client`; no live registration required                                           |
+| P      | `heartbeat [--token <jwt>]`              | `POST /api/worker/heartbeat`                   | `worker.heartbeat`           | `client`; live registration                                                       |
+| P      | `handover [--token <jwt>]`               | `POST /api/worker/handover`                    | `worker.handover`            | `client`; live registration and live execution                                    |
+| P      | `list`                                   | `GET /api/worker/catalog`                      | `worker.catalog.list`        | `human`                                                                           |
+| P      | `get <worker-name>`                      | `GET /api/worker/catalog/:workerName`          | `worker.catalog.get`         | `human`                                                                           |
+| P      | `agent get <agent-name>`                 | `GET /api/worker/agent/:agentName`             | `worker.agent.get`           | `human`                                                                           |
+| P      | `instance list`                          | `GET /api/worker/instance`                     | `worker.instance.list`       | `human`                                                                           |
+| P      | `instance get <runtime-identity>`        | `GET /api/worker/instance/:runtimeIdentity`    | `worker.instance.get`        | `human`                                                                           |
+| P      | `instance deregister <runtime-identity>` | `DELETE /api/worker/instance/:runtimeIdentity` | `worker.instance.deregister` | `client`; no live registration required; ownership by client, binding and project |
 
 The inventory includes these nine **proposed** commands. `[R]`, `[M]` and
 `[L]` use the [common synopsis definitions](./common-flags.md#synopsis-markers).
@@ -145,7 +141,7 @@ Its operation is `worker.credential` at `POST /api/worker/credential`, with `cli
 
 The five human reads follow [inspection operations](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#inspection-operations).
 Each is `unary`, has `mutation: false` and a default timeout of 30 s, and reads
-no table of another service. The linked section is a pending root anchor. Every authenticated human has the
+no table of another service. Every authenticated human has the
 server-owner authority of the target design; this table introduces no project
 membership or administrator role. Machine inspection/calls remain scoped to the
 authenticated client and claim and gain no authority from caller-supplied IDs.
@@ -569,120 +565,56 @@ kanthord worker instance deregister <runtime-identity> [--idempotency-key <key>]
 
 Required `runtime-identity: RuntimeIdentity`, no default, maps to
 `params.runtimeIdentity`. Empty query and absent body. Required token: machine
-JWT. The shared mutation key applies. Proposed HTTP `200` returns
+JWT. The shared mutation key applies. HTTP `200` returns
 `{ "runtimeIdentity": "...", "registered": false }`; the CLI adds its key.
 
-This proposes a public self-deregistration operation for the design's program
-deregistration event. The explicit runtime identity prevents a delayed retry from
-ending a newer registration of the same client. The handler must verify that the
-target belongs to the authenticated client, binding and project. It cannot end a
-server-placement pool instance or another client's instance. Supplying an ID is
-not proof of ownership.
+The [deregistration contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#deregistration)
+declares `worker.instance.deregister` as a `client` mutation at
+`DELETE /api/worker/instance/:runtimeIdentity`, with `unary` lifetime,
+the default 30 s timeout and the default 10 MiB body limit. The explicit runtime
+identity prevents a delayed retry from ending a newer registration of the same
+client. The handler ends only the live registration whose runtime identity
+matches the path and whose client identity, binding and project match the caller.
+It frees the slot through the Project instance-count collaboration in the same
+transaction. Supplying an ID is not proof of ownership.
 
-The proposed `requiresRegistration: false` exception allows an accepted replay
-after deregistration, while authentication still checks the credential and
-binding. A first call requires a matching live registration. A missing target
-without a replay answer returns proposed `404`; a different live registration
-returns proposed `409` and remains intact. A retained same-key accepted answer
-can replay only for the same caller and target. A revoked credential or unavailable
-binding does not gain an authentication bypass for cleanup.
+This is no execution operation, so it requires no live registration.
+Authentication still checks the credential and binding. A retry with the same
+`Idempotency-Key`, caller and target replays the recorded answer after the end,
+within the TTL and one process. The operation declares no replay guard.
+Every target that is no live registration of the caller answers `404`
+`worker.instance.not_found`, including an ended registration, another client's
+instance, a server-placement instance and a newer registration of the same
+client identity, which stays intact. A retry after a restart answers `404`, and
+the caller reads it after its own call as the end of its registration. A revoked
+credential or unavailable binding gains no authentication bypass for cleanup.
 
 The effect is to end the registration, preventing later work pulls and execution
 operations under it. Scheduler owns any live execution's liveness disposition.
 Success does not prove the remote process stopped, release an execution, or
 authorize reuse of its workspace. Dead-process cleanup, physical-stop enforcement
-and failure recovery are not defined by this proposed command.
+and capacity reuse stay with B9 SC5 and W5. The same client identity registers
+again with a fresh idempotency key after expiry or deregistration.
 
-## MCP and repository actions — proposed CLI projection
+## MCP and repository actions
 
-The target server owns one MCP v2 server. Native agents use its permitted reads;
-external harnesses authenticate with their machine JWT and present an execution
-identity belonging to their own live claim. The approved initial platform reads
-are GitHub pull-request retrieval and review-comment listing. The only exposed
-write is the action-performer tool, available to external harnesses only. Native
-reviewers invoke the action performer from their evaluation method.
+The target server owns one MCP v2 server. Every client, native agent or external
+harness, receives the same static tools: `github-pull-request-get`,
+`github-pull-request-review-comment-list` and `repository-action-request`.
+No client kind, claim kind or assessment state changes the list. `tools/list`
+needs the live registration, or the hosted execution for a native agent at the
+`server` placement, and no execution identity argument. It reads no Mission record.
+The action performer is the only exposed write. The evaluation method of
+`reviewer@1` also invokes it, with the same checks and serialized calls of one
+execution identity, and the performer never dispatches an action twice.
 
-The proposed REST projection remains **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service).
-It preserves the MCP tool allowlist, external-harness restriction and claim checks.
+This revision projects no tool to a REST route and gives the CLI no command
+that calls a tool. Tools are reached through the MCP server.
 
-### `mcp tool list`
+### Action performer results
 
-```text
-kanthord worker mcp tool list --execution <execution-id> [--limit <count>] [--cursor <opaque>]
-```
+The action tool returns the MCP tool result, not CLI output:
 
-`--execution` is required `ExecutionId`, no default, mapped to
-`query.executionId`. [`--limit`](./common-flags.md#--limit) and
-[`--cursor`](./common-flags.md#--cursor) use the shared list contract.
-No positional arguments; empty params, absent body. Required token: machine JWT
-of a registered external-harness instance. Scheduler must establish that the
-execution is the caller's live claim. A steps claim cannot make the action tool
-eligible by naming another execution.
-
-Proposed HTTP `200` returns a page of tools available to that execution in
-descending primary-key order by name under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
-Each item contains `name: ToolName`, `description: string`,
-`inputSchema: object`, `outputSchema: object`, and `mutation: boolean`. Assessment-state filtering remains **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service). Listing grants no authority; invocation repeats all admission checks.
-
-### `mcp tool call <tool-name> --file <path>`
-
-```text
-kanthord worker mcp tool call <tool-name> --file <path> [--idempotency-key <key>]
-```
-
-| Input                                                      | Requiredness / type / default        | Mapping and validation                                                                             |
-| ---------------------------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `tool-name`                                                | Required `ToolName`; no default      | Selects exactly one concrete operation below; it is not a body field or arbitrary route parameter. |
-| [`--file`](./common-flags.md#--file)                       | Required                             | Object becomes `body`; validate the selected tool's schema.                                        |
-| [`--idempotency-key`](./common-flags.md#--idempotency-key) | Only for `repository-action-request` | Required mutation header for that tool. Rejected for read tools.                                   |
-
-Required token: machine JWT of a registered external-harness instance. Empty
-params and query. The file has these fields:
-
-| JSON field    | Requiredness / type / default      | Validation                                                                                                                                        |
-| ------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `executionId` | Required `ExecutionId`; no default | Must belong to the caller's live registration and claim. Action requests additionally require an evaluation claim and current passing assessment. |
-| `arguments`   | Required object; no default        | Exact selected tool schema below. The action tool requires the empty object.                                                                      |
-
-The wire operation's mutation declaration cannot depend on unvalidated input.
-The three tool calls therefore have separate proposed static operation
-declarations at concrete paths:
-
-| Tool / concrete path suffix after `/api/worker/mcp/tool/` | Operation ID                                    | Mutation | Access                                                                              |
-| --------------------------------------------------------- | ----------------------------------------------- | -------- | ----------------------------------------------------------------------------------- |
-| `github-pull-request-get/call`                            | `worker.mcp.githubPullRequestGet`               | `false`  | `client`, own live external-harness execution                                       |
-| `github-pull-request-review-comment-list/call`            | `worker.mcp.githubPullRequestReviewCommentList` | `false`  | `client`, own live external-harness execution                                       |
-| `repository-action-request/call`                          | `worker.mcp.repositoryActionRequest`            | `true`   | `client`, own live external-harness evaluation claim and current passing assessment |
-
-All three use `POST` with the strict JSON body above. There is no fourth generic
-invocation operation. The one CLI command dispatches to the selected declaration.
-
-| Tool                                      | `arguments` fields and validation                                                                                                                                                                                                                                                  | Result / effect                                                                                                                                                                                      |
-| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `github-pull-request-get`                 | Required `pullRequestNumber: integer`, positive safe integer, no default; no other fields                                                                                                                                                                                          | Read the pull request through the permitted GitHub implementation. Derive the repository from the claim's pinned node repository binding; Project authorizes that resource operation before custody. |
-| `github-pull-request-review-comment-list` | Required `pullRequestNumber: integer`, positive safe integer, no default; optional `limit: integer`, default `100`, range `1..100`; a cursor binds the page size, and a differing `limit` fails; optional `cursor: string`, nonempty opaque server cursor, absent means first page | One page of review comments through the same authorized binding. The CLI's file fields carry pagination here because it is a tool invocation, not a CLI list command.                                |
-| `repository-action-request`               | Empty object `{}`; no action name, branch, address, commit, repository selector or policy override                                                                                                                                                                                 | Pass only the execution identity to the action performer. It derives every operand from the attempt records and evidence snapshot, and requests eligible configured actions.                         |
-
-Proposed read-tool success returns HTTP `200` and
-`{ "toolName": "...", "result": ... }`. Pull-request results use the GitHub
-method's published result schema; comment results use `items` and `nextCursor`
-with the method's published comment schema. The
-[platform implementation contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#platform-connector-and-platform-implementations)
-pins the versions, endpoints and schema source; this document defines no invented
-common platform result schema.
-
-The GitHub implementation uses `octokit` at 5.0.5 and `X-GitHub-Api-Version: 2022-11-28`.
-Pull request read calls `GET /repos/{owner}/{repo}/pulls/{pull_number}`; review
-comment list calls `GET /repos/{owner}/{repo}/pulls/{pull_number}/comments`.
-Both endpoint bodies stay unchanged. Discovery embeds their dereferenced response
-schemas from `@octokit/openapi` at 23.0.2 under `result`, extracted at build time.
-The comment `limit` maps to `per_page`. Its cursor is base64url canonical JSON
-`{ page, perPage }`. A differing `limit` answers HTTP 400
-`worker.platform.github.cursor_page_size_mismatch`. `nextCursor` is `null` without
-a `rel="next"` link. A result class answers `worker.platform.github.<class>`
-with the HTTP status and GitHub message.
-
-The action tool answers HTTP `200` with
 `{ toolName: "repository-action-request", items: ActionResultItem[] }`.
 `ActionResultItem` is discriminated on `kind`, with one value per return class:
 
@@ -696,8 +628,8 @@ The external-object shape is the Mission record; the [action performer ruling of
 The first version produces no `awaiting-prerequisite` item, because a repository strategy holds at most one action and its `follows` is null.
 The answer holds no release instruction, because [B9 items A3, W1, W4 and PR2](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-and-project-services) own what follows a failure or an uncertainty.
 There is no default classification. An accepted tool result containing failure or uncertainty
-does not mean repository success; the CLI prints those classes intact. A request
-whose own transport outcome is unknown is reported as indeterminate instead.
+does not mean repository success. A request whose own transport outcome is
+unknown is indeterminate instead.
 
 The action performer serializes invocations by execution identity and never
 redispatches an unresolved action. It may reuse an earlier attempt's open remote
@@ -709,9 +641,45 @@ The tool call does not release the execution. The target permits a reviewer
 release after a result containing only submitted objects and prerequisite waits;
 Scheduler records the corresponding wait fact. Failure release and recovery remain **blocked** under [HANDOFF B9](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#b9-failure-and-recovery).
 
-### MCP transport requirements outside the CLI inventory
+### MCP endpoint outside the CLI inventory
 
-The MCP endpoint and declarations remain **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service).
+The [MCP server contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#mcp-server)
+declares three `client` operations at `/api/worker/mcp`. Each requires a live
+registration, uses the operational store, a 10 MiB body limit and a 900 s timeout,
+and declares `mutation: false` under the [Gateway exemption](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#idempotency-of-a-mutation).
+An MCP client carries no `Idempotency-Key`.
+
+| Operation            | Method   | Lifetime | Body and answer                                                                    |
+| -------------------- | -------- | -------- | ---------------------------------------------------------------------------------- |
+| `worker.mcp.message` | `POST`   | `stream` | One MCP JSON-RPC message; JSON or an open `text/event-stream` response             |
+| `worker.mcp.listen`  | `GET`    | `stream` | No body; server-to-client event stream, resumed with `Last-Event-ID` after timeout |
+| `worker.mcp.close`   | `DELETE` | `unary`  | No body; ends the named session and answers 204                                    |
+
+The Gateway checks the JWT and live registration before session lookup.
+`Mcp-Session-Id` has the form `mcp_session_<ulid>` and binds to the initializing
+client identity and registration. After admission, a foreign, ended or absent
+session answers 404; the client initializes again. A new registration cannot
+reuse a session of its earlier registration. DELETE, registration end and server
+stop end the session. A session identity alone authorizes nothing.
+Every authenticated MCP request renews the registration heartbeat.
+
+Before each `tools/call`, the MCP server runs the invocation chain's execution
+proof component with the required `executionId` argument. A failed proof returns
+a JSON-RPC error whose `data` holds the shared error envelope with
+`gateway.invocation.execution_proof_failed`. The tool receives the proven node,
+attempt and pinned revision, never caller-supplied values for them. A tool refusal
+returns `isError: true`. The action tool refuses a steps claim with
+`worker.action_performer.claim_not_evaluation` and an evaluation claim without a
+current passing assessment with `worker.action_performer.assessment_not_current`.
+
+A native agent at the `server` placement reaches MCP in-process under its hosted
+execution; its proof skips the registration comparison. Native agents at the
+`worker` placement and external harnesses use HTTP and their machine JWT.
+A tool runs under a session context; disconnect ends the response stream only.
+The Gateway cancels session contexts in shutdown phase 1. The action performer
+owns write idempotency; a restart before its dispatch record stays B9 W2.
+MCP bodies follow the MCP specification; tool schemas live in `tools/list`.
+
 Target transport is MCP v2 Streamable HTTP mounted on the Gateway listener:
 one endpoint accepts `POST`, `GET` and `DELETE`; each JSON-RPC client message uses
 a new `POST`. Responses are JSON or a continuing event stream. Initialization
@@ -722,9 +690,9 @@ WebSocket or deprecated HTTP+SSE transport requirement.
 
 This protocol/session lifecycle is not a set of extra CLI commands. Nor are
 model/repository/platform connectors, webhook decoding, prompt composition,
-lease/agent loops, workspace cleanup or collaboration functions. The proposed
-tool projection exposes no direct platform write and no raw git push, merge,
-credential export or caller-selected remote destination.
+lease/agent loops, workspace cleanup or collaboration functions. The MCP server
+exposes no direct platform write and no raw git push, merge, credential export
+or caller-selected remote destination.
 
 ## Design provenance
 
