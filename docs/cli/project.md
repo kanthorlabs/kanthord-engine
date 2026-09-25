@@ -344,6 +344,7 @@ Each `PolicyAction` holds only:
   - `type: "action_end_state"` and a required `binding` as a binding-name string, with no other members.
 
 The action rules follow the [GitHub action catalog](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md).
+The key of the action is `<binding name>.<name>`, which the Mission Service freezes at the attempt opening.
 
 - The `action_end_state` shape identifies the configured action of another binding for the same node.
 - Absent references and invalid dependency cycles fail validation.

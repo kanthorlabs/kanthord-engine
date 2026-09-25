@@ -109,19 +109,19 @@ Heartbeat, handover, the five inspection reads and provider check use their rule
 `human` authenticates a human JWT. `client` authenticates a machine JWT and requires
 a live registration unless an explicit exception is stated.
 
-| Status | Command after `kanthord worker`           | Route                                                   | Operation ID                                                                                | Access / registration                                                            |
-| ------ | ----------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| I      | `register`                                | `POST /api/worker/register`                             | `worker.register`                                                                           | `client`; `requiresRegistration: false`                                          |
-| P      | `heartbeat [--token <jwt>]`               | `POST /api/worker/heartbeat`                            | `worker.heartbeat`                                                                          | `client`; live registration                                                      |
-| P      | `handover [--token <jwt>]`                | `POST /api/worker/handover`                             | `worker.handover`                                                                           | `client`; live registration and live execution                                   |
-| P      | `list`                                    | `GET /api/worker/catalog`                               | `worker.catalog.list`                                                                       | `human`                                                                          |
-| P      | `get <worker-name>`                       | `GET /api/worker/catalog/:workerName`                   | `worker.catalog.get`                                                                        | `human`                                                                          |
-| P      | `agent get <agent-name>`                  | `GET /api/worker/agent/:agentName`                      | `worker.agent.get`                                                                          | `human`                                                                          |
-| P      | `instance list`                           | `GET /api/worker/instance`                              | `worker.instance.list`                                                                      | `human`                                                                          |
-| P      | `instance get <runtime-identity>`         | `GET /api/worker/instance/:runtimeIdentity`             | `worker.instance.get`                                                                       | `human`                                                                          |
-| P      | `instance deregister <runtime-identity>`  | `POST /api/worker/instance/:runtimeIdentity/deregister` | `worker.instance.deregister` **[blocked][worker-contract]**                                 | `client`; proposed `requiresRegistration: false`, with explicit ownership checks |
-| P      | `mcp tool list`                           | `GET /api/worker/mcp/tool`                              | `worker.mcp.tool.list` **[blocked][worker-contract]** (action-result record schemas)        | `client`; live registration and own live execution                               |
-| P      | `mcp tool call <tool-name> --file <path>` | Three concrete `POST` routes in the tool mapping below  | Three static tool operations; **[blocked][worker-contract]** (action-result record schemas) | `client`; live registration and own live execution; further per-tool checks      |
+| Status | Command after `kanthord worker`           | Route                                                   | Operation ID                                                                       | Access / registration                                                            |
+| ------ | ----------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| I      | `register`                                | `POST /api/worker/register`                             | `worker.register`                                                                  | `client`; `requiresRegistration: false`                                          |
+| P      | `heartbeat [--token <jwt>]`               | `POST /api/worker/heartbeat`                            | `worker.heartbeat`                                                                 | `client`; live registration                                                      |
+| P      | `handover [--token <jwt>]`                | `POST /api/worker/handover`                             | `worker.handover`                                                                  | `client`; live registration and live execution                                   |
+| P      | `list`                                    | `GET /api/worker/catalog`                               | `worker.catalog.list`                                                              | `human`                                                                          |
+| P      | `get <worker-name>`                       | `GET /api/worker/catalog/:workerName`                   | `worker.catalog.get`                                                               | `human`                                                                          |
+| P      | `agent get <agent-name>`                  | `GET /api/worker/agent/:agentName`                      | `worker.agent.get`                                                                 | `human`                                                                          |
+| P      | `instance list`                           | `GET /api/worker/instance`                              | `worker.instance.list`                                                             | `human`                                                                          |
+| P      | `instance get <runtime-identity>`         | `GET /api/worker/instance/:runtimeIdentity`             | `worker.instance.get`                                                              | `human`                                                                          |
+| P      | `instance deregister <runtime-identity>`  | `POST /api/worker/instance/:runtimeIdentity/deregister` | `worker.instance.deregister` **[blocked][worker-contract]**                        | `client`; proposed `requiresRegistration: false`, with explicit ownership checks |
+| P      | `mcp tool list`                           | `GET /api/worker/mcp/tool`                              | `worker.mcp.tool.list` **[blocked][worker-contract]** (assessment-state filtering) | `client`; live registration and own live execution                               |
+| P      | `mcp tool call <tool-name> --file <path>` | Three concrete `POST` routes in the tool mapping below  | Three static tool operations                                                       | `client`; live registration and own live execution; further per-tool checks      |
 
 The inventory includes these nine **proposed** commands. `[R]`, `[M]` and
 `[L]` use the [common synopsis definitions](./common-flags.md#synopsis-markers).
@@ -648,11 +648,11 @@ The wire operation's mutation declaration cannot depend on unvalidated input.
 The three tool calls therefore have separate proposed static operation
 declarations at concrete paths:
 
-| Tool / concrete path suffix after `/api/worker/mcp/tool/` | Operation ID                                                                                       | Mutation | Access                                                                              |
-| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------- |
-| `github-pull-request-get/call`                            | `worker.mcp.githubPullRequestGet`                                                                  | `false`  | `client`, own live external-harness execution                                       |
-| `github-pull-request-review-comment-list/call`            | `worker.mcp.githubPullRequestReviewCommentList`                                                    | `false`  | `client`, own live external-harness execution                                       |
-| `repository-action-request/call`                          | `worker.mcp.repositoryActionRequest` **[blocked][worker-contract]** (action-result record schemas) | `true`   | `client`, own live external-harness evaluation claim and current passing assessment |
+| Tool / concrete path suffix after `/api/worker/mcp/tool/` | Operation ID                                    | Mutation | Access                                                                              |
+| --------------------------------------------------------- | ----------------------------------------------- | -------- | ----------------------------------------------------------------------------------- |
+| `github-pull-request-get/call`                            | `worker.mcp.githubPullRequestGet`               | `false`  | `client`, own live external-harness execution                                       |
+| `github-pull-request-review-comment-list/call`            | `worker.mcp.githubPullRequestReviewCommentList` | `false`  | `client`, own live external-harness execution                                       |
+| `repository-action-request/call`                          | `worker.mcp.repositoryActionRequest`            | `true`   | `client`, own live external-harness evaluation claim and current passing assessment |
 
 All three use `POST` with the strict JSON body above. There is no fourth generic
 invocation operation. The one CLI command dispatches to the selected declaration.
@@ -682,20 +682,20 @@ The comment `limit` maps to `per_page`. Its cursor is base64url canonical JSON
 a `rel="next"` link. A result class answers `worker.platform.github.<class>`
 with the HTTP status and GitHub message.
 
-Proposed action success returns HTTP `200` with `toolName` and `items`. The
-proposed item discriminant is `kind`, with exactly four values:
+The action tool answers HTTP `200` with
+`{ toolName: "repository-action-request", items: ActionResultItem[] }`.
+`ActionResultItem` is discriminated on `kind`, with one value per return class:
 
-- `submitted`: `externalObject` is the accepted Mission external-object record.
-- `awaiting-prerequisite`: `action` identifies the configured action and
-  `observation` identifies the observation it follows; this alone is a wait fact.
-- `failed-before-effect`: `action` and `refusal` report a confirmed request failure
-  before effect.
-- `uncertain`: `action` and `uncertainty: "effect" | "recording" | "both"` retain
-  what is unknown.
+- `submitted` holds `externalObject`, the `ExternalObject` record that the Mission Service accepted, in the schema that `mission.externalObject.get` answers.
+- `awaiting-prerequisite` holds `action: { key, bindingId }`, the waiting action, and `prerequisite: { key, externalObjectId }`, the requested action it follows and its external object. The reviewer release names that `externalObjectId` in its `external-observation` wait fact.
+- `failed-before-effect` holds `action: { key, bindingId }` and `refusal: { class, code, message }`, where `class` is `confirmed_failure`, `retryable_refusal` or `final_refusal`. A final refusal declines the request before any write. `code` and `message` come from the connector that transported the request: the platform implementation for a platform action, the repository connector for a network git write.
+- `uncertain` holds `action: { key, bindingId }`, `uncertainty: "effect" | "recording" | "both"` and an optional `address`, present when the remote returned the address and the Mission submission stayed uncertain. An `unknown_outcome` result class produces `effect`.
 
-The action/observation/external-object shapes are owned by their domain contracts
-and remain schema dependencies, not arbitrary caller-supplied JSON. There is no
-default classification. An accepted tool result containing failure or uncertainty
+The external-object shape is the Mission record; the [action performer ruling of `worker-service.impl.md`](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#action-performer) declares the item shapes.
+`key` is the `FrozenAction.key` of the attempt, and `bindingId` is the repository binding of the action.
+The first version produces no `awaiting-prerequisite` item, because a repository strategy holds at most one action and its `follows` is null.
+The answer holds no release instruction, because [B9 items A3, W1, W4 and PR2](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-and-project-services) own what follows a failure or an uncertainty.
+There is no default classification. An accepted tool result containing failure or uncertainty
 does not mean repository success; the CLI prints those classes intact. A request
 whose own transport outcome is unknown is reported as indeterminate instead.
 
