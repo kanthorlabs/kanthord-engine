@@ -191,7 +191,7 @@ Blocked commands link their items in [HANDOFF Project Service](https://github.co
 | 22  | `credential login-status <session> [R]`                                                                | `GET /api/project/credential/login/:sessionId`                         | `project.credential.login_status`                          | `human`; proposed route                                                                                                        |
 | 23  | `provider check --base-url <url> --credential <credential-id> [R]`                                     | `POST /api/project/provider/check`                                     | `project.provider.check`                                   | `human`; proposed route                                                                                                        |
 
-- Rows 5 to 8 keep their marks for the source configuration and the storage credential record type in HANDOFF.
+- Rows 5 to 8 keep their marks for the source configuration in HANDOFF, not the storage credential record type.
 - The credential routes and the provider check are server-wide; they contain no `projectId`.
 - The static path `/api/project/provider/check`, like `/credential`, must not fall under `/:projectId`.
 - Provider-account views reuse the binding operations and add a required kind constraint; they create no second provider-account store.
@@ -488,8 +488,8 @@ Its `config` holds `available` and these required fields, with no defaults:
 - `prefix`: text for the server-generated object-key prefix.
 - `credential`: `CredentialId` reference to a custody record, never inline secret material.
 
-Its credential record type follows the [HANDOFF Mission item](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#mission-service) and remains **blocked**.
-This configuration declares no credential record type.
+`credential` names a record of type `s3_access_key` under the [storage configuration contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#storage-configuration).
+The [credential type contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-credential-store-record) defines its key pair, suitability and session-token exclusion.
 The service validates field types, the endpoint URL, the custody reference and project cardinality at write and resolution.
 An absent field, invalid value or second storage binding refuses the write.
 The binding write probes no store capability.
@@ -578,7 +578,7 @@ Inputs:
 - `<credential-id>`: required `CredentialId` on `get` and `rotate`, no default;
   path `credentialId`. A record is shared server-wide, not scoped by a project.
 - `--type <type>`: optional single-use enum on `list`, proposed values
-  `api_key | oauth`, absent means both supported types; query `type`.
+  `api_key | oauth | s3_access_key`; absence selects all three supported types; query `type`.
 - `--remote-identity <identity>`: optional single-use `RemoteIdentity` on
   `list`, absent means no identity filter; exact-match query `remoteIdentity`.
 - [`--file`](./common-flags.md#--file): required on `create` and `rotate`. Its
@@ -618,7 +618,7 @@ The shared JSON output convention does not replace the line output of `login`.
 Creation body:
 
 - `name`: **required**, credential name, 1 to 63 characters; no default. A lower-case letter comes first, then lower-case letters, digits and hyphens.
-- `type`: **required**, value `api_key` for direct entry, no default. OAuth entry uses the login session.
+- `type`: **required**, `api_key` or `s3_access_key` for direct entry, no default. OAuth entry uses the login session.
 - `remoteIdentity`: **required**, `RemoteIdentity`, no default. The platform and
   record type must be consistent with the supported type registry.
 - `material`: **required**, closed type-specific object, no default:
@@ -626,6 +626,8 @@ Creation body:
     git-platform personal access token or model-provider key. No default;
     preserve exact bytes represented by the JSON string. Provider-specific
     syntax and size bounds require the type schema.
+  - For `s3_access_key`: required `accessKeyId` and `secretAccessKey`; no session token.
+    The [credential record contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-credential-store-record) defines the stored shape.
 
 Rotation body:
 
@@ -646,6 +648,8 @@ and has no binding-set or binding-revision effect. Custody attributes creation
 and each material change to the authenticated human in its log. A credential leaves the server only through the [credential handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-credential-handover) or the direct acquisition grant.
 Rotation and OAuth refresh update the record in place and create no revision. Rotation commits in one transaction, and the last write wins.
 
+The [remote identity contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-remote-identity-of-a-record) defines the endpoint-host platform for `s3_access_key`.
+Its example is `s3.eu-central-1.amazonaws.com:user:kanthord-evidence`.
 The remote identity of a credential store record never changes; rotation keeps it.
 A credential for another remote is a new record from `credential create`.
 Each binding adopts it with a `binding apply` that changes its `credential`, which creates a revision.
