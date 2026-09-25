@@ -250,8 +250,7 @@ and their capabilities are:
 
 The first native-runtime milestone supplies `general@1` and `reviewer@1`;
 external-harness integration follows. These are target declarations, not claims
-that the current engine has these templates. All four require goal, steps and
-validation criteria; a verification command is optional. No worker named `tdd@1`
+that the current engine has these templates. All four require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
 is promised by this specification.
 
 ### `get <worker-name>`

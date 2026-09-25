@@ -17,7 +17,7 @@ non-flag conventions and commands outside service groups live in `other.md`.
 | Command group                  | Owning document                                   | Scope                                                                                                   |
 | ------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `project`                      | [Project Service](project.md)                     | Projects, permitted resources, bindings, policy, and credential custody.                                |
-| `mission`                      | [Mission Service](mission.md)                     | Mission graph, criteria, evidence, assessments, outcomes, and human controls.                           |
+| `mission`                      | [Mission Service](mission.md)                     | Mission graph, criterion, evidence, assessments, outcomes, and human controls.                          |
 | `scheduler`                    | [Scheduler Service](scheduler.md)                 | Work pull, executions, claims, leases, and scheduling inspection.                                       |
 | `intake`                       | [Intake Service](intake.md)                       | Subscriptions, deliveries, and acquisition through a webhook, a poll or a stream.                       |
 | `worker`                       | [Worker Service](worker.md)                       | Workers, agents, instance registration, and execution hosting.                                          |
