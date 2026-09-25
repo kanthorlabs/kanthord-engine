@@ -308,7 +308,7 @@ An external worker declares no native agent configuration or prompts; looking up
 a native agent under it returns proposed `404`. Prompt/default changes require a
 new worker version. This command neither composes the prompt of an execution nor
 reads a local `AGENTS.md`/`CLAUDE.md`. The [Worker configuration](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#configuration) declares `worker.globalPrompt`.
-Prompt bounds remain **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service).
+Each global prompt source and project prompt source holds at most 32768 UTF-8 bytes under the [Worker implementation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md).
 
 ## Instance inspection and lifecycle — proposed
 
