@@ -90,11 +90,13 @@ commands without `[L]` reject pagination options.
   uppercase, and 26 characters. Reject bare ULIDs and other entity prefixes.
 - `BindingId`: `binding_<ulid>`, under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
 - `CredentialId`: `credential_<ulid>`, under the same ruling.
-- `Revision` and binding-set `version`: JSON safe integers returned by the
-  service, copied without arithmetic by the caller. A new project starts at
-  binding-set version `0`; its first write names version `0` and commits version `1`.
-  A new binding starts at revision `1`. Version `0` and revision `1` are the lower
-  bounds. A supplied revision/version must identify a value the server issued. No floating point or numeric string.
+- `Revision` and binding-set `version`: positive JSON safe integers that the service returns; the caller copies them without arithmetic.
+  A new project starts at binding-set version `1`.
+  Its first write names version `1` and commits version `2`.
+  A new binding starts at revision `1`.
+  `1` is the lower bound of every version and revision.
+  A supplied revision or version identifies a value from the server.
+  The server rejects a fraction or a numeric string.
 - `Timestamp`: JSON safe integer of Unix milliseconds in UTC.
 - `WorkerName`, `AgentName`, and provider name: nonempty exact natural-key
   strings from the relevant supported catalog, not prefixed IDs. Versioned
@@ -213,9 +215,9 @@ other request fields. Read commands have no body. Proposed project metadata is
 `id`, `name`, `bindingSetVersion`, and `createdAt`, with the scalar types above.
 `list.items` holds that metadata; `get` returns one project.
 
-Creation allocates a project identity and an empty binding set at version `0`.
+Creation allocates a project identity and an empty binding set at version `1`.
 The server returns that version. A mission belongs intrinsically to its project; it is
-not a binding. Creation calls the Mission collaboration `createMission` in the same transaction. The mission starts empty at mission revision 0. No operation creates or deletes a mission.
+not a binding. Creation calls the Mission collaboration `createMission` in the same transaction. The mission starts empty at mission revision 1. No operation creates or deletes a mission.
 A project name is unique on the server and is the natural key of creation. Creation or rename to a name that another project holds returns 409 with code `project.name_conflict` and the holder identity in `error.details`. A retry of creation after a restart returns 409 when the name exists, and the CLI prints the holder identity. Rename commits in one transaction; the last write wins under the unique name. Rename keeps the same project identity and bindings.
 
 No deletion, archival, project membership, or ownership-transfer command is
@@ -275,8 +277,7 @@ are absent by default, and `null` is invalid unless a future contract explicitly
 permits it. Each object is closed except template- or platform-owned objects
 whose schemas are explicitly blocked below.
 
-- `version`: **required**, nonnegative safe integer holding the exact
-  binding-set version that the client reads. No automatic fetch-and-retry or
+- `version`: **required**, positive safe integer; the exact binding-set version that the client reads. No automatic fetch-and-retry or
   force override on a stale version.
 - `bindings`: **required**, object keyed by binding name. A human chooses each
   name, unique inside its project. A name holds 1 to 63 characters: a lower-case
@@ -299,7 +300,7 @@ This example uses the proposed kind-specific fields below:
 
 ```json
 {
-  "version": 0,
+  "version": 1,
   "bindings": {
     "kanthord-repo": {
       "kind": "repository",
