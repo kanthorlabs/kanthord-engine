@@ -94,7 +94,7 @@ Every record answer holds `id: CredentialId`, `name: CredentialName`, `platform`
 `updatedAt: Timestamp` and `revision: Revision`. It never holds `secret`.
 `platform` is the closed enum `github | github-copilot | openai | anthropic | openai-compatible | s3`.
 `type` is the closed enum `api_key | oauth | s3_access_key`.
-The [platform implementations](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#platform-implementations)
+The [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#platform-validators)
 fix accepted pairs and metadata:
 
 | Platform            | Accepted type   | Metadata                                 |

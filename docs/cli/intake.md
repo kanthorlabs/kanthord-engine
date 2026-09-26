@@ -374,7 +374,8 @@ never expires.
 A human action on a parked delivery remains **[blocked][intake-contract]**; handoff bounds remain **[blocked][intake-bounds]**. After acceptance, the Intake Service asks nothing further about the delivery.
 
 Acceptance transfers every effect obligation to Scheduler; it promises no
-execution and needs no live worker. Scheduler invokes Worker payload decoding
+execution and needs no live worker. Scheduler invokes payload decoding of the
+[Repository component](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/repository.md#platform-connector-and-platform-implementations)
 and resolves effects; the Intake Service interprets no payload for business meaning.
 Acceptance as a human act uses the linked human identity through Mission.
 A platform signature itself grants no authority to create nodes, write WHAT,

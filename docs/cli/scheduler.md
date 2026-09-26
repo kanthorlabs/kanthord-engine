@@ -520,9 +520,10 @@ All fields are required; nullable fields remain present with `null`.
 | `completedAt`                                   | Timestamp or `null` while durable completion has not been established.                                                                                                                                                                                                      |
 | `observationId`                                 | Opaque Mission observation reference or `null` while no accepted observation is associated. Its prefix remains Mission-owned.                                                                                                                                               |
 
-The observer has no claimant and no execution ID. It reads through Worker's
-platform connector under the narrowly authorized service identity resolved
-from the external object, folds platform state and submits the observation
+The observer has no claimant and no execution ID. It reads through the
+[platform connector of the Repository component](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/repository.md#platform-connector-and-platform-implementations)
+under the narrowly authorized service identity resolved from the external
+object, folds platform state and submits the observation
 to Mission. It never decides the node's outcome. This proposal offers no
 manual `observe`, `complete`, `retry` or lease-stealing command: observer recovery remains **blocked** under [HANDOFF C1](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service).
 The [service identity ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-operation-and-its-two-entry-adapters) governs observer identity.
@@ -544,9 +545,10 @@ invokes Mission under the linked human identity. Refusal admits no effect,
 and a duplicate creates no second effect. The Scheduler preserves every
 obligation whose effect lacks durable acceptance and deduplicates effects per
 project and per external object across subscription kinds and redeliveries.
-Admission needs no live worker and promises no execution. Worker decodes the
-platform payload; Scheduler core consumes that decoded delivery rather than
-interpreting platform JSON.
+Admission needs no live worker and promises no execution. The
+[Repository component](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/repository.md#platform-connector-and-platform-implementations)
+decodes the platform payload; Scheduler core consumes that decoded delivery
+rather than interpreting platform JSON.
 
 The observer resolves the repository binding, object address, node and attempt;
 correlation needs no surviving originating runtime. An ambiguous or out-of-order
