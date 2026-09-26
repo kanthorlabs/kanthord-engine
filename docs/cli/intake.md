@@ -353,8 +353,8 @@ its source binding and exactly one project. Read only; take no idempotency key.
 Payload inclusion remains **[blocked][intake-contract]**.
 
 **Statuses:** `200` with the delivery, `400` for an invalid identity, or `404`
-with `intake.delivery.not_found` when no retained delivery has that identity.
-The read does not promise indefinite retention of resolved deliveries.
+with `intake.delivery.not_found` when no delivery has that identity.
+The record of a resolved delivery stays; the read does not promise indefinite retention of its payload.
 
 ### Handoff and disposition
 
@@ -406,7 +406,7 @@ a platform signature with a human JWT.
 A poll and a stream have no receipt route because the Intake Service initiates
 them. A poll pauses beyond capacity. A stream closes beyond capacity with
 observed state `failed` and reason capacity. The Intake Service never removes an unresolved
-delivery and bounds retention of resolved deliveries. It promises durability
+delivery, keeps the record of a resolved delivery and bounds the retention of its payload. It promises durability
 for accepted deliveries, not receipt of every update a platform produces.
 
 The [Gateway delivery ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#delivery-bytes-and-body-limits) requires `/hooks/*` support and exact bytes without JSON validation.
@@ -452,7 +452,7 @@ as namespace. Proposed Intake codes are:
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `intake.subscription.duplicate_kind`          | A uniqueness conflict on source binding and kind, proposed `409`; ordinary natural-key repeats return the existing subscription. Incompatible-input admission remains **[blocked][intake-contract]**. |
 | `intake.subscription.source_binding_disabled` | Disabled-source admission remains **[blocked][intake-contract]**.                                                                                                                                     |
-| `intake.delivery.not_found`                   | No retained Intake delivery matches the get identity; proposed `404`.                                                                                                                                 |
+| `intake.delivery.not_found`                   | No Intake delivery matches the get identity; proposed `404`.                                                                                                                                          |
 
 ## Optional design provenance
 
