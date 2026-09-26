@@ -90,7 +90,7 @@ commands without `[L]` reject pagination options.
 - `ProjectId`: opaque `project_<ulid>` string; the ULID suffix is canonical,
   uppercase, and 26 characters. Reject bare ULIDs and other entity prefixes.
 - `BindingId`: `binding_<ulid>`, under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
-- `CredentialId`: `credential_<ulid>`, under the [custody record contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-record).
+- `CredentialName`: the name of a custody credential, under the [custody record contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-record). A binding names a credential and never a revision.
 - A `BindingId` names one revision of a binding, and a record pins it. The latest revision of a binding states its current configuration.
 - Binding-set `version`: positive JSON safe integer that the service returns; the caller copies it without arithmetic.
   A new project starts at binding-set version `1`.
@@ -290,7 +290,7 @@ This example uses the proposed kind-specific fields below:
             "follows": { "type": "assessment_passed" }
           }
         },
-        "credential": "credential_01J8Z3N5K7Q2W4E6R8T0Y2V4X7"
+        "credential": "github-kanthorlabs"
       }
     },
     "general-main": {
@@ -322,7 +322,7 @@ Common to every `config`:
 - `address`: **required**, nonblank SSH repository address; no default. An HTTPS address fails. The adapter validates and normalizes the repository address.
 - Unsupported addresses and contradictory platform/address combinations fail.
 - `strategy`: **required**, `RepositoryStrategy` object below. It has no inferred base branch, action or trigger.
-- `credential`: **required**, one `CredentialId` of platform `github` and type `api_key`; no default. It serves every platform action and the observer read. Git uses the SSH configuration of the host.
+- `credential`: **required**, one `CredentialName` of platform `github`; no default. It serves every platform action and the observer read. Git uses the SSH configuration of the host.
 - `projectPrompt`: **optional**, string, absent by default. Absence contributes no binding-provided prompt to Worker prompt composition.
 - The project prompt holds at most 32768 UTF-8 bytes. A larger value refuses the write with `project.bindings.repository.project_prompt_too_large`.
 - The JSON file holds the prompt text, not a client-side path.
@@ -411,11 +411,11 @@ Its `config` holds `available` and these required fields, with no defaults:
 - `bucket`: nonblank bucket name, such as `atlas-evidence`.
 - `region`: nonblank region.
 - `prefix`: text for the server-generated object-key prefix.
-- `credential`: `CredentialId` reference to a custody record, never inline secret material.
+- `credential`: `CredentialName` of a custody credential, never inline secret material.
 
-`credential` names a record of platform `s3` and type `s3_access_key` under the [storage configuration contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#storage-configuration).
-The [credential type contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-record) defines its key pair, suitability and session-token exclusion.
-The service validates field types, the endpoint URL, the custody reference and project cardinality at write and resolution.
+`credential` names a credential of platform `s3` under the [storage configuration contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#storage-configuration).
+The [credential record contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-record) defines its key pair, suitability and session-token exclusion.
+The service validates field types, the endpoint URL and the custody reference at write and resolution.
 Its use check sends `{ credential, platform: s3 }` to custody and compares no
 metadata. The endpoint, bucket, region and prefix here serve work; credential
 metadata serves the healthcheck. A key for another S3 service can pass the use
@@ -523,8 +523,8 @@ one. Proposed item fields are:
 - `effective`, present only when the Worker Service resolves and validates it:
   `agentProvider`, `provider`, `credential`, `modelIdentifier` and `reasoningEffort`.
   An invalid result permits no fallback.
-- `revisions`: proposed object with `workerBinding`, `entry`, `enablement` and
-  `credentialMetadata` revision values supplied by the Worker snapshot. `workerBinding` and `entry` are `BindingId` values.
+- `revisions`: proposed object with `workerBinding`, `entry` and `enablement`
+  revision values supplied by the Worker snapshot. `workerBinding` and `entry` are `BindingId` values.
   `entry` is the binding revision when an entry exists, otherwise `null`.
 - `valid`, boolean; and `issues`, an array of proposed `{ path, code }` objects
   describing invalid configuration without secret values. `path` is an array
