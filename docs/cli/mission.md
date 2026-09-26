@@ -26,7 +26,7 @@ mechanical baseline. In particular, current machine identity types do not establ
 execution identity by themselves.
 
 One project has one mission: its initiatives, objectives, tasks and relations.
-The proposal contains **70 leaf commands**: 69 remote commands and one host-local upload helper.
+The proposal contains **73 leaf commands**: 72 remote commands and one host-local upload helper.
 They use **71 Mission operations**, because the upload helper calls begin and complete.
 Group help is not a leaf.
 A mission exists from project creation, empty at mission revision 1. No operation creates or deletes a mission. Project discovery
@@ -167,7 +167,7 @@ command. Operation IDs identify proposed Mission operations, not functions
 already declared in source. Every mutation has `[M]`; lists have `[L]`.
 The host-local upload helper combines two remote operations instead of one.
 
-### Mission, graph, changes, nodes and criterion — 18 commands
+### Mission, graph, changes, nodes and criterion — 19 commands
 
 | #   | Synopsis after `kanthord mission`                                                                       | Proposed HTTP route                                        | Proposed operation                                          | Access |
 | --- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------- | ------ |
@@ -189,6 +189,7 @@ The host-local upload helper combines two remote operations instead of one.
 | 16  | `criterion set <node-id> --file <path> [M]`                                                             | `PUT /api/mission/node/:nodeId/criterion`                  | `mission.criterion.set` **[blocked][mission-contract]**     | H      |
 | 17  | `node retire preview <node-id> [--force]`                                                               | `GET /api/mission/node/:nodeId/retire/preview`             | `mission.node.retire.preview`                               | H      |
 | 18  | `node retire <node-id> --file <path> [--force] [M]`                                                     | `POST /api/mission/node/:nodeId/retire`                    | `mission.node.retire` **[blocked][mission-contract]**       | H      |
+| 19  | `node rebind <mission-id> <binding-id> [--node <node-id>] --file <path> [M]`                            | `POST /api/mission/:missionId/rebind`                      | `mission.node.rebind`                                       | H      |
 
 All positional IDs are required, typed as their names indicate, and have no
 default. `<depends-on-id>` is a `NodeId`. `<revision>` is a positive safe integer.
@@ -235,6 +236,7 @@ that the current outcome of that objective pins.
   updates the task inside the objective revision. A node with an attempt remains
   editable by human override authority while nonterminal; import admission
   conditions do not govern this human update.
+- `node rebind` accepts `Rebind` and returns the `NodeChange` of the act and the skipped nodes. It moves the pinned binding revision of one node, or of every node of the mission, to `<binding-id>`, a later revision of the same binding, under [the rebind](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-rebind). It admits every node that is not terminal and not retired, and the new revision applies at the next attempt.
 - `node move` accepts `Move`, returns `NodeChange`, and changes containment
   atomically, including affected child sets. A task can move only to an objective,
   and that move revises both objectives; an objective moves only to an initiative
@@ -266,9 +268,9 @@ that the current outcome of that objective pins.
 
 | #   | Synopsis after `kanthord mission`                              | Proposed HTTP route                             | Proposed operation                                       | Access |
 | --- | -------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------- | ------ |
-| 19  | `import preview <mission-id> --file <path> [<plan-file>...]`   | `POST /api/mission/:missionId/import/preview`   | `mission.import.preview` **[blocked][mission-contract]** | H      |
-| 20  | `import apply <mission-id> --file <path> [<plan-file>...] [M]` | `POST /api/mission/:missionId/import`           | `mission.import.apply` **[blocked][mission-contract]**   | H      |
-| 21  | `import get <mission-id> <request-id>`                         | `GET /api/mission/:missionId/import/:requestId` | `mission.import.get` **[blocked][mission-contract]**     | H      |
+| 20  | `import preview <mission-id> --file <path> [<plan-file>...]`   | `POST /api/mission/:missionId/import/preview`   | `mission.import.preview` **[blocked][mission-contract]** | H      |
+| 21  | `import apply <mission-id> --file <path> [<plan-file>...] [M]` | `POST /api/mission/:missionId/import`           | `mission.import.apply` **[blocked][mission-contract]**   | H      |
+| 22  | `import get <mission-id> <request-id>`                         | `GET /api/mission/:missionId/import/:requestId` | `mission.import.get` **[blocked][mission-contract]**     | H      |
 
 - `<mission-id>` and `<request-id>` are required `MissionId` and `RequestId` values.
 - Preview accepts `ImportSnapshot`; apply accepts `ImportApply`.
@@ -307,7 +309,7 @@ authorship/approval. Attribution records the submitting human only.
 
 | #   | Synopsis after `kanthord mission`                                | Proposed HTTP route                  | Proposed operation | Access |
 | --- | ---------------------------------------------------------------- | ------------------------------------ | ------------------ | ------ |
-| 22  | `export <mission-id> --format <markdown\|json> --out <path> [R]` | `GET /api/mission/:missionId/export` | `mission.export`   | H      |
+| 23  | `export <mission-id> --format <markdown\|json> --out <path> [R]` | `GET /api/mission/:missionId/export` | `mission.export`   | H      |
 
 - The required `--format` maps to the query `format=markdown` or `format=json`, with no default.
 - The required `<mission-id>` is a `MissionId`; access is `human`.
@@ -327,17 +329,17 @@ authorship/approval. Attribution records the submitting human only.
 
 | #   | Synopsis after `kanthord mission`                             | Proposed HTTP route                                | Proposed operation                                      | Access |
 | --- | ------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------- | ------ |
-| 23  | `node priority set <node-id> --file <path> [M]`               | `POST /api/mission/node/:nodeId/priority`          | `mission.node.priority.set`                             | H      |
-| 24  | `node priority list <node-id> [L]`                            | `GET /api/mission/node/:nodeId/priority`           | `mission.node.priority.list`                            | H      |
-| 25  | `node pause <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/pause`             | `mission.node.pause` **[blocked][mission-recovery]**    | H      |
-| 26  | `node resume <node-id> --file <path> [M]`                     | `POST /api/mission/node/:nodeId/resume`            | `mission.node.resume` **[blocked][mission-contract]**   | H      |
-| 27  | `node block <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/block`             | `mission.node.block` **[blocked][mission-contract]**    | H      |
-| 28  | `node unblock <node-id> --file <path> [M]`                    | `POST /api/mission/node/:nodeId/unblock`           | `mission.node.unblock` **[blocked][mission-contract]**  | H      |
-| 29  | `node ready <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/ready`             | `mission.node.ready`                                    | H      |
-| 30  | `node override <node-id> --result <result> --file <path> [M]` | `POST /api/mission/node/:nodeId/override`          | `mission.node.override` **[blocked][mission-contract]** | H      |
-| 31  | `node discard <node-id> --file <path> [M]`                    | `POST /api/mission/node/:nodeId/discard`           | `mission.node.discard` **[blocked][mission-contract]**  | H      |
-| 32  | `unblock list <node-id> [L]`                                  | `GET /api/mission/node/:nodeId/unblock`            | `mission.unblock.list`                                  | H      |
-| 33  | `unblock get <node-id> <request-id>`                          | `GET /api/mission/node/:nodeId/unblock/:requestId` | `mission.unblock.get`                                   | H      |
+| 24  | `node priority set <node-id> --file <path> [M]`               | `POST /api/mission/node/:nodeId/priority`          | `mission.node.priority.set`                             | H      |
+| 25  | `node priority list <node-id> [L]`                            | `GET /api/mission/node/:nodeId/priority`           | `mission.node.priority.list`                            | H      |
+| 26  | `node pause <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/pause`             | `mission.node.pause` **[blocked][mission-recovery]**    | H      |
+| 27  | `node resume <node-id> --file <path> [M]`                     | `POST /api/mission/node/:nodeId/resume`            | `mission.node.resume` **[blocked][mission-contract]**   | H      |
+| 28  | `node block <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/block`             | `mission.node.block` **[blocked][mission-contract]**    | H      |
+| 29  | `node unblock <node-id> --file <path> [M]`                    | `POST /api/mission/node/:nodeId/unblock`           | `mission.node.unblock` **[blocked][mission-contract]**  | H      |
+| 30  | `node ready <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/ready`             | `mission.node.ready`                                    | H      |
+| 31  | `node override <node-id> --result <result> --file <path> [M]` | `POST /api/mission/node/:nodeId/override`          | `mission.node.override` **[blocked][mission-contract]** | H      |
+| 32  | `node discard <node-id> --file <path> [M]`                    | `POST /api/mission/node/:nodeId/discard`           | `mission.node.discard` **[blocked][mission-contract]**  | H      |
+| 33  | `unblock list <node-id> [L]`                                  | `GET /api/mission/node/:nodeId/unblock`            | `mission.unblock.list`                                  | H      |
+| 34  | `unblock get <node-id> <request-id>`                          | `GET /api/mission/node/:nodeId/unblock/:requestId` | `mission.unblock.get`                                   | H      |
 
 `<node-id>` is required; state-changing controls accept initiatives/objectives
 only. `<request-id>` is the accepted unblock's required `RequestId`.
@@ -411,29 +413,29 @@ All controls recheck admission at commit. Human-control race precedence remains 
 
 | #   | Synopsis after `kanthord mission`                                       | Proposed HTTP route                                     | Proposed operation                                                  | Access |
 | --- | ----------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------- | ------ |
-| 34  | `attempt list <node-id> [L]`                                            | `GET /api/mission/node/:nodeId/attempt`                 | `mission.attempt.list` **[blocked][mission-contract]**              | H      |
-| 35  | `attempt get <node-id> <attempt>`                                       | `GET /api/mission/node/:nodeId/attempt/:attempt`        | `mission.attempt.get` **[blocked][mission-contract]**               | H      |
-| 36  | `evidence list <node-id> [--attempt <attempt>] [L]`                     | `GET /api/mission/node/:nodeId/evidence`                | `mission.evidence.list` **[blocked][mission-contract]**             | H      |
-| 37  | `evidence get <evidence-id>`                                            | `GET /api/mission/evidence/:evidenceId`                 | `mission.evidence.get` **[blocked][mission-contract]**              | H      |
-| 38  | `evidence submit <node-id> --file <path> [M]`                           | `POST /api/mission/node/:nodeId/evidence`               | `mission.evidence.submit` **[blocked][mission-contract]**           | E      |
-| 39  | `evidence content get <evidence-id>`                                    | `GET /api/mission/evidence/:evidenceId/content`         | `mission.evidence.content.get` **[blocked][mission-contract]**      | H      |
-| 40  | `evidence upload <node-id> <path> [M]`                                  | Host-local helper; begin and complete routes below      | `mission.evidence.upload.begin`, `mission.evidence.upload.complete` | E      |
-| 41  | `run-output list <node-id> [--attempt <attempt>] [L]`                   | `GET /api/mission/node/:nodeId/run-output`              | `mission.runOutput.list` **[blocked][mission-contract]**            | H      |
-| 42  | `run-output get <node-id> <execution-id>`                               | `GET /api/mission/node/:nodeId/run-output/:executionId` | `mission.runOutput.get` **[blocked][mission-contract]**             | H      |
-| 43  | `run-output submit <node-id> --file <path> [M]`                         | `POST /api/mission/node/:nodeId/run-output`             | `mission.runOutput.submit` **[blocked][mission-contract]**          | E      |
-| 44  | `evaluation list <node-id> [--attempt <attempt>] [L]`                   | `GET /api/mission/node/:nodeId/evaluation`              | `mission.evaluation.list` **[blocked][mission-contract]**           | H      |
-| 45  | `evaluation get <evaluation-id>`                                        | `GET /api/mission/evaluation/:evaluationId`             | `mission.evaluation.get` **[blocked][mission-contract]**            | H      |
-| 46  | `assessment list <node-id> [--attempt <attempt>] [L]`                   | `GET /api/mission/node/:nodeId/assessment`              | `mission.assessment.list` **[blocked][mission-contract]**           | H      |
-| 47  | `assessment get <assessment-id>`                                        | `GET /api/mission/assessment/:assessmentId`             | `mission.assessment.get` **[blocked][mission-contract]**            | H      |
-| 48  | `assessment submit <node-id> --file <path> [M]`                         | `POST /api/mission/node/:nodeId/assessment`             | `mission.assessment.submit` **[blocked][mission-contract]**         | E      |
-| 49  | `outcome list <node-id> [--attempt <attempt>] [L]`                      | `GET /api/mission/node/:nodeId/outcome`                 | `mission.outcome.list` **[blocked][mission-contract]**              | H      |
-| 50  | `outcome get <outcome-id>`                                              | `GET /api/mission/outcome/:outcomeId`                   | `mission.outcome.get` **[blocked][mission-contract]**               | H      |
-| 51  | `task-result submit <task-id> --file <path> [M]`                        | `POST /api/mission/node/:taskId/task-result`            | `mission.taskResult.submit` **[blocked][mission-contract]**         | E      |
-| 52  | `evidence pending list <mission-id> [L]`                                | `GET /api/mission/:missionId/evidence/pending`          | `mission.evidence.pending.list`                                     | H      |
-| 53  | `evidence pending cleanup <mission-id> [M]`                             | `POST /api/mission/:missionId/evidence/pending/cleanup` | `mission.evidence.pending.cleanup`                                  | H      |
-| 54  | `evidence content remove <evidence-id> [--force] [--reason <text>] [M]` | `DELETE /api/mission/evidence/:evidenceId/content`      | `mission.evidence.content.remove` **[blocked][mission-contract]**   | H      |
+| 35  | `attempt list <node-id> [L]`                                            | `GET /api/mission/node/:nodeId/attempt`                 | `mission.attempt.list` **[blocked][mission-contract]**              | H      |
+| 36  | `attempt get <node-id> <attempt>`                                       | `GET /api/mission/node/:nodeId/attempt/:attempt`        | `mission.attempt.get` **[blocked][mission-contract]**               | H      |
+| 37  | `evidence list <node-id> [--attempt <attempt>] [L]`                     | `GET /api/mission/node/:nodeId/evidence`                | `mission.evidence.list` **[blocked][mission-contract]**             | H      |
+| 38  | `evidence get <evidence-id>`                                            | `GET /api/mission/evidence/:evidenceId`                 | `mission.evidence.get` **[blocked][mission-contract]**              | H      |
+| 39  | `evidence submit <node-id> --file <path> [M]`                           | `POST /api/mission/node/:nodeId/evidence`               | `mission.evidence.submit` **[blocked][mission-contract]**           | E      |
+| 40  | `evidence content get <evidence-id>`                                    | `GET /api/mission/evidence/:evidenceId/content`         | `mission.evidence.content.get` **[blocked][mission-contract]**      | H      |
+| 41  | `evidence upload <node-id> <path> [M]`                                  | Host-local helper; begin and complete routes below      | `mission.evidence.upload.begin`, `mission.evidence.upload.complete` | E      |
+| 42  | `run-output list <node-id> [--attempt <attempt>] [L]`                   | `GET /api/mission/node/:nodeId/run-output`              | `mission.runOutput.list` **[blocked][mission-contract]**            | H      |
+| 43  | `run-output get <node-id> <execution-id>`                               | `GET /api/mission/node/:nodeId/run-output/:executionId` | `mission.runOutput.get` **[blocked][mission-contract]**             | H      |
+| 44  | `run-output submit <node-id> --file <path> [M]`                         | `POST /api/mission/node/:nodeId/run-output`             | `mission.runOutput.submit` **[blocked][mission-contract]**          | E      |
+| 45  | `evaluation list <node-id> [--attempt <attempt>] [L]`                   | `GET /api/mission/node/:nodeId/evaluation`              | `mission.evaluation.list` **[blocked][mission-contract]**           | H      |
+| 46  | `evaluation get <evaluation-id>`                                        | `GET /api/mission/evaluation/:evaluationId`             | `mission.evaluation.get` **[blocked][mission-contract]**            | H      |
+| 47  | `assessment list <node-id> [--attempt <attempt>] [L]`                   | `GET /api/mission/node/:nodeId/assessment`              | `mission.assessment.list` **[blocked][mission-contract]**           | H      |
+| 48  | `assessment get <assessment-id>`                                        | `GET /api/mission/assessment/:assessmentId`             | `mission.assessment.get` **[blocked][mission-contract]**            | H      |
+| 49  | `assessment submit <node-id> --file <path> [M]`                         | `POST /api/mission/node/:nodeId/assessment`             | `mission.assessment.submit` **[blocked][mission-contract]**         | E      |
+| 50  | `outcome list <node-id> [--attempt <attempt>] [L]`                      | `GET /api/mission/node/:nodeId/outcome`                 | `mission.outcome.list` **[blocked][mission-contract]**              | H      |
+| 51  | `outcome get <outcome-id>`                                              | `GET /api/mission/outcome/:outcomeId`                   | `mission.outcome.get` **[blocked][mission-contract]**               | H      |
+| 52  | `task-result submit <task-id> --file <path> [M]`                        | `POST /api/mission/node/:taskId/task-result`            | `mission.taskResult.submit` **[blocked][mission-contract]**         | E      |
+| 53  | `evidence pending list <mission-id> [L]`                                | `GET /api/mission/:missionId/evidence/pending`          | `mission.evidence.pending.list`                                     | H      |
+| 54  | `evidence pending cleanup <mission-id> [M]`                             | `POST /api/mission/:missionId/evidence/pending/cleanup` | `mission.evidence.pending.cleanup`                                  | H      |
+| 55  | `evidence content remove <evidence-id> [--force] [--reason <text>] [M]` | `DELETE /api/mission/evidence/:evidenceId/content`      | `mission.evidence.content.remove` **[blocked][mission-contract]**   | H      |
 
-Row 38 is the host-local upload helper; the other 20 commands in this group are remote leaves.
+Row 41 is the host-local upload helper; the other 20 commands in this group are remote leaves.
 Every positional is required. `<task-id>` is a `NodeId` of kind task.
 `--attempt` accepts a nonnegative safe integer, including 0.
 A positional `<attempt>` names an opened attempt and requires a positive safe integer.
@@ -458,7 +460,7 @@ objective. A task attempt is not manufactured for convenience.
   A repository reference returns a typed unavailable-content result that points to the address, never a repository snapshot.
   Inline content holds at most 5 MiB decoded; larger inline content answers 413 `mission.evidence.too_large`.
   Object content holds at most 5 GiB.
-  Without a storage binding, only inline evidence content is accepted.
+  A node without a storage binding accepts only inline evidence content.
   No submission truncates or alters evidence content.
 - Two independent observations of identical bytes may produce distinct evidence
   records. Repeating an unchanged address with no new observation does not.
@@ -517,12 +519,12 @@ effect. A completed historical record remains attributed to its original attempt
 
 | #   | Synopsis after `kanthord mission`                          | Proposed HTTP route                                                         | Proposed operation                                            | Access |
 | --- | ---------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------- | ------ |
-| 55  | `external-action list <node-id> [--attempt <attempt>] [L]` | `GET /api/mission/node/:nodeId/external-action`                             | `mission.externalAction.list` **[blocked][mission-contract]** | H      |
-| 56  | `external-action get <node-id> <attempt> <action-key>`     | `GET /api/mission/node/:nodeId/attempt/:attempt/external-action/:actionKey` | `mission.externalAction.get` **[blocked][mission-contract]**  | H      |
-| 57  | `external-object list <node-id> [--attempt <attempt>] [L]` | `GET /api/mission/node/:nodeId/external-object`                             | `mission.externalObject.list` **[blocked][mission-contract]** | H      |
-| 58  | `external-object get <external-object-id>`                 | `GET /api/mission/external-object/:externalObjectId`                        | `mission.externalObject.get` **[blocked][mission-contract]**  | H      |
-| 59  | `observation list <node-id> [--attempt <attempt>] [L]`     | `GET /api/mission/node/:nodeId/observation`                                 | `mission.observation.list` **[blocked][mission-contract]**    | H      |
-| 60  | `observation get <observation-id>`                         | `GET /api/mission/observation/:observationId`                               | `mission.observation.get` **[blocked][mission-contract]**     | H      |
+| 56  | `external-action list <node-id> [--attempt <attempt>] [L]` | `GET /api/mission/node/:nodeId/external-action`                             | `mission.externalAction.list` **[blocked][mission-contract]** | H      |
+| 57  | `external-action get <node-id> <attempt> <action-key>`     | `GET /api/mission/node/:nodeId/attempt/:attempt/external-action/:actionKey` | `mission.externalAction.get` **[blocked][mission-contract]**  | H      |
+| 58  | `external-object list <node-id> [--attempt <attempt>] [L]` | `GET /api/mission/node/:nodeId/external-object`                             | `mission.externalObject.list` **[blocked][mission-contract]** | H      |
+| 59  | `external-object get <external-object-id>`                 | `GET /api/mission/external-object/:externalObjectId`                        | `mission.externalObject.get` **[blocked][mission-contract]**  | H      |
+| 60  | `observation list <node-id> [--attempt <attempt>] [L]`     | `GET /api/mission/node/:nodeId/observation`                                 | `mission.observation.list` **[blocked][mission-contract]**    | H      |
+| 61  | `observation get <observation-id>`                         | `GET /api/mission/observation/:observationId`                               | `mission.observation.get` **[blocked][mission-contract]**     | H      |
 
 All positionals are required. `<action-key>` is a Project-defined natural key
 in that attempt's frozen action set. `--attempt` follows the all-attempts default
@@ -564,18 +566,18 @@ The execution identity is the first positional in every synopsis. The server der
 
 | #   | Synopsis after `kanthord mission`                             | Proposed HTTP route                                                    | Proposed operation                                                          | Access |
 | --- | ------------------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------ |
-| 61  | `execution pinned-revision get <execution-id>`                | `GET /api/mission/execution/:executionId/pinned-revision`              | `mission.execution.pinnedRevision.get` **[blocked][mission-contract]**      | E      |
-| 62  | `execution revision list <execution-id> [L]`                  | `GET /api/mission/execution/:executionId/revision`                     | `mission.execution.revision.list` **[blocked][mission-contract]**           | E      |
-| 63  | `execution revision get <execution-id> <revision>`            | `GET /api/mission/execution/:executionId/revision/:revision`           | `mission.execution.revision.get` **[blocked][mission-contract]**            | E      |
-| 64  | `execution run-output list <execution-id> [L]`                | `GET /api/mission/execution/:executionId/run-output`                   | `mission.execution.runOutput.list` **[blocked][mission-contract]**          | E      |
-| 65  | `execution task-outcome list <execution-id> [L]`              | `GET /api/mission/execution/:executionId/task-outcome`                 | `mission.execution.taskOutcome.list` **[blocked][mission-contract]**        | E      |
-| 66  | `execution evidence list <execution-id> [L]`                  | `GET /api/mission/execution/:executionId/evidence`                     | `mission.execution.evidence.list` **[blocked][mission-contract]**           | E      |
-| 67  | `execution evidence content get <execution-id> <evidence-id>` | `GET /api/mission/execution/:executionId/evidence/:evidenceId/content` | `mission.execution.evidence.content.get` **[blocked][mission-contract]**    | E      |
-| 68  | `execution objective list <execution-id> [L]`                 | `GET /api/mission/execution/:executionId/objective`                    | `mission.execution.objective.list` **[blocked][mission-contract]**          | E      |
-| 69  | `execution objective outcome list <execution-id> [L]`         | `GET /api/mission/execution/:executionId/objective/outcome`            | `mission.execution.objective.outcome.list` **[blocked][mission-contract]**  | E      |
-| 70  | `execution objective evidence list <execution-id> [L]`        | `GET /api/mission/execution/:executionId/objective/evidence`           | `mission.execution.objective.evidence.list` **[blocked][mission-contract]** | E      |
-| 71  | `execution cleared-outcome get <execution-id>`                | `GET /api/mission/execution/:executionId/cleared-outcome`              | `mission.execution.clearedOutcome.get` **[blocked][mission-contract]**      | E      |
-| 72  | `execution unblock get <execution-id>`                        | `GET /api/mission/execution/:executionId/unblock`                      | `mission.execution.unblock.get`                                             | E      |
+| 62  | `execution pinned-revision get <execution-id>`                | `GET /api/mission/execution/:executionId/pinned-revision`              | `mission.execution.pinnedRevision.get` **[blocked][mission-contract]**      | E      |
+| 63  | `execution revision list <execution-id> [L]`                  | `GET /api/mission/execution/:executionId/revision`                     | `mission.execution.revision.list` **[blocked][mission-contract]**           | E      |
+| 64  | `execution revision get <execution-id> <revision>`            | `GET /api/mission/execution/:executionId/revision/:revision`           | `mission.execution.revision.get` **[blocked][mission-contract]**            | E      |
+| 65  | `execution run-output list <execution-id> [L]`                | `GET /api/mission/execution/:executionId/run-output`                   | `mission.execution.runOutput.list` **[blocked][mission-contract]**          | E      |
+| 66  | `execution task-outcome list <execution-id> [L]`              | `GET /api/mission/execution/:executionId/task-outcome`                 | `mission.execution.taskOutcome.list` **[blocked][mission-contract]**        | E      |
+| 67  | `execution evidence list <execution-id> [L]`                  | `GET /api/mission/execution/:executionId/evidence`                     | `mission.execution.evidence.list` **[blocked][mission-contract]**           | E      |
+| 68  | `execution evidence content get <execution-id> <evidence-id>` | `GET /api/mission/execution/:executionId/evidence/:evidenceId/content` | `mission.execution.evidence.content.get` **[blocked][mission-contract]**    | E      |
+| 69  | `execution objective list <execution-id> [L]`                 | `GET /api/mission/execution/:executionId/objective`                    | `mission.execution.objective.list` **[blocked][mission-contract]**          | E      |
+| 70  | `execution objective outcome list <execution-id> [L]`         | `GET /api/mission/execution/:executionId/objective/outcome`            | `mission.execution.objective.outcome.list` **[blocked][mission-contract]**  | E      |
+| 71  | `execution objective evidence list <execution-id> [L]`        | `GET /api/mission/execution/:executionId/objective/evidence`           | `mission.execution.objective.evidence.list` **[blocked][mission-contract]** | E      |
+| 72  | `execution cleared-outcome get <execution-id>`                | `GET /api/mission/execution/:executionId/cleared-outcome`              | `mission.execution.clearedOutcome.get` **[blocked][mission-contract]**      | E      |
+| 73  | `execution unblock get <execution-id>`                        | `GET /api/mission/execution/:executionId/unblock`                      | `mission.execution.unblock.get`                                             | E      |
 
 The reads return the same record schemas as the human reads and never a revision newer than the pinned one.
 The pinned-revision read returns `Revision` with tasks and the complete node content.
@@ -604,9 +606,9 @@ The path never serves as an evidence address or a server-side path argument.
 | `mission.evidence.upload.complete` | `POST /api/mission/evidence/:evidenceId/upload/complete` | `ExecutionContext`    | `EvidenceUploadResult`  | E      |
 
 1. The component calls begin with the size, media type, optional SHA-256, execution context and evidence metadata.
-   The server checks the live claim, node or task scope, storage binding and 5 GiB single-object limit.
+   The server checks the live claim, node or task scope, the storage binding of the pinned revision and 5 GiB single-object limit.
    It creates a pending record with the server-generated key `<prefix>/<project>/<mission>/<node>/<attempt>/<evidence id>`.
-   The record names the storage binding identity and revision.
+   The record pins that storage binding revision in `storageBindingId`.
    The answer supplies a presigned PUT with a lifetime of 1 hour.
    The checksum header is required only when begin supplies a SHA-256.
 2. The component sends the bytes directly to the store through that PUT, with no proxy through the server.
@@ -677,6 +679,7 @@ from fields whose authoritative schema is still absent.
 | `Content`      | Required `name: Text`, `requirement: Text`, `criterion: Text`, `verifications: Text[]`, `bindings: Text[]`. All text fields are nonblank. The name is a title, not an identity, and is not unique. The criterion can hold several checkable statements. Verifications form a nonempty ordered list; each item is a nonblank bash command. Bindings are project binding names; the rule table below decides counts per node kind. The write resolves names to identities. No implicit verification or arbitrary extra field exists. |
 | `NodeCreate`   | Required `file: PlanFileName`, `kind: "initiative" \| "objective" \| "task"`, `content: Content`, `reason: Text`, `expectedMissionRevision: positive integer`. `parentId: NodeId` and `expectedParentRevision: positive integer` required for objectives/tasks and forbidden for initiatives. No supplied new node ID. Dependencies are separate validated graph operations or part of an atomic import.                                                                                                                           |
 | `NodeUpdate`   | Required `expectedRevision: positive integer`, `file: PlanFileName`, `content: Content`, `reason: Text`. For a task, expected revision is its objective's. Full content replacement, not a partial merge; omitted content fields are errors. No `state`, `attempt`, `actor` or `priority`.                                                                                                                                                                                                                                         |
+| `Rebind`       | Required `bindingId: BindingId`, `reason: Text`, `expectedMissionRevision: positive integer`; optional `nodeId: NodeId`. Without `nodeId` the act covers every node of the mission. `<binding-id>` supplies `bindingId`.                                                                                                                                                                                                                                                                                                           |
 | `GraphEdit`    | Required `expectedMissionRevision: positive integer`, `reason: Text`. Endpoints are required CLI positionals. Duplicate addition/absent removal is proposed as a no-op only after authorization; replay returns the originally accepted result.                                                                                                                                                                                                                                                                                    |
 | `Move`         | Required `expectedMissionRevision: positive integer`, `expectedRevision: positive integer`, `newParentId: NodeId`, `expectedOldParentRevision: positive integer`, `expectedNewParentRevision: positive integer`, `reason: Text`. Old parent is read from the graph; no caller-authored old-parent identity overrides it.                                                                                                                                                                                                           |
 | `Retire`       | Required `expectedMissionRevision: positive integer`, `previewDigest: SHA256`, `reason: Text`. `force` comes from the `--force` flag.                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -691,13 +694,11 @@ from fields whose authoritative schema is still absent.
 - The [node content rules](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-node-content) govern every content write, import and unblock content change.
 - Identity, kind, revision, state, attempt, priority and edges stay outside content.
 
-| Binding kind     | Initiative | Objective | Task |
-| ---------------- | ---------- | --------- | ---- |
-| Repository       | 0          | Exactly 1 | 0    |
-| Worker           | 0          | 0         | 0    |
-| Provider account | 0          | 0         | 0    |
-| Source           | 0          | 0         | 0    |
-| Storage          | 0          | 0         | 0    |
+| Binding kind | Initiative | Objective | Task |
+| ------------ | ---------- | --------- | ---- |
+| Repository   | 0          | Exactly 1 | 0    |
+| Worker       | 0          | 0         | 0    |
+| Storage      | At most 1  | At most 1 | 0    |
 
 A new binding kind adds a row.
 An absent, blank or nontext `name`, `requirement` or `criterion` answers `mission.node.content_invalid`.
@@ -782,10 +783,10 @@ An execution submission always names an attempt of 1 or more, because a claim ex
 The [object evidence contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#object-evidence) defines the pending row and cleanup result below.
 Neither result carries a presigned URL.
 
-| Schema                         | Fields, requiredness and validation                                                                                                                                                                                                                                                                                                        |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `PendingUpload`                | Required `evidenceId: EvidenceId`, `missionId: MissionId`, `nodeId: NodeId`, `attempt: nonnegative integer`, `storageBindingId: BindingId`, `storageBindingRevision: positive integer`, `location: string` as an `s3://` URI, `expiresAt: Timestamp`, `cleanedUp: boolean`. The list selects expired pending uploads of the named mission. |
-| `EvidencePendingCleanupResult` | Required `missionId: MissionId`, `cleanedUpEvidenceIds: EvidenceId[]`. The array names the rows that this cleanup marks; it is empty when cleanup marks none.                                                                                                                                                                              |
+| Schema                         | Fields, requiredness and validation                                                                                                                                                                                                                                                            |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PendingUpload`                | Required `evidenceId: EvidenceId`, `missionId: MissionId`, `nodeId: NodeId`, `attempt: nonnegative integer`, `storageBindingId: BindingId`, `location: string` as an `s3://` URI, `expiresAt: Timestamp`, `cleanedUp: boolean`. The list selects expired pending uploads of the named mission. |
+| `EvidencePendingCleanupResult` | Required `missionId: MissionId`, `cleanedUpEvidenceIds: EvidenceId[]`. The array names the rows that this cleanup marks; it is empty when cleanup marks none.                                                                                                                                  |
 
 `EvidenceSubmit` accepts no object address; only complete publishes object evidence.
 The complete operation takes `ExecutionContext`; the route supplies its required `EvidenceId`.
@@ -867,8 +868,8 @@ The `attempt` of `ControlResult` is an attempt object or null, not a node-attemp
 | `ControlResult`    | `node: Node`, `attempt: Attempt \| null`, `outcome: Outcome \| null`, `taskOutcomeIds: OutcomeId[]`, `actor: Actor`, `acceptedAt: Timestamp`. Null means this act wrote no such record, not an unfinished implicit evaluation. An override, discard or block while the attempt reads 0 returns `attempt: null`. It returns the written outcome with `attempt: 0` and `taskOutcomeIds: []`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `UnblockRecord`    | `requestId: RequestId`, `nodeId: NodeId`, `clearedAttempt: nonnegative integer`, `openedAttempt: nonnegative integer`, `pinnedRevision: positive integer \| null`, `resultingRevision: positive integer`, `state: "Pending" \| "Available"`, `actor: Actor`, `createdAt: Timestamp`. When the attempt reads 0, `clearedAttempt` and `openedAttempt` hold 0, and `pinnedRevision` stays null. The act creates no attempt.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `Attempt`          | `nodeId: NodeId`, `attempt: nonnegative integer`, `nodeRevision: positive integer`, `requiredExternalActions: FrozenAction[]`, `openedAt: Timestamp`, `closedAt: Timestamp \| null`, `executionEnded: boolean`, `outcomeIds: OutcomeId[]`, optional `unblockRequestId: RequestId`. This record names an opened attempt of 1 or more. No live configuration refresh rewrites this record's frozen facts.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `FrozenAction`     | `key: Key`, `bindingId: BindingId`, `bindingRevision: positive integer`, `action: "pull_request" \| "merge_push"`, `expectedEndState: ExpectedEndState`, `follows: Key \| null`, `configuration: { baseBranch: Text }` under [the attempt](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-attempt). `follows` is null for a repository strategy. A further binding kind adds its own values with its design. Initiative array is empty.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `Evidence`         | `id: EvidenceId`, `nodeId: NodeId`, `attempt: nonnegative integer`, `nodeRevision: positive integer`, `subject: Text`, `scope: "node" \| "task"`, `address: Address`, `provenance: Actor`, `createdAt: Timestamp`, `redacted: boolean`, `removedBy: Actor \| null`, `removedReason: Text \| null`; optional `redactionDescription: Text`, `correctsEvidenceId: EvidenceId`, `machineCheck: MachineCheck`. The latter fields have the same conditional requiredness as `EvidenceSubmit`. Attempt 0 applies only to the landed-commit evidence of a success override. The override supplies that evidence while the attempt of its node reads 0. Object evidence also requires `storageBindingId: BindingId`, `storageBindingRevision: positive integer`, `size: nonnegative safe integer` and `mediaType: Text`.                                                                                                                                                                                                                  |
+| `FrozenAction`     | `key: Key`, `bindingId: BindingId`, `action: "pull_request" \| "merge_push"`, `expectedEndState: ExpectedEndState`, `follows: Key \| null`, `configuration: { baseBranch: Text }` under [the attempt](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-attempt). `follows` is null for a repository strategy. A further binding kind adds its own values with its design. Initiative array is empty.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `Evidence`         | `id: EvidenceId`, `nodeId: NodeId`, `attempt: nonnegative integer`, `nodeRevision: positive integer`, `subject: Text`, `scope: "node" \| "task"`, `address: Address`, `provenance: Actor`, `createdAt: Timestamp`, `redacted: boolean`, `removedBy: Actor \| null`, `removedReason: Text \| null`; optional `redactionDescription: Text`, `correctsEvidenceId: EvidenceId`, `machineCheck: MachineCheck`. The latter fields have the same conditional requiredness as `EvidenceSubmit`. Attempt 0 applies only to the landed-commit evidence of a success override. The override supplies that evidence while the attempt of its node reads 0. Object evidence also requires `storageBindingId: BindingId`, `size: nonnegative safe integer` and `mediaType: Text`.                                                                                                                                                                                                                                                              |
 | `StoredContent`    | Inline: `evidenceId: EvidenceId`, `address: ProducedAddress`, and all `ContentBytes` fields. Object: `evidenceId: EvidenceId`, `address: ObjectAddress`, `mediaType: Text`, `size: nonnegative safe integer`, `getUrl: string`, `expiresAt: Timestamp`. The object answer grants one GET to the reader's component. Removed content answers `ContentRemoved`. Repository-only evidence answers 409 `mission.evidence.content_repository` with the address in `details`, under the [evidence content rules](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#evidence-content).                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `RunOutput`        | All `RunOutputSubmit` fields plus `nodeId: NodeId`, `actor: Actor`, `acceptedAt: Timestamp`. Its natural key is `(nodeId, executionId)`, not an invented run-output ID.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `Evaluation`       | `id: EvaluationId`, `nodeId: NodeId`, `attempt: nonnegative integer`, `nodeRevision: positive integer`, `status: string`, `tries: EvaluationTry[]`, `assessmentIds: AssessmentId[]`. Evaluation status and retry budgets remain **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#policy-and-budgets)**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |

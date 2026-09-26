@@ -56,15 +56,8 @@ non-secret diagnostic. A supplied identity never proves authorization.
 | `CredentialId`   | `credential_<ulid>` under the [record contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-record). Canonical uppercase ULID matching `[0-7][0-9A-HJKMNP-TV-Z]{25}`; reject a bare ULID or another prefix. |
 | `CredentialName` | Human-selected server-wide unique name, 1 to 63 characters: lower-case letter first, then lower-case letters, digits and hyphens.                                                                                                                                      |
 | `LoginSessionId` | `login_session_<ulid>`, with the same canonical ULID validation.                                                                                                                                                                                                       |
-| `RemoteIdentity` | Three nonempty parts, `<namespace>:<identity kind>:<identifier>`. The identifier is the displayed login, slug or path, not a numeric identity.                                                                                                                         |
 | `Timestamp`      | JSON safe integer of Unix milliseconds in UTC.                                                                                                                                                                                                                         |
 | `Revision`       | Positive JSON safe integer returned by custody.                                                                                                                                                                                                                        |
-
-[Remote identity](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-remote-identity-of-a-record)
-records human intent. It neither routes validation nor proves authorization.
-Its namespace can differ from the credential platform: `copilot-login` has
-platform `github-copilot` and remote identity `github:user:ulrich`.
-Custody asks no remote to confirm this value. Rotation preserves it.
 
 ## Command inventory
 
@@ -72,16 +65,16 @@ Each synopsis follows `kanthord credential`. All eight commands have `[R]` and
 `human` access; five mutations have `[M]`, and one list has `[L]`.
 All paths below are proposed routes under the ruled `/api/credential` prefix.
 
-| #   | Synopsis after `kanthord credential`                                                        | Proposed HTTP route                          | Operation ID                 | Access/status     |
-| --- | ------------------------------------------------------------------------------------------- | -------------------------------------------- | ---------------------------- | ----------------- |
-| 1   | `create --file <path> [M] [R]`                                                              | `POST /api/credential`                       | `credential.create`          | `human`; proposed |
-| 2   | `list [--platform <platform>] [--type <type>] [--remote-identity <identity>] [L] [R]`       | `GET /api/credential`                        | `credential.list`            | `human`; proposed |
-| 3   | `get <credential-id> [R]`                                                                   | `GET /api/credential/:credentialId`          | `credential.get`             | `human`; proposed |
-| 4   | `rotate <credential-id> --file <path> [M] [R]`                                              | `PUT /api/credential/:credentialId/material` | `credential.rotate`          | `human`; proposed |
-| 5   | `update-metadata <credential-id> --file <path> [M] [R]`                                     | `PUT /api/credential/:credentialId/metadata` | `credential.update_metadata` | `human`; proposed |
-| 6   | `login <platform> [--mode browser\|device] --name <name> --remote-identity <value> [M] [R]` | `POST /api/credential/login`                 | `credential.login`           | `human`; proposed |
-| 7   | `login-code <session> <value> [M] [R]`                                                      | `POST /api/credential/login/:sessionId/code` | `credential.login_code`      | `human`; proposed |
-| 8   | `login-status <session> [R]`                                                                | `GET /api/credential/login/:sessionId`       | `credential.login_status`    | `human`; proposed |
+| #   | Synopsis after `kanthord credential`                              | Proposed HTTP route                          | Operation ID                 | Access/status     |
+| --- | ----------------------------------------------------------------- | -------------------------------------------- | ---------------------------- | ----------------- |
+| 1   | `create --file <path> [M] [R]`                                    | `POST /api/credential`                       | `credential.create`          | `human`; proposed |
+| 2   | `list [--platform <platform>] [L] [R]`                            | `GET /api/credential`                        | `credential.list`            | `human`; proposed |
+| 3   | `get <credential-id> [R]`                                         | `GET /api/credential/:credentialId`          | `credential.get`             | `human`; proposed |
+| 4   | `rotate <credential-id> --file <path> [M] [R]`                    | `PUT /api/credential/:credentialId/material` | `credential.rotate`          | `human`; proposed |
+| 5   | `update-metadata <credential-id> --file <path> [M] [R]`           | `PUT /api/credential/:credentialId/metadata` | `credential.update_metadata` | `human`; proposed |
+| 6   | `login <platform> [--mode browser\|device] --name <name> [M] [R]` | `POST /api/credential/login`                 | `credential.login`           | `human`; proposed |
+| 7   | `login-code <session> <value> [M] [R]`                            | `POST /api/credential/login/:sessionId/code` | `credential.login_code`      | `human`; proposed |
+| 8   | `login-status <session> [R]`                                      | `GET /api/credential/login/:sessionId`       | `credential.login_status`    | `human`; proposed |
 
 The static `/api/credential/login` path takes precedence over `/:credentialId`.
 These routes have no project identity. The proposed provider check is in
@@ -90,18 +83,17 @@ These routes have no project identity. The proposed provider check is in
 ## Record and platform schemas
 
 Every record answer holds `id: CredentialId`, `name: CredentialName`, `platform`,
-`type`, `metadata`, `remoteIdentity: RemoteIdentity`, `createdAt: Timestamp`,
+`metadata`, `createdAt: Timestamp`,
 `updatedAt: Timestamp` and `revision: Revision`. It never holds `secret`.
-`platform` is the closed enum `github | github-copilot | openai | anthropic | openai-compatible | s3`.
-`type` is the closed enum `api_key | oauth | s3_access_key`.
+`platform` is the closed enum `github | github-copilot | anthropic | openai-compatible | s3`.
+Each platform holds exactly one secret shape from `api_key | oauth | s3_access_key`.
 The [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#platform-validators)
-fix accepted pairs and metadata:
+fix the secret shape and the metadata of each platform:
 
-| Platform            | Accepted type   | Metadata                                 |
+| Platform            | Secret shape    | Metadata                                 |
 | ------------------- | --------------- | ---------------------------------------- |
 | `github`            | `api_key`       | None; proposed wire value `null`.        |
 | `github-copilot`    | `oauth`         | None; proposed wire value `null`.        |
-| `openai`            | `api_key`       | None; proposed wire value `null`.        |
 | `anthropic`         | `api_key`       | None; proposed wire value `null`.        |
 | `openai-compatible` | `api_key`       | Required `{ baseUrl, models }`.          |
 | `s3`                | `s3_access_key` | Required `{ endpoint, bucket, region }`. |
@@ -110,13 +102,15 @@ For `openai-compatible`:
 
 - `baseUrl` is required, uses `https` or `http`, and has no query or fragment.
   It is fixed for the life of the record. A different endpoint needs a new record.
+  An official OpenAI record uses `https://api.openai.com/v1`.
 - `models` is required and starts as `[]` at creation. A human adds approved
   models through a metadata revision after `worker provider check`.
-- Each model has required `id`, `contextWindow`, `maxTokens` and `reasoningLevels`.
-  `id` is a nonblank string. Both limits are positive integers, and `maxTokens`
-  is at most `contextWindow`.
+- Each model has a required `id` and optional `contextWindow`, `maxTokens` and
+  `reasoningLevels`. `id` is a nonblank string. An omitted value takes the pi 0.86.0
+  default: `contextWindow` `128000`, `maxTokens` `16384`, `reasoningLevels` `["off"]`.
+  Both limits are positive integers, and `maxTokens` is at most `contextWindow`.
 - `reasoningLevels` is an array of established levels from `off`, `minimal`,
-  `low`, `medium`, `high`, `xhigh`, `max`. No implicit reasoning level is supplied.
+  `low`, `medium`, `high`, `xhigh`, `max`. An omitted list supplies only `off`.
 - A model cannot be removed while a default configuration or entry names it.
   The refusal lists the dependents. The dependency check and metadata update
   commit in one transaction. Empty `models` permits no agent model selection.
@@ -134,12 +128,10 @@ The required file supplies the body; params and query are empty. Required
 fields have no default:
 
 - `name`: `CredentialName`.
-- `platform`: one of the five platforms that accept direct entry; OAuth-only
+- `platform`: one of the four platforms whose secret shape is not `oauth`;
   `github-copilot` requires `login`.
-- `type`: `api_key` or `s3_access_key`, as the platform table permits.
 - `metadata`: the platform schema above, with explicit `null` for no metadata.
-- `remoteIdentity`: `RemoteIdentity`.
-- `secret`: a closed object. For `api_key`, `{ key }`, with a required nonempty
+- `secret`: a closed object of the secret shape of the platform. For `api_key`, `{ key }`, with a required nonempty
   string whose exact value is preserved. For `s3_access_key`, required nonempty
   strings `{ accessKeyId, secretAccessKey }`; a session token is invalid.
 
@@ -151,9 +143,8 @@ that identity, never the submitted secret.
 
 ## `list`
 
-No positional arguments and no body. Optional filters map to query `platform`,
-`type` and `remoteIdentity`. Each is single-use with no default filter.
-The platform and type enums are defined above; remote identity uses exact match.
+No positional arguments and no body. The optional filter maps to query `platform`.
+It is single-use with no default filter. The platform enum is defined above.
 `limit` and optional `cursor` use the shared pagination contract.
 Proposed HTTP `200` returns record answers in `items`, in descending primary-key
 order under [pagination](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
@@ -168,16 +159,16 @@ an unknown identity answers proposed `404 credential.not_found`.
 ## `rotate <credential-id>`
 
 The required `CredentialId` maps to `params.credentialId`; query is empty.
-The required file supplies exactly `{ secret }`. The record's type determines
-its closed secret schema. `api_key` and `s3_access_key` use the create schemas.
+The required file supplies exactly `{ secret }`. The secret shape of the record's
+platform determines its closed secret schema. `api_key` and `s3_access_key` use the create schemas.
 An OAuth secret is `{ refresh, access, expires }`, the pi-ai credential shape;
 initial OAuth material enters only through a login session. The file has no
-name, platform, type, metadata, remote identity or identity override.
+name, platform, metadata or identity override.
 
-Rotation preserves record identity, name and remote identity. It makes no
+Rotation preserves record identity and name. It makes no
 remote call, commits in one transaction and uses last-write-wins semantics.
 It changes no binding revision. Proposed HTTP `200` returns the record answer
-without the secret. A credential for another remote identity needs a new record.
+without the secret.
 Custody logs the human identity and record identity, never material.
 This command does not rotate `masterKey`.
 
@@ -196,10 +187,9 @@ the check and update are atomic. No remote probe supplies approval.
 The [OAuth login contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-oauth-login)
 requires a platform that accepts `oauth`; the implemented platform set permits
 `github-copilot` only. The positional platform is required with no default.
-`--name` is required `CredentialName`; `--remote-identity` is required
-`RemoteIdentity`. Both have no default.
+`--name` is required `CredentialName` with no default.
 
-The proposed body is `{ platform, mode?, name, remoteIdentity }`, with empty
+The proposed body is `{ platform, mode?, name }`, with empty
 params and query. Optional `--mode` is `browser` or `device`, without a CLI
 default; absence leaves selection to the platform's supported flow. Custody
 maps `device` to pi-ai interaction value `device_code`. A platform with one
@@ -249,7 +239,7 @@ are proposed. Errors contain no secret. Dependency refusals list dependents in
 | 404  | `credential.not_found`               | Unknown credential identity or reference.                 |
 | 400  | `credential.invalid_input`           | Invalid local schema, secret or metadata.                 |
 | 400  | `credential.platform_unsupported`    | Platform is outside the closed set.                       |
-| 400  | `credential.type_unsupported`        | Platform does not accept this type or entry method.       |
+| 400  | `credential.entry_unsupported`       | Platform does not accept this entry method.               |
 | 400  | `credential.platform_mismatch`       | Use requests a platform other than the record's platform. |
 | 409  | `credential.metadata.base_url_fixed` | Metadata update changes `baseUrl`.                        |
 | 409  | `credential.metadata.model_in_use`   | Removed model has dependent defaults or entries.          |
