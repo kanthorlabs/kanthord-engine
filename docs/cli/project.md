@@ -139,7 +139,7 @@ results. The current [Gateway replay implementation](../../src/gateway/idempoten
 is in memory and bounded by its configured TTL; restart loses it. The shared
 [same-key retry rules](./other.md#idempotency-and-retries) apply, but that page's
 SQLite implementation note predates the in-memory implementation.
-This specification promises no exactly-once behavior across restart. A project name is the natural key of project creation: a retry after a restart that names an existing project returns 409 with `project.name_conflict`, and the CLI prints the holder identity from `error.details`. A rename targets a project ID and commits in one transaction; the last write wins under the unique name. A retry after a restart checks the name holder again. A binding-set edit has a version precondition,
+This specification promises no exactly-once behavior across restart. A project name is the natural key of project creation: a retry after a restart that names an existing project returns 409 with `project.name.conflict`, and the CLI prints the holder identity from `error.details`. A rename targets a project ID and commits in one transaction; the last write wins under the unique name. A retry after a restart checks the name holder again. A binding-set edit has a version precondition,
 but a retry after a committed edit and restart can encounter a stale version
 instead of replaying the old answer.
 
@@ -197,7 +197,7 @@ other request fields. Read commands have no body. Proposed project metadata is
 Creation allocates a project identity and an empty binding set at version `1`.
 The server returns that version. A mission belongs intrinsically to its project; it is
 not a binding. Creation calls the Mission collaboration `createMission` in the same transaction. The mission starts empty at mission version 1. No operation creates or deletes a mission.
-A project name is unique on the server and is the natural key of creation. Creation or rename to a name that another project holds returns 409 with code `project.name_conflict` and the holder identity in `error.details`. A retry of creation after a restart returns 409 when the name exists, and the CLI prints the holder identity. Rename commits in one transaction; the last write wins under the unique name. Rename keeps the same project identity and bindings.
+A project name is unique on the server and is the natural key of creation. Creation or rename to a name that another project holds returns 409 with code `project.name.conflict` and the holder identity in `error.details`. A retry of creation after a restart returns 409 when the name exists, and the CLI prints the holder identity. Rename commits in one transaction; the last write wins under the unique name. Rename keeps the same project identity and bindings.
 
 No deletion, archival, project membership, or ownership-transfer command is
 declared: those lifecycle policies have no basis in the Project design.

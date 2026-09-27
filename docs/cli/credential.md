@@ -138,7 +138,7 @@ fields have no default:
 
 Custody validates the local schema and makes no remote call. Proposed HTTP
 `200` returns the credential answer with revision 1. The name is the natural key of
-creation. A taken name answers `409 credential.name_conflict`, with the identity
+creation. A taken name answers `409 credential.name.conflict`, with the identity
 of its newest revision in `error.details`, including a retry after restart. The CLI prints
 that identity, never the submitted secret.
 
@@ -155,7 +155,7 @@ The CLI fetches no further page implicitly.
 
 The required `CredentialName` has no default and maps to `params.credentialName`.
 Query is empty and body absent. Proposed HTTP `200` returns one credential answer;
-an unknown name answers proposed `404 credential.not_found`.
+an unknown name answers proposed `404 credential.credential.not_found`.
 
 ## `rotate <credential-name>`
 
@@ -212,7 +212,7 @@ and expiry. The command prints those values, one per line, plus the mutation
 key, and exits `0`. This line output is an exception to ordinary JSON output.
 Expiry falls 15 minutes after start. At most one pending session exists per
 platform and human; another start answers 409. A name conflict at start or
-commit answers `409 credential.name_conflict` and the holder identity.
+commit answers `409 credential.name.conflict` and the holder identity.
 
 The human opens the address and completes the platform interaction. A browser
 callback listener belongs to pi-ai and lasts only for the session. Device mode
@@ -247,18 +247,18 @@ are proposed. Errors contain no secret. Dependency refusals list dependents in
 
 | HTTP | Code                                 | Condition                                                  |
 | ---- | ------------------------------------ | ---------------------------------------------------------- |
-| 409  | `credential.name_conflict`           | Name already held; details identify the holder.            |
-| 404  | `credential.not_found`               | Unknown credential identity or reference.                  |
-| 400  | `credential.invalid_input`           | Invalid local schema, secret or metadata.                  |
-| 400  | `credential.platform_unsupported`    | Platform is outside the closed set.                        |
-| 400  | `credential.entry_unsupported`       | Platform does not accept this entry method.                |
-| 400  | `credential.platform_mismatch`       | Use requests a platform other than the record's platform.  |
+| 409  | `credential.name.conflict`           | Name already held; details identify the holder.            |
+| 404  | `credential.credential.not_found`    | Unknown credential identity or reference.                  |
+| 400  | `credential.input.invalid`           | Invalid local schema, secret or metadata.                  |
+| 400  | `credential.platform.unsupported`    | Platform is outside the closed set.                        |
+| 400  | `credential.entry.unsupported`       | Platform does not accept this entry method.                |
+| 400  | `credential.platform.mismatch`       | Use requests a platform other than the record's platform.  |
 | 409  | `credential.metadata.base_url_fixed` | Metadata edit changes `baseUrl` outside a rotation.        |
 | 404  | `credential.revision.not_found`      | Unknown revision of the named credential.                  |
 | 409  | `credential.revision.newest_live`    | Revoke names the newest live revision.                     |
 | 409  | `credential.revision.ended`          | Revoke names a drained or revoked revision.                |
 | 409  | `credential.revision.revoked`        | A pinned use names a revoked revision.                     |
-| 409  | `credential.revision_conflict`       | Rotation or metadata edit names a stale expected revision. |
+| 409  | `credential.revision.conflict`       | Rotation or metadata edit names a stale expected revision. |
 | 409  | `credential.metadata.model_in_use`   | Removed model has dependent defaults or entries.           |
 | 404  | `credential.login.not_found`         | Unknown login session.                                     |
 | 409  | `credential.login.pending`           | Another session is pending for this platform and human.    |

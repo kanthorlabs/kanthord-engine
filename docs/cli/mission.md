@@ -103,14 +103,14 @@ request body, except the raw-file collection for Markdown import.
 GET requests have no body. `--help` is never sent to the server.
 
 The shared [`--idempotency-key`](./common-flags.md#--idempotency-key) retry
-rules apply. Import and unblock carry no domain request identifier. After a lost answer, a retry answers 409 `mission.version_conflict` or `mission.node.state_conflict`, and the human reads the mission again.
+rules apply. Import and unblock carry no domain request identifier. After a lost answer, a retry answers 409 `mission.version.conflict` or `mission.node.state_conflict`, and the human reads the mission again.
 
 ### Operation contracts
 
 - Every Mission route follows the [operation contracts](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#operation-contracts).
 - Each route uses the shared error envelope, the default 30 s timeout and the 10 MiB body limit.
-- A stale expected revision answers 409 `mission.revision_conflict` with the current value in `details`. A stale expected mission version answers 409 `mission.version_conflict` with the current value in `details`.
-- An absent node, mission or record answers 404 `mission.not_found`.
+- A stale expected revision answers 409 `mission.revision.conflict` with the current value in `details`. A stale expected mission version answers 409 `mission.version.conflict` with the current value in `details`.
+- An absent node, mission or record answers 404 `mission.mission.not_found`.
 
 ### Scalars and schema notation
 
@@ -565,7 +565,7 @@ Run outputs, task outcomes and evidence return `Page<RunOutput>`, `Page<Outcome>
 Evidence content uses `StoredContent`, with inline bytes or a presigned GET for object content.
 The reader's kanthord component receives the GET URL and keeps it outside the agent context.
 The cleared-attempt outcome and the unblock record of the claimed attempt return the existing `Outcome` and `UnblockRecord` schemas.
-Both reads answer 404 `mission.not_found` when no unblock opened the claimed attempt.
+Both reads answer 404 `mission.mission.not_found` when no unblock opened the claimed attempt.
 The initiative-only objective reads return `Page<Node>`, `Page<Outcome>` and `Page<Evidence>` for its current objectives.
 Each objective resolves to the `nodeRevision` of its current outcome.
 An objective without an outcome carries its identity and its state only.
@@ -719,7 +719,7 @@ The [graph write answer](https://github.com/kanthorlabs/kanthord/blob/main/docs/
 
 Preconditions in `HumanAct` are proposed concurrency protection, not permission
 to invent transitions missing from the design. A precondition mismatch answers 409 `mission.node.state_conflict` with the current `state` and `attempt` in `details`.
-A stale `expectedMissionVersion` answers 409 `mission.version_conflict` before the state check. A human act checks the mission version and leaves it unchanged.
+A stale `expectedMissionVersion` answers 409 `mission.version.conflict` before the state check. A human act checks the mission version and leaves it unchanged.
 An act while the attempt reads 0 writes an outcome with `attempt: 0` and no task outcome.
 
 ### Evidence content removal
