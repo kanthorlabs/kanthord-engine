@@ -483,6 +483,21 @@ const readInput = <P extends z.ZodType, Q extends z.ZodType>(
 ) => z.strictObject({ params, query, body: z.null() });
 
 export const missionOperations = {
+  "node.create": {
+    ...writeOperation,
+    id: "mission.node.create",
+    method: HttpMethod.Post,
+    path: "/api/mission/:missionId/node",
+    input: z.strictObject({
+      params: z.strictObject({
+        missionId: identitySchema(MISSION_IDENTITY_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: nodeCreateSchema,
+    }),
+    output: nodeChangeSchema,
+    description: "Create a mission node.",
+  },
   get: {
     ...readOperation,
     id: "mission.get",

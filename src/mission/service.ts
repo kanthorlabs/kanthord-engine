@@ -26,6 +26,7 @@ import {
   type MissionCollaborations,
   type WorkQueue,
 } from "./contract.ts";
+import { createNode } from "./node-create.ts";
 import {
   insertMission,
   readLiveNodesPinning,
@@ -70,6 +71,21 @@ export class MissionService implements Service, MissionCollaborations {
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["node.create"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) =>
+          createNode(
+            tx,
+            params.missionId,
+            body,
+            humanActor(caller),
+            this.dependencies.bindings,
+            this.dependencies.workQueue,
+            this.dependencies.config.textMaxBytes,
+          ),
+        ),
+    );
     registry.register(missionOperations.get, ({ params }, caller) =>
       caller.commit((tx) => {
         const mission = readMissionByProject(tx, params.projectId);

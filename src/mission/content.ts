@@ -8,7 +8,7 @@ import {
   planFileNameSchema,
 } from "./contract.ts";
 
-const Field = {
+export const ContentField = {
   Filename: "filename",
   Name: "name",
   Requirement: "requirement",
@@ -16,6 +16,9 @@ const Field = {
   Verifications: "verifications",
   Bindings: "bindings",
 } as const;
+export const CONTENT_FIELDS = Object.values(ContentField);
+export const TASKS_FIELD = "tasks";
+const Field = ContentField;
 const UTF8 = "utf8";
 const RESOURCE_KIND_SEPARATOR = ":";
 const ZERO = 0;
