@@ -3,7 +3,8 @@ import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
 import { mintHumanIdentity } from "../kernel/caller-mint.ts";
 import { OperationError } from "../kernel/errors.ts";
-import { HttpStatus } from "../kernel/http.ts";
+import { HttpMethod, HttpStatus } from "../kernel/http.ts";
+import { digest } from "../kernel/json.ts";
 import {
   AccessPolicy,
   OperationRegistry,
@@ -41,6 +42,8 @@ import {
   type CriterionSet,
   type Move,
   type NodeChange,
+  type Retire,
+  type RetirePreview,
   type MissionBindings,
   type WorkQueue,
 } from "./contract.ts";
@@ -2605,6 +2608,620 @@ test("node.move rejects a newly closed dependency cycle and rolls back containme
     .revisions[ZERO]!.nodeId;
   f.edit(DependencyOperation.Add, newParent, objective);
   f.refuses(objective, newParent, MissionErrorCode.Cycle);
+});
+
+const INVALID_RETIRE_DIGEST = "0".repeat(64);
+const RETIRE_QUEUE_FAILURE = "retirement queue failure";
+const RETIRE_PREVIEW_PATH = "/api/mission/node/:nodeId/retire/preview";
+const RETIRE_PATH = "/api/mission/node/:nodeId/retire";
+
+function retireFixture(t: TestContext) {
+  const f = dependencyFixture(t);
+  function preview(nodeId: string, query: object = {}): RetirePreview {
+    const operation = missionOperations["node.retire.preview"];
+    const input = operation.input.parse({
+      params: { nodeId },
+      query,
+      body: null,
+    });
+    const commits = f.commits();
+    try {
+      return operation.output.parse(
+        f.registry.get(operation.id).handler(input, f.caller),
+      );
+    } finally {
+      assert.equal(f.commits(), commits + ONE_COMMIT);
+    }
+  }
+  function apply(nodeId: string, body: Retire): NodeChange {
+    const operation = missionOperations["node.retire"];
+    const input = operation.input.parse({
+      params: { nodeId },
+      query: {},
+      body,
+    });
+    const commits = f.commits();
+    try {
+      return operation.output.parse(
+        f.registry.get(operation.id).handler(input, f.caller),
+      );
+    } finally {
+      assert.equal(f.commits(), commits + ONE_COMMIT);
+    }
+  }
+  function request(plan: RetirePreview): Retire {
+    return {
+      reason: REASON,
+      expectedMissionVersion: plan.missionVersion,
+      previewDigest: plan.previewDigest,
+      force: plan.force,
+    };
+  }
+  function refuses(
+    nodeId: string,
+    code: string,
+    details?: unknown,
+    status: number = HttpStatus.Conflict,
+    force = false,
+  ) {
+    const body: Retire = {
+      reason: REASON,
+      expectedMissionVersion: f.version(),
+      previewDigest: INVALID_RETIRE_DIGEST,
+      force,
+    };
+    const before = { ...f.snapshot(), jobs: f.jobs() };
+    for (const invoke of [
+      () => preview(nodeId, { force: String(force) }),
+      () => apply(nodeId, body),
+    ]) {
+      assert.throws(invoke, retirementError(code, details, status));
+      assert.deepEqual({ ...f.snapshot(), jobs: f.jobs() }, before);
+    }
+  }
+  function task(parentId: string, filename = TASK_FILENAME) {
+    const revision = f.store.transaction((tx) =>
+      readCurrentRevision(tx, parentId),
+    );
+    assert.ok(revision);
+    const result = f.create({
+      ...f.body(NodeKind.Task, parentId),
+      filename,
+      expectedParentRevision: revision.revision,
+    });
+    const id = result.revisions[ZERO]!.tasks!.find(
+      (item) => item.filename === filename,
+    )?.id;
+    assert.ok(id);
+    return id;
+  }
+  function get(nodeId: string) {
+    const operation = missionOperations["node.get"];
+    const input = operation.input.parse({
+      params: { nodeId },
+      query: {},
+      body: null,
+    });
+    return operation.output.parse(
+      f.registry.get(operation.id).handler(input, f.caller),
+    );
+  }
+  return { ...f, preview, apply, request, refuses, task, get };
+}
+
+function retirementError(
+  code: string,
+  details?: unknown,
+  status: number = HttpStatus.Conflict,
+) {
+  return (error: unknown) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.status, status);
+    assert.equal(error.code, code);
+    if (details !== undefined) assert.deepEqual(error.details, details);
+    return true;
+  };
+}
+
+test("node.retire operations declare human read preview and write apply with strict force query", (t) => {
+  const f = retireFixture(t);
+  const id = f.initiative();
+  const preview = missionOperations["node.retire.preview"];
+  const apply = missionOperations["node.retire"];
+  assert.equal(preview.method, HttpMethod.Get);
+  assert.equal(preview.path, RETIRE_PREVIEW_PATH);
+  assert.equal(preview.access, AccessPolicy.Human);
+  assert.equal(preview.mutation, false);
+  assert.equal(apply.method, HttpMethod.Post);
+  assert.equal(apply.path, RETIRE_PATH);
+  assert.equal(apply.access, AccessPolicy.Human);
+  assert.equal(apply.mutation, true);
+  assert.equal(f.preview(id).force, false);
+  assert.equal(f.preview(id, { force: "false" }).force, false);
+  assert.equal(f.preview(id, { force: "true" }).force, true);
+  for (const force of [
+    "",
+    "TRUE",
+    "False",
+    "0",
+    "1",
+    "yes",
+    true,
+    false,
+    null,
+    ["false"],
+  ]) {
+    assert.equal(
+      preview.input.safeParse({
+        params: { nodeId: id },
+        query: { force },
+        body: null,
+      }).success,
+      false,
+    );
+  }
+});
+
+test("node.retire preview is read-only and hashes precisely the other five fields; apply increments once", (t) => {
+  const f = retireFixture(t);
+  const id = f.objective();
+  const before = { ...f.snapshot(), jobs: f.jobs() };
+  const plan = f.preview(id);
+  const { previewDigest, ...fields } = plan;
+  assert.equal(previewDigest, digest(fields));
+  assert.match(previewDigest, /^[0-9a-f]{64}$/);
+  assert.deepEqual({ ...f.snapshot(), jobs: f.jobs() }, before);
+  const result = f.apply(id, f.request(plan));
+  assert.deepEqual(result, {
+    ...emptyChange(plan.missionVersion + ONE),
+    retiredNodeIds: [id],
+  });
+  assert.equal(f.version(), plan.missionVersion + ONE);
+  assert.deepEqual(f.snapshot().revisions, before.revisions);
+  assert.equal(f.snapshot().nodes.length, before.nodes.length);
+  assert.equal(f.node(id)?.state, NodeState.Available);
+  assert.ok(f.node(id)?.retired_at);
+  f.refuses(id, MissionErrorCode.Retired, { nodeId: id });
+});
+
+for (const attempt of [ONE, TWO]) {
+  test(`node.retire preview and apply refuse attempt ${attempt}`, (t) => {
+    const f = retireFixture(t);
+    const id = f.objective();
+    f.store.database
+      .prepare("UPDATE mission_node SET attempt = ? WHERE id = ?")
+      .run(attempt, id);
+    f.refuses(id, MissionErrorCode.RetireRefused, {
+      nodeId: id,
+      state: NodeState.Available,
+      attempt,
+    });
+  });
+}
+
+for (const state of [
+  NodeState.Executing,
+  NodeState.Waiting,
+  NodeState.Evaluating,
+  NodeState.Blocked,
+  NodeState.Paused,
+  NodeState.Completed,
+  NodeState.Discarded,
+  NodeState.ExternalRequested,
+  NodeState.ExternalSuccess,
+  NodeState.ExternalFailed,
+]) {
+  test(`node.retire preview and apply refuse ${state}, even with force`, (t) => {
+    const f = retireFixture(t);
+    const id = f.objective();
+    f.setState(id, state);
+    f.refuses(id, MissionErrorCode.RetireRefused, {
+      nodeId: id,
+      state,
+      attempt: ZERO,
+    });
+    f.refuses(
+      id,
+      MissionErrorCode.RetireRefused,
+      { nodeId: id, state, attempt: ZERO },
+      HttpStatus.Conflict,
+      true,
+    );
+  });
+}
+
+test("node.retire checks a task through its objective outside the retirement set", (t) => {
+  const f = retireFixture(t);
+  const objective = f.objective();
+  const task = f.task(objective);
+  f.setState(objective, NodeState.Executing);
+  f.refuses(task, MissionErrorCode.RetireRefused, {
+    nodeId: objective,
+    state: NodeState.Executing,
+    attempt: ZERO,
+  });
+  f.setState(objective, NodeState.Available);
+  f.store.database
+    .prepare("UPDATE mission_node SET attempt = ? WHERE id = ?")
+    .run(ONE, objective);
+  f.refuses(task, MissionErrorCode.RetireRefused, {
+    nodeId: objective,
+    state: NodeState.Available,
+    attempt: ONE,
+  });
+});
+
+test("node.retire checks the named node first, then descendants in identity order", (t) => {
+  const f = retireFixture(t);
+  const first = f.objective();
+  const root = f.node(first)!.parent_id!;
+  const second = f.create({
+    ...f.body(NodeKind.Objective, root),
+    filename: OTHER_FILENAME,
+  }).revisions[ZERO]!.nodeId;
+  f.setState(root, NodeState.Executing);
+  f.setState(first, NodeState.Blocked);
+  f.setState(second, NodeState.Paused);
+  f.refuses(root, MissionErrorCode.RetireRefused, {
+    nodeId: root,
+    state: NodeState.Executing,
+    attempt: ZERO,
+  });
+  f.setState(root, NodeState.Available);
+  const earliest = [first, second].sort()[ZERO]!;
+  f.refuses(root, MissionErrorCode.RetireRefused, {
+    nodeId: earliest,
+    state: f.node(earliest)!.state,
+    attempt: ZERO,
+  });
+});
+
+test("node.retire refuses sorted unique nonterminal dependents without force, including force=false", (t) => {
+  const f = retireFixture(t);
+  const first = f.objective();
+  const root = f.node(first)!.parent_id!;
+  const second = f.create({
+    ...f.body(NodeKind.Objective, root),
+    filename: OTHER_FILENAME,
+  }).revisions[ZERO]!.nodeId;
+  const dependent = f.create({ ...f.body(), filename: NEW_FILENAME }).revisions[
+    ZERO
+  ]!.nodeId;
+  const another = f.create({ ...f.body(), filename: "another.md" }).revisions[
+    ZERO
+  ]!.nodeId;
+  f.edit(DependencyOperation.Add, dependent, first);
+  f.edit(DependencyOperation.Add, dependent, second);
+  f.edit(DependencyOperation.Add, another, first);
+  f.refuses(root, MissionErrorCode.RetireHasDependents, {
+    dependents: [dependent, another].sort(),
+  });
+  assert.throws(
+    () => f.preview(root, { force: "false" }),
+    retirementError(MissionErrorCode.RetireHasDependents, {
+      dependents: [dependent, another].sort(),
+    }),
+  );
+  const plan = f.preview(root, { force: "true" });
+  const expected = [
+    { kind: EdgeKind.Dependency, dependentId: dependent, dependsOnId: first },
+    { kind: EdgeKind.Dependency, dependentId: dependent, dependsOnId: second },
+    { kind: EdgeKind.Dependency, dependentId: another, dependsOnId: first },
+  ].sort(
+    (a, b) =>
+      a.dependentId.localeCompare(b.dependentId) ||
+      a.dependsOnId.localeCompare(b.dependsOnId),
+  );
+  assert.deepEqual(plan.removedEdges, expected);
+  const result = f.apply(root, f.request(plan));
+  assert.deepEqual(result.removedEdges, expected);
+  assert.equal(f.node(dependent)?.state, NodeState.Available);
+  assert.equal(f.node(another)?.state, NodeState.Available);
+  assert.deepEqual(
+    f.jobs().map((job) => job.node_id),
+    [dependent, another].sort(),
+  );
+  assert.deepEqual(f.snapshot().dependencies, []);
+});
+
+for (const state of [NodeState.Completed, NodeState.Discarded]) {
+  test(`node.retire preserves ${state} dependent history with and without force`, (t) => {
+    const f = retireFixture(t);
+    const { nodeId, dependsOnId } = f.pair();
+    f.edit(DependencyOperation.Add, nodeId, dependsOnId);
+    f.setState(nodeId, state);
+    const dependencies = f.snapshot().dependencies;
+    assert.deepEqual(f.preview(dependsOnId).removedEdges, []);
+    const plan = f.preview(dependsOnId, { force: "true" });
+    assert.deepEqual(plan.removedEdges, []);
+    f.apply(dependsOnId, f.request(plan));
+    assert.deepEqual(f.snapshot().dependencies, dependencies);
+    assert.equal(f.node(nodeId)?.state, state);
+    assert.equal(
+      f.jobs().some((job) => job.node_id === nodeId),
+      false,
+    );
+  });
+}
+
+test("node.retire covers all current descendants, keeps internal dependencies and deletes all held jobs in its transaction", (t) => {
+  const f = retireFixture(t);
+  const first = f.objective();
+  const root = f.node(first)!.parent_id!;
+  const firstTask = f.task(first);
+  const oldTask = f.task(first, "old.md");
+  f.apply(oldTask, f.request(f.preview(oldTask)));
+  const oldRetirement = f.node(oldTask)!.retired_at;
+  const second = f.create({
+    ...f.body(NodeKind.Objective, root),
+    filename: OTHER_FILENAME,
+  }).revisions[ZERO]!.nodeId;
+  const secondTask = f.task(second, "second-task.md");
+  const third = f.create({
+    ...f.body(NodeKind.Objective, root),
+    filename: NEW_FILENAME,
+  }).revisions[ZERO]!.nodeId;
+  f.edit(DependencyOperation.Add, third, first);
+  const dependencies = f.snapshot().dependencies;
+  const jobs = f.jobs().map((job) => job.node_id);
+  assert.deepEqual(jobs, [first, second].sort());
+  const deleted: string[] = [];
+  const remove = f.queue.delete;
+  f.queue.delete = (tx, id) => {
+    assert.equal(tx.database, f.store.database);
+    assert.ok(readNode(tx, id)?.retired_at);
+    assert.equal(
+      tx.database
+        .prepare("SELECT version FROM mission_mission WHERE id = ?")
+        .get(f.missionId)?.version,
+      plan.missionVersion,
+    );
+    deleted.push(id);
+    remove(tx, id);
+  };
+  const plan = f.preview(root);
+  assert.deepEqual(
+    plan.retiredNodeIds,
+    [root, first, firstTask, second, secondTask, third].sort(),
+  );
+  const result = f.apply(root, f.request(plan));
+  assert.deepEqual(result.retiredNodeIds, plan.retiredNodeIds);
+  assert.equal(result.missionVersion, plan.missionVersion + ONE);
+  assert.deepEqual(result.revisions, []);
+  assert.deepEqual(result.removedEdges, []);
+  assert.deepEqual(deleted.sort(), jobs);
+  assert.deepEqual(f.jobs(), []);
+  assert.deepEqual(f.snapshot().dependencies, dependencies);
+  assert.equal(f.node(oldTask)?.retired_at, oldRetirement);
+  const timestamps = new Set(
+    plan.retiredNodeIds.map((id) => f.node(id)!.retired_at),
+  );
+  assert.equal(timestamps.size, ONE);
+  assert.ok(!timestamps.has(null));
+});
+
+test("node.retire gives the surviving initiative a job only when its last nonterminal objective retires", (t) => {
+  const f = retireFixture(t);
+  const first = f.objective();
+  const root = f.node(first)!.parent_id!;
+  const second = f.create({
+    ...f.body(NodeKind.Objective, root),
+    filename: OTHER_FILENAME,
+  }).revisions[ZERO]!.nodeId;
+  f.apply(first, f.request(f.preview(first)));
+  assert.deepEqual(
+    f.jobs().map((job) => job.node_id),
+    [second],
+  );
+  f.calls.length = ZERO;
+  f.apply(second, f.request(f.preview(second)));
+  assert.deepEqual(
+    f.jobs().map((job) => job.node_id),
+    [root],
+  );
+  assert.ok(
+    f.calls.some(
+      (call) => call.action === QueueAction.Delete && call.nodeId === second,
+    ),
+  );
+  assert.ok(
+    f.calls.some(
+      (call) => call.action === QueueAction.Insert && call.nodeId === root,
+    ),
+  );
+  assert.equal(f.node(root)?.retired_at, null);
+});
+
+test("node.retire task alone revises its objective with retired change and retains readable task history", (t) => {
+  const f = retireFixture(t);
+  const objective = f.objective();
+  const task = f.task(objective);
+  const sibling = f.task(objective, OTHER_FILENAME);
+  const before = f.get(task);
+  const jobs = f.jobs();
+  const previous = f.store.transaction((tx) =>
+    readCurrentRevision(tx, objective),
+  )!;
+  const result = f.apply(task, f.request(f.preview(task)));
+  assert.deepEqual(result.retiredNodeIds, [task]);
+  assert.equal(result.revisions.length, ONE);
+  const revision = result.revisions[ZERO]!;
+  assert.equal(revision.nodeId, objective);
+  assert.equal(revision.revision, previous.revision + ONE);
+  assert.equal(revision.reason, REASON);
+  assert.deepEqual(revision.actor, humanActor(f.caller));
+  assert.deepEqual(
+    revision.tasks!.map((item) => item.id),
+    [sibling],
+  );
+  assert.deepEqual(revision.change, {
+    write: RevisionWrite.NodeRetire,
+    previousRevision: previous.revision,
+    changedFields: [TASKS_FIELD],
+    tasks: [{ id: task, change: TaskChange.Retired, changedFields: [] }],
+  });
+  assert.deepEqual(f.jobs(), jobs);
+  assert.equal(f.node(objective)?.retired_at, null);
+  assert.deepEqual(f.get(task), {
+    ...before,
+    retiredAt: f.node(task)!.retired_at,
+    visibleRevision: revision.revision,
+  });
+  const operation = missionOperations["node.revision.get"];
+  const input = operation.input.parse({
+    params: { nodeId: task, revision: previous.revision },
+    query: {},
+    body: null,
+  });
+  const historical = operation.output.parse(
+    f.registry.get(operation.id).handler(input, f.caller),
+  );
+  assert.ok(historical.tasks!.some((item) => item.id === task));
+});
+
+test("node.retire keeps retired runnable identity, filename, content and revisions readable", (t) => {
+  const f = retireFixture(t);
+  const id = f.objective();
+  const before = f.get(id);
+  const revisions = f.snapshot().revisions;
+  f.apply(id, f.request(f.preview(id)));
+  assert.deepEqual(f.get(id), { ...before, retiredAt: f.node(id)!.retired_at });
+  const operation = missionOperations["node.revision.list"];
+  const input = operation.input.parse({
+    params: { nodeId: id },
+    query: {},
+    body: null,
+  });
+  const result = operation.output.parse(
+    f.registry.get(operation.id).handler(input, f.caller),
+  );
+  assert.equal(result.items.length, ONE);
+  assert.equal(result.items[ZERO]!.nodeId, id);
+  assert.equal(result.items[ZERO]!.filename, before.filename);
+  assert.deepEqual(f.snapshot().revisions, revisions);
+});
+
+test("node.retire checks existence, retirement, version, reason, admissibility and digest in order", (t) => {
+  const f = retireFixture(t);
+  f.refuses(
+    UNKNOWN_NODE_ID,
+    MissionErrorCode.NodeNotFound,
+    undefined,
+    HttpStatus.NotFound,
+  );
+  const id = f.objective();
+  const plan = f.preview(id);
+  const body = f.request(plan);
+  const before = { ...f.snapshot(), jobs: f.jobs() };
+  assert.throws(
+    () => f.apply(id, { ...body, previewDigest: INVALID_RETIRE_DIGEST }),
+    retirementError(MissionErrorCode.RetireMismatch),
+  );
+  assert.deepEqual({ ...f.snapshot(), jobs: f.jobs() }, before);
+  f.setState(id, NodeState.Executing);
+  assert.throws(
+    () =>
+      f.apply(id, {
+        ...body,
+        expectedMissionVersion: MISSION_INITIAL_VERSION,
+        reason: "x".repeat(TEXT_MAX_BYTES + ONE),
+      }),
+    retirementError(MissionErrorCode.VersionConflict, {
+      current: plan.missionVersion,
+    }),
+  );
+  assert.throws(
+    () => f.apply(id, { ...body, reason: "x".repeat(TEXT_MAX_BYTES + ONE) }),
+    retirementError(
+      MissionErrorCode.ContentInvalid,
+      undefined,
+      HttpStatus.BadRequest,
+    ),
+  );
+  assert.throws(
+    () => f.apply(id, body),
+    retirementError(MissionErrorCode.RetireRefused, {
+      nodeId: id,
+      state: NodeState.Executing,
+      attempt: ZERO,
+    }),
+  );
+  f.setState(id, NodeState.Available);
+  f.apply(id, body);
+  assert.throws(
+    () => f.apply(id, body),
+    retirementError(MissionErrorCode.Retired, { nodeId: id }),
+  );
+});
+
+test("node.retire detects a changed dependency digest even without a mission version change", (t) => {
+  const f = retireFixture(t);
+  const { nodeId, dependsOnId } = f.pair();
+  const plan = f.preview(dependsOnId, { force: "true" });
+  f.store.database
+    .prepare(
+      "INSERT INTO mission_dependency (mission_id, dependent_id, depends_on_id) VALUES (?, ?, ?)",
+    )
+    .run(f.missionId, nodeId, dependsOnId);
+  const before = { ...f.snapshot(), jobs: f.jobs() };
+  const changed = f.preview(dependsOnId, { force: "true" });
+  assert.equal(changed.missionVersion, plan.missionVersion);
+  assert.notEqual(changed.previewDigest, plan.previewDigest);
+  assert.throws(
+    () => f.apply(dependsOnId, f.request(plan)),
+    retirementError(MissionErrorCode.RetireMismatch),
+  );
+  assert.deepEqual({ ...f.snapshot(), jobs: f.jobs() }, before);
+});
+
+test("node.retire digest binds force and mission version", (t) => {
+  const f = retireFixture(t);
+  const id = f.initiative();
+  const plan = f.preview(id);
+  assert.notEqual(
+    f.preview(id, { force: "true" }).previewDigest,
+    plan.previewDigest,
+  );
+  assert.throws(
+    () => f.apply(id, { ...f.request(plan), force: true }),
+    retirementError(MissionErrorCode.RetireMismatch),
+  );
+  f.create({ ...f.body(), filename: OTHER_FILENAME });
+  const before = { ...f.snapshot(), jobs: f.jobs() };
+  assert.throws(
+    () => f.apply(id, f.request(plan)),
+    retirementError(MissionErrorCode.VersionConflict, {
+      current: plan.missionVersion + ONE,
+    }),
+  );
+  assert.throws(
+    () =>
+      f.apply(id, {
+        ...f.request(plan),
+        expectedMissionVersion: plan.missionVersion + ONE,
+      }),
+    retirementError(MissionErrorCode.RetireMismatch),
+  );
+  assert.deepEqual({ ...f.snapshot(), jobs: f.jobs() }, before);
+});
+
+test("node.retire rolls back retirement, dependency removal, routing and jobs when queue deletion fails", (t) => {
+  const f = retireFixture(t);
+  const { nodeId, dependsOnId } = f.pair();
+  f.edit(DependencyOperation.Add, nodeId, dependsOnId);
+  const plan = f.preview(dependsOnId, { force: "true" });
+  const before = f.snapshot();
+  const jobs = f.jobs();
+  const remove = f.queue.delete;
+  f.queue.delete = (tx, id) => {
+    remove(tx, id);
+    throw new Error(RETIRE_QUEUE_FAILURE);
+  };
+  assert.throws(() => f.apply(dependsOnId, f.request(plan)), {
+    message: RETIRE_QUEUE_FAILURE,
+  });
+  assert.deepEqual(f.snapshot(), { ...before, calls: f.calls });
+  assert.deepEqual(f.jobs(), jobs);
 });
 
 test("MissionService refuses to restart after stop", async () => {

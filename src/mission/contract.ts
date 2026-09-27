@@ -602,6 +602,33 @@ export const missionOperations = {
     output: revisionSchema,
     description: "Get a node content revision.",
   },
+  "node.retire.preview": {
+    ...readOperation,
+    id: "mission.node.retire.preview",
+    method: HttpMethod.Get,
+    path: "/api/mission/node/:nodeId/retire/preview",
+    input: readInput(
+      z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject({
+        force: z.enum(["true", "false"]).default("false"),
+      }),
+    ),
+    output: retirePreviewSchema,
+    description: "Preview retirement of a mission node and its descendants.",
+  },
+  "node.retire": {
+    ...writeOperation,
+    id: "mission.node.retire",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:nodeId/retire",
+    input: z.strictObject({
+      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      query: z.strictObject({}),
+      body: retireSchema,
+    }),
+    output: nodeChangeSchema,
+    description: "Retire a mission node and its descendants.",
+  },
   "node.move": {
     ...writeOperation,
     id: "mission.node.move",

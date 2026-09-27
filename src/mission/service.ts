@@ -30,12 +30,14 @@ import { addDependency, removeDependency } from "./dependency.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
 import { createNode } from "./node-create.ts";
 import { moveNode } from "./node-move.ts";
+import { planRetirement, retireNode } from "./node-retire.ts";
 import { setCriterion, updateNode } from "./node-update.ts";
 import {
   getNode,
   getRevision,
   nodeCursor,
   nodePage,
+  requireNode,
   revisionCursor,
   revisionPage,
 } from "./node-read.ts";
@@ -46,7 +48,7 @@ import {
 } from "./store.ts";
 
 const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
-const INCLUDE_RETIRED_TRUE = "true";
+const QUERY_TRUE = "true";
 
 export function humanActor(caller: CallerContext): HumanActor {
   const identity = caller.identity;
@@ -144,7 +146,7 @@ export class MissionService implements Service, MissionCollaborations {
               kind: query.kind,
               state: query.state,
               parentId: query.parentId,
-              includeRetired: query.includeRetired === INCLUDE_RETIRED_TRUE,
+              includeRetired: query.includeRetired === QUERY_TRUE,
               after,
             },
             query.limit,
@@ -169,6 +171,31 @@ export class MissionService implements Service, MissionCollaborations {
       missionOperations["node.revision.get"],
       ({ params }, caller) =>
         caller.commit((tx) => getRevision(tx, params.nodeId, params.revision)),
+    );
+    registry.register(
+      missionOperations["node.retire.preview"],
+      ({ params, query }, caller) =>
+        caller.commit((tx) =>
+          planRetirement(
+            tx,
+            requireNode(tx, params.nodeId),
+            query.force === QUERY_TRUE,
+          ),
+        ),
+    );
+    registry.register(
+      missionOperations["node.retire"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) =>
+          retireNode(
+            tx,
+            params.nodeId,
+            body,
+            humanActor(caller),
+            this.dependencies.workQueue,
+            this.dependencies.config.textMaxBytes,
+          ),
+        ),
     );
     registry.register(
       missionOperations["node.move"],
