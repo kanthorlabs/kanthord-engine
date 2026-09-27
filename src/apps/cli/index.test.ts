@@ -232,6 +232,65 @@ test("project binding commands expose help and reject invalid inputs before I/O"
   }
 });
 
+test("project agent commands expose help and reject invalid inputs before I/O", (t) => {
+  const env = environment(temporary(t));
+  const group = invocation(["project", "agent", "--help"], env);
+  assert.equal(group.status, ExitCode.Success, group.stderr);
+  for (const leaf of ["list", "get"]) {
+    assert.match(group.stdout, new RegExp(`\\b${leaf}\\b`));
+    const help = invocation(["project", "agent", leaf, "--help"], env);
+    assert.equal(help.status, ExitCode.Success, help.stderr);
+    assert.match(help.stdout, /<worker-binding-id>/);
+  }
+  for (const [args, code] of [
+    [
+      ["list", "invalid", BINDING_ID],
+      "cli.project.agent.list.invalid_project_id",
+    ],
+    [
+      ["list", PROJECT_ID, "invalid"],
+      "cli.project.agent.list.invalid_binding_id",
+    ],
+    [
+      ["list", PROJECT_ID, BINDING_ID, "--limit", "0"],
+      "cli.pagination.limit_invalid",
+    ],
+    [
+      ["list", PROJECT_ID, BINDING_ID, "--limit", "1001"],
+      "cli.pagination.limit_out_of_range",
+    ],
+    [
+      ["get", "invalid", BINDING_ID, "swe@1"],
+      "cli.project.agent.get.invalid_project_id",
+    ],
+    [
+      ["get", PROJECT_ID, "invalid", "swe@1"],
+      "cli.project.agent.get.invalid_binding_id",
+    ],
+    [["list", PROJECT_ID, BINDING_ID], "cli.project.agent.list.token_required"],
+    [
+      ["get", PROJECT_ID, BINDING_ID, "swe@1"],
+      "cli.project.agent.get.token_required",
+    ],
+  ] as const) {
+    const result = invocation(["project", "agent", ...args], env);
+    assert.equal(result.status, ExitCode.Failure, result.stderr);
+    assert.match(result.stderr, new RegExp(`^${code.replaceAll(".", "\\.")}:`));
+    assert.equal(result.stdout, EMPTY_OUTPUT);
+  }
+  for (const args of [
+    ["list", PROJECT_ID, BINDING_ID],
+    ["get", PROJECT_ID, BINDING_ID, "swe@1"],
+  ]) {
+    const result = invocation(
+      ["project", "agent", ...args, "--idempotency-key", "key"],
+      env,
+    );
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /unknown option/);
+  }
+});
+
 test("worker agent enablement commands expose offline help and validate inputs before I/O", (t) => {
   const env = environment(temporary(t));
   for (const [path, fileRequired] of [

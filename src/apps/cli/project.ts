@@ -30,6 +30,7 @@ const LIST = "list";
 const GET = "get";
 const RENAME = "rename";
 const BINDING = "binding";
+const AGENT = "agent";
 const EXPORT = "export";
 const APPLY = "apply";
 const REVISION = "revision";
@@ -78,6 +79,16 @@ const REVISION_LIST_TOKEN_REQUIRED =
   "cli.project.binding.revision.list.token_required";
 const REVISION_LIST_INDETERMINATE =
   "cli.project.binding.revision.list.indeterminate";
+const AGENT_LIST_INVALID_PROJECT_ID =
+  "cli.project.agent.list.invalid_project_id";
+const AGENT_LIST_INVALID_BINDING_ID =
+  "cli.project.agent.list.invalid_binding_id";
+const AGENT_LIST_TOKEN_REQUIRED = "cli.project.agent.list.token_required";
+const AGENT_LIST_INDETERMINATE = "cli.project.agent.list.indeterminate";
+const AGENT_GET_INVALID_PROJECT_ID = "cli.project.agent.get.invalid_project_id";
+const AGENT_GET_INVALID_BINDING_ID = "cli.project.agent.get.invalid_binding_id";
+const AGENT_GET_TOKEN_REQUIRED = "cli.project.agent.get.token_required";
+const AGENT_GET_INDETERMINATE = "cli.project.agent.get.indeterminate";
 
 function validateName(name: string, code: string): void {
   if (!projectNameSchema.safeParse(name).success)
@@ -288,6 +299,54 @@ async function bindingRevisionList(
   );
 }
 
+async function agentList(
+  projectId: string,
+  workerBindingId: string,
+  command: Command,
+): Promise<void> {
+  validateProjectId(projectId, AGENT_LIST_INVALID_PROJECT_ID);
+  validateBindingId(workerBindingId, AGENT_LIST_INVALID_BINDING_ID);
+  const options = command.optsWithGlobals();
+  const limit = pageLimit(options.limit);
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, AGENT_LIST_TOKEN_REQUIRED);
+  const result = await httpClient(projectOperations, endpoint, token)[
+    "agentConfiguration.list"
+  ]({
+    params: { projectId, bindingId: workerBindingId },
+    query: {
+      limit,
+      ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
+    },
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, AGENT_LIST_INDETERMINATE))}\n`,
+  );
+}
+
+async function agentGet(
+  projectId: string,
+  workerBindingId: string,
+  agentName: string,
+  command: Command,
+): Promise<void> {
+  validateProjectId(projectId, AGENT_GET_INVALID_PROJECT_ID);
+  validateBindingId(workerBindingId, AGENT_GET_INVALID_BINDING_ID);
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, AGENT_GET_TOKEN_REQUIRED);
+  const result = await httpClient(projectOperations, endpoint, token)[
+    "agentConfiguration.get"
+  ]({
+    params: { projectId, bindingId: workerBindingId, agentName },
+    query: {},
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, AGENT_GET_INDETERMINATE))}\n`,
+  );
+}
+
 export function addProjectCommand(program: Command): void {
   assert.equal(program.name(), PROGRAM_NAME);
   assert.ok(
@@ -336,6 +395,46 @@ export function addProjectCommand(program: Command): void {
       rename(projectId, command),
     );
   addBindingCommands(project);
+  addAgentCommands(project);
+}
+
+function addAgentCommands(project: Command): void {
+  const agent = project.command(AGENT).description("Project agent commands");
+  agent.action(() => agent.help());
+  agent
+    .command(LIST)
+    .description("List worker binding agents as JSON")
+    .argument("<project-id>", "Project ID")
+    .argument("<worker-binding-id>", "Worker binding ID")
+    .option("--limit <count>", "Maximum results per page", singleUse("--limit"))
+    .option(
+      "--cursor <cursor>",
+      "Continue from a cursor",
+      singleUse("--cursor"),
+    )
+    .action(
+      (
+        projectId: string,
+        workerBindingId: string,
+        _options,
+        command: Command,
+      ) => agentList(projectId, workerBindingId, command),
+    );
+  agent
+    .command(GET)
+    .description("Get a worker binding agent as JSON")
+    .argument("<project-id>", "Project ID")
+    .argument("<worker-binding-id>", "Worker binding ID")
+    .argument("<agent-name>", "Agent name")
+    .action(
+      (
+        projectId: string,
+        workerBindingId: string,
+        agentName: string,
+        _options,
+        command: Command,
+      ) => agentGet(projectId, workerBindingId, agentName, command),
+    );
 }
 
 function addBindingCommands(project: Command): void {
