@@ -88,7 +88,7 @@ restriction, not an interactive input flow.
 The proposed [`--file`](./common-flags.md#--file) reference defines path
 resolution, allowed sources, and local validation. The owning command defines
 requiredness, payload fields, bounds, and any explicit conversion such as
-[Mission imports](./mission.md#import--3-commands).
+[Mission imports](./mission.md#import--2-commands).
 
 ### Pagination
 
@@ -253,10 +253,7 @@ Do not blindly retry with a new key, loop indefinitely on 409, assume a timeout
 rolled back a mutation, or claim that reusing a key guarantees exactly-once
 effects across server restarts.
 
-Some domain operations additionally need a durable `requestId`. The Mission
-import and unblock and the Scheduler work pull and lease renewal derive it as
-`request_<same-key-ulid>` from the CLI's bare idempotency key. The Scheduler
-release carries none. The Mission mapping remains **blocked** under [HANDOFF Mission Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#mission-service).
+Some domain operations additionally need a durable `requestId`. The Scheduler work pull and lease renewal derive it as `request_<same-key-ulid>` from the CLI's bare idempotency key. The Scheduler release carries none.
 It does not apply to every mutation. It is distinct
 from Gateway's transport `X-Request-Id`, which identifies one HTTP request;
 transport correlation alone never deduplicates a domain effect.
