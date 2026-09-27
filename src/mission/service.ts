@@ -20,9 +20,9 @@ import {
   type MissionCollaborations,
   type WorkQueue,
 } from "./contract.ts";
+import { insertMission, readLiveNodesPinning } from "./store.ts";
 
 const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
-const NOT_IMPLEMENTED_MESSAGE = "not implemented";
 
 export interface Dependencies {
   config: MissionConfig;
@@ -51,16 +51,12 @@ export class MissionService implements Service, MissionCollaborations {
   }
 
   createMission(tx: Transaction, projectId: string, actor: HumanActor): void {
-    void tx;
-    void projectId;
     void actor;
-    throw new Error(NOT_IMPLEMENTED_MESSAGE);
+    insertMission(tx, projectId, Date.now());
   }
 
   liveNodesPinning(tx: Transaction, bindingId: string): string[] {
-    void tx;
-    void bindingId;
-    throw new Error(NOT_IMPLEMENTED_MESSAGE);
+    return readLiveNodesPinning(tx, bindingId);
   }
 
   start(): Promise<Error | null> {

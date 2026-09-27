@@ -4,6 +4,9 @@ import type { Operation } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 
 export const MISSION_SERVICE_NAME = "mission";
+export const MISSION_IDENTITY_PREFIX = "mission";
+export const NODE_IDENTITY_PREFIX = "node";
+export const MISSION_INITIAL_VERSION = 1;
 export const SCHEDULER_ACTOR_SERVICE = "scheduler";
 
 export interface HumanActor {
