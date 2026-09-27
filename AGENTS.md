@@ -39,6 +39,7 @@ engine/
 │   │   ├── files.ts            # Private filesystem validation and publication
 │   │   ├── http.ts             # Shared HTTP methods, statuses, and media types
 │   │   └── test-support.ts     # Isolated temporary filesystem fixtures
+│   ├── repository/             # Repository shared component: startup version gate and SSH reachability connector
 │   ├── custody/                # Custody component: credential envelope, platform validators, OAuth login sessions, and platform probes
 │   ├── project/                # Project Service and binding lookup ownership
 │   │   ├── contract.ts         # Project operations and ProjectBindings collaboration
