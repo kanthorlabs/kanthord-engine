@@ -602,6 +602,19 @@ export const missionOperations = {
     output: revisionSchema,
     description: "Get a node content revision.",
   },
+  "node.move": {
+    ...writeOperation,
+    id: "mission.node.move",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:nodeId/move",
+    input: z.strictObject({
+      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      query: z.strictObject({}),
+      body: moveSchema,
+    }),
+    output: nodeChangeSchema,
+    description: "Move a mission node to a new parent.",
+  },
   "node.update": {
     ...writeOperation,
     id: "mission.node.update",

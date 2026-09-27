@@ -38,6 +38,7 @@ import {
   pageOf,
   type NodeCreate,
   type NodeUpdate,
+  type Move,
   type NodeChange,
   type MissionBindings,
   type WorkQueue,
@@ -2126,6 +2127,243 @@ for (const retired of [false, true]) {
     );
   });
 }
+
+function moveFixture(t: TestContext) {
+  const f = dependencyFixture(t);
+  function revision(id: string) {
+    return (
+      f.store.transaction((tx) => readCurrentRevision(tx, id))?.revision ?? ZERO
+    );
+  }
+  function move(
+    nodeId: string,
+    newParentId: string,
+    overrides: Partial<Move> = {},
+  ) {
+    const oldParentId = f.node(nodeId)?.parent_id;
+    const ownerId =
+      f.node(nodeId)?.kind === NodeKind.Task ? oldParentId : nodeId;
+    const operation = missionOperations[RevisionWrite.NodeMove];
+    const input = operation.input.parse({
+      params: { nodeId },
+      query: {},
+      body: {
+        newParentId,
+        reason: REASON,
+        expectedMissionVersion: f.version(),
+        expectedRevision: revision(ownerId ?? nodeId),
+        expectedOldParentRevision: revision(oldParentId ?? nodeId),
+        expectedNewParentRevision: revision(newParentId),
+        ...overrides,
+      },
+    });
+    const commits = f.commits();
+    try {
+      return nodeChangeSchema.parse(
+        f.registry.get(operation.id).handler(input, f.caller),
+      );
+    } finally {
+      assert.equal(f.commits(), commits + ONE_COMMIT);
+    }
+  }
+  function refuses(
+    nodeId: string,
+    parentId: string,
+    code: string,
+    details?: unknown,
+    overrides: Partial<Move> = {},
+  ) {
+    const before = { ...f.snapshot(), jobs: f.jobs() };
+    assert.throws(
+      () => move(nodeId, parentId, overrides),
+      (error) => {
+        assert.ok(error instanceof OperationError);
+        assert.equal(error.code, code);
+        if (details !== undefined) assert.deepEqual(error.details, details);
+        return true;
+      },
+    );
+    assert.deepEqual({ ...f.snapshot(), jobs: f.jobs() }, before);
+  }
+  return { ...f, move, refuses, revision };
+}
+
+test("node.move objective changes containment without revisions and reroutes both initiative jobs", (t) => {
+  const f = moveFixture(t);
+  const oldParent = f.initiative();
+  const objective = f.create(f.body(NodeKind.Objective, oldParent)).revisions[
+    ZERO
+  ]!.nodeId;
+  const newParent = f.create({ ...f.body(), filename: OTHER_FILENAME })
+    .revisions[ZERO]!.nodeId;
+  const dependency = f.create({ ...f.body(), filename: NEW_FILENAME })
+    .revisions[ZERO]!.nodeId;
+  f.edit(DependencyOperation.Add, newParent, dependency);
+  const before = f.snapshot().revisions;
+  f.calls.length = ZERO;
+  const version = f.version();
+  assert.deepEqual(f.move(objective, newParent), {
+    ...emptyChange(version + ONE),
+    addedEdges: [
+      { kind: EdgeKind.Containment, parentId: newParent, childId: objective },
+    ],
+    removedEdges: [
+      { kind: EdgeKind.Containment, parentId: oldParent, childId: objective },
+    ],
+  });
+  assert.equal(f.version(), version + ONE);
+  assert.equal(f.node(objective)?.parent_id, newParent);
+  assert.equal(f.node(objective)?.state, NodeState.Pending);
+  assert.deepEqual(f.snapshot().revisions, before);
+  assert.ok(
+    f.calls.some(
+      (call) => call.action === QueueAction.Delete && call.nodeId === objective,
+    ),
+  );
+  assert.ok(
+    f.calls.some(
+      (call) => call.action === QueueAction.Insert && call.nodeId === oldParent,
+    ),
+  );
+  f.calls.length = ZERO;
+  assert.deepEqual(f.move(objective, newParent), emptyChange(f.version()));
+  assert.deepEqual(f.calls, []);
+});
+
+test("node.move task revises both owners with exact changes and no-op leaves versions alone", (t) => {
+  const f = moveFixture(t);
+  const oldParent = f.objective();
+  const newParent = f.create({
+    ...f.body(NodeKind.Objective, f.node(oldParent)!.parent_id!),
+    filename: OTHER_FILENAME,
+  }).revisions[ZERO]!.nodeId;
+  const task = f.create(f.body(NodeKind.Task, oldParent)).revisions[ZERO]!
+    .tasks![ZERO]!.id;
+  const version = f.version();
+  const result = f.move(task, newParent);
+  assert.equal(result.missionVersion, version + ONE);
+  assert.equal(result.revisions.length, TWO);
+  assert.deepEqual(
+    result.revisions.map((item) => item.nodeId),
+    [oldParent, newParent],
+  );
+  assert.deepEqual(
+    result.revisions.map((item) => item.change),
+    [
+      {
+        write: RevisionWrite.NodeMove,
+        previousRevision: TWO,
+        changedFields: [TASKS_FIELD],
+        tasks: [{ id: task, change: TaskChange.MovedOut, changedFields: [] }],
+      },
+      {
+        write: RevisionWrite.NodeMove,
+        previousRevision: ONE,
+        changedFields: [TASKS_FIELD],
+        tasks: [
+          {
+            id: task,
+            change: TaskChange.MovedIn,
+            changedFields: CONTENT_FIELDS,
+          },
+        ],
+      },
+    ],
+  );
+  assert.deepEqual(
+    result.revisions.map((item) => item.tasks?.map((entry) => entry.id)),
+    [[], [task]],
+  );
+  assert.deepEqual(
+    result.revisions.map((item) => item.actor),
+    [humanActor(f.caller), humanActor(f.caller)],
+  );
+  assert.deepEqual(result.addedEdges, [
+    { kind: EdgeKind.Containment, parentId: newParent, childId: task },
+  ]);
+  assert.deepEqual(result.removedEdges, [
+    { kind: EdgeKind.Containment, parentId: oldParent, childId: task },
+  ]);
+  assert.equal(f.node(task)?.parent_id, newParent);
+  assert.deepEqual(f.move(task, newParent), emptyChange(f.version()));
+});
+
+test("node.move checks version, revisions, parents, terminal and retirement before writes", (t) => {
+  const f = moveFixture(t);
+  const oldParent = f.objective();
+  const initiative = f.node(oldParent)!.parent_id!;
+  const newParent = f.create({
+    ...f.body(NodeKind.Objective, initiative),
+    filename: OTHER_FILENAME,
+  }).revisions[ZERO]!.nodeId;
+  const task = f.create(f.body(NodeKind.Task, oldParent)).revisions[ZERO]!
+    .tasks![ZERO]!.id;
+  f.refuses(
+    task,
+    newParent,
+    MissionErrorCode.VersionConflict,
+    { current: f.version() },
+    { expectedMissionVersion: ONE },
+  );
+  f.refuses(
+    task,
+    newParent,
+    MissionErrorCode.RevisionConflict,
+    { current: TWO },
+    { expectedRevision: ONE },
+  );
+  f.refuses(
+    task,
+    newParent,
+    MissionErrorCode.RevisionConflict,
+    { current: TWO },
+    { expectedOldParentRevision: ONE },
+  );
+  f.refuses(
+    task,
+    newParent,
+    MissionErrorCode.RevisionConflict,
+    { current: ONE },
+    { expectedNewParentRevision: TWO },
+  );
+  f.refuses(task, initiative, MissionErrorCode.CreateRefused, {
+    parentId: initiative,
+    parentKind: NodeKind.Initiative,
+  });
+  f.refuses(initiative, newParent, MissionErrorCode.CreateRefused, {
+    parentId: newParent,
+    parentKind: NodeKind.Objective,
+  });
+  f.refuses(oldParent, newParent, MissionErrorCode.CreateRefused, {
+    parentId: newParent,
+    parentKind: NodeKind.Objective,
+  });
+  f.refuses(task, UNKNOWN_NODE_ID, MissionErrorCode.NodeNotFound, undefined, {
+    expectedNewParentRevision: ONE,
+  });
+  f.setState(newParent, NodeState.Completed);
+  f.refuses(task, newParent, MissionErrorCode.Terminal, { nodeId: newParent });
+  f.setState(newParent, NodeState.Available);
+  f.setState(oldParent, NodeState.Completed);
+  f.refuses(task, newParent, MissionErrorCode.Terminal, { nodeId: oldParent });
+  f.setState(oldParent, NodeState.Available);
+  f.store.database
+    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+    .run(RETIRED_AT, newParent);
+  f.refuses(task, newParent, MissionErrorCode.Retired, { nodeId: newParent });
+});
+
+test("node.move rejects a newly closed dependency cycle and rolls back containment", (t) => {
+  const f = moveFixture(t);
+  const oldParent = f.initiative();
+  const objective = f.create(f.body(NodeKind.Objective, oldParent)).revisions[
+    ZERO
+  ]!.nodeId;
+  const newParent = f.create({ ...f.body(), filename: OTHER_FILENAME })
+    .revisions[ZERO]!.nodeId;
+  f.edit(DependencyOperation.Add, newParent, objective);
+  f.refuses(objective, newParent, MissionErrorCode.Cycle);
+});
 
 test("MissionService refuses to restart after stop", async () => {
   const mission = makeService(new HealthRegistry());
