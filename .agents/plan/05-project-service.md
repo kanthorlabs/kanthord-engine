@@ -16,8 +16,11 @@ Binding-set operations implement three binding kinds: `repository`, `worker`, an
 `storage`. Source kind is out of scope (HANDOFF Intake-Service).
 
 Every repository binding write calls one `git ls-remote` before the transaction
-(`project-service.impl.md:247`). The on-demand resource healthcheck endpoint belongs
-to Plan 07 (D8).
+(`project-service.impl.md:247`). Plan 05 implements the component healthcheck
+(`{ bindings }` map, already registered at `service.ts:25`) and exposes `resourceInventory`
+for the resource healthcheck report; only repository bindings are checked in ERD 1
+(`project-service.impl.md:256–266`). Plan 07 calls `resourceInventory` from the health
+report.
 
 Leaves to Plan 07: replaces `unwired` stubs for `CustodySuitability`, `ValidateEntry`,
 `CreateMission`, `LiveNodesPinning`, `RepositoryConnector`, `WorkerAgentViewFn`, and
@@ -66,12 +69,13 @@ Leaves to Plan 08: CLI command file for the `project` group.
 
 ## Provides
 
-| Seam                 | TypeScript signature                                                                                                                                                   | Owner file                | Consumer plans |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | -------------- |
-| `entriesOfAgent`     | `(tx: Transaction, agentName: string): AgentDependentBinding[]`                                                                                                        | `src/project/contract.ts` | 03             |
-| `bindingsNaming`     | `(tx: Transaction, credentialName: string): BindingRevision[]`                                                                                                         | `src/project/contract.ts` | 01             |
-| `resolveBinding`     | `(tx: Transaction, projectId: string, bindingName: string): { bindingId: string; resourceIdentity: string } \| null`                                                   | `src/project/contract.ts` | 06 (per D7)    |
-| `getBindingRevision` | `(tx: Transaction, bindingId: string): { bindingId: string; name: string; resourceIdentity: string; revision: number; tombstone: boolean; disabled: boolean } \| null` | `src/project/contract.ts` | 06             |
+| Seam                 | TypeScript signature                                                                                                                                                                                                                                                                                                                            | Owner file                | Consumer plans |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | -------------- |
+| `entriesOfAgent`     | `(tx: Transaction, agentName: string): AgentDependentBinding[]`                                                                                                                                                                                                                                                                                 | `src/project/contract.ts` | 03             |
+| `bindingsNaming`     | `(tx: Transaction, credentialName: string): BindingRevision[]`                                                                                                                                                                                                                                                                                  | `src/project/contract.ts` | 01             |
+| `resolveBinding`     | `(tx: Transaction, projectId: string, bindingName: string): { bindingId: string; resourceIdentity: string } \| null`                                                                                                                                                                                                                            | `src/project/contract.ts` | 06 (per D7)    |
+| `getBindingRevision` | `(tx: Transaction, bindingId: string): { bindingId: string; name: string; resourceIdentity: string; revision: number; tombstone: boolean; disabled: boolean } \| null`                                                                                                                                                                          | `src/project/contract.ts` | 06             |
+| `resourceInventory`  | `(tx: Transaction): ResourceEntry[]` — current (non-tombstoned) repository bindings; each entry has `scope: HealthScope.Project`, project name, percent-encoded binding name, `repository:<address>` target, `network git read` capability, and a `check` closure that calls `gitLsRemote`; `ResourceEntry` imported from `../kernel/health.ts` | `src/project/service.ts`  | 07             |
 
 ## Tasks
 
@@ -610,6 +614,72 @@ revision: row.revision, tombstone, disabled }`.
 - Rules:
   - Edit only the `src/project/` section; leave all other sections unchanged.
 - Done when: `pnpm run verify` passes; AGENTS.md reflects the delivered files.
+
+### 05.9 Component healthcheck and resource inventory
+
+- Files: `src/project/contract.ts` (edit), `src/project/service.ts` (edit),
+  `src/project/service.test.ts` (edit)
+- Do:
+  1. Add to `contract.ts`:
+     a. Add named constant `RESOURCE_CAPABILITY_NETWORK_GIT_READ = "network git read"`.
+     b. Add named constant `RESOURCE_TARGET_KIND_REPOSITORY = "repository"`.
+     c. Import `ResourceEntry`, `ResourceStatus`, `ResourceCheck`, `HealthScope` from
+     `../kernel/health.ts`. Declare no local equivalents.
+  2. Verify `healthcheck()` in `service.ts` returns
+     `{ bindings: this.started && !this.shutdown.err() ? HealthStatus.Healthy : HealthStatus.Unavailable }`.
+     No logic change is needed; this method reads only in-process state and performs no
+     remote call (`architecture.impl.md:369`).
+  3. Add `resourceInventory(tx: Transaction): ResourceEntry[]` as a public method on
+     `ProjectService`:
+     - For each `(project_id, resource_identity)` group where `resource_identity LIKE
+'repository:%'`, select the max-revision row inside `tx`; include only groups whose
+       max-revision row has `removed_at IS NULL`.
+     - Join `project_project WHERE id = row.project_id` inside the same `tx` to get the
+       project name.
+     - Parse each `config` column as JSON; extract `config.address` as the SSH URL.
+     - Build one `ResourceEntry` per row:
+       - `scope`: `HealthScope.Project`.
+       - `project`: project name from the join.
+       - `name`: `encodeURIComponent(row.name)`.
+       - `target`: `RESOURCE_TARGET_KIND_REPOSITORY + ":" + config.address`.
+       - `capability`: `RESOURCE_CAPABILITY_NETWORK_GIT_READ`.
+       - `check`: async closure that captures `config.address` at build time:
+         `const deadline = context.deadline(); assert.ok(deadline !== null);`
+         call `this.repositoryConnector.gitLsRemote(address, context, deadline - Date.now())`;
+         on success return `ResourceStatus.Healthy`; in the catch block return
+         `context.err() ? ResourceStatus.Unknown : ResourceStatus.Unhealthy`.
+         No check result is stored (`project-service.impl.md:266`). No credential record
+         appears in the attribution (`project-service.impl.md:265`; Repository component uses
+         host SSH config only, per `repository.impl.md`).
+     - The method receives `tx`, reads rows inside it, opens no transaction, and performs no
+       network call (`00-index.md` Seams, `resourceInventory`).
+  4. Update `src/project/service.test.ts`:
+     - `healthcheck()`: started service returns `{ bindings: HealthStatus.Healthy }`; stopped
+       service returns `{ bindings: HealthStatus.Unavailable }`.
+     - `resourceInventory(tx)`:
+       - Two current repository bindings in one project return two `ResourceEntry` items with
+         correct `scope`, `project`, `name`, `target`, `capability` fields.
+       - A tombstoned repository binding is excluded.
+       - A worker binding is excluded.
+       - A storage binding is excluded.
+       - Calling `entry.check(ctx)` with a stub `repositoryConnector` that resolves returns
+         `ResourceStatus.Healthy`.
+       - Calling `entry.check(ctx)` with a stub that rejects returns `ResourceStatus.Unhealthy`.
+       - Calling `entry.check(ctx)` where `ctx` is already cancelled returns
+         `ResourceStatus.Unknown`.
+       - `resourceInventory` itself performs no network call.
+       - Two entries with the same address produce two independent `check` closures.
+       - `name` is the percent-encoded binding name; `target` is
+         `"repository:" + config.address`.
+- Rules:
+  - `healthcheck()` reads only in-process state; performs no remote call
+    (`architecture.impl.md:369`).
+  - `resourceInventory` receives `tx`, opens no transaction, and performs no network call (`00-index.md` Seams, `resourceInventory`).
+  - `check` honours the caller-supplied context; it sets no deadline of its own.
+  - Named constants for every fixed string (`architecture.impl.md:17-20`).
+  - Import `ResourceEntry`, `ResourceStatus`, `ResourceCheck`, `HealthScope` from
+    `../kernel/health.ts`; declare no local equivalents.
+- Done when: all new `service.test.ts` tests pass; `pnpm run verify` passes.
 
 ## Blockers
 

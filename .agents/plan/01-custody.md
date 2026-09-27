@@ -17,6 +17,10 @@ This plan delivers:
 - OAuth login sessions as in-memory records with no persisted table.
 - The `src/custody` ESLint service element and the `credential` migration prefix exemption
   in `src/apps/server/migrations.test.ts`.
+- The resource healthcheck: `resourceInventory` method and `modelListCheck` collaboration on
+  `CustodyComponent`; five platform probes; types
+  `ResourceEntry`, `ResourceCheck` and `ResourceStatusValue` from `src/kernel/health.ts`
+  (consumed by Plan 07).
 
 This plan does not deliver:
 
@@ -64,6 +68,8 @@ real implementations.
 | `custodySuitability`           | `(tx: Transaction, req: { credential: string; platform: string }): void` — reads newest live revision; throws on absent credential or platform mismatch                                                                                                                                                                                                 | `src/custody/service.ts` | 03, 05         |
 | `credentialMetadata`           | `(tx: Transaction, credentialName: string): CredentialMetadata \| null` — nonsecret metadata read; returns `null` for unknown name                                                                                                                                                                                                                      | `src/custody/service.ts` | 03             |
 | `CustodyComponent` constructor | `new CustodyComponent({ envelopeKey: Buffer, logger: Logger, health?: HealthRegistry, agentProvidersDependentOn: AgentProvidersDependentOnFn, bindingsNaming: BindingsNamingFn, enablementsDependentOnModel: EnablementsDependentOnModelFn })` — Plan 07 calls `deriveEnvelopeKey(config.masterKey)` and passes the result; collaborations are required | `src/custody/index.ts`   | 07             |
+| `resourceInventory`            | `(tx: Transaction): ResourceEntry[]` — synchronous; one global `ResourceEntry` per credential name (newest live revision, `ended_at IS NULL`); `target` = `credential:<revision id>`; `check` closure decrypts and runs the platform probe                                                                                                              | `src/custody/service.ts` | 07             |
+| `modelListCheck`               | `(tx: Transaction, credentialName: string): ResourceCheck` — reads the newest live revision of the name inside `tx`; returns a closure that runs the `GET /models` probe (anthropic, openai-compatible); a missing revision or a non-model-list platform returns a closure that answers `unknown` without a remote call                                 | `src/custody/service.ts` | 03, 07         |
 
 ## Tasks
 
@@ -288,7 +294,7 @@ real implementations.
   1. Create `engine/src/custody/service.ts`. Import `Logger` from `pino`.
      Declare `export class CustodyComponent implements Service`.
      Constructor accepts `{ envelopeKey: Buffer; logger: Logger; health?: HealthRegistry }`.
-     The constructor calls `health?.register("credential", () => this.healthcheck())`.
+     The constructor calls `health?.register("custody", () => this.healthcheck())`.
      `healthcheck()` returns `{ credential: this.started && !this.shutdown.err() ? HealthStatus.Healthy : HealthStatus.Unavailable }`.
      Add `declare(registry: OperationRegistry): void` that binds handlers for all 9 operations.
      Implement the full `Service` lifecycle (`start`, `quiesce`, `stop`, `run`)
@@ -608,6 +614,155 @@ real implementations.
   - `node --test src/custody/sessions.test.ts` passes all session lifecycle tests.
   - `node --test src/custody/service.test.ts` passes all login handler tests, including
     successful completion inserting a credential row and commit-time name conflict.
+  - `pnpm run verify` passes.
+
+### 01.10 Resource healthcheck
+
+- Files:
+  - `engine/src/kernel/health.ts`
+  - `engine/src/kernel/health.test.ts`
+  - `engine/src/custody/resource-healthcheck.ts`
+  - `engine/src/custody/resource-healthcheck.test.ts`
+  - `engine/src/custody/service.ts`
+  - `engine/package.json`
+  - `engine/pnpm-lock.yaml`
+- Do:
+  1. Edit `engine/src/kernel/health.ts`. Add after the existing exports:
+     - `export const ResourceStatus = { Healthy: "healthy", Unhealthy: "unhealthy", Unknown: "unknown" } as const`.
+     - `export type ResourceStatusValue = (typeof ResourceStatus)[keyof typeof ResourceStatus]`.
+     - `export const HealthScope = { Global: "global", Project: "project" } as const`.
+     - `export type HealthScopeValue = (typeof HealthScope)[keyof typeof HealthScope]`.
+     - `export type ResourceCheck = (context: Context) => Promise<ResourceStatusValue>`.
+     - `export interface ResourceEntry { scope: HealthScopeValue; project: string | null; name: string; target: string; capability: string; check: ResourceCheck }`.
+       Rules for `ResourceEntry`:
+       `project` holds the project name when `scope` is `project`, and `null` when `scope` is `global`.
+       `name` holds each segment percent-encoded with `encodeURIComponent`, joined by `/`.
+       `target` is the deduplication key; form: `<target kind>:<identifier>`.
+       `capability` is known at inventory time and never depends on the check result.
+       `check` honours the `Context` it receives and never throws; a failure maps to a `ResourceStatusValue`.
+       A cancelled or expired context maps to `ResourceStatus.Unknown`.
+       Edit `engine/src/kernel/health.test.ts`. Add tests:
+     - `ResourceStatus` values are `"healthy"`, `"unhealthy"` and `"unknown"`.
+     - `HealthScope` values are `"global"` and `"project"`.
+  2. Create `engine/src/custody/resource-healthcheck.ts`.
+     Import `Platform` from `"./platforms.ts"`.
+     Import `ResourceStatus`, `type ResourceStatusValue`, `type Context` from the kernel.
+     Export four named capability constants:
+     - `CAPABILITY_RATE_LIMIT_READ = "rate-limit read"` — github (`custody.impl.md` "The resource healthcheck").
+     - `CAPABILITY_COPILOT_TOKEN_READ = "copilot token read"` — github-copilot.
+     - `CAPABILITY_MODEL_LIST_READ = "model-list read"` — anthropic and openai-compatible.
+     - `CAPABILITY_BUCKET_HEAD = "bucket head"` — s3.
+       Export `TARGET_KIND_CREDENTIAL = "credential"` — the target kind for deduplication.
+       Export five async probe functions. Each accepts a `Context` and aborts when it cancels.
+       A network error or cancellation returns `ResourceStatus.Unknown` for every probe.
+       A 403 response returns `ResourceStatus.Unknown` for every probe (a forbidden probe proves
+       no invalid credential, `custody.impl.md` "The resource healthcheck").
+     - `probeGitHub(apiKey: string, context: Context): Promise<ResourceStatusValue>`:
+       Send `GET https://api.github.com/rate_limit` with `Authorization: Bearer <apiKey>`.
+       HTTP 200 → `ResourceStatus.Healthy`. HTTP 403 → `ResourceStatus.Unknown`.
+       Any other status → `ResourceStatus.Unhealthy`.
+       Network error or cancellation → `ResourceStatus.Unknown`.
+     - `probeGitHubCopilot(access: string, expires: number, context: Context): Promise<ResourceStatusValue>`:
+       If `expires <= Date.now()`, return `ResourceStatus.Unknown` without a remote call
+       (`custody.impl.md` "No check refreshes an OAuth record").
+       Send `GET https://api.github.com/copilot_internal/v2/token` with `Authorization: Bearer <access>`.
+       HTTP 200 → `ResourceStatus.Healthy`. HTTP 403 → `ResourceStatus.Unknown`.
+       Any other status → `ResourceStatus.Unhealthy`.
+       Network error or cancellation → `ResourceStatus.Unknown`.
+     - `probeAnthropic(apiKey: string, context: Context): Promise<ResourceStatusValue>`:
+       Send `GET https://api.anthropic.com/v1/models` with `x-api-key: <apiKey>`.
+       HTTP 200 → `ResourceStatus.Healthy`. HTTP 403 → `ResourceStatus.Unknown`.
+       Any other status → `ResourceStatus.Unhealthy`.
+       Network error or cancellation → `ResourceStatus.Unknown`.
+     - `probeOpenAICompatible(apiKey: string, baseUrl: string, context: Context): Promise<ResourceStatusValue>`:
+       Send `GET <baseUrl>/models` with `Authorization: Bearer <apiKey>`.
+       HTTP 200 → `ResourceStatus.Healthy`. HTTP 403 → `ResourceStatus.Unknown`.
+       Any other status → `ResourceStatus.Unhealthy`.
+       Network error or cancellation → `ResourceStatus.Unknown`.
+     - `probeS3(accessKeyId: string, secretAccessKey: string, endpoint: string, bucket: string, region: string, context: Context): Promise<ResourceStatusValue>`:
+       Add `@aws-sdk/client-s3` to `dependencies` in `engine/package.json` at an exact version, like every other dependency.
+       Construct `new S3Client({ endpoint, region, credentials: { accessKeyId, secretAccessKey } })`.
+       Bridge the `Context` to an `AbortController`.
+       Call `client.send(new HeadBucketCommand({ Bucket: bucket }), { abortSignal })`.
+       Read the status from `$metadata.httpStatusCode` of the answer or of the thrown error.
+       HTTP 200 → `ResourceStatus.Healthy`. HTTP 404 → `ResourceStatus.Unhealthy`.
+       HTTP 403 → `ResourceStatus.Unknown` (a write-only key can work despite a forbidden probe).
+       Network error, cancellation or any other status → `ResourceStatus.Unknown`.
+       Call `client.destroy()` in a `finally` block.
+  3. In `engine/src/custody/service.ts`, add two methods to `CustodyComponent`:
+     - `resourceInventory(tx: Transaction): ResourceEntry[]` (synchronous):
+       Import `ResourceEntry`, `HealthScope`, `ResourceStatus`, `type ResourceCheck` from
+       `"../kernel/health.ts"`, and `TARGET_KIND_CREDENTIAL`, the four probe functions
+       and capability constants from `"./resource-healthcheck.ts"`.
+       Query one row per credential name: the row with null `ended_at` and the highest `revision`.
+       For each row, capture `id`, `name`, `platform`, `nonce`, `ciphertext` and parsed `metadata` now.
+       Build and return one `ResourceEntry` per row:
+       `scope: HealthScope.Global`, `project: null`,
+       `name: encodeURIComponent(credentialName)`,
+       `target: TARGET_KIND_CREDENTIAL + ":" + id`,
+       `capability` from the platform (see probe-to-capability mapping below),
+       `check` closure: decrypts the captured `nonce` and `ciphertext` using `id`, dispatches
+       to the probe for `platform`. Return `ResourceStatus.Unknown` on decryption failure.
+       Probe dispatch inside the closure:
+       `Platform.GitHub` → `probeGitHub(secret.key, context)`.
+       `Platform.GitHubCopilot` → `probeGitHubCopilot(secret.access, secret.expires, context)`.
+       `Platform.Anthropic` → `probeAnthropic(secret.key, context)`.
+       `Platform.OpenAICompatible` → `probeOpenAICompatible(secret.key, metadata.baseUrl, context)`.
+       `Platform.S3` → `probeS3(secret.accessKeyId, secret.secretAccessKey, metadata.endpoint, metadata.bucket, metadata.region, context)`.
+       Capability mapping (named constants, not bare strings):
+       `Platform.GitHub` → `CAPABILITY_RATE_LIMIT_READ`.
+       `Platform.GitHubCopilot` → `CAPABILITY_COPILOT_TOKEN_READ`.
+       `Platform.Anthropic` → `CAPABILITY_MODEL_LIST_READ`.
+       `Platform.OpenAICompatible` → `CAPABILITY_MODEL_LIST_READ`.
+       `Platform.S3` → `CAPABILITY_BUCKET_HEAD`.
+     - `modelListCheck(tx: Transaction, credentialName: string): ResourceCheck`:
+       Read the newest live revision of `credentialName` inside `tx`.
+       If no live revision exists, or the platform is not `anthropic` or `openai-compatible`,
+       return a closure that returns `ResourceStatus.Unknown` without a remote call.
+       Otherwise, capture `id`, `nonce`, `ciphertext` and `metadata.baseUrl` now.
+       Return a closure that decrypts the captured secret and calls `probeAnthropic` or
+       `probeOpenAICompatible` depending on `platform`. Return `ResourceStatus.Unknown` on
+       decryption failure.
+  4. Create `engine/src/custody/resource-healthcheck.test.ts`. Test:
+     - `probeGitHub` returns `Healthy` on HTTP 200 and `Unhealthy` on HTTP 401.
+     - `probeGitHub` returns `Unknown` on HTTP 403 and on a network error.
+     - `probeGitHubCopilot` returns `Unknown` for an expired token without a network call.
+     - `probeGitHubCopilot` returns `Healthy` on HTTP 200 for a valid token.
+     - `probeGitHubCopilot` returns `Unknown` on HTTP 403.
+     - `probeAnthropic` returns `Healthy` on HTTP 200 and `Unhealthy` on HTTP 401.
+     - `probeAnthropic` returns `Unknown` on HTTP 403.
+     - `probeOpenAICompatible` returns `Healthy` on HTTP 200 and `Unhealthy` on HTTP 401.
+     - `probeOpenAICompatible` returns `Unknown` on HTTP 403.
+     - `probeS3` maps 200 to `Healthy`, 404 to `Unhealthy` and 403 to `Unknown` against a stubbed `S3Client.send`.
+     - `resourceInventory` returns one `ResourceEntry` per credential name (newest live
+       revision, `ended_at IS NULL`), `scope` is `global`, `project` is `null`.
+     - `resourceInventory` excludes names whose every revision has a non-null `ended_at`.
+     - `resourceInventory` assigns the correct capability constant per platform.
+     - A `check` closure from `resourceInventory` returns `Unknown` for a decryption failure.
+     - `modelListCheck` returns a closure that answers `Unknown` for a missing revision.
+     - `modelListCheck` returns a closure that answers `Unknown` for a non-model-list platform.
+     - No secret appears in any probe result, inventory entry or error.
+- Rules:
+  - Import `ResourceStatus`, `ResourceEntry`, `ResourceCheck`, `HealthScope` from `../kernel/health.ts`.
+    No plan declares its own `ResourceStatus` (`00-index.md` "Resource healthcheck entry").
+  - `resourceInventory` is synchronous. It opens no transaction, performs no network call,
+    and returns closures. A closure captures all row values at inventory time and performs
+    no later store read (`00-index.md` Seams, `resourceInventory`).
+  - HTTP 403 reports `Unknown` for every probe: a forbidden probe proves no invalid credential
+    (`custody.impl.md` "The resource healthcheck").
+  - No check refreshes an OAuth record; an expired access token reports `Unknown` without a
+    remote call (`custody.impl.md` "The resource healthcheck").
+  - The GitHub rate-limit probe spends no rate limit (`custody.impl.md` "The resource healthcheck").
+  - The S3 probe uses `HeadBucketCommand` of `@aws-sdk/client-s3` with the metadata `endpoint` and `region`, so it serves every S3-compatible provider (`custody.impl.md` "Platform validators").
+  - No check result persists; checks run on demand
+    (`architecture.md` "No service stores the result of a check.").
+  - Named constants for every capability string and target kind (`engine/CLAUDE.local.md`).
+  - No background check, no freshness cache (2026-09-25 Ulrich ruling in `engine/.agents/plan/00-index.md`).
+  - Plan 07 places each entry in the health report.
+- Done when:
+  - `node --test src/kernel/health.test.ts` passes the new `ResourceStatus` and `HealthScope` tests.
+  - `node --test src/custody/resource-healthcheck.test.ts` passes all probe, inventory and
+    dispatch tests.
   - `pnpm run verify` passes.
 
 ## Blockers

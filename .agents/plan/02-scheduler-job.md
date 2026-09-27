@@ -8,6 +8,7 @@ This plan delivers:
 - The `WorkQueue` collaboration interface (`insert`, `delete`, `priorityUpdate`) in `src/scheduler/contract.ts`, consumed by the Mission Service in Plan 06.
 - The `scheduler.queue.list` and `scheduler.queue.peek` human read operations with their handlers.
 - The `SchedulerService` skeleton that implements `Service` and `WorkQueue`, registers the two read operations, and exports `schedulerMigrations`.
+- The `scheduler` component healthcheck with key `queue`, registered via `HealthRegistry`; returns 200 when started and not shut down, and 503 otherwise. The `queue` key reports lifecycle availability only: it reads the `started` flag and the `shutdown` cancellation state; it performs no SQL probe and no external resource check.
 
 Out of scope: execution, claim, lease, observation-obligation tables and handlers; the scheduling processor pool; work pulls; delivery admission; every ERD 2 item.
 
@@ -134,7 +135,7 @@ None. This plan creates the Scheduler Service from scratch.
   6. Test `"WorkQueue priorityUpdate changes priority and preserves id"`: insert a job at priority 0; call `store.transaction(tx => scheduler.priorityUpdate(tx, nodeId, 1))`; assert the `priority` column is 1 and the `id` column is unchanged.
   7. Test `"queue list handler orders by id descending and paginates"`: declare `const LIST_PAGE_LIMIT = 2`, `const LIST_TOTAL_JOBS = 3`, `const LIST_SECOND_PAGE_COUNT = 1` as const; insert `LIST_TOTAL_JOBS` jobs for one `projectId` via separate `store.transaction` calls; construct registry; call `scheduler.declare(registry)`; construct a CallerContext backed by the store; invoke the `queueList` handler with `{ params: { projectId }, query: { limit: LIST_PAGE_LIMIT }, body: null }`; assert `items.length === LIST_PAGE_LIMIT` and `items[0].jobId > items[1].jobId` (string comparison); assert `nextCursor` is non-null; invoke again with `{ params: { projectId }, query: { limit: LIST_PAGE_LIMIT, cursor: nextCursor }, body: null }`; assert `items.length === LIST_SECOND_PAGE_COUNT` and `nextCursor === null`.
   8. Test `"queue peek handler returns the first job by priority desc then id asc, or null"`: declare `const PRIORITY_LOW = 0`, `const PRIORITY_HIGH = 1` as const; insert a job at `PRIORITY_LOW` and a job at `PRIORITY_HIGH` for the same `projectId` via `store.transaction`; invoke the `queuePeek` handler; assert `job.priority === PRIORITY_HIGH`; directly insert two rows at `PRIORITY_HIGH` with fixed known ids `"job_00000000000000000000000000"` and `"job_ZZZZZZZZZZZZZZZZZZZZZZZZZZ"` via `tx.database.prepare("INSERT INTO scheduler_job (id, project_id, node_id, priority) VALUES (?, ?, ?, ?)").run(...)` inside `store.transaction`; invoke peek; assert `job.jobId === "job_00000000000000000000000000"` (lowest id wins the `id ASC` tie-break at equal priority); invoke peek for a fresh `projectId` with no jobs; assert `job === null`.
-  9. Test `"SchedulerService lifecycle"`: assert `healthcheck().queue` is `HealthStatus.Unavailable` before start; call `start()`; assert `healthcheck().queue` is `HealthStatus.Healthy`; call `stop()`; assert `healthcheck().queue` is `HealthStatus.Unavailable`; call `start()` again; assert the returned error is non-null.
+  9. Test `"SchedulerService lifecycle and health registration"`: construct `new HealthRegistry()` and pass it as `health` in the scheduler's `Dependencies`. Assert `(await registry.check(background)).scheduler.queue === HealthStatus.Unavailable` before start. Call `start()`. Assert `(await registry.check(background)).scheduler.queue === HealthStatus.Healthy`. Call `stop()`. Assert `(await registry.check(background)).scheduler.queue === HealthStatus.Unavailable`. Call `start()` again; assert the returned error is non-null.
 - Do — index.ts:
   1. Export `SchedulerService`, `type Dependencies` from `./service.ts`.
   2. Export `schedulerMigrations` from `./migrations.ts`.
@@ -146,7 +147,7 @@ None. This plan creates the Scheduler Service from scratch.
   - Named constants for every fixed string or numeric comparison value; no bare literals in comparisons or switch cases. (`docs/brainstorm/architecture.impl.md:17–20`)
   - No code comments. (user global instructions)
   - Error code `system.pagination.cursor_invalid` has three parts. (`docs/brainstorm/architecture.impl.md:339`)
-- Done when: `node --test --test-timeout=30000 src/scheduler/service.test.ts` passes all 6 tests; `pnpm run verify` passes.
+- Done when: `node --test --test-timeout=30000 src/scheduler/service.test.ts` passes all 6 tests including `"SchedulerService lifecycle and health registration"`; `pnpm run verify` passes.
 
 ### 02.4 Register scheduler in the migration test and update AGENTS.md
 

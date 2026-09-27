@@ -44,6 +44,31 @@ No new table. No database. The worker app communicates over HTTP only.
 - `docs/reference/erd/01-setup.md` — ERD 1 scope; ERD 2 covers registration, execution and credential handover.
 - `docs/reference/erd/README.md#owners-without-a-table` — "The `worker` application and an external harness hold no table of the server."
 
+## Healthcheck
+
+### Component healthcheck
+
+The `Worker` class implements `Service`. It is the worker application process — a separate process with no `HealthRegistry` and no HTTP listener.
+
+| Component           | Key      | When 200                                         | When 503                                                            |
+| ------------------- | -------- | ------------------------------------------------ | ------------------------------------------------------------------- |
+| HTTP client startup | `client` | `started === true` AND `shutdown.err() === null` | before `start()` completes, or after `quiesce()` cancels `shutdown` |
+
+`client: 200` proves that startup completed (version check passed and, after task 09.1, masterKey validated) and the process is running. It does not prove ongoing connectivity to the server; if the server disappears after startup, `client` stays `200`. No remote call occurs. The `masterKey` check (task 09.1) does not add a separate component; a running process with `client: 200` has already passed it.
+
+`started` is set to `true` inside `start()` after `log("Worker application started")` emits. At the moment of that notice, `healthcheck()` still returns `{ client: 503 }`. The notice is informational, not health-derived.
+
+In ERD 1, `Worker.healthcheck()` has no runtime consumer. The worker app is a separate process; the server `HealthRegistry` does not include it. ERD 2 adds registration-aware consumption.
+
+### Resource healthcheck
+
+None in ERD 1.
+
+Sources:
+
+- `worker-service.impl.md:165` — "The resource healthcheck of an instance reports `healthy` when its last heartbeat is inside `worker.heartbeatWindow`, and `unhealthy` otherwise." (registered instance, ERD 2)
+- `engine/.agents/plan/00-index.md:18` — "Worker registrations (`worker_registration` table)...Heartbeat and work pull are registration lifecycle (ERD 2)."
+
 ## Depends on
 
 None. The skeleton consumes no seam from plans 01–08.
@@ -93,6 +118,24 @@ No seam. The worker app produces no collaboration type that another ERD 1 plan c
   - The watchdog applies only to a settled state; ERD 2 limits it when registration and work pulls exist.
   - No code comments. Named constants for every number.
 - Done when: `pnpm run verify` passes. Tests prove that the startup notice is one JSON line with `msg: "Worker application started"`, that `SIGHUP` leaves the process running, that `SIGTERM` stops it with a `null` result, and that a stop that does not finish triggers the watchdog (fake timers and a stubbed `process.exit`).
+
+### 09.3 Add explicit healthcheck tests
+
+- Files:
+  - `src/apps/worker/index.test.ts`
+
+- Do:
+  1. Add a test: construct a `Worker` without calling `start()`; call `healthcheck()` and assert `{ client: HealthStatus.Unavailable }`.
+  2. Add a test: after a version-check failure (server returns wrong version), `healthcheck()` returns `{ client: HealthStatus.Unavailable }`.
+  3. Add a test: after a failed start caused by absent `masterKey` (task 09.1), `healthcheck()` returns `{ client: HealthStatus.Unavailable }`. Use a fixture with a valid server but no `masterKey` in `cli.yaml`.
+  4. Add a test: after `await worker.quiesce()` but before `stop()` returns, `healthcheck()` returns `{ client: HealthStatus.Unavailable }`. Assert this to prove the transition at shutdown cancellation, not only at completed stop.
+
+- Rules:
+  - No code comments.
+  - `client: 200` tests already exist at `index.test.ts:65` and `index.test.ts:74-76`; add only the missing cases listed above.
+  - Step 3 depends on task 09.1; run this task after 09.1.
+
+- Done when: `pnpm run verify` passes. Tests cover pre-start, version-check failure, failed-start with absent `masterKey` and post-quiesce states.
 
 ## Blockers
 

@@ -320,6 +320,45 @@ The static worker catalog module is created in this plan. `validateEntry` needs 
   - All `worker.agent.*` error codes match exactly the strings in `worker.md`
   - Calling any `unwired(...)` function throws `CodedError` with code `"system.composition.unwired"`
 
+### 03.6 Declare and implement the agent provider health inventory
+
+- Files: `src/worker/contract.ts` (edit), `src/worker/service.ts` (edit), `src/worker/service.test.ts` (edit), `src/apps/server/index.ts` (edit)
+
+- Do:
+  1. In `contract.ts`, add `import { HealthScope, type ResourceCheck, type ResourceEntry } from "../kernel/health.ts"`. Declare named constants `AGENT_PROVIDER_CAPABILITY = "model-list read"` and `AGENT_PROVIDER_TARGET_KIND = "agent-provider"`.
+  2. Declare type `ModelListCheckFn = (tx: Transaction, credentialName: string) => ResourceCheck` inline in `contract.ts`.
+  3. Extend the `Dependencies` interface in `service.ts` with required field `modelListCheck: ModelListCheckFn`.
+  4. Expose `resourceInventory(tx: Transaction): ResourceEntry[]` as a synchronous method on `WorkerService`:
+     a. Declare named constant `HEALTH_PAGE_SIZE = 100`.
+     b. Loop: call `listEnablements(tx, HEALTH_PAGE_SIZE, cursor)` repeatedly, starting with `cursor = null` and advancing `cursor = page.nextCursor` after each call, until `nextCursor` is `null`. Collect all rows across pages.
+     c. For each row (all non-tombstoned enablements, including disabled-state rows) and for each item in `row.agentProviders`, build an entry: `scope = HealthScope.Global`, `project = null`, `name = encodeURIComponent(row.agentName) + "/" + encodeURIComponent(item.name)`, `target = AGENT_PROVIDER_TARGET_KIND + ":" + item.credential`, `capability = AGENT_PROVIDER_CAPABILITY`, `check = this.modelListCheck(tx, item.credential)`.
+     d. Return the flat entry list.
+  5. In `src/apps/server/index.ts`, add `modelListCheck: unwired("modelListCheck")` to the `WorkerService` constructor call.
+  6. In `service.test.ts`, add tests:
+     - `resourceInventory` returns one entry per agent-provider pair across all non-tombstoned enablements.
+     - Disabled-state enablements contribute entries; the state does not filter the inventory.
+     - Tombstoned enablements contribute no entries.
+     - Entry `scope` equals `HealthScope.Global` and `project` equals `null`.
+     - Entry `name` equals `encodeURIComponent(agentName) + "/" + encodeURIComponent(providerName)`.
+     - Entry `target` equals `"agent-provider:" + credentialName`.
+     - Entry `capability` equals `AGENT_PROVIDER_CAPABILITY`.
+     - Calling `check(ctx)` delegates to the closure that the injected `modelListCheck` returns.
+     - No write occurs to the store after the call.
+
+- Rules:
+  - Import `ResourceEntry`, `ResourceCheck`, `HealthScope` from `../kernel/health.ts`; declare no local `ResourceStatus` (`00-index.md` "Resource healthcheck entry").
+  - `AGENT_PROVIDER_CAPABILITY` and `AGENT_PROVIDER_TARGET_KIND` are named constants; no bare literals in comparisons or assignments.
+  - All non-tombstoned enablements contribute entries regardless of enablement state; perform no state filter inside `resourceInventory`.
+  - The pagination loop enumerates all enablements; a fixed upper limit is not sufficient.
+  - `resourceInventory` is synchronous: it reads rows inside the caller's transaction, performs no network call, and returns closures. The `modelListCheck(tx, item.credential)` call obtains the closure inside `tx`.
+  - Plan 07 calls `resourceInventory` inside one `caller.commit`, then runs the closures after the commit.
+  - `modelListCheck` is required in `Dependencies`; plan 03 passes `unwired("modelListCheck")`; plan 07 wires `custody.modelListCheck` (`00-index.md` Seams, `modelListCheck`).
+  - No code comments.
+
+- Done when:
+  - `pnpm run verify` passes.
+  - Tests assert inventory completeness across enabled and disabled enablement states, tombstone exclusion through `listEnablements`, scope and project fields, percent-encoded naming, prefixed target key, capability constant, and probe delegation without stored results.
+
 ## Blockers
 
 None.

@@ -14,6 +14,8 @@ Delivers:
 - Task 07.5: Add the combined ERD 1 table-list assertion to `src/apps/server/migrations.test.ts`.
 - Task 07.6: Update `src/apps/cli/index.ts:298` to include all six service operation sets; regenerate `static/openapi.yaml` and `static/openapi/**`; update `src/apps/server/openapi-integration.test.ts`.
 - Task 07.7: Create `src/apps/server/erd1-setup.test.ts` — six ERD 1 setup journey integration tests.
+- Task 07.8: Rename `gateway.healthcheck` → `gateway.liveness` in `src/gateway/contract.ts`; add the resource health report operation `gateway.healthcheck` (human, 120 s); update `declarations.ts` and `service.ts` to wire both routes; update path references in index and openapi-integration tests.
+- Task 07.9: Create `src/apps/server/healthcheck.test.ts` — eight integration tests for liveness (eight maps, stopped service) and the resource health report (body shape, deduplication, failing inventory, slow check, rejected check, auth requirement).
 
 Does not deliver:
 
@@ -38,14 +40,20 @@ Does not deliver:
 - `engine/AGENTS.md` — "Regenerate OpenAPI": change declarations first, run the command, commit, verify.
 - `engine/.agents/plan/00-index.md` — seams table; ownership table; `custodySuitability` consumed by Plans 03 and 05.
 - Orchestrator decisions D3, D5, D8, D9, D14, D15, D16.
+- `docs/brainstorm/gateway-service.impl.md:266–300` — Component healthchecks and the resource healthcheck report: eight liveness maps, `GET /api/liveness` route, `GET /api/healthcheck` route, dedupe by target, 32-check limit, 10 s check deadline, `missingInventories`, entry placement by owner and scope.
+- `docs/brainstorm/gateway-service.md:23–33` — Health report and liveness answer: `gateway.liveness` is public; `gateway.healthcheck` is human; liveness reports internal components only.
+- `docs/brainstorm/architecture.md:120–145` — Resource healthcheck: inventory owners, no stored result, check on demand, dedupe by target, bounded concurrency, deadline per check.
+- `docs/brainstorm/custody.impl.md:204–213` — The resource healthcheck: probe attribution against the credential store record.
+- `docs/brainstorm/gateway-service.impl.md:459–460` — Entry paths: `GET /api/liveness` is public; `GET /api/healthcheck` is human.
+- `engine/.agents/plan/00-index.md` "Shared conventions" rows "Component healthcheck" and "Resource healthcheck entry".
 
 ## Depends on
 
-- Plan 01 → `custodyMigrations`, `CustodyComponent` constructor (accepts `envelopeKey: Buffer` derived by `deriveEnvelopeKey`), `deriveEnvelopeKey(masterKey: string): Buffer` from `src/custody/envelope.ts`, `custodySuitability(tx, req)` and `credentialMetadata(tx, name)` implementations, `custodyOperations` for the OpenAPI inventory.
+- Plan 01 → `custodyMigrations`, `CustodyComponent` constructor (accepts `envelopeKey: Buffer` derived by `deriveEnvelopeKey`), `deriveEnvelopeKey(masterKey: string): Buffer` from `src/custody/envelope.ts`, `custodySuitability(tx, req)` and `credentialMetadata(tx, name)` implementations, `custodyOperations` for the OpenAPI inventory; `resourceInventory(tx: Transaction): ResourceEntry[]` and `modelListCheck(tx: Transaction, credentialName: string): ResourceCheck` on `CustodyComponent`.
 - Plan 02 → `schedulerMigrations`, `SchedulerService` (constructor requires `config: Record<string, never>` and optional `health?: HealthRegistry`); `WorkQueue` interface with methods `insert`, `delete`, `priorityUpdate` (defined in `src/scheduler/contract.ts`; `src/scheduler/index.ts` does not re-export it — import `WorkQueue` from `src/scheduler/contract.ts` directly); `schedulerOperations` for the OpenAPI inventory.
-- Plan 03 → `workerMigrations` with `worker_agent_enablement`; `WorkerService` extended `Dependencies` with `custodySuitability`, `credentialMetadata`, `entriesOfAgent`; implementations `validateEntry`, `agentProvidersDependentOn`, `enablementsDependentOnModel`, `workerAgentsOf`, `workerAgentView`; `unwired.ts` and its test created in Plan 03 task 03.5.
-- Plan 04 → `RepositoryComponent` class from `src/repository/index.ts`; constructor runs `checkRepositoryTools()`; method `gitLsRemote(sshUrl, context, deadlineMs)`.
-- Plan 05 → `projectMigrations`; `ProjectService` extended `Dependencies` with `operationalStore`, `custodySuitability`, `validateEntry`, `repositoryConnector`, `workerAgentsOf`, `workerAgentView`, `createMission`, `liveNodesPinning`; implementations `entriesOfAgent`, `bindingsNaming`, `resolveBinding`, `getBindingRevision`; `projectOperations` for the OpenAPI inventory; `unwired(...)` stubs in `src/apps/server/index.ts` placed by Plans 03 and 05.
+- Plan 03 → `workerMigrations` with `worker_agent_enablement`; `WorkerService` extended `Dependencies` with `custodySuitability`, `credentialMetadata`, `entriesOfAgent`; implementations `validateEntry`, `agentProvidersDependentOn`, `enablementsDependentOnModel`, `workerAgentsOf`, `workerAgentView`; `unwired.ts` and its test created in Plan 03 task 03.5; `resourceInventory(tx: Transaction): ResourceEntry[]` on `WorkerService`.
+- Plan 04 → `RepositoryComponent` class from `src/repository/index.ts`; constructor accepts `{ health?: HealthRegistry }` and runs `checkRepositoryTools()`; method `gitLsRemote(sshUrl, context, deadlineMs)`.
+- Plan 05 → `projectMigrations`; `ProjectService` extended `Dependencies` with `operationalStore`, `custodySuitability`, `validateEntry`, `repositoryConnector`, `workerAgentsOf`, `workerAgentView`, `createMission`, `liveNodesPinning`; implementations `entriesOfAgent`, `bindingsNaming`, `resolveBinding`, `getBindingRevision`; `projectOperations` for the OpenAPI inventory; `unwired(...)` stubs in `src/apps/server/index.ts` placed by Plans 03 and 05; `resourceInventory(tx: Transaction): ResourceEntry[]` on `ProjectService`.
 - Plan 06 → `missionMigrations`, `MissionService`, `missionConfigSchema`, `MissionConfig`; `MissionBindings` interface (two methods: `resolveBinding`, `getBindingRevision`); implementations `createMission`, `liveNodesPinning`; `missionOperations` for the OpenAPI inventory.
 
 ## Provides
@@ -125,7 +133,9 @@ No seam for another plan. Plan 07 is the terminal assembly plan.
      - `SchedulerService`, `schedulerMigrations` from `"../../scheduler/index.ts"`; `type WorkQueue` from `"../../scheduler/contract.ts"` — `src/scheduler/index.ts` exports only `SchedulerService` and `schedulerMigrations`; it does not re-export `WorkQueue`.
      - `MissionService`, `missionMigrations` from `"../../mission/index.ts"`.
      - `RepositoryComponent` from `"../../repository/index.ts"`.
-  2. Add an optional parameter `repositoryConnector?: { gitLsRemote(sshUrl: string, context: Context, deadlineMs: number): Promise<void> }` to the `composeServices` options type. When absent, default to `new RepositoryComponent()`.
+  2. Add two optional parameters to the `composeServices` options type:
+     a. `repositoryConnector?: { gitLsRemote(sshUrl: string, context: Context, deadlineMs: number): Promise<void> }` — when absent, default to `new RepositoryComponent({ health: options.health })`.
+     b. `inventoryOverrides?: { custody?: (tx: Transaction) => ResourceEntry[]; worker?: (tx: Transaction) => ResourceEntry[]; project?: (tx: Transaction) => ResourceEntry[] }` — when present, replaces the real inventory closure for the named owner in the `gateway.declare` call. Tests use this field to inject controlled inventory functions.
   3. Update the `store.migrate([...])` call in `Server.open` to the fixed service order:
      ```
      [
@@ -141,8 +151,8 @@ No seam for another plan. Plan 07 is the terminal assembly plan.
   4. Inside `composeServices`, before service construction, derive the envelope key:
      `const envelopeKey = deriveEnvelopeKey(options.config.masterKey)`.
      Then resolve the repository connector:
-     `const repoConnector = options.repositoryConnector ?? new RepositoryComponent()`.
-     (`RepositoryComponent` constructor runs `checkRepositoryTools()` synchronously per Plan 04; no separate call needed.)
+     `const repoConnector = options.repositoryConnector ?? new RepositoryComponent({ health: options.health })`.
+     (`RepositoryComponent` constructor accepts `{ health?: HealthRegistry }` and runs `checkRepositoryTools()` synchronously per Plan 04; no separate call needed.)
   5. Declare the hoisted cycle variables:
      ```ts
      let custody: CustodyComponent;
@@ -154,11 +164,19 @@ No seam for another plan. Plan 07 is the terminal assembly plan.
      a. `const scheduler = new SchedulerService({ config: {}, health: options.health })` (1). `config` is required by `SchedulerService.Dependencies` (Plan 02 task 02.3).
      b. `const workQueue: WorkQueue = { insert: (tx, n, p, pr) => scheduler.insert(tx, n, p, pr), delete: (tx, n) => scheduler.delete(tx, n), priorityUpdate: (tx, n, pr) => scheduler.priorityUpdate(tx, n, pr) }` — use exact method names from `src/scheduler/contract.ts` `WorkQueue` interface.
      c. `custody = new CustodyComponent({ envelopeKey, logger: options.logger, health: options.health, agentProvidersDependentOn: (tx, name) => worker.agentProvidersDependentOn(tx, name), enablementsDependentOnModel: (tx, name, model) => worker.enablementsDependentOnModel(tx, name, model), bindingsNaming: (tx, name) => project.bindingsNaming(tx, name) })` (2). Closures capture `worker` and `project` by reference.
-     d. `worker = new WorkerService({ config: {}, health: options.health, registrations: options.registrations, custodySuitability: (tx, req) => custody.custodySuitability(tx, req), credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name), entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name) })` (3). Closure captures `project` by reference.
+     d. `worker = new WorkerService({ config: {}, health: options.health, registrations: options.registrations, custodySuitability: (tx, req) => custody.custodySuitability(tx, req), credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name), modelListCheck: (tx, name) => custody.modelListCheck(tx, name), entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name) })` (3). Closures capture `custody` and `project` by reference. `modelListCheck` replaces the `unwired("modelListCheck")` stub placed by Plan 03.
      e. `mission = new MissionService({ config: options.config.mission, health: options.health, workQueue, bindings: { resolveBinding: (tx, pid, name) => project.resolveBinding(tx, pid, name), getBindingRevision: (tx, bid) => project.getBindingRevision(tx, bid) } })` (4). Closures capture `project` by reference. The `bindings` object satisfies `MissionBindings` from Plan 06 `src/mission/contract.ts`.
      f. `project = new ProjectService({ config: {}, health: options.health, operationalStore: options.store, repositoryConnector: repoConnector, bindings: options.bindings, validateEntry: (tx, name, entry) => worker.validateEntry(tx, name, entry), custodySuitability: (tx, req) => custody.custodySuitability(tx, req), workerAgentsOf: (name) => worker.workerAgentsOf(name), workerAgentView: (tx, wname, aname, entry) => worker.workerAgentView(tx, wname, aname, entry), createMission: (tx, pid, actor) => mission.createMission(tx, pid, actor), liveNodesPinning: (tx, bid) => mission.liveNodesPinning(tx, bid) })` (5). Closures capture `worker`, `custody` and `mission` by reference.
      g. Construct `gateway` as before (6).
-  7. Call `declare(registry)` in this order: `custody`, `scheduler`, `worker`, `project`, `mission`, `gateway`.
+  7. Call `declare(registry)` in this order: `custody`, `scheduler`, `worker`, `project`, `mission`. Call `gateway.declare` last with the resource inventory closures and the logger:
+     ```
+     gateway.declare(registry, {
+       custody: (tx) => custody.resourceInventory(tx),
+       worker: (tx) => worker.resourceInventory(tx),
+       project: (tx) => project.resourceInventory(tx),
+     }, options.logger)
+     ```
+     When `options.inventoryOverrides` is present, the override replaces the real inventory closure for that owner. `options.inventoryOverrides` is an optional field added in step 2a; tests use it to inject controlled inventory functions.
   8. Return `{ custody, scheduler, worker, project, mission, gateway, invocation, registry }`.
   9. In `Server.open`, set `services = [scheduler, custody, worker, mission, project, gateway]` (construction order, not alphabetical).
      Push `stop()` closures into `releases` in the same construction order (scheduler push first, gateway push last) so that the reverse-pop sequence stops gateway first and scheduler last.
@@ -167,7 +185,7 @@ No seam for another plan. Plan 07 is the terminal assembly plan.
   - Construction order: scheduler(1), custody(2), worker(3), mission(4), project(5), gateway(6). (`architecture.impl.md:427–430`.)
   - Stop order (reverse of construction): gateway, project, mission, worker, custody, scheduler. (`architecture.impl.md:449–469`.)
   - `deriveEnvelopeKey(config.masterKey)` — not `hkdfSync` inline (Plan 01 `src/custody/envelope.ts` exports `deriveEnvelopeKey`; Plan 01 Provides section states this).
-  - `new RepositoryComponent()` constructs the connector per D5; method is `gitLsRemote`.
+  - `new RepositoryComponent({ health: options.health })` constructs the connector per D5; method is `gitLsRemote`; `health` registers the `repository` map in the shared `HealthRegistry`.
   - `WorkQueue` method names are `insert`, `delete`, `priorityUpdate` — exact names from `src/scheduler/contract.ts` (Plan 02 task 02.2).
   - `MissionBindings` has two methods: `resolveBinding` and `getBindingRevision` (Plan 06 task 06.2).
   - No Tracking dependency (D8).
@@ -177,13 +195,17 @@ No seam for another plan. Plan 07 is the terminal assembly plan.
 - Done when:
   - `pnpm run verify` passes.
   - `src/apps/server/index.test.ts` (existing) asserts all six domain services start and that a stop call after start failure releases in reverse construction order.
+  - `RepositoryComponent` receives `{ health: options.health }` in its constructor call (health probe registered under `"repository"`).
+  - `WorkerService` construction includes `modelListCheck` pointing to `custody.modelListCheck` (no `unwired` stub remains).
 
 ### 07.4 Update `test-support.ts` to use the full ERD 1 assembly
 
 - Files:
   - `engine/src/apps/server/test-support.ts` (edit)
 - Do:
-  1. Add an optional `repositoryConnector?` field (same type as in Task 07.3) to the fixture options. Pass it through to `composeServices`.
+  1. Add two optional fields to the fixture options:
+     a. `repositoryConnector?` — same type as in Task 07.3; pass through to `composeServices`.
+     b. `inventoryOverrides?` — same type as in Task 07.3 step 2b; pass through to `composeServices`. Tests that exercise the resource health report inject controlled inventory functions through this field.
   2. Update `gatewayFixture` to pass the full migration list `[gateway, custody, scheduler, worker, project, mission]` in the same fixed service order as Task 07.3.
   3. In fixture startup, start all six domain services plus Gateway in construction order: custody, scheduler, worker, mission, project, gateway.
   4. In fixture teardown, stop all services in reverse construction order.
@@ -235,6 +257,7 @@ No seam for another plan. Plan 07 is the terminal assembly plan.
      - Spread each into `apiOperations` alongside the existing `gatewayOperations` and `workerOperations`.
      - Add schema-and-response assertions for at least one path from each new service group: one `credential.*`, one `scheduler.queue.*`, one `project.*`, one `binding.*`, and one `mission.*` path.
      - Assert that no operation whose `id` starts with a service prefix other than `gateway`, `credential`, `scheduler`, `worker`, `project` or `mission` appears in the emitted document.
+  5. Assert the emitted document includes `gateway.liveness` at `/api/liveness` with public access (30 s) and `gateway.healthcheck` at `/api/healthcheck` with human access (120 s). Assert the `gateway.healthcheck` response schema holds `services` (with `project`, `intake`, `worker` each having `global` and `projects`) and `shared` (with `custody`). Assert that `gateway.liveness` (not `gateway.healthcheck`) carries the component health map schema.
 - Rules:
   - `engine/AGENTS.md` (Regenerate OpenAPI): change declarations first; run the command; commit; verify.
   - `service: "credential"` on all custody operations per D9; `src/gateway/openapi.ts:51` validates the prefix match between `operation.service` and the `id` prefix; Plan 01 already sets this correctly.
@@ -294,6 +317,85 @@ No seam for another plan. Plan 07 is the terminal assembly plan.
   - All six tests pass through the composed HTTP server.
   - `pnpm run verify` passes.
   - Each test proves one ERD 1 setup step end-to-end including idempotency replay for credential create.
+
+### 07.8 Rename the component health route and add the resource health report
+
+- Files:
+  - `engine/src/gateway/contract.ts` (edit)
+  - `engine/src/gateway/declarations.ts` (edit)
+  - `engine/src/gateway/service.ts` (edit)
+  - `engine/src/apps/server/index.test.ts` (edit — update path references)
+  - `engine/src/apps/server/openapi-integration.test.ts` (edit — update path references)
+  - `engine/src/gateway/health.test.ts` (edit — rename the error code constant to `gateway.liveness.unhealthy`)
+- Do:
+  1. In `src/gateway/contract.ts`:
+     a. Rename the `healthcheck` entry to `liveness`. Change `id` to `"gateway.liveness"`, `path` to `"/api/liveness"`, keep `access: AccessPolicy.Public` and `timeoutMs: 30000`. Keep the existing output schema (`z.record(z.string(), componentHealthSchema)`). Keep `HEALTHCHECK_OK`.
+     b. Export named constants: `MAX_CONCURRENT_CHECKS = 32`, `RESOURCE_CHECK_DEADLINE_MS = 10000`, `OWNER_CUSTODY = "custody"`, `OWNER_WORKER = "worker"`, `OWNER_PROJECT = "project"`. Import `ResourceStatus` from `"../kernel/health.ts"`; declare no local status constants.
+     c. Declare and export `resourceEntrySchema = z.strictObject({ status: z.enum([ResourceStatus.Healthy, ResourceStatus.Unhealthy, ResourceStatus.Unknown]), capability: z.string().min(1) })`. Declare `const resourceMapSchema = z.record(z.string().min(1), resourceEntrySchema)` and `const ownerSchema = z.strictObject({ global: resourceMapSchema, projects: z.record(z.string().min(1), resourceMapSchema) })`.
+     d. Add a new `healthcheck` entry: `id: "gateway.healthcheck"`, `method: HttpMethod.Get`, `path: "/api/healthcheck"`, `access: AccessPolicy.Human`, `timeoutMs: 120000`, `mutation: false`, `store: StoreName.Operational`, `status: HttpStatus.OK`. Input: `emptyInput`. Output: `z.strictObject({ services: z.strictObject({ project: ownerSchema, intake: ownerSchema, worker: ownerSchema }), shared: z.strictObject({ custody: ownerSchema }) })`.
+  2. In `src/gateway/declarations.ts`:
+     a. Add imports: `type ResourceEntry`, `HealthScope`, `ResourceStatus` from `"../kernel/health.ts"`; `MAX_CONCURRENT_CHECKS`, `RESOURCE_CHECK_DEADLINE_MS`, `OWNER_CUSTODY`, `OWNER_WORKER`, `OWNER_PROJECT` from `"./contract.ts"`; `type Logger` from `"pino"`, `type Transaction` from `"../kernel/store.ts"`, `StoreName` from `"../kernel/operation.ts"`. `isHumanIdentity` is already imported.
+     b. Change `registerGatewayOperations` to accept two additional parameters: `inventories: { custody: (tx: Transaction) => ResourceEntry[]; worker: (tx: Transaction) => ResourceEntry[]; project: (tx: Transaction) => ResourceEntry[] }` and `logger: Logger`.
+     c. Rename the existing `gatewayOperations.healthcheck` registration to `gatewayOperations.liveness`. Change its error code from `"gateway.healthcheck.unhealthy"` to `"gateway.liveness.unhealthy"`. Keep all other handler logic unchanged.
+     d. Register `gatewayOperations.healthcheck` with the resource report handler:
+     - Declare the named constant `const INTAKE_EMPTY_OWNER = { global: {}, projects: {} } as const`.
+     - Assert `isHumanIdentity(caller.identity)`; the human access policy guarantees it.
+     - Declare `const missingInventories: string[] = []` and `const allEntries: { owner: string; entry: ResourceEntry }[] = []`.
+     - Call `caller.commit((tx) => { ... })` once. Inside: call `inventories.custody(tx)`, `inventories.worker(tx)`, `inventories.project(tx)` each in its own `try/catch`. Push the owner name into `missingInventories` on catch. On success, push each returned entry with its owner name into `allEntries`.
+     - After the commit: if `missingInventories.length > 0`, throw `new GatewayError(503, "gateway.healthcheck.inventory_failed", "One or more resource owners failed to supply their inventory.", { missingInventories })`.
+     - Deduplicate: build a `Map<string, ResourceEntry>` keyed by `entry.target`. For the first entry of each target, record the check. Build a `Map<string, string>` of `target → owner` for log attribution. Initialize a `Map<string, string>` of `target → status` to `ResourceStatus.Unknown` for every unique target.
+     - Run at most `MAX_CONCURRENT_CHECKS` checks concurrently using a hand-rolled active-count semaphore and a promise queue. For each unique `ResourceEntry` from the deduplicated map, create a child `CancellationContext` with deadline `Date.now() + RESOURCE_CHECK_DEADLINE_MS`. Call `entry.check(context)`. Handle each check result as follows: if the promise resolves with a status value, record it; if the promise rejects or throws, record `ResourceStatus.Unknown`. A check that exceeds its deadline also records `ResourceStatus.Unknown`. Late settlements after `caller.context` cancels do not overwrite any already-recorded status.
+     - After each check settles: cancel its `CancellationContext`; call `throwIfCancelled(caller.context)`. On cancellation, cancel all remaining active check contexts and return immediately with no success answer. Emit `logger.info({ caller: caller.identity.accountId, owner: ownerByTarget.get(entry.target), target: entry.target, status }, "resource.health.check")`.
+     - When `caller.context` is cancelled (including route timeout): stop dispatching queued but not-yet-started checks, cancel all active check contexts, and produce no success answer.
+     - Before assembling the response, cancel any still-running check contexts. Assign `ResourceStatus.Unknown` to their targets.
+     - Place each entry from `allEntries` (not the deduplicated unique set) into the response: if `entry.scope === HealthScope.Global`, place at `owner.global[entry.name]`; if `entry.scope === HealthScope.Project`, place at `owner.projects[entry.project][entry.name]` after `assert.ok(entry.project !== null)`. Use the status from the results map for that entry's target. Each `ResourceEntry.check` closure captures only row data values from the inventory query; it holds no reference to the transaction object and runs after the transaction has committed.
+     - Return `{ services: { project: projectReport, intake: INTAKE_EMPTY_OWNER, worker: workerReport }, shared: { custody: custodyReport } }`.
+  3. In `src/gateway/service.ts`:
+     - Import `type ResourceEntry` from `"../kernel/health.ts"`, `type Logger` from `"pino"`, `type Transaction` from `"../kernel/store.ts"`. (`HealthScope` is imported in `declarations.ts`, not `service.ts`.)
+     - Change `declare(registry: OperationRegistry): void` to `declare(registry: OperationRegistry, inventories: { custody: (tx: Transaction) => ResourceEntry[]; worker: (tx: Transaction) => ResourceEntry[]; project: (tx: Transaction) => ResourceEntry[] }, logger: Logger): void`.
+     - Pass `inventories` and `logger` to `registerGatewayOperations`.
+  4. In `src/apps/server/index.test.ts`: replace all references to `gatewayOperations.healthcheck.path` with `gatewayOperations.liveness.path` where the component health check is referenced. Replace `"gateway.healthcheck"` operation id references with `"gateway.liveness"` where the component health operation is meant.
+  5. In `src/apps/server/openapi-integration.test.ts`: apply the same path and id replacements as step 4.
+- Rules:
+  - `gateway.liveness` is public 30 s; `gateway.healthcheck` is human 120 s (`gateway-service.impl.md:459–460`).
+  - `caller.commit` is called exactly once; the operation declares `store: StoreName.Operational`, which `caller.commit` opens (`architecture.impl.md:618`, D3).
+  - At most `MAX_CONCURRENT_CHECKS = 32` concurrent checks; each check deadline is `RESOURCE_CHECK_DEADLINE_MS = 10000` ms (`gateway-service.impl.md:332–334`).
+  - A check that rejects or throws contributes `ResourceStatus.Unknown`; a deadline expiry also contributes `ResourceStatus.Unknown`. Late settlements after `caller.context` cancels do not overwrite any already-recorded status.
+  - When `caller.context` is cancelled (including route timeout), stop dispatching queued checks, cancel all active check contexts, and produce no success answer (`gateway-service.impl.md:338`).
+  - Each `ResourceEntry.check` closure captures only row data values; it holds no reference to the transaction object and runs after the transaction has committed.
+  - Error codes: `"gateway.liveness.unhealthy"` for 503 on unavailable components (renamed from old `"gateway.healthcheck.unhealthy"`); `"gateway.healthcheck.inventory_failed"` for 503 on missing inventories (new).
+  - `intake` always returns `{ global: {}, projects: {} }` in ERD 1 (`gateway-service.impl.md:309`).
+  - One Pino log record per check: `{ caller, owner, target, status }`, no secret material (`custody.impl.md:212`).
+  - Named constants for all compared literals: `MAX_CONCURRENT_CHECKS`, `RESOURCE_CHECK_DEADLINE_MS`, `ResourceStatus`, `INTAKE_EMPTY_OWNER`, `OWNER_CUSTODY`, `OWNER_WORKER`, `OWNER_PROJECT`.
+  - No code comments.
+- Done when:
+  - `GET /api/liveness` (no auth, 30 s) returns HTTP 200 with `{ status: "ok", services: { server: {...}, gateway: {...}, custody: {...}, scheduler: {...}, worker: {...}, repository: {...}, project: {...}, mission: {...} } }`.
+  - `GET /api/healthcheck` (human token, 120 s) returns HTTP 200 with `{ services: { project: { global: {}, projects: {} }, intake: { global: {}, projects: {} }, worker: { global: {}, projects: {} } }, shared: { custody: { global: {}, projects: {} } } }` when no resources are registered.
+  - `pnpm run verify` passes.
+
+### 07.9 Integration tests for both healthcheck levels
+
+- Files:
+  - `engine/src/apps/server/healthcheck.test.ts` (create)
+- Do:
+  1. Test `"liveness: 200 body holds all eight maps"`: start a fresh `gatewayFixture`; call `GET /api/liveness` with no authentication header; assert HTTP 200; assert the response body `services` map holds exactly the keys `server`, `gateway`, `custody`, `scheduler`, `worker`, `repository`, `project` and `mission`, each a nonempty object. Use `gatewayOperations.liveness.path` as the path constant.
+  2. Test `"liveness: a stopped service returns 503 with the complete map"`: start a fresh `gatewayFixture`; call `scheduler.stop()`; call `GET /api/liveness`; assert HTTP 503; assert `error.details.services.scheduler.queue` equals `503`; assert all other map keys are present in `error.details.services`.
+  3. Test `"healthcheck: 200 body holds services and shared with empty intake maps"`: start a fresh `gatewayFixture` with `repositoryConnector: { gitLsRemote: async () => {} }`; obtain a human token from the fixture; call `GET /api/healthcheck` with `Authorization: Bearer <token>`; assert HTTP 200; assert the body holds `services.project`, `services.intake`, `services.worker`, `shared.custody`, each with a `global` key and a `projects` key; assert `services.intake.global` equals `{}` and `services.intake.projects` equals `{}`. Use `gatewayOperations.healthcheck.path` as the path constant.
+  4. Test `"healthcheck: deduplication by target runs one check"`: start a fresh `gatewayFixture` with `inventoryOverrides.custody` returning two `ResourceEntry` items with the same `target` but different `name` values and a check closure that increments a shared counter; call `GET /api/healthcheck`; assert the counter equals `1`; assert both entries report the same status.
+  5. Test `"healthcheck: a failing inventory gives 503 with missingInventories"`: start a fresh `gatewayFixture` with `inventoryOverrides.project` set to a function that throws; call `GET /api/healthcheck`; assert HTTP 503; assert `error.details.missingInventories` includes `OWNER_PROJECT`.
+  6. Test `"healthcheck: a slow check gives unknown"`: start a fresh `gatewayFixture` with `inventoryOverrides.custody` returning one entry whose `check` closure waits longer than `RESOURCE_CHECK_DEADLINE_MS` before resolving; call `GET /api/healthcheck`; assert the entry in `shared.custody.global` reports `status: ResourceStatus.Unknown`.
+  7. Test `"healthcheck: a rejected check gives unknown"`: start a fresh `gatewayFixture` with `inventoryOverrides.custody` returning one entry whose `check` closure throws; call `GET /api/healthcheck`; assert HTTP 200 and the entry reports `status: ResourceStatus.Unknown`.
+  8. Test `"healthcheck: requires human token; liveness requires none"`: call `GET /api/healthcheck` with no authentication header; assert HTTP 401; call `GET /api/liveness` with no authentication header; assert HTTP 200.
+- Rules:
+  - Use `gatewayFixture` from task 07.4.
+  - Import `gatewayOperations` from `"../../gateway/contract.ts"`; use `gatewayOperations.liveness.path` and `gatewayOperations.healthcheck.path`.
+  - Import `RESOURCE_CHECK_DEADLINE_MS` and `OWNER_PROJECT` from `"../../gateway/contract.ts"` and `ResourceStatus` from `"../../kernel/health.ts"`.
+  - Inject inventories through `inventoryOverrides` (task 07.3 step 2b; task 07.4 step 1b).
+  - No code comments. Each test is self-contained.
+  - No TDD: this file is created after Plans 01–06 and task 07.8 deliver behavior code.
+- Done when:
+  - All eight tests pass.
+  - `pnpm run verify` passes.
 
 ## Blockers
 

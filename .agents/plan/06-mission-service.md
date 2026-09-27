@@ -146,92 +146,92 @@ Every other ERD 1 task is unblocked.
 
      `NodeKind`: `z.enum(["initiative", "objective", "task"])`.
      `NodeState`: `z.enum(["Pending", "Available", "Executing", "Waiting", "Evaluating",
-  "Blocked", "Paused", "Completed", "Discarded", "External.Requested",
-  "External.Success", "External.Failed"])`.
+"Blocked", "Paused", "Completed", "Discarded", "External.Requested",
+"External.Success", "External.Failed"])`.
      `ContentSchema`: `z.strictObject({ name: z.string().min(1), requirement: z.string().min(1),
-  criterion: z.string().min(1), verifications: z.array(z.string().min(1)).min(1),
-  bindings: z.array(z.string()) })`.
+criterion: z.string().min(1), verifications: z.array(z.string().min(1)).min(1),
+bindings: z.array(z.string()) })`.
      `PlanFileName`: `z.string().regex(/^[a-z][a-z0-9_-]*\.md$/)`.
      `NodeCreate`: `z.strictObject({ filename: PlanFileName, kind: NodeKind,
-  content: ContentSchema, reason: z.string().min(1),
-  expectedMissionVersion: z.number().int().positive(),
-  parentId: identitySchema("node").optional(),
-  expectedParentRevision: z.number().int().positive().optional() })`.
+content: ContentSchema, reason: z.string().min(1),
+expectedMissionVersion: z.number().int().positive(),
+parentId: identitySchema("node").optional(),
+expectedParentRevision: z.number().int().positive().optional() })`.
      `NodeUpdate`: `z.strictObject({ filename: PlanFileName, content: ContentSchema,
-  reason: z.string().min(1), expectedRevision: z.number().int().positive(),
-  expectedMissionVersion: z.number().int().positive() })`.
+reason: z.string().min(1), expectedRevision: z.number().int().positive(),
+expectedMissionVersion: z.number().int().positive() })`.
      `Move`: `z.strictObject({ newParentId: identitySchema("node"),
-  reason: z.string().min(1), expectedMissionVersion: z.number().int().positive(),
-  expectedRevision: z.number().int().positive(),
-  expectedOldParentRevision: z.number().int().positive(),
-  expectedNewParentRevision: z.number().int().positive() })`.
+reason: z.string().min(1), expectedMissionVersion: z.number().int().positive(),
+expectedRevision: z.number().int().positive(),
+expectedOldParentRevision: z.number().int().positive(),
+expectedNewParentRevision: z.number().int().positive() })`.
      `GraphEdit`: `z.strictObject({ reason: z.string().min(1),
-  expectedMissionVersion: z.number().int().positive() })`.
+expectedMissionVersion: z.number().int().positive() })`.
      `CriterionSet`: `z.strictObject({ criterion: z.string().min(1),
-  verifications: z.array(z.string().min(1)).min(1), reason: z.string().min(1),
-  expectedRevision: z.number().int().positive(),
-  expectedMissionVersion: z.number().int().positive() })`.
+verifications: z.array(z.string().min(1)).min(1), reason: z.string().min(1),
+expectedRevision: z.number().int().positive(),
+expectedMissionVersion: z.number().int().positive() })`.
      `PrioritySet`: `z.strictObject({ value: z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
-  expectedMissionVersion: z.number().int().positive() })`.
+expectedMissionVersion: z.number().int().positive() })`.
      `Rebind`: `z.strictObject({ bindingId: identitySchema("binding"),
-  reason: z.string().min(1), expectedMissionVersion: z.number().int().positive(),
-  nodeId: identitySchema("node").optional() })`.
+reason: z.string().min(1), expectedMissionVersion: z.number().int().positive(),
+nodeId: identitySchema("node").optional() })`.
      `Retire`: `z.strictObject({ reason: z.string().min(1),
-  expectedMissionVersion: z.number().int().positive(),
-  previewDigest: z.string().regex(/^[0-9a-f]{64}$/), force: z.boolean() })`.
+expectedMissionVersion: z.number().int().positive(),
+previewDigest: z.string().regex(/^[0-9a-f]{64}$/), force: z.boolean() })`.
      `TaskContent`: `z.strictObject({ id: identitySchema("node"),
-  filename: PlanFileName, content: ContentSchema })`.
+filename: PlanFileName, content: ContentSchema })`.
      `RevisionChange`: `z.strictObject({ write: z.enum(["import","node.create","node.update",
-  "node.move","node.retire","criterion.set","unblock"]),
-  previousRevision: z.number().int().positive().nullable(),
-  changedFields: z.array(z.string()),
-  tasks: z.array(z.strictObject({ id: identitySchema("node"),
-    change: z.enum(["created","updated","moved-in","moved-out","retired"]),
-    changedFields: z.array(z.string()) })).optional() })`.
+"node.move","node.retire","criterion.set","unblock"]),
+previousRevision: z.number().int().positive().nullable(),
+changedFields: z.array(z.string()),
+tasks: z.array(z.strictObject({ id: identitySchema("node"),
+  change: z.enum(["created","updated","moved-in","moved-out","retired"]),
+  changedFields: z.array(z.string()) })).optional() })`.
      `RevisionSchema`: `z.strictObject({ nodeId: identitySchema("node"),
-  filename: PlanFileName, revision: z.number().int().positive(),
-  reason: z.string(), actor: ActorSchema, createdAt: z.number().int(),
-  content: ContentSchema, tasks: z.array(TaskContent).optional(),
-  change: RevisionChange, pinnedByAttempts: z.array(z.number().int().nonnegative()) })`.
+filename: PlanFileName, revision: z.number().int().positive(),
+reason: z.string(), actor: ActorSchema, createdAt: z.number().int(),
+content: ContentSchema, tasks: z.array(TaskContent).optional(),
+change: RevisionChange, pinnedByAttempts: z.array(z.number().int().nonnegative()) })`.
      `ActorSchema`: `z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("human"), account: z.string(), name: z.string() }),
-  z.strictObject({ kind: z.literal("service"), service: z.string() }) ])`.
+z.strictObject({ kind: z.literal("human"), account: z.string(), name: z.string() }),
+z.strictObject({ kind: z.literal("service"), service: z.string() }) ])`.
      `EdgeSchema`: `z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("containment"), parentId: identitySchema("node"),
-    childId: identitySchema("node") }),
-  z.strictObject({ kind: z.literal("dependency"), dependentId: identitySchema("node"),
-    dependsOnId: identitySchema("node") }) ])`.
+z.strictObject({ kind: z.literal("containment"), parentId: identitySchema("node"),
+  childId: identitySchema("node") }),
+z.strictObject({ kind: z.literal("dependency"), dependentId: identitySchema("node"),
+  dependsOnId: identitySchema("node") }) ])`.
      `NodeChange`: `z.strictObject({ missionVersion: z.number().int().positive(),
-  revisions: z.array(RevisionSchema), retiredNodeIds: z.array(identitySchema("node")),
-  addedEdges: z.array(EdgeSchema), removedEdges: z.array(EdgeSchema),
-  openAttemptsUnchanged: z.array(z.strictObject({ nodeId: identitySchema("node"),
-    attempt: z.number().int().nonnegative() })) })`.
+revisions: z.array(RevisionSchema), retiredNodeIds: z.array(identitySchema("node")),
+addedEdges: z.array(EdgeSchema), removedEdges: z.array(EdgeSchema),
+openAttemptsUnchanged: z.array(z.strictObject({ nodeId: identitySchema("node"),
+  attempt: z.number().int().nonnegative() })) })`.
      `RetirePreview`: `z.strictObject({ nodeId: identitySchema("node"), force: z.boolean(),
-  missionVersion: z.number().int().positive(), retiredNodeIds: z.array(identitySchema("node")),
-  removedEdges: z.array(EdgeSchema), previewDigest: z.string().regex(/^[0-9a-f]{64}$/) })`.
+missionVersion: z.number().int().positive(), retiredNodeIds: z.array(identitySchema("node")),
+removedEdges: z.array(EdgeSchema), previewDigest: z.string().regex(/^[0-9a-f]{64}$/) })`.
      `ImportEntry`: `z.strictObject({ filename: PlanFileName, kind: NodeKind,
-  name: z.string().min(1), requirement: z.string().min(1), criterion: z.string().min(1),
-  verifications: z.array(z.string().min(1)).min(1), bindings: z.array(z.string()),
-  id: identitySchema("node").optional(), parent: PlanFileName.optional(),
-  dependsOn: z.array(PlanFileName).optional() })`.
+name: z.string().min(1), requirement: z.string().min(1), criterion: z.string().min(1),
+verifications: z.array(z.string().min(1)).min(1), bindings: z.array(z.string()),
+id: identitySchema("node").optional(), parent: PlanFileName.optional(),
+dependsOn: z.array(PlanFileName).optional() })`.
      `PlanFileEntry`: `z.strictObject({ filename: PlanFileName, content: z.string() })`.
      `ImportSnapshotBase`: `z.strictObject({ format: z.enum(["markdown","json"]),
-  missionId: identitySchema("mission"), missionVersion: z.number().int().positive(),
-  reason: z.string().min(1) })` with discriminated `files` or `entries` field by format.
+missionId: identitySchema("mission"), missionVersion: z.number().int().positive(),
+reason: z.string().min(1) })` with discriminated `files` or `entries` field by format.
      `ImportApply`: extends `ImportSnapshotBase` with `previewDigest: z.string().regex(/^[0-9a-f]{64}$/)`,
      `confirmedRetirements: z.array(identitySchema("node"))`.
      `Violation`: `z.strictObject({ code: z.string(), message: z.string(),
-  filename: z.string().nullable(), nodeId: identitySchema("node").nullable(),
-  details: z.unknown().nullable() })`.
+filename: z.string().nullable(), nodeId: identitySchema("node").nullable(),
+details: z.unknown().nullable() })`.
      `ImportPreview`: `z.strictObject({ missionId: identitySchema("mission"),
-  expectedMissionVersion: z.number().int().positive(), previewDigest: z.string().regex(/^[0-9a-f]{64}$/),
-  creates: z.array(PlanFileName), updates: z.array(identitySchema("node")),
-  retirements: z.array(identitySchema("node")), removedEdges: z.array(EdgeSchema),
-  noOps: z.array(identitySchema("node")), violations: z.array(Violation) })`.
+expectedMissionVersion: z.number().int().positive(), previewDigest: z.string().regex(/^[0-9a-f]{64}$/),
+creates: z.array(PlanFileName), updates: z.array(identitySchema("node")),
+retirements: z.array(identitySchema("node")), removedEdges: z.array(EdgeSchema),
+noOps: z.array(identitySchema("node")), violations: z.array(Violation) })`.
      `ImportResult`: `z.strictObject({ missionId: identitySchema("mission"),
-  missionVersion: z.number().int().positive(),
-  assignedIds: z.array(z.strictObject({ filename: PlanFileName, nodeId: identitySchema("node") })),
-  changes: NodeChange, actor: ActorSchema, acceptedAt: z.number().int() })`.
+missionVersion: z.number().int().positive(),
+assignedIds: z.array(z.strictObject({ filename: PlanFileName, nodeId: identitySchema("node") })),
+changes: NodeChange, actor: ActorSchema, acceptedAt: z.number().int() })`.
      `NodeSchema` (output): `z.discriminatedUnion` or a base `z.strictObject` with
      `id: identitySchema("node")`, `filename: PlanFileName`, `missionId: identitySchema("mission")`,
      `kind: NodeKind`, `parentId: identitySchema("node").nullable()`,
@@ -244,8 +244,8 @@ Every other ERD 1 task is unblocked.
      for initiatives/objectives, or the objective's revisions for a task.
      `engine/docs/cli/mission.md:838`.
      `MissionSchema` (output): `z.strictObject({ id: identitySchema("mission"),
-  projectId: identitySchema("project"), version: z.number().int().positive(),
-  createdAt: z.number().int() })`.
+projectId: identitySchema("project"), version: z.number().int().positive(),
+createdAt: z.number().int() })`.
 
   6. Export `missionOperations = {} as const` as placeholder.
 
@@ -278,7 +278,8 @@ Every other ERD 1 task is unblocked.
 ### 06.3 Create `index.ts` and skeleton `service.ts`
 
 - Files: `src/mission/index.ts`, `src/mission/service.ts`,
-  `src/apps/server/migrations.test.ts`, `engine/AGENTS.md`
+  `src/mission/service.test.ts`, `src/apps/server/migrations.test.ts`,
+  `engine/AGENTS.md`
 - Do:
   1. In `service.ts`: declare `Dependencies` interface with `config: MissionConfig`,
      `health?: HealthRegistry`, `bindings: MissionBindings`, `workQueue: WorkQueue`.
@@ -288,6 +289,10 @@ Every other ERD 1 task is unblocked.
      `healthcheck`, and `declare(registry: OperationRegistry): void`.
      Implement `createMission(tx, projectId, actor)` and `liveNodesPinning(tx, bindingId)`
      as placeholders that throw `new Error("not implemented")`; task 06.4 replaces both.
+     In the constructor body call `dependencies.health?.register("mission", () => this.healthcheck())`.
+     Implement `healthcheck()` to return the `mission` component map with one key:
+     - `operations`: `HealthStatus.Healthy` when `this.started && !this.shutdown.err()`; `HealthStatus.Unavailable` otherwise.
+       The `operations` key reports whether the MissionService declared handlers are active.
   2. In `index.ts`: export `MissionService`, `type Dependencies`,
      `missionMigrations` (array from 06.1), `missionConfigSchema` (convict fragment
      with `mission.consecutiveLossLimit` as a `nat` integer defaulting to `3`, and
@@ -305,6 +310,12 @@ Every other ERD 1 task is unblocked.
      and `mission_mission`, `mission_node`, `mission_node_revision`,
      `mission_dependency` to the expected table list.
   4. Edit `engine/AGENTS.md`: update `src/mission/` entry from `[planned]`.
+  5. Add `service.test.ts` colocated tests for `healthcheck()`:
+     - Create a `new HealthRegistry()`. Construct `MissionService` with it. Call
+       `start()`. Assert `healthcheck()` returns `{ operations: HealthStatus.Healthy }`.
+       Call `stop()`. Assert `healthcheck()` returns `{ operations: HealthStatus.Unavailable }`.
+     - Call `registry.check(background)` after start. Assert the result contains key
+       `"mission"` with nested key `"operations"` equal to `HealthStatus.Healthy`.
 - Rules:
   - Follow the `service.ts` pattern of `src/project/service.ts`. `engine/AGENTS.md`.
   - `missionConfigSchema` uses `convict` with `nat` format: `consecutiveLossLimit` default `3`, `textMaxBytes` default `32768`.
@@ -315,8 +326,11 @@ Every other ERD 1 task is unblocked.
     throw `new OperationError(code, message, { status, details })`. The gateway maps
     `OperationError` to the HTTP response with code and status; other errors become
     HTTP 500 (`architecture.impl.md`; `engine/src/gateway/errors.ts`).
+  - `healthcheck()` reads in-process state only; it performs no remote call and no DB access.
+    `architecture.impl.md:378`.
+  - Mission owns no external resource and no resource healthcheck. `architecture.md:126–129`.
 - Done when: `pnpm run verify` passes; migration test lists all four mission
-  tables; `mission.consecutiveLossLimit` default is `3`.
+  tables; `mission.consecutiveLossLimit` default is `3`; healthcheck tests pass.
 
 ### 06.4 Implement `createMission` and `liveNodesPinning`
 

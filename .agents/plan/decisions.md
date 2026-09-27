@@ -20,7 +20,7 @@ Every cross-service collaboration in a `Dependencies` type is required, never op
 
 ## D5 — Repository seam
 
-Plan 04 publishes `class RepositoryComponent` in `src/repository/index.ts`: `constructor()` runs `checkRepositoryTools()`; `gitLsRemote(sshUrl: string, context: Context, deadlineMs: number): Promise<void>`. Plan 05 declares a matching `RepositoryConnector` interface inline in its own `contract.ts` with exactly this method. Plan 07 constructs `new RepositoryComponent()` and injects it into the Project Service. The call runs before `caller.commit`, as asynchronous work (`architecture.impl.md:681–683`).
+Plan 04 publishes `class RepositoryComponent` in `src/repository/index.ts`: `constructor(dependencies: { health?: HealthRegistry } = {})` runs `checkRepositoryTools()` and registers the `repository` component healthcheck; `gitLsRemote(sshUrl: string, context: Context, deadlineMs: number): Promise<void>`. Plan 05 declares a matching `RepositoryConnector` interface inline in its own `contract.ts` with exactly this method. Plan 07 constructs `new RepositoryComponent({ health })` and injects it into the Project Service. The call runs before `caller.commit`, as asynchronous work (`architecture.impl.md:681–683`).
 
 ## D6 — Worker catalog
 
@@ -33,11 +33,10 @@ Plan 03 creates the static catalog `src/worker/catalog.ts`. Project reads a cata
 ## D8 — Scope cuts
 
 - No 503 stubs. An operation outside ERD 1 is absent.
-- Health probes and the on-demand resource healthcheck are out of ERD 1 unless the binding write itself requires the call (the repository `ls-remote` at a binding write is in scope: `project-service.impl.md:247`).
 - No Tracking wiring in ERD 1 until Ulrich rules (no page gives the interface methods).
 - Configuration fields that only ERD 2 code reads (`worker.heartbeatWindow`, `worker.globalPrompt`) are out of ERD 1.
 
-Index blocker B4 reopens the health-probe cut of this decision until Ulrich defines the healthchecks.
+Blocker B4 removed the health-probe cut: every service and component has a component healthcheck, and Custody, Worker and Project implement their ERD 1 resource healthchecks (index "Shared conventions").
 
 ## D9 — Operation service key
 
