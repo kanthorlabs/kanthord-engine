@@ -84,8 +84,8 @@ These routes have no project identity. The proposed provider check is in
 ## Record and platform schemas
 
 A credential answer holds `name: CredentialName`, `platform` and `revisions`, an array of revision answers, newest first.
-A revision answer holds `id: CredentialId`, `revision: Revision`, `metadata`, `createdAt: Timestamp`,
-`endedAt: Timestamp | null` and `endReason: "drained" | "revoked" | null`. No answer holds `secret`.
+A revision answer holds `id: CredentialId`, `revision: Revision`, `metadata`, `createdAt: Timestamp`
+and `endedAt: Timestamp | null`. No answer holds `secret`.
 `platform` is the closed enum `github | github-copilot | anthropic | openai-compatible | s3`.
 Each platform holds exactly one secret shape from `api_key | oauth | s3_access_key`.
 The [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#platform-validators)
