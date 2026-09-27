@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
 import { canonicalJSON, digest } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
+import { importAdmissible, isTerminal } from "./admission.ts";
 import {
   checkBindingRuleTable,
   validateFilename,
@@ -18,6 +19,7 @@ import {
   type Content,
   type Edge,
   type ImportEntry,
+  type ImportPreview,
   type ImportSnapshot,
   type Mission,
   type MissionBindings,
@@ -532,6 +534,145 @@ export function resolveImportSet(
   resolveGraph(result);
   if (result.violations.length === ZERO) classify(tx, result);
   return result;
+}
+
+function modifiedNodes(resolved: ResolvedImport): Set<string> {
+  assert.equal(resolved.violations.length, ZERO);
+  const modified = new Set<string>();
+  const updates = new Set(resolved.updates);
+  const retiring = new Set(resolved.retirements);
+  const add = (id: string | null): void => {
+    if (id !== null && resolved.currentNodes.has(id)) modified.add(id);
+  };
+  for (const item of resolved.resolvedEntries) {
+    const { current } = item;
+    if (current === null) {
+      add(item.parentId);
+      continue;
+    }
+    if (!updates.has(current.id)) continue;
+    if (current.kind !== NodeKind.Task) add(current.id);
+    if (current.kind === NodeKind.Task || current.parent_id !== item.parentId) {
+      add(current.parent_id);
+      add(item.parentId);
+    }
+  }
+  for (const id of retiring) {
+    const node = resolved.currentNodes.get(id);
+    assert.ok(node, "Retirements name current nodes.");
+    add(node.kind === NodeKind.Task ? node.parent_id : node.id);
+    if (node.parent_id !== null && !retiring.has(node.parent_id))
+      add(node.parent_id);
+  }
+  return modified;
+}
+
+export function checkImportCondition(
+  tx: Transaction,
+  resolved: ResolvedImport,
+): Violation[] {
+  assert.equal(resolved.violations.length, ZERO);
+  const violations: Violation[] = [];
+  for (const id of [...modifiedNodes(resolved)].sort()) {
+    const node = readNode(tx, id);
+    assert.ok(node, "Modified nodes exist in the transaction.");
+    const locator = { id, filename: node.filename };
+    if (isTerminal(node.state)) {
+      violations.push(
+        violation(
+          MissionErrorCode.TerminalChange,
+          "Import cannot change a terminal node.",
+          { nodeId: id },
+          locator,
+        ),
+      );
+      continue;
+    }
+    if (!importAdmissible(node.state, node.attempt))
+      violations.push(
+        violation(
+          MissionErrorCode.ConditionFailed,
+          "Node does not satisfy the import condition.",
+          { state: node.state, attempt: node.attempt },
+          locator,
+        ),
+      );
+  }
+  return violations;
+}
+
+export interface PreparedImport {
+  preview: ImportPreview;
+  resolved: ResolvedImport | null;
+}
+
+export function prepareImport(
+  tx: Transaction,
+  mission: Mission,
+  snapshot: ImportSnapshot,
+  routeMissionId: string,
+  bindings: MissionBindings,
+  textMaxBytes: number,
+): PreparedImport {
+  assert.equal(mission.id, routeMissionId, "Route mission was loaded.");
+  assert.equal(
+    mission.version,
+    snapshot.missionVersion,
+    "Version was checked.",
+  );
+  const normalized = normalizeImportSnapshot(
+    snapshot,
+    routeMissionId,
+    textMaxBytes,
+  );
+  const resolved =
+    normalized.violations.length === ZERO
+      ? resolveImportSet(tx, mission, normalized.entries, bindings)
+      : null;
+  const violations =
+    resolved === null
+      ? normalized.violations
+      : resolved.violations.length > ZERO
+        ? resolved.violations
+        : checkImportCondition(tx, resolved);
+  const retirements = resolved?.retirements ?? [];
+  return {
+    resolved,
+    preview: {
+      missionId: mission.id,
+      expectedMissionVersion: snapshot.missionVersion,
+      previewDigest: importDigest(
+        mission.id,
+        snapshot.missionVersion,
+        normalized.entries,
+        retirements,
+      ),
+      creates: resolved?.creates ?? [],
+      updates: resolved?.updates ?? [],
+      retirements,
+      removedEdges: resolved?.removedEdges ?? [],
+      noOps: resolved?.noOps ?? [],
+      violations,
+    },
+  };
+}
+
+export function previewImport(
+  tx: Transaction,
+  mission: Mission,
+  snapshot: ImportSnapshot,
+  routeMissionId: string,
+  bindings: MissionBindings,
+  textMaxBytes: number,
+): ImportPreview {
+  return prepareImport(
+    tx,
+    mission,
+    snapshot,
+    routeMissionId,
+    bindings,
+    textMaxBytes,
+  ).preview;
 }
 
 export function importDigest(

@@ -510,6 +510,22 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "import.preview": {
+    ...readOperation,
+    body: true,
+    id: "mission.import.preview",
+    method: HttpMethod.Post,
+    path: "/api/mission/:missionId/import/preview",
+    input: z.strictObject({
+      params: z.strictObject({
+        missionId: identitySchema(MISSION_IDENTITY_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: importSnapshotSchema,
+    }),
+    output: importPreviewSchema,
+    description: "Preview a whole-mission import without writing changes.",
+  },
   "edge.list": {
     ...readOperation,
     id: "mission.edge.list",

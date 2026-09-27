@@ -29,8 +29,10 @@ import {
   type MissionBindings,
 } from "./contract.ts";
 import {
+  checkImportCondition,
   importDigest,
   normalizeImportSnapshot,
+  prepareImport,
   resolveImportSet,
   type NormalizedEntry,
 } from "./import.ts";
@@ -987,4 +989,219 @@ test("digest is canonical, input-order independent, nonmutating and retirement-s
   );
   assert.deepEqual({ entries, retired }, before);
   assert.match(actual, /^[0-9a-f]{64}$/);
+});
+
+const CONDITION_CASES: Array<{
+  label: string;
+  transform: (entries: NormalizedEntry[]) => NormalizedEntry[];
+  checked: string[];
+}> = [
+  {
+    label: "updated initiative",
+    transform: (entries) => change(entries, "a.md", { name: "Changed" }),
+    checked: ["a.md"],
+  },
+  {
+    label: "updated objective does not modify its initiative",
+    transform: (entries) => change(entries, "o.md", { name: "Changed" }),
+    checked: ["o.md"],
+  },
+  {
+    label: "updated task checks its objective",
+    transform: (entries) => change(entries, "t.md", { name: "Changed" }),
+    checked: ["o.md"],
+  },
+  {
+    label: "moved task checks both objectives",
+    transform: (entries) => change(entries, "t.md", { parent: "p.md" }),
+    checked: ["o.md", "p.md"],
+  },
+  {
+    label: "moved objective checks itself and both initiatives",
+    transform: (entries) => change(entries, "o.md", { parent: "b.md" }),
+    checked: ["a.md", "b.md", "o.md"],
+  },
+  {
+    label: "dependency changes check the dependent only",
+    transform: (entries) => change(entries, "b.md", { dependsOn: ["a.md"] }),
+    checked: ["b.md"],
+  },
+  {
+    label: "created objective checks its current initiative",
+    transform: (entries) => [
+      ...entries,
+      entry("new.md", {
+        kind: NodeKind.Objective,
+        parent: "a.md",
+        bindings: [REPOSITORY],
+      }),
+    ],
+    checked: ["a.md"],
+  },
+  {
+    label: "created task checks its current objective",
+    transform: (entries) => [
+      ...entries,
+      entry("new.md", {
+        kind: NodeKind.Task,
+        parent: "o.md",
+      }),
+    ],
+    checked: ["o.md"],
+  },
+  {
+    label: "created initiative and new parent need no current-node check",
+    transform: (entries) => [
+      ...entries,
+      entry("new.md"),
+      entry("new-objective.md", {
+        kind: NodeKind.Objective,
+        parent: "new.md",
+        bindings: [REPOSITORY],
+      }),
+    ],
+    checked: [],
+  },
+  {
+    label: "retired task checks its surviving objective",
+    transform: (entries) =>
+      entries.filter((value) => value.filename !== TASK_FILENAME),
+    checked: ["o.md"],
+  },
+  {
+    label: "retired objective checks itself and its surviving initiative",
+    transform: (entries) =>
+      entries.filter((value) => !["o.md", "t.md"].includes(value.filename)),
+    checked: ["a.md", "o.md"],
+  },
+  {
+    label: "entire retirement deduplicates task owners",
+    transform: () => [],
+    checked: ["a.md", "b.md", "o.md", "p.md"],
+  },
+  {
+    label: "multiple changes to one content owner are deduplicated",
+    transform: (entries) =>
+      change(change(entries, "o.md", { name: "Changed" }), "t.md", {
+        name: "Changed",
+      }),
+    checked: ["o.md"],
+  },
+];
+
+for (const scenario of CONDITION_CASES) {
+  test(`import condition: ${scenario.label}`, (t) => {
+    const { store, entries, resolve } = fixture(t, hierarchy());
+    store.database
+      .prepare("UPDATE mission_node SET state = ? WHERE kind != ?")
+      .run(NodeState.Executing, NodeKind.Task);
+    const resolved = resolve(scenario.transform(entries));
+    assert.deepEqual(resolved.violations, []);
+    const violations = store.transaction((tx) =>
+      checkImportCondition(tx, resolved),
+    );
+    assert.deepEqual(
+      violations.map((value) => value.nodeId),
+      scenario.checked.map((filename) => item(entries, filename).id!).sort(),
+    );
+    for (const value of violations) {
+      assert.equal(value.code, MissionErrorCode.ConditionFailed);
+      assert.deepEqual(value.details, {
+        state: NodeState.Executing,
+        attempt: ZERO,
+      });
+    }
+  });
+}
+
+for (const state of [NodeState.Completed, NodeState.Discarded]) {
+  test(`import condition permits ${state} noOps but rejects changes and retirement`, (t) => {
+    const { store, entries, resolve } = fixture(t);
+    const id = entries[ZERO]!.id!;
+    store.database
+      .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+      .run(state, id);
+    const unchanged = resolve();
+    assert.deepEqual(
+      store.transaction((tx) => checkImportCondition(tx, unchanged)),
+      [],
+    );
+    for (const input of [change(entries, "a.md", { name: "Changed" }), []]) {
+      const resolved = resolve(input);
+      const violations = store.transaction((tx) =>
+        checkImportCondition(tx, resolved),
+      );
+      assert.deepEqual(
+        violations.map(({ code, nodeId, details }) => ({
+          code,
+          nodeId,
+          details,
+        })),
+        [
+          {
+            code: MissionErrorCode.TerminalChange,
+            nodeId: id,
+            details: { nodeId: id },
+          },
+        ],
+      );
+    }
+  });
+}
+
+for (const state of [NodeState.Pending, NodeState.Available]) {
+  test(`import condition admits ${state} only at attempt zero`, (t) => {
+    const { store, entries, resolve } = fixture(t);
+    const id = entries[ZERO]!.id!;
+    const input = change(entries, "a.md", { name: "Changed" });
+    store.database
+      .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+      .run(state, id);
+    const valid = resolve(input);
+    assert.deepEqual(
+      store.transaction((tx) => checkImportCondition(tx, valid)),
+      [],
+    );
+    store.database
+      .prepare("UPDATE mission_node SET attempt = ? WHERE id = ?")
+      .run(ONE, id);
+    const invalid = resolve(input);
+    const violations = store.transaction((tx) =>
+      checkImportCondition(tx, invalid),
+    );
+    assert.equal(violations[ZERO]?.code, MissionErrorCode.ConditionFailed);
+    assert.deepEqual(violations[ZERO]?.details, { state, attempt: ONE });
+  });
+}
+
+test("prepared import exposes the resolved state without resolving bindings twice", (t) => {
+  const { store, mission, entries } = fixture(t, hierarchy());
+  let resolutions = ZERO;
+  const wireEntries = entries.map((value) =>
+    value.kind === NodeKind.Task ? { ...value, dependsOn: undefined } : value,
+  );
+  const prepared = store.transaction((tx) =>
+    prepareImport(
+      tx,
+      mission,
+      snapshot(wireEntries, mission.id),
+      mission.id,
+      {
+        ...bindings,
+        resolveBinding: (...args) => {
+          resolutions++;
+          return bindings.resolveBinding(...args);
+        },
+      },
+      TEXT_MAX_BYTES,
+    ),
+  );
+  assert.equal(
+    resolutions,
+    hierarchy().filter((value) => value.kind === NodeKind.Objective).length,
+  );
+  assert.ok(prepared.resolved);
+  assert.deepEqual(prepared.preview.violations, []);
+  assert.equal(prepared.preview.noOps, prepared.resolved.noOps);
+  assert.equal(prepared.resolved.resolvedEntries.length, entries.length);
 });

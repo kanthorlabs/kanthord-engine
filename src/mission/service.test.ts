@@ -21,6 +21,10 @@ import {
 } from "../kernel/store.ts";
 import {
   ActorKind,
+  ImportFormat,
+  importPreviewSchema,
+  type ImportEntry,
+  type ImportSnapshot,
   MISSION_IDENTITY_PREFIX,
   MISSION_INITIAL_VERSION,
   MISSION_SERVICE_NAME,
@@ -48,12 +52,15 @@ import {
   type WorkQueue,
 } from "./contract.ts";
 import { missionMigrations } from "./migrations.ts";
+import { nodeRecord } from "./node-read.ts";
+import { importDigest, normalizeImportSnapshot } from "./import.ts";
 import { MissionService, humanActor, type Dependencies } from "./service.ts";
 import { CONTENT_FIELDS, TASKS_FIELD, ContentField } from "./content.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   insertNode as insertNodeRow,
   readNode,
+  readMissionNodes,
   readCurrentRevision,
   updateNodeFilename,
 } from "./store.ts";
@@ -386,6 +393,7 @@ const PARENT_ID_FIELD = "parentId";
 const PARENT_REVISION_FIELD = "expectedParentRevision";
 const UNKNOWN_NODE_ID = "node_00000000000000000000000000";
 const UNKNOWN_MISSION_ID = "mission_00000000000000000000000000";
+const IMPORT_PREVIEW_PATH = "/api/mission/:missionId/import/preview";
 const PRIORITY = 42;
 const QueueAction = { Insert: "insert", Delete: "delete" } as const;
 type QueueCall = {
@@ -3222,6 +3230,339 @@ test("node.retire rolls back retirement, dependency removal, routing and jobs wh
   });
   assert.deepEqual(f.snapshot(), { ...before, calls: f.calls });
   assert.deepEqual(f.jobs(), jobs);
+});
+
+function importPreviewFixture(t: TestContext) {
+  const f = nodeFixture(t);
+  const objectiveId = f.objective();
+  const entries: ImportEntry[] = f.store.transaction((tx) => {
+    const nodes = readMissionNodes(tx, f.missionId);
+    const filenames = new Map(nodes.map((node) => [node.id, node.filename]));
+    return nodes.map((node) => ({
+      id: node.id,
+      filename: node.filename,
+      kind: node.kind,
+      ...nodeRecord(tx, node).content,
+      bindings: node.kind === NodeKind.Objective ? [REPOSITORY_NAME] : [],
+      ...(node.parent_id === null
+        ? {}
+        : { parent: filenames.get(node.parent_id)! }),
+    }));
+  });
+  const snapshot: Extract<
+    ImportSnapshot,
+    { format: typeof ImportFormat.Json }
+  > = {
+    format: ImportFormat.Json,
+    missionId: f.missionId,
+    missionVersion: f.version(),
+    reason: REASON,
+    entries,
+  };
+  function preview(body: ImportSnapshot = snapshot, missionId = f.missionId) {
+    const operation = missionOperations["import.preview"];
+    const input = operation.input.parse({
+      params: { missionId },
+      query: {},
+      body,
+    });
+    const before = f.snapshot();
+    const writes = f.store.database
+      .prepare("SELECT total_changes() AS count")
+      .get();
+    const commits = f.commits();
+    const result = importPreviewSchema.parse(
+      f.registry.get(operation.id).handler(input, f.caller),
+    );
+    assert.equal(f.commits(), commits + ONE_COMMIT);
+    assert.deepEqual(f.snapshot(), before);
+    assert.deepEqual(
+      f.store.database.prepare("SELECT total_changes() AS count").get(),
+      writes,
+    );
+    return result;
+  }
+  function changed(patch: Partial<ImportEntry>): ImportSnapshot {
+    return {
+      ...snapshot,
+      entries: entries.map((entry) =>
+        entry.id === objectiveId ? { ...entry, ...patch } : entry,
+      ),
+    };
+  }
+  return {
+    ...f,
+    entries,
+    importSnapshot: snapshot,
+    objectiveId,
+    preview,
+    changed,
+  };
+}
+
+test("import.preview is a human POST with a read-only body, one commit and schema-valid answer", (t) => {
+  const f = importPreviewFixture(t);
+  const operation = f.registry.get(
+    missionOperations["import.preview"].id,
+  ).operation;
+  assert.equal(operation.access, AccessPolicy.Human);
+  assert.equal(operation.method, HttpMethod.Post);
+  assert.equal(operation.path, IMPORT_PREVIEW_PATH);
+  assert.equal(operation.body, true);
+  assert.equal(operation.mutation, false);
+  const result = f.preview();
+  assert.deepEqual(result.violations, []);
+  assert.deepEqual(result.noOps, f.entries.map((entry) => entry.id!).sort());
+  assert.deepEqual(
+    [result.creates, result.updates, result.retirements, result.removedEdges],
+    [[], [], [], []],
+  );
+});
+
+test("import.preview stage one stops before unknown identity and binding resolution", (t) => {
+  const f = importPreviewFixture(t);
+  const snapshot = f.changed({
+    filename: "../invalid.md",
+    id: UNKNOWN_NODE_ID,
+    bindings: [UNKNOWN_NAME],
+  });
+  const result = f.preview(snapshot);
+  assert.deepEqual(
+    result.violations.map((value) => value.code),
+    [MissionErrorCode.ContentInvalid],
+  );
+  assert.deepEqual(
+    [
+      result.creates,
+      result.updates,
+      result.retirements,
+      result.removedEdges,
+      result.noOps,
+    ],
+    [[], [], [], [], []],
+  );
+  assert.equal(
+    result.previewDigest,
+    importDigest(
+      f.missionId,
+      snapshot.missionVersion,
+      normalizeImportSnapshot(snapshot, f.missionId, TEXT_MAX_BYTES).entries,
+      [],
+    ),
+  );
+});
+
+test("import.preview malformed Markdown digest omits refused files and does not resolve references", (t) => {
+  const f = importPreviewFixture(t);
+  const snapshot: ImportSnapshot = {
+    missionId: f.missionId,
+    missionVersion: f.importSnapshot.missionVersion,
+    reason: REASON,
+    format: ImportFormat.Markdown,
+    files: [{ filename: NEW_FILENAME, content: "not a plan" }],
+  };
+  const result = f.preview(snapshot);
+  assert.deepEqual(
+    result.violations.map((value) => value.code),
+    [MissionErrorCode.PlanInvalid],
+  );
+  assert.equal(
+    result.previewDigest,
+    importDigest(f.missionId, snapshot.missionVersion, [], []),
+  );
+  assert.deepEqual(result.retirements, []);
+});
+
+for (const [label, patch, code] of [
+  ["cycle", { dependsOn: [OBJECTIVE_FILENAME] }, MissionErrorCode.Cycle],
+  ["unknown identity", { id: UNKNOWN_NODE_ID }, MissionErrorCode.UnknownId],
+  [
+    "unresolved binding",
+    { bindings: [UNKNOWN_NAME] },
+    MissionErrorCode.BindingsInvalid,
+  ],
+] satisfies Array<[string, Partial<ImportEntry>, string]>) {
+  test(`import.preview stage two rejects ${label} without running stage three`, (t) => {
+    const f = importPreviewFixture(t);
+    f.setState(f.objectiveId, NodeState.Completed);
+    const result = f.preview(f.changed(patch));
+    assert.deepEqual(
+      result.violations.map((value) => value.code),
+      [code],
+    );
+    assert.deepEqual(
+      [
+        result.creates,
+        result.updates,
+        result.retirements,
+        result.removedEdges,
+        result.noOps,
+      ],
+      [[], [], [], [], []],
+    );
+    if (code === MissionErrorCode.BindingsInvalid)
+      assert.deepEqual(result.violations[ZERO]?.details, {
+        binding: UNKNOWN_NAME,
+      });
+  });
+}
+
+test("import.preview stage two rejects a retired identity", (t) => {
+  const f = importPreviewFixture(t);
+  f.store.database
+    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+    .run(RETIRED_AT, f.objectiveId);
+  const result = f.preview();
+  assert.deepEqual(
+    result.violations.map((value) => value.code),
+    [MissionErrorCode.RetiredId],
+  );
+  assert.deepEqual(result.violations[ZERO]?.details, { id: f.objectiveId });
+});
+
+for (const [state, attempt] of [
+  [NodeState.Executing, ZERO],
+  [NodeState.Available, ONE],
+] as const) {
+  test(`import.preview stage three rejects ${state} at attempt ${attempt}`, (t) => {
+    const f = importPreviewFixture(t);
+    f.store.database
+      .prepare("UPDATE mission_node SET state = ?, attempt = ? WHERE id = ?")
+      .run(state, attempt, f.objectiveId);
+    const result = f.preview(f.changed({ name: "Changed" }));
+    assert.deepEqual(result.updates, [f.objectiveId]);
+    assert.deepEqual(
+      result.violations.map(({ code, nodeId, details }) => ({
+        code,
+        nodeId,
+        details,
+      })),
+      [
+        {
+          code: MissionErrorCode.ConditionFailed,
+          nodeId: f.objectiveId,
+          details: { state, attempt },
+        },
+      ],
+    );
+  });
+}
+
+test("import.preview terminal noOps are allowed but changes are terminal_change", (t) => {
+  const f = importPreviewFixture(t);
+  f.setState(f.objectiveId, NodeState.Completed);
+  assert.deepEqual(f.preview().violations, []);
+  const result = f.preview(f.changed({ name: "Changed" }));
+  assert.deepEqual(
+    result.violations.map(({ code, nodeId, details }) => ({
+      code,
+      nodeId,
+      details,
+    })),
+    [
+      {
+        code: MissionErrorCode.TerminalChange,
+        nodeId: f.objectiveId,
+        details: { nodeId: f.objectiveId },
+      },
+    ],
+  );
+});
+
+test("import.preview checks mission existence, version and reason before stages", (t) => {
+  const f = importPreviewFixture(t);
+  const invalid = {
+    ...f.importSnapshot,
+    missionVersion: MISSION_INITIAL_VERSION,
+    reason: "x".repeat(TEXT_MAX_BYTES + ONE),
+  };
+  const before = f.snapshot();
+  const commits = f.commits();
+  assert.throws(
+    () => f.preview(invalid, UNKNOWN_MISSION_ID),
+    retirementError(
+      MissionErrorCode.MissionNotFound,
+      undefined,
+      HttpStatus.NotFound,
+    ),
+  );
+  assert.throws(
+    () => f.preview(invalid),
+    retirementError(MissionErrorCode.VersionConflict, {
+      current: f.importSnapshot.missionVersion,
+    }),
+  );
+  assert.throws(
+    () =>
+      f.preview({
+        ...invalid,
+        missionVersion: f.importSnapshot.missionVersion,
+      }),
+    retirementError(
+      MissionErrorCode.ContentInvalid,
+      { field: "reason" },
+      HttpStatus.BadRequest,
+    ),
+  );
+  assert.equal(f.commits(), commits + THREE);
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("import.preview empty set retires every current node without writes or queue calls", (t) => {
+  const f = importPreviewFixture(t);
+  const result = f.preview({ ...f.importSnapshot, entries: [] });
+  assert.deepEqual(
+    result.retirements,
+    f.entries.map((entry) => entry.id!).sort(),
+  );
+  assert.deepEqual(result.violations, []);
+  assert.deepEqual(result.removedEdges, [
+    {
+      kind: EdgeKind.Containment,
+      parentId: f.node(f.objectiveId)!.parent_id,
+      childId: f.objectiveId,
+    },
+  ]);
+  assert.equal(
+    result.previewDigest,
+    importDigest(
+      f.missionId,
+      f.importSnapshot.missionVersion,
+      [],
+      result.retirements,
+    ),
+  );
+});
+
+test("import.preview equivalent Markdown and JSON plans have identical classifications and digest", (t) => {
+  const f = importPreviewFixture(t);
+  const entries = [
+    ...f.entries.map((entry) =>
+      entry.id === f.objectiveId ? { ...entry, name: "Changed" } : entry,
+    ),
+    {
+      ...f.entries.find((entry) => entry.kind === NodeKind.Initiative)!,
+      id: undefined,
+      filename: NEW_FILENAME,
+    },
+  ];
+  const json = f.preview({ ...f.importSnapshot, entries });
+  const markdown = f.preview({
+    format: ImportFormat.Markdown,
+    missionId: f.missionId,
+    missionVersion: f.importSnapshot.missionVersion,
+    reason: REASON,
+    files: entries.map(
+      ({ filename, name, requirement, criterion, ...frontMatter }) => ({
+        filename,
+        content: `---\n${JSON.stringify(frontMatter)}\n---\n# ${name}\n## Requirement\n${requirement}\n## Criterion\n${criterion}\n`,
+      }),
+    ),
+  });
+  assert.deepEqual(markdown, json);
+  assert.deepEqual(json.violations, []);
+  assert.deepEqual(json.creates, [NEW_FILENAME]);
+  assert.deepEqual(json.updates, [f.objectiveId]);
 });
 
 test("MissionService refuses to restart after stop", async () => {

@@ -28,6 +28,7 @@ import {
 } from "./contract.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
+import { previewImport } from "./import.ts";
 import { createNode } from "./node-create.ts";
 import { moveNode } from "./node-move.ts";
 import { planRetirement, retireNode } from "./node-retire.ts";
@@ -46,6 +47,7 @@ import {
   readLiveNodesPinning,
   readMissionByProject,
 } from "./store.ts";
+import { requireMission } from "./write.ts";
 
 const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
 const QUERY_TRUE = "true";
@@ -86,6 +88,20 @@ export class MissionService implements Service, MissionCollaborations {
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["import.preview"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) =>
+          previewImport(
+            tx,
+            requireMission(tx, params.missionId, body.missionVersion),
+            body,
+            params.missionId,
+            this.dependencies.bindings,
+            this.dependencies.config.textMaxBytes,
+          ),
+        ),
+    );
     registry.register(
       missionOperations["edge.list"],
       ({ params, query }, caller) =>
