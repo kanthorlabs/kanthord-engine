@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { background, CancellationContext } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
+import { HealthRegistry } from "../kernel/health.ts";
+import { HealthStatus } from "../kernel/service.ts";
 import {
   CheckErrorCode,
   checkRepositoryTools,
   parseGitVersion,
   parseSshVersion,
+  probeRepositoryTools,
 } from "./check.ts";
+import { RepositoryComponent } from "./index.ts";
 
 const GIT_MIN_VERSION = [2, 40];
 const GIT_NEWER_VERSION = [2, 41];
@@ -73,4 +78,22 @@ test("parseSshVersion rejects malformed output", () => {
 
 test("checkRepositoryTools accepts the installed tools", () => {
   assert.doesNotThrow(() => checkRepositoryTools());
+});
+
+test("probeRepositoryTools accepts the installed tools", async () => {
+  assert.equal(await probeRepositoryTools(background), true);
+});
+
+test("probeRepositoryTools resolves false for a cancelled context", async () => {
+  const context = new CancellationContext();
+  context.cancel();
+  assert.equal(await probeRepositoryTools(context), false);
+});
+
+test("RepositoryComponent registers its toolchain healthcheck", async () => {
+  const registry = new HealthRegistry();
+  new RepositoryComponent({ health: registry });
+  const result = await registry.check(background);
+  assert.ok(Object.hasOwn(result, "repository"));
+  assert.deepEqual(result.repository, { toolchain: HealthStatus.Healthy });
 });

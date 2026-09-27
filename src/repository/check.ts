@@ -1,4 +1,6 @@
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
+import type { Context } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 
 const GIT_MIN_MAJOR = 2;
@@ -7,6 +9,7 @@ const SSH_MIN_MAJOR = 9;
 const SSH_MIN_MINOR = 0;
 const ENOENT_CODE = "ENOENT";
 const EXIT_SUCCESS = 0;
+const execFileAsync = promisify(execFile);
 
 export const CheckErrorCode = {
   ToolMissing: "repository.connector.tool_missing",
@@ -81,4 +84,25 @@ export function checkRepositoryTools(): void {
   runTool("bash", ["--version"]);
   parseGitVersion(runTool("git", ["--version"]).stdout);
   parseSshVersion(runTool("ssh", ["-V"]).stderr);
+}
+
+export async function probeRepositoryTools(context: Context): Promise<boolean> {
+  const controller = new AbortController();
+  const unsubscribe = context.onCancel(() => controller.abort());
+  try {
+    await execFileAsync("bash", ["--version"], { signal: controller.signal });
+    const git = await execFileAsync("git", ["--version"], {
+      signal: controller.signal,
+    });
+    parseGitVersion(git.stdout);
+    const ssh = await execFileAsync("ssh", ["-V"], {
+      signal: controller.signal,
+    });
+    parseSshVersion(ssh.stderr);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    unsubscribe();
+  }
 }
