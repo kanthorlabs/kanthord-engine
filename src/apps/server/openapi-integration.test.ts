@@ -21,6 +21,12 @@ const ARRAY_SCHEMA_TYPE = "array";
 const NULL_SCHEMA_TYPE = "null";
 const CREDENTIAL_COLLECTION_FRAGMENT = "openapi/credential/create.yaml";
 const CREDENTIAL_COLLECTION_MAX_LINES = 300;
+const WORKER_AGENT_ENABLEMENT_ITEM_FRAGMENT =
+  "openapi/worker/agent.enablement.get.yaml";
+const WORKER_AGENT_ENABLEMENT_ITEM_MAX_LINES = 450;
+const WORKER_AGENT_ENABLEMENT_GET_ID = "worker.agent.enablement.get";
+const WORKER_AGENT_ENABLEMENT_PUT_ID = "worker.agent.enablement.put";
+const WORKER_AGENT_ENABLEMENT_REMOVE_ID = "worker.agent.enablement.remove";
 const apiOperations = [
   ...Object.values(gatewayOperations),
   ...Object.values(custodyOperations),
@@ -30,6 +36,22 @@ const apiOperations = [
 test("published OpenAPI validates, matches the registry exactly, and describes real responses", async (t) => {
   const files = emitOpenAPIFiles(apiOperations);
   const emitted = files["openapi.yaml"];
+  assert.ok(Object.hasOwn(files, WORKER_AGENT_ENABLEMENT_ITEM_FRAGMENT));
+  assert.deepEqual(emitted.paths["/api/worker/agent/enablement/{agentName}"], {
+    $ref: `./${WORKER_AGENT_ENABLEMENT_ITEM_FRAGMENT}#/pathItem`,
+  });
+  assert.equal(
+    WORKER_AGENT_ENABLEMENT_GET_ID,
+    workerOperations["agent.enablement.get"].id,
+  );
+  assert.equal(
+    WORKER_AGENT_ENABLEMENT_PUT_ID,
+    workerOperations["agent.enablement.put"].id,
+  );
+  assert.equal(
+    WORKER_AGENT_ENABLEMENT_REMOVE_ID,
+    workerOperations["agent.enablement.remove"].id,
+  );
   const custodyPaths = new Set(
     Object.values(custodyOperations).map(({ path }) =>
       path.replace(/:([^/]+)/g, "{$1}"),
@@ -61,12 +83,50 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
       );
       maxLines = CREDENTIAL_COLLECTION_MAX_LINES;
     }
+    if (file === WORKER_AGENT_ENABLEMENT_ITEM_FRAGMENT) {
+      assert.ok("pathItem" in document);
+      assert.ok(isObject(document.pathItem));
+      assert.deepEqual(Object.keys(document.pathItem).sort(), [
+        "delete",
+        "get",
+        "put",
+      ]);
+      const methodIds = Object.fromEntries(
+        Object.entries(document.pathItem).map(([method, operation]) => {
+          assert.ok(isObject(operation));
+          assert.ok("operationId" in operation);
+          return [method, operation.operationId];
+        }),
+      );
+      assert.deepEqual(methodIds, {
+        get: WORKER_AGENT_ENABLEMENT_GET_ID,
+        put: WORKER_AGENT_ENABLEMENT_PUT_ID,
+        delete: WORKER_AGENT_ENABLEMENT_REMOVE_ID,
+      });
+      maxLines = WORKER_AGENT_ENABLEMENT_ITEM_MAX_LINES;
+    }
     assert.ok(
       content.split("\n").length <= maxLines,
       `${file} must stay small enough to review as one scope`,
     );
   }
   const resolved = await SwaggerParser.validate(openapiPath());
+  const emittedWorkerIds = Object.values(resolved.paths ?? {}).flatMap((path) =>
+    Object.values(path).map(
+      (operation) => (operation as { operationId?: string }).operationId,
+    ),
+  );
+  for (const id of [
+    "worker.agent.enablement.list",
+    "worker.agent.enablement.get",
+    "worker.agent.enablement.put",
+    "worker.agent.enablement.enable",
+    "worker.agent.enablement.disable",
+    "worker.agent.enablement.remove",
+    "worker.agent.enablement.provider.add",
+    "worker.agent.enablement.provider.remove",
+  ])
+    assert.ok(emittedWorkerIds.includes(id), id);
   for (const operation of Object.values(custodyOperations)) {
     const path = operation.path.replace(/:([^/]+)/g, "{$1}");
     const method = operation.method.toLowerCase() as "get" | "post" | "put";

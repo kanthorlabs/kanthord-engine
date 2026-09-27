@@ -50,10 +50,14 @@ engine/
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
 │   │   ├── migrations.ts       # scheduler_job table migration
 │   │   └── service.ts          # Private lifecycle, WorkQueue implementation, and queue handlers
-│   ├── worker/                 # Worker Service and registration ownership
-│   │   ├── contract.ts         # Worker operations and registration collaboration types
+│   ├── worker/                 # Worker registrations, agent enablement lifecycle, and configuration collaborations
+│   │   ├── contract.ts         # Worker operations, schemas, and collaboration types
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
-│   │   └── service.ts          # Private lifecycle, registration handler, and replay guard
+│   │   ├── migrations.ts       # Append-only agent enablement revision table
+│   │   ├── catalog.ts          # Static worker and agent declarations
+│   │   ├── enablements.ts      # Revision, tombstone, pagination, and dependency store reads
+│   │   ├── configuration.ts    # Shared provider, model, and reasoning-level validation
+│   │   └── service.ts          # Registration, enablement mutations, entry validation, dependency lookups, and views
 │   ├── tracking/               # [planned] Telemetry ingestion, storage, and retention
 │   ├── gateway/                # HTTP transport, authentication, and invocation infrastructure
 │   │   ├── contract.ts         # Gateway operation declarations

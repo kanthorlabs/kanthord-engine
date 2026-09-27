@@ -32,6 +32,18 @@ paths:
     $ref: ./openapi/scheduler/queue.list.yaml#/pathItem
   /api/scheduler/project/{projectId}/queue/peek:
     $ref: ./openapi/scheduler/queue.peek.yaml#/pathItem
+  /api/worker/agent/enablement/{agentName}/disable:
+    $ref: ./openapi/worker/agent.enablement.disable.yaml#/pathItem
+  /api/worker/agent/enablement/{agentName}/enable:
+    $ref: ./openapi/worker/agent.enablement.enable.yaml#/pathItem
+  /api/worker/agent/enablement/{agentName}:
+    $ref: ./openapi/worker/agent.enablement.get.yaml#/pathItem
+  /api/worker/agent/enablement:
+    $ref: ./openapi/worker/agent.enablement.list.yaml#/pathItem
+  /api/worker/agent/enablement/{agentName}/provider:
+    $ref: ./openapi/worker/agent.enablement.provider.add.yaml#/pathItem
+  /api/worker/agent/enablement/{agentName}/provider/{providerName}:
+    $ref: ./openapi/worker/agent.enablement.provider.remove.yaml#/pathItem
   /api/worker/register:
     $ref: ./openapi/worker/register.yaml#/pathItem
 components:

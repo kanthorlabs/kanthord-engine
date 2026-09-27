@@ -1,0 +1,170 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: worker.agent.enablement.provider.add
+    tags:
+      - worker
+    description: Append a named provider to an agent enablement.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: agentName
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/worker.agent.enablement.provider.add.Input/properti\
+            es/params/properties/agentName"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/worker.agent.enablement.provider.add.Input/properti\
+              es/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.agent.enablement.provider.add.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.agent.enablement.provider.add.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            agentName:
+              type: string
+              minLength: 1
+          required:
+            - agentName
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            expectedRevision:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            name:
+              type: string
+              minLength: 1
+            provider:
+              type: string
+              enum:
+                - github-copilot
+                - anthropic
+                - openai-compatible
+            credential:
+              type: string
+              minLength: 1
+          required:
+            - expectedRevision
+            - name
+            - provider
+            - credential
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.agent.enablement.provider.add.Output:
+      type: object
+      properties:
+        agentName:
+          type: string
+        state:
+          type: string
+          enum:
+            - enabled
+            - disabled
+        agentProviders:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                minLength: 1
+              provider:
+                type: string
+                enum:
+                  - github-copilot
+                  - anthropic
+                  - openai-compatible
+              credential:
+                type: string
+                minLength: 1
+            required:
+              - name
+              - provider
+              - credential
+            additionalProperties: false
+        defaultConfiguration:
+          type: object
+          properties:
+            agentProvider:
+              type: string
+              minLength: 1
+            modelIdentifier:
+              type: string
+              minLength: 1
+            reasoningEffort:
+              type: string
+              enum:
+                - off
+                - minimal
+                - low
+                - medium
+                - high
+                - xhigh
+                - max
+          required:
+            - agentProvider
+            - modelIdentifier
+            - reasoningEffort
+          additionalProperties: false
+        revision:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+      required:
+        - agentName
+        - state
+        - agentProviders
+        - defaultConfiguration
+        - revision
+      additionalProperties: false
