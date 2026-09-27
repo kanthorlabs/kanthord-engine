@@ -113,3 +113,28 @@ export class HealthRegistry {
     }
   }
 }
+
+export const ResourceStatus = {
+  Healthy: "healthy",
+  Unhealthy: "unhealthy",
+  Unknown: "unknown",
+} as const;
+export type ResourceStatusValue =
+  (typeof ResourceStatus)[keyof typeof ResourceStatus];
+
+export const HealthScope = {
+  Global: "global",
+  Project: "project",
+} as const;
+export type HealthScopeValue = (typeof HealthScope)[keyof typeof HealthScope];
+
+export type ResourceCheck = (context: Context) => Promise<ResourceStatusValue>;
+
+export interface ResourceEntry {
+  scope: HealthScopeValue;
+  project: string | null;
+  name: string;
+  target: string;
+  capability: string;
+  check: ResourceCheck;
+}

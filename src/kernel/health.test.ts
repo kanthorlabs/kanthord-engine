@@ -3,10 +3,24 @@ import { test } from "node:test";
 import { CancellationContext, type Context } from "./context.ts";
 import {
   HealthRegistry,
+  HealthScope,
+  ResourceStatus,
   MAX_HEALTH_PROBES,
   type HealthProbe,
 } from "./health.ts";
 import { healthy } from "./service.ts";
+
+test("resource status values are stable", () => {
+  assert.deepEqual(ResourceStatus, {
+    Healthy: "healthy",
+    Unhealthy: "unhealthy",
+    Unknown: "unknown",
+  });
+});
+
+test("health scope values are stable", () => {
+  assert.deepEqual(HealthScope, { Global: "global", Project: "project" });
+});
 
 test("health registration validates names, duplicates, probes, capacity and timeout", () => {
   const registry = new HealthRegistry();

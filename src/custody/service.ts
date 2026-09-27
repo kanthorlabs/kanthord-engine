@@ -8,7 +8,14 @@ import {
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { IdentityKind } from "../kernel/caller.ts";
-import type { HealthRegistry } from "../kernel/health.ts";
+import {
+  HealthScope,
+  ResourceStatus,
+  type HealthRegistry,
+  type ResourceCheck,
+  type ResourceEntry,
+  type ResourceStatusValue,
+} from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
@@ -33,6 +40,10 @@ import {
 } from "./contract.ts";
 import { decrypt, encrypt } from "./envelope.ts";
 import {
+  apiKeySecretSchema,
+  oauthSecretSchema,
+  s3AccessKeySecretSchema,
+  s3MetadataSchema,
   metadataSchemaForPlatform,
   openaiCompatibleMetadataSchema,
   OAUTH_PLATFORMS,
@@ -42,6 +53,15 @@ import {
   validateNameForm,
 } from "./platforms.ts";
 
+import {
+  PLATFORM_CAPABILITY,
+  TARGET_KIND_CREDENTIAL,
+  probeGitHub,
+  probeGitHubCopilot,
+  probeAnthropic,
+  probeOpenAICompatible,
+  probeS3,
+} from "./resource-healthcheck.ts";
 import {
   loginMode,
   loginNotFound,
@@ -102,6 +122,63 @@ type CredentialRow = {
 };
 
 type LiveRow = CredentialRow & { nonce: Buffer; ciphertext: Buffer };
+
+type PlatformProbe = (
+  secret: unknown,
+  metadata: unknown,
+  context: Context,
+) => Promise<ResourceStatusValue>;
+
+const platformProbes: Record<Platform, PlatformProbe> = {
+  [Platform.GitHub]: (secret, _metadata, context) =>
+    probeGitHub(apiKeySecretSchema.parse(secret).key, context),
+  [Platform.GitHubCopilot]: (secret, _metadata, context) => {
+    const { access, expires } = oauthSecretSchema.parse(secret);
+    return probeGitHubCopilot(access, expires, context);
+  },
+  [Platform.Anthropic]: (secret, _metadata, context) =>
+    probeAnthropic(apiKeySecretSchema.parse(secret).key, context),
+  [Platform.OpenAICompatible]: (secret, metadata, context) =>
+    probeOpenAICompatible(
+      apiKeySecretSchema.parse(secret).key,
+      openaiCompatibleMetadataSchema.parse(metadata).baseUrl,
+      context,
+    ),
+  [Platform.S3]: (secret, metadata, context) => {
+    const { accessKeyId, secretAccessKey } =
+      s3AccessKeySecretSchema.parse(secret);
+    const { endpoint, bucket, region } = s3MetadataSchema.parse(metadata);
+    return probeS3(
+      accessKeyId,
+      secretAccessKey,
+      endpoint,
+      bucket,
+      region,
+      context,
+    );
+  },
+};
+
+function capturedResourceCheck(row: LiveRow, key: Buffer): ResourceCheck {
+  const { id, platform } = row;
+  const nonce = Buffer.from(row.nonce);
+  const ciphertext = Buffer.from(row.ciphertext);
+  const metadata: unknown =
+    row.metadata === null ? null : JSON.parse(row.metadata);
+  return async (context) => {
+    if (context.err()) return ResourceStatus.Unknown;
+    try {
+      const secret = decrypt(key, id, platform, nonce, ciphertext);
+      return await platformProbes[platform as Platform](
+        secret,
+        metadata,
+        context,
+      );
+    } catch {
+      return ResourceStatus.Unknown;
+    }
+  };
+}
 
 function newestLive(tx: Transaction, name: string): LiveRow | undefined {
   return tx.database
@@ -289,6 +366,33 @@ export class CustodyComponent implements Service {
       platform: row.platform,
       metadata: row.metadata === null ? null : JSON.parse(row.metadata),
     };
+  }
+
+  resourceInventory(tx: Transaction): ResourceEntry[] {
+    const rows = tx.database
+      .prepare(
+        "SELECT id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at FROM credential AS current WHERE ended_at IS NULL AND revision = (SELECT MAX(revision) FROM credential WHERE name = current.name AND ended_at IS NULL) ORDER BY name",
+      )
+      .all() as LiveRow[];
+    return rows.map((row) => ({
+      scope: HealthScope.Global,
+      project: null,
+      name: encodeURIComponent(row.name),
+      target: `${TARGET_KIND_CREDENTIAL}:${row.id}`,
+      capability: PLATFORM_CAPABILITY[row.platform as Platform],
+      check: capturedResourceCheck(row, this.envelopeKey),
+    }));
+  }
+
+  modelListCheck(tx: Transaction, credentialName: string): ResourceCheck {
+    const row = newestLive(tx, credentialName);
+    if (
+      !row ||
+      (row.platform !== Platform.Anthropic &&
+        row.platform !== Platform.OpenAICompatible)
+    )
+      return async () => ResourceStatus.Unknown;
+    return capturedResourceCheck(row, this.envelopeKey);
   }
 
   credentialDependents(
