@@ -17,9 +17,11 @@ import type { HealthRegistry } from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { throwIfCancelled } from "../kernel/context.ts";
 import {
+  BINDING_SET_INITIAL_VERSION,
   BindingKind,
   BindingState,
   EMPTY_LENGTH,
+  LIST_LIMIT_MAX,
   INSTANCE_COUNT_MIN,
   INSTANCE_COUNT_MAX,
   LS_REMOTE_TIMEOUT_MS,
@@ -40,6 +42,7 @@ import {
   type RepositoryConnector,
   type WorkerAgentsOfFn,
   type WorkerAgentViewFn,
+  type WorkerEntry,
 } from "./contract.ts";
 import {
   insertProject,
@@ -59,6 +62,11 @@ import {
 
 const SSH_UNREACHABLE_STATUS = 422;
 const UTF8_ENCODING = "utf8";
+const CURSOR_ENCODING = "base64url";
+const PAGE_EXTRA = 1;
+const FIRST_INDEX = 0;
+const LAST_INDEX = 1;
+const MINIMUM_LIMIT = 1;
 type BindingEdit = typeof bindingEditSchema._output;
 type BindingSetWrite = typeof bindingSetWriteInputSchema._output;
 
@@ -75,6 +83,36 @@ function requireBinding(tx: Transaction, projectId: string, bindingId: string) {
       "Binding not found.",
     );
   return binding;
+}
+
+function requireWorkerBinding(
+  tx: Transaction,
+  projectId: string,
+  bindingId: string,
+) {
+  const project = requireProject(tx, projectId);
+  const binding = requireBinding(tx, projectId, bindingId);
+  if (kindOf(binding.resourceIdentity) !== BindingKind.Worker)
+    throw new OperationError(
+      HttpStatus.NotFound,
+      ProjectErrorCode.BindingNotFound,
+      "Binding not found.",
+    );
+  return { project, config: workerConfigSchema.parse(binding.config) };
+}
+
+function agentCursor(cursor: string): string {
+  const name = Buffer.from(cursor, CURSOR_ENCODING).toString(UTF8_ENCODING);
+  if (
+    name.length === EMPTY_LENGTH ||
+    Buffer.from(name, UTF8_ENCODING).toString(CURSOR_ENCODING) !== cursor
+  )
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      ProjectErrorCode.CursorInvalid,
+      "Cursor is invalid.",
+    );
+  return name;
 }
 
 function uniqueSubmission(bindings: BindingSetWrite["bindings"]) {
@@ -166,6 +204,7 @@ export class ProjectService implements Service, ProjectBindings {
         this.writeBindings(params.projectId, body, caller),
     );
     this.declareBindingReads(registry);
+    this.declareAgentReads(registry);
   }
   private declareBindingReads(registry: OperationRegistry): void {
     registry.register(
@@ -212,6 +251,93 @@ export class ProjectService implements Service, ProjectBindings {
           requireBinding(tx, params.projectId, params.bindingId);
           const page = listRevisions(tx, params.bindingId, query);
           return { ...page, items: page.items.map(bindingRecord) };
+        }),
+    );
+  }
+  private agentItem(
+    tx: Transaction,
+    project: ReturnType<typeof requireProject>,
+    bindingId: string,
+    config: typeof workerConfigSchema._output,
+    agent: string,
+  ) {
+    const selected = config.entries?.find((item) => item.agent === agent);
+    const entry: WorkerEntry | null = selected
+      ? (({ agent: selectedAgent, ...fields }) => {
+          assert.equal(selectedAgent, agent);
+          return fields;
+        })(selected)
+      : null;
+    const view = this.workerAgentView(tx, config.worker, agent, entry);
+    assert.ok(view, "Declared agents must have a worker view.");
+    assert.ok(project.bindingSetVersion >= BINDING_SET_INITIAL_VERSION);
+    return {
+      agent,
+      worker: config.worker,
+      workerBindingId: bindingId,
+      bindingSetVersion: project.bindingSetVersion,
+      defaults: view.defaults,
+      entry,
+      effective: view.effective,
+      valid: view.valid,
+      issues: view.issues,
+    };
+  }
+  private declareAgentReads(registry: OperationRegistry): void {
+    registry.register(
+      projectOperations["agentConfiguration.list"],
+      ({ params, query }, caller) =>
+        caller.commit((tx) => {
+          const { project, config } = requireWorkerBinding(
+            tx,
+            params.projectId,
+            params.bindingId,
+          );
+          assert.ok(Number.isInteger(query.limit));
+          assert.ok(
+            query.limit >= MINIMUM_LIMIT && query.limit <= LIST_LIMIT_MAX,
+          );
+          const cursor =
+            query.cursor === undefined ? null : agentCursor(query.cursor);
+          const names = this.workerAgentsOf(config.worker)
+            .filter((name) => cursor === null || name > cursor)
+            .sort();
+          const selected = names.slice(FIRST_INDEX, query.limit + PAGE_EXTRA);
+          const page = selected.slice(FIRST_INDEX, query.limit);
+          const last = page.at(-LAST_INDEX);
+          return {
+            items: page.map((name) =>
+              this.agentItem(tx, project, params.bindingId, config, name),
+            ),
+            nextCursor:
+              selected.length > query.limit && last
+                ? Buffer.from(last, UTF8_ENCODING).toString(CURSOR_ENCODING)
+                : null,
+          };
+        }),
+    );
+    registry.register(
+      projectOperations["agentConfiguration.get"],
+      ({ params }, caller) =>
+        caller.commit((tx) => {
+          const { project, config } = requireWorkerBinding(
+            tx,
+            params.projectId,
+            params.bindingId,
+          );
+          if (!this.workerAgentsOf(config.worker).includes(params.agentName))
+            throw new OperationError(
+              HttpStatus.NotFound,
+              ProjectErrorCode.BindingNotFound,
+              "Binding not found.",
+            );
+          return this.agentItem(
+            tx,
+            project,
+            params.bindingId,
+            config,
+            params.agentName,
+          );
         }),
     );
   }

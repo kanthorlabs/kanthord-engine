@@ -37,15 +37,7 @@ const apiOperations = [
   ...Object.values(custodyOperations),
   ...Object.values(workerOperations),
   ...Object.values(schedulerOperations),
-  projectOperations.create,
-  projectOperations.list,
-  projectOperations.get,
-  projectOperations.rename,
-  projectOperations["bindingSet.write"],
-  projectOperations["bindingSet.get"],
-  projectOperations["binding.list"],
-  projectOperations["binding.get"],
-  projectOperations["bindingRevision.list"],
+  ...Object.values(projectOperations),
 ];
 test("published OpenAPI validates, matches the registry exactly, and describes real responses", async (t) => {
   const files = emitOpenAPIFiles(apiOperations);

@@ -1,0 +1,145 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: project.agentConfiguration.get
+    tags:
+      - project
+    description: Get an effective agent configuration view.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.agentConfiguration.get.Input/properties/par\
+            ams/properties/projectId"
+      - name: bindingId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.agentConfiguration.get.Input/properties/par\
+            ams/properties/bindingId"
+      - name: agentName
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.agentConfiguration.get.Input/properties/par\
+            ams/properties/agentName"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/project.agentConfiguration.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    project.agentConfiguration.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            projectId:
+              type: string
+              minLength: 1
+            bindingId:
+              type: string
+              minLength: 1
+            agentName:
+              type: string
+              minLength: 1
+          required:
+            - projectId
+            - bindingId
+            - agentName
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    project.agentConfiguration.get.Output:
+      type: object
+      properties:
+        agent:
+          type: string
+        worker:
+          type: string
+        workerBindingId:
+          type: string
+        bindingSetVersion:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+        defaults:
+          anyOf:
+            - {}
+            - type: "null"
+        entry:
+          anyOf:
+            - {}
+            - type: "null"
+        effective:
+          anyOf:
+            - {}
+            - type: "null"
+        valid:
+          type: boolean
+        issues:
+          type: array
+          items:
+            type: object
+            properties:
+              path:
+                type: array
+                items:
+                  type: string
+              code:
+                type: string
+            required:
+              - path
+              - code
+            additionalProperties: false
+      required:
+        - agent
+        - worker
+        - workerBindingId
+        - bindingSetVersion
+        - defaults
+        - entry
+        - effective
+        - valid
+        - issues
+      additionalProperties: false

@@ -67,12 +67,11 @@ const CORE_OPERATIONS = [
   "project.binding.list",
   "project.binding.get",
   "project.bindingRevision.list",
+  "project.agentConfiguration.list",
+  "project.agentConfiguration.get",
 ];
 const CURSOR_ENCODING = "base64url";
-type OperationKey = Exclude<
-  keyof typeof projectOperations,
-  "bindingSet.write" | "agentConfiguration.list" | "agentConfiguration.get"
->;
+type OperationKey = Exclude<keyof typeof projectOperations, "bindingSet.write">;
 
 function unexpected(): never {
   throw new Error("Unexpected peer collaboration call.");
@@ -159,7 +158,7 @@ function allowMission(
   );
 }
 
-test("Project declares exactly nine operations and owns its lifecycle probe", async (t) => {
+test("Project declares every operation and owns its lifecycle probe", async (t) => {
   const { project, registry, health } = fixture(t);
   assert.deepEqual(
     registry
@@ -553,6 +552,10 @@ const EXTERNAL_WORKER = "external@1";
 const UNKNOWN_WORKER = "unknown@1";
 const AGENT = "general";
 const SECOND_AGENT = "reviewer";
+const THIRD_AGENT = "writer";
+const AGENT_PAGE_LIMIT = 2;
+const MALFORMED_CURSOR = "!";
+const AGENT_GET_KEY = "agentConfiguration.get";
 const UNKNOWN_AGENT = "undeclared";
 const MODEL = "model";
 const REPOSITORY_ADDRESS = "git@github.com:owner/repo.git";
@@ -1445,4 +1448,148 @@ test("binding reads preserve ownership and paginate filtered current, removed an
     );
   }
   assert.deepEqual(f.invoke("binding.get", null, params), pinned);
+});
+
+test("agent views page sorted declarations and copy worker views with stripped entries", async (t) => {
+  const calls: Array<{ agent: string; entry: WorkerEntry | null }> = [];
+  const defaults = {
+    agentProvider: "default",
+    modelIdentifier: MODEL,
+    reasoningEffort: "low",
+  };
+  const effective = {
+    ...defaults,
+    provider: "provider",
+    credential: "credential",
+  };
+  const issues = [{ path: ["modelIdentifier"], code: "example.issue" }];
+  const view = { defaults, effective, valid: false, issues };
+  const f = writeFixture(t, {
+    workerAgentsOf: (worker) => {
+      assert.equal(worker, NATIVE_WORKER);
+      assert.ok(f.store.database.isTransaction);
+      return [THIRD_AGENT, AGENT, SECOND_AGENT];
+    },
+    workerAgentView: (tx, worker, agent, entry) => {
+      assert.equal(tx.database, f.store.database);
+      assert.equal(worker, NATIVE_WORKER);
+      assert.ok(tx.database.isTransaction);
+      calls.push({ agent, entry });
+      return view;
+    },
+  });
+  const result = await f.write({
+    [WORKER_NAME]: {
+      kind: BindingKind.Worker,
+      config: {
+        worker: NATIVE_WORKER,
+        instanceCount: SINGLE_INSTANCE,
+        entries: [{ agent: SECOND_AGENT, modelIdentifier: MODEL }],
+      },
+    },
+  });
+  const bindingId = result.bindings[WORKER_NAME]!.id;
+  const params = { ...f.params, bindingId };
+  const expected = (agent: string, entry: WorkerEntry | null) => ({
+    agent,
+    worker: NATIVE_WORKER,
+    workerBindingId: bindingId,
+    bindingSetVersion: result.bindingSetVersion,
+    ...view,
+    entry,
+  });
+  const before = f.commits();
+  const first = f.invoke("agentConfiguration.list", null, params, {
+    limit: AGENT_PAGE_LIMIT,
+  });
+  assert.deepEqual(first, {
+    items: [
+      expected(AGENT, null),
+      expected(SECOND_AGENT, { modelIdentifier: MODEL }),
+    ],
+    nextCursor: Buffer.from(SECOND_AGENT).toString(CURSOR_ENCODING),
+  });
+  const last = f.invoke("agentConfiguration.list", null, params, {
+    limit: AGENT_PAGE_LIMIT,
+    cursor: first.nextCursor!,
+  });
+  assert.deepEqual(last, {
+    items: [expected(THIRD_AGENT, null)],
+    nextCursor: null,
+  });
+  assert.deepEqual(
+    f.invoke("agentConfiguration.get", null, {
+      ...params,
+      agentName: SECOND_AGENT,
+    }),
+    expected(SECOND_AGENT, { modelIdentifier: MODEL }),
+  );
+  assert.deepEqual(calls, [
+    { agent: AGENT, entry: null },
+    { agent: SECOND_AGENT, entry: { modelIdentifier: MODEL } },
+    { agent: THIRD_AGENT, entry: null },
+    { agent: SECOND_AGENT, entry: { modelIdentifier: MODEL } },
+  ]);
+  assert.equal(f.commits(), before + REVISION_THREE);
+  for (const cursor of [MALFORMED_CURSOR, `${first.nextCursor}=`])
+    refuses(
+      () => f.invoke("agentConfiguration.list", null, params, { cursor }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.CursorInvalid,
+    );
+  refuses(
+    () =>
+      f.invoke("agentConfiguration.get", null, {
+        ...params,
+        agentName: UNKNOWN_AGENT,
+      }),
+    HttpStatus.NotFound,
+    ProjectErrorCode.BindingNotFound,
+  );
+});
+
+test("agent views reject missing, foreign and non-worker bindings; external list is empty", async (t) => {
+  const f = writeFixture(t, {
+    workerAgentsOf: (worker) => {
+      assert.equal(worker, EXTERNAL_WORKER);
+      return [];
+    },
+    workerAgentView: unexpected,
+  });
+  const result = await f.write({
+    [WORKER_NAME]: workerBinding(EXTERNAL_WORKER),
+    [STORAGE_NAME]: storageBinding(),
+  });
+  const workerId = result.bindings[WORKER_NAME]!.id;
+  const params = { ...f.params, bindingId: workerId };
+  assert.deepEqual(f.invoke("agentConfiguration.list", null, params), {
+    items: [],
+    nextCursor: null,
+  });
+  const missingProject = {
+    ...params,
+    projectId: createIdentity(PROJECT_ID_PREFIX),
+  };
+  const other = f.invoke("create", { name: OTHER_NAME });
+  const foreign = { ...params, projectId: other.id };
+  const absent = { ...params, bindingId: createIdentity(BINDING_ID_PREFIX) };
+  const nonWorker = { ...params, bindingId: result.bindings[STORAGE_NAME]!.id };
+  for (const operation of [
+    "agentConfiguration.list",
+    "agentConfiguration.get",
+  ] as const) {
+    const input: Record<string, string> =
+      operation === AGENT_GET_KEY ? { agentName: AGENT } : {};
+    refuses(
+      () => f.invoke(operation, null, { ...missingProject, ...input }),
+      HttpStatus.NotFound,
+      ProjectErrorCode.ProjectNotFound,
+    );
+    for (const rejected of [foreign, absent, nonWorker])
+      refuses(
+        () => f.invoke(operation, null, { ...rejected, ...input }),
+        HttpStatus.NotFound,
+        ProjectErrorCode.BindingNotFound,
+      );
+  }
 });
