@@ -50,6 +50,46 @@ export interface MissionCollaborations {
   liveNodesPinning(tx: Transaction, bindingId: string): string[];
 }
 
+export const MissionErrorCode = {
+  MissionNotFound: "mission.mission.not_found",
+  NodeNotFound: "mission.node.not_found",
+  VersionConflict: "mission.version.conflict",
+  RevisionConflict: "mission.revision.conflict",
+  ContentInvalid: "mission.node.content_invalid",
+  VerificationsMissing: "mission.node.verifications_missing",
+  BindingsInvalid: "mission.node.bindings_invalid",
+  FilenameConflict: "mission.node.filename_conflict",
+  CreateRefused: "mission.node.create_refused",
+  Retired: "mission.node.retired",
+  Terminal: "mission.node.terminal",
+  RetireRefused: "mission.node.retire_refused",
+  RetireHasDependents: "mission.node.retire_has_dependents",
+  RetireMismatch: "mission.node.retire_mismatch",
+  PriorityTask: "mission.node.priority_task",
+  PlanInvalid: "mission.import.plan_invalid",
+  UnresolvedReference: "mission.import.unresolved_reference",
+  DuplicateFile: "mission.import.duplicate_file",
+  UnknownId: "mission.import.unknown_id",
+  DuplicateId: "mission.import.duplicate_id",
+  ForeignId: "mission.import.foreign_id",
+  RetiredId: "mission.import.retired_id",
+  Cycle: "mission.import.cycle",
+  ConditionFailed: "mission.import.condition_failed",
+  TerminalChange: "mission.import.terminal_change",
+  RetirementMismatch: "mission.import.retirement_mismatch",
+  ExportTooLarge: "mission.export.too_large",
+  BindingNotFound: "mission.binding.not_found",
+  BindingRemoved: "mission.binding.removed",
+  BindingDisabled: "mission.binding.disabled",
+  CursorInvalid: "system.pagination.cursor_invalid",
+} as const;
+
+export const MissionBindingKind = {
+  Repository: "repository",
+  Worker: "worker",
+  Storage: "storage",
+} as const;
+
 export const NodeKind = {
   Initiative: "initiative",
   Objective: "objective",
