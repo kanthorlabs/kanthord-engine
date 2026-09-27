@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { ulid } from "ulid";
@@ -13,9 +12,9 @@ import {
   TEST_PROJECT_ID,
   TEST_WORKER_BINDING,
 } from "./test-support.ts";
-import { isNumber } from "../../kernel/values.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { directories } from "../../config/index.ts";
+import { kanthord as command, environment } from "./cli-support.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 const clientConfigPath = (env: NodeJS.ProcessEnv) =>
@@ -24,49 +23,8 @@ const clientConfigPath = (env: NodeJS.ProcessEnv) =>
 const EMPTY_OUTPUT = "";
 const NO_REGISTRATIONS = 0;
 const SINGLE_REGISTRATION = 1;
-const EMPTY_ARGUMENT_COUNT = 0;
 const REGISTRATION_ATTEMPTS = 2;
 const TOKEN_SOURCES = 3;
-
-function command(args: string[], env: NodeJS.ProcessEnv) {
-  assert.ok(args.length > EMPTY_ARGUMENT_COUNT);
-  assert.ok(env.XDG_CONFIG_HOME);
-  const entry = new URL("../../main.ts", import.meta.url).href;
-  return new Promise<{ code: number; stdout: string; stderr: string }>(
-    (resolve, reject) => {
-      execFile(
-        process.execPath,
-        [
-          "--input-type=module",
-          "-e",
-          `process.argv=[process.execPath,'kanthord',...${JSON.stringify(args)}];await import(${JSON.stringify(entry)});`,
-        ],
-        { env, timeout: 10000 },
-        (error, stdout, stderr) => {
-          const code = error?.code;
-          if (error && !isNumber(code)) return reject(error);
-          resolve({
-            code: isNumber(code) ? code : ExitCode.Success,
-            stdout,
-            stderr,
-          });
-        },
-      );
-    },
-  );
-}
-
-function environment(directory: string): NodeJS.ProcessEnv {
-  assert.ok(directory.startsWith("/"));
-  assert.ok(existsSync(directory));
-  return {
-    ...process.env,
-    XDG_CONFIG_HOME: directory,
-    KANTHORD_CONFIG: join(directory, "absent.yaml"),
-    KANTHORD_ENDPOINT: "http://127.0.0.1:1",
-    KANTHORD_TOKEN: undefined,
-  };
-}
 
 test("worker register requires a token and validates retry keys before any request", async (t) => {
   const env = environment(temporary(t));
