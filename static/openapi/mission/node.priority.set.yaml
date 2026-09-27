@@ -1,0 +1,401 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: mission.node.priority.set
+    tags:
+      - mission
+    description: Set the priority of a mission initiative or objective.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: nodeId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.node.priority.set.Input/properties/params/p\
+            roperties/nodeId"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/mission.node.priority.set.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/mission.node.priority.set.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    mission.node.priority.set.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            nodeId:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - nodeId
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            value:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            expectedMissionVersion:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+          required:
+            - value
+            - expectedMissionVersion
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    mission.node.priority.set.Output:
+      oneOf:
+        - type: object
+          properties:
+            id:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+            filename:
+              type: string
+              pattern: ^[a-z][a-z0-9_-]*\.md$
+            missionId:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: mission_ followed by a canonical 26-character uppercase ULID.
+            parentId:
+              anyOf:
+                - type: string
+                  minLength: 31
+                  maxLength: 31
+                  pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: node_ followed by a canonical 26-character uppercase ULID.
+                - type: "null"
+            visibleRevision:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            content:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                requirement:
+                  type: string
+                  minLength: 1
+                criterion:
+                  type: string
+                  minLength: 1
+                verifications:
+                  minItems: 1
+                  type: array
+                  items:
+                    type: string
+                    minLength: 1
+                bindings:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - name
+                - requirement
+                - criterion
+                - verifications
+                - bindings
+              additionalProperties: false
+            retiredAt:
+              anyOf:
+                - type: integer
+                  minimum: -9007199254740991
+                  maximum: 9007199254740991
+                - type: "null"
+            pinnedByAttempts:
+              type: array
+              items:
+                type: integer
+                exclusiveMinimum: 0
+                maximum: 9007199254740991
+            kind:
+              type: string
+              const: initiative
+            state:
+              type: string
+              enum:
+                - Pending
+                - Available
+                - Executing
+                - Waiting
+                - Evaluating
+                - Blocked
+                - Paused
+                - Completed
+                - Discarded
+                - External.Requested
+                - External.Success
+                - External.Failed
+            attempt:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            priority:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+          required:
+            - id
+            - filename
+            - missionId
+            - parentId
+            - visibleRevision
+            - content
+            - retiredAt
+            - pinnedByAttempts
+            - kind
+            - state
+            - attempt
+            - priority
+          additionalProperties: false
+        - type: object
+          properties:
+            id:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+            filename:
+              type: string
+              pattern: ^[a-z][a-z0-9_-]*\.md$
+            missionId:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: mission_ followed by a canonical 26-character uppercase ULID.
+            parentId:
+              anyOf:
+                - type: string
+                  minLength: 31
+                  maxLength: 31
+                  pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: node_ followed by a canonical 26-character uppercase ULID.
+                - type: "null"
+            visibleRevision:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            content:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                requirement:
+                  type: string
+                  minLength: 1
+                criterion:
+                  type: string
+                  minLength: 1
+                verifications:
+                  minItems: 1
+                  type: array
+                  items:
+                    type: string
+                    minLength: 1
+                bindings:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - name
+                - requirement
+                - criterion
+                - verifications
+                - bindings
+              additionalProperties: false
+            retiredAt:
+              anyOf:
+                - type: integer
+                  minimum: -9007199254740991
+                  maximum: 9007199254740991
+                - type: "null"
+            pinnedByAttempts:
+              type: array
+              items:
+                type: integer
+                exclusiveMinimum: 0
+                maximum: 9007199254740991
+            kind:
+              type: string
+              const: objective
+            state:
+              type: string
+              enum:
+                - Pending
+                - Available
+                - Executing
+                - Waiting
+                - Evaluating
+                - Blocked
+                - Paused
+                - Completed
+                - Discarded
+                - External.Requested
+                - External.Success
+                - External.Failed
+            attempt:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            priority:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+          required:
+            - id
+            - filename
+            - missionId
+            - parentId
+            - visibleRevision
+            - content
+            - retiredAt
+            - pinnedByAttempts
+            - kind
+            - state
+            - attempt
+            - priority
+          additionalProperties: false
+        - type: object
+          properties:
+            id:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+            filename:
+              type: string
+              pattern: ^[a-z][a-z0-9_-]*\.md$
+            missionId:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: mission_ followed by a canonical 26-character uppercase ULID.
+            parentId:
+              anyOf:
+                - type: string
+                  minLength: 31
+                  maxLength: 31
+                  pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: node_ followed by a canonical 26-character uppercase ULID.
+                - type: "null"
+            visibleRevision:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            content:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                requirement:
+                  type: string
+                  minLength: 1
+                criterion:
+                  type: string
+                  minLength: 1
+                verifications:
+                  minItems: 1
+                  type: array
+                  items:
+                    type: string
+                    minLength: 1
+                bindings:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - name
+                - requirement
+                - criterion
+                - verifications
+                - bindings
+              additionalProperties: false
+            retiredAt:
+              anyOf:
+                - type: integer
+                  minimum: -9007199254740991
+                  maximum: 9007199254740991
+                - type: "null"
+            pinnedByAttempts:
+              type: array
+              items:
+                type: integer
+                exclusiveMinimum: 0
+                maximum: 9007199254740991
+            kind:
+              type: string
+              const: task
+          required:
+            - id
+            - filename
+            - missionId
+            - parentId
+            - visibleRevision
+            - content
+            - retiredAt
+            - pinnedByAttempts
+            - kind
+          additionalProperties: false

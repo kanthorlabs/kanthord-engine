@@ -10,6 +10,8 @@ import { SCHEDULER_SERVICE_NAME } from "../../scheduler/contract.ts";
 import { Store } from "../../kernel/store.ts";
 import { gatewayMigrations } from "../../gateway/index.ts";
 import { projectMigrations } from "../../project/index.ts";
+import { missionMigrations } from "../../mission/index.ts";
+import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
 import { workerMigrations } from "../../worker/index.ts";
 import { composeServices } from "./index.ts";
 import type { OperationRegistry } from "../../kernel/operation.ts";
@@ -36,6 +38,7 @@ export const domainHealth = {
   custody: { credential: 200 },
   project: { bindings: 200 },
   worker: { registrations: 200 },
+  mission: { operations: 200 },
 };
 
 export const TEST_WORKER_BINDING = "binding";
@@ -128,7 +131,6 @@ export async function gatewayFixture(
       typeof composeServices
     >[0]["repositoryConnector"];
     machines?: MachineDependencies;
-    standIns?: Parameters<typeof composeServices>[0]["standIns"];
     path?: string;
   } = {},
 ) {
@@ -143,6 +145,7 @@ export async function gatewayFixture(
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
     { service: "gateway", migrations: gatewayMigrations },
     { service: "worker", migrations: workerMigrations },
+    { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
     { service: "project", migrations: projectMigrations },
   ]);
   const logs: string[] = [];
@@ -152,6 +155,7 @@ export async function gatewayFixture(
     gateway,
     project,
     worker,
+    mission,
     invocation,
     repoConnector,
   } = composeServices({
@@ -162,7 +166,6 @@ export async function gatewayFixture(
     repositoryConnector: options.repositoryConnector,
     bindings: options.machines?.project,
     registrations: options.machines?.worker,
-    standIns: options.standIns,
     logger: pino(
       { level: "info" },
       {
@@ -176,7 +179,7 @@ export async function gatewayFixture(
     const failures: Error[] = [];
     try {
       const quiescence = await Promise.all(
-        [scheduler, custody, worker, project, gateway].map((service) =>
+        [scheduler, custody, worker, mission, project, gateway].map((service) =>
           service.quiesce(),
         ),
       );
@@ -184,7 +187,14 @@ export async function gatewayFixture(
       await gateway.drain();
       const invocationError = await invocation.stop();
       if (invocationError) failures.push(invocationError);
-      for (const service of [gateway, project, worker, custody, scheduler]) {
+      for (const service of [
+        gateway,
+        project,
+        mission,
+        worker,
+        custody,
+        scheduler,
+      ]) {
         const error = await service.stop();
         if (error) failures.push(error);
       }
@@ -194,7 +204,14 @@ export async function gatewayFixture(
       store.close();
     }
   });
-  for (const service of [scheduler, custody, worker, project, gateway]) {
+  for (const service of [
+    scheduler,
+    custody,
+    worker,
+    mission,
+    project,
+    gateway,
+  ]) {
     const error = await service.start();
     if (error) throw error;
   }
@@ -207,6 +224,7 @@ export async function gatewayFixture(
     repoConnector,
     scheduler,
     custody,
+    mission,
     gateway,
     store,
     endpoint,

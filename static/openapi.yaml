@@ -28,6 +28,38 @@ paths:
     $ref: ./openapi/gateway/openapiFile.yaml#/pathItem
   /api/auth/verify:
     $ref: ./openapi/gateway/verify.yaml#/pathItem
+  /api/mission/node/{nodeId}/criterion:
+    $ref: ./openapi/mission/criterion.set.yaml#/pathItem
+  /api/mission/node/{nodeId}/dependency/{dependsOnId}:
+    $ref: ./openapi/mission/dependency.add.yaml#/pathItem
+  /api/mission/{missionId}/edge:
+    $ref: ./openapi/mission/edge.list.yaml#/pathItem
+  /api/mission/{missionId}/export:
+    $ref: ./openapi/mission/export.yaml#/pathItem
+  /api/mission/project/{projectId}:
+    $ref: ./openapi/mission/get.yaml#/pathItem
+  /api/mission/{missionId}/import:
+    $ref: ./openapi/mission/import.apply.yaml#/pathItem
+  /api/mission/{missionId}/import/preview:
+    $ref: ./openapi/mission/import.preview.yaml#/pathItem
+  /api/mission/{missionId}/node:
+    $ref: ./openapi/mission/node.create.yaml#/pathItem
+  /api/mission/node/{nodeId}:
+    $ref: ./openapi/mission/node.get.yaml#/pathItem
+  /api/mission/node/{nodeId}/move:
+    $ref: ./openapi/mission/node.move.yaml#/pathItem
+  /api/mission/node/{nodeId}/priority:
+    $ref: ./openapi/mission/node.priority.set.yaml#/pathItem
+  /api/mission/{missionId}/rebind:
+    $ref: ./openapi/mission/node.rebind.yaml#/pathItem
+  /api/mission/node/{nodeId}/retire:
+    $ref: ./openapi/mission/node.retire.yaml#/pathItem
+  /api/mission/node/{nodeId}/retire/preview:
+    $ref: ./openapi/mission/node.retire.preview.yaml#/pathItem
+  /api/mission/node/{nodeId}/revision/{revision}:
+    $ref: ./openapi/mission/node.revision.get.yaml#/pathItem
+  /api/mission/node/{nodeId}/revision:
+    $ref: ./openapi/mission/node.revision.list.yaml#/pathItem
   /api/project/{projectId}/binding/{bindingId}/agent/{agentName}:
     $ref: ./openapi/project/agentConfiguration.get.yaml#/pathItem
   /api/project/{projectId}/binding/{bindingId}/agent:

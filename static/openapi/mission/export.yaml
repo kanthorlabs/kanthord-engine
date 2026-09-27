@@ -1,0 +1,195 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: mission.export
+    tags:
+      - mission
+    description: Export the current mission plan.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: missionId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.export.Input/properties/params/properties/m\
+            issionId"
+      - name: format
+        in: query
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.export.Input/properties/query/properties/fo\
+            rmat"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/mission.export.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    mission.export.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            missionId:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: mission_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - missionId
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            format:
+              type: string
+              enum:
+                - markdown
+                - json
+          required:
+            - format
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    mission.export.Output:
+      anyOf:
+        - type: object
+          properties:
+            missionId:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: mission_ followed by a canonical 26-character uppercase ULID.
+            missionVersion:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            entries:
+              type: array
+              items:
+                type: object
+                properties:
+                  filename:
+                    type: string
+                    pattern: ^[a-z][a-z0-9_-]*\.md$
+                  id:
+                    type: string
+                    minLength: 31
+                    maxLength: 31
+                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: node_ followed by a canonical 26-character uppercase ULID.
+                  kind:
+                    type: string
+                    enum:
+                      - initiative
+                      - objective
+                      - task
+                  name:
+                    type: string
+                    minLength: 1
+                  requirement:
+                    type: string
+                    minLength: 1
+                  criterion:
+                    type: string
+                    minLength: 1
+                  verifications:
+                    minItems: 1
+                    type: array
+                    items:
+                      type: string
+                      minLength: 1
+                  bindings:
+                    type: array
+                    items:
+                      type: string
+                  parent:
+                    type: string
+                    pattern: ^[a-z][a-z0-9_-]*\.md$
+                  dependsOn:
+                    type: array
+                    items:
+                      type: string
+                      pattern: ^[a-z][a-z0-9_-]*\.md$
+                required:
+                  - filename
+                  - id
+                  - kind
+                  - name
+                  - requirement
+                  - criterion
+                  - verifications
+                  - bindings
+                additionalProperties: false
+          required:
+            - missionId
+            - missionVersion
+            - entries
+          additionalProperties: false
+        - type: object
+          properties:
+            missionId:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: mission_ followed by a canonical 26-character uppercase ULID.
+            missionVersion:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            files:
+              type: array
+              items:
+                type: object
+                properties:
+                  filename:
+                    type: string
+                    minLength: 1
+                  content:
+                    type: string
+                required:
+                  - filename
+                  - content
+                additionalProperties: false
+          required:
+            - missionId
+            - missionVersion
+            - files
+          additionalProperties: false

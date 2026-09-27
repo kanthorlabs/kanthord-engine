@@ -20,10 +20,9 @@ import {
   SCHEDULER_SERVICE_NAME,
   type WorkQueue,
 } from "../../scheduler/contract.ts";
-import { unwired } from "./unwired.ts";
+import { MissionService, missionMigrations } from "../../mission/index.ts";
+import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
 import type {
-  CreateMission,
-  LiveNodesPinning,
   ProjectBindings,
   RepositoryConnector,
 } from "../../project/contract.ts";
@@ -64,10 +63,6 @@ export function composeServices(options: {
   registry?: OperationRegistry;
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
-  standIns?: {
-    createMission?: CreateMission;
-    liveNodesPinning?: LiveNodesPinning;
-  };
 }) {
   const repoConnector =
     options.repositoryConnector ??
@@ -121,14 +116,20 @@ export function composeServices(options: {
     modelListCheck: (tx, name) => custody.modelListCheck(tx, name),
     entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
   });
+  const mission = new MissionService({
+    config: options.config.mission,
+    health: options.health,
+    workQueue,
+    bindings: {
+      resolveBinding: (tx, pid, name) => project.resolveBinding(tx, pid, name),
+      getBindingRevision: (tx, bid) => project.getBindingRevision(tx, bid),
+    },
+  });
   const project: ProjectService = new ProjectService({
     config: {},
     operationalStore: options.store,
-    createMission:
-      options.standIns?.createMission ?? (() => unwired("createMission")()),
-    liveNodesPinning:
-      options.standIns?.liveNodesPinning ??
-      (() => unwired("liveNodesPinning")()),
+    createMission: (tx, pid, actor) => mission.createMission(tx, pid, actor),
+    liveNodesPinning: (tx, bid) => mission.liveNodesPinning(tx, bid),
     validateEntry: (tx, name, entry) => worker.validateEntry(tx, name, entry),
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
     repositoryConnector: repoConnector,
@@ -141,6 +142,7 @@ export function composeServices(options: {
   scheduler.declare(registry);
   custody.declare(registry);
   worker.declare(registry);
+  mission.declare(registry);
   project.declare(registry);
   const gateway = new GatewayService({
     config: options.config.gateway,
@@ -155,6 +157,7 @@ export function composeServices(options: {
     scheduler,
     workQueue,
     custody,
+    mission,
     project,
     worker,
     gateway,
@@ -223,20 +226,28 @@ export class Server implements Service {
         { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
         { service: "gateway", migrations: gatewayMigrations },
         { service: "worker", migrations: workerMigrations },
+        { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
         { service: "project", migrations: projectMigrations },
       ]);
       throwIfCancelled(this.shutdown);
-      const { scheduler, custody, project, worker, gateway, invocation } =
-        composeServices({
-          config,
-          store: this.store,
-          logger: this.log.logger,
-          health: this.health,
-        });
+      const {
+        scheduler,
+        custody,
+        worker,
+        mission,
+        project,
+        gateway,
+        invocation,
+      } = composeServices({
+        config,
+        store: this.store,
+        logger: this.log.logger,
+        health: this.health,
+      });
       this.gateway = gateway;
       this.invocation = invocation;
       this.releases.push(() => invocation.stop());
-      const services = [scheduler, custody, worker, project, gateway];
+      const services = [scheduler, custody, worker, mission, project, gateway];
       this.services = services;
       for (const service of services) this.releases.push(() => service.stop());
       for (const service of services) {

@@ -19,7 +19,7 @@ import { Store } from "../../kernel/store.ts";
 import { isString } from "../../kernel/values.ts";
 import { GATEWAY_STARTED_MESSAGE } from "../../gateway/index.ts";
 import { ulid } from "ulid";
-import { gatewayFixture } from "./test-support.ts";
+import { domainHealth, gatewayFixture } from "./test-support.ts";
 import { custodyOperations } from "../../custody/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
@@ -69,16 +69,17 @@ function layout(directory: string) {
   };
 }
 
-test("composition registers the real repository toolchain probe", async (t) => {
+test("composition starts all six services and registers the real repository toolchain probe", async (t) => {
   const fixture = await gatewayFixture(t);
   const response = await fixture.request(gatewayOperations.healthcheck.path);
   assert.equal(response.status, HttpStatus.OK);
   const body = gatewayOperations.healthcheck.output.parse(
     await response.json(),
   );
-  assert.deepEqual(body.services.repository, {
-    toolchain: HealthStatus.Healthy,
-  });
+  for (const [name, checks] of Object.entries(domainHealth))
+    assert.deepEqual(body.services[name], checks, name);
+  assert.equal(body.services.gateway?.listener, HealthStatus.Healthy);
+  assert.deepEqual(await fixture.mission.healthcheck(), domainHealth.mission);
 });
 
 test("injected repository connector skips the tool gate and probe", async (t) => {
@@ -285,6 +286,7 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
       scheduler: { queue: HttpStatus.OK },
       custody: { credential: 200 },
       worker: { registrations: 200 },
+      mission: { operations: 200 },
       project: { bindings: 200 },
       gateway: {
         listener: 200,
@@ -390,8 +392,10 @@ test("server lifecycle returns errors, reports owned health and releases every r
     const report = await server.health.check();
     assert.deepEqual(report.server, { gateway: 200, store: 200, log: 200 });
     assert.deepEqual(report['test-worker'], { 'instance-one': 200 });
+    assert.deepEqual(report.scheduler, { queue: 200 });
     assert.deepEqual(report.custody, { credential: 200 });
     assert.deepEqual(report.worker, { registrations: 200 });
+    assert.deepEqual(report.mission, { operations: 200 });
     assert.deepEqual(report.project, { bindings: 200 });
     assert.equal(report.gateway.listener, 200);
     const logHealth = OperationalLog.prototype.healthcheck;
@@ -450,7 +454,9 @@ test("server quiesces concurrently, drains with direct calls available, joins th
       `
     import assert from 'node:assert/strict';
     import { Server } from ${JSON.stringify(new URL("./index.ts", import.meta.url).href)};
+    import { SchedulerService } from ${JSON.stringify(new URL("../../scheduler/index.ts", import.meta.url).href)};
     import { CustodyComponent } from ${JSON.stringify(new URL("../../custody/index.ts", import.meta.url).href)};
+    import { MissionService } from ${JSON.stringify(new URL("../../mission/index.ts", import.meta.url).href)};
     import { ProjectService } from ${JSON.stringify(new URL("../../project/index.ts", import.meta.url).href)};
     import { WorkerService } from ${JSON.stringify(new URL("../../worker/index.ts", import.meta.url).href)};
     import { GatewayService } from ${JSON.stringify(new URL("../../gateway/index.ts", import.meta.url).href)};
@@ -462,7 +468,9 @@ test("server quiesces concurrently, drains with direct calls available, joins th
     let quiesced = 0;
     const signalled = new Set();
     const released = new Set();
-    for (const [name, type] of [['custody', CustodyComponent], ['worker', WorkerService], ['project', ProjectService], ['gateway', GatewayService]]) {
+    const services = [['scheduler', SchedulerService], ['custody', CustodyComponent], ['worker', WorkerService], ['mission', MissionService], ['project', ProjectService], ['gateway', GatewayService]];
+    const serviceCount = services.length;
+    for (const [name, type] of services) {
       const start = type.prototype.start;
       type.prototype.start = function() {
         events.push('start-' + name);
@@ -474,13 +482,13 @@ test("server quiesces concurrently, drains with direct calls available, joins th
         signalled.add(name);
         events.push('quiesce-' + name);
         const task = quiesce.call(this);
-        if (++quiesced === 4) gate.resolve();
+        if (++quiesced === serviceCount) gate.resolve();
         return gate.promise.then(() => task);
       };
       const drain = type.prototype.drain;
       type.prototype.drain = async function() {
         if (!released.size) {
-          assert.equal(quiesced, 4);
+          assert.equal(quiesced, serviceCount);
           assert.equal(server.store.healthcheck(), true);
           assert.equal(server.log.healthcheck(), true);
           const result = await server.gateway.invocation.invoke('gateway.openapi', { params: {}, query: {}, body: null });
@@ -507,16 +515,59 @@ test("server quiesces concurrently, drains with direct calls available, joins th
     OperationalLog.prototype.close = function() { events.push('log'); return closeLog.call(this); };
     assert.equal(await server.start(), null);
     assert.equal(await server.stop(), null);
-    assert.deepEqual([...new Set(events.filter(event => event.startsWith('start-')))], ['start-custody', 'start-worker', 'start-project', 'start-gateway']);
+    assert.deepEqual([...new Set(events.filter(event => event.startsWith('start-')))], ['start-scheduler', 'start-custody', 'start-worker', 'start-mission', 'start-project', 'start-gateway']);
     const shutdown = events.filter(event => !event.startsWith('start-'));
-    assert.deepEqual(shutdown.slice(0, 4), ['quiesce-custody', 'quiesce-worker', 'quiesce-project', 'quiesce-gateway']);
-    assert.deepEqual(shutdown.slice(4, 8).sort(), ['drain-custody', 'drain-gateway', 'drain-project', 'drain-worker']);
-    assert.deepEqual(shutdown.slice(8), ['stop-gateway', 'stop-project', 'stop-worker', 'stop-custody', 'store', 'log']);
+    const drainEnd = serviceCount + serviceCount;
+    assert.deepEqual(shutdown.slice(0, serviceCount), ['quiesce-scheduler', 'quiesce-custody', 'quiesce-worker', 'quiesce-mission', 'quiesce-project', 'quiesce-gateway']);
+    assert.deepEqual(shutdown.slice(serviceCount, drainEnd).sort(), ['drain-custody', 'drain-gateway', 'drain-mission', 'drain-project', 'drain-scheduler', 'drain-worker']);
+    assert.deepEqual(shutdown.slice(drainEnd), ['stop-gateway', 'stop-project', 'stop-mission', 'stop-worker', 'stop-custody', 'stop-scheduler', 'store', 'log']);
   `,
     ],
     { env: paths.env, encoding: "utf8", timeout: 15000 },
   );
   assert.equal(result.status, ExitCode.Success, result.stderr);
+});
+
+test("server startup failure releases Mission in reverse construction order and stop is idempotent", (t) => {
+  const paths = layout(temporary(t));
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    import assert from 'node:assert/strict';
+    import { Server } from ${JSON.stringify(new URL("./index.ts", import.meta.url).href)};
+    import { SchedulerService } from ${JSON.stringify(new URL("../../scheduler/index.ts", import.meta.url).href)};
+    import { CustodyComponent } from ${JSON.stringify(new URL("../../custody/index.ts", import.meta.url).href)};
+    import { WorkerService } from ${JSON.stringify(new URL("../../worker/index.ts", import.meta.url).href)};
+    import { MissionService } from ${JSON.stringify(new URL("../../mission/index.ts", import.meta.url).href)};
+    import { ProjectService } from ${JSON.stringify(new URL("../../project/index.ts", import.meta.url).href)};
+    import { GatewayService } from ${JSON.stringify(new URL("../../gateway/index.ts", import.meta.url).href)};
+    const events = [];
+    const failure = new Error('gateway startup failed');
+    GatewayService.prototype.start = async () => failure;
+    for (const [name, type] of [['scheduler', SchedulerService], ['custody', CustodyComponent], ['worker', WorkerService], ['mission', MissionService], ['project', ProjectService], ['gateway', GatewayService]]) {
+      const stop = type.prototype.stop;
+      type.prototype.stop = function() {
+        events.push(name);
+        return stop.call(this);
+      };
+    }
+    const server = new Server();
+    assert.equal(await server.start(), failure);
+    assert.deepEqual(events, ['gateway', 'project', 'mission', 'worker', 'custody', 'scheduler']);
+    assert.equal(await server.stop(), null);
+    assert.equal(await server.stop(), null);
+    assert.deepEqual(events, ['gateway', 'project', 'mission', 'worker', 'custody', 'scheduler']);
+    assert.deepEqual(await server.healthcheck(), { gateway: 503, store: 503, log: 503 });
+    process.stdout.write('verified\\n');
+  `,
+    ],
+    { env: paths.env, encoding: "utf8", timeout: SHUTDOWN_DEADLINE_MS },
+  );
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(result.stdout, LIFECYCLE_VERIFIED_OUTPUT);
 });
 
 test("the shutdown watchdog holds the event loop and exits the process when cleanup never settles", () => {

@@ -1,0 +1,99 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: mission.get
+    tags:
+      - mission
+    description: Get the mission of a project.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.get.Input/properties/params/properties/proj\
+            ectId"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/mission.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    mission.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            projectId:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: project_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - projectId
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    mission.get.Output:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 34
+          maxLength: 34
+          pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: mission_ followed by a canonical 26-character uppercase ULID.
+        projectId:
+          type: string
+          minLength: 34
+          maxLength: 34
+          pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: project_ followed by a canonical 26-character uppercase ULID.
+        version:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+      required:
+        - id
+        - projectId
+        - version
+      additionalProperties: false

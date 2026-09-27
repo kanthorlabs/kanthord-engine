@@ -98,7 +98,6 @@ type Page<T> = { items: T[]; nextCursor: string | null };
 
 async function setup(t: TestContext): Promise<Fixture> {
   const fixture = await gatewayFixture(t, {
-    standIns: { createMission: () => {}, liveNodesPinning: () => [] },
     repositoryConnector: { gitLsRemote: async () => {} },
   });
   const directory = temporary(t);
