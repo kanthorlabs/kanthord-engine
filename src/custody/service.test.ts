@@ -17,6 +17,10 @@ import { CustodyComponent } from "./service.ts";
 const FIRST_REVISION = 1;
 const HUMAN_ACCOUNT_ID = "alice";
 const NAME_CONFLICT_CODE = "credential.name.conflict";
+const REVISION_CONFLICT_CODE = "credential.revision.conflict";
+const NEXT_REVISION = FIRST_REVISION + 1;
+const THIRD_REVISION = NEXT_REVISION + 1;
+const ROTATED_BASE_URL = "https://other.example/v1";
 const key = Buffer.alloc(32, 7);
 const secretValue = "private-credential-value";
 const apiSecret = { key: secretValue };
@@ -88,7 +92,37 @@ function fixture() {
     });
   const list = (query: Record<string, unknown> = {}) =>
     invoke(custodyOperations.list, { params: {}, query, body: null });
-  return { store, component, registry, health, logs, create, get, list };
+  const rotate = (name: string, body: unknown) =>
+    invoke(custodyOperations.rotate, {
+      params: { credentialName: name },
+      query: {},
+      body,
+    });
+  const updateMetadata = (name: string, body: unknown) =>
+    invoke(custodyOperations.update_metadata, {
+      params: { credentialName: name },
+      query: {},
+      body,
+    });
+  const revoke = (name: string, revision: number) =>
+    invoke(custodyOperations.revoke, {
+      params: { credentialName: name, revision },
+      query: {},
+      body: null,
+    });
+  return {
+    store,
+    component,
+    registry,
+    health,
+    logs,
+    create,
+    get,
+    list,
+    rotate,
+    updateMetadata,
+    revoke,
+  };
 }
 
 function fails(fn: () => unknown, status: number, code: string) {
@@ -233,6 +267,226 @@ test("get orders revisions and list paginates sorted names with filters", () => 
       () => f.list({ cursor: "%%%" }),
       HttpStatus.BadRequest,
       "system.pagination.cursor_invalid",
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("rotate copies or replaces metadata, allows new base URL and guards revisions", () => {
+  const f = fixture();
+  try {
+    f.create(inputs[3]);
+    const copied = f.rotate("storage", {
+      expectedRevision: FIRST_REVISION,
+      secret: inputs[3]!.secret,
+    }) as { revisions: { id: string; revision: number; metadata: unknown }[] };
+    assert.deepEqual(copied.revisions[0]!.metadata, inputs[3]!.metadata);
+    assert.equal(copied.revisions[0]!.revision, NEXT_REVISION);
+    noSecret(copied);
+    const replacement = { ...inputs[3]!.metadata, bucket: "other" };
+    const replaced = f.rotate("storage", {
+      expectedRevision: NEXT_REVISION,
+      secret: inputs[3]!.secret,
+      metadata: replacement,
+    }) as { revisions: { id: string; revision: number; metadata: unknown }[] };
+    assert.deepEqual(replaced.revisions[0]!.metadata, replacement);
+    assert.equal(replaced.revisions[0]!.revision, THIRD_REVISION);
+    noSecret(replaced);
+    assert.throws(
+      () =>
+        f.rotate("storage", {
+          expectedRevision: FIRST_REVISION,
+          secret: apiSecret,
+        }),
+      (error) =>
+        error instanceof OperationError &&
+        error.status === HttpStatus.Conflict &&
+        error.code === REVISION_CONFLICT_CODE &&
+        (error.details as { revision: number }).revision === THIRD_REVISION,
+    );
+    f.create(inputs[2]);
+    const changed = f.rotate("openai", {
+      expectedRevision: FIRST_REVISION,
+      secret: apiSecret,
+      metadata: {
+        baseUrl: ROTATED_BASE_URL,
+        models: [{ id: "new" }],
+      },
+    }) as { revisions: { id: string; metadata: { baseUrl: string } }[] };
+    assert.equal(changed.revisions[0]!.metadata.baseUrl, ROTATED_BASE_URL);
+    noSecret(changed);
+    fails(
+      () =>
+        f.rotate("missing", {
+          expectedRevision: FIRST_REVISION,
+          secret: apiSecret,
+        }),
+      HttpStatus.NotFound,
+      "credential.credential.not_found",
+    );
+    fails(
+      () =>
+        f.rotate("storage", { expectedRevision: THIRD_REVISION, secret: {} }),
+      HttpStatus.BadRequest,
+      "credential.input.invalid",
+    );
+    assert.equal(f.logs.at(-1)?.credentialId, changed.revisions[0]!.id);
+    assert.equal(f.logs.at(-1)?.humanIdentity, HUMAN_ACCOUNT_ID);
+    assert.ok(!JSON.stringify(f.logs).includes(secretValue));
+  } finally {
+    f.store.close();
+  }
+});
+
+test("two rotations with the same expected revision reject the second", () => {
+  const f = fixture();
+  try {
+    f.create(inputs[0]);
+    noSecret(
+      f.rotate("github", {
+        expectedRevision: FIRST_REVISION,
+        secret: apiSecret,
+      }),
+    );
+    fails(
+      () =>
+        f.rotate("github", {
+          expectedRevision: FIRST_REVISION,
+          secret: apiSecret,
+        }),
+      HttpStatus.Conflict,
+      REVISION_CONFLICT_CODE,
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("metadata edits re-encrypt under new identity and enforce base URL and revision", () => {
+  const f = fixture();
+  try {
+    f.create(inputs[2]);
+    const metadata = { ...inputs[2]!.metadata, models: [{ id: "added" }] };
+    const answer = f.updateMetadata("openai", {
+      expectedRevision: FIRST_REVISION,
+      metadata,
+    }) as { revisions: { id: string; revision: number; metadata: unknown }[] };
+    assert.equal(answer.revisions[0]!.revision, NEXT_REVISION);
+    assert.deepEqual(answer.revisions[0]!.metadata, metadata);
+    assert.notEqual(answer.revisions[0]!.id, answer.revisions[1]!.id);
+    const row = f.store.database
+      .prepare("SELECT id, nonce, ciphertext FROM credential WHERE id = ?")
+      .get(answer.revisions[0]!.id) as {
+      id: string;
+      nonce: Buffer;
+      ciphertext: Buffer;
+    };
+    assert.deepEqual(
+      decrypt(
+        key,
+        row.id,
+        Platform.OpenAICompatible,
+        row.nonce,
+        row.ciphertext,
+      ),
+      apiSecret,
+    );
+    noSecret(answer);
+    fails(
+      () =>
+        f.updateMetadata("openai", {
+          expectedRevision: NEXT_REVISION,
+          metadata: { ...metadata, baseUrl: ROTATED_BASE_URL },
+        }),
+      HttpStatus.Conflict,
+      "credential.metadata.base_url_fixed",
+    );
+    fails(
+      () =>
+        f.updateMetadata("openai", {
+          expectedRevision: FIRST_REVISION,
+          metadata,
+        }),
+      HttpStatus.Conflict,
+      REVISION_CONFLICT_CODE,
+    );
+    fails(
+      () =>
+        f.updateMetadata("missing", {
+          expectedRevision: FIRST_REVISION,
+          metadata,
+        }),
+      HttpStatus.NotFound,
+      "credential.credential.not_found",
+    );
+    fails(
+      () =>
+        f.updateMetadata("openai", {
+          expectedRevision: NEXT_REVISION,
+          metadata: {},
+        }),
+      HttpStatus.BadRequest,
+      "credential.input.invalid",
+    );
+    assert.equal(f.logs.at(-1)?.credentialId, row.id);
+    assert.equal(f.logs.at(-1)?.humanIdentity, HUMAN_ACCOUNT_ID);
+    assert.ok(!JSON.stringify(f.logs).includes(secretValue));
+  } finally {
+    f.store.close();
+  }
+});
+
+test("two metadata edits with the same expected revision reject the second", () => {
+  const f = fixture();
+  try {
+    f.create(inputs[0]);
+    noSecret(
+      f.updateMetadata("github", {
+        expectedRevision: FIRST_REVISION,
+        metadata: null,
+      }),
+    );
+    fails(
+      () =>
+        f.updateMetadata("github", {
+          expectedRevision: FIRST_REVISION,
+          metadata: null,
+        }),
+      HttpStatus.Conflict,
+      REVISION_CONFLICT_CODE,
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("revoke ends only an older live revision", () => {
+  const f = fixture();
+  try {
+    f.create(inputs[0]);
+    f.rotate("github", { expectedRevision: FIRST_REVISION, secret: apiSecret });
+    fails(
+      () => f.revoke("github", NEXT_REVISION),
+      HttpStatus.Conflict,
+      "credential.revision.newest_live",
+    );
+    const answer = f.revoke("github", FIRST_REVISION) as {
+      revisions: { revision: number; endedAt: number | null }[];
+    };
+    assert.equal(answer.revisions[0]!.endedAt, null);
+    assert.equal(answer.revisions[1]!.revision, FIRST_REVISION);
+    assert.ok(answer.revisions[1]!.endedAt !== null);
+    noSecret(answer);
+    fails(
+      () => f.revoke("github", FIRST_REVISION),
+      HttpStatus.Conflict,
+      "credential.revision.ended",
+    );
+    fails(
+      () => f.revoke("github", THIRD_REVISION),
+      HttpStatus.NotFound,
+      "credential.revision.not_found",
     );
   } finally {
     f.store.close();

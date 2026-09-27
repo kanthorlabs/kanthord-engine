@@ -23,9 +23,10 @@ import {
   LIST_LIMIT_DEFAULT,
   type CredentialAnswer,
 } from "./contract.ts";
-import { encrypt } from "./envelope.ts";
+import { decrypt, encrypt } from "./envelope.ts";
 import {
   metadataSchemaForPlatform,
+  openaiCompatibleMetadataSchema,
   OAUTH_PLATFORMS,
   Platform,
   RESERVED_NAME_LOGIN,
@@ -46,6 +47,11 @@ const CustodyErrorCode = {
   UnsupportedEntry: "credential.entry.unsupported",
   Conflict: "credential.name.conflict",
   NotFound: "credential.credential.not_found",
+  RevisionConflict: "credential.revision.conflict",
+  BaseUrlFixed: "credential.metadata.base_url_fixed",
+  RevisionNotFound: "credential.revision.not_found",
+  RevisionEnded: "credential.revision.ended",
+  NewestLive: "credential.revision.newest_live",
   InvalidCursor: "system.pagination.cursor_invalid",
 } as const;
 const FIRST_REVISION = 1;
@@ -65,6 +71,48 @@ type CredentialRow = {
   created_at: number;
   ended_at: number | null;
 };
+
+type LiveRow = CredentialRow & { nonce: Buffer; ciphertext: Buffer };
+
+function newestLive(tx: Transaction, name: string): LiveRow | undefined {
+  return tx.database
+    .prepare(
+      "SELECT id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at FROM credential WHERE name = ? AND ended_at IS NULL ORDER BY revision DESC LIMIT 1",
+    )
+    .get(name) as LiveRow | undefined;
+}
+
+function requireLive(tx: Transaction, name: string, expected: number): LiveRow {
+  const row = newestLive(tx, name);
+  if (!row)
+    throw new OperationError(
+      HttpStatus.NotFound,
+      CustodyErrorCode.NotFound,
+      "Credential not found.",
+    );
+  if (row.revision !== expected)
+    throw new OperationError(
+      HttpStatus.Conflict,
+      CustodyErrorCode.RevisionConflict,
+      "Credential revision conflict.",
+      { revision: row.revision },
+    );
+  return row;
+}
+
+function validatedMetadata(
+  platform: Platform,
+  value: unknown,
+): Record<string, unknown> | null {
+  const schema = metadataSchemaForPlatform(platform);
+  if (schema === null) {
+    if (value !== null) throw invalidInput();
+    return null;
+  }
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw invalidInput();
+  return parsed.data as Record<string, unknown>;
+}
 
 function invalidInput(): OperationError {
   return new OperationError(
@@ -144,6 +192,15 @@ export class CustodyComponent implements Service {
     );
     registry.register(custodyOperations.list, (input, caller) =>
       this.list(input, caller),
+    );
+    registry.register(custodyOperations.rotate, (input, caller) =>
+      this.rotate(input, caller),
+    );
+    registry.register(custodyOperations.update_metadata, (input, caller) =>
+      this.updateMetadata(input, caller),
+    );
+    registry.register(custodyOperations.revoke, (input, caller) =>
+      this.revoke(input, caller),
     );
   }
 
@@ -266,6 +323,189 @@ export class CustodyComponent implements Service {
           ? Buffer.from(page.at(-1)!.name, "utf8").toString("base64url")
           : null;
       return { items, nextCursor };
+    });
+  }
+
+  private refuseRemovedModels(
+    tx: Transaction,
+    credentialName: string,
+    removedIds: string[],
+  ): void {
+    void tx;
+    void credentialName;
+    void removedIds;
+  }
+
+  private checkModels(
+    tx: Transaction,
+    row: LiveRow,
+    metadata: Record<string, unknown> | null,
+    allowBaseUrlChange: boolean,
+  ): void {
+    if (row.platform !== Platform.OpenAICompatible) return;
+    const current = openaiCompatibleMetadataSchema.parse(
+      JSON.parse(row.metadata!),
+    );
+    const next = openaiCompatibleMetadataSchema.parse(metadata);
+    if (!allowBaseUrlChange && current.baseUrl !== next.baseUrl)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.BaseUrlFixed,
+        "Credential base URL cannot be changed by metadata update.",
+      );
+    const nextIds = new Set(next.models.map((model) => model.id));
+    const removedIds = current.models
+      .filter((model) => !nextIds.has(model.id))
+      .map((model) => model.id);
+    this.refuseRemovedModels(tx, row.name, removedIds);
+  }
+
+  private insertRevision(
+    tx: Transaction,
+    row: LiveRow,
+    id: string,
+    secret: unknown,
+    metadata: Record<string, unknown> | null,
+  ): void {
+    const { nonce, ciphertext } = encrypt(
+      this.envelopeKey,
+      id,
+      row.platform,
+      secret,
+    );
+    tx.database
+      .prepare(
+        "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, (SELECT MAX(revision) + 1 FROM credential WHERE name = ?), ?, ?, ?, ?, NULL)",
+      )
+      .run(
+        id,
+        row.name,
+        row.platform,
+        row.name,
+        nonce,
+        ciphertext,
+        metadata === null ? null : canonicalJSON(metadata),
+        Date.now(),
+      );
+  }
+
+  private rotate(
+    input: typeof custodyOperations.rotate.input._output,
+    caller: CallerContext,
+  ): CredentialAnswer {
+    return caller.commit((tx) => {
+      const row = requireLive(
+        tx,
+        input.params.credentialName,
+        input.body.expectedRevision,
+      );
+      const platform = row.platform as Platform;
+      const secret = secretSchemaForPlatform(platform).safeParse(
+        input.body.secret,
+      );
+      if (!secret.success) throw invalidInput();
+      const metadata = validatedMetadata(
+        platform,
+        input.body.metadata === undefined
+          ? row.metadata === null
+            ? null
+            : JSON.parse(row.metadata)
+          : input.body.metadata,
+      );
+      this.checkModels(tx, row, metadata, true);
+      const id = createIdentity(CREDENTIAL_PREFIX);
+      this.insertRevision(tx, row, id, secret.data, metadata);
+      this.logger.info(
+        {
+          credentialId: id,
+          humanIdentity:
+            caller.identity?.kind === IdentityKind.Human
+              ? caller.identity.accountId
+              : undefined,
+        },
+        "credential rotated",
+      );
+      return answerForName(tx, row.name)!;
+    });
+  }
+
+  private updateMetadata(
+    input: typeof custodyOperations.update_metadata.input._output,
+    caller: CallerContext,
+  ): CredentialAnswer {
+    return caller.commit((tx) => {
+      const row = requireLive(
+        tx,
+        input.params.credentialName,
+        input.body.expectedRevision,
+      );
+      const metadata = validatedMetadata(
+        row.platform as Platform,
+        input.body.metadata,
+      );
+      this.checkModels(tx, row, metadata, false);
+      const id = createIdentity(CREDENTIAL_PREFIX);
+      const secret = decrypt(
+        this.envelopeKey,
+        row.id,
+        row.platform,
+        row.nonce,
+        row.ciphertext,
+      );
+      this.insertRevision(tx, row, id, secret, metadata);
+      this.logger.info(
+        {
+          credentialId: id,
+          humanIdentity:
+            caller.identity?.kind === IdentityKind.Human
+              ? caller.identity.accountId
+              : undefined,
+        },
+        "credential metadata updated",
+      );
+      return answerForName(tx, row.name)!;
+    });
+  }
+
+  private revoke(
+    input: typeof custodyOperations.revoke.input._output,
+    caller: CallerContext,
+  ): CredentialAnswer {
+    return caller.commit((tx) => {
+      const { credentialName, revision } = input.params;
+      const row = tx.database
+        .prepare(
+          "SELECT id, ended_at FROM credential WHERE name = ? AND revision = ?",
+        )
+        .get(credentialName, revision) as
+        { id: string; ended_at: number | null } | undefined;
+      if (!row)
+        throw new OperationError(
+          HttpStatus.NotFound,
+          CustodyErrorCode.RevisionNotFound,
+          "Credential revision not found.",
+        );
+      if (row.ended_at !== null)
+        throw new OperationError(
+          HttpStatus.Conflict,
+          CustodyErrorCode.RevisionEnded,
+          "Credential revision already ended.",
+        );
+      const later = tx.database
+        .prepare(
+          "SELECT id FROM credential WHERE name = ? AND revision > ? AND ended_at IS NULL LIMIT 1",
+        )
+        .get(credentialName, revision);
+      if (!later)
+        throw new OperationError(
+          HttpStatus.Conflict,
+          CustodyErrorCode.NewestLive,
+          "Cannot revoke the newest live credential revision.",
+        );
+      tx.database
+        .prepare("UPDATE credential SET ended_at = ? WHERE id = ?")
+        .run(Date.now(), row.id);
+      return answerForName(tx, credentialName)!;
     });
   }
 
