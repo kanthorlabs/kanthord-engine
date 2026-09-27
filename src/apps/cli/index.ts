@@ -29,6 +29,7 @@ import {
 import { KANTHORD_AUTH_USERNAME } from "../../gateway/local.ts";
 import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
+import { addCredentialCommand } from "./credential.ts";
 import {
   CommandName,
   ExitCode,
@@ -158,6 +159,7 @@ export function createProgram(
   addConfigCommand(program);
   addServeCommand(program, onServer);
   addJWTCommand(program);
+  addCredentialCommand(program);
   for (const name of [
     CommandName.Project,
     CommandName.Mission,
