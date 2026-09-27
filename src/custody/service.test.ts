@@ -8,7 +8,12 @@ import { HttpStatus } from "../kernel/http.ts";
 import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { custodyOperations, CUSTODY_SERVICE_NAME } from "./contract.ts";
+import {
+  custodyOperations,
+  CUSTODY_SERVICE_NAME,
+  type CredentialMetadataFn,
+  type CustodySuitabilityFn,
+} from "./contract.ts";
 import { decrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { Platform } from "./platforms.ts";
@@ -18,6 +23,8 @@ const FIRST_REVISION = 1;
 const HUMAN_ACCOUNT_ID = "alice";
 const NAME_CONFLICT_CODE = "credential.name.conflict";
 const REVISION_CONFLICT_CODE = "credential.revision.conflict";
+const CREDENTIAL_NOT_FOUND_CODE = "credential.credential.not_found";
+const PLATFORM_MISMATCH_CODE = "credential.platform.mismatch";
 const NEXT_REVISION = FIRST_REVISION + 1;
 const THIRD_REVISION = NEXT_REVISION + 1;
 const ROTATED_BASE_URL = "https://other.example/v1";
@@ -487,6 +494,90 @@ test("revoke ends only an older live revision", () => {
       () => f.revoke("github", THIRD_REVISION),
       HttpStatus.NotFound,
       "credential.revision.not_found",
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("custody suitability checks the newest live revision and platform", () => {
+  const f = fixture();
+  try {
+    const suitability: CustodySuitabilityFn = f.component.custodySuitability;
+    f.create(inputs[0]);
+    f.store.transaction((tx) =>
+      suitability(tx, { credential: "github", platform: Platform.GitHub }),
+    );
+    fails(
+      () =>
+        f.store.transaction((tx) =>
+          suitability(tx, { credential: "missing", platform: Platform.GitHub }),
+        ),
+      HttpStatus.NotFound,
+      CREDENTIAL_NOT_FOUND_CODE,
+    );
+    fails(
+      () =>
+        f.store.transaction((tx) =>
+          suitability(tx, { credential: "github", platform: Platform.S3 }),
+        ),
+      HttpStatus.BadRequest,
+      PLATFORM_MISMATCH_CODE,
+    );
+    f.rotate("github", { expectedRevision: FIRST_REVISION, secret: apiSecret });
+    f.revoke("github", FIRST_REVISION);
+    f.store.transaction((tx) =>
+      suitability(tx, { credential: "github", platform: Platform.GitHub }),
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("credential metadata returns only nonsecret fields from the newest live revision", () => {
+  const f = fixture();
+  try {
+    const metadata: CredentialMetadataFn = f.component.credentialMetadata;
+    f.create(inputs[2]);
+    f.create(inputs[0]);
+    const openai = f.store.transaction((tx) => metadata(tx, "openai"));
+    assert.deepEqual(openai?.metadata, inputs[2]!.metadata);
+    assert.deepEqual(Object.keys(openai!), [
+      "id",
+      "name",
+      "platform",
+      "metadata",
+    ]);
+    assert.equal(openai?.name, inputs[2]!.name);
+    assert.equal(openai?.platform, Platform.OpenAICompatible);
+    noSecret(openai);
+    const github = f.store.transaction((tx) => metadata(tx, "github"));
+    assert.equal(github?.metadata, null);
+    assert.deepEqual(Object.keys(github!), [
+      "id",
+      "name",
+      "platform",
+      "metadata",
+    ]);
+    assert.equal(
+      f.store.transaction((tx) => metadata(tx, "missing")),
+      null,
+    );
+    const rotated = f.rotate("openai", {
+      expectedRevision: FIRST_REVISION,
+      secret: apiSecret,
+      metadata: { baseUrl: ROTATED_BASE_URL, models: [] },
+    }) as { revisions: { id: string }[] };
+    const newest = f.store.transaction((tx) => metadata(tx, "openai"));
+    assert.equal(newest?.id, rotated.revisions[0]!.id);
+    assert.deepEqual(newest?.metadata, {
+      baseUrl: ROTATED_BASE_URL,
+      models: [],
+    });
+    f.revoke("openai", FIRST_REVISION);
+    assert.equal(
+      f.store.transaction((tx) => metadata(tx, "openai"))?.id,
+      rotated.revisions[0]!.id,
     );
   } finally {
     f.store.close();

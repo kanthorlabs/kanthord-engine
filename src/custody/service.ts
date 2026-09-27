@@ -22,6 +22,7 @@ import {
   custodyOperations,
   LIST_LIMIT_DEFAULT,
   type CredentialAnswer,
+  type CredentialMetadata,
 } from "./contract.ts";
 import { decrypt, encrypt } from "./envelope.ts";
 import {
@@ -47,6 +48,7 @@ const CustodyErrorCode = {
   UnsupportedEntry: "credential.entry.unsupported",
   Conflict: "credential.name.conflict",
   NotFound: "credential.credential.not_found",
+  PlatformMismatch: "credential.platform.mismatch",
   RevisionConflict: "credential.revision.conflict",
   BaseUrlFixed: "credential.metadata.base_url_fixed",
   RevisionNotFound: "credential.revision.not_found",
@@ -202,6 +204,39 @@ export class CustodyComponent implements Service {
     registry.register(custodyOperations.revoke, (input, caller) =>
       this.revoke(input, caller),
     );
+  }
+
+  custodySuitability(
+    tx: Transaction,
+    req: { credential: string; platform: string },
+  ): void {
+    const row = newestLive(tx, req.credential);
+    if (!row)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        CustodyErrorCode.NotFound,
+        "Credential not found.",
+      );
+    if (row.platform !== req.platform)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        CustodyErrorCode.PlatformMismatch,
+        "Credential platform mismatch.",
+      );
+  }
+
+  credentialMetadata(
+    tx: Transaction,
+    credentialName: string,
+  ): CredentialMetadata | null {
+    const row = newestLive(tx, credentialName);
+    if (!row) return null;
+    return {
+      id: row.id,
+      name: row.name,
+      platform: row.platform,
+      metadata: row.metadata === null ? null : JSON.parse(row.metadata),
+    };
   }
 
   private create(
