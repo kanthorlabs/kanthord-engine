@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { setImmediate } from "node:timers/promises";
+import {
+  createProvider,
+  type Provider,
+  type ProviderAuthInteraction,
+  type OAuthCredential,
+} from "@earendil-works/pi-ai";
 import type { Logger } from "pino";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -25,6 +32,8 @@ import { decrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { Platform } from "./platforms.ts";
 import { CustodyComponent } from "./service.ts";
+import { COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER } from "./login.ts";
+import { LoginSessionState, SESSION_EXPIRY_MS } from "./sessions.ts";
 
 const FIRST_REVISION = 1;
 const HUMAN_ACCOUNT_ID = "alice";
@@ -79,6 +88,8 @@ const inputs = [
 
 function fixture(
   collaborations: {
+    oauthProviders?: () => readonly Provider[];
+    now?: () => number;
     agentProvidersDependentOn?: AgentProvidersDependentOnFn;
     bindingsNaming?: BindingsNamingFn;
     enablementsDependentOnModel?: EnablementsDependentOnModelFn;
@@ -95,6 +106,9 @@ function fixture(
   } as unknown as Logger;
   const health = new HealthRegistry();
   const component = new CustodyComponent({
+    store,
+    oauthProviders: collaborations.oauthProviders,
+    now: collaborations.now,
     envelopeKey: key,
     logger,
     health,
@@ -152,9 +166,31 @@ function fixture(
       query: {},
       body: null,
     });
+  const login = async (body: unknown) =>
+    (await invoke(custodyOperations.login, {
+      params: {},
+      query: {},
+      body,
+    })) as typeof custodyOperations.login.output._output;
+  const loginCode = (sessionId: string, value: string) =>
+    invoke(custodyOperations.login_code, {
+      params: { sessionId },
+      query: {},
+      body: { value },
+    });
+  const loginStatus = (sessionId: string) =>
+    invoke(custodyOperations.login_status, {
+      params: { sessionId },
+      query: {},
+      body: null,
+    }) as typeof custodyOperations.login_status.output._output;
   return {
     store,
     component,
+    caller,
+    login,
+    loginCode,
+    loginStatus,
     lastTransaction: () => lastTransaction,
     registry,
     health,
@@ -731,6 +767,570 @@ test("credentialDependents returns both injected collaborations' results", () =>
   }
 });
 
+const LOGIN_NAME = "copilot";
+const LOGIN_BODY = { platform: Platform.GitHubCopilot, name: LOGIN_NAME };
+const LOGIN_ADDRESS = "https://github.com/login/device";
+const LOGIN_CODE = "ABCD-EFGH";
+const LOGIN_PENDING = "credential.login.pending";
+const LOGIN_NOT_FOUND = "credential.login.not_found";
+const LOGIN_VALUE_NOT_AWAITED = "credential.login.value_not_awaited";
+const LOGIN_FAILED_MESSAGE = "login failed";
+const INVALID_INPUT_CODE = "credential.input.invalid";
+const UNSUPPORTED_ENTRY_CODE = "credential.entry.unsupported";
+const UNSUPPORTED_PLATFORM_CODE = "credential.platform.unsupported";
+const EMPTY_DOMAIN = "";
+const DEVICE_OPTION = "device_code";
+const MANUAL_VALUE = "manual-answer";
+const LAST_MESSAGE = "Waiting for authorization";
+const NO_CREDENTIALS = 0;
+const CLOCK_START = 1700000000000;
+const MAX_TURNS = 20;
+const oauthCredential: OAuthCredential = {
+  type: "oauth",
+  refresh: "private-refresh-token",
+  access: "private-access-token",
+  expires: CLOCK_START + SESSION_EXPIRY_MS,
+  availableModelIds: ["not-stored"],
+};
+
+function fakeProvider(
+  login: (interaction: ProviderAuthInteraction) => Promise<OAuthCredential>,
+): Provider {
+  return createProvider({
+    id: Platform.GitHubCopilot,
+    models: [],
+    api: {},
+    auth: {
+      oauth: {
+        name: "Fake OAuth",
+        login,
+        refresh: async () => {
+          throw new Error("unexpected refresh");
+        },
+        toAuth: async () => {
+          throw new Error("unexpected auth resolution");
+        },
+      },
+    },
+  });
+}
+
+function deviceAddress(interaction: ProviderAuthInteraction): void {
+  interaction.notify({
+    type: "device_code",
+    verificationUri: LOGIN_ADDRESS,
+    userCode: LOGIN_CODE,
+  });
+}
+
+function gatedLogin() {
+  const result = Promise.withResolvers<OAuthCredential>();
+  const entered = Promise.withResolvers<ProviderAuthInteraction>();
+  const provider = fakeProvider(async (interaction) => {
+    entered.resolve(interaction);
+    deviceAddress(interaction);
+    return await result.promise;
+  });
+  return { result, entered, provider };
+}
+
+async function terminalStatus(
+  f: ReturnType<typeof fixture>,
+  sessionId: string,
+) {
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    const status = f.loginStatus(sessionId);
+    if (status.state !== LoginSessionState.Pending) return status;
+    await setImmediate();
+  }
+  assert.fail("Login did not finish within the bounded event-loop turns");
+}
+
+function credentialCount(f: ReturnType<typeof fixture>): number {
+  return (
+    f.store.database
+      .prepare("SELECT COUNT(*) AS count FROM credential")
+      .get() as { count: number }
+  ).count;
+}
+
+function noOAuthSecret(value: unknown): void {
+  const serialized = JSON.stringify(value);
+  assert.ok(!serialized.includes(oauthCredential.access));
+  assert.ok(!serialized.includes(oauthCredential.refresh));
+  assert.ok(!serialized.includes('"ciphertext"'));
+  assert.ok(!serialized.includes('"access"'));
+  assert.ok(!serialized.includes('"refresh"'));
+}
+
+function rejectsWith(status: number, code: string) {
+  return (error: unknown) =>
+    error instanceof OperationError &&
+    error.status === status &&
+    error.code === code;
+}
+
+test("OAuth uses real pi-ai modify, defaults Copilot enterprise, and stores only the encrypted secret", async (t) => {
+  const finish = Promise.withResolvers<OAuthCredential>();
+  const prompted = Promise.withResolvers<void>();
+  let selected: string | undefined;
+  let domain: string | undefined;
+  const provider = fakeProvider(async (interaction) => {
+    domain = await interaction.prompt({
+      type: "text",
+      message: "GitHub Enterprise URL/domain (blank for github.com)",
+      placeholder: COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER,
+    });
+    selected = await interaction.prompt({
+      type: "select",
+      message: "Mode",
+      options: [{ id: DEVICE_OPTION, label: "Device" }],
+    });
+    interaction.notify({ type: "info", message: "Starting" });
+    deviceAddress(interaction);
+    interaction.notify({ type: "progress", message: LAST_MESSAGE });
+    prompted.resolve();
+    return await finish.promise;
+  });
+  const f = fixture({
+    oauthProviders: () => [provider],
+    now: () => CLOCK_START,
+  });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const answer = await f.login({ ...LOGIN_BODY, mode: "browser" });
+  await prompted.promise;
+  assert.match(answer.sessionId, /^login_session_[0-9A-HJKMNP-TV-Z]{26}$/);
+  assert.equal(answer.address, LOGIN_ADDRESS);
+  assert.equal(answer.code, LOGIN_CODE);
+  assert.equal(answer.expiresAt, CLOCK_START + SESSION_EXPIRY_MS);
+  assert.equal(domain, EMPTY_DOMAIN);
+  assert.equal(selected, DEVICE_OPTION);
+  assert.equal(f.loginStatus(answer.sessionId).lastMessage, LAST_MESSAGE);
+  assert.equal(credentialCount(f), NO_CREDENTIALS);
+  fails(
+    () => f.loginCode(answer.sessionId, MANUAL_VALUE),
+    HttpStatus.Conflict,
+    LOGIN_VALUE_NOT_AWAITED,
+  );
+  await assert.rejects(
+    f.login({ ...LOGIN_BODY, name: "second" }),
+    rejectsWith(HttpStatus.Conflict, LOGIN_PENDING),
+  );
+  finish.resolve(oauthCredential);
+  const status = await terminalStatus(f, answer.sessionId);
+  assert.equal(status.state, LoginSessionState.Completed);
+  assert.equal(status.failureReason, null);
+  assert.equal(credentialCount(f), FIRST_REVISION);
+  const row = f.store.database.prepare("SELECT * FROM credential").get() as {
+    id: string;
+    revision: number;
+    metadata: null;
+    platform: string;
+    ended_at: null;
+    nonce: Buffer;
+    ciphertext: Buffer;
+  };
+  assert.equal(row.revision, FIRST_REVISION);
+  assert.equal(row.metadata, null);
+  assert.equal(row.ended_at, null);
+  assert.equal(row.platform, Platform.GitHubCopilot);
+  assert.deepEqual(
+    decrypt(key, row.id, row.platform, row.nonce, row.ciphertext),
+    {
+      refresh: oauthCredential.refresh,
+      access: oauthCredential.access,
+      expires: oauthCredential.expires,
+    },
+  );
+  assert.deepEqual(f.logs, [
+    { credentialId: row.id, humanIdentity: HUMAN_ACCOUNT_ID },
+  ]);
+  noOAuthSecret([answer, status, f.logs]);
+  fails(
+    () => f.loginCode(answer.sessionId, MANUAL_VALUE),
+    HttpStatus.Conflict,
+    LOGIN_VALUE_NOT_AWAITED,
+  );
+});
+
+test("OAuth validates entry, name, mode and start-time name conflict before starting a provider", async (t) => {
+  const f = fixture({
+    oauthProviders: () => {
+      assert.fail("Invalid input must not start OAuth");
+    },
+  });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const cases = [
+    {
+      body: { ...LOGIN_BODY, platform: Platform.GitHub },
+      code: UNSUPPORTED_ENTRY_CODE,
+    },
+    {
+      body: { ...LOGIN_BODY, platform: "unknown" },
+      code: UNSUPPORTED_PLATFORM_CODE,
+    },
+    { body: { ...LOGIN_BODY, name: "login" }, code: INVALID_INPUT_CODE },
+    { body: { ...LOGIN_BODY, name: "Bad Name" }, code: INVALID_INPUT_CODE },
+    { body: { ...LOGIN_BODY, mode: "unknown" }, code: INVALID_INPUT_CODE },
+  ];
+  for (const { body, code } of cases)
+    await assert.rejects(
+      f.login(body),
+      rejectsWith(HttpStatus.BadRequest, code),
+    );
+  const existing = f.create({ ...inputs[0], name: LOGIN_NAME }) as {
+    revisions: { id: string }[];
+  };
+  await assert.rejects(f.login(LOGIN_BODY), (error) => {
+    assert.ok(rejectsWith(HttpStatus.Conflict, NAME_CONFLICT_CODE)(error));
+    assert.deepEqual((error as OperationError).details, {
+      id: existing.revisions[0]!.id,
+    });
+    return true;
+  });
+  fails(
+    () => f.loginCode("unknown", MANUAL_VALUE),
+    HttpStatus.NotFound,
+    LOGIN_NOT_FOUND,
+  );
+  fails(() => f.loginStatus("unknown"), HttpStatus.NotFound, LOGIN_NOT_FOUND);
+});
+
+test("OAuth commit-time name conflict survives pi-ai's error wrapper without storing another row", async (t) => {
+  const gate = gatedLogin();
+  const f = fixture({ oauthProviders: () => [gate.provider] });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const answer = await f.login(LOGIN_BODY);
+  f.create({ ...inputs[0], name: LOGIN_NAME });
+  gate.result.resolve(oauthCredential);
+  const status = await terminalStatus(f, answer.sessionId);
+  assert.equal(status.state, LoginSessionState.Failed);
+  assert.equal(status.failureReason, NAME_CONFLICT_CODE);
+  assert.equal(credentialCount(f), FIRST_REVISION);
+  noOAuthSecret([answer, status, f.logs]);
+});
+
+for (const type of ["manual_code", "text", "secret"] as const) {
+  test(`OAuth ${type} prompt waits for login_code, including unrelated pre-address text`, async (t) => {
+    const awaiting = Promise.withResolvers<void>();
+    const received = Promise.withResolvers<string>();
+    const provider = fakeProvider(async (interaction) => {
+      const pending = interaction.prompt({
+        type,
+        message: "Supply a value",
+        placeholder: "unrelated",
+      });
+      awaiting.resolve();
+      deviceAddress(interaction);
+      received.resolve(await pending);
+      return oauthCredential;
+    });
+    const f = fixture({ oauthProviders: () => [provider] });
+    t.after(async () => {
+      await f.component.stop();
+      f.store.close();
+    });
+    const answer = await f.login(LOGIN_BODY);
+    await awaiting.promise;
+    assert.equal(
+      f.loginStatus(answer.sessionId).state,
+      LoginSessionState.Pending,
+    );
+    assert.deepEqual(f.loginCode(answer.sessionId, MANUAL_VALUE), {
+      sessionId: answer.sessionId,
+    });
+    assert.equal(await received.promise, MANUAL_VALUE);
+    assert.equal(
+      (await terminalStatus(f, answer.sessionId)).state,
+      LoginSessionState.Completed,
+    );
+    noOAuthSecret([answer, f.loginStatus(answer.sessionId), f.logs]);
+  });
+}
+
+test("OAuth provider failure records a non-secret reason and no credential", async (t) => {
+  const gate = gatedLogin();
+  const f = fixture({ oauthProviders: () => [gate.provider] });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const answer = await f.login(LOGIN_BODY);
+  gate.result.reject(new Error(oauthCredential.access));
+  const status = await terminalStatus(f, answer.sessionId);
+  assert.equal(status.state, LoginSessionState.Failed);
+  assert.equal(status.failureReason, LOGIN_FAILED_MESSAGE);
+  assert.equal(credentialCount(f), NO_CREDENTIALS);
+  noOAuthSecret([answer, status, f.logs]);
+});
+
+test("OAuth expiry aborts an unanswered prompt and never writes credentials", async (t) => {
+  let now = CLOCK_START;
+  const entered = Promise.withResolvers<ProviderAuthInteraction>();
+  const provider = fakeProvider(async (interaction) => {
+    entered.resolve(interaction);
+    deviceAddress(interaction);
+    await interaction.prompt({ type: "manual_code", message: "Code" });
+    return oauthCredential;
+  });
+  const f = fixture({ oauthProviders: () => [provider], now: () => now });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const answer = await f.login(LOGIN_BODY);
+  now = answer.expiresAt;
+  fails(
+    () => f.loginStatus(answer.sessionId),
+    HttpStatus.NotFound,
+    LOGIN_NOT_FOUND,
+  );
+  fails(
+    () => f.loginCode(answer.sessionId, MANUAL_VALUE),
+    HttpStatus.NotFound,
+    LOGIN_NOT_FOUND,
+  );
+  assert.ok((await entered.promise).signal.aborted);
+  await setImmediate();
+  assert.equal(credentialCount(f), NO_CREDENTIALS);
+  noOAuthSecret(f.logs);
+});
+
+test("OAuth expiry timer cancels a pre-address wait without any status polling", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: CLOCK_START });
+  const entered = Promise.withResolvers<ProviderAuthInteraction>();
+  const provider = fakeProvider(async (interaction) => {
+    entered.resolve(interaction);
+    await interaction.prompt({ type: "manual_code", message: "Code" });
+    return oauthCredential;
+  });
+  const f = fixture({ oauthProviders: () => [provider] });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const pending = f.login(LOGIN_BODY);
+  const rejected = assert.rejects(
+    pending,
+    rejectsWith(HttpStatus.NotFound, LOGIN_NOT_FOUND),
+  );
+  const interaction = await entered.promise;
+  t.mock.timers.tick(SESSION_EXPIRY_MS);
+  await rejected;
+  assert.ok(interaction.signal.aborted);
+  assert.equal(credentialCount(f), NO_CREDENTIALS);
+});
+
+test("OAuth rechecks expiry on completion before a delayed expiry timer fires", async (t) => {
+  let now = CLOCK_START;
+  const gate = gatedLogin();
+  const f = fixture({ oauthProviders: () => [gate.provider], now: () => now });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const answer = await f.login(LOGIN_BODY);
+  now = answer.expiresAt;
+  gate.result.resolve(oauthCredential);
+  await setImmediate();
+  assert.ok((await gate.entered.promise).signal.aborted);
+  assert.equal(credentialCount(f), NO_CREDENTIALS);
+  assert.deepEqual(f.logs, []);
+  fails(
+    () => f.loginStatus(answer.sessionId),
+    HttpStatus.NotFound,
+    LOGIN_NOT_FOUND,
+  );
+});
+
+test("OAuth rejects an invalid returned secret without logging or storing it", async (t) => {
+  const gate = gatedLogin();
+  const f = fixture({ oauthProviders: () => [gate.provider] });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const answer = await f.login(LOGIN_BODY);
+  gate.result.resolve({ ...oauthCredential, expires: Number.NaN });
+  const status = await terminalStatus(f, answer.sessionId);
+  assert.equal(status.state, LoginSessionState.Failed);
+  assert.equal(status.failureReason, LOGIN_FAILED_MESSAGE);
+  assert.equal(credentialCount(f), NO_CREDENTIALS);
+  assert.deepEqual(f.logs, []);
+  noOAuthSecret([answer, status]);
+});
+
+test("OAuth a failed insert never completes the session or emits a success log", async (t) => {
+  const gate = gatedLogin();
+  const f = fixture({ oauthProviders: () => [gate.provider] });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  f.store.database.exec(
+    "CREATE TRIGGER refuse_login BEFORE INSERT ON credential BEGIN SELECT RAISE(ABORT, 'private-access-token'); END",
+  );
+  const answer = await f.login(LOGIN_BODY);
+  gate.result.resolve(oauthCredential);
+  const status = await terminalStatus(f, answer.sessionId);
+  assert.equal(status.state, LoginSessionState.Failed);
+  assert.equal(status.failureReason, LOGIN_FAILED_MESSAGE);
+  assert.equal(credentialCount(f), NO_CREDENTIALS);
+  assert.deepEqual(f.logs, []);
+  noOAuthSecret([answer, status]);
+});
+
+test("OAuth the enterprise-shaped prompt after an address still requires login_code", async (t) => {
+  const received = Promise.withResolvers<string>();
+  const provider = fakeProvider(async (interaction) => {
+    deviceAddress(interaction);
+    received.resolve(
+      await interaction.prompt({
+        type: "text",
+        message: "Another domain",
+        placeholder: COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER,
+      }),
+    );
+    return oauthCredential;
+  });
+  const f = fixture({ oauthProviders: () => [provider] });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const answer = await f.login(LOGIN_BODY);
+  assert.equal(
+    f.loginStatus(answer.sessionId).state,
+    LoginSessionState.Pending,
+  );
+  f.loginCode(answer.sessionId, MANUAL_VALUE);
+  assert.equal(await received.promise, MANUAL_VALUE);
+  assert.equal(
+    (await terminalStatus(f, answer.sessionId)).state,
+    LoginSessionState.Completed,
+  );
+});
+
+for (const shutdown of ["stop", "quiesce"] as const) {
+  test(`OAuth ${shutdown} aborts running work and refuses late persistence`, async (t) => {
+    const gate = gatedLogin();
+    const f = fixture({ oauthProviders: () => [gate.provider] });
+    t.after(async () => {
+      await f.component.stop();
+      f.store.close();
+    });
+    const answer = await f.login(LOGIN_BODY);
+    await f.component[shutdown]();
+    assert.ok((await gate.entered.promise).signal.aborted);
+    gate.result.resolve(oauthCredential);
+    const status = await terminalStatus(f, answer.sessionId);
+    await setImmediate();
+    assert.equal(status.state, LoginSessionState.Failed);
+    assert.equal(credentialCount(f), NO_CREDENTIALS);
+    await assert.rejects(f.login({ ...LOGIN_BODY, name: "after-stop" }));
+  });
+}
+
+test("OAuth waiting for an address observes caller cancellation", async (t) => {
+  const entered = Promise.withResolvers<ProviderAuthInteraction>();
+  const provider = fakeProvider(async (interaction) => {
+    entered.resolve(interaction);
+    await interaction.prompt({ type: "manual_code", message: "Code" });
+    return oauthCredential;
+  });
+  const f = fixture({ oauthProviders: () => [provider] });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const context = new CancellationContext();
+  f.caller.context = context;
+  const pending = f.login(LOGIN_BODY);
+  const rejected = assert.rejects(pending, (error) => error === context.err());
+  const interaction = await entered.promise;
+  context.cancel();
+  await rejected;
+  assert.ok(interaction.signal.aborted);
+  assert.equal(credentialCount(f), NO_CREDENTIALS);
+});
+
+test("OAuth pre-address failures preserve OperationError and sanitize arbitrary provider errors", async (t) => {
+  for (const original of [
+    new OperationError(
+      HttpStatus.Conflict,
+      NAME_CONFLICT_CODE,
+      "Credential name already exists.",
+    ),
+    new Error(oauthCredential.refresh),
+  ]) {
+    const provider = fakeProvider(async () => {
+      throw original;
+    });
+    const f = fixture({ oauthProviders: () => [provider] });
+    t.after(async () => {
+      await f.component.stop();
+      f.store.close();
+    });
+    await assert.rejects(f.login(LOGIN_BODY), (error) => {
+      if (original instanceof OperationError) assert.equal(error, original);
+      else {
+        assert.ok(error instanceof Error);
+        assert.equal(error.message, LOGIN_FAILED_MESSAGE);
+      }
+      noOAuthSecret(error);
+      return true;
+    });
+    assert.equal(credentialCount(f), NO_CREDENTIALS);
+  }
+});
+
+test("OAuth unsupported select options fail without an address or a credential", async (t) => {
+  const provider = fakeProvider(async (interaction) => {
+    await interaction.prompt({
+      type: "select",
+      message: "Mode",
+      options: [{ id: "unsupported", label: "Unsupported" }],
+    });
+    return oauthCredential;
+  });
+  const f = fixture({ oauthProviders: () => [provider] });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  await assert.rejects(f.login(LOGIN_BODY), { message: LOGIN_FAILED_MESSAGE });
+  assert.equal(credentialCount(f), NO_CREDENTIALS);
+});
+
+test("OAuth auth_url records a browser address with a null code", async (t) => {
+  const gate = Promise.withResolvers<OAuthCredential>();
+  const provider = fakeProvider(async (interaction) => {
+    interaction.notify({ type: "auth_url", url: LOGIN_ADDRESS });
+    return await gate.promise;
+  });
+  const f = fixture({ oauthProviders: () => [provider] });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const answer = await f.login(LOGIN_BODY);
+  assert.equal(answer.address, LOGIN_ADDRESS);
+  assert.equal(answer.code, null);
+  assert.equal(
+    f.loginStatus(answer.sessionId).state,
+    LoginSessionState.Pending,
+  );
+});
+
 test("lifecycle reports health and joins cancellation", async () => {
   const f = fixture();
   try {
@@ -751,6 +1351,7 @@ test("lifecycle reports health and joins cancellation", async () => {
     );
     assert.ok((await f.component.start()) instanceof Error);
     const other = new CustodyComponent({
+      store: f.store,
       envelopeKey: key,
       logger: { info() {} } as unknown as Logger,
       agentProvidersDependentOn: () => [],

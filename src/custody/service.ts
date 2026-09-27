@@ -1,4 +1,6 @@
 import type { Logger } from "pino";
+import type { Provider } from "@earendil-works/pi-ai";
+import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import {
   background,
   CancellationContext,
@@ -16,7 +18,7 @@ import {
   type Healthcheck,
   type Service,
 } from "../kernel/service.ts";
-import type { Transaction } from "../kernel/store.ts";
+import type { Store, Transaction } from "../kernel/store.ts";
 import {
   credentialCreateSchema,
   custodyOperations,
@@ -40,7 +42,23 @@ import {
   validateNameForm,
 } from "./platforms.ts";
 
+import {
+  loginMode,
+  loginNotFound,
+  LOGIN_VALUE_NOT_AWAITED,
+  OAuthLogin,
+  type OAuthSecret,
+} from "./login.ts";
+import {
+  LoginSessionStore,
+  LoginSessionState,
+  type LoginSession,
+} from "./sessions.ts";
+
 export interface Dependencies {
+  store: Store;
+  oauthProviders?: () => readonly Provider[];
+  now?: () => number;
   envelopeKey: Buffer;
   logger: Logger;
   health?: HealthRegistry;
@@ -183,6 +201,12 @@ export class CustodyComponent implements Service {
   private stopTask?: Promise<Error | null>;
   private readonly quiesceTask = Promise.resolve(null);
   private started = false;
+  private readonly store: Store;
+  private readonly sessions = new LoginSessionStore();
+  private readonly logins = new Map<string, OAuthLogin>();
+  private readonly oauthProviders: () => readonly Provider[];
+  private readonly now: () => number;
+  private acceptingLogins = true;
   private readonly envelopeKey: Buffer;
   private readonly logger: Logger;
   private readonly agentProvidersDependentOn: AgentProvidersDependentOnFn;
@@ -190,6 +214,10 @@ export class CustodyComponent implements Service {
   private readonly enablementsDependentOnModel: EnablementsDependentOnModelFn;
 
   constructor(dependencies: Dependencies) {
+    this.store = dependencies.store;
+    this.oauthProviders =
+      dependencies.oauthProviders ?? (() => [githubCopilotProvider()]);
+    this.now = dependencies.now ?? Date.now;
     this.envelopeKey = dependencies.envelopeKey;
     this.logger = dependencies.logger;
     this.agentProvidersDependentOn = dependencies.agentProvidersDependentOn;
@@ -218,6 +246,15 @@ export class CustodyComponent implements Service {
     );
     registry.register(custodyOperations.revoke, (input, caller) =>
       this.revoke(input, caller),
+    );
+    registry.register(custodyOperations.login, (input, caller) =>
+      this.login(input, caller),
+    );
+    registry.register(custodyOperations.login_code, (input, caller) =>
+      this.loginCode(input, caller),
+    );
+    registry.register(custodyOperations.login_status, (input, caller) =>
+      this.loginStatus(input, caller),
     );
   }
 
@@ -581,6 +618,166 @@ export class CustodyComponent implements Service {
     });
   }
 
+  private requireAvailableName(tx: Transaction, name: string): void {
+    const existing = rowsForName(tx, name);
+    if (existing.length !== NO_ROWS)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.Conflict,
+        "Credential name already exists.",
+        { id: existing[0]!.id },
+      );
+  }
+
+  private completeLogin(
+    session: LoginSession,
+    flow: OAuthLogin,
+    secret: OAuthSecret,
+  ): void {
+    const id = this.store.transaction((tx) => {
+      flow.requirePending();
+      this.requireAvailableName(tx, session.credentialName);
+      const id = createIdentity(CREDENTIAL_PREFIX);
+      const { nonce, ciphertext } = encrypt(
+        this.envelopeKey,
+        id,
+        session.platform,
+        secret,
+      );
+      tx.database
+        .prepare(
+          "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL)",
+        )
+        .run(
+          id,
+          session.credentialName,
+          session.platform,
+          FIRST_REVISION,
+          nonce,
+          ciphertext,
+          this.now(),
+        );
+      return id;
+    });
+    this.sessions.complete(session.id);
+    this.logger.info(
+      { credentialId: id, humanIdentity: session.humanIdentity },
+      "credential login completed",
+    );
+  }
+
+  private async login(
+    input: typeof custodyOperations.login.input._output,
+    caller: CallerContext,
+  ): Promise<typeof custodyOperations.login.output._output> {
+    if (!this.acceptingLogins)
+      throw new Diagnostic(
+        CustodyErrorCode.Stopped,
+        "custody: login is stopped.",
+      );
+    const { platform, name, mode: requested } = input.body;
+    if (!Object.values(Platform).some((value) => value === platform))
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        CustodyErrorCode.UnsupportedPlatform,
+        "Unsupported platform.",
+      );
+    const supported = platform as Platform;
+    if (!OAUTH_PLATFORMS.includes(supported))
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        CustodyErrorCode.UnsupportedEntry,
+        "Unsupported credential entry.",
+      );
+    if (!validateNameForm(name) || name === RESERVED_NAME_LOGIN)
+      throw invalidInput();
+    const mode = loginMode(supported, requested);
+    this.store.transaction((tx) => this.requireAvailableName(tx, name));
+    if (caller.identity?.kind !== IdentityKind.Human) throw invalidInput();
+    const session = this.sessions.start(
+      platform,
+      mode,
+      caller.identity.accountId,
+      name,
+      this.now(),
+    );
+    const flow = new OAuthLogin(session, this.sessions, this.now);
+    this.logins.set(session.id, flow);
+    const unsubscribe = caller.context.onCancel(() => flow.abort());
+    void flow
+      .run(this.oauthProviders, (secret) =>
+        this.completeLogin(session, flow, secret),
+      )
+      .then(() => this.logins.delete(session.id));
+    try {
+      await flow.ready.promise;
+      const cancelled = caller.context.err();
+      if (cancelled) throw cancelled;
+      if (
+        session.state === LoginSessionState.Failed ||
+        session.state === LoginSessionState.Expired ||
+        session.address === null
+      )
+        throw flow.failure;
+      return caller.commit(() => ({
+        sessionId: session.id,
+        address: session.address!,
+        code: session.code,
+        expiresAt: session.expiresAt,
+      }));
+    } finally {
+      unsubscribe();
+    }
+  }
+
+  private loginSession(id: string): LoginSession {
+    const session = this.sessions.get(id);
+    if (!session || session.state === LoginSessionState.Expired)
+      throw loginNotFound();
+    if (session.expiresAt <= this.now()) {
+      this.logins.get(id)?.expire();
+      throw loginNotFound();
+    }
+    return session;
+  }
+
+  private loginCode(
+    input: typeof custodyOperations.login_code.input._output,
+    caller: CallerContext,
+  ): typeof custodyOperations.login_code.output._output {
+    const session = this.loginSession(input.params.sessionId);
+    return caller.commit(() => {
+      const flow = this.logins.get(session.id);
+      if (!flow)
+        throw new OperationError(
+          HttpStatus.Conflict,
+          LOGIN_VALUE_NOT_AWAITED,
+          "No login value is awaited.",
+        );
+      flow.supply(input.body.value);
+      return { sessionId: session.id };
+    });
+  }
+
+  private loginStatus(
+    input: typeof custodyOperations.login_status.input._output,
+    caller: CallerContext,
+  ): typeof custodyOperations.login_status.output._output {
+    const session = this.loginSession(input.params.sessionId);
+    return caller.commit(() => ({
+      sessionId: session.id,
+      state: session.state,
+      lastMessage: session.lastMessage,
+      failureReason: session.failureReason,
+    }));
+  }
+
+  private abortLogins(): void {
+    this.acceptingLogins = false;
+    for (const flow of this.logins.values()) flow.abort();
+    this.logins.clear();
+  }
+
   start(): Promise<Error | null> {
     if (this.shutdown.err())
       return Promise.resolve(
@@ -594,9 +791,11 @@ export class CustodyComponent implements Service {
     return this.startTask;
   }
   quiesce(): Promise<Error | null> {
+    this.abortLogins();
     return this.quiesceTask;
   }
   stop(): Promise<Error | null> {
+    this.abortLogins();
     this.shutdown.cancel();
     this.started = false;
     this.stopTask ??= Promise.resolve(null);
