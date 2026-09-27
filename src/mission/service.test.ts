@@ -32,6 +32,7 @@ import {
   RevisionWrite,
   TaskChange,
   nodeChangeSchema,
+  edgeSchema,
   nodeSchema,
   revisionSchema,
   pageOf,
@@ -538,6 +539,7 @@ function nodeFixture(t: TestContext) {
     objective,
     node,
     setState,
+    snapshot,
     refuses,
   };
 }
@@ -1301,6 +1303,533 @@ test("node reads refuse missing identities and malformed cursors", (t) => {
     }).success,
     false,
   );
+});
+
+const DependencyOperation = {
+  Add: "dependency.add",
+  Remove: "dependency.remove",
+} as const;
+type DependencyOperation =
+  (typeof DependencyOperation)[keyof typeof DependencyOperation];
+const EndpointReason = {
+  Task: "task_endpoint",
+  CrossMission: "cross_mission",
+} as const;
+const CURSOR_ENCODING = "base64url";
+const REASON_FIELD = "reason";
+
+function dependencyFixture(t: TestContext) {
+  const f = nodeFixture(t);
+  f.store.database.exec(
+    "CREATE TABLE test_mission_job (node_id TEXT PRIMARY KEY)",
+  );
+  const insert = f.queue.insert;
+  const remove = f.queue.delete;
+  f.queue.insert = (tx, nodeId, projectId, priority) => {
+    assert.equal(tx.database, f.store.database);
+    assert.equal(readNode(tx, nodeId)?.state, NodeState.Available);
+    tx.database.prepare("INSERT INTO test_mission_job VALUES (?)").run(nodeId);
+    insert(tx, nodeId, projectId, priority);
+  };
+  f.queue.delete = (tx, nodeId) => {
+    assert.equal(tx.database, f.store.database);
+    assert.ok(readNode(tx, nodeId));
+    tx.database
+      .prepare("DELETE FROM test_mission_job WHERE node_id = ?")
+      .run(nodeId);
+    remove(tx, nodeId);
+  };
+  function edit(
+    operation: DependencyOperation,
+    nodeId: string,
+    dependsOnId: string,
+    expectedMissionVersion = f.version(),
+    reason = REASON,
+  ) {
+    const declaration = missionOperations[operation];
+    const input = declaration.input.parse({
+      params: { nodeId, dependsOnId },
+      query: {},
+      body: { expectedMissionVersion, reason },
+    });
+    const commits = f.commits();
+    try {
+      return declaration.output.parse(
+        f.registry.get(declaration.id).handler(input, f.caller),
+      );
+    } finally {
+      assert.equal(f.commits(), commits + ONE_COMMIT);
+    }
+  }
+  function jobs() {
+    return f.store.database
+      .prepare("SELECT node_id FROM test_mission_job ORDER BY node_id")
+      .all();
+  }
+  function refuses(
+    operation: DependencyOperation,
+    nodeId: string,
+    dependsOnId: string,
+    code: string,
+    details?: unknown,
+    expectedMissionVersion = f.version(),
+    status: number = HttpStatus.Conflict,
+    reason = REASON,
+  ) {
+    const before = { ...f.snapshot(), jobs: jobs() };
+    assert.throws(
+      () =>
+        edit(operation, nodeId, dependsOnId, expectedMissionVersion, reason),
+      (error) => {
+        assert.ok(error instanceof OperationError);
+        assert.equal(error.status, status);
+        assert.equal(error.code, code);
+        if (details !== undefined) assert.deepEqual(error.details, details);
+        return true;
+      },
+    );
+    assert.deepEqual({ ...f.snapshot(), jobs: jobs() }, before);
+  }
+  function edges(query: object = {}, missionId = f.missionId) {
+    const operation = missionOperations["edge.list"];
+    const input = operation.input.parse({
+      params: { missionId },
+      query,
+      body: null,
+    });
+    const commits = f.commits();
+    const result = pageOf(edgeSchema).parse(
+      f.registry.get(operation.id).handler(input, f.caller),
+    );
+    assert.equal(f.commits(), commits + ONE_COMMIT);
+    return result;
+  }
+  function pair() {
+    const nodeId = f.objective();
+    const dependsOnId = f.create({ ...f.body(), filename: OTHER_FILENAME })
+      .revisions[ZERO]!.nodeId;
+    f.calls.length = ZERO;
+    return { nodeId, dependsOnId };
+  }
+  return { ...f, edit, refuses, jobs, edges, pair };
+}
+
+function emptyChange(missionVersion: number): NodeChange {
+  return {
+    missionVersion,
+    revisions: [],
+    retiredNodeIds: [],
+    addedEdges: [],
+    removedEdges: [],
+    openAttemptsUnchanged: [],
+  };
+}
+
+test("dependency edits reroute objectives and jobs atomically without revisions or actor writes", (t) => {
+  const f = dependencyFixture(t);
+  const { nodeId, dependsOnId } = f.pair();
+  const before = f.snapshot();
+  const version = f.version();
+  const edge = { kind: EdgeKind.Dependency, dependentId: nodeId, dependsOnId };
+  assert.deepEqual(f.edit(DependencyOperation.Add, nodeId, dependsOnId), {
+    ...emptyChange(version + ONE),
+    addedEdges: [edge],
+  });
+  assert.equal(f.node(nodeId)?.state, NodeState.Pending);
+  assert.equal(
+    f.jobs().some((job) => job.node_id === nodeId),
+    false,
+  );
+  assert.deepEqual(f.calls, [{ action: QueueAction.Delete, nodeId }]);
+  assert.deepEqual(f.snapshot().revisions, before.revisions);
+  f.calls.length = ZERO;
+  assert.deepEqual(f.edit(DependencyOperation.Remove, nodeId, dependsOnId), {
+    ...emptyChange(version + TWO),
+    removedEdges: [edge],
+  });
+  assert.equal(f.node(nodeId)?.state, NodeState.Available);
+  assert.equal(
+    f.jobs().some((job) => job.node_id === nodeId),
+    true,
+  );
+  assert.deepEqual(f.calls, [
+    {
+      action: QueueAction.Insert,
+      nodeId,
+      projectId: PROJECT_ID,
+      priority: ZERO,
+    },
+  ]);
+  assert.deepEqual(f.snapshot().revisions, before.revisions);
+  assert.deepEqual(f.snapshot().dependencies, []);
+});
+
+test("dependency addition rejects direct, self and inherited ancestor closure cycles without writes", (t) => {
+  const f = dependencyFixture(t);
+  const { nodeId, dependsOnId } = f.pair();
+  f.edit(DependencyOperation.Add, nodeId, dependsOnId);
+  f.refuses(
+    DependencyOperation.Add,
+    dependsOnId,
+    nodeId,
+    MissionErrorCode.Cycle,
+  );
+  f.refuses(DependencyOperation.Add, nodeId, nodeId, MissionErrorCode.Cycle);
+  f.refuses(
+    DependencyOperation.Add,
+    f.node(nodeId)!.parent_id!,
+    nodeId,
+    MissionErrorCode.Cycle,
+  );
+});
+
+test("dependency addition validates task endpoints in either position and cross-mission endpoints", (t) => {
+  const f = dependencyFixture(t);
+  const { nodeId, dependsOnId } = f.pair();
+  const task = f.create(f.body(NodeKind.Task, nodeId)).revisions[ZERO]!.tasks![
+    ZERO
+  ]!.id;
+  for (const [dependent, target] of [
+    [task, dependsOnId],
+    [nodeId, task],
+  ]) {
+    f.refuses(
+      DependencyOperation.Add,
+      dependent!,
+      target!,
+      MissionErrorCode.EndpointInvalid,
+      {
+        reason: EndpointReason.Task,
+        nodeId: dependent,
+        dependsOnId: target,
+      },
+    );
+  }
+  f.store.transaction((tx) =>
+    f.mission.createMission(tx, UNKNOWN_PROJECT_ID, HUMAN_ACTOR),
+  );
+  const otherMission = f.invoke(UNKNOWN_PROJECT_ID);
+  const other = f.create(
+    { ...f.body(), expectedMissionVersion: otherMission.version },
+    otherMission.id,
+  ).revisions[ZERO]!.nodeId;
+  f.refuses(
+    DependencyOperation.Add,
+    nodeId,
+    other,
+    MissionErrorCode.EndpointInvalid,
+    {
+      reason: EndpointReason.CrossMission,
+      nodeId,
+      dependsOnId: other,
+    },
+  );
+});
+
+for (const operation of Object.values(DependencyOperation)) {
+  for (const state of [NodeState.Completed, NodeState.Discarded]) {
+    test(`${operation} refuses terminal dependent ${state} before no-op`, (t) => {
+      const f = dependencyFixture(t);
+      const { nodeId, dependsOnId } = f.pair();
+      f.setState(nodeId, state);
+      f.refuses(operation, nodeId, dependsOnId, MissionErrorCode.Terminal, {
+        nodeId,
+      });
+    });
+  }
+  test(`${operation} checks existence, retirement, version, terminal state and reason in order`, (t) => {
+    const f = dependencyFixture(t);
+    const { nodeId, dependsOnId } = f.pair();
+    f.refuses(
+      operation,
+      UNKNOWN_NODE_ID,
+      dependsOnId,
+      MissionErrorCode.NodeNotFound,
+      undefined,
+      FIRST_REVISION,
+      HttpStatus.NotFound,
+    );
+    f.refuses(
+      operation,
+      nodeId,
+      dependsOnId,
+      MissionErrorCode.ContentInvalid,
+      { field: REASON_FIELD },
+      f.version(),
+      HttpStatus.BadRequest,
+      NODE_TEXT.repeat(TEXT_MAX_BYTES),
+    );
+    f.setState(nodeId, NodeState.Completed);
+    f.refuses(
+      operation,
+      nodeId,
+      dependsOnId,
+      MissionErrorCode.VersionConflict,
+      { current: f.version() },
+      FIRST_REVISION,
+    );
+    f.store.database
+      .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+      .run(RETIRED_AT, nodeId);
+    f.refuses(
+      operation,
+      nodeId,
+      dependsOnId,
+      MissionErrorCode.Retired,
+      { nodeId },
+      FIRST_REVISION,
+    );
+  });
+}
+
+for (const operation of Object.values(DependencyOperation)) {
+  test(`${operation} rolls back graph, routing, jobs and version when queue reconciliation fails`, (t) => {
+    const f = dependencyFixture(t);
+    const { nodeId, dependsOnId } = f.pair();
+    if (operation === DependencyOperation.Remove)
+      f.edit(DependencyOperation.Add, nodeId, dependsOnId);
+    const failure = new Error(UNEXPECTED_COLLABORATION);
+    f.queue.delete = (tx, id) => {
+      assert.equal(id, nodeId);
+      assert.equal(readNode(tx, id)?.state, NodeState.Pending);
+      tx.database
+        .prepare("DELETE FROM test_mission_job WHERE node_id = ?")
+        .run(id);
+      throw failure;
+    };
+    f.queue.insert = (tx, id) => {
+      assert.equal(id, nodeId);
+      assert.equal(readNode(tx, id)?.state, NodeState.Available);
+      tx.database.prepare("INSERT INTO test_mission_job VALUES (?)").run(id);
+      throw failure;
+    };
+    const before = { ...f.snapshot(), jobs: f.jobs() };
+    assert.throws(
+      () => f.edit(operation, nodeId, dependsOnId),
+      (error) => error === failure,
+    );
+    assert.deepEqual({ ...f.snapshot(), jobs: f.jobs() }, before);
+  });
+}
+
+test("dependency.add checks both endpoints exist before retirement and target retirement before version", (t) => {
+  const f = dependencyFixture(t);
+  const { nodeId, dependsOnId } = f.pair();
+  f.store.database
+    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+    .run(RETIRED_AT, nodeId);
+  f.refuses(
+    DependencyOperation.Add,
+    nodeId,
+    UNKNOWN_NODE_ID,
+    MissionErrorCode.NodeNotFound,
+    undefined,
+    FIRST_REVISION,
+    HttpStatus.NotFound,
+  );
+  f.store.database
+    .prepare("UPDATE mission_node SET retired_at = NULL WHERE id = ?")
+    .run(nodeId);
+  f.store.database
+    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+    .run(RETIRED_AT, dependsOnId);
+  f.refuses(
+    DependencyOperation.Add,
+    nodeId,
+    dependsOnId,
+    MissionErrorCode.Retired,
+    { nodeId: dependsOnId },
+    FIRST_REVISION,
+  );
+});
+
+test("dependency duplicate addition and absent removal do not write, increment or call the queue", (t) => {
+  const f = dependencyFixture(t);
+  const { nodeId, dependsOnId } = f.pair();
+  f.edit(DependencyOperation.Add, nodeId, dependsOnId);
+  f.calls.length = ZERO;
+  const before = { ...f.snapshot(), jobs: f.jobs() };
+  const changes = f.store.database.prepare("SELECT total_changes() AS count");
+  const writes = changes.get()?.count;
+  const version = f.version();
+  assert.deepEqual(
+    f.edit(DependencyOperation.Add, nodeId, dependsOnId),
+    emptyChange(version),
+  );
+  assert.deepEqual(
+    f.edit(DependencyOperation.Remove, nodeId, UNKNOWN_NODE_ID),
+    emptyChange(version),
+  );
+  assert.deepEqual({ ...f.snapshot(), jobs: f.jobs() }, before);
+  assert.equal(changes.get()?.count, writes);
+  f.refuses(
+    DependencyOperation.Add,
+    nodeId,
+    dependsOnId,
+    MissionErrorCode.ContentInvalid,
+    { field: REASON_FIELD },
+    version,
+    HttpStatus.BadRequest,
+    NODE_TEXT.repeat(TEXT_MAX_BYTES),
+  );
+  f.refuses(
+    DependencyOperation.Remove,
+    nodeId,
+    UNKNOWN_NODE_ID,
+    MissionErrorCode.ContentInvalid,
+    { field: REASON_FIELD },
+    version,
+    HttpStatus.BadRequest,
+    NODE_TEXT.repeat(TEXT_MAX_BYTES),
+  );
+});
+
+test("dependency removal does not validate endpoint pairs or target retirement", (t) => {
+  const f = dependencyFixture(t);
+  const { nodeId, dependsOnId } = f.pair();
+  const task = f.create(f.body(NodeKind.Task, nodeId)).revisions[ZERO]!.tasks![
+    ZERO
+  ]!.id;
+  assert.deepEqual(
+    f.edit(DependencyOperation.Remove, task, nodeId),
+    emptyChange(f.version()),
+  );
+  f.edit(DependencyOperation.Add, nodeId, dependsOnId);
+  f.store.database
+    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+    .run(RETIRED_AT, dependsOnId);
+  assert.deepEqual(
+    f.edit(DependencyOperation.Remove, nodeId, dependsOnId).removedEdges,
+    [{ kind: EdgeKind.Dependency, dependentId: nodeId, dependsOnId }],
+  );
+});
+
+test("dependency addition on initiative reroutes every child objective and removes their jobs", (t) => {
+  const f = dependencyFixture(t);
+  const { nodeId, dependsOnId } = f.pair();
+  const parentId = f.node(nodeId)!.parent_id!;
+  const other = f.create({
+    ...f.body(NodeKind.Objective, parentId),
+    filename: NEW_FILENAME,
+  }).revisions[ZERO]!.nodeId;
+  f.calls.length = ZERO;
+  f.edit(DependencyOperation.Add, parentId, dependsOnId);
+  assert.equal(f.node(parentId)?.state, NodeState.Pending);
+  for (const child of [nodeId, other]) {
+    assert.equal(f.node(child)?.state, NodeState.Pending);
+    assert.equal(
+      f.jobs().some((job) => job.node_id === child),
+      false,
+    );
+  }
+  assert.deepEqual(
+    f.calls.map((call) => call.nodeId).sort(),
+    [nodeId, other].sort(),
+  );
+  assert.ok(f.calls.every((call) => call.action === QueueAction.Delete));
+});
+
+test("dependency removal only releases nodes when all remaining dependencies are completed", (t) => {
+  const f = dependencyFixture(t);
+  const { nodeId, dependsOnId } = f.pair();
+  const other = f.create({ ...f.body(), filename: NEW_FILENAME }).revisions[
+    ZERO
+  ]!.nodeId;
+  f.edit(DependencyOperation.Add, nodeId, dependsOnId);
+  f.edit(DependencyOperation.Add, nodeId, other);
+  f.calls.length = ZERO;
+  f.edit(DependencyOperation.Remove, nodeId, dependsOnId);
+  assert.equal(f.node(nodeId)?.state, NodeState.Pending);
+  assert.deepEqual(f.calls, []);
+  f.edit(DependencyOperation.Add, nodeId, dependsOnId);
+  f.setState(other, NodeState.Completed);
+  f.edit(DependencyOperation.Remove, nodeId, dependsOnId);
+  assert.equal(f.node(nodeId)?.state, NodeState.Available);
+  assert.equal(
+    f.jobs().some((job) => job.node_id === nodeId),
+    true,
+  );
+});
+
+test("edge.list lists only current incident edges, filters kinds and paginates descending keys", (t) => {
+  const f = dependencyFixture(t);
+  const { nodeId, dependsOnId } = f.pair();
+  const parentId = f.node(nodeId)!.parent_id!;
+  const task = f.create(f.body(NodeKind.Task, nodeId)).revisions[ZERO]!.tasks![
+    ZERO
+  ]!.id;
+  f.edit(DependencyOperation.Add, nodeId, dependsOnId);
+  const dependency = {
+    kind: EdgeKind.Dependency,
+    dependentId: nodeId,
+    dependsOnId,
+  };
+  const containment = [
+    { kind: EdgeKind.Containment, parentId, childId: nodeId },
+    { kind: EdgeKind.Containment, parentId: nodeId, childId: task },
+  ].sort((a, b) => (a.parentId > b.parentId ? -ONE : ONE));
+  const expected = [dependency, ...containment];
+  assert.deepEqual(f.edges(), { items: expected, nextCursor: null });
+  assert.deepEqual(f.edges({ kind: EdgeKind.Dependency }).items, [dependency]);
+  assert.deepEqual(f.edges({ kind: EdgeKind.Containment }).items, containment);
+  assert.deepEqual(f.edges({ nodeId }).items, expected);
+  assert.deepEqual(f.edges({ nodeId: dependsOnId }).items, [dependency]);
+  assert.deepEqual(
+    f.edges({ kind: EdgeKind.Containment, nodeId: dependsOnId }).items,
+    [],
+  );
+  assert.deepEqual(f.edges({ nodeId: UNKNOWN_NODE_ID }).items, []);
+  let cursor: string | undefined;
+  for (const edge of expected) {
+    const page = f.edges({ limit: ONE, cursor });
+    assert.deepEqual(page.items, [edge]);
+    cursor = page.nextCursor ?? undefined;
+  }
+  assert.equal(cursor, undefined);
+  f.store.database
+    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+    .run(RETIRED_AT, nodeId);
+  assert.deepEqual(f.edges().items, []);
+});
+
+test("edge.list refuses unknown missions and malformed cursor encodings, kinds and node identities", (t) => {
+  const f = dependencyFixture(t);
+  assert.throws(
+    () => f.edges({}, UNKNOWN_MISSION_ID),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.NotFound);
+      assert.equal(error.code, MissionErrorCode.MissionNotFound);
+      return true;
+    },
+  );
+  const cursors = [
+    "%%%",
+    "",
+    Buffer.from(`unknown|${UNKNOWN_NODE_ID}|${UNKNOWN_NODE_ID}`).toString(
+      CURSOR_ENCODING,
+    ),
+    Buffer.from(`${EdgeKind.Dependency}|bad|${UNKNOWN_NODE_ID}`).toString(
+      CURSOR_ENCODING,
+    ),
+    Buffer.from(`${EdgeKind.Dependency}|${UNKNOWN_NODE_ID}|bad`).toString(
+      CURSOR_ENCODING,
+    ),
+    Buffer.from(
+      `${EdgeKind.Dependency}|${UNKNOWN_NODE_ID}|${UNKNOWN_NODE_ID}|extra`,
+    ).toString(CURSOR_ENCODING),
+  ];
+  for (const cursor of cursors) {
+    assert.throws(
+      () => f.edges({ cursor }),
+      (error) => {
+        assert.ok(error instanceof OperationError);
+        assert.equal(error.status, HttpStatus.BadRequest);
+        assert.equal(error.code, MissionErrorCode.CursorInvalid);
+        return true;
+      },
+    );
+  }
 });
 
 test("MissionService refuses to restart after stop", async () => {

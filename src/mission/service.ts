@@ -26,6 +26,8 @@ import {
   type MissionCollaborations,
   type WorkQueue,
 } from "./contract.ts";
+import { addDependency, removeDependency } from "./dependency.ts";
+import { edgeCursor, edgePage } from "./edge-read.ts";
 import { createNode } from "./node-create.ts";
 import {
   getNode,
@@ -80,6 +82,53 @@ export class MissionService implements Service, MissionCollaborations {
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["edge.list"],
+      ({ params, query }, caller) =>
+        caller.commit((tx) =>
+          edgePage(
+            tx,
+            params.missionId,
+            {
+              kind: query.kind,
+              nodeId: query.nodeId,
+              after:
+                query.cursor === undefined
+                  ? undefined
+                  : edgeCursor(query.cursor),
+            },
+            query.limit,
+          ),
+        ),
+    );
+    registry.register(
+      missionOperations["dependency.add"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) =>
+          addDependency(
+            tx,
+            params.nodeId,
+            params.dependsOnId,
+            body,
+            this.dependencies.workQueue,
+            this.dependencies.config.textMaxBytes,
+          ),
+        ),
+    );
+    registry.register(
+      missionOperations["dependency.remove"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) =>
+          removeDependency(
+            tx,
+            params.nodeId,
+            params.dependsOnId,
+            body,
+            this.dependencies.workQueue,
+            this.dependencies.config.textMaxBytes,
+          ),
+        ),
+    );
     registry.register(
       missionOperations["node.list"],
       ({ params, query }, caller) => {

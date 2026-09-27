@@ -4,6 +4,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  EdgeKind,
   MISSION_IDENTITY_PREFIX,
   MISSION_INITIAL_VERSION,
   MissionErrorCode,
@@ -330,6 +331,101 @@ export function readDependencies(
     ORDER BY d.dependent_id, d.depends_on_id`,
     )
     .all(missionId) as DepEdge[];
+}
+
+export interface EdgeListFilter {
+  kind?: EdgeKind;
+  nodeId?: string;
+  after?: string;
+}
+
+export interface EdgeRow {
+  kind: EdgeKind;
+  firstId: string;
+  secondId: string;
+  key: string;
+}
+
+export function listEdges(
+  tx: Transaction,
+  missionId: string,
+  filter: EdgeListFilter,
+  count: number,
+): EdgeRow[] {
+  return tx.database
+    .prepare(
+      `WITH edges AS (
+      SELECT ? AS kind, parent.id AS firstId, child.id AS secondId
+      FROM mission_node child JOIN mission_node parent ON parent.id = child.parent_id
+      WHERE child.mission_id = ? AND child.retired_at IS NULL AND parent.retired_at IS NULL
+      UNION ALL
+      SELECT ?, d.dependent_id, d.depends_on_id
+      FROM mission_dependency d
+      JOIN mission_node source ON source.id = d.dependent_id
+      JOIN mission_node target ON target.id = d.depends_on_id
+      WHERE d.mission_id = ? AND source.retired_at IS NULL AND target.retired_at IS NULL
+    ), keyed AS (
+      SELECT *, kind || '|' || firstId || '|' || secondId AS key FROM edges
+    )
+    SELECT * FROM keyed
+    WHERE (? IS NULL OR kind = ?)
+      AND (? IS NULL OR firstId = ? OR secondId = ?)
+      AND (? IS NULL OR key < ?)
+    ORDER BY key DESC LIMIT ?`,
+    )
+    .all(
+      EdgeKind.Containment,
+      missionId,
+      EdgeKind.Dependency,
+      missionId,
+      filter.kind ?? null,
+      filter.kind ?? null,
+      filter.nodeId ?? null,
+      filter.nodeId ?? null,
+      filter.nodeId ?? null,
+      filter.after ?? null,
+      filter.after ?? null,
+      count,
+    ) as unknown as EdgeRow[];
+}
+
+export function hasDependency(
+  tx: Transaction,
+  nodeId: string,
+  dependsOnId: string,
+): boolean {
+  return (
+    tx.database
+      .prepare(
+        "SELECT dependent_id FROM mission_dependency WHERE dependent_id = ? AND depends_on_id = ?",
+      )
+      .get(nodeId, dependsOnId) !== undefined
+  );
+}
+
+export function insertDependency(
+  tx: Transaction,
+  missionId: string,
+  nodeId: string,
+  dependsOnId: string,
+): void {
+  tx.database
+    .prepare(
+      "INSERT INTO mission_dependency (mission_id, dependent_id, depends_on_id) VALUES (?, ?, ?)",
+    )
+    .run(missionId, nodeId, dependsOnId);
+}
+
+export function deleteDependency(
+  tx: Transaction,
+  nodeId: string,
+  dependsOnId: string,
+): void {
+  tx.database
+    .prepare(
+      "DELETE FROM mission_dependency WHERE dependent_id = ? AND depends_on_id = ?",
+    )
+    .run(nodeId, dependsOnId);
 }
 
 export function readNodeState(tx: Transaction, nodeId: string): string | null {

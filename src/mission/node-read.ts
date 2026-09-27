@@ -38,7 +38,7 @@ function notFound(code: string): never {
   );
 }
 
-function invalidCursor(): never {
+export function invalidCursor(): never {
   throw new OperationError(
     HttpStatus.BadRequest,
     MissionErrorCode.CursorInvalid,
@@ -46,14 +46,14 @@ function invalidCursor(): never {
   );
 }
 
-function decode(cursor: string): string {
+export function decode(cursor: string): string {
   const value = Buffer.from(cursor, CURSOR_ENCODING).toString(TEXT_ENCODING);
   if (Buffer.from(value, TEXT_ENCODING).toString(CURSOR_ENCODING) !== cursor)
     invalidCursor();
   return value;
 }
 
-function encode(value: string): string {
+export function encode(value: string): string {
   return Buffer.from(value, TEXT_ENCODING).toString(CURSOR_ENCODING);
 }
 

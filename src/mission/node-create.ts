@@ -21,7 +21,6 @@ import {
   TaskChange,
   type Content,
   type HumanActor,
-  type Mission,
   type MissionBindings,
   type NodeChange,
   type NodeCreate,
@@ -37,10 +36,10 @@ import {
   insertNode,
   insertRevision,
   readCurrentRevision,
-  readMission,
   readNode,
   readRevision,
 } from "./store.ts";
+import { requireMission } from "./write.ts";
 
 const FIRST_REVISION = 1;
 const REVISION_INCREMENT = 1;
@@ -49,28 +48,6 @@ const Field = {
   ExpectedParentRevision: "expectedParentRevision",
   Reason: "reason",
 } as const;
-
-function requireMission(
-  tx: Transaction,
-  missionId: string,
-  expected: number,
-): Mission {
-  const mission = readMission(tx, missionId);
-  if (!mission)
-    throw new OperationError(
-      HttpStatus.NotFound,
-      MissionErrorCode.MissionNotFound,
-      "Mission not found.",
-    );
-  if (mission.version !== expected)
-    throw new OperationError(
-      HttpStatus.Conflict,
-      MissionErrorCode.VersionConflict,
-      "Mission version changed.",
-      { current: mission.version },
-    );
-  return mission;
-}
 
 function invalidField(field: string): never {
   throw new OperationError(

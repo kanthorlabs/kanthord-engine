@@ -69,6 +69,7 @@ export const MissionErrorCode = {
   CreateRefused: "mission.node.create_refused",
   Retired: "mission.node.retired",
   Terminal: "mission.node.terminal",
+  EndpointInvalid: "mission.dependency.endpoint_invalid",
   RetireRefused: "mission.node.retire_refused",
   RetireHasDependents: "mission.node.retire_has_dependents",
   RetireMismatch: "mission.node.retire_mismatch",
@@ -496,7 +497,50 @@ const pageQuery = {
   cursor: z.string().optional(),
 };
 
+const dependencyInput = z.strictObject({
+  params: z.strictObject({
+    nodeId: identitySchema(NODE_IDENTITY_PREFIX),
+    dependsOnId: identitySchema(NODE_IDENTITY_PREFIX),
+  }),
+  query: z.strictObject({}),
+  body: graphEditSchema,
+});
+
 export const missionOperations = {
+  "edge.list": {
+    ...readOperation,
+    id: "mission.edge.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/:missionId/edge",
+    input: readInput(
+      z.strictObject({ missionId: identitySchema(MISSION_IDENTITY_PREFIX) }),
+      z.strictObject({
+        ...pageQuery,
+        kind: edgeKindSchema.optional(),
+        nodeId: identitySchema(NODE_IDENTITY_PREFIX).optional(),
+      }),
+    ),
+    output: pageOf(edgeSchema),
+    description: "List current mission edges.",
+  },
+  "dependency.add": {
+    ...writeOperation,
+    id: "mission.dependency.add",
+    method: HttpMethod.Put,
+    path: "/api/mission/node/:nodeId/dependency/:dependsOnId",
+    input: dependencyInput,
+    output: nodeChangeSchema,
+    description: "Add a mission dependency.",
+  },
+  "dependency.remove": {
+    ...writeOperation,
+    id: "mission.dependency.remove",
+    method: HttpMethod.Delete,
+    path: "/api/mission/node/:nodeId/dependency/:dependsOnId",
+    input: dependencyInput,
+    output: nodeChangeSchema,
+    description: "Remove a mission dependency.",
+  },
   "node.list": {
     ...readOperation,
     id: "mission.node.list",
