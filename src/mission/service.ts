@@ -30,7 +30,7 @@ import { addDependency, removeDependency } from "./dependency.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
 import { createNode } from "./node-create.ts";
 import { moveNode } from "./node-move.ts";
-import { updateNode } from "./node-update.ts";
+import { setCriterion, updateNode } from "./node-update.ts";
 import {
   getNode,
   getRevision,
@@ -180,6 +180,19 @@ export class MissionService implements Service, MissionCollaborations {
             body,
             humanActor(caller),
             this.dependencies.workQueue,
+            this.dependencies.config.textMaxBytes,
+          ),
+        ),
+    );
+    registry.register(
+      missionOperations["criterion.set"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) =>
+          setCriterion(
+            tx,
+            params.nodeId,
+            body,
+            humanActor(caller),
             this.dependencies.config.textMaxBytes,
           ),
         ),

@@ -2,14 +2,22 @@ import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { CONTENT_FIELDS, TASKS_FIELD, ContentField } from "./content.ts";
+import {
+  CONTENT_FIELDS,
+  TASKS_FIELD,
+  ContentField,
+  validateNodeContent,
+  validateText,
+} from "./content.ts";
 import {
   MissionErrorCode,
   NodeKind,
   RevisionWrite,
   TaskChange,
   type Content,
+  type CriterionSet,
   type HumanActor,
+  type Mission,
   type MissionBindings,
   type NodeChange,
   type NodeUpdate,
@@ -32,6 +40,19 @@ import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 
 const REVISION_INCREMENT = 1;
 const NO_CHANGED_FIELDS = 0;
+const REASON_FIELD = "reason";
+const CRITERION_FIELDS = [ContentField.Criterion, ContentField.Verifications];
+
+type EditBody = Pick<
+  NodeUpdate,
+  "reason" | "expectedMissionVersion" | "expectedRevision"
+>;
+type EditContext = {
+  node: NodeRow;
+  owner: NodeRow;
+  mission: Mission;
+  previous: Revision;
+};
 
 function contentOwner(tx: Transaction, node: NodeRow): NodeRow {
   if (node.kind !== NodeKind.Task) {
@@ -50,82 +71,11 @@ function contentOwner(tx: Transaction, node: NodeRow): NodeRow {
   return owner;
 }
 
-function changedFields(
-  filename: string,
-  content: Content,
-  previousFilename: string,
-  previousContent: Content,
-): string[] {
-  const changed = new Set<string>();
-  if (filename !== previousFilename) changed.add(ContentField.Filename);
-  for (const field of CONTENT_FIELDS) {
-    if (field === ContentField.Filename) continue;
-    const key = field as keyof Content;
-    if (JSON.stringify(content[key]) !== JSON.stringify(previousContent[key]))
-      changed.add(field);
-  }
-  return CONTENT_FIELDS.filter((field) => changed.has(field));
-}
-
-function updatedRevision(
-  previous: Revision,
-  node: NodeRow,
-  body: NodeUpdate,
-  content: Content,
-  fields: string[],
-  actor: HumanActor,
-): Revision {
-  const common = {
-    ...previous,
-    revision: previous.revision + REVISION_INCREMENT,
-    reason: body.reason,
-    actor,
-    createdAt: Date.now(),
-    pinnedByAttempts: [],
-  };
-  if (node.kind !== NodeKind.Task)
-    return {
-      ...common,
-      filename: body.filename,
-      content,
-      change: {
-        write: RevisionWrite.NodeUpdate,
-        previousRevision: previous.revision,
-        changedFields: fields,
-        ...(node.kind === NodeKind.Objective ? { tasks: [] } : {}),
-      },
-    };
-  assert.ok(previous.tasks, "Objective revision must contain tasks.");
-  assert.ok(
-    previous.tasks.some((task) => task.id === node.id),
-    "Task must be in objective revision.",
-  );
-  return {
-    ...common,
-    tasks: previous.tasks.map((task) =>
-      task.id === node.id
-        ? { id: task.id, filename: body.filename, content }
-        : task,
-    ),
-    change: {
-      write: RevisionWrite.NodeUpdate,
-      previousRevision: previous.revision,
-      changedFields: [TASKS_FIELD],
-      tasks: [
-        { id: node.id, change: TaskChange.Updated, changedFields: fields },
-      ],
-    },
-  };
-}
-
-export function updateNode(
+function editContext(
   tx: Transaction,
   nodeId: string,
-  body: NodeUpdate,
-  actor: HumanActor,
-  bindings: MissionBindings,
-  textMaxBytes: number,
-): NodeChange {
+  body: EditBody,
+): EditContext {
   const node = requireNode(tx, nodeId);
   requireActive(node);
   const mission = requireMission(
@@ -148,28 +98,106 @@ export function updateNode(
       "Node revision changed.",
       { current: current.revision },
     );
-  const previous = revisionFromRow(current);
-  const content = resolveContent(
-    tx,
-    bindings,
-    mission.projectId,
-    {
-      ...body,
-      kind: node.kind,
-    },
-    textMaxBytes,
+  return { node, owner, mission, previous: revisionFromRow(current) };
+}
+
+function currentContent(context: EditContext): {
+  filename: string;
+  content: Content;
+} {
+  const { node, previous } = context;
+  if (node.kind !== NodeKind.Task)
+    return { filename: previous.filename, content: previous.content };
+  assert.ok(previous.tasks, "Objective revision must contain tasks.");
+  const task = previous.tasks.find((item) => item.id === node.id);
+  assert.ok(task, "Task must exist in objective revision.");
+  return task;
+}
+
+function changedFields(
+  filename: string,
+  content: Content,
+  prior: { filename: string; content: Content },
+  candidates: readonly string[],
+): string[] {
+  const changed = new Set<string>();
+  if (filename !== prior.filename) changed.add(ContentField.Filename);
+  for (const field of candidates) {
+    if (field === ContentField.Filename) continue;
+    const key = field as keyof Content;
+    if (JSON.stringify(content[key]) !== JSON.stringify(prior.content[key]))
+      changed.add(field);
+  }
+  return candidates.filter((field) => changed.has(field));
+}
+
+function updatedRevision(
+  context: EditContext,
+  body: EditBody,
+  filename: string,
+  content: Content,
+  fields: string[],
+  write: RevisionWrite,
+  actor: HumanActor,
+): Revision {
+  const { previous, node } = context;
+  const common = {
+    ...previous,
+    revision: previous.revision + REVISION_INCREMENT,
+    reason: body.reason,
+    actor,
+    createdAt: Date.now(),
+    pinnedByAttempts: [],
+  };
+  if (node.kind !== NodeKind.Task)
+    return {
+      ...common,
+      filename,
+      content,
+      change: {
+        write,
+        previousRevision: previous.revision,
+        changedFields: fields,
+        ...(node.kind === NodeKind.Objective ? { tasks: [] } : {}),
+      },
+    };
+  assert.ok(previous.tasks, "Objective revision must contain tasks.");
+  assert.ok(
+    previous.tasks.some((task) => task.id === node.id),
+    "Task must be in objective revision.",
   );
-  const task =
-    node.kind === NodeKind.Task
-      ? previous.tasks?.find((item) => item.id === node.id)
-      : undefined;
-  if (node.kind === NodeKind.Task)
-    assert.ok(task, "Task must exist in objective revision.");
+  return {
+    ...common,
+    tasks: previous.tasks.map((task) =>
+      task.id === node.id ? { id: task.id, filename, content } : task,
+    ),
+    change: {
+      write,
+      previousRevision: previous.revision,
+      changedFields: [TASKS_FIELD],
+      tasks: [
+        { id: node.id, change: TaskChange.Updated, changedFields: fields },
+      ],
+    },
+  };
+}
+
+function finishEdit(
+  tx: Transaction,
+  context: EditContext,
+  body: EditBody,
+  filename: string,
+  content: Content,
+  candidates: readonly string[],
+  write: RevisionWrite,
+  actor: HumanActor,
+): NodeChange {
+  const { node, owner, mission } = context;
   const fields = changedFields(
-    body.filename,
+    filename,
     content,
-    task?.filename ?? previous.filename,
-    task?.content ?? previous.content,
+    currentContent(context),
+    candidates,
   );
   const empty = {
     missionVersion: mission.version,
@@ -180,21 +208,18 @@ export function updateNode(
     openAttemptsUnchanged: [],
   };
   if (fields.length === NO_CHANGED_FIELDS) return empty;
-  if (
-    body.filename !== node.filename &&
-    filenameTaken(tx, mission.id, body.filename)
-  )
-    throw filenameConflict(body.filename);
+  if (filename !== node.filename && filenameTaken(tx, mission.id, filename))
+    throw filenameConflict(filename);
   const revision = updatedRevision(
-    previous,
-    node,
+    context,
     body,
+    filename,
     content,
     fields,
+    write,
     actor,
   );
-  if (body.filename !== node.filename)
-    updateNodeFilename(tx, node.id, body.filename);
+  if (filename !== node.filename) updateNodeFilename(tx, node.id, filename);
   insertRevision(tx, revision);
   const missionVersion = incrementMissionVersion(tx, mission.id);
   const stored = readRevision(tx, owner.id, revision.revision);
@@ -205,4 +230,60 @@ export function updateNode(
     "Update increments mission once.",
   );
   return { ...empty, missionVersion, revisions: [revisionFromRow(stored)] };
+}
+
+export function updateNode(
+  tx: Transaction,
+  nodeId: string,
+  body: NodeUpdate,
+  actor: HumanActor,
+  bindings: MissionBindings,
+  textMaxBytes: number,
+): NodeChange {
+  const context = editContext(tx, nodeId, body);
+  const content = resolveContent(
+    tx,
+    bindings,
+    context.mission.projectId,
+    { ...body, kind: context.node.kind },
+    textMaxBytes,
+  );
+  return finishEdit(
+    tx,
+    context,
+    body,
+    body.filename,
+    content,
+    CONTENT_FIELDS,
+    RevisionWrite.NodeUpdate,
+    actor,
+  );
+}
+
+export function setCriterion(
+  tx: Transaction,
+  nodeId: string,
+  body: CriterionSet,
+  actor: HumanActor,
+  textMaxBytes: number,
+): NodeChange {
+  const context = editContext(tx, nodeId, body);
+  const prior = currentContent(context);
+  const content = {
+    ...prior.content,
+    criterion: body.criterion,
+    verifications: body.verifications,
+  };
+  validateNodeContent(context.node.kind, content, textMaxBytes);
+  validateText(REASON_FIELD, body.reason, textMaxBytes);
+  return finishEdit(
+    tx,
+    context,
+    body,
+    prior.filename,
+    content,
+    CRITERION_FIELDS,
+    RevisionWrite.CriterionSet,
+    actor,
+  );
 }

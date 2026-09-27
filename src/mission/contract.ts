@@ -615,6 +615,19 @@ export const missionOperations = {
     output: nodeChangeSchema,
     description: "Move a mission node to a new parent.",
   },
+  "criterion.set": {
+    ...writeOperation,
+    id: "mission.criterion.set",
+    method: HttpMethod.Put,
+    path: "/api/mission/node/:nodeId/criterion",
+    input: z.strictObject({
+      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      query: z.strictObject({}),
+      body: criterionSetSchema,
+    }),
+    output: nodeChangeSchema,
+    description: "Set mission node criterion and verifications.",
+  },
   "node.update": {
     ...writeOperation,
     id: "mission.node.update",

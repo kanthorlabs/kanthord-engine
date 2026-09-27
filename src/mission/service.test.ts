@@ -38,6 +38,7 @@ import {
   pageOf,
   type NodeCreate,
   type NodeUpdate,
+  type CriterionSet,
   type Move,
   type NodeChange,
   type MissionBindings,
@@ -446,6 +447,17 @@ function nodeFixture(t: TestContext) {
       f.registry.get(operation.id).handler(input, f.caller),
     );
   }
+  function criterionSet(nodeId: string, body: CriterionSet): NodeChange {
+    const operation = missionOperations[RevisionWrite.CriterionSet];
+    const input = operation.input.parse({
+      params: { nodeId },
+      query: {},
+      body,
+    });
+    return nodeChangeSchema.parse(
+      f.registry.get(operation.id).handler(input, f.caller),
+    );
+  }
   function create(body: NodeCreate, id = missionId): NodeChange {
     const operation = missionOperations[RevisionWrite.NodeCreate];
     const input = operation.input.parse({
@@ -549,6 +561,7 @@ function nodeFixture(t: TestContext) {
     version,
     create,
     update,
+    criterionSet,
     body,
     initiative,
     objective,
@@ -2127,6 +2140,235 @@ for (const retired of [false, true]) {
     );
   });
 }
+
+function criterionBody(
+  f: ReturnType<typeof nodeFixture>,
+  id: string,
+): CriterionSet {
+  const update = updateBody(f, id);
+  return {
+    criterion: update.content.criterion,
+    verifications: update.content.verifications,
+    reason: REASON,
+    expectedRevision: update.expectedRevision,
+    expectedMissionVersion: update.expectedMissionVersion,
+  };
+}
+
+function criterionRefuses(
+  f: ReturnType<typeof nodeFixture>,
+  id: string,
+  body: CriterionSet,
+  code: string,
+  details?: unknown,
+  status: number = HttpStatus.Conflict,
+): void {
+  const before = f.snapshot();
+  const commits = f.commits();
+  assert.throws(
+    () => f.criterionSet(id, body),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, code);
+      assert.equal(error.status, status);
+      if (details !== undefined) assert.deepEqual(error.details, details);
+      return true;
+    },
+  );
+  assert.equal(f.commits(), commits + ONE_COMMIT);
+  assert.deepEqual(f.snapshot(), before);
+}
+
+test("criterion.set no-op preserves mission and revision; changed criterion preserves other content", (t) => {
+  const f = nodeFixture(t);
+  const id = f.objective();
+  const body = criterionBody(f, id);
+  const before = f.snapshot();
+  const commits = f.commits();
+  assert.deepEqual(
+    f.criterionSet(id, body),
+    emptyChange(body.expectedMissionVersion),
+  );
+  assert.equal(f.commits(), commits + ONE_COMMIT);
+  assert.deepEqual(f.snapshot(), before);
+  const original = updateBody(f, id);
+  const changed = f.criterionSet(id, { ...body, criterion: "new criterion" });
+  const revision = changed.revisions[ZERO]!;
+  assert.equal(changed.missionVersion, body.expectedMissionVersion + ONE);
+  assert.equal(f.version(), changed.missionVersion);
+  assert.deepEqual(revision.change, {
+    write: RevisionWrite.CriterionSet,
+    previousRevision: body.expectedRevision,
+    changedFields: [ContentField.Criterion],
+    tasks: [],
+  });
+  assert.equal(revision.filename, original.filename);
+  assert.deepEqual(revision.content, {
+    ...original.content,
+    bindings: [BINDING_ID],
+    criterion: "new criterion",
+  });
+  assert.deepEqual(revision.tasks, []);
+});
+
+test("criterion.set initiative changes only criterion and verifications", (t) => {
+  const f = nodeFixture(t);
+  const id = f.initiative();
+  const body = criterionBody(f, id);
+  const commits = f.commits();
+  const result = f.criterionSet(id, {
+    ...body,
+    criterion: "new criterion",
+    verifications: ["new verification"],
+  });
+  assert.equal(f.commits(), commits + ONE_COMMIT);
+  assert.equal(result.missionVersion, body.expectedMissionVersion + ONE);
+  assert.deepEqual(result.revisions[ZERO]!.change, {
+    write: RevisionWrite.CriterionSet,
+    previousRevision: FIRST_REVISION,
+    changedFields: [ContentField.Criterion, ContentField.Verifications],
+  });
+  assert.equal(result.revisions[ZERO]!.tasks, undefined);
+});
+
+test("criterion.set task revises objective only and preserves task metadata", (t) => {
+  const f = nodeFixture(t);
+  const owner = f.objective();
+  const task = f.create(f.body(NodeKind.Task, owner)).revisions[ZERO]!.tasks![
+    ZERO
+  ]!.id;
+  const body = criterionBody(f, task);
+  const prior = f.store.transaction((tx) => readCurrentRevision(tx, owner));
+  assert.ok(prior);
+  const changed = f.criterionSet(task, {
+    ...body,
+    verifications: ["new verification"],
+  });
+  const revision = changed.revisions[ZERO]!;
+  assert.equal(changed.missionVersion, body.expectedMissionVersion + ONE);
+  assert.equal(revision.nodeId, owner);
+  assert.equal(revision.revision, prior.revision + ONE);
+  assert.deepEqual(revision.change, {
+    write: RevisionWrite.CriterionSet,
+    previousRevision: prior.revision,
+    changedFields: [TASKS_FIELD],
+    tasks: [
+      {
+        id: task,
+        change: TaskChange.Updated,
+        changedFields: [ContentField.Verifications],
+      },
+    ],
+  });
+  assert.equal(revision.filename, prior.filename);
+  assert.deepEqual(revision.content.bindings, JSON.parse(prior.bindings));
+  assert.deepEqual(revision.tasks![ZERO], {
+    id: task,
+    filename: TASK_FILENAME,
+    content: {
+      ...f.body(NodeKind.Task, owner).content,
+      verifications: ["new verification"],
+    },
+  });
+  assert.equal(
+    f.store.transaction((tx) => readCurrentRevision(tx, task)),
+    null,
+  );
+});
+
+test("criterion.set enforces check order, revisions and content validation", (t) => {
+  const f = nodeFixture(t);
+  const id = f.objective();
+  const task = f.create(f.body(NodeKind.Task, id)).revisions[ZERO]!.tasks![
+    ZERO
+  ]!.id;
+  const body = criterionBody(f, id);
+  criterionRefuses(
+    f,
+    UNKNOWN_NODE_ID,
+    body,
+    MissionErrorCode.NodeNotFound,
+    undefined,
+    HttpStatus.NotFound,
+  );
+  criterionRefuses(
+    f,
+    id,
+    { ...body, expectedMissionVersion: FIRST_REVISION },
+    MissionErrorCode.VersionConflict,
+    { current: f.version() },
+  );
+  criterionRefuses(
+    f,
+    id,
+    { ...body, expectedRevision: FIRST_REVISION },
+    MissionErrorCode.RevisionConflict,
+    { current: NEXT_REVISION },
+  );
+  assert.equal(
+    missionOperations[RevisionWrite.CriterionSet].input.safeParse({
+      params: { nodeId: id },
+      query: {},
+      body: { ...body, verifications: [] },
+    }).success,
+    false,
+  );
+  criterionRefuses(
+    f,
+    id,
+    { ...body, verifications: ["   "] },
+    MissionErrorCode.ContentInvalid,
+    { field: ContentField.Verifications },
+    HttpStatus.BadRequest,
+  );
+  criterionRefuses(
+    f,
+    id,
+    { ...body, criterion: "  " },
+    MissionErrorCode.ContentInvalid,
+    { field: ContentField.Criterion },
+    HttpStatus.BadRequest,
+  );
+  criterionRefuses(
+    f,
+    id,
+    { ...body, reason: NODE_TEXT.repeat(TEXT_MAX_BYTES) },
+    MissionErrorCode.ContentInvalid,
+    { field: REASON_FIELD },
+    HttpStatus.BadRequest,
+  );
+  f.setState(id, NodeState.Completed);
+  criterionRefuses(f, id, body, MissionErrorCode.Terminal, { nodeId: id });
+  criterionRefuses(f, task, criterionBody(f, task), MissionErrorCode.Terminal, {
+    nodeId: id,
+  });
+  f.store.database
+    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+    .run(RETIRED_AT, id);
+  criterionRefuses(f, task, criterionBody(f, task), MissionErrorCode.Retired, {
+    nodeId: id,
+  });
+  criterionRefuses(f, id, body, MissionErrorCode.Retired, { nodeId: id });
+});
+
+test("criterion.set refuses a retired task before stale mission version", (t) => {
+  const f = nodeFixture(t);
+  const owner = f.objective();
+  const task = f.create(f.body(NodeKind.Task, owner)).revisions[ZERO]!.tasks![
+    ZERO
+  ]!.id;
+  const body = criterionBody(f, task);
+  f.store.database
+    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+    .run(RETIRED_AT, task);
+  criterionRefuses(
+    f,
+    task,
+    { ...body, expectedMissionVersion: FIRST_REVISION },
+    MissionErrorCode.Retired,
+    { nodeId: task },
+  );
+});
 
 function moveFixture(t: TestContext) {
   const f = dependencyFixture(t);
