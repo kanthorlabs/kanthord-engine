@@ -30,6 +30,9 @@ const DEFAULT_BIND = "127.0.0.1";
 const DEFAULT_LOG_LEVEL = "info";
 const DEFAULT_PORT = 31415;
 const DEFAULT_IDEMPOTENCY_TTL = 86400;
+const DEFAULT_CONSECUTIVE_LOSS_LIMIT = 3;
+const DEFAULT_TEXT_MAX_BYTES = 32768;
+const INVALID_FIELD_CODE = "system.config.invalid_field";
 const ORIGINAL_CONTENT = "original";
 const REPLACEMENT_CONTENT = "replacement";
 
@@ -40,6 +43,11 @@ test("service fragments preserve the existing YAML field set", () => {
     "gateway",
     "log",
     "masterKey",
+    "mission",
+  ]);
+  assert.deepEqual(Object.keys(config.mission).sort(), [
+    "consecutiveLossLimit",
+    "textMaxBytes",
   ]);
   assert.deepEqual(Object.keys(config.gateway).sort(), [
     "allowedHosts",
@@ -49,6 +57,32 @@ test("service fragments preserve the existing YAML field set", () => {
     "port",
     "tokenLifetime",
   ]);
+});
+
+test("mission configuration defaults and strict validation", () => {
+  const masterKey = randomBytes(32).toString("base64");
+  const mission = configuration({ masterKey }).getProperties().mission;
+  assert.equal(mission.consecutiveLossLimit, DEFAULT_CONSECUTIVE_LOSS_LIMIT);
+  assert.equal(mission.textMaxBytes, DEFAULT_TEXT_MAX_BYTES);
+  assert.doesNotThrow(() =>
+    configuration({
+      masterKey,
+      mission: { consecutiveLossLimit: DEFAULT_CONSECUTIVE_LOSS_LIMIT },
+    }),
+  );
+  for (const invalidMission of [
+    { unknown: true },
+    { consecutiveLossLimit: -1 },
+  ]) {
+    assert.throws(
+      () => configuration({ masterKey, mission: invalidMission }),
+      (error: Error & { code?: string }) => {
+        assert.equal(error.code, INVALID_FIELD_CODE);
+        assert.match(error.message, /mission/);
+        return true;
+      },
+    );
+  }
 });
 
 test("configuration is strict, file-only, masks secrets, and reports every invalid field safely", (t) => {

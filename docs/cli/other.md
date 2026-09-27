@@ -337,6 +337,12 @@ The implemented fields are:
 - `gateway.idempotencyTtl`: optional positive safe integer in seconds, default
   `86400`. The idempotency component uses it as the TTL of an in-memory record.
 
+- `mission.consecutiveLossLimit`: optional Convict `nat`, default `3`. It
+  holds the consecutive loss limit of the Mission Service.
+- `mission.textMaxBytes`: optional Convict `nat` in UTF-8 bytes, default
+  `32768`. It bounds every `Text` value of a Mission write; a stored value keeps
+  its length after a change of the bound.
+
 The current Project and Worker fragments are empty and add no YAML sections.
 See [Gateway](./gateway.md) for authentication context.
 

@@ -22,11 +22,13 @@ import {
   type GlobalConfig,
 } from "./global.ts";
 import { gatewayConfigSchema, type GatewayConfig } from "../gateway/index.ts";
+import { missionConfigSchema, type MissionConfig } from "../mission/index.ts";
 import { projectConfigSchema } from "../project/index.ts";
 import { workerConfigSchema } from "../worker/index.ts";
 const EMPTY_SCHEMA_FIELD_COUNT = 0;
 export interface ServerConfig extends GlobalConfig {
   gateway: GatewayConfig;
+  mission: MissionConfig;
 }
 
 export function configPath(
@@ -44,6 +46,7 @@ convict.addParser({ extension: ["yaml", "yml"], parse: parseMapping });
 
 const fragments = {
   gateway: gatewayConfigSchema,
+  mission: missionConfigSchema,
   project: projectConfigSchema,
   worker: workerConfigSchema,
 };
