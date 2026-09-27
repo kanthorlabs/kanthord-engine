@@ -179,6 +179,80 @@ export function readMissionNodes(
     .all(missionId) as unknown as NodeRow[];
 }
 
+export interface NodeListFilter {
+  kind?: NodeKind;
+  state?: NodeState;
+  parentId?: string;
+  includeRetired: boolean;
+  after?: string;
+}
+
+export function listNodes(
+  tx: Transaction,
+  missionId: string,
+  filter: NodeListFilter,
+  count: number,
+): NodeRow[] {
+  return tx.database
+    .prepare(
+      `SELECT * FROM mission_node WHERE mission_id = ?
+     AND (? = 1 OR retired_at IS NULL)
+     AND (? IS NULL OR kind = ?)
+     AND (? IS NULL OR state = ?)
+     AND (? IS NULL OR parent_id = ?)
+     AND (? IS NULL OR id < ?)
+     ORDER BY id DESC LIMIT ?`,
+    )
+    .all(
+      missionId,
+      Number(filter.includeRetired),
+      filter.kind ?? null,
+      filter.kind ?? null,
+      filter.state ?? null,
+      filter.state ?? null,
+      filter.parentId ?? null,
+      filter.parentId ?? null,
+      filter.after ?? null,
+      filter.after ?? null,
+      count,
+    ) as unknown as NodeRow[];
+}
+
+export function listRevisions(
+  tx: Transaction,
+  nodeId: string,
+  after: number | undefined,
+  count: number,
+): RevisionRow[] {
+  return tx.database
+    .prepare(
+      `SELECT * FROM mission_node_revision WHERE node_id = ?
+     AND (? IS NULL OR revision < ?) ORDER BY revision DESC LIMIT ?`,
+    )
+    .all(
+      nodeId,
+      after ?? null,
+      after ?? null,
+      count,
+    ) as unknown as RevisionRow[];
+}
+
+export function readLastTaskSnapshot(
+  tx: Transaction,
+  objectiveId: string,
+  taskId: string,
+): RevisionRow | null {
+  return (
+    (tx.database
+      .prepare(
+        `SELECT * FROM mission_node_revision WHERE node_id = ?
+     AND EXISTS (SELECT 1 FROM json_each(tasks) WHERE json_extract(value, '$.id') = ?)
+     ORDER BY revision DESC LIMIT 1`,
+      )
+      .get(objectiveId, taskId) as RevisionRow | undefined) ?? null
+  );
+}
+
 export function setNodeState(
   tx: Transaction,
   nodeId: string,

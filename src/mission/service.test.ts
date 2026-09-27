@@ -32,6 +32,9 @@ import {
   RevisionWrite,
   TaskChange,
   nodeChangeSchema,
+  nodeSchema,
+  revisionSchema,
+  pageOf,
   type NodeCreate,
   type NodeChange,
   type MissionBindings,
@@ -1088,6 +1091,215 @@ test("node.create validates content and reason byte limits without writes", (t) 
     MissionErrorCode.ContentInvalid,
     { field: nameField },
     HttpStatus.BadRequest,
+  );
+});
+
+test("node reads map current and retired task snapshots, revisions and pagination", (t) => {
+  const f = nodeFixture(t);
+  function invoke<
+    K extends
+      "node.get" | "node.list" | "node.revision.list" | "node.revision.get",
+  >(key: K, params: object, query: object = {}) {
+    const operation = missionOperations[key];
+    const input = operation.input.parse({ params, query, body: null });
+    const before = f.commits();
+    const result = f.registry.get(operation.id).handler(input, f.caller);
+    assert.equal(f.commits(), before + ONE_COMMIT);
+    return operation.output.parse(result);
+  }
+  const initiative = f.initiative();
+  const objective = f.create(f.body(NodeKind.Objective, initiative)).revisions[
+    ZERO
+  ]!.nodeId;
+  const taskRevision = f.create(f.body(NodeKind.Task, objective)).revisions[
+    ZERO
+  ]!;
+  const task = taskRevision.tasks![ZERO]!;
+  const taskNode = nodeSchema.parse(invoke("node.get", { nodeId: task.id }));
+  assert.equal(taskNode.visibleRevision, NEXT_REVISION);
+  assert.deepEqual(taskNode.content, task.content);
+  assert.equal("state" in taskNode, false);
+  const objectiveNode = nodeSchema.parse(
+    invoke("node.get", { nodeId: objective }),
+  );
+  assert.equal(objectiveNode.kind, NodeKind.Objective);
+  if (objectiveNode.kind !== NodeKind.Objective)
+    throw new Error(UNEXPECTED_COLLABORATION);
+  assert.equal(objectiveNode.priority, ZERO);
+  assert.deepEqual(objectiveNode.content.bindings, [BINDING_ID]);
+  const revision = revisionSchema.parse(
+    invoke("node.revision.get", { nodeId: task.id, revision: NEXT_REVISION }),
+  );
+  assert.equal(revision.nodeId, objective);
+  assert.deepEqual(revision, taskRevision);
+  const page = pageOf(revisionSchema).parse(
+    invoke("node.revision.list", { nodeId: task.id }, { limit: "1" }),
+  );
+  assert.deepEqual(
+    page.items.map((item) => item.revision),
+    [NEXT_REVISION],
+  );
+  assert.ok(page.nextCursor);
+  assert.deepEqual(
+    pageOf(revisionSchema)
+      .parse(
+        invoke(
+          "node.revision.list",
+          { nodeId: objective },
+          { limit: "1", cursor: page.nextCursor },
+        ),
+      )
+      .items.map((item) => item.revision),
+    [FIRST_REVISION],
+  );
+  const first = pageOf(nodeSchema).parse(
+    invoke("node.list", { missionId: f.missionId }, { limit: "1" }),
+  );
+  assert.equal(first.items.length, ONE);
+  assert.ok(first.nextCursor);
+  const second = pageOf(nodeSchema).parse(
+    invoke(
+      "node.list",
+      { missionId: f.missionId },
+      { limit: "1", cursor: first.nextCursor },
+    ),
+  );
+  assert.equal(second.items.length, ONE);
+  assert.ok(first.items[ZERO]!.id > second.items[ZERO]!.id);
+  assert.deepEqual(
+    pageOf(nodeSchema)
+      .parse(
+        invoke(
+          "node.list",
+          { missionId: f.missionId },
+          { kind: NodeKind.Task, parentId: objective },
+        ),
+      )
+      .items.map((item) => item.id),
+    [task.id],
+  );
+  assert.deepEqual(
+    pageOf(nodeSchema)
+      .parse(
+        invoke(
+          "node.list",
+          { missionId: f.missionId },
+          { state: objectiveNode.state },
+        ),
+      )
+      .items.every((item) => item.kind !== NodeKind.Task),
+    true,
+  );
+  f.store.database
+    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+    .run(RETIRED_AT, task.id);
+  assert.equal(
+    pageOf(nodeSchema).parse(
+      invoke("node.list", { missionId: f.missionId }, { kind: NodeKind.Task }),
+    ).items.length,
+    ZERO,
+  );
+  assert.equal(
+    pageOf(nodeSchema).parse(
+      invoke(
+        "node.list",
+        { missionId: f.missionId },
+        { kind: NodeKind.Task, includeRetired: "false" },
+      ),
+    ).items.length,
+    ZERO,
+  );
+  assert.equal(
+    pageOf(nodeSchema).parse(
+      invoke(
+        "node.list",
+        { missionId: f.missionId },
+        { kind: NodeKind.Task, includeRetired: "true" },
+      ),
+    ).items.length,
+    ONE,
+  );
+  f.store.database
+    .prepare(
+      "INSERT INTO mission_node_revision SELECT node_id, revision + 1, filename, name, requirement, criterion, verifications, bindings, '[]', change, reason, actor, created_at FROM mission_node_revision WHERE node_id = ? AND revision = ?",
+    )
+    .run(objective, NEXT_REVISION);
+  const retired = nodeSchema.parse(invoke("node.get", { nodeId: task.id }));
+  assert.equal(retired.visibleRevision, THREE);
+  assert.deepEqual(retired.content, task.content);
+});
+
+test("node reads refuse missing identities and malformed cursors", (t) => {
+  const f = nodeFixture(t);
+  function refuses(
+    key: "node.get" | "node.list" | "node.revision.get" | "node.revision.list",
+    params: object,
+    query: object,
+    code: string,
+    status: number,
+  ) {
+    const operation = missionOperations[key];
+    const input = operation.input.parse({ params, query, body: null });
+    assert.throws(
+      () => f.registry.get(operation.id).handler(input, f.caller),
+      (error) => {
+        assert.ok(error instanceof OperationError);
+        assert.equal(error.code, code);
+        assert.equal(error.status, status);
+        return true;
+      },
+    );
+  }
+  refuses(
+    "node.get",
+    { nodeId: UNKNOWN_NODE_ID },
+    {},
+    MissionErrorCode.NodeNotFound,
+    HttpStatus.NotFound,
+  );
+  refuses(
+    "node.list",
+    { missionId: UNKNOWN_MISSION_ID },
+    {},
+    MissionErrorCode.MissionNotFound,
+    HttpStatus.NotFound,
+  );
+  const objective = f.objective();
+  refuses(
+    "node.revision.get",
+    { nodeId: objective, revision: NEXT_REVISION },
+    {},
+    MissionErrorCode.NodeNotFound,
+    HttpStatus.NotFound,
+  );
+  refuses(
+    "node.revision.list",
+    { nodeId: UNKNOWN_NODE_ID },
+    {},
+    MissionErrorCode.NodeNotFound,
+    HttpStatus.NotFound,
+  );
+  refuses(
+    "node.list",
+    { missionId: f.missionId },
+    { cursor: "%%%" },
+    MissionErrorCode.CursorInvalid,
+    HttpStatus.BadRequest,
+  );
+  refuses(
+    "node.revision.list",
+    { nodeId: objective },
+    { cursor: "%%%" },
+    MissionErrorCode.CursorInvalid,
+    HttpStatus.BadRequest,
+  );
+  assert.equal(
+    missionOperations["node.list"].input.safeParse({
+      params: { missionId: f.missionId },
+      query: { kind: NodeKind.Task, state: NodeState.Pending },
+      body: null,
+    }).success,
+    false,
   );
 });
 

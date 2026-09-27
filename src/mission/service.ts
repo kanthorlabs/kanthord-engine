@@ -28,12 +28,21 @@ import {
 } from "./contract.ts";
 import { createNode } from "./node-create.ts";
 import {
+  getNode,
+  getRevision,
+  nodeCursor,
+  nodePage,
+  revisionCursor,
+  revisionPage,
+} from "./node-read.ts";
+import {
   insertMission,
   readLiveNodesPinning,
   readMissionByProject,
 } from "./store.ts";
 
 const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
+const INCLUDE_RETIRED_TRUE = "true";
 
 export function humanActor(caller: CallerContext): HumanActor {
   const identity = caller.identity;
@@ -71,6 +80,45 @@ export class MissionService implements Service, MissionCollaborations {
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["node.list"],
+      ({ params, query }, caller) => {
+        const after =
+          query.cursor === undefined ? undefined : nodeCursor(query.cursor);
+        return caller.commit((tx) =>
+          nodePage(
+            tx,
+            params.missionId,
+            {
+              kind: query.kind,
+              state: query.state,
+              parentId: query.parentId,
+              includeRetired: query.includeRetired === INCLUDE_RETIRED_TRUE,
+              after,
+            },
+            query.limit,
+          ),
+        );
+      },
+    );
+    registry.register(missionOperations["node.get"], ({ params }, caller) =>
+      caller.commit((tx) => getNode(tx, params.nodeId)),
+    );
+    registry.register(
+      missionOperations["node.revision.list"],
+      ({ params, query }, caller) => {
+        const after =
+          query.cursor === undefined ? undefined : revisionCursor(query.cursor);
+        return caller.commit((tx) =>
+          revisionPage(tx, params.nodeId, after, query.limit),
+        );
+      },
+    );
+    registry.register(
+      missionOperations["node.revision.get"],
+      ({ params }, caller) =>
+        caller.commit((tx) => getRevision(tx, params.nodeId, params.revision)),
+    );
     registry.register(
       missionOperations["node.create"],
       ({ params, body }, caller) =>

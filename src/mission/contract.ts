@@ -482,7 +482,82 @@ const readInput = <P extends z.ZodType, Q extends z.ZodType>(
   query: Q,
 ) => z.strictObject({ params, query, body: z.null() });
 
+export const NODE_LIST_LIMIT_DEFAULT = 100;
+export const NODE_LIST_LIMIT_MIN = 1;
+export const NODE_LIST_LIMIT_MAX = 1000;
+const pageQuery = {
+  limit: z.coerce
+    .number()
+    .int()
+    .min(NODE_LIST_LIMIT_MIN)
+    .max(NODE_LIST_LIMIT_MAX)
+    .default(NODE_LIST_LIMIT_DEFAULT)
+    .optional(),
+  cursor: z.string().optional(),
+};
+
 export const missionOperations = {
+  "node.list": {
+    ...readOperation,
+    id: "mission.node.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/:missionId/node",
+    input: readInput(
+      z.strictObject({ missionId: identitySchema(MISSION_IDENTITY_PREFIX) }),
+      z
+        .strictObject({
+          ...pageQuery,
+          kind: nodeKindSchema.optional(),
+          state: nodeStateSchema.optional(),
+          parentId: identitySchema(NODE_IDENTITY_PREFIX).optional(),
+          includeRetired: z.enum(["true", "false"]).default("false").optional(),
+        })
+        .refine(
+          (query) => query.kind !== NodeKind.Task || query.state === undefined,
+        ),
+    ),
+    output: pageOf(nodeSchema),
+    description: "List mission nodes.",
+  },
+  "node.get": {
+    ...readOperation,
+    id: "mission.node.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/node/:nodeId",
+    input: readInput(
+      z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject({}),
+    ),
+    output: nodeSchema,
+    description: "Get a mission node.",
+  },
+  "node.revision.list": {
+    ...readOperation,
+    id: "mission.node.revision.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/node/:nodeId/revision",
+    input: readInput(
+      z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject(pageQuery),
+    ),
+    output: pageOf(revisionSchema),
+    description: "List node content revisions.",
+  },
+  "node.revision.get": {
+    ...readOperation,
+    id: "mission.node.revision.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/node/:nodeId/revision/:revision",
+    input: readInput(
+      z.strictObject({
+        nodeId: identitySchema(NODE_IDENTITY_PREFIX),
+        revision: z.coerce.number().int().positive().safe(),
+      }),
+      z.strictObject({}),
+    ),
+    output: revisionSchema,
+    description: "Get a node content revision.",
+  },
   "node.create": {
     ...writeOperation,
     id: "mission.node.create",
