@@ -17,6 +17,7 @@ import { clientConfigPath } from "../../gateway/client.ts";
 import { ExitCode } from "./constants.ts";
 
 const EMPTY_OUTPUT = "";
+const PROJECT_GET = "get";
 const SINGLE_DIAGNOSTIC_LINE = 1;
 const TOKEN_LIFETIME_SECONDS = 600;
 const entry = new URL("../../main.ts", import.meta.url).href;
@@ -86,6 +87,58 @@ test("CLI help works offline, config help resolves its path, and unsupported nam
   assert.ok(option.stdout.includes(join(process.cwd(), "relative.yaml")));
   assert.equal(invocation(["gateway", "--help"], env).status, ExitCode.Success);
   assert.equal(invocation(["worker", "--help"], env).status, ExitCode.Success);
+});
+
+test("project commands expose offline help and validate inputs before I/O", (t) => {
+  const env = environment(temporary(t));
+  const group = invocation(["project", "--help"], env);
+  assert.equal(group.status, ExitCode.Success, group.stderr);
+  for (const leaf of ["create", "list", "get", "rename"]) {
+    assert.match(group.stdout, new RegExp(`\\b${leaf}\\b`));
+    const help = invocation(["project", leaf, "--help"], env);
+    assert.equal(help.status, ExitCode.Success, help.stderr);
+  }
+  for (const [args, code] of [
+    [["create", "--name", "Invalid"], "cli.project.create.invalid_name"],
+    [["list", "--limit", "0"], "cli.pagination.limit_invalid"],
+    [["list", "--limit", "1001"], "cli.pagination.limit_out_of_range"],
+    [["get", "invalid"], "cli.project.get.invalid_project_id"],
+    [
+      ["rename", "invalid", "--name", "Invalid"],
+      "cli.project.rename.invalid_project_id",
+    ],
+    [
+      ["rename", "project_01ARZ3NDEKTSV4RRFFQ69G5FAV", "--name", "Invalid"],
+      "cli.project.rename.invalid_name",
+    ],
+    [["create", "--name", "valid"], "cli.project.create.token_required"],
+    [["list"], "cli.project.list.token_required"],
+    [
+      ["get", "project_01ARZ3NDEKTSV4RRFFQ69G5FAV"],
+      "cli.project.get.token_required",
+    ],
+    [
+      ["rename", "project_01ARZ3NDEKTSV4RRFFQ69G5FAV", "--name", "valid"],
+      "cli.project.rename.token_required",
+    ],
+  ] as const) {
+    const result = invocation(["project", ...args], env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, new RegExp(`^${code.replaceAll(".", "\\.")}:`));
+    assert.equal(result.stdout, EMPTY_OUTPUT);
+  }
+  for (const leaf of ["list", "get"]) {
+    const args =
+      leaf === PROJECT_GET
+        ? ["get", "project_01ARZ3NDEKTSV4RRFFQ69G5FAV"]
+        : ["list"];
+    const result = invocation(
+      ["project", ...args, "--idempotency-key", "key"],
+      env,
+    );
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /unknown option/);
+  }
 });
 
 test("worker agent enablement commands expose offline help and validate inputs before I/O", (t) => {

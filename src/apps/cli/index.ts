@@ -32,6 +32,7 @@ import { KANTHORD_AUTH_USERNAME } from "../../gateway/local.ts";
 import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
 import { addCredentialCommand } from "./credential.ts";
+import { addProjectCommand } from "./project.ts";
 import { addSchedulerCommand } from "./scheduler.ts";
 import {
   CommandName,
@@ -163,12 +164,9 @@ export function createProgram(
   addServeCommand(program, onServer);
   addJWTCommand(program);
   addCredentialCommand(program);
+  addProjectCommand(program);
   addSchedulerCommand(program);
-  for (const name of [
-    CommandName.Project,
-    CommandName.Mission,
-    CommandName.Tracking,
-  ]) {
+  for (const name of [CommandName.Mission, CommandName.Tracking]) {
     const group = program
       .command(name)
       .description(`${name[0]!.toUpperCase()}${name.slice(1)} Service commands`)
