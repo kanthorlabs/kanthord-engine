@@ -28,6 +28,10 @@ paths:
     $ref: ./openapi/gateway/openapiFile.yaml#/pathItem
   /api/auth/verify:
     $ref: ./openapi/gateway/verify.yaml#/pathItem
+  /api/project:
+    $ref: ./openapi/project/create.yaml#/pathItem
+  /api/project/{projectId}:
+    $ref: ./openapi/project/get.yaml#/pathItem
   /api/scheduler/project/{projectId}/queue:
     $ref: ./openapi/scheduler/queue.list.yaml#/pathItem
   /api/scheduler/project/{projectId}/queue/peek:

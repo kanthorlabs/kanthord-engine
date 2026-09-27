@@ -8,6 +8,8 @@ import type { Transaction } from "../kernel/store.ts";
 import { isObject, isString } from "../kernel/values.ts";
 import {
   BINDING_ID_PREFIX,
+  BINDING_SET_INITIAL_VERSION,
+  PROJECT_ID_PREFIX,
   BindingKind,
   BindingState,
   ChangeKind,
@@ -35,12 +37,115 @@ const REPOSITORY_ADDRESS_PATTERN =
   /^git@github\.com:([^/\s:]+)\/([^/\s:]+)\.git(?![\s\S])/;
 const REVISION_PATTERN = /^[1-9][0-9]*(?![\s\S])/;
 const bindingIdentitySchema = identitySchema(BINDING_ID_PREFIX);
+const projectIdentitySchema = identitySchema(PROJECT_ID_PREFIX);
 const latestBindingQuery = `SELECT b.* FROM project_binding b
   WHERE b.project_id = ? AND b.revision = (
     SELECT MAX(latest.revision) FROM project_binding latest
     WHERE latest.project_id = b.project_id
       AND latest.resource_identity = b.resource_identity
   )`;
+
+type ProjectRow = {
+  id: string;
+  name: string;
+  binding_set_version: number;
+  created_at: number;
+};
+export type StoredProject = {
+  id: string;
+  name: string;
+  bindingSetVersion: number;
+  createdAt: number;
+};
+
+function toProject(row: ProjectRow): StoredProject {
+  assert.ok(projectIdentitySchema.safeParse(row.id).success);
+  assert.ok(row.binding_set_version >= BINDING_SET_INITIAL_VERSION);
+  return {
+    id: row.id,
+    name: row.name,
+    bindingSetVersion: row.binding_set_version,
+    createdAt: row.created_at,
+  };
+}
+
+function requireAvailableName(
+  tx: Transaction,
+  name: string,
+  projectId?: string,
+): void {
+  const holder = tx.database
+    .prepare("SELECT id FROM project_project WHERE name = ?")
+    .get(name);
+  if (holder && holder.id !== projectId)
+    throw new OperationError(
+      HttpStatus.Conflict,
+      ProjectErrorCode.NameConflict,
+      "Project name is already taken.",
+      { id: String(holder.id) },
+    );
+}
+
+export function insertProject(tx: Transaction, name: string): StoredProject {
+  requireAvailableName(tx, name);
+  const row: ProjectRow = {
+    id: createIdentity(PROJECT_ID_PREFIX),
+    name,
+    binding_set_version: BINDING_SET_INITIAL_VERSION,
+    created_at: Date.now(),
+  };
+  tx.database
+    .prepare(
+      "INSERT INTO project_project (id, name, binding_set_version, created_at) VALUES (?, ?, ?, ?)",
+    )
+    .run(row.id, row.name, row.binding_set_version, row.created_at);
+  return toProject(row);
+}
+
+export function requireProject(tx: Transaction, id: string): StoredProject {
+  const row = tx.database
+    .prepare("SELECT * FROM project_project WHERE id = ?")
+    .get(id) as ProjectRow | undefined;
+  if (!row)
+    throw new OperationError(
+      HttpStatus.NotFound,
+      ProjectErrorCode.ProjectNotFound,
+      "Project not found.",
+    );
+  return toProject(row);
+}
+
+export function renameProject(
+  tx: Transaction,
+  id: string,
+  name: string,
+): StoredProject {
+  const project = requireProject(tx, id);
+  requireAvailableName(tx, name, id);
+  tx.database
+    .prepare("UPDATE project_project SET name = ? WHERE id = ?")
+    .run(name, id);
+  return { ...project, name };
+}
+
+export function listProjects(
+  tx: Transaction,
+  filter: PageFilter,
+): { items: StoredProject[]; nextCursor: string | null } {
+  const cursor =
+    filter.cursor == null
+      ? null
+      : decodeCursor(
+          filter.cursor,
+          (value) => projectIdentitySchema.safeParse(value).success,
+        );
+  const rows = tx.database
+    .prepare(
+      "SELECT * FROM project_project WHERE (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?",
+    )
+    .all(cursor, cursor, filter.limit + EXTRA_ROW) as ProjectRow[];
+  return page(rows, filter.limit, (row) => row.id, toProject);
+}
 
 export type StoredBinding = {
   id: string;
@@ -372,6 +477,22 @@ export function readBindingRevision(
   return toBinding(row);
 }
 
+export function readLatestBinding(
+  tx: Transaction,
+  projectId: string,
+  resourceIdentity: string,
+): StoredBinding | null {
+  const row = tx.database
+    .prepare(
+      "SELECT * FROM project_binding WHERE project_id = ? AND resource_identity = ? ORDER BY revision DESC LIMIT 1",
+    )
+    .get(projectId, resourceIdentity) as BindingRow | undefined;
+  if (!row) return null;
+  assert.equal(row.project_id, projectId);
+  assert.equal(row.resource_identity, resourceIdentity);
+  return toBinding(row);
+}
+
 function decodeCursor(
   cursor: string,
   valid: (value: string) => boolean,
@@ -393,11 +514,12 @@ function validRevision(value: string): boolean {
   return REVISION_PATTERN.test(value) && Number.isSafeInteger(Number(value));
 }
 
-function page(
-  rows: BindingRow[],
+function page<Row, Item>(
+  rows: Row[],
   limit: number,
-  key: (row: BindingRow) => string,
-): BindingPage {
+  key: (row: Row) => string,
+  convert: (row: Row) => Item,
+): { items: Item[]; nextCursor: string | null } {
   assert.ok(
     Number.isInteger(limit) &&
       limit >= MINIMUM_LIMIT &&
@@ -414,7 +536,7 @@ function page(
     rows.length > limit && last
       ? Buffer.from(key(last), TEXT_ENCODING).toString(CURSOR_ENCODING)
       : null;
-  return { items: selected.map(toBinding), nextCursor };
+  return { items: selected.map(convert), nextCursor };
 }
 
 export function listBindings(
@@ -450,7 +572,7 @@ export function listBindings(
   const rows = tx.database
     .prepare(`${latestBindingQuery}${where} ORDER BY b.id DESC LIMIT ?`)
     .all(...parameters, filter.limit + EXTRA_ROW) as BindingRow[];
-  return page(rows, filter.limit, (row) => row.id);
+  return page(rows, filter.limit, (row) => row.id, toBinding);
 }
 
 export function listRevisions(
@@ -480,5 +602,5 @@ export function listRevisions(
       `SELECT * FROM project_binding WHERE project_id = ? AND resource_identity = ?${cursorCondition} ORDER BY revision DESC LIMIT ?`,
     )
     .all(...parameters, filter.limit + EXTRA_ROW) as BindingRow[];
-  return page(rows, filter.limit, (row) => String(row.revision));
+  return page(rows, filter.limit, (row) => String(row.revision), toBinding);
 }

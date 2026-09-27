@@ -136,7 +136,15 @@ export default tseslint.config(
                 { from: file({ anyOf: ["config", "config-global", "main"] }) },
                 { from: element("repository") },
                 {
-                  from: element("service", { captured: { name: "!gateway" } }),
+                  from: element("service", {
+                    captured: { name: "!(gateway|project)" },
+                  }),
+                },
+                {
+                  from: element("service", {
+                    captured: { name: "project" },
+                    fileInternalPath: "!service.test.ts",
+                  }),
                 },
               ],
             },

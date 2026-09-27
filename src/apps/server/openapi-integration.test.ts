@@ -8,6 +8,7 @@ import { gatewayOperations } from "../../gateway/contract.ts";
 import { custodyOperations } from "../../custody/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
+import { projectOperations } from "../../project/contract.ts";
 import {
   openapiPath,
   emitOpenAPI,
@@ -27,11 +28,17 @@ const WORKER_AGENT_ENABLEMENT_ITEM_MAX_LINES = 450;
 const WORKER_AGENT_ENABLEMENT_GET_ID = "worker.agent.enablement.get";
 const WORKER_AGENT_ENABLEMENT_PUT_ID = "worker.agent.enablement.put";
 const WORKER_AGENT_ENABLEMENT_REMOVE_ID = "worker.agent.enablement.remove";
+const PROJECT_COLLECTION_FRAGMENT = "openapi/project/create.yaml";
+const PROJECT_COLLECTION_MAX_LINES = 225;
 const apiOperations = [
   ...Object.values(gatewayOperations),
   ...Object.values(custodyOperations),
   ...Object.values(workerOperations),
   ...Object.values(schedulerOperations),
+  projectOperations.create,
+  projectOperations.list,
+  projectOperations.get,
+  projectOperations.rename,
 ];
 test("published OpenAPI validates, matches the registry exactly, and describes real responses", async (t) => {
   const files = emitOpenAPIFiles(apiOperations);
@@ -105,12 +112,36 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
       });
       maxLines = WORKER_AGENT_ENABLEMENT_ITEM_MAX_LINES;
     }
+    if (file === PROJECT_COLLECTION_FRAGMENT) {
+      assert.deepEqual(emitted.paths["/api/project"], {
+        $ref: `./${PROJECT_COLLECTION_FRAGMENT}#/pathItem`,
+      });
+      assert.ok("pathItem" in document);
+      assert.ok(isObject(document.pathItem));
+      assert.deepEqual(Object.keys(document.pathItem).sort(), ["get", "post"]);
+      const methodIds = Object.fromEntries(
+        Object.entries(document.pathItem).map(([method, operation]) => {
+          assert.ok(isObject(operation));
+          assert.ok("operationId" in operation);
+          return [method, operation.operationId];
+        }),
+      );
+      assert.deepEqual(methodIds, {
+        get: projectOperations.list.id,
+        post: projectOperations.create.id,
+      });
+      maxLines = PROJECT_COLLECTION_MAX_LINES;
+    }
     assert.ok(
       content.split("\n").length <= maxLines,
       `${file} must stay small enough to review as one scope`,
     );
   }
   const resolved = await SwaggerParser.validate(openapiPath());
+  assert.equal(
+    resolved.paths?.["/api/project"]?.post?.operationId,
+    projectOperations.create.id,
+  );
   const emittedWorkerIds = Object.values(resolved.paths ?? {}).flatMap((path) =>
     Object.values(path).map(
       (operation) => (operation as { operationId?: string }).operationId,

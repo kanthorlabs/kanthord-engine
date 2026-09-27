@@ -288,9 +288,9 @@ const writeOperation = {
   mutation: true,
   body: true,
 } as const;
-const readInput = (
-  params: typeof emptyFields | typeof projectParams | typeof bindingParams,
-  query = emptyFields,
+const readInput = <P extends z.ZodType, Q extends z.ZodType>(
+  params: P,
+  query: Q,
 ) => z.strictObject({ params, query, body: z.null() });
 
 export const projectOperations = {
@@ -321,7 +321,7 @@ export const projectOperations = {
     id: "project.get",
     method: HttpMethod.Get,
     path: "/api/project/:projectId",
-    input: readInput(projectParams),
+    input: readInput(projectParams, emptyFields),
     output: projectRecord,
     description: "Get a project.",
   },
@@ -370,7 +370,7 @@ export const projectOperations = {
     id: "project.binding.get",
     method: HttpMethod.Get,
     path: "/api/project/:projectId/binding/:bindingId",
-    input: readInput(bindingParams),
+    input: readInput(bindingParams, emptyFields),
     output: bindingRecord,
     description: "Get a binding revision.",
   },
@@ -379,7 +379,7 @@ export const projectOperations = {
     id: "project.bindingSet.get",
     method: HttpMethod.Get,
     path: "/api/project/:projectId/binding-set",
-    input: readInput(projectParams),
+    input: readInput(projectParams, emptyFields),
     output: bindingSetWriteInputSchema,
     description: "Export the complete current binding set.",
   },
@@ -432,6 +432,7 @@ export const projectOperations = {
         bindingId: z.string().min(1),
         agentName: z.string().min(1),
       }),
+      emptyFields,
     ),
     output: agentConfigItem,
     description: "Get an effective agent configuration view.",

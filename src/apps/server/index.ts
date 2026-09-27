@@ -130,6 +130,16 @@ export function composeServices(options: {
   });
   const project: ProjectService = new ProjectService({
     config: {},
+    operationalStore: options.store,
+    createMission: () => unwired("createMission")(),
+    liveNodesPinning: () => unwired("liveNodesPinning")(),
+    validateEntry: () => unwired("validateEntry")(),
+    custodySuitability: () => unwired("custodySuitability")(),
+    repositoryConnector: {
+      gitLsRemote: () => unwired("repositoryConnector")(),
+    },
+    workerAgentsOf: () => unwired("workerAgentsOf")(),
+    workerAgentView: () => unwired("workerAgentView")(),
     health: options.health,
     bindings: options.bindings,
   });

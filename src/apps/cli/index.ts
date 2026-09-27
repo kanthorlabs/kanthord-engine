@@ -1,6 +1,7 @@
 import { workerOperations } from "../../worker/contract.ts";
 import { custodyOperations } from "../../custody/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
+import { projectOperations } from "../../project/contract.ts";
 import assert from "node:assert/strict";
 import { Command, CommanderError } from "commander";
 import { dirname } from "node:path";
@@ -305,4 +306,8 @@ const apiOperations = [
   ...Object.values(custodyOperations),
   ...Object.values(workerOperations),
   ...Object.values(schedulerOperations),
+  projectOperations.create,
+  projectOperations.list,
+  projectOperations.get,
+  projectOperations.rename,
 ];
