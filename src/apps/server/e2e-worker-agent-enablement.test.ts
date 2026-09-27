@@ -45,9 +45,7 @@ type CredentialResult = CredentialAnswer & { idempotencyKey: string };
 type Fixture = { directory: string; env: NodeJS.ProcessEnv };
 
 async function setup(t: TestContext): Promise<Fixture> {
-  const fixture = await gatewayFixture(t, {
-    standIns: { entriesOfAgent: () => [], bindingsNaming: () => [] },
-  });
+  const fixture = await gatewayFixture(t);
   const directory = temporary(t);
   const env = {
     ...environment(directory),

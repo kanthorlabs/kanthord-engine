@@ -91,9 +91,7 @@ test("injected repository connector skips the tool gate and probe", async (t) =>
 });
 
 test("composed Custody and Worker share credential and enablement collaborations", async (t) => {
-  const fixture = await gatewayFixture(t, {
-    standIns: { entriesOfAgent: () => [], bindingsNaming: () => [] },
-  });
+  const fixture = await gatewayFixture(t);
   const headers = {
     Authorization: `Bearer ${fixture.token}`,
     "Content-Type": "application/json",

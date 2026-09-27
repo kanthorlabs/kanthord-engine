@@ -10,7 +10,6 @@ import {
   CustodyComponent,
   custodyMigrations,
   deriveEnvelopeKey,
-  type BindingsNamingFn,
 } from "../../custody/index.ts";
 import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
 import {
@@ -22,11 +21,13 @@ import {
   type WorkQueue,
 } from "../../scheduler/contract.ts";
 import { unwired } from "./unwired.ts";
-import type { ProjectBindings } from "../../project/contract.ts";
 import type {
-  EntriesOfAgent,
-  WorkerRegistrations,
-} from "../../worker/contract.ts";
+  CreateMission,
+  LiveNodesPinning,
+  ProjectBindings,
+  RepositoryConnector,
+} from "../../project/contract.ts";
+import type { WorkerRegistrations } from "../../worker/contract.ts";
 import { audit, ensureDirectory } from "../../kernel/files.ts";
 import { Diagnostic, diagnostic, asError } from "../../kernel/errors.ts";
 import {
@@ -52,13 +53,7 @@ import {
   type Context,
 } from "../../kernel/context.ts";
 
-export type RepositoryConnector = {
-  gitLsRemote(
-    sshUrl: string,
-    context: Context,
-    deadlineMs: number,
-  ): Promise<void>;
-};
+export type { RepositoryConnector } from "../../project/contract.ts";
 
 export function composeServices(options: {
   config: ServerConfig;
@@ -70,8 +65,8 @@ export function composeServices(options: {
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
   standIns?: {
-    entriesOfAgent?: EntriesOfAgent;
-    bindingsNaming?: BindingsNamingFn;
+    createMission?: CreateMission;
+    liveNodesPinning?: LiveNodesPinning;
   };
 }) {
   const repoConnector =
@@ -115,8 +110,7 @@ export function composeServices(options: {
       worker.agentProvidersDependentOn(tx, name),
     enablementsDependentOnModel: (tx, name, model) =>
       worker.enablementsDependentOnModel(tx, name, model),
-    bindingsNaming:
-      options.standIns?.bindingsNaming ?? (() => unwired("bindingsNaming")()),
+    bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
   });
   const worker: WorkerService = new WorkerService({
     config: {},
@@ -125,21 +119,22 @@ export function composeServices(options: {
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
     credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
     modelListCheck: (tx, name) => custody.modelListCheck(tx, name),
-    entriesOfAgent:
-      options.standIns?.entriesOfAgent ?? (() => unwired("entriesOfAgent")()),
+    entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
   });
   const project: ProjectService = new ProjectService({
     config: {},
     operationalStore: options.store,
-    createMission: () => unwired("createMission")(),
-    liveNodesPinning: () => unwired("liveNodesPinning")(),
-    validateEntry: () => unwired("validateEntry")(),
-    custodySuitability: () => unwired("custodySuitability")(),
-    repositoryConnector: {
-      gitLsRemote: () => unwired("repositoryConnector")(),
-    },
-    workerAgentsOf: () => unwired("workerAgentsOf")(),
-    workerAgentView: () => unwired("workerAgentView")(),
+    createMission:
+      options.standIns?.createMission ?? (() => unwired("createMission")()),
+    liveNodesPinning:
+      options.standIns?.liveNodesPinning ??
+      (() => unwired("liveNodesPinning")()),
+    validateEntry: (tx, name, entry) => worker.validateEntry(tx, name, entry),
+    custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
+    repositoryConnector: repoConnector,
+    workerAgentsOf: (name) => worker.workerAgentsOf(name),
+    workerAgentView: (tx, w, a, entry) =>
+      worker.workerAgentView(tx, w, a, entry),
     health: options.health,
     bindings: options.bindings,
   });
