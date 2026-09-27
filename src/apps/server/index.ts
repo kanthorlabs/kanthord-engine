@@ -113,6 +113,7 @@ export function composeServices(options: {
     registrations: options.registrations,
     custodySuitability: () => unwired("custodySuitability")(),
     credentialMetadata: () => unwired("credentialMetadata")(),
+    modelListCheck: () => unwired("modelListCheck")(),
     entriesOfAgent: () => unwired("entriesOfAgent")(),
   });
   const project: ProjectService = new ProjectService({

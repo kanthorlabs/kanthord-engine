@@ -7,6 +7,7 @@ import {
   type Operation,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
+import type { ResourceCheck } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 export const MAX_RUNTIME_IDENTITY_LENGTH = 128;
 export interface VerifiedClient {
@@ -72,6 +73,14 @@ export type CredentialMetadataFn = (
   tx: Transaction,
   credentialName: string,
 ) => CredentialMetadataRecord | null;
+
+export const AGENT_PROVIDER_CAPABILITY = "model-list read";
+export const AGENT_PROVIDER_TARGET_KIND = "agent-provider";
+
+export type ModelListCheckFn = (
+  tx: Transaction,
+  credentialName: string,
+) => ResourceCheck;
 
 export type EntriesOfAgent = (
   tx: Transaction,

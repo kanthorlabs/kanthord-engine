@@ -9,7 +9,11 @@ import {
   type Healthcheck,
   type Service,
 } from "../kernel/service.ts";
-import type { HealthRegistry } from "../kernel/health.ts";
+import {
+  HealthScope,
+  type HealthRegistry,
+  type ResourceEntry,
+} from "../kernel/health.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import assert from "node:assert/strict";
 import { isMachineIdentity } from "../kernel/caller.ts";
@@ -19,6 +23,8 @@ import { HttpStatus } from "../kernel/http.ts";
 import {
   workerOperations,
   WORKER_SERVICE_NAME,
+  AGENT_PROVIDER_CAPABILITY,
+  AGENT_PROVIDER_TARGET_KIND,
   type WorkerRegistrations,
   type AgentEnablement,
   type AgentProviderItem,
@@ -29,6 +35,7 @@ import {
   type CustodySuitability,
   type CredentialMetadataFn,
   type EntriesOfAgent,
+  type ModelListCheckFn,
   WorkerErrorCode,
   LIST_LIMIT_DEFAULT,
   agentEnablementSchema,
@@ -60,6 +67,7 @@ import { InMemoryRegistrations } from "./registrations.ts";
 
 const NONE = 0;
 const LAST_PROVIDER = 1;
+const HEALTH_PAGE_SIZE = 100;
 
 function wireRecord(row: EnablementRow) {
   return agentEnablementSchema.parse({
@@ -152,6 +160,7 @@ export interface Dependencies {
   custodySuitability: CustodySuitability;
   credentialMetadata: CredentialMetadataFn;
   entriesOfAgent: EntriesOfAgent;
+  modelListCheck: ModelListCheckFn;
   health?: HealthRegistry;
   registrations?: WorkerRegistrations;
 }
@@ -467,6 +476,33 @@ export class WorkerService implements Service {
           entry.reasoningEffort === undefined))
     )
       throw configurationError(agentName, WorkerErrorCode.InvalidConfiguration);
+  }
+
+  resourceInventory(tx: Transaction): ResourceEntry[] {
+    const entries: ResourceEntry[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = listEnablements(tx, HEALTH_PAGE_SIZE, cursor);
+      for (const row of page.items) {
+        entries.push(
+          ...row.agentProviders.map((item) => ({
+            scope: HealthScope.Global,
+            project: null,
+            name: `${encodeURIComponent(row.agentName)}/${encodeURIComponent(item.name)}`,
+            target: `${AGENT_PROVIDER_TARGET_KIND}:${item.credential}`,
+            capability: AGENT_PROVIDER_CAPABILITY,
+            check: this.dependencies.modelListCheck(tx, item.credential),
+          })),
+        );
+      }
+      assert.notEqual(
+        page.nextCursor,
+        cursor === null ? undefined : cursor,
+        "Enablement pagination must advance.",
+      );
+      cursor = page.nextCursor;
+    } while (cursor !== null);
+    return entries;
   }
 
   agentProvidersDependentOn(tx: Transaction, credentialName: string) {

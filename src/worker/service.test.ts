@@ -6,6 +6,8 @@ import {
   WorkerErrorCode,
   WORKER_SERVICE_NAME,
   LIST_LIMIT_DEFAULT,
+  AGENT_PROVIDER_CAPABILITY,
+  AGENT_PROVIDER_TARGET_KIND,
   type AgentDependentBinding,
   type WorkerEntry,
 } from "./contract.ts";
@@ -18,7 +20,11 @@ import {
 } from "./enablements.ts";
 import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
-import { HealthRegistry } from "../kernel/health.ts";
+import {
+  HealthRegistry,
+  HealthScope,
+  ResourceStatus,
+} from "../kernel/health.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -28,6 +34,7 @@ const fakeCollaborations = {
   custodySuitability: () => {},
   credentialMetadata: () => null,
   entriesOfAgent: () => [],
+  modelListCheck: () => async () => ResourceStatus.Unknown,
 };
 
 const client = {
@@ -138,7 +145,10 @@ function enablementFixture(
   collaborations: Partial<
     Pick<
       Dependencies,
-      "custodySuitability" | "credentialMetadata" | "entriesOfAgent"
+      | "custodySuitability"
+      | "credentialMetadata"
+      | "entriesOfAgent"
+      | "modelListCheck"
     >
   > = {},
 ) {
@@ -193,6 +203,123 @@ function refuses(
     return true;
   });
 }
+
+test("resource inventory includes every live provider across pages without writes", async (t) => {
+  const calls: Array<{
+    tx: Parameters<Dependencies["modelListCheck"]>[0];
+    credential: string;
+  }> = [];
+  const f = enablementFixture(t, {
+    modelListCheck: (tx, credential) => {
+      calls.push({ tx, credential });
+      return async () => ResourceStatus.Unhealthy;
+    },
+  });
+  const PAGE_SIZE = 100;
+  const EXTRA_AGENT = 1;
+  const SPECIAL_AGENT = "agent/name";
+  const SPECIAL_PROVIDER = {
+    ...provider,
+    name: "with space",
+    credential: "special-credential",
+  };
+  const DISABLED_AGENT = "disabled";
+  const REMOVED_AGENT = "removed";
+  f.store.transaction((tx) => {
+    for (let index = 0; index < PAGE_SIZE + EXTRA_AGENT; index++) {
+      insertEnablementRevision(
+        tx,
+        `agent-${String(index).padStart(3, "0")}`,
+        EnablementState.Enabled,
+        [provider],
+        defaults,
+      );
+    }
+    insertEnablementRevision(
+      tx,
+      SPECIAL_AGENT,
+      EnablementState.Enabled,
+      [provider, SPECIAL_PROVIDER],
+      defaults,
+    );
+    insertEnablementRevision(
+      tx,
+      DISABLED_AGENT,
+      EnablementState.Disabled,
+      [provider],
+      defaults,
+    );
+    insertEnablementRevision(
+      tx,
+      REMOVED_AGENT,
+      EnablementState.Enabled,
+      [provider],
+      defaults,
+    );
+    insertEnablementRevision(
+      tx,
+      REMOVED_AGENT,
+      EnablementState.Enabled,
+      [provider],
+      defaults,
+      Date.now(),
+    );
+  });
+  const countRows = () =>
+    f.store.transaction(
+      (tx) =>
+        (
+          tx.database
+            .prepare("SELECT COUNT(*) AS count FROM worker_agent_enablement")
+            .get() as { count: number }
+        ).count,
+    );
+  const before = countRows();
+  let inventory: ReturnType<typeof f.worker.resourceInventory> = [];
+  f.store.transaction((tx) => {
+    inventory = f.worker.resourceInventory(tx);
+    assert.ok(calls.every((call) => call.tx === tx));
+  });
+  assert.equal(countRows(), before);
+  const expectedNames = [
+    ...Array.from(
+      { length: PAGE_SIZE + EXTRA_AGENT },
+      (_, index) => `agent-${String(index).padStart(3, "0")}/${provider.name}`,
+    ),
+    `${encodeURIComponent(SPECIAL_AGENT)}/${provider.name}`,
+    `${encodeURIComponent(SPECIAL_AGENT)}/${encodeURIComponent(SPECIAL_PROVIDER.name)}`,
+    `${DISABLED_AGENT}/${provider.name}`,
+  ];
+  assert.deepEqual(
+    inventory.map((entry) => entry.name).sort(),
+    expectedNames.sort(),
+  );
+  assert.equal(calls.length, inventory.length);
+  assert.ok(
+    calls.some((call) => call.credential === SPECIAL_PROVIDER.credential),
+  );
+  assert.ok(
+    inventory.some(
+      (entry) => entry.name === `${DISABLED_AGENT}/${provider.name}`,
+    ),
+  );
+  assert.ok(inventory.every((entry) => !entry.name.startsWith(REMOVED_AGENT)));
+  const special = inventory.find(
+    (entry) =>
+      entry.name ===
+      `${encodeURIComponent(SPECIAL_AGENT)}/${encodeURIComponent(SPECIAL_PROVIDER.name)}`,
+  );
+  assert.ok(special);
+  assert.equal(special.scope, HealthScope.Global);
+  assert.equal(special.project, null);
+  assert.equal(
+    special.target,
+    `${AGENT_PROVIDER_TARGET_KIND}:${SPECIAL_PROVIDER.credential}`,
+  );
+  assert.equal(special.capability, AGENT_PROVIDER_CAPABILITY);
+  assert.equal(await special.check(background), ResourceStatus.Unhealthy);
+  assert.equal(countRows(), before);
+});
 
 test("enablement operations use one commit, page ascending, and project only wire fields", (t) => {
   const f = enablementFixture(t);
