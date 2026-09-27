@@ -28,6 +28,14 @@ paths:
     $ref: ./openapi/gateway/openapiFile.yaml#/pathItem
   /api/auth/verify:
     $ref: ./openapi/gateway/verify.yaml#/pathItem
+  /api/project/{projectId}/binding/{bindingId}:
+    $ref: ./openapi/project/binding.get.yaml#/pathItem
+  /api/project/{projectId}/binding:
+    $ref: ./openapi/project/binding.list.yaml#/pathItem
+  /api/project/{projectId}/binding/{bindingId}/revision:
+    $ref: ./openapi/project/bindingRevision.list.yaml#/pathItem
+  /api/project/{projectId}/binding-set:
+    $ref: ./openapi/project/bindingSet.get.yaml#/pathItem
   /api/project:
     $ref: ./openapi/project/create.yaml#/pathItem
   /api/project/{projectId}:

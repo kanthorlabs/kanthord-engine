@@ -30,6 +30,8 @@ const WORKER_AGENT_ENABLEMENT_PUT_ID = "worker.agent.enablement.put";
 const WORKER_AGENT_ENABLEMENT_REMOVE_ID = "worker.agent.enablement.remove";
 const PROJECT_COLLECTION_FRAGMENT = "openapi/project/create.yaml";
 const PROJECT_COLLECTION_MAX_LINES = 225;
+const PROJECT_BINDING_SET_FRAGMENT = "openapi/project/bindingSet.get.yaml";
+const PROJECT_BINDING_SET_MAX_LINES = 625;
 const apiOperations = [
   ...Object.values(gatewayOperations),
   ...Object.values(custodyOperations),
@@ -39,11 +41,17 @@ const apiOperations = [
   projectOperations.list,
   projectOperations.get,
   projectOperations.rename,
+  projectOperations["bindingSet.write"],
+  projectOperations["bindingSet.get"],
+  projectOperations["binding.list"],
+  projectOperations["binding.get"],
+  projectOperations["bindingRevision.list"],
 ];
 test("published OpenAPI validates, matches the registry exactly, and describes real responses", async (t) => {
   const files = emitOpenAPIFiles(apiOperations);
   const emitted = files["openapi.yaml"];
   assert.ok(Object.hasOwn(files, WORKER_AGENT_ENABLEMENT_ITEM_FRAGMENT));
+  assert.ok(Object.hasOwn(files, PROJECT_BINDING_SET_FRAGMENT));
   assert.deepEqual(emitted.paths["/api/worker/agent/enablement/{agentName}"], {
     $ref: `./${WORKER_AGENT_ENABLEMENT_ITEM_FRAGMENT}#/pathItem`,
   });
@@ -132,6 +140,26 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
       });
       maxLines = PROJECT_COLLECTION_MAX_LINES;
     }
+    if (file === PROJECT_BINDING_SET_FRAGMENT) {
+      assert.deepEqual(emitted.paths["/api/project/{projectId}/binding-set"], {
+        $ref: `./${PROJECT_BINDING_SET_FRAGMENT}#/pathItem`,
+      });
+      assert.ok("pathItem" in document);
+      assert.ok(isObject(document.pathItem));
+      assert.deepEqual(Object.keys(document.pathItem).sort(), ["get", "put"]);
+      const methodIds = Object.fromEntries(
+        Object.entries(document.pathItem).map(([method, operation]) => {
+          assert.ok(isObject(operation));
+          assert.ok("operationId" in operation);
+          return [method, operation.operationId];
+        }),
+      );
+      assert.deepEqual(methodIds, {
+        get: projectOperations["bindingSet.get"].id,
+        put: projectOperations["bindingSet.write"].id,
+      });
+      maxLines = PROJECT_BINDING_SET_MAX_LINES;
+    }
     assert.ok(
       content.split("\n").length <= maxLines,
       `${file} must stay small enough to review as one scope`,
@@ -141,6 +169,10 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   assert.equal(
     resolved.paths?.["/api/project"]?.post?.operationId,
     projectOperations.create.id,
+  );
+  assert.equal(
+    resolved.paths?.["/api/project/{projectId}/binding-set"]?.put?.operationId,
+    projectOperations["bindingSet.write"].id,
   );
   const emittedWorkerIds = Object.values(resolved.paths ?? {}).flatMap((path) =>
     Object.values(path).map(

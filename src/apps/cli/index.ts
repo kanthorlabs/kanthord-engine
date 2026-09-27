@@ -310,4 +310,9 @@ const apiOperations = [
   projectOperations.list,
   projectOperations.get,
   projectOperations.rename,
+  projectOperations["bindingSet.write"],
+  projectOperations["bindingSet.get"],
+  projectOperations["binding.list"],
+  projectOperations["binding.get"],
+  projectOperations["bindingRevision.list"],
 ];

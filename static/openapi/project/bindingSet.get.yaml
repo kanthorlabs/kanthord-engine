@@ -1,0 +1,601 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: project.bindingSet.get
+    tags:
+      - project
+    description: Export the complete current binding set.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.bindingSet.get.Input/properties/params/prop\
+            erties/projectId"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/project.bindingSet.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+  put:
+    operationId: project.bindingSet.write
+    tags:
+      - project
+    description: Replace the binding set at its expected version.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.bindingSet.write.Input/properties/params/pr\
+            operties/projectId"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/project.bindingSet.write.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/project.bindingSet.write.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    project.bindingSet.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            projectId:
+              type: string
+              minLength: 1
+          required:
+            - projectId
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    project.bindingSet.get.Output:
+      type: object
+      properties:
+        version:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+        bindings:
+          type: object
+          propertyNames:
+            type: string
+            minLength: 1
+            maxLength: 63
+            pattern: ^[a-z][a-z0-9-]*$
+          additionalProperties:
+            oneOf:
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    const: repository
+                  config:
+                    type: object
+                    properties:
+                      available:
+                        type: boolean
+                      platform:
+                        type: string
+                        const: github
+                      address:
+                        type: string
+                        minLength: 1
+                      strategy:
+                        type: object
+                        properties:
+                          baseBranch:
+                            type: string
+                            minLength: 1
+                          action:
+                            type: object
+                            properties:
+                              name:
+                                type: string
+                                enum:
+                                  - pull_request
+                                  - merge_push
+                              follows:
+                                oneOf:
+                                  - type: object
+                                    properties:
+                                      type:
+                                        type: string
+                                        const: assessment_passed
+                                    required:
+                                      - type
+                                    additionalProperties: false
+                                  - type: object
+                                    properties:
+                                      type:
+                                        type: string
+                                        const: action_end_state
+                                      binding:
+                                        type: string
+                                        minLength: 1
+                                        maxLength: 63
+                                        pattern: ^[a-z][a-z0-9-]*$
+                                    required:
+                                      - type
+                                      - binding
+                                    additionalProperties: false
+                            required:
+                              - name
+                              - follows
+                            additionalProperties: false
+                        required:
+                          - baseBranch
+                        additionalProperties: false
+                      credential:
+                        type: string
+                        minLength: 1
+                      projectPrompt:
+                        type: string
+                    required:
+                      - available
+                      - platform
+                      - address
+                      - strategy
+                      - credential
+                    additionalProperties: false
+                required:
+                  - kind
+                  - config
+                additionalProperties: false
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    const: worker
+                  config:
+                    type: object
+                    properties:
+                      worker:
+                        type: string
+                        minLength: 1
+                      instanceCount:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      resourceBudget:
+                        type: object
+                        properties:
+                          turns:
+                            type: integer
+                            exclusiveMinimum: 0
+                            maximum: 9007199254740991
+                          wallTimeMs:
+                            type: integer
+                            exclusiveMinimum: 0
+                            maximum: 9007199254740991
+                        required:
+                          - turns
+                          - wallTimeMs
+                        additionalProperties: false
+                      entries:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            agent:
+                              type: string
+                              minLength: 1
+                            agentProvider:
+                              type: string
+                            modelIdentifier:
+                              type: string
+                            reasoningEffort:
+                              type: string
+                          required:
+                            - agent
+                          additionalProperties: false
+                    required:
+                      - worker
+                      - instanceCount
+                    additionalProperties: false
+                required:
+                  - kind
+                  - config
+                additionalProperties: false
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    const: storage
+                  config:
+                    type: object
+                    properties:
+                      available:
+                        type: boolean
+                      endpoint:
+                        type: string
+                        format: uri
+                      bucket:
+                        type: string
+                        minLength: 1
+                      region:
+                        type: string
+                        minLength: 1
+                      prefix:
+                        type: string
+                      credential:
+                        type: string
+                        minLength: 1
+                    required:
+                      - available
+                      - endpoint
+                      - bucket
+                      - region
+                      - prefix
+                      - credential
+                    additionalProperties: false
+                required:
+                  - kind
+                  - config
+                additionalProperties: false
+      required:
+        - version
+        - bindings
+      additionalProperties: false
+    project.bindingSet.write.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            projectId:
+              type: string
+              minLength: 1
+          required:
+            - projectId
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            version:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            bindings:
+              type: object
+              propertyNames:
+                type: string
+                minLength: 1
+                maxLength: 63
+                pattern: ^[a-z][a-z0-9-]*$
+              additionalProperties:
+                oneOf:
+                  - type: object
+                    properties:
+                      kind:
+                        type: string
+                        const: repository
+                      config:
+                        type: object
+                        properties:
+                          available:
+                            type: boolean
+                          platform:
+                            type: string
+                            const: github
+                          address:
+                            type: string
+                            minLength: 1
+                          strategy:
+                            type: object
+                            properties:
+                              baseBranch:
+                                type: string
+                                minLength: 1
+                              action:
+                                type: object
+                                properties:
+                                  name:
+                                    type: string
+                                    enum:
+                                      - pull_request
+                                      - merge_push
+                                  follows:
+                                    oneOf:
+                                      - type: object
+                                        properties:
+                                          type:
+                                            type: string
+                                            const: assessment_passed
+                                        required:
+                                          - type
+                                        additionalProperties: false
+                                      - type: object
+                                        properties:
+                                          type:
+                                            type: string
+                                            const: action_end_state
+                                          binding:
+                                            type: string
+                                            minLength: 1
+                                            maxLength: 63
+                                            pattern: ^[a-z][a-z0-9-]*$
+                                        required:
+                                          - type
+                                          - binding
+                                        additionalProperties: false
+                                required:
+                                  - name
+                                  - follows
+                                additionalProperties: false
+                            required:
+                              - baseBranch
+                            additionalProperties: false
+                          credential:
+                            type: string
+                            minLength: 1
+                          projectPrompt:
+                            type: string
+                        required:
+                          - available
+                          - platform
+                          - address
+                          - strategy
+                          - credential
+                        additionalProperties: false
+                    required:
+                      - kind
+                      - config
+                    additionalProperties: false
+                  - type: object
+                    properties:
+                      kind:
+                        type: string
+                        const: worker
+                      config:
+                        type: object
+                        properties:
+                          worker:
+                            type: string
+                            minLength: 1
+                          instanceCount:
+                            type: integer
+                            minimum: -9007199254740991
+                            maximum: 9007199254740991
+                          resourceBudget:
+                            type: object
+                            properties:
+                              turns:
+                                type: integer
+                                exclusiveMinimum: 0
+                                maximum: 9007199254740991
+                              wallTimeMs:
+                                type: integer
+                                exclusiveMinimum: 0
+                                maximum: 9007199254740991
+                            required:
+                              - turns
+                              - wallTimeMs
+                            additionalProperties: false
+                          entries:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                agent:
+                                  type: string
+                                  minLength: 1
+                                agentProvider:
+                                  type: string
+                                modelIdentifier:
+                                  type: string
+                                reasoningEffort:
+                                  type: string
+                              required:
+                                - agent
+                              additionalProperties: false
+                        required:
+                          - worker
+                          - instanceCount
+                        additionalProperties: false
+                    required:
+                      - kind
+                      - config
+                    additionalProperties: false
+                  - type: object
+                    properties:
+                      kind:
+                        type: string
+                        const: storage
+                      config:
+                        type: object
+                        properties:
+                          available:
+                            type: boolean
+                          endpoint:
+                            type: string
+                            format: uri
+                          bucket:
+                            type: string
+                            minLength: 1
+                          region:
+                            type: string
+                            minLength: 1
+                          prefix:
+                            type: string
+                          credential:
+                            type: string
+                            minLength: 1
+                        required:
+                          - available
+                          - endpoint
+                          - bucket
+                          - region
+                          - prefix
+                          - credential
+                        additionalProperties: false
+                    required:
+                      - kind
+                      - config
+                    additionalProperties: false
+          required:
+            - version
+            - bindings
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    project.bindingSet.write.Output:
+      type: object
+      properties:
+        projectId:
+          type: string
+        bindingSetVersion:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+        bindings:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties:
+            type: object
+            properties:
+              id:
+                type: string
+              projectId:
+                type: string
+              name:
+                type: string
+              kind:
+                type: string
+                enum:
+                  - repository
+                  - worker
+                  - storage
+              resourceIdentity:
+                type: string
+              revision:
+                type: integer
+                exclusiveMinimum: 0
+                maximum: 9007199254740991
+              config: {}
+              createdAt:
+                type: integer
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+              removedAt:
+                anyOf:
+                  - type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  - type: "null"
+            required:
+              - id
+              - projectId
+              - name
+              - kind
+              - resourceIdentity
+              - revision
+              - config
+              - createdAt
+              - removedAt
+            additionalProperties: false
+        changes:
+          type: array
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+                enum:
+                  - created
+                  - revised
+                  - removed
+                  - unchanged
+              bindingId:
+                type: string
+            required:
+              - kind
+              - bindingId
+            additionalProperties: false
+      required:
+        - projectId
+        - bindingSetVersion
+        - bindings
+        - changes
+      additionalProperties: false

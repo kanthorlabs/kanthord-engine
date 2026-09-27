@@ -65,6 +65,7 @@ export const ProjectErrorCode = {
     "project.bindings.repository.project_prompt_too_large",
   RepositorySshUnreachable: "project.bindings.repository.ssh_unreachable",
   WorkerAgentUnknown: "project.bindings.worker.agent_unknown",
+  WorkerFieldForbidden: "project.bindings.worker.field_forbidden",
   WorkerInstanceCountRange: "project.bindings.worker.instance_count_range",
   WorkerResourceChanged: "project.bindings.worker.resource_changed",
 } as const;
@@ -147,10 +148,105 @@ export const bindingEditSchema = z.discriminatedUnion("kind", [
     config: storageConfigSchema,
   }),
 ]);
-export const bindingSetWriteInputSchema = z.strictObject({
-  version: z.number().int().positive(),
-  bindings: z.record(bindingNameSchema, bindingEditSchema),
-});
+export const WorkerField = {
+  Entries: "entries",
+  ResourceBudget: "resourceBudget",
+} as const;
+const CUSTOM_ISSUE = "custom";
+type BindingEdits = Record<string, z.infer<typeof bindingEditSchema>>;
+
+function followsPath(name: string): string[] {
+  return [
+    "bindings",
+    name,
+    "config",
+    "strategy",
+    "action",
+    "follows",
+    "binding",
+  ];
+}
+
+function refineAgentSelectors(
+  name: string,
+  config: z.infer<typeof workerConfigSchema>,
+  ctx: z.RefinementCtx,
+): void {
+  const selectors = new Set<string>();
+  for (const [index, entry] of (config.entries ?? []).entries()) {
+    if (selectors.has(entry.agent))
+      ctx.addIssue({
+        code: CUSTOM_ISSUE,
+        path: ["bindings", name, "config", WorkerField.Entries, index, "agent"],
+        message: "Agent selectors must be unique within a worker binding.",
+      });
+    selectors.add(entry.agent);
+  }
+}
+
+function refineFollowsCycles(
+  edges: Map<string, string>,
+  ctx: z.RefinementCtx,
+): void {
+  const checked = new Set<string>();
+  for (const start of edges.keys()) {
+    const path = new Set<string>();
+    let name: string | undefined = start;
+    for (let remaining = edges.size; remaining > EMPTY_LENGTH; remaining--) {
+      if (name === undefined || checked.has(name)) break;
+      path.add(name);
+      const target = edges.get(name);
+      if (target !== undefined && path.has(target)) {
+        ctx.addIssue({
+          code: CUSTOM_ISSUE,
+          path: followsPath(name),
+          message: "Action follows references must not form a cycle.",
+        });
+        break;
+      }
+      name = target;
+    }
+    for (const visited of path) checked.add(visited);
+  }
+}
+
+function refineBindingRelations(
+  bindings: BindingEdits,
+  ctx: z.RefinementCtx,
+): void {
+  const edges = new Map<string, string>();
+  for (const [name, binding] of Object.entries(bindings)) {
+    if (binding.kind === BindingKind.Worker)
+      refineAgentSelectors(name, binding.config, ctx);
+    if (binding.kind !== BindingKind.Repository) continue;
+    const follows = binding.config.strategy.action?.follows;
+    if (follows?.type !== FollowsType.ActionEndState) continue;
+    const target = Object.hasOwn(bindings, follows.binding)
+      ? bindings[follows.binding]
+      : undefined;
+    if (
+      target?.kind !== BindingKind.Repository ||
+      !target.config.strategy.action
+    ) {
+      ctx.addIssue({
+        code: CUSTOM_ISSUE,
+        path: followsPath(name),
+        message:
+          "Action follows must name a submitted repository with an action.",
+      });
+      continue;
+    }
+    edges.set(name, follows.binding);
+  }
+  refineFollowsCycles(edges, ctx);
+}
+
+export const bindingSetWriteInputSchema = z
+  .strictObject({
+    version: z.number().int().positive(),
+    bindings: z.record(bindingNameSchema, bindingEditSchema),
+  })
+  .superRefine(({ bindings }, ctx) => refineBindingRelations(bindings, ctx));
 
 export type CustodySuitability = (
   tx: Transaction,
