@@ -34,6 +34,7 @@ import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
 import { addCredentialCommand } from "./credential.ts";
 import { addProjectCommand } from "./project.ts";
+import { addMissionCommand } from "./mission.ts";
 import { addSchedulerCommand } from "./scheduler.ts";
 import {
   CommandName,
@@ -167,7 +168,8 @@ export function createProgram(
   addCredentialCommand(program);
   addProjectCommand(program);
   addSchedulerCommand(program);
-  for (const name of [CommandName.Mission, CommandName.Tracking]) {
+  addMissionCommand(program);
+  for (const name of [CommandName.Tracking]) {
     const group = program
       .command(name)
       .description(`${name[0]!.toUpperCase()}${name.slice(1)} Service commands`)
