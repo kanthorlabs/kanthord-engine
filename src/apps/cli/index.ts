@@ -31,6 +31,7 @@ import { KANTHORD_AUTH_USERNAME } from "../../gateway/local.ts";
 import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
 import { addCredentialCommand } from "./credential.ts";
+import { addSchedulerCommand } from "./scheduler.ts";
 import {
   CommandName,
   ExitCode,
@@ -161,10 +162,10 @@ export function createProgram(
   addServeCommand(program, onServer);
   addJWTCommand(program);
   addCredentialCommand(program);
+  addSchedulerCommand(program);
   for (const name of [
     CommandName.Project,
     CommandName.Mission,
-    CommandName.Scheduler,
     CommandName.Tracking,
   ]) {
     const group = program
