@@ -48,7 +48,7 @@ Every other ERD 1 task is unblocked.
 - `docs/brainstorm/architecture.impl.md:583–600` — Kind 2 collaboration contract.
 - `engine/AGENTS.md` — "Add a service", "Add an operation", "Add a migration",
   file layout.
-- `engine/.agents/plan/00-index.md` — seam signatures, ownership table.
+- `engine/.agents/plan/erd-01-setup/00-index.md` — seam signatures, ownership table.
 - `docs/reference/erd/01-setup.md:201` — `resource_identity` first part is the
   binding kind; kind is `repository`, `storage` or `worker`.
 
@@ -546,7 +546,7 @@ createdAt: z.number().int() })`.
     `architecture.impl.md:17–20`.
   - `reconcileJob` is idempotent: a node that was already claimable and remains
     claimable produces no DB write. Prevents duplicate-insert unique-constraint
-    failures from Plan 02's `WorkQueue`. `engine/.agents/plan/02-scheduler-job.md:110`.
+    failures from Plan 02's `WorkQueue`. `engine/.agents/plan/erd-01-setup/02-scheduler-job.md:110`.
 - Done when: `pnpm run verify` passes; all helper tests pass.
 
 ### 06.9 Implement `mission.get` and the migration isolation test

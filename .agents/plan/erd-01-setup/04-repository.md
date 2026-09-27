@@ -17,8 +17,8 @@ The platform connector, payload decoders and all write operations (node-branch p
 - `docs/brainstorm/architecture.impl.md:17–20` → every comparison against a fixed string or number uses a named constant.
 - `docs/brainstorm/architecture.impl.md:339–349` → error code form `<namespace>.<component>[.<component>...].<error>`, minimum three parts.
 - `docs/brainstorm/architecture.impl.md:382` → "Service and component collaborators receive `Context`, not a native `AbortSignal`. Native signals are bridged at transport boundaries."
-- `engine/.agents/plan/00-index.md` ownership table → Plan 04 adds `src/repository` as a separate non-service element type to `eslint.config.js`; Plan 04 adds `src/repository/` to `AGENTS.md`.
-- `engine/.agents/plan/07-gateway-server.md:39,85,95` → Plan 07 constructs `new RepositoryComponent()` and calls no lifecycle method on it; names the injected method `gitLsRemote`.
+- `engine/.agents/plan/erd-01-setup/00-index.md` ownership table → Plan 04 adds `src/repository` as a separate non-service element type to `eslint.config.js`; Plan 04 adds `src/repository/` to `AGENTS.md`.
+- `engine/.agents/plan/erd-01-setup/07-gateway-server.md:39,85,95` → Plan 07 constructs `new RepositoryComponent()` and calls no lifecycle method on it; names the injected method `gitLsRemote`.
 
 ## Depends on
 

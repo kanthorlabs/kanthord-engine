@@ -67,7 +67,7 @@ None in ERD 1.
 Sources:
 
 - `worker-service.impl.md:165` — "The resource healthcheck of an instance reports `healthy` when its last heartbeat is inside `worker.heartbeatWindow`, and `unhealthy` otherwise." (registered instance, ERD 2)
-- `engine/.agents/plan/00-index.md:18` — "Worker registrations (`worker_registration` table)...Heartbeat and work pull are registration lifecycle (ERD 2)."
+- `engine/.agents/plan/erd-01-setup/00-index.md:18` — "Worker registrations (`worker_registration` table)...Heartbeat and work pull are registration lifecycle (ERD 2)."
 
 ## Depends on
 

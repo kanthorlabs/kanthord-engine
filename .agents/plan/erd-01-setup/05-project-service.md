@@ -52,7 +52,7 @@ Leaves to Plan 08: CLI command file for the `project` group.
 - `engine/docs/cli/project.md` → 11 implementable operations, config schemas, access
   policies, error codes, response fields.
 - `engine/AGENTS.md` → "Add a service", "Add a migration", "Add an operation".
-- `engine/.agents/plan/00-index.md` → seam signatures, collaboration-type contract rule,
+- `engine/.agents/plan/erd-01-setup/00-index.md` → seam signatures, collaboration-type contract rule,
   shared-file ownership.
 - Orchestrator decisions D2–D8 and Aelita error-code ruling (2026-09-27).
 

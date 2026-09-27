@@ -32,7 +32,7 @@ Does not deliver:
 - `docs/reference/erd/01-setup.md:33–153` — all ERD 1 table names for the combined table assertion.
 - `docs/reference/erd/README.md` (owners-without-a-table) — Gateway owns no table; `credential` is the one unprefixed table.
 - `engine/AGENTS.md` — "Regenerate OpenAPI": change declarations first, run the command, commit, verify.
-- `engine/.agents/plan/00-index.md` — seams table; ownership table; shared conventions rows "Component healthcheck" and "Resource healthcheck entry".
+- `engine/.agents/plan/erd-01-setup/00-index.md` — seams table; ownership table; shared conventions rows "Component healthcheck" and "Resource healthcheck entry".
 - `docs/brainstorm/gateway-service.impl.md:266–300` — component healthchecks and the resource healthcheck report: eight liveness maps, `GET /api/liveness` route, `GET /api/healthcheck` route, dedupe by target, 32-check limit, 10 s check deadline, `missingInventories`, entry placement by owner and scope.
 - `docs/brainstorm/gateway-service.md:23–33` — health report and liveness answer: `gateway.liveness` is public; `gateway.healthcheck` is human; liveness reports internal components only.
 - `docs/brainstorm/architecture.md:120–145` — resource healthcheck: inventory owners, no stored result, check on demand, dedupe by target, bounded concurrency, deadline per check.

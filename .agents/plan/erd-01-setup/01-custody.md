@@ -52,7 +52,7 @@ This plan does not deliver:
   single-use enforcement.
 - `engine/AGENTS.md#add-a-service`, `#add-a-migration`, `#add-an-operation` — file
   structure and migration rules.
-- `engine/.agents/plan/00-index.md` — ESLint element rule, migration prefix exemption,
+- `engine/.agents/plan/erd-01-setup/00-index.md` — ESLint element rule, migration prefix exemption,
   seam table, ownership table.
 
 ## Depends on
@@ -785,7 +785,7 @@ three in the composition root and in `gatewayFixture`. Plan 03 replaces
   - No check result persists; checks run on demand
     (`architecture.md` "No service stores the result of a check.").
   - Named constants for every capability string and target kind (`engine/CLAUDE.local.md`).
-  - No background check, no freshness cache (2026-09-25 Ulrich ruling in `engine/.agents/plan/00-index.md`).
+  - No background check, no freshness cache (2026-09-25 Ulrich ruling in `engine/.agents/plan/erd-01-setup/00-index.md`).
   - Plan 07 places each entry in the health report.
 - Done when:
   - `node --test src/kernel/health.test.ts` passes the new `ResourceStatus` and `HealthScope` tests.

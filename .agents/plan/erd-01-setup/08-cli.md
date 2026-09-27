@@ -32,22 +32,22 @@ Out of scope:
 - `docs/brainstorm/architecture.impl.md:339–349` — error code form (3+ parts).
 - `docs/reference/erd/01-setup.md` — ERD 1 table and constraint rules.
 - `engine/AGENTS.md` — CLI imports contracts and adapter only.
-- `engine/.agents/plan/00-index.md` — plan order and seam ownership.
-- `engine/.agents/plan/01-custody.md` — `custodyOperations` keys (short, no prefix):
+- `engine/.agents/plan/erd-01-setup/00-index.md` — plan order and seam ownership.
+- `engine/.agents/plan/erd-01-setup/01-custody.md` — `custodyOperations` keys (short, no prefix):
   `create`, `list`, `get`, `rotate`, `update_metadata`, `revoke`, `login`,
   `login_code`, `login_status`.
-- `engine/.agents/plan/02-scheduler-job.md` — `schedulerOperations` keys (camelCase):
+- `engine/.agents/plan/erd-01-setup/02-scheduler-job.md` — `schedulerOperations` keys (camelCase):
   `queueList`, `queuePeek`.
-- `engine/.agents/plan/03-worker-agent-enablement.md` — `workerOperations` keys
+- `engine/.agents/plan/erd-01-setup/03-worker-agent-enablement.md` — `workerOperations` keys
   (dotted, no prefix): `agent.enablement.list`, `agent.enablement.get`,
   `agent.enablement.put`, `agent.enablement.enable`, `agent.enablement.disable`,
   `agent.enablement.remove`, `agent.enablement.provider.add`,
   `agent.enablement.provider.remove`.
-- `engine/.agents/plan/05-project-service.md` — `projectOperations` keys (short,
+- `engine/.agents/plan/erd-01-setup/05-project-service.md` — `projectOperations` keys (short,
   no prefix): `create`, `list`, `get`, `rename`, `binding.list`, `binding.get`,
   `bindingSet.get`, `bindingSet.write`, `bindingRevision.list`,
   `agentConfiguration.list`, `agentConfiguration.get`.
-- `engine/.agents/plan/06-mission-service.md` — `missionOperations` keys (short,
+- `engine/.agents/plan/erd-01-setup/06-mission-service.md` — `missionOperations` keys (short,
   no prefix). `export` and `import.preview` are `mutation: false`.
 - `engine/src/apps/cli/index.ts` — dispatcher and help-only loop.
 - `engine/src/apps/server/cli-support.ts` — `kanthord(args, env)` subprocess helper.
