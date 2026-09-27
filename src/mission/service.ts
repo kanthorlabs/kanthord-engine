@@ -29,6 +29,7 @@ import {
 import { addDependency, removeDependency } from "./dependency.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
 import { createNode } from "./node-create.ts";
+import { updateNode } from "./node-update.ts";
 import {
   getNode,
   getRevision,
@@ -167,6 +168,20 @@ export class MissionService implements Service, MissionCollaborations {
       missionOperations["node.revision.get"],
       ({ params }, caller) =>
         caller.commit((tx) => getRevision(tx, params.nodeId, params.revision)),
+    );
+    registry.register(
+      missionOperations["node.update"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) =>
+          updateNode(
+            tx,
+            params.nodeId,
+            body,
+            humanActor(caller),
+            this.dependencies.bindings,
+            this.dependencies.config.textMaxBytes,
+          ),
+        ),
     );
     registry.register(
       missionOperations["node.create"],

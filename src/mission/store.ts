@@ -16,6 +16,7 @@ import {
 import type { DepEdge } from "./graph.ts";
 
 const VERSION_INCREMENT = 1;
+const UPDATED_NODE_COUNT = 1;
 const INITIAL_ATTEMPT = 0;
 const FILENAME_UNIQUE_FAILURE =
   /UNIQUE constraint failed: mission_node\.mission_id, mission_node\.filename/;
@@ -159,6 +160,27 @@ export function insertNode(
   } catch (error) {
     if (error instanceof Error && FILENAME_UNIQUE_FAILURE.test(error.message))
       throw filenameConflict(node.filename);
+    throw error;
+  }
+}
+
+export function updateNodeFilename(
+  tx: Transaction,
+  nodeId: string,
+  filename: string,
+): void {
+  try {
+    const result = tx.database
+      .prepare("UPDATE mission_node SET filename = ? WHERE id = ?")
+      .run(filename, nodeId);
+    assert.equal(
+      result.changes,
+      UPDATED_NODE_COUNT,
+      "Filename update requires one node.",
+    );
+  } catch (error) {
+    if (error instanceof Error && FILENAME_UNIQUE_FAILURE.test(error.message))
+      throw filenameConflict(filename);
     throw error;
   }
 }

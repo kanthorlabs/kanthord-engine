@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { isTerminal } from "./admission.ts";
 import { validateText } from "./content.ts";
 import {
   EdgeKind,
@@ -26,7 +25,7 @@ import {
   readMissionNodes,
   type NodeRow,
 } from "./store.ts";
-import { requireMission } from "./write.ts";
+import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 
 const REASON_FIELD = "reason";
 const VERSION_INCREMENT = 1;
@@ -35,26 +34,6 @@ const EndpointReason = {
   CrossMission: "cross_mission",
 } as const;
 type DependencyEdge = Extract<Edge, { kind: typeof EdgeKind.Dependency }>;
-
-function requireActive(node: NodeRow): void {
-  if (node.retired_at !== null)
-    throw new OperationError(
-      HttpStatus.Conflict,
-      MissionErrorCode.Retired,
-      "Node is retired.",
-      { nodeId: node.id },
-    );
-}
-
-function requireNonterminal(node: NodeRow): void {
-  if (isTerminal(node.state))
-    throw new OperationError(
-      HttpStatus.Conflict,
-      MissionErrorCode.Terminal,
-      "Dependent node is terminal.",
-      { nodeId: node.id },
-    );
-}
 
 function validateEndpoints(node: NodeRow, target: NodeRow): void {
   const reason =

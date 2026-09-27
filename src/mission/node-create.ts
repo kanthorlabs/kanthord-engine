@@ -121,11 +121,11 @@ function requireParent(
   return revisionFromRow(current);
 }
 
-function resolveContent(
+export function resolveContent(
   tx: Transaction,
   bindings: MissionBindings,
   projectId: string,
-  body: NodeCreate,
+  body: Pick<NodeCreate, "filename" | "kind" | "content" | "reason">,
   textMaxBytes: number,
 ): Content {
   validateFilename(body.filename);

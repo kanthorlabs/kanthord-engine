@@ -37,18 +37,20 @@ import {
   revisionSchema,
   pageOf,
   type NodeCreate,
+  type NodeUpdate,
   type NodeChange,
   type MissionBindings,
   type WorkQueue,
 } from "./contract.ts";
 import { missionMigrations } from "./migrations.ts";
 import { MissionService, humanActor, type Dependencies } from "./service.ts";
-import { CONTENT_FIELDS, TASKS_FIELD } from "./content.ts";
+import { CONTENT_FIELDS, TASKS_FIELD, ContentField } from "./content.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   insertNode as insertNodeRow,
   readNode,
   readCurrentRevision,
+  updateNodeFilename,
 } from "./store.ts";
 
 const UNEXPECTED_COLLABORATION = "unexpected collaboration call";
@@ -432,6 +434,17 @@ function nodeFixture(t: TestContext) {
   function version() {
     return f.invoke(PROJECT_ID).version;
   }
+  function update(nodeId: string, body: NodeUpdate): NodeChange {
+    const operation = missionOperations[RevisionWrite.NodeUpdate];
+    const input = operation.input.parse({
+      params: { nodeId },
+      query: {},
+      body,
+    });
+    return nodeChangeSchema.parse(
+      f.registry.get(operation.id).handler(input, f.caller),
+    );
+  }
   function create(body: NodeCreate, id = missionId): NodeChange {
     const operation = missionOperations[RevisionWrite.NodeCreate];
     const input = operation.input.parse({
@@ -534,6 +547,7 @@ function nodeFixture(t: TestContext) {
     queue,
     version,
     create,
+    update,
     body,
     initiative,
     objective,
@@ -1831,6 +1845,287 @@ test("edge.list refuses unknown missions and malformed cursor encodings, kinds a
     );
   }
 });
+
+function updateBody(f: ReturnType<typeof nodeFixture>, id: string): NodeUpdate {
+  const node = f.store.transaction((tx) => {
+    const row = readNode(tx, id)!;
+    const owner = row.kind === NodeKind.Task ? row.parent_id! : id;
+    const revision = readCurrentRevision(tx, owner)!;
+    const content =
+      row.kind === NodeKind.Task
+        ? JSON.parse(revision.tasks!).find(
+            (task: { id: string }) => task.id === id,
+          ).content
+        : {
+            name: revision.name,
+            requirement: revision.requirement,
+            criterion: revision.criterion,
+            verifications: JSON.parse(revision.verifications),
+            bindings: JSON.parse(revision.bindings),
+          };
+    return {
+      filename: row.filename,
+      content,
+      kind: row.kind,
+      expectedRevision: revision.revision,
+    };
+  });
+  return {
+    filename: node.filename,
+    expectedRevision: node.expectedRevision,
+    content: {
+      ...node.content,
+      bindings: node.kind === NodeKind.Objective ? [REPOSITORY_NAME] : [],
+    },
+    expectedMissionVersion: f.version(),
+    reason: REASON,
+  };
+}
+
+test("node.update no-op and changed objective fields preserve version and write exact revisions", (t) => {
+  const f = nodeFixture(t);
+  const id = f.objective();
+  const body = updateBody(f, id);
+  const before = f.snapshot();
+  const commits = f.commits();
+  const noOp = f.update(id, body);
+  assert.equal(f.commits(), commits + ONE_COMMIT);
+  assert.deepEqual(noOp, {
+    missionVersion: body.expectedMissionVersion,
+    revisions: [],
+    retiredNodeIds: [],
+    addedEdges: [],
+    removedEdges: [],
+    openAttemptsUnchanged: [],
+  });
+  assert.deepEqual(f.snapshot(), before);
+  const changed = f.update(id, {
+    ...body,
+    filename: NEW_FILENAME,
+    content: { ...body.content, name: "updated" },
+  });
+  assert.equal(changed.missionVersion, body.expectedMissionVersion + ONE);
+  assert.equal(f.node(id)?.filename, NEW_FILENAME);
+  assert.equal(changed.revisions[ZERO]?.revision, NEXT_REVISION);
+  assert.deepEqual(changed.revisions[ZERO]?.change, {
+    write: RevisionWrite.NodeUpdate,
+    previousRevision: FIRST_REVISION,
+    changedFields: ["filename", "name"],
+    tasks: [],
+  });
+  assert.deepEqual(changed.revisions[ZERO]?.actor, humanActor(f.caller));
+  assert.equal(f.version(), changed.missionVersion);
+});
+
+test("node.update initiative lists only changed content fields in canonical order", (t) => {
+  const f = nodeFixture(t);
+  const id = f.initiative();
+  const body = updateBody(f, id);
+  const changed = f.update(id, {
+    ...body,
+    content: {
+      ...body.content,
+      criterion: "new criterion",
+      verifications: ["new verification"],
+      requirement: "new requirement",
+      name: "new name",
+      bindings: [STORAGE_NAME],
+    },
+  });
+  assert.deepEqual(changed.revisions[ZERO]?.change, {
+    write: RevisionWrite.NodeUpdate,
+    previousRevision: FIRST_REVISION,
+    changedFields: CONTENT_FIELDS.filter(
+      (field) => field !== ContentField.Filename,
+    ),
+  });
+  assert.deepEqual(changed.revisions[ZERO]?.content.bindings, [
+    OTHER_BINDING_ID,
+  ]);
+  assert.equal(changed.revisions[ZERO]?.tasks, undefined);
+});
+
+test("node.update task no-op leaves objective revision and mission unchanged", (t) => {
+  const f = nodeFixture(t);
+  const owner = f.objective();
+  const task = f.create(f.body(NodeKind.Task, owner)).revisions[ZERO]!.tasks![
+    ZERO
+  ]!.id;
+  const body = updateBody(f, task);
+  const before = f.snapshot();
+  const commits = f.commits();
+  const answer = f.update(task, body);
+  assert.equal(f.commits(), commits + ONE_COMMIT);
+  assert.deepEqual(answer, {
+    missionVersion: body.expectedMissionVersion,
+    revisions: [],
+    retiredNodeIds: [],
+    addedEdges: [],
+    removedEdges: [],
+    openAttemptsUnchanged: [],
+  });
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("node filename store maps unique-index failure to filename conflict", (t) => {
+  const f = nodeFixture(t);
+  const id = f.initiative();
+  f.create({ ...f.body(), filename: OTHER_FILENAME });
+  assert.throws(
+    () =>
+      f.store.transaction((tx) => updateNodeFilename(tx, id, OTHER_FILENAME)),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, MissionErrorCode.FilenameConflict);
+      assert.deepEqual(error.details, { filename: OTHER_FILENAME });
+      return true;
+    },
+  );
+  assert.equal(f.node(id)?.filename, INITIATIVE_FILENAME);
+});
+
+test("node.update task revises only its objective and maps filename conflicts", (t) => {
+  const f = nodeFixture(t);
+  const objectiveId = f.objective();
+  const taskId = f.create(f.body(NodeKind.Task, objectiveId)).revisions[ZERO]!
+    .tasks![ZERO]!.id;
+  const body = updateBody(f, taskId);
+  const commits = f.commits();
+  const changed = f.update(taskId, {
+    ...body,
+    filename: NEW_FILENAME,
+    content: { ...body.content, name: "task changed" },
+  });
+  assert.equal(f.commits(), commits + ONE_COMMIT);
+  assert.equal(changed.missionVersion, body.expectedMissionVersion + ONE);
+  assert.equal(f.node(taskId)?.filename, NEW_FILENAME);
+  assert.equal(changed.revisions[ZERO]?.nodeId, objectiveId);
+  assert.equal(changed.revisions[ZERO]?.revision, body.expectedRevision + ONE);
+  assert.deepEqual(changed.revisions[ZERO]?.change, {
+    write: RevisionWrite.NodeUpdate,
+    previousRevision: body.expectedRevision,
+    changedFields: [TASKS_FIELD],
+    tasks: [
+      {
+        id: taskId,
+        change: TaskChange.Updated,
+        changedFields: ["filename", "name"],
+      },
+    ],
+  });
+  assert.deepEqual(changed.revisions[ZERO]?.tasks?.[ZERO], {
+    id: taskId,
+    filename: NEW_FILENAME,
+    content: { ...body.content, name: "task changed" },
+  });
+  assert.equal(
+    f.store.transaction((tx) => readCurrentRevision(tx, taskId)),
+    null,
+  );
+  assert.equal(f.version(), changed.missionVersion);
+  updateRefuses(
+    f,
+    taskId,
+    { ...updateBody(f, taskId), filename: OBJECTIVE_FILENAME },
+    MissionErrorCode.FilenameConflict,
+    { filename: OBJECTIVE_FILENAME },
+  );
+});
+
+function updateRefuses(
+  f: ReturnType<typeof nodeFixture>,
+  id: string,
+  body: NodeUpdate,
+  code: string,
+  details?: unknown,
+  status: number = HttpStatus.Conflict,
+): void {
+  const before = f.snapshot();
+  const commits = f.commits();
+  assert.throws(
+    () => f.update(id, body),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, status);
+      assert.equal(error.code, code);
+      if (details !== undefined) assert.deepEqual(error.details, details);
+      return true;
+    },
+  );
+  assert.equal(f.commits(), commits + ONE_COMMIT);
+  assert.deepEqual(f.snapshot(), before);
+}
+
+test("node.update checks existence, retirement, version and revision in order", (t) => {
+  const f = nodeFixture(t);
+  const id = f.initiative();
+  const body = updateBody(f, id);
+  updateRefuses(
+    f,
+    UNKNOWN_NODE_ID,
+    body,
+    MissionErrorCode.NodeNotFound,
+    undefined,
+    HttpStatus.NotFound,
+  );
+  updateRefuses(
+    f,
+    id,
+    { ...body, expectedMissionVersion: FIRST_REVISION },
+    MissionErrorCode.VersionConflict,
+    { current: body.expectedMissionVersion },
+  );
+  updateRefuses(
+    f,
+    id,
+    { ...body, expectedRevision: NEXT_REVISION },
+    MissionErrorCode.RevisionConflict,
+    { current: FIRST_REVISION },
+  );
+  f.store.database
+    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+    .run(RETIRED_AT, id);
+  updateRefuses(
+    f,
+    id,
+    { ...body, expectedMissionVersion: FIRST_REVISION },
+    MissionErrorCode.Retired,
+    { nodeId: id },
+  );
+});
+
+for (const kind of [NodeKind.Initiative, NodeKind.Objective]) {
+  test(`node.update refuses terminal ${kind}`, (t) => {
+    const f = nodeFixture(t);
+    const id = kind === NodeKind.Initiative ? f.initiative() : f.objective();
+    const body = updateBody(f, id);
+    f.setState(id, NodeState.Completed);
+    updateRefuses(f, id, body, MissionErrorCode.Terminal, { nodeId: id });
+  });
+}
+
+for (const retired of [false, true]) {
+  test(`node.update refuses task with ${retired ? "retired" : "terminal"} objective`, (t) => {
+    const f = nodeFixture(t);
+    const owner = f.objective();
+    const task = f.create(f.body(NodeKind.Task, owner)).revisions[ZERO]!.tasks![
+      ZERO
+    ]!.id;
+    const body = updateBody(f, task);
+    if (retired)
+      f.store.database
+        .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+        .run(RETIRED_AT, owner);
+    else f.setState(owner, NodeState.Discarded);
+    updateRefuses(
+      f,
+      task,
+      body,
+      retired ? MissionErrorCode.Retired : MissionErrorCode.Terminal,
+      { nodeId: owner },
+    );
+  });
+}
 
 test("MissionService refuses to restart after stop", async () => {
   const mission = makeService(new HealthRegistry());
