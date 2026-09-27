@@ -164,6 +164,7 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
     status: "ok",
     services: {
       server: { gateway: 200, store: 200, log: 200 },
+      scheduler: { queue: HttpStatus.OK },
       custody: { credential: 200 },
       worker: { registrations: 200 },
       project: { bindings: 200 },

@@ -15,6 +15,14 @@ import {
   type BindingsNamingFn,
 } from "../../custody/index.ts";
 import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
+import {
+  SchedulerService,
+  schedulerMigrations,
+} from "../../scheduler/index.ts";
+import {
+  SCHEDULER_SERVICE_NAME,
+  type WorkQueue,
+} from "../../scheduler/contract.ts";
 import { unwired } from "./unwired.ts";
 import type { ProjectBindings } from "../../project/contract.ts";
 import type { WorkerRegistrations } from "../../worker/contract.ts";
@@ -74,6 +82,17 @@ export function composeServices(options: {
       },
     },
   });
+  const scheduler = new SchedulerService({
+    config: {},
+    health: options.health,
+  });
+  const workQueue: WorkQueue = {
+    insert: (tx, nodeId, projectId, priority) =>
+      scheduler.insert(tx, nodeId, projectId, priority),
+    delete: (tx, nodeId) => scheduler.delete(tx, nodeId),
+    priorityUpdate: (tx, nodeId, priority) =>
+      scheduler.priorityUpdate(tx, nodeId, priority),
+  };
   const custody = new CustodyComponent({
     store: options.store,
     envelopeKey,
@@ -98,6 +117,7 @@ export function composeServices(options: {
     health: options.health,
     bindings: options.bindings,
   });
+  scheduler.declare(registry);
   custody.declare(registry);
   worker.declare(registry);
   project.declare(registry);
@@ -110,7 +130,16 @@ export function composeServices(options: {
   });
   gateway.declare(registry);
   registry.seal({ [StoreName.Operational]: options.store });
-  return { custody, project, worker, gateway, invocation, registry };
+  return {
+    scheduler,
+    workQueue,
+    custody,
+    project,
+    worker,
+    gateway,
+    invocation,
+    registry,
+  };
 }
 
 export class Server implements Service {
@@ -169,23 +198,23 @@ export class Server implements Service {
       this.releases.push(() => this.store!.close());
       this.store.migrate([
         { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
+        { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
         { service: "gateway", migrations: gatewayMigrations },
         { service: "worker", migrations: workerMigrations },
         { service: "project", migrations: projectMigrations },
       ]);
       throwIfCancelled(this.shutdown);
-      const { custody, project, worker, gateway, invocation } = composeServices(
-        {
+      const { scheduler, custody, project, worker, gateway, invocation } =
+        composeServices({
           config,
           store: this.store,
           logger: this.log.logger,
           health: this.health,
-        },
-      );
+        });
       this.gateway = gateway;
       this.invocation = invocation;
       this.releases.push(() => invocation.stop());
-      const services = [custody, worker, project, gateway];
+      const services = [scheduler, custody, worker, project, gateway];
       this.services = services;
       for (const service of services) this.releases.push(() => service.stop());
       for (const service of services) {

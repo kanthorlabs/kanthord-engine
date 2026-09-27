@@ -7,6 +7,7 @@ import { gatewayFixture } from "./test-support.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import { custodyOperations } from "../../custody/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
+import { schedulerOperations } from "../../scheduler/contract.ts";
 import {
   openapiPath,
   emitOpenAPI,
@@ -16,12 +17,15 @@ import {
 import { HttpStatus } from "../../kernel/http.ts";
 import { isObject } from "../../kernel/values.ts";
 const MAX_OPENAPI_FRAGMENT_LINES = 200;
+const ARRAY_SCHEMA_TYPE = "array";
+const NULL_SCHEMA_TYPE = "null";
 const CREDENTIAL_COLLECTION_FRAGMENT = "openapi/credential/create.yaml";
 const CREDENTIAL_COLLECTION_MAX_LINES = 300;
 const apiOperations = [
   ...Object.values(gatewayOperations),
   ...Object.values(custodyOperations),
   ...Object.values(workerOperations),
+  ...Object.values(schedulerOperations),
 ];
 test("published OpenAPI validates, matches the registry exactly, and describes real responses", async (t) => {
   const files = emitOpenAPIFiles(apiOperations);
@@ -68,6 +72,56 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     const method = operation.method.toLowerCase() as "get" | "post" | "put";
     assert.equal(resolved.paths?.[path]?.[method]?.operationId, operation.id);
   }
+  for (const operation of Object.values(schedulerOperations)) {
+    const path = operation.path.replace(/:([^/]+)/g, "{$1}");
+    assert.equal(resolved.paths?.[path]?.get?.operationId, operation.id);
+  }
+  const queueListPath = schedulerOperations.queueList.path.replace(
+    /:([^/]+)/g,
+    "{$1}",
+  );
+  const queueListResponse = resolved.paths?.[queueListPath]?.get?.responses[
+    HttpStatus.OK
+  ] as unknown as {
+    content: {
+      "application/json": {
+        schema: {
+          properties: {
+            items: { type: string };
+            nextCursor: { anyOf: { type: string }[] };
+          };
+        };
+      };
+    };
+  };
+  const queueListProperties =
+    queueListResponse.content["application/json"].schema.properties;
+  assert.equal(queueListProperties.items.type, ARRAY_SCHEMA_TYPE);
+  assert.ok(
+    queueListProperties.nextCursor.anyOf.some(
+      (schema) => schema.type === NULL_SCHEMA_TYPE,
+    ),
+  );
+  const queuePeekPath = schedulerOperations.queuePeek.path.replace(
+    /:([^/]+)/g,
+    "{$1}",
+  );
+  const queuePeekResponse = resolved.paths?.[queuePeekPath]?.get?.responses[
+    HttpStatus.OK
+  ] as unknown as {
+    content: {
+      "application/json": {
+        schema: { properties: { job: { anyOf: { type: string }[] } } };
+      };
+    };
+  };
+  assert.ok(
+    queuePeekResponse.content[
+      "application/json"
+    ].schema.properties.job.anyOf.some(
+      (schema) => schema.type === NULL_SCHEMA_TYPE,
+    ),
+  );
   const fixture = await gatewayFixture(t);
   assert.deepEqual(
     Object.keys(

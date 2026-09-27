@@ -5,6 +5,8 @@ import pino from "pino";
 import { configuration } from "../../config/index.ts";
 import { custodyMigrations } from "../../custody/index.ts";
 import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
+import { schedulerMigrations } from "../../scheduler/index.ts";
+import { SCHEDULER_SERVICE_NAME } from "../../scheduler/contract.ts";
 import { Store } from "../../kernel/store.ts";
 import { gatewayMigrations } from "../../gateway/index.ts";
 import { projectMigrations } from "../../project/index.ts";
@@ -28,6 +30,7 @@ import { generateHumanJWT, generateMachineJWT } from "../../gateway/local.ts";
 import { HealthRegistry } from "../../kernel/health.ts";
 
 export const domainHealth = {
+  scheduler: { queue: 200 },
   custody: { credential: 200 },
   project: { bindings: 200 },
   worker: { registrations: 200 },
@@ -132,39 +135,43 @@ export async function gatewayFixture(
   const store = new Store(options.path ?? ":memory:");
   store.migrate([
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
+    { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
     { service: "gateway", migrations: gatewayMigrations },
     { service: "worker", migrations: workerMigrations },
     { service: "project", migrations: projectMigrations },
   ]);
   const logs: string[] = [];
-  const { custody, gateway, project, worker, invocation } = composeServices({
-    config,
-    store,
-    registry: options.registry,
-    health: options.health ?? new HealthRegistry(),
-    bindings: options.machines?.project,
-    registrations: options.machines?.worker,
-    standIns: options.standIns,
-    logger: pino(
-      { level: "info" },
-      {
-        write: (line) => {
-          logs.push(line);
+  const { scheduler, custody, gateway, project, worker, invocation } =
+    composeServices({
+      config,
+      store,
+      registry: options.registry,
+      health: options.health ?? new HealthRegistry(),
+      bindings: options.machines?.project,
+      registrations: options.machines?.worker,
+      standIns: options.standIns,
+      logger: pino(
+        { level: "info" },
+        {
+          write: (line) => {
+            logs.push(line);
+          },
         },
-      },
-    ),
-  });
+      ),
+    });
   t.after(async () => {
     const failures: Error[] = [];
     try {
       const quiescence = await Promise.all(
-        [custody, worker, project, gateway].map((service) => service.quiesce()),
+        [scheduler, custody, worker, project, gateway].map((service) =>
+          service.quiesce(),
+        ),
       );
       failures.push(...quiescence.filter((error) => error !== null));
       await gateway.drain();
       const invocationError = await invocation.stop();
       if (invocationError) failures.push(invocationError);
-      for (const service of [gateway, project, worker, custody]) {
+      for (const service of [gateway, project, worker, custody, scheduler]) {
         const error = await service.stop();
         if (error) failures.push(error);
       }
@@ -174,7 +181,7 @@ export async function gatewayFixture(
       store.close();
     }
   });
-  for (const service of [custody, worker, project, gateway]) {
+  for (const service of [scheduler, custody, worker, project, gateway]) {
     const error = await service.start();
     if (error) throw error;
   }
@@ -184,6 +191,7 @@ export async function gatewayFixture(
   const request = (path: string, init?: RequestInit) =>
     fetch(endpoint + path, init);
   return {
+    scheduler,
     custody,
     gateway,
     store,
