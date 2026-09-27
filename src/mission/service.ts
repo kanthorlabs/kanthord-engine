@@ -1,11 +1,14 @@
+import assert from "node:assert/strict";
+import { isHumanIdentity } from "../kernel/caller.ts";
 import {
   background,
   CancellationContext,
   type Context,
 } from "../kernel/context.ts";
-import { Diagnostic } from "../kernel/errors.ts";
+import { Diagnostic, OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import type { HealthRegistry } from "../kernel/health.ts";
-import type { OperationRegistry } from "../kernel/operation.ts";
+import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import {
   HealthStatus,
   type Healthcheck,
@@ -14,15 +17,35 @@ import {
 import type { Transaction } from "../kernel/store.ts";
 import type { MissionConfig } from "./config.ts";
 import {
+  ActorKind,
   MISSION_SERVICE_NAME,
+  MissionErrorCode,
+  missionOperations,
   type HumanActor,
   type MissionBindings,
   type MissionCollaborations,
   type WorkQueue,
 } from "./contract.ts";
-import { insertMission, readLiveNodesPinning } from "./store.ts";
+import {
+  insertMission,
+  readLiveNodesPinning,
+  readMissionByProject,
+} from "./store.ts";
 
 const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
+
+export function humanActor(caller: CallerContext): HumanActor {
+  const identity = caller.identity;
+  assert.ok(
+    isHumanIdentity(identity),
+    "Mission writes require a human identity.",
+  );
+  return {
+    kind: ActorKind.Human,
+    account: identity.accountId,
+    name: identity.name,
+  };
+}
 
 export interface Dependencies {
   config: MissionConfig;
@@ -47,7 +70,18 @@ export class MissionService implements Service, MissionCollaborations {
   }
 
   declare(registry: OperationRegistry): void {
-    void registry;
+    registry.register(missionOperations.get, ({ params }, caller) =>
+      caller.commit((tx) => {
+        const mission = readMissionByProject(tx, params.projectId);
+        if (!mission)
+          throw new OperationError(
+            HttpStatus.NotFound,
+            MissionErrorCode.MissionNotFound,
+            "Mission not found.",
+          );
+        return mission;
+      }),
+    );
   }
 
   createMission(tx: Transaction, projectId: string, actor: HumanActor): void {

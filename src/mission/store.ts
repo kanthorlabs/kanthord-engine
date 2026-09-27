@@ -20,6 +20,21 @@ export function insertMission(
   return id;
 }
 
+export function readMissionByProject(
+  tx: Transaction,
+  projectId: string,
+): { id: string; projectId: string; version: number } | null {
+  const row = tx.database
+    .prepare(
+      "SELECT id, project_id, version FROM mission_mission WHERE project_id = ?",
+    )
+    .get(projectId) as
+    { id: string; project_id: string; version: number } | undefined;
+  return row
+    ? { id: row.id, projectId: row.project_id, version: row.version }
+    : null;
+}
+
 export function readNodeState(tx: Transaction, nodeId: string): string | null {
   const row = tx.database
     .prepare("SELECT state FROM mission_node WHERE id = ?")

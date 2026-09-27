@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
+import { mintHumanIdentity } from "../kernel/caller-mint.ts";
+import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
+import {
+  AccessPolicy,
+  OperationRegistry,
+  type CallerContext,
+} from "../kernel/operation.ts";
 import { createIdentity, identitySchema } from "../kernel/identity.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { HealthRegistry } from "../kernel/health.ts";
@@ -15,6 +23,8 @@ import {
   MISSION_IDENTITY_PREFIX,
   MISSION_INITIAL_VERSION,
   MISSION_SERVICE_NAME,
+  MissionErrorCode,
+  missionOperations,
   NODE_IDENTITY_PREFIX,
   NodeKind,
   NodeState,
@@ -22,13 +32,18 @@ import {
   type WorkQueue,
 } from "./contract.ts";
 import { missionMigrations } from "./migrations.ts";
-import { MissionService } from "./service.ts";
+import { MissionService, humanActor } from "./service.ts";
 
 const UNEXPECTED_COLLABORATION = "unexpected collaboration call";
 const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
 const CONSECUTIVE_LOSS_LIMIT = 3;
 const TEXT_MAX_BYTES = 32768;
 const PROJECT_ID = "project_00000000000000000000000000";
+const UNKNOWN_PROJECT_ID = "project_00000000000000000000000001";
+const ACCOUNT_ID = "mission-account";
+const DISPLAY_NAME = "Mission Operator";
+const TOKEN_ID = "mission-token";
+const ONE_COMMIT = 1;
 const BINDING_ID = "binding_00000000000000000000000000";
 const OTHER_BINDING_ID = "binding_00000000000000000000000001";
 const UNKNOWN_BINDING_ID = "binding_00000000000000000000000002";
@@ -94,6 +109,34 @@ function fixture(t: TestContext) {
   return { store, mission: makeService(new HealthRegistry()) };
 }
 
+function handlerFixture(t: TestContext) {
+  const { store, mission } = fixture(t);
+  const registry = new OperationRegistry();
+  mission.declare(registry);
+  let commits = 0;
+  const caller: CallerContext = {
+    identity: mintHumanIdentity(ACCOUNT_ID, DISPLAY_NAME, TOKEN_ID),
+    context: background,
+    requestId: "request",
+    commit: (fn) => {
+      commits++;
+      return store.transaction(fn);
+    },
+  };
+  function invoke(projectId: string) {
+    const operation = missionOperations.get;
+    const input = operation.input.parse({
+      params: { projectId },
+      query: {},
+      body: null,
+    });
+    return operation.output.parse(
+      registry.get(operation.id).handler(input, caller),
+    );
+  }
+  return { store, mission, caller, registry, invoke, commits: () => commits };
+}
+
 function insertNode(
   tx: Transaction,
   missionId: string,
@@ -147,6 +190,60 @@ function insertRevision(
       CREATED_AT,
     );
 }
+
+test("mission.get returns a project's mission through one commit", (t) => {
+  const { store, mission, invoke, commits, registry } = handlerFixture(t);
+  store.transaction((tx) => mission.createMission(tx, PROJECT_ID, HUMAN_ACTOR));
+  const result = invoke(PROJECT_ID);
+  assert.ok(
+    identitySchema(MISSION_IDENTITY_PREFIX).safeParse(result.id).success,
+  );
+  assert.deepEqual(result, {
+    id: result.id,
+    projectId: PROJECT_ID,
+    version: MISSION_INITIAL_VERSION,
+  });
+  assert.equal(
+    registry.get(missionOperations.get.id).operation.access,
+    AccessPolicy.Human,
+  );
+  assert.equal(commits(), ONE_COMMIT);
+});
+
+test("mission.get maps an unknown project to not found", (t) => {
+  const { invoke, commits } = handlerFixture(t);
+  assert.throws(
+    () => invoke(UNKNOWN_PROJECT_ID),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.NotFound);
+      assert.equal(error.code, MissionErrorCode.MissionNotFound);
+      return true;
+    },
+  );
+  assert.equal(commits(), ONE_COMMIT);
+});
+
+test("humanActor requires minted human provenance and maps account and name", (t) => {
+  const { caller } = handlerFixture(t);
+  assert.deepEqual(humanActor(caller), {
+    kind: ActorKind.Human,
+    account: ACCOUNT_ID,
+    name: DISPLAY_NAME,
+  });
+  assert.throws(() => humanActor({ ...caller, identity: undefined }));
+  assert.throws(() =>
+    humanActor({
+      ...caller,
+      identity: {
+        kind: ActorKind.Human,
+        accountId: ACCOUNT_ID,
+        name: DISPLAY_NAME,
+        jti: TOKEN_ID,
+      },
+    }),
+  );
+});
 
 test("MissionService healthcheck follows lifecycle", async () => {
   const health = new HealthRegistry();

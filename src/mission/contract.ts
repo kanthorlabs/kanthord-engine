@@ -1,12 +1,19 @@
 import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
-import type { Operation } from "../kernel/operation.ts";
+import { HttpMethod, HttpStatus } from "../kernel/http.ts";
+import {
+  AccessPolicy,
+  OperationLifetime,
+  StoreName,
+  type Operation,
+} from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 
 export const MISSION_SERVICE_NAME = "mission";
 export const MISSION_IDENTITY_PREFIX = "mission";
 export const NODE_IDENTITY_PREFIX = "node";
 export const MISSION_INITIAL_VERSION = 1;
+export const MISSION_OPERATION_TIMEOUT_MS = 30000;
 export const SCHEDULER_ACTOR_SERVICE = "scheduler";
 
 export interface HumanActor {
@@ -450,7 +457,42 @@ export const missionSchema = z.strictObject({
 });
 export type Mission = z.infer<typeof missionSchema>;
 
-export const missionOperations = {} as const satisfies Record<
-  string,
-  Operation
->;
+export const pageOf = <T extends z.ZodType>(item: T) =>
+  z.strictObject({ items: z.array(item), nextCursor: z.string().nullable() });
+const baseOperation = {
+  service: MISSION_SERVICE_NAME,
+  store: StoreName.Operational,
+  lifetime: OperationLifetime.Unary,
+  access: AccessPolicy.Human,
+  timeoutMs: MISSION_OPERATION_TIMEOUT_MS,
+  status: HttpStatus.OK,
+} as const;
+const readOperation = {
+  ...baseOperation,
+  mutation: false,
+  body: false,
+} as const;
+export const writeOperation = {
+  ...baseOperation,
+  mutation: true,
+  body: true,
+} as const;
+const readInput = <P extends z.ZodType, Q extends z.ZodType>(
+  params: P,
+  query: Q,
+) => z.strictObject({ params, query, body: z.null() });
+
+export const missionOperations = {
+  get: {
+    ...readOperation,
+    id: "mission.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/project/:projectId",
+    input: readInput(
+      z.strictObject({ projectId: identitySchema("project") }),
+      z.strictObject({}),
+    ),
+    output: missionSchema,
+    description: "Get the mission of a project.",
+  },
+} as const satisfies Record<string, Operation>;

@@ -137,12 +137,18 @@ export default tseslint.config(
                 { from: element("repository") },
                 {
                   from: element("service", {
-                    captured: { name: "!(gateway|project)" },
+                    captured: { name: "!(gateway|project|mission)" },
                   }),
                 },
                 {
                   from: element("service", {
                     captured: { name: "project" },
+                    fileInternalPath: "!service.test.ts",
+                  }),
+                },
+                {
+                  from: element("service", {
+                    captured: { name: "mission" },
                     fileInternalPath: "!service.test.ts",
                   }),
                 },
