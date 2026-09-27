@@ -20,6 +20,7 @@ export const INSTANCE_COUNT_MIN = 0;
 export const INSTANCE_COUNT_MAX = 64;
 export const STORAGE_PLATFORM = "s3";
 export const REPOSITORY_PLATFORM = "github";
+export const WORKER_PLATFORM = "kanthord";
 export const PROJECT_OPERATION_TIMEOUT_MS = 30000;
 export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
@@ -53,6 +54,7 @@ export const BindingState = {
 } as const;
 
 export const ProjectErrorCode = {
+  CursorInvalid: "system.pagination.cursor_invalid",
   NameConflict: "project.name.conflict",
   ProjectNotFound: "project.project.not_found",
   BindingNotFound: "project.binding.not_found",
