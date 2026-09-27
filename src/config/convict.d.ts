@@ -5,7 +5,9 @@ declare module "convict" {
     default: unknown;
     sensitive?: boolean;
   }
-  export type Schema = { [key: string]: Field | Schema };
+  export type Schema<T = Record<string, unknown>> = {
+    [K in keyof T]: Field | Schema;
+  };
   interface Config<T> {
     load(value: unknown): Config<T>;
     validate(options: { allowed: "strict" }): Config<T>;

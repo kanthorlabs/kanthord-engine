@@ -47,7 +47,12 @@ engine/
 │   │   ├── migrations.ts       # project_project and project_binding tables
 │   │   ├── store.ts            # Binding-set read, compare-and-swap write, pagination, and resource identity derivation
 │   │   └── service.ts          # Lifecycle, operation handlers, and collaboration implementations
-│   ├── mission/                # [planned] Mission graph, criteria, evidence, and outcomes
+│   ├── mission/                # Mission Service: mission graph, criteria, evidence, and outcomes
+│   │   ├── contract.ts         # Mission schemas, operations, and collaboration types
+│   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
+│   │   ├── config.ts           # Mission limits and Convict configuration schema
+│   │   ├── migrations.ts       # Mission, node, revision, and dependency tables
+│   │   └── service.ts          # Lifecycle, health, and collaboration implementations
 │   ├── scheduler/              # Scheduler Service — job table, work queue, and queue reads
 │   │   ├── contract.ts         # WorkQueue collaboration and queue operation declarations
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations

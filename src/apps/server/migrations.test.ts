@@ -13,6 +13,8 @@ import { workerMigrations } from "../../worker/index.ts";
 import { projectMigrations } from "../../project/index.ts";
 import { SCHEDULER_SERVICE_NAME } from "../../scheduler/contract.ts";
 import { schedulerMigrations } from "../../scheduler/index.ts";
+import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
+import { missionMigrations } from "../../mission/index.ts";
 
 const PROJECT_SERVICE_NAME = "project";
 
@@ -22,6 +24,7 @@ const services: Migrations = [
   { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
   { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
   { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
+  { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
 ];
 const HISTORY_TABLE = "migration";
 const CREDENTIAL_TABLE = "credential";
@@ -29,6 +32,16 @@ const WORKER_AGENT_ENABLEMENT_TABLE = "worker_agent_enablement";
 const PROJECT_PROJECT_TABLE = "project_project";
 const PROJECT_BINDING_TABLE = "project_binding";
 const SCHEDULER_JOB_TABLE = "scheduler_job";
+const MISSION_MISSION_TABLE = "mission_mission";
+const MISSION_NODE_TABLE = "mission_node";
+const MISSION_NODE_REVISION_TABLE = "mission_node_revision";
+const MISSION_DEPENDENCY_TABLE = "mission_dependency";
+const MISSION_TABLES = [
+  MISSION_MISSION_TABLE,
+  MISSION_NODE_TABLE,
+  MISSION_NODE_REVISION_TABLE,
+  MISSION_DEPENDENCY_TABLE,
+];
 const INTEGRITY_OK = "ok";
 
 function tables(store: Store): string[] {
@@ -69,6 +82,7 @@ test("service migrations own distinct prefixes and create only tables in their n
       PROJECT_PROJECT_TABLE,
       PROJECT_BINDING_TABLE,
       SCHEDULER_JOB_TABLE,
+      ...MISSION_TABLES,
     ]);
   } finally {
     store.close();
@@ -91,6 +105,8 @@ test("each service migration set applies alone to an empty store", () => {
       );
       if (service.service === SCHEDULER_SERVICE_NAME)
         assert.deepEqual(tables(store), [SCHEDULER_JOB_TABLE]);
+      if (service.service === MISSION_SERVICE_NAME)
+        assert.deepEqual(tables(store), MISSION_TABLES);
       if (service.service === WORKER_SERVICE_NAME)
         assert.deepEqual(tables(store), [WORKER_AGENT_ENABLEMENT_TABLE]);
       if (service.service === PROJECT_SERVICE_NAME) {
