@@ -40,6 +40,7 @@ import {
 } from "./contract.ts";
 import { projectMigrations } from "./migrations.ts";
 import {
+  insertProject,
   readCurrentBindingSet,
   requireProject,
   writeBindingSet,
@@ -1592,4 +1593,383 @@ test("agent views reject missing, foreign and non-worker bindings; external list
         ProjectErrorCode.BindingNotFound,
       );
   }
+});
+
+const LIVE_NODE = "node-live";
+const MISSING_NAME = "missing";
+const ROTATED_CREDENTIAL = "rotated-key";
+const ENTRY_PROVIDER = "provider";
+const ENTRY_REASONING = "high";
+
+function persistBindings(
+  tx: Transaction,
+  projectId: string,
+  bindings: Record<string, { kind: string; config: unknown }>,
+) {
+  assert.ok(tx.database.isTransaction);
+  const project = requireProject(tx, projectId);
+  const result = writeBindingSet(
+    tx,
+    projectId,
+    project.bindingSetVersion,
+    new Map(Object.entries(bindings)),
+  );
+  assert.equal(
+    result.newVersion,
+    project.bindingSetVersion + VERSION_INCREMENT,
+  );
+  return {
+    ...result,
+    bindings: Object.fromEntries(readCurrentBindingSet(tx, projectId)),
+  };
+}
+
+test("entriesOfAgent selects latest workers across projects, strips selectors and preserves null and empty entries", (t) => {
+  const workers: string[] = [];
+  const f = fixture(t, {
+    workerAgentsOf: (worker) => {
+      workers.push(worker);
+      return worker === NATIVE_WORKER ? [AGENT, SECOND_AGENT] : [THIRD_AGENT];
+    },
+  });
+  f.store.transaction((tx) => {
+    const first = insertProject(tx, PROJECT_NAME);
+    const second = insertProject(tx, OTHER_NAME);
+    const entry = {
+      agentProvider: ENTRY_PROVIDER,
+      modelIdentifier: MODEL,
+      reasoningEffort: ENTRY_REASONING,
+    };
+    persistBindings(tx, first.id, { [WORKER_NAME]: workerBinding() });
+    const explicit = persistBindings(tx, first.id, {
+      [WORKER_NAME]: {
+        kind: BindingKind.Worker,
+        config: {
+          ...workerBinding().config,
+          instanceCount: INSTANCE_COUNT_MIN,
+          entries: [{ agent: SECOND_AGENT }, { agent: AGENT, ...entry }],
+        },
+      },
+      [REPOSITORY_NAME]: repositoryBinding(),
+      [STORAGE_NAME]: storageBinding(),
+    }).bindings[WORKER_NAME]!;
+    persistBindings(tx, second.id, { removed: workerBinding() });
+    const implicit = persistBindings(tx, second.id, {
+      [WORKER_NAME]: workerBinding(),
+      unrelated: workerBinding(OTHER_WORKER),
+    }).bindings[WORKER_NAME]!;
+    assert.deepEqual(
+      new Map(
+        f.project
+          .entriesOfAgent(tx, AGENT)
+          .map((item) => [item.bindingId, item]),
+      ),
+      new Map([
+        [
+          explicit.id,
+          { bindingId: explicit.id, workerName: NATIVE_WORKER, entry },
+        ],
+        [
+          implicit.id,
+          { bindingId: implicit.id, workerName: NATIVE_WORKER, entry: null },
+        ],
+      ]),
+    );
+    assert.deepEqual(
+      workers.sort(),
+      [NATIVE_WORKER, NATIVE_WORKER, OTHER_WORKER].sort(),
+    );
+    assert.deepEqual(
+      f.project
+        .entriesOfAgent(tx, SECOND_AGENT)
+        .find(({ bindingId }) => bindingId === explicit.id)?.entry,
+      {},
+    );
+    assert.deepEqual(f.project.entriesOfAgent(tx, UNKNOWN_AGENT), []);
+  });
+});
+
+test("bindingsNaming finds exact credential keys at any depth across projects and deduplicates current rows without checking pins", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const first = insertProject(tx, PROJECT_NAME);
+    const second = insertProject(tx, OTHER_NAME);
+    const repository = persistBindings(tx, first.id, {
+      [REPOSITORY_NAME]: {
+        ...repositoryBinding(),
+        config: {
+          ...repositoryBinding().config,
+          credential: ROTATED_CREDENTIAL,
+          nested: {
+            items: [
+              { credential: REPOSITORY_CREDENTIAL },
+              { credential: REPOSITORY_CREDENTIAL },
+            ],
+          },
+        },
+      },
+      unrelated: {
+        ...storageBinding(),
+        config: {
+          ...storageBinding().config,
+          description: REPOSITORY_CREDENTIAL,
+          credentials: REPOSITORY_CREDENTIAL,
+        },
+      },
+    }).bindings[REPOSITORY_NAME]!;
+    const storage = persistBindings(tx, second.id, {
+      [STORAGE_NAME]: {
+        ...storageBinding(),
+        config: {
+          ...storageBinding().config,
+          available: false,
+          nested: [{ deeper: { credential: REPOSITORY_CREDENTIAL } }],
+        },
+      },
+    }).bindings[STORAGE_NAME]!;
+    const results = f.project.bindingsNaming(tx, REPOSITORY_CREDENTIAL);
+    assert.deepEqual(
+      new Set(results.map(({ bindingId }) => bindingId)),
+      new Set([repository.id, storage.id]),
+    );
+    assert.equal(results.length, TWO_CALLS);
+    assert.deepEqual(
+      results.find(({ bindingId }) => bindingId === repository.id),
+      { bindingId: repository.id, projectId: first.id },
+    );
+    assert.deepEqual(
+      results.find(({ bindingId }) => bindingId === storage.id),
+      { bindingId: storage.id, projectId: second.id },
+    );
+    assert.deepEqual(f.project.bindingsNaming(tx, MISSING_NAME), []);
+  });
+});
+
+test("bindingsNaming checks only matching older live revisions and frees dependencies after nodes rebind", (t) => {
+  const calls: string[] = [];
+  const pinned = new Set<string>();
+  let callerTransaction: Transaction;
+  const f = fixture(t, {
+    liveNodesPinning: (tx, bindingId) => {
+      assert.equal(tx, callerTransaction);
+      assert.ok(tx.database.isTransaction);
+      calls.push(bindingId);
+      return pinned.has(bindingId) ? [LIVE_NODE] : [];
+    },
+  });
+  f.store.transaction((tx) => {
+    callerTransaction = tx;
+    const project = insertProject(tx, PROJECT_NAME);
+    const original = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings[REPOSITORY_NAME]!;
+    const rotated = {
+      ...repositoryBinding(),
+      config: { ...repositoryBinding().config, credential: ROTATED_CREDENTIAL },
+    };
+    const middle = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: rotated,
+    }).bindings[REPOSITORY_NAME]!;
+    const latest = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings[REPOSITORY_NAME]!;
+    pinned.add(original.id);
+    pinned.add(middle.id);
+    assert.deepEqual(
+      new Set(
+        f.project
+          .bindingsNaming(tx, REPOSITORY_CREDENTIAL)
+          .map(({ bindingId }) => bindingId),
+      ),
+      new Set([original.id, latest.id]),
+    );
+    assert.deepEqual(calls, [original.id]);
+    calls.length = NO_CALLS;
+    pinned.clear();
+    assert.deepEqual(f.project.bindingsNaming(tx, REPOSITORY_CREDENTIAL), [
+      { bindingId: latest.id, projectId: project.id },
+    ]);
+    assert.deepEqual(calls, [original.id]);
+  });
+});
+
+test("bindingsNaming excludes tombstones and earlier pins even after the group is rebound", (t) => {
+  const calls: string[] = [];
+  const f = fixture(t, {
+    liveNodesPinning: (_tx, bindingId) => {
+      calls.push(bindingId);
+      return [LIVE_NODE];
+    },
+  });
+  f.store.transaction((tx) => {
+    const first = insertProject(tx, PROJECT_NAME);
+    const second = insertProject(tx, OTHER_NAME);
+    persistBindings(tx, first.id, { [REPOSITORY_NAME]: repositoryBinding() });
+    persistBindings(tx, second.id, { [REPOSITORY_NAME]: repositoryBinding() });
+    persistBindings(tx, first.id, {});
+    persistBindings(tx, second.id, {});
+    assert.deepEqual(f.project.bindingsNaming(tx, REPOSITORY_CREDENTIAL), []);
+    const rebound = persistBindings(tx, first.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings[REPOSITORY_NAME]!;
+    assert.deepEqual(f.project.bindingsNaming(tx, REPOSITORY_CREDENTIAL), [
+      { bindingId: rebound.id, projectId: first.id },
+    ]);
+    assert.deepEqual(calls, []);
+  });
+});
+
+test("resolveBinding selects the latest named group in its project after revision, replacement and removal", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const first = insertProject(tx, PROJECT_NAME);
+    const second = insertProject(tx, OTHER_NAME);
+    const other = persistBindings(tx, second.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings[REPOSITORY_NAME]!;
+    for (const binding of [
+      repositoryBinding(),
+      {
+        ...repositoryBinding(),
+        config: { ...repositoryBinding().config, available: false },
+      },
+      repositoryBinding(SECOND_REPOSITORY_ADDRESS),
+    ]) {
+      const current = persistBindings(tx, first.id, {
+        [REPOSITORY_NAME]: binding,
+      }).bindings[REPOSITORY_NAME]!;
+      assert.deepEqual(
+        f.project.resolveBinding(tx, first.id, REPOSITORY_NAME),
+        { bindingId: current.id, resourceIdentity: current.resourceIdentity },
+      );
+      assert.deepEqual(
+        f.project.resolveBinding(tx, second.id, REPOSITORY_NAME),
+        { bindingId: other.id, resourceIdentity: other.resourceIdentity },
+      );
+    }
+    assert.equal(f.project.resolveBinding(tx, first.id, MISSING_NAME), null);
+    assert.equal(
+      f.project.resolveBinding(tx, MISSING_NAME, REPOSITORY_NAME),
+      null,
+    );
+    persistBindings(tx, first.id, {});
+    assert.equal(f.project.resolveBinding(tx, first.id, REPOSITORY_NAME), null);
+  });
+});
+
+test("getBindingRevision keeps pinned fields and derives disablement from the latest row for every kind", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const original = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+      [WORKER_NAME]: workerBinding(),
+      [STORAGE_NAME]: storageBinding(),
+    }).bindings;
+    assert.equal(f.project.getBindingRevision(tx, MISSING_NAME), null);
+    for (const disabled of [false, true, false]) {
+      persistBindings(tx, project.id, {
+        [REPOSITORY_NAME]: {
+          ...repositoryBinding(),
+          config: { ...repositoryBinding().config, available: !disabled },
+        },
+        [WORKER_NAME]: {
+          ...workerBinding(),
+          config: {
+            ...workerBinding().config,
+            instanceCount: disabled ? INSTANCE_COUNT_MIN : SINGLE_INSTANCE,
+          },
+        },
+        [STORAGE_NAME]: {
+          ...storageBinding(),
+          config: { ...storageBinding().config, available: !disabled },
+        },
+      });
+      for (const row of Object.values(original))
+        assert.deepEqual(f.project.getBindingRevision(tx, row.id), {
+          bindingId: row.id,
+          name: row.name,
+          resourceIdentity: row.resourceIdentity,
+          revision: REVISION_ONE,
+          tombstone: false,
+          disabled,
+        });
+    }
+  });
+});
+
+test("getBindingRevision marks removed rows and preceding pins without reviving them on rebind or affecting another project", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const first = insertProject(tx, PROJECT_NAME);
+    const second = insertProject(tx, OTHER_NAME);
+    const old = persistBindings(tx, first.id, {
+      [WORKER_NAME]: workerBinding(),
+    }).bindings[WORKER_NAME]!;
+    const other = persistBindings(tx, second.id, {
+      [WORKER_NAME]: workerBinding(),
+    }).bindings[WORKER_NAME]!;
+    const removed = persistBindings(tx, first.id, {}).changes.find(
+      ({ kind }) => kind === ChangeKind.Removed,
+    )!;
+    assert.equal(f.project.getBindingRevision(tx, old.id)?.tombstone, true);
+    assert.equal(
+      f.project.getBindingRevision(tx, removed.bindingId)?.tombstone,
+      true,
+    );
+    const rebound = persistBindings(tx, first.id, {
+      [WORKER_NAME]: {
+        ...workerBinding(),
+        config: {
+          ...workerBinding().config,
+          instanceCount: INSTANCE_COUNT_MIN,
+        },
+      },
+    }).bindings[WORKER_NAME]!;
+    assert.equal(f.project.getBindingRevision(tx, old.id)?.tombstone, true);
+    assert.equal(f.project.getBindingRevision(tx, old.id)?.disabled, true);
+    assert.equal(
+      f.project.getBindingRevision(tx, removed.bindingId)?.tombstone,
+      true,
+    );
+    assert.equal(
+      f.project.getBindingRevision(tx, rebound.id)?.tombstone,
+      false,
+    );
+    assert.equal(f.project.getBindingRevision(tx, other.id)?.tombstone, false);
+    assert.equal(f.project.getBindingRevision(tx, other.id)?.disabled, false);
+  });
+});
+
+test("collaborations read uncommitted rows without opening or committing a transaction or calling the network", (t) => {
+  const f = fixture(t, { workerAgentsOf: () => [AGENT] });
+  const failure = new Error("Caller rollback");
+  assert.throws(
+    () =>
+      f.store.transaction((tx) => {
+        const project = insertProject(tx, PROJECT_NAME);
+        const current = persistBindings(tx, project.id, {
+          [WORKER_NAME]: workerBinding(),
+          [REPOSITORY_NAME]: repositoryBinding(),
+        }).bindings;
+        assert.equal(f.project.entriesOfAgent(tx, AGENT).length, ONE_CALL);
+        assert.equal(
+          f.project.bindingsNaming(tx, REPOSITORY_CREDENTIAL).length,
+          ONE_CALL,
+        );
+        assert.equal(
+          f.project.resolveBinding(tx, project.id, WORKER_NAME)?.bindingId,
+          current[WORKER_NAME]!.id,
+        );
+        assert.equal(
+          f.project.getBindingRevision(tx, current[WORKER_NAME]!.id)?.tombstone,
+          false,
+        );
+        assert.ok(tx.database.isTransaction);
+        throw failure;
+      }),
+    (error) => error === failure,
+  );
+  assert.deepEqual(f.invoke("list").items, []);
+  assert.equal(f.store.database.isTransaction, false);
 });

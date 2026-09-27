@@ -35,6 +35,9 @@ import {
   projectOperations,
   workerConfigSchema,
   type ProjectBindings,
+  type AgentDependentBinding,
+  type BindingRevision,
+  type BindingRevisionResult,
   type CreateMission,
   type LiveNodesPinning,
   type ValidateEntry,
@@ -56,6 +59,10 @@ import {
   listBindings,
   listRevisions,
   readCurrentBindingSet,
+  readCurrentBindings,
+  readCurrentBindingByName,
+  readCredentialBindings,
+  hasBindingTombstone,
   writeBindingSet,
   type StoredBinding,
 } from "./store.ts";
@@ -461,6 +468,89 @@ export class ProjectService implements Service, ProjectBindings {
     }
     for (const agent of agents)
       this.validateEntry(tx, config.worker, entries.get(agent) ?? null);
+  }
+  entriesOfAgent(tx: Transaction, agentName: string): AgentDependentBinding[] {
+    assert.ok(tx.database.isTransaction);
+    return readCurrentBindings(tx).flatMap(
+      (binding): AgentDependentBinding[] => {
+        assert.equal(binding.removedAt, null);
+        if (kindOf(binding.resourceIdentity) !== BindingKind.Worker) return [];
+        const config = workerConfigSchema.parse(binding.config);
+        if (!this.workerAgentsOf(config.worker).includes(agentName)) return [];
+        const entries = new Map(
+          (config.entries ?? []).map(({ agent, ...entry }) => [agent, entry]),
+        );
+        return [
+          {
+            bindingId: binding.id,
+            workerName: config.worker,
+            entry: entries.get(agentName) ?? null,
+          },
+        ];
+      },
+    );
+  }
+  bindingsNaming(tx: Transaction, credentialName: string): BindingRevision[] {
+    assert.ok(tx.database.isTransaction);
+    const dependents = readCredentialBindings(tx, credentialName)
+      .filter(
+        ({ binding, current }) =>
+          current ||
+          this.liveNodesPinning(tx, binding.id).length > EMPTY_LENGTH,
+      )
+      .map(({ binding }) => ({
+        bindingId: binding.id,
+        projectId: binding.projectId,
+      }));
+    assert.equal(
+      new Set(dependents.map(({ bindingId }) => bindingId)).size,
+      dependents.length,
+    );
+    return dependents;
+  }
+  resolveBinding(
+    tx: Transaction,
+    projectId: string,
+    bindingName: string,
+  ): { bindingId: string; resourceIdentity: string } | null {
+    const binding = readCurrentBindingByName(tx, projectId, bindingName);
+    if (!binding) return null;
+    assert.equal(binding.removedAt, null);
+    assert.equal(binding.projectId, projectId);
+    return {
+      bindingId: binding.id,
+      resourceIdentity: binding.resourceIdentity,
+    };
+  }
+  getBindingRevision(
+    tx: Transaction,
+    bindingId: string,
+  ): BindingRevisionResult | null {
+    const binding = readBindingRevision(tx, bindingId);
+    if (!binding) return null;
+    const latest = readLatestBinding(
+      tx,
+      binding.projectId,
+      binding.resourceIdentity,
+    );
+    assert.ok(latest, "A retained binding must have a latest revision.");
+    assert.ok(latest.revision >= binding.revision);
+    const current = bindingEditSchema.parse({
+      kind: kindOf(latest.resourceIdentity),
+      config: latest.config,
+    });
+    const disabled =
+      current.kind === BindingKind.Worker
+        ? current.config.instanceCount === INSTANCE_COUNT_MIN
+        : current.config.available === false;
+    return {
+      bindingId: binding.id,
+      name: binding.name,
+      resourceIdentity: binding.resourceIdentity,
+      revision: binding.revision,
+      tombstone: hasBindingTombstone(tx, binding),
+      disabled,
+    };
   }
   async resolveWorkerBinding(bindingId: string, context: Context) {
     throwIfCancelled(context);

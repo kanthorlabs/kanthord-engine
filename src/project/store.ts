@@ -31,6 +31,7 @@ const EXTRA_ROW = 1;
 const FIRST_ROW = 0;
 const LAST_ROW_OFFSET = 1;
 const RESOURCE_SEPARATOR = ":";
+const CREDENTIAL_KEY = "credential";
 const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const REPOSITORY_ADDRESS_PATTERN =
@@ -38,12 +39,15 @@ const REPOSITORY_ADDRESS_PATTERN =
 const REVISION_PATTERN = /^[1-9][0-9]*(?![\s\S])/;
 const bindingIdentitySchema = identitySchema(BINDING_ID_PREFIX);
 const projectIdentitySchema = identitySchema(PROJECT_ID_PREFIX);
+const latestRevisionQuery = `SELECT MAX(latest.revision) FROM project_binding latest
+  WHERE latest.project_id = b.project_id
+    AND latest.resource_identity = b.resource_identity`;
 const latestBindingQuery = `SELECT b.* FROM project_binding b
-  WHERE b.project_id = ? AND b.revision = (
-    SELECT MAX(latest.revision) FROM project_binding latest
-    WHERE latest.project_id = b.project_id
-      AND latest.resource_identity = b.resource_identity
-  )`;
+  WHERE b.project_id = ? AND b.revision = (${latestRevisionQuery})`;
+const followingTombstoneQuery = `SELECT removed.id FROM project_binding removed
+  WHERE removed.project_id = b.project_id
+    AND removed.resource_identity = b.resource_identity
+    AND removed.revision > b.revision AND removed.removed_at IS NOT NULL`;
 
 type ProjectRow = {
   id: string;
@@ -270,6 +274,77 @@ export function readCurrentBindingSet(
     "Bindings must belong to the requested project.",
   );
   return current;
+}
+
+export function readCurrentBindings(tx: Transaction): StoredBinding[] {
+  const rows = tx.database
+    .prepare(
+      `SELECT b.* FROM project_binding b
+      WHERE b.revision = (${latestRevisionQuery}) AND b.removed_at IS NULL`,
+    )
+    .all() as BindingRow[];
+  assert.ok(tx.database.isTransaction);
+  assert.ok(rows.every((row) => row.removed_at === null));
+  return rows.map(toBinding);
+}
+
+export function readCurrentBindingByName(
+  tx: Transaction,
+  projectId: string,
+  name: string,
+): StoredBinding | null {
+  const row = tx.database
+    .prepare(`${latestBindingQuery} AND b.removed_at IS NULL AND b.name = ?`)
+    .get(projectId, name) as BindingRow | undefined;
+  if (!row) return null;
+  assert.equal(row.project_id, projectId);
+  assert.equal(row.name, name);
+  return toBinding(row);
+}
+
+export function readCredentialBindings(
+  tx: Transaction,
+  credentialName: string,
+): Array<{ binding: StoredBinding; current: boolean }> {
+  const rows = tx.database
+    .prepare(
+      `SELECT b.*, (${latestRevisionQuery}) AS latest_revision
+      FROM project_binding b
+      WHERE b.removed_at IS NULL
+        AND NOT EXISTS (${followingTombstoneQuery})
+        AND EXISTS (
+          SELECT 1 FROM json_tree(b.config) reference
+          WHERE reference.key = ? AND reference.atom = ?
+        )`,
+    )
+    .all(CREDENTIAL_KEY, credentialName) as Array<
+    BindingRow & { latest_revision: number }
+  >;
+  return rows.map((row) => {
+    assert.equal(row.removed_at, null);
+    assert.ok(row.latest_revision >= row.revision);
+    return {
+      binding: toBinding(row),
+      current: row.revision === row.latest_revision,
+    };
+  });
+}
+
+export function hasBindingTombstone(
+  tx: Transaction,
+  binding: StoredBinding,
+): boolean {
+  assert.ok(binding.revision >= INITIAL_REVISION);
+  assert.ok(tx.database.isTransaction);
+  if (binding.removedAt !== null) return true;
+  return (
+    tx.database
+      .prepare(
+        `SELECT b.id FROM project_binding b
+      WHERE b.id = ? AND EXISTS (${followingTombstoneQuery})`,
+      )
+      .get(binding.id) !== undefined
+  );
 }
 
 function classify(
