@@ -21,7 +21,7 @@ The ownership and admission requirements stated here come from the service
 design. Open recovery decisions remain open, even where a candidate command
 shape is otherwise complete.
 
-The Scheduler owns queue entries, claims, execution records, leases,
+The Scheduler owns jobs, claims, execution records, leases,
 live-execution accounting, wait records, delivery admission and observation
 obligations. Mission owns nodes, attempts, pinned revisions, evidence,
 assessments, outcomes, external objects and accepted observation records.
@@ -87,7 +87,7 @@ The [Scheduler operation contracts](https://github.com/kanthorlabs/kanthord/blob
   of **Unix epoch milliseconds in UTC**. A nullable timestamp uses `null`
   when its event has not occurred. A duration is measured with a monotonic clock. JWT timestamps retain their separate seconds unit.
 - Neither a timestamp nor a ULID is a general causal-order proof. Queue order
-  has its explicit priority/entry ordering rule; revision and claim checks
+  has its explicit priority/job ordering rule; revision and claim checks
   establish currency elsewhere.
 
 ### Access policies
@@ -198,11 +198,11 @@ kanthord scheduler queue list <project-id> [--limit <count>] [--cursor <opaque>]
 `<project-id>` is required, has no default and maps to path `projectId`.
 [`--limit`](./common-flags.md#--limit) and
 [`--cursor`](./common-flags.md#--cursor) have the shared definitions. There are
-no other query fields or JSON body. The list returns a page of `QueueEntry`
-records in descending entry-identity order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
-This inspection order does not change queue selection. Held-out entries remain
-visible so a human can understand a wait. Reading changes no entry.
-The list is a live view of current entries and holds no history.
+no other query fields or JSON body. The list returns a page of `Job`
+records in descending job-identity order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
+This inspection order does not change queue selection. Held-out jobs remain
+visible so a human can understand a wait. Reading changes no job.
+The list is a live view of current jobs and holds no history.
 
 ### `queue peek`
 
@@ -212,28 +212,28 @@ kanthord scheduler queue peek <project-id>
 
 The required positional input maps to path `projectId` and has no default.
 No query or body is accepted. Returns the required field
-`{ "entry": QueueEntry | null }`, with `null` for an empty queue. It reads
-the first entry in priority descending, then entry identity ascending order,
-and removes nothing, including when that entry is held out. It neither predicts a particular instance's compatible
+`{ "job": Job | null }`, with `null` for an empty queue. It reads
+the first job in priority descending, then job identity ascending order,
+and removes nothing, including when that job is held out. It neither predicts a particular instance's compatible
 selection nor reserves a node for a subsequent pull.
 
-### Proposed `QueueEntry` result
+### Proposed `Job` result
 
 Every field below is required in a result; none has a client default.
 
-| Field                 | Type and validation / meaning                                                                             |
-| --------------------- | --------------------------------------------------------------------------------------------------------- |
-| `entryId`             | `work_queue_entry_<ulid>`; the ULID carries the creation time of the entry.                               |
-| `projectId`, `nodeId` | Project and Mission node references. Only an initiative or objective can be queued; never a task.         |
-| `claimKind`           | Enum `steps` or `evaluation`, admitted by Mission state.                                                  |
-| `priority`            | Safe integer copied from the Mission-owned priority. An absent node priority is Mission's default `0`.    |
-| `heldOut`             | Boolean; an entry waiting on a named fact is excluded from selection while that fact remains unsatisfied. |
-| `waitFor`             | `WaitFact` defined under release, or `null` when there is no recorded wait.                               |
+| Field                 | Type and validation / meaning                                                                          |
+| --------------------- | ------------------------------------------------------------------------------------------------------ |
+| `jobId`               | `job_<ulid>`; the ULID carries the creation time of the job.                                           |
+| `projectId`, `nodeId` | Project and Mission node references. Only an initiative or objective can be queued; never a task.      |
+| `claimKind`           | Enum `steps` or `evaluation`, admitted by Mission state.                                               |
+| `priority`            | Safe integer copied from the Mission-owned priority. An absent node priority is Mission's default `0`. |
+| `heldOut`             | Boolean; a job waiting on a named fact is excluded from selection while that fact remains unsatisfied. |
+| `waitFor`             | `WaitFact` defined under release, or `null` when there is no recorded wait.                            |
 
-A priority change preserves the entry identity. Holding out an entry also
-preserves it; a release with further work creates a new entry. Membership
+A priority change preserves the job identity. Holding out a job also
+preserves it; a release with further work creates a new job. Membership
 means claimable work subject to the wait record, not necessarily Mission
-state `Available`. Neither priority, age, inspection nor a stale entry admits
+state `Available`. Neither priority, age, inspection nor a stale job admits
 a claim. Mission state and every admission condition are rechecked at claim.
 
 ## Work acquisition
@@ -266,7 +266,7 @@ it cannot acquire a chosen node or authorize its own claim.
 1. Worker vouches for the runtime association, a fresh instance healthcheck
    and the worker's published compatibility declarations. The instance has
    at most one outstanding pull or one live execution.
-2. Scheduler selects the first non-held-out entry that the claimant admits
+2. Scheduler selects the first non-held-out job that the claimant admits
    in the project's queue order. Compatibility includes exact worker name,
    declared node state and required node format, using the pinned revision
    of an open attempt or the current revision before the first claim.
@@ -440,8 +440,8 @@ not sufficient correlation.
   When all requests are submitted, Mission routes the release to
   `External.Requested`. A passing assessment with no required external action
   already ends the claim; no fresh release is needed to declare completion.
-- A release with further work creates the appropriate new queue entry. A
-  named wait records the fact and holds the entry out. The write reads current
+- A release with further work creates the appropriate new job. A
+  named wait records the fact and holds the job out. The write reads current
   accepted facts in the same serialized transaction: an already-satisfied
   fact satisfies the wait immediately, and a concurrent fact cannot be lost.
   Mission releases the hold in the transaction accepting the fact. The next
@@ -450,7 +450,7 @@ not sufficient correlation.
 Proposed success is HTTP `200` with required fields
 `{ "executionId": string, "releasedAt": timestamp }`; the CLI adds its key.
 At the handler, a duplicate returns the accepted release without ending a second
-execution, double-decrementing a count or creating a second entry. A duplicate
+execution, double-decrementing a count or creating a second job. A duplicate
 with another payload answers 409 `scheduler.execution.release_conflict`.
 The invocation chain refuses a retry after the claim ends before the handler;
 the holder reads `claim get` for the accepted end. This receipt is not an outcome
@@ -568,7 +568,7 @@ signed delivery, and a human or machine token is not delivery verification.
 
 ## Service collaborations and loops excluded from the command surface
 
-- **Queue insert/delete/reorder:** Mission writes affected entries, including
+- **Queue insert/delete/reorder:** Mission writes affected jobs, including
   dependency and parent effects, within the transaction committing the
   accepted fact. Its public collaboration is a co-location contract, not a
   routable command that can detach queue membership from Mission state.
@@ -584,7 +584,7 @@ signed delivery, and a human or machine token is not delivery verification.
   Scheduler-owned processing. An idle project consumes no turn, a waiting
   pull holds no permit, and one execution occupies no scheduling processor.
   There is no public `tick`, `drain`, `force-release`, `declare-loss`,
-  `reset-epoch`, `reset-budget` or arbitrary held-out-entry removal.
+  `reset-epoch`, `reset-budget` or arbitrary held-out-job removal.
 - **External action performance:** Worker derives action operands from the
   attempt and evidence, and Mission owns resulting records. It is not
   Scheduler delivery admission or a queue write.
