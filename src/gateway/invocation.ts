@@ -323,8 +323,7 @@ export class Invocation {
         commit: <T>(
           write: (transaction: import("../kernel/store.ts").Transaction) => T,
         ): T => {
-          if (!reservation || committed)
-            throw new Error("A mutation commits exactly once.");
+          if (committed) throw new Error("caller.commit: called twice.");
           const response = this.stores[operation.store].transaction(
             (transaction) => {
               const body = operation.output.parse(write(transaction));
@@ -337,7 +336,8 @@ export class Invocation {
       };
       const output = await handler(parsed.data, caller);
       if (committed) {
-        this.idempotency.complete(reservation!, committed, operation.secret);
+        if (reservation)
+          this.idempotency.complete(reservation, committed, operation.secret);
         return committed;
       }
       if (
