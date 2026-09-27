@@ -23,6 +23,9 @@ import {
   ActorKind,
   ImportFormat,
   importPreviewSchema,
+  importResultSchema,
+  type ImportApply,
+  type ImportResult,
   type ImportEntry,
   type ImportSnapshot,
   MISSION_IDENTITY_PREFIX,
@@ -3563,6 +3566,722 @@ test("import.preview equivalent Markdown and JSON plans have identical classific
   assert.deepEqual(json.violations, []);
   assert.deepEqual(json.creates, [NEW_FILENAME]);
   assert.deepEqual(json.updates, [f.objectiveId]);
+});
+
+const IMPORT_APPLY_PATH = "/api/mission/:missionId/import";
+const IMPORT_QUEUE_FAILURE = "import queue insert failed";
+const IMPORT_UPDATED_NAME = "Updated imported content";
+const IMPORT_EXTRA_TASK = "extra-task.md";
+const IMPORT_NEW_TASK = "new-task.md";
+const IMPORT_NEW_PARENT = "new-parent.md";
+const IMPORT_NODE_COUNT = 4;
+
+function importApplyFixture(t: TestContext) {
+  const f = dependencyFixture(t);
+  function entry(
+    filename: string,
+    kind: NodeKind,
+    parent?: string,
+  ): ImportEntry {
+    return {
+      filename,
+      kind,
+      name: NODE_TEXT,
+      requirement: NODE_TEXT,
+      criterion: NODE_TEXT,
+      verifications: [VERIFICATION],
+      bindings: kind === NodeKind.Objective ? [REPOSITORY_NAME] : [],
+      ...(parent === undefined ? {} : { parent }),
+    };
+  }
+  const initial = [
+    entry(INITIATIVE_FILENAME, NodeKind.Initiative),
+    entry(OBJECTIVE_FILENAME, NodeKind.Objective, INITIATIVE_FILENAME),
+    {
+      ...entry(OTHER_FILENAME, NodeKind.Objective, INITIATIVE_FILENAME),
+      dependsOn: [OBJECTIVE_FILENAME],
+    },
+    entry(TASK_FILENAME, NodeKind.Task, OBJECTIVE_FILENAME),
+  ];
+  function snapshot(entries: ImportEntry[] = initial): ImportSnapshot {
+    return {
+      format: ImportFormat.Json,
+      missionId: f.missionId,
+      missionVersion: f.version(),
+      reason: REASON,
+      entries,
+    };
+  }
+  function preview(body: ImportSnapshot) {
+    const operation = missionOperations["import.preview"];
+    return operation.output.parse(
+      f.registry.get(operation.id).handler(
+        operation.input.parse({
+          params: { missionId: f.missionId },
+          query: {},
+          body,
+        }),
+        f.caller,
+      ),
+    );
+  }
+  function request(body: ImportSnapshot = snapshot()): ImportApply {
+    const plan = preview(body);
+    assert.deepEqual(plan.violations, []);
+    return {
+      ...body,
+      previewDigest: plan.previewDigest,
+      confirmedRetirements: plan.retirements,
+    };
+  }
+  function apply(body: ImportApply, missionId = f.missionId) {
+    const operation = missionOperations["import.apply"];
+    const input = operation.input.parse({
+      params: { missionId },
+      query: {},
+      body,
+    });
+    const commits = f.commits();
+    try {
+      return importResultSchema.parse(
+        f.registry.get(operation.id).handler(input, f.caller),
+      );
+    } finally {
+      assert.equal(f.commits(), commits + ONE_COMMIT);
+    }
+  }
+  function identified(
+    result: ImportResult,
+    entries: ImportEntry[] = initial,
+  ): ImportEntry[] {
+    const ids = new Map(
+      result.assignedIds.map((item) => [item.filename, item.nodeId]),
+    );
+    return entries.map((item) => {
+      const id = ids.get(item.filename);
+      assert.ok(id);
+      return { ...item, id };
+    });
+  }
+  function state() {
+    const { calls, ...rows } = f.snapshot();
+    void calls;
+    return { ...rows, jobs: f.jobs() };
+  }
+  return {
+    ...f,
+    entry,
+    initial,
+    importSnapshot: snapshot,
+    preview,
+    request,
+    apply,
+    identified,
+    state,
+  };
+}
+
+test("import.apply is a human mutation and imports a full graph in one commit and version increment", (t) => {
+  const f = importApplyFixture(t);
+  const operation = f.registry.get(
+    missionOperations["import.apply"].id,
+  ).operation;
+  assert.equal(operation.method, HttpMethod.Post);
+  assert.equal(operation.path, IMPORT_APPLY_PATH);
+  assert.equal(operation.access, AccessPolicy.Human);
+  assert.equal(operation.mutation, true);
+  assert.equal(operation.body, true);
+  const body = f.request();
+  const result = f.apply(body);
+  assert.equal(result.missionVersion, body.missionVersion + ONE);
+  assert.equal(result.changes.missionVersion, result.missionVersion);
+  assert.equal(f.version(), result.missionVersion);
+  assert.equal(result.assignedIds.length, IMPORT_NODE_COUNT);
+  assert.deepEqual(
+    result.assignedIds.map((item) => item.filename),
+    f.initial.map((item) => item.filename).sort(),
+  );
+  assert.deepEqual(result.actor, humanActor(f.caller));
+  assert.ok(result.acceptedAt >= CREATED_AT);
+  const ids = new Map(
+    result.assignedIds.map((item) => [item.filename, item.nodeId]),
+  );
+  const objective = ids.get(OBJECTIVE_FILENAME)!;
+  const task = ids.get(TASK_FILENAME)!;
+  assert.equal(f.node(task)?.parent_id, objective);
+  assert.equal(f.node(ids.get(OTHER_FILENAME)!)?.state, NodeState.Pending);
+  assert.deepEqual(
+    f.jobs().map((job) => job.node_id),
+    [objective],
+  );
+  assert.equal(result.changes.revisions.length, THREE);
+  assert.equal(
+    f.store.transaction((tx) => readCurrentRevision(tx, task)),
+    null,
+  );
+  const revision = result.changes.revisions.find(
+    (item) => item.nodeId === objective,
+  )!;
+  assert.deepEqual(revision.tasks, [
+    {
+      id: task,
+      filename: TASK_FILENAME,
+      content: {
+        name: NODE_TEXT,
+        requirement: NODE_TEXT,
+        criterion: NODE_TEXT,
+        verifications: [VERIFICATION],
+        bindings: [],
+      },
+    },
+  ]);
+  assert.deepEqual(revision.change, {
+    write: RevisionWrite.Import,
+    previousRevision: null,
+    changedFields: [...CONTENT_FIELDS, TASKS_FIELD],
+    tasks: [
+      {
+        id: task,
+        change: TaskChange.Created,
+        changedFields: [...CONTENT_FIELDS],
+      },
+    ],
+  });
+  assert.equal(result.changes.addedEdges.length, IMPORT_NODE_COUNT);
+  assert.deepEqual(result.changes.removedEdges, []);
+  assert.deepEqual(result.changes.openAttemptsUnchanged, []);
+  assert.deepEqual(
+    result.changes.revisions.map((item) => item.nodeId),
+    result.changes.revisions.map((item) => item.nodeId).sort(),
+  );
+  for (const revision of result.changes.revisions) {
+    assert.equal(revision.revision, FIRST_REVISION);
+    assert.equal(revision.change.write, RevisionWrite.Import);
+    assert.equal(revision.reason, REASON);
+    assert.deepEqual(revision.actor, result.actor);
+    assert.equal(revision.createdAt, result.acceptedAt);
+  }
+});
+
+test("import.apply identical identified set is a no-op with every assigned identity and no database writes", (t) => {
+  const f = importApplyFixture(t);
+  const first = f.apply(f.request());
+  const body = f.request(f.importSnapshot(f.identified(first).reverse()));
+  const before = f.state();
+  const writes = f.store.database
+    .prepare("SELECT total_changes() AS count")
+    .get();
+  const calls = [...f.calls];
+  const result = f.apply(body);
+  assert.equal(result.missionVersion, first.missionVersion);
+  assert.deepEqual(result.assignedIds, first.assignedIds);
+  assert.deepEqual(result.changes, {
+    missionVersion: first.missionVersion,
+    revisions: [],
+    retiredNodeIds: [],
+    addedEdges: [],
+    removedEdges: [],
+    openAttemptsUnchanged: [],
+  });
+  assert.deepEqual(f.state(), before);
+  assert.deepEqual(f.calls, calls);
+  assert.deepEqual(
+    f.store.database.prepare("SELECT total_changes() AS count").get(),
+    writes,
+  );
+});
+
+test("import.apply stops at the first staged violation before digest checking and preserves its error details", (t) => {
+  const f = importApplyFixture(t);
+  const snapshot = f.importSnapshot([
+    { ...f.initial[ZERO]!, filename: "../invalid.md", id: UNKNOWN_NODE_ID },
+    { ...f.initial[ONE]!, bindings: [UNKNOWN_NAME] },
+  ]);
+  const first = f.preview(snapshot).violations[ZERO]!;
+  const before = f.state();
+  assert.throws(
+    () =>
+      f.apply({
+        ...snapshot,
+        previewDigest: INVALID_RETIRE_DIGEST,
+        confirmedRetirements: [],
+      }),
+    retirementError(
+      first.code,
+      { field: "filename", filename: first.filename, nodeId: first.nodeId },
+      HttpStatus.BadRequest,
+    ),
+  );
+  assert.deepEqual(f.state(), before);
+});
+
+for (const [label, patch, code] of [
+  ["unknown id", { id: UNKNOWN_NODE_ID }, MissionErrorCode.UnknownId],
+  ["binding", { bindings: [UNKNOWN_NAME] }, MissionErrorCode.BindingsInvalid],
+  ["reference", { parent: NEW_FILENAME }, MissionErrorCode.UnresolvedReference],
+  ["cycle", { dependsOn: [OBJECTIVE_FILENAME] }, MissionErrorCode.Cycle],
+] satisfies Array<[string, Partial<ImportEntry>, string]>) {
+  test(`import.apply maps resolved ${label} violations to 400 with locators and no effects`, (t) => {
+    const f = importApplyFixture(t);
+    const snapshot = f.importSnapshot(
+      f.initial.map((item) =>
+        item.filename === OBJECTIVE_FILENAME ? { ...item, ...patch } : item,
+      ),
+    );
+    const violation = f.preview(snapshot).violations[ZERO]!;
+    assert.equal(violation.code, code);
+    const before = f.state();
+    assert.throws(
+      () =>
+        f.apply({
+          ...snapshot,
+          previewDigest: INVALID_RETIRE_DIGEST,
+          confirmedRetirements: [],
+        }),
+      retirementError(
+        code,
+        {
+          ...(violation.details as object),
+          filename: violation.filename,
+          nodeId: violation.nodeId,
+        },
+        HttpStatus.BadRequest,
+      ),
+    );
+    assert.deepEqual(f.state(), before);
+  });
+}
+
+for (const [state, code] of [
+  [NodeState.Executing, MissionErrorCode.ConditionFailed],
+  [NodeState.Completed, MissionErrorCode.TerminalChange],
+] as const) {
+  test(`import.apply maps ${state} condition violations to 409 before digest mismatch`, (t) => {
+    const f = importApplyFixture(t);
+    const first = f.apply(f.request());
+    const entries = f.identified(first);
+    const objective = entries.find(
+      (item) => item.filename === OBJECTIVE_FILENAME,
+    )!;
+    f.setState(objective.id!, state);
+    const snapshot = f.importSnapshot(
+      entries.map((item) =>
+        item.id === objective.id
+          ? { ...item, name: IMPORT_UPDATED_NAME }
+          : item,
+      ),
+    );
+    const before = f.state();
+    assert.throws(
+      () =>
+        f.apply({
+          ...snapshot,
+          previewDigest: INVALID_RETIRE_DIGEST,
+          confirmedRetirements: [],
+        }),
+      retirementError(code, {
+        ...(code === MissionErrorCode.ConditionFailed
+          ? { state, attempt: ZERO }
+          : {}),
+        filename: OBJECTIVE_FILENAME,
+        nodeId: objective.id,
+      }),
+    );
+    assert.deepEqual(f.state(), before);
+  });
+}
+
+test("import.apply checks existence then version then reason without changing rows", (t) => {
+  const f = importApplyFixture(t);
+  const body = f.request();
+  f.apply(body);
+  const before = f.state();
+  const invalid = { ...body, reason: "x".repeat(TEXT_MAX_BYTES + ONE) };
+  assert.throws(
+    () => f.apply(invalid, UNKNOWN_MISSION_ID),
+    retirementError(
+      MissionErrorCode.MissionNotFound,
+      undefined,
+      HttpStatus.NotFound,
+    ),
+  );
+  assert.throws(
+    () => f.apply(invalid),
+    retirementError(MissionErrorCode.VersionConflict, {
+      current: body.missionVersion + ONE,
+    }),
+  );
+  assert.throws(
+    () => f.apply({ ...invalid, missionVersion: f.version() }),
+    retirementError(
+      MissionErrorCode.ContentInvalid,
+      { field: "reason" },
+      HttpStatus.BadRequest,
+    ),
+  );
+  assert.deepEqual(f.state(), before);
+});
+
+test("import.apply refuses changed digest, changed entries and missing or wrong confirmed retirements without effects", (t) => {
+  const f = importApplyFixture(t);
+  const first = f.apply(f.request());
+  const body = f.request(f.importSnapshot([]));
+  const before = f.state();
+  for (const invalid of [
+    { ...body, previewDigest: INVALID_RETIRE_DIGEST },
+    { ...body, confirmedRetirements: [] },
+    {
+      ...body,
+      confirmedRetirements: [
+        ...body.confirmedRetirements.slice(ONE),
+        UNKNOWN_NODE_ID,
+      ],
+    },
+    {
+      ...body,
+      confirmedRetirements: [...body.confirmedRetirements, UNKNOWN_NODE_ID],
+    },
+    { ...body, format: ImportFormat.Json, entries: f.identified(first) },
+  ]) {
+    assert.throws(
+      () => f.apply(invalid),
+      retirementError(MissionErrorCode.RetirementMismatch),
+    );
+    assert.deepEqual(f.state(), before);
+  }
+  const result = f.apply({
+    ...body,
+    confirmedRetirements: [
+      ...body.confirmedRetirements,
+      ...body.confirmedRetirements,
+    ],
+  });
+  assert.deepEqual(result.changes.retiredNodeIds, body.confirmedRetirements);
+  assert.deepEqual(f.jobs(), []);
+});
+
+test("import.apply task rename and move, objective retirement and dependency replacement write import revisions atomically", (t) => {
+  const f = importApplyFixture(t);
+  const first = f.apply(f.request());
+  const entries = f.identified(first);
+  const oldObjective = entries.find(
+    (item) => item.filename === OBJECTIVE_FILENAME,
+  )!.id!;
+  const newObjective = entries.find(
+    (item) => item.filename === OTHER_FILENAME,
+  )!.id!;
+  const task = entries.find((item) => item.filename === TASK_FILENAME)!.id!;
+  const next = entries
+    .filter((item) => item.id !== oldObjective)
+    .map((item) => {
+      if (item.id === newObjective)
+        return {
+          ...item,
+          dependsOn: [NEW_FILENAME],
+          name: IMPORT_UPDATED_NAME,
+        };
+      if (item.id === task)
+        return { ...item, filename: IMPORT_NEW_TASK, parent: OTHER_FILENAME };
+      return item;
+    });
+  next.push(f.entry(NEW_FILENAME, NodeKind.Initiative));
+  const body = f.request(f.importSnapshot(next));
+  const result = f.apply(body);
+  assert.equal(result.missionVersion, first.missionVersion + ONE);
+  assert.equal(f.node(oldObjective)?.retired_at, result.acceptedAt);
+  assert.equal(f.node(task)?.parent_id, newObjective);
+  const oldRevision = result.changes.revisions.find(
+    (item) => item.nodeId === oldObjective,
+  )!;
+  const newRevision = result.changes.revisions.find(
+    (item) => item.nodeId === newObjective,
+  )!;
+  assert.deepEqual(oldRevision.change.tasks, [
+    { id: task, change: TaskChange.MovedOut, changedFields: [] },
+  ]);
+  assert.deepEqual(oldRevision.tasks, []);
+  assert.deepEqual(newRevision.change.tasks, [
+    {
+      id: task,
+      change: TaskChange.MovedIn,
+      changedFields: [...CONTENT_FIELDS],
+    },
+  ]);
+  assert.deepEqual(newRevision.change.changedFields, [
+    ContentField.Name,
+    TASKS_FIELD,
+  ]);
+  assert.equal(newRevision.tasks?.[ZERO]?.filename, IMPORT_NEW_TASK);
+  assert.equal(newRevision.revision, NEXT_REVISION);
+  assert.ok(
+    result.changes.revisions.every(
+      (item) => item.change.write === RevisionWrite.Import,
+    ),
+  );
+  assert.deepEqual(result.changes.retiredNodeIds, [oldObjective]);
+  const removedContainment = [
+    {
+      kind: EdgeKind.Containment,
+      parentId: entries.find((item) => item.kind === NodeKind.Initiative)!.id!,
+      childId: oldObjective,
+    },
+    { kind: EdgeKind.Containment, parentId: oldObjective, childId: task },
+  ].sort(
+    (a, b) =>
+      a.parentId.localeCompare(b.parentId) ||
+      a.childId.localeCompare(b.childId),
+  );
+  assert.deepEqual(result.changes.removedEdges, [
+    ...removedContainment,
+    {
+      kind: EdgeKind.Dependency,
+      dependentId: newObjective,
+      dependsOnId: oldObjective,
+    },
+  ]);
+  const created = result.assignedIds.find(
+    (item) => item.filename === NEW_FILENAME,
+  )!.nodeId;
+  assert.deepEqual(
+    f.jobs().map((job) => job.node_id),
+    [created],
+  );
+  assert.equal(f.node(newObjective)?.state, NodeState.Pending);
+  assert.deepEqual(
+    f.state().dependencies.map((edge) => ({ ...edge })),
+    [
+      {
+        mission_id: f.missionId,
+        dependent_id: newObjective,
+        depends_on_id: created,
+      },
+    ],
+  );
+});
+
+test("import.apply retains stored task order, appends creates in set order and coalesces all task changes into one objective revision", (t) => {
+  const f = importApplyFixture(t);
+  const initial = [
+    ...f.initial,
+    f.entry(IMPORT_EXTRA_TASK, NodeKind.Task, OBJECTIVE_FILENAME),
+  ];
+  const first = f.apply(f.request(f.importSnapshot(initial)));
+  const entries = f.identified(first, initial);
+  const originalTask = entries.find((item) => item.filename === TASK_FILENAME)!;
+  const retiredTask = entries.find(
+    (item) => item.filename === IMPORT_EXTRA_TASK,
+  )!;
+  const next = [
+    f.entry(IMPORT_NEW_TASK, NodeKind.Task, OBJECTIVE_FILENAME),
+    ...entries
+      .filter((item) => item.id !== retiredTask.id)
+      .reverse()
+      .map((item) =>
+        item.id === originalTask.id
+          ? { ...item, filename: NEW_FILENAME, name: IMPORT_UPDATED_NAME }
+          : item,
+      ),
+    f.entry(IMPORT_EXTRA_TASK, NodeKind.Task, OBJECTIVE_FILENAME),
+  ];
+  const result = f.apply(f.request(f.importSnapshot(next)));
+  assert.equal(result.changes.revisions.length, ONE);
+  const revision = result.changes.revisions[ZERO]!;
+  assert.deepEqual(
+    revision.tasks?.map((item) => item.filename),
+    [NEW_FILENAME, IMPORT_NEW_TASK, IMPORT_EXTRA_TASK],
+  );
+  assert.deepEqual(revision.change.changedFields, [TASKS_FIELD]);
+  assert.deepEqual(revision.change.tasks?.slice(ZERO, TWO), [
+    {
+      id: originalTask.id,
+      change: TaskChange.Updated,
+      changedFields: [ContentField.Filename, ContentField.Name],
+    },
+    { id: retiredTask.id, change: TaskChange.Retired, changedFields: [] },
+  ]);
+  assert.ok(
+    revision.change.tasks
+      ?.slice(TWO)
+      .every((item) => item.change === TaskChange.Created),
+  );
+  assert.equal(
+    f.store.transaction((tx) => readCurrentRevision(tx, originalTask.id!)),
+    null,
+  );
+});
+
+test("import.apply same filename without identity retires and replaces the old node before uniqueness is checked", (t) => {
+  const f = importApplyFixture(t);
+  const first = f.apply(f.request());
+  const entries = f.identified(first);
+  const old = entries.find((item) => item.filename === OBJECTIVE_FILENAME)!.id!;
+  const next = entries.map((item) =>
+    item.id === old ? { ...item, id: undefined } : item,
+  );
+  const result = f.apply(f.request(f.importSnapshot(next)));
+  const replacement = result.assignedIds.find(
+    (item) => item.filename === OBJECTIVE_FILENAME,
+  )!.nodeId;
+  assert.notEqual(replacement, old);
+  assert.equal(f.node(old)?.retired_at, result.acceptedAt);
+  assert.equal(f.node(replacement)?.retired_at, null);
+  assert.deepEqual(
+    f.jobs().map((job) => job.node_id),
+    [replacement],
+  );
+  assert.deepEqual(result.changes.retiredNodeIds, [old]);
+  assert.deepEqual(
+    f.store.database.prepare("PRAGMA foreign_key_check").all(),
+    [],
+  );
+});
+
+test("import.apply rolls back every row including jobs after a late queue insertion failure", (t) => {
+  const f = importApplyFixture(t);
+  const first = f.apply(f.request());
+  const entries = f.identified(first);
+  const old = entries.find((item) => item.filename === OBJECTIVE_FILENAME)!.id!;
+  const next = entries.map((item) => {
+    if (item.id === old)
+      return { ...item, id: undefined, name: IMPORT_UPDATED_NAME };
+    if (item.filename === TASK_FILENAME)
+      return { ...item, filename: IMPORT_NEW_TASK };
+    return item;
+  });
+  const body = f.request(f.importSnapshot(next));
+  const before = f.state();
+  const insert = f.queue.insert;
+  f.queue.insert = (tx, id, projectId, priority) => {
+    insert(tx, id, projectId, priority);
+    assert.equal(readNode(tx, old)?.retired_at !== null, true);
+    assert.ok(f.state().revisions.length > before.revisions.length);
+    assert.ok(f.state().nodes.length > before.nodes.length);
+    throw new Error(IMPORT_QUEUE_FAILURE);
+  };
+  assert.throws(() => f.apply(body), { message: IMPORT_QUEUE_FAILURE });
+  assert.deepEqual(f.state(), before);
+  assert.deepEqual(
+    f.store.database.prepare("PRAGMA foreign_key_check").all(),
+    [],
+  );
+  f.queue.insert = insert;
+  const result = f.apply(body);
+  assert.equal(result.missionVersion, first.missionVersion + ONE);
+});
+
+test("import.apply handles filename swaps and new parents without transient uniqueness or foreign key failures", (t) => {
+  const f = importApplyFixture(t);
+  const first = f.apply(f.request());
+  const entries = f.identified(first);
+  const next = entries.map((item) => {
+    if (item.filename === OBJECTIVE_FILENAME)
+      return { ...item, filename: OTHER_FILENAME, parent: IMPORT_NEW_PARENT };
+    if (item.filename === OTHER_FILENAME)
+      return {
+        ...item,
+        filename: OBJECTIVE_FILENAME,
+        dependsOn: [OTHER_FILENAME],
+      };
+    if (item.kind === NodeKind.Task) return { ...item, parent: OTHER_FILENAME };
+    return item;
+  });
+  next.push(f.entry(IMPORT_NEW_PARENT, NodeKind.Initiative));
+  const result = f.apply(f.request(f.importSnapshot(next)));
+  const newParent = result.assignedIds.find(
+    (item) => item.filename === IMPORT_NEW_PARENT,
+  )!.nodeId;
+  const moved = entries.find(
+    (item) => item.filename === OBJECTIVE_FILENAME,
+  )!.id!;
+  assert.equal(f.node(moved)?.parent_id, newParent);
+  assert.equal(f.node(moved)?.filename, OTHER_FILENAME);
+  assert.deepEqual(
+    f.store.database.prepare("PRAGMA foreign_key_check").all(),
+    [],
+  );
+  assert.deepEqual(
+    f.preview(f.importSnapshot(f.identified(result, next))).updates,
+    [],
+  );
+});
+
+test("import.apply graph-only changes reroute jobs without writing content revisions", (t) => {
+  const f = importApplyFixture(t);
+  const first = f.apply(f.request());
+  const entries = f.identified(first);
+  const other = entries.find((item) => item.filename === OTHER_FILENAME)!;
+  const objective = entries.find(
+    (item) => item.filename === OBJECTIVE_FILENAME,
+  )!;
+  const before = f.state().revisions;
+  const next = entries.map((item) =>
+    item.id === other.id ? { ...item, dependsOn: [] } : item,
+  );
+  const result = f.apply(f.request(f.importSnapshot(next)));
+  assert.equal(result.missionVersion, first.missionVersion + ONE);
+  assert.deepEqual(result.changes.revisions, []);
+  assert.deepEqual(f.state().revisions, before);
+  assert.deepEqual(result.changes.addedEdges, []);
+  assert.deepEqual(result.changes.removedEdges, [
+    {
+      kind: EdgeKind.Dependency,
+      dependentId: other.id,
+      dependsOnId: objective.id,
+    },
+  ]);
+  assert.deepEqual(
+    f.jobs().map((job) => job.node_id),
+    [objective.id, other.id].sort(),
+  );
+});
+
+test("import.apply permits terminal no-ops and an empty mission without writes", (t) => {
+  const f = importApplyFixture(t);
+  const empty = f.apply(f.request(f.importSnapshot([])));
+  assert.equal(empty.missionVersion, MISSION_INITIAL_VERSION);
+  assert.deepEqual(empty.assignedIds, []);
+  const first = f.apply(f.request());
+  const entries = f.identified(first);
+  const objective = entries.find(
+    (item) => item.filename === OBJECTIVE_FILENAME,
+  )!;
+  f.setState(objective.id!, NodeState.Completed);
+  const body = f.request(f.importSnapshot(entries));
+  const before = f.state();
+  const result = f.apply(body);
+  assert.equal(result.missionVersion, first.missionVersion);
+  assert.deepEqual(result.changes.revisions, []);
+  assert.deepEqual(f.state(), before);
+});
+
+test("import.apply Markdown uses the same digest, revisions, graph and no-op behavior as JSON", (t) => {
+  const f = importApplyFixture(t);
+  function markdown(entries: ImportEntry[]): ImportSnapshot {
+    return {
+      format: ImportFormat.Markdown,
+      missionId: f.missionId,
+      missionVersion: f.version(),
+      reason: REASON,
+      files: entries.map(
+        ({ filename, name, requirement, criterion, ...frontMatter }) => ({
+          filename,
+          content: `---\n${JSON.stringify(frontMatter)}\n---\n# ${name}\n## Requirement\n${requirement}\n## Criterion\n${criterion}\n`,
+        }),
+      ),
+    };
+  }
+  const body = f.request(markdown(f.initial));
+  assert.equal(body.previewDigest, f.request().previewDigest);
+  const result = f.apply(body);
+  assert.equal(result.assignedIds.length, IMPORT_NODE_COUNT);
+  assert.equal(result.changes.revisions.length, THREE);
+  assert.equal(f.jobs().length, ONE);
+  const entries = f.identified(result);
+  const before = f.state();
+  const second = f.apply(f.request(markdown(entries)));
+  assert.equal(second.missionVersion, result.missionVersion);
+  assert.deepEqual(second.assignedIds, result.assignedIds);
+  assert.deepEqual(f.state(), before);
 });
 
 test("MissionService refuses to restart after stop", async () => {

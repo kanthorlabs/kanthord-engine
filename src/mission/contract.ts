@@ -510,6 +510,21 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "import.apply": {
+    ...writeOperation,
+    id: "mission.import.apply",
+    method: HttpMethod.Post,
+    path: "/api/mission/:missionId/import",
+    input: z.strictObject({
+      params: z.strictObject({
+        missionId: identitySchema(MISSION_IDENTITY_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: importApplySchema,
+    }),
+    output: importResultSchema,
+    description: "Apply a whole-mission import atomically.",
+  },
   "import.preview": {
     ...readOperation,
     body: true,

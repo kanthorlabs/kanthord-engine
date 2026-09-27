@@ -29,6 +29,7 @@ import {
 import { addDependency, removeDependency } from "./dependency.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
 import { previewImport } from "./import.ts";
+import { applyImport } from "./import-apply.ts";
 import { createNode } from "./node-create.ts";
 import { moveNode } from "./node-move.ts";
 import { planRetirement, retireNode } from "./node-retire.ts";
@@ -88,6 +89,21 @@ export class MissionService implements Service, MissionCollaborations {
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["import.apply"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) =>
+          applyImport(
+            tx,
+            params.missionId,
+            body,
+            humanActor(caller),
+            this.dependencies.bindings,
+            this.dependencies.workQueue,
+            this.dependencies.config.textMaxBytes,
+          ),
+        ),
+    );
     registry.register(
       missionOperations["import.preview"],
       ({ params, body }, caller) =>
