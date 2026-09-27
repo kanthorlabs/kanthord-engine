@@ -312,6 +312,7 @@ export type WorkerAgentView = {
   issues: Array<{ path: string[]; code: string }>;
 };
 export type BindingRevisionResult = {
+  projectId: string;
   bindingId: string;
   name: string;
   resourceIdentity: string;

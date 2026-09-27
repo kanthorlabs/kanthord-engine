@@ -553,6 +553,7 @@ export class ProjectService implements Service, ProjectBindings {
         ? current.config.instanceCount === INSTANCE_COUNT_MIN
         : current.config.available === false;
     return {
+      projectId: binding.projectId,
       bindingId: binding.id,
       name: binding.name,
       resourceIdentity: binding.resourceIdentity,

@@ -40,6 +40,8 @@ import {
   NodeState,
   EdgeKind,
   RevisionWrite,
+  RebindSkipCondition,
+  type Rebind,
   TaskChange,
   nodeChangeSchema,
   edgeSchema,
@@ -446,6 +448,7 @@ function nodeFixture(
       ? null
       : {
           ...match[1],
+          projectId: PROJECT_ID,
           name: match[0],
           revision: FIRST_REVISION,
           tombstone: false,
@@ -4518,6 +4521,417 @@ test("serializePlanFile round-trips YAML-special verification strings", () => {
   assert.deepEqual(parsed, objective);
   assert.deepEqual(parsed.verifications, objective.verifications);
 });
+
+const REBIND_PATH = "/api/mission/:missionId/rebind";
+const NEXT_BINDING_ID = "binding_00000000000000000000000003";
+const NEXT_STORAGE_ID = "binding_00000000000000000000000004";
+type BindingRevision = NonNullable<
+  ReturnType<MissionBindings["getBindingRevision"]>
+>;
+
+function rebindFixture(t: TestContext) {
+  const table = new Map<string, BindingRevision>(
+    [...bindingMap].map(([name, binding]) => [
+      binding.bindingId,
+      {
+        ...binding,
+        projectId: PROJECT_ID,
+        name,
+        revision: FIRST_REVISION,
+        tombstone: false,
+        disabled: false,
+      },
+    ]),
+  );
+  table.set(NEXT_BINDING_ID, {
+    ...table.get(BINDING_ID)!,
+    bindingId: NEXT_BINDING_ID,
+    revision: NEXT_REVISION,
+  });
+  table.set(NEXT_STORAGE_ID, {
+    ...table.get(OTHER_BINDING_ID)!,
+    bindingId: NEXT_STORAGE_ID,
+    revision: NEXT_REVISION,
+  });
+  const f = nodeFixture(t, (_tx, id) => table.get(id) ?? null);
+  function rebind(overrides: Partial<Rebind> = {}, missionId = f.missionId) {
+    const operation = missionOperations[RevisionWrite.NodeRebind];
+    const input = operation.input.parse({
+      params: { missionId },
+      query: {},
+      body: {
+        bindingId: NEXT_BINDING_ID,
+        reason: REASON,
+        expectedMissionVersion: f.version(),
+        ...overrides,
+      },
+    });
+    const commits = f.commits();
+    try {
+      return operation.output.parse(
+        f.registry.get(operation.id).handler(input, f.caller),
+      );
+    } finally {
+      assert.equal(f.commits(), commits + ONE_COMMIT);
+    }
+  }
+  function refuses(
+    overrides: Partial<Rebind>,
+    code: string,
+    status: number = HttpStatus.Conflict,
+    details?: unknown,
+    missionId = f.missionId,
+  ) {
+    const before = f.snapshot();
+    assert.throws(
+      () => rebind(overrides, missionId),
+      (error) => {
+        assert.ok(error instanceof OperationError);
+        assert.equal(error.code, code);
+        assert.equal(error.status, status);
+        if (details !== undefined) assert.deepEqual(error.details, details);
+        return true;
+      },
+    );
+    assert.deepEqual(f.snapshot(), before);
+  }
+  return { ...f, table, rebind, refuses };
+}
+
+function emptyRebindChange(missionVersion: number): NodeChange {
+  return {
+    missionVersion,
+    revisions: [],
+    retiredNodeIds: [],
+    addedEdges: [],
+    removedEdges: [],
+    openAttemptsUnchanged: [],
+  };
+}
+
+test("mission.node.rebind declares a human write and advances a pin without changing tasks, state or routing", (t) => {
+  const f = rebindFixture(t);
+  const operation = missionOperations[RevisionWrite.NodeRebind];
+  assert.equal(operation.method, HttpMethod.Post);
+  assert.equal(operation.path, REBIND_PATH);
+  assert.equal(operation.access, AccessPolicy.Human);
+  assert.equal(operation.mutation, true);
+  assert.equal(operation.body, true);
+  const nodeId = f.objective();
+  f.create(f.body(NodeKind.Task, nodeId));
+  const previous = f.store.transaction((tx) =>
+    readCurrentRevision(tx, nodeId),
+  )!;
+  const before = f.snapshot();
+  const version = f.version();
+  assert.deepEqual(
+    f.store.transaction((tx) => f.mission.liveNodesPinning(tx, BINDING_ID)),
+    [nodeId],
+  );
+  assert.deepEqual(
+    f.store.transaction((tx) =>
+      f.mission.liveNodesPinning(tx, NEXT_BINDING_ID),
+    ),
+    [],
+  );
+  const result = f.rebind({ nodeId });
+  assert.equal(result.nodeChange.missionVersion, version + ONE);
+  assert.equal(result.nodeChange.revisions.length, ONE);
+  const revision = result.nodeChange.revisions[ZERO]!;
+  assert.equal(revision.nodeId, nodeId);
+  assert.equal(revision.revision, previous.revision + ONE);
+  assert.deepEqual(revision.change, {
+    write: RevisionWrite.NodeRebind,
+    previousRevision: previous.revision,
+    changedFields: [ContentField.Bindings],
+    tasks: [],
+  });
+  assert.deepEqual(revision.tasks, JSON.parse(previous.tasks!));
+  assert.deepEqual(revision.content, {
+    name: previous.name,
+    requirement: previous.requirement,
+    criterion: previous.criterion,
+    verifications: JSON.parse(previous.verifications),
+    bindings: [NEXT_BINDING_ID],
+  });
+  assert.deepEqual(revision.actor, {
+    kind: ActorKind.Human,
+    account: ACCOUNT_ID,
+    name: DISPLAY_NAME,
+  });
+  assert.equal(revision.reason, REASON);
+  assert.deepEqual(revision.pinnedByAttempts, []);
+  assert.deepEqual(result.skipped, []);
+  assert.deepEqual(result.nodeChange.openAttemptsUnchanged, []);
+  assert.deepEqual(f.snapshot().nodes, before.nodes);
+  assert.deepEqual(f.calls, before.calls);
+  assert.deepEqual(
+    f.store.transaction((tx) => readCurrentRevision(tx, nodeId))?.bindings,
+    JSON.stringify([NEXT_BINDING_ID]),
+  );
+  assert.deepEqual(
+    f.store.transaction((tx) => f.mission.liveNodesPinning(tx, BINDING_ID)),
+    [],
+  );
+  assert.deepEqual(
+    f.store.transaction((tx) =>
+      f.mission.liveNodesPinning(tx, NEXT_BINDING_ID),
+    ),
+    [nodeId],
+  );
+  assert.deepEqual(
+    f
+      .snapshot()
+      .revisions.filter(
+        (row) => row.node_id === nodeId && row.revision === previous.revision,
+      ),
+    [previous],
+  );
+});
+
+test("mission rebind changes initiative and objective once, preserving unrelated pins and objective snapshots", (t) => {
+  const f = rebindFixture(t);
+  const initiativeBody = f.body();
+  initiativeBody.content.bindings = [STORAGE_NAME];
+  const initiative = f.create(initiativeBody).revisions[ZERO]!.nodeId;
+  const objectiveBody = f.body(NodeKind.Objective, initiative);
+  objectiveBody.content.bindings.push(STORAGE_NAME);
+  const objective = f.create(objectiveBody).revisions[ZERO]!.nodeId;
+  const version = f.version();
+  const result = f.rebind({ bindingId: NEXT_STORAGE_ID });
+  assert.equal(result.nodeChange.missionVersion, version + ONE);
+  assert.equal(result.nodeChange.revisions.length, TWO);
+  const initiativeRevision = result.nodeChange.revisions.find(
+    (r) => r.nodeId === initiative,
+  )!;
+  const objectiveRevision = result.nodeChange.revisions.find(
+    (r) => r.nodeId === objective,
+  )!;
+  assert.deepEqual(initiativeRevision.content.bindings, [NEXT_STORAGE_ID]);
+  assert.equal(Object.hasOwn(initiativeRevision.change, "tasks"), false);
+  assert.equal(Object.hasOwn(initiativeRevision, "tasks"), false);
+  assert.deepEqual(objectiveRevision.content.bindings, [
+    BINDING_ID,
+    NEXT_STORAGE_ID,
+  ]);
+  assert.deepEqual(objectiveRevision.change.tasks, []);
+  assert.deepEqual(objectiveRevision.tasks, []);
+  assert.deepEqual(result.skipped, []);
+});
+
+test("mission rebind reports only terminal and retired earlier pins and keeps skipped-only acts as no-ops", (t) => {
+  const f = rebindFixture(t);
+  const parent = f.initiative();
+  const conditions = [
+    NodeState.Completed,
+    NodeState.Discarded,
+    NodeState.Available,
+  ];
+  const expected = conditions.map((state, index) => {
+    const body = f.body(NodeKind.Objective, parent);
+    body.filename = `node-${index}.md`;
+    const nodeId = f.create(body).revisions[ZERO]!.nodeId;
+    f.setState(nodeId, state);
+    if (state === NodeState.Available)
+      f.store.database
+        .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+        .run(RETIRED_AT, nodeId);
+    return {
+      node: f.store.transaction((tx) => nodeRecord(tx, readNode(tx, nodeId)!)),
+      condition:
+        state === NodeState.Available
+          ? RebindSkipCondition.Retired
+          : RebindSkipCondition.Terminal,
+    };
+  });
+  f.setState(parent, NodeState.Completed);
+  const before = f.snapshot();
+  const result = f.rebind();
+  assert.deepEqual(result.nodeChange, emptyRebindChange(f.version()));
+  assert.deepEqual(
+    result.skipped,
+    expected.sort((a, b) => a.node.id.localeCompare(b.node.id)),
+  );
+  assert.deepEqual(f.snapshot(), before);
+  const body = f.body();
+  body.filename = NEW_FILENAME;
+  const activeParent = f.create(body).revisions[ZERO]!.nodeId;
+  const activeBody = f.body(NodeKind.Objective, activeParent);
+  activeBody.filename = OTHER_FILENAME;
+  const active = f.create(activeBody).revisions[ZERO]!.nodeId;
+  const mixed = f.rebind();
+  assert.deepEqual(mixed.skipped, expected);
+  assert.deepEqual(
+    mixed.nodeChange.revisions.map((r) => r.nodeId),
+    [active],
+  );
+});
+
+for (const named of [false, true]) {
+  test(`equal target rebind is a no-op with named=${named}`, (t) => {
+    const f = rebindFixture(t);
+    const nodeId = f.objective();
+    f.rebind({ nodeId });
+    const version = f.version();
+    const before = f.snapshot();
+    assert.deepEqual(f.rebind(named ? { nodeId } : {}), {
+      nodeChange: emptyRebindChange(version),
+      skipped: [],
+    });
+    assert.deepEqual(f.snapshot(), before);
+  });
+}
+
+const TargetFailure = {
+  Absent: "absent",
+  Foreign: "foreign",
+  Tombstone: "tombstone",
+  Disabled: "disabled",
+} as const;
+for (const condition of Object.values(TargetFailure)) {
+  test(`mission rebind refuses ${condition} target before inspecting candidates`, (t) => {
+    const f = rebindFixture(t);
+    const target = f.table.get(NEXT_BINDING_ID)!;
+    if (condition === TargetFailure.Absent) f.table.delete(NEXT_BINDING_ID);
+    if (condition === TargetFailure.Foreign)
+      Object.assign(target, {
+        projectId: UNKNOWN_PROJECT_ID,
+        tombstone: true,
+        disabled: true,
+      });
+    if (condition === TargetFailure.Tombstone)
+      Object.assign(target, { tombstone: true, disabled: true });
+    if (condition === TargetFailure.Disabled) target.disabled = true;
+    const notFound =
+      condition === TargetFailure.Absent || condition === TargetFailure.Foreign;
+    const code = notFound
+      ? MissionErrorCode.BindingNotFound
+      : condition === TargetFailure.Tombstone
+        ? MissionErrorCode.BindingRemoved
+        : MissionErrorCode.BindingDisabled;
+    f.refuses(
+      { nodeId: UNKNOWN_NODE_ID },
+      code,
+      notFound ? HttpStatus.NotFound : HttpStatus.Conflict,
+    );
+  });
+}
+
+test("mission rebind validates mission, version and reason before target lookup", (t) => {
+  const f = rebindFixture(t);
+  f.table.clear();
+  f.refuses(
+    {},
+    MissionErrorCode.MissionNotFound,
+    HttpStatus.NotFound,
+    undefined,
+    UNKNOWN_MISSION_ID,
+  );
+  f.refuses(
+    {
+      expectedMissionVersion: NEXT_REVISION,
+      reason: "x".repeat(TEXT_MAX_BYTES + ONE),
+    },
+    MissionErrorCode.VersionConflict,
+    HttpStatus.Conflict,
+    { current: FIRST_REVISION },
+  );
+  f.refuses(
+    { reason: "x".repeat(TEXT_MAX_BYTES + ONE) },
+    MissionErrorCode.ContentInvalid,
+    HttpStatus.BadRequest,
+    { field: "reason" },
+  );
+});
+
+for (const condition of Object.values(RebindSkipCondition)) {
+  test(`mission rebind refuses a named ${condition} node before binding matching`, (t) => {
+    const f = rebindFixture(t);
+    const nodeId = f.initiative();
+    f.setState(nodeId, NodeState.Completed);
+    if (condition === RebindSkipCondition.Retired)
+      f.store.database
+        .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+        .run(RETIRED_AT, nodeId);
+    f.refuses(
+      { nodeId },
+      condition === RebindSkipCondition.Retired
+        ? MissionErrorCode.Retired
+        : MissionErrorCode.Terminal,
+      HttpStatus.Conflict,
+      { nodeId },
+    );
+  });
+}
+
+test("mission rebind refuses missing and foreign named nodes", (t) => {
+  const f = rebindFixture(t);
+  f.refuses(
+    { nodeId: UNKNOWN_NODE_ID },
+    MissionErrorCode.NodeNotFound,
+    HttpStatus.NotFound,
+  );
+  const nodeId = f.objective();
+  f.store.transaction((tx) =>
+    f.mission.createMission(tx, UNKNOWN_PROJECT_ID, HUMAN_ACTOR),
+  );
+  const foreignMission = f.invoke(UNKNOWN_PROJECT_ID).id;
+  f.store.database
+    .prepare("UPDATE mission_node SET mission_id = ? WHERE id = ?")
+    .run(foreignMission, nodeId);
+  f.refuses({ nodeId }, MissionErrorCode.NodeNotFound, HttpStatus.NotFound);
+});
+
+for (const kind of [NodeKind.Initiative, NodeKind.Objective, NodeKind.Task]) {
+  test(`mission rebind refuses a named ${kind} that pins no matching binding`, (t) => {
+    const f = rebindFixture(t);
+    let nodeId: string;
+    if (kind === NodeKind.Initiative) nodeId = f.initiative();
+    else {
+      nodeId = f.objective();
+      if (kind === NodeKind.Task) {
+        const change = f.create(f.body(NodeKind.Task, nodeId));
+        nodeId = change.revisions[ZERO]!.tasks![ZERO]!.id;
+      }
+    }
+    const bindingId = NEXT_STORAGE_ID;
+    f.refuses(
+      { nodeId, bindingId },
+      MissionErrorCode.BindingMismatch,
+      HttpStatus.Conflict,
+      { nodeId, bindingId },
+    );
+  });
+}
+
+const UnmatchedPin = {
+  Foreign: "foreign pin",
+  Newer: "newer pin",
+  Missing: "missing pin",
+} as const;
+for (const condition of Object.values(UnmatchedPin)) {
+  test(`mission rebind ignores a ${condition} and refuses it when named`, (t) => {
+    const f = rebindFixture(t);
+    const nodeId = f.objective();
+    const stored = f.table.get(BINDING_ID)!;
+    if (condition === UnmatchedPin.Foreign)
+      stored.projectId = UNKNOWN_PROJECT_ID;
+    if (condition === UnmatchedPin.Newer) stored.revision = THREE;
+    if (condition === UnmatchedPin.Missing) f.table.delete(BINDING_ID);
+    const before = f.snapshot();
+    assert.deepEqual(f.rebind(), {
+      nodeChange: emptyRebindChange(f.version()),
+      skipped: [],
+    });
+    assert.deepEqual(f.snapshot(), before);
+    f.refuses(
+      { nodeId },
+      MissionErrorCode.BindingMismatch,
+      HttpStatus.Conflict,
+      { nodeId, bindingId: NEXT_BINDING_ID },
+    );
+  });
+}
 
 test("MissionService refuses to restart after stop", async () => {
   const mission = makeService(new HealthRegistry());

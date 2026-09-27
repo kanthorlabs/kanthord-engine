@@ -32,6 +32,7 @@ export interface MissionBindings {
     tx: Transaction,
     bindingId: string,
   ): {
+    projectId: string;
     bindingId: string;
     name: string;
     resourceIdentity: string;
@@ -92,6 +93,7 @@ export const MissionErrorCode = {
   BindingNotFound: "mission.binding.not_found",
   BindingRemoved: "mission.binding.removed",
   BindingDisabled: "mission.binding.disabled",
+  BindingMismatch: "mission.binding.mismatch",
   CursorInvalid: "system.pagination.cursor_invalid",
 } as const;
 
@@ -126,9 +128,16 @@ export const RevisionWrite = {
   NodeUpdate: "node.update",
   NodeMove: "node.move",
   NodeRetire: "node.retire",
+  NodeRebind: "node.rebind",
   CriterionSet: "criterion.set",
   Unblock: "unblock",
 } as const;
+export const RebindSkipCondition = {
+  Terminal: "terminal",
+  Retired: "retired",
+} as const;
+export const rebindSkipConditionSchema = z.enum(RebindSkipCondition);
+export type RebindSkipCondition = z.infer<typeof rebindSkipConditionSchema>;
 export const TaskChange = {
   Created: "created",
   Updated: "updated",
@@ -480,6 +489,13 @@ export const nodeSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type Node = z.infer<typeof nodeSchema>;
+export const rebindResultSchema = z.strictObject({
+  nodeChange: nodeChangeSchema,
+  skipped: z.array(
+    z.strictObject({ node: nodeSchema, condition: rebindSkipConditionSchema }),
+  ),
+});
+export type RebindResult = z.infer<typeof rebindResultSchema>;
 export const missionSchema = z.strictObject({
   id: identitySchema("mission"),
   projectId: identitySchema("project"),
@@ -687,6 +703,21 @@ export const missionOperations = {
     ),
     output: retirePreviewSchema,
     description: "Preview retirement of a mission node and its descendants.",
+  },
+  "node.rebind": {
+    ...writeOperation,
+    id: "mission.node.rebind",
+    method: HttpMethod.Post,
+    path: "/api/mission/:missionId/rebind",
+    input: z.strictObject({
+      params: z.strictObject({
+        missionId: identitySchema(MISSION_IDENTITY_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: rebindSchema,
+    }),
+    output: rebindResultSchema,
+    description: "Rebind mission nodes to a newer binding revision.",
   },
   "node.retire": {
     ...writeOperation,

@@ -33,6 +33,7 @@ import { previewImport } from "./import.ts";
 import { applyImport } from "./import-apply.ts";
 import { createNode } from "./node-create.ts";
 import { moveNode } from "./node-move.ts";
+import { rebindNodes } from "./node-rebind.ts";
 import { planRetirement, retireNode } from "./node-retire.ts";
 import { setCriterion, updateNode } from "./node-update.ts";
 import {
@@ -214,6 +215,20 @@ export class MissionService implements Service, MissionCollaborations {
       missionOperations["node.revision.get"],
       ({ params }, caller) =>
         caller.commit((tx) => getRevision(tx, params.nodeId, params.revision)),
+    );
+    registry.register(
+      missionOperations["node.rebind"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) =>
+          rebindNodes(
+            tx,
+            params.missionId,
+            body,
+            humanActor(caller),
+            this.dependencies.bindings,
+            this.dependencies.config.textMaxBytes,
+          ),
+        ),
     );
     registry.register(
       missionOperations["node.retire.preview"],

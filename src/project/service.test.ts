@@ -2050,6 +2050,7 @@ test("getBindingRevision keeps pinned fields and derives disablement from the la
       });
       for (const row of Object.values(original))
         assert.deepEqual(f.project.getBindingRevision(tx, row.id), {
+          projectId: project.id,
           bindingId: row.id,
           name: row.name,
           resourceIdentity: row.resourceIdentity,
