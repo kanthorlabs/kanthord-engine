@@ -45,7 +45,11 @@ engine/
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
 │   │   └── service.ts          # Private lifecycle, declarations, and binding lookup
 │   ├── mission/                # [planned] Mission graph, criteria, evidence, and outcomes
-│   ├── scheduler/              # [planned] Queue, claims, leases, and observations
+│   ├── scheduler/              # Scheduler Service — job table, work queue, and queue reads
+│   │   ├── contract.ts         # WorkQueue collaboration and queue operation declarations
+│   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
+│   │   ├── migrations.ts       # scheduler_job table migration
+│   │   └── service.ts          # Private lifecycle, WorkQueue implementation, and queue handlers
 │   ├── worker/                 # Worker Service and registration ownership
 │   │   ├── contract.ts         # Worker operations and registration collaboration types
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
