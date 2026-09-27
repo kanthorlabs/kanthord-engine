@@ -23,6 +23,7 @@ export default tseslint.config(
     settings: {
       "boundaries/elements": [
         { type: "kernel", pattern: "src/kernel" },
+        { type: "repository", pattern: "src/repository" },
         {
           type: "service",
           pattern:
@@ -53,6 +54,7 @@ export default tseslint.config(
           policies: [
             { allow: [{ dependency: { relationship: { to: "internal" } } }] },
             { from: element("kernel"), allow: allow("kernel") },
+            { from: element("repository"), allow: allow("kernel") },
             { from: file("config-global"), allow: allow("kernel") },
             {
               from: file("config"),
@@ -66,6 +68,7 @@ export default tseslint.config(
               from: element("service"),
               allow: [
                 ...allow("kernel"),
+                { to: element("repository") },
                 { to: file("config-global") },
                 { to: serviceEntry("contract.ts") },
               ],
@@ -74,6 +77,7 @@ export default tseslint.config(
               from: element("apps-server"),
               allow: [
                 ...allow("kernel"),
+                { to: element("repository") },
                 { to: file("config") },
                 { to: serviceEntry("{index,contract}.ts") },
                 {
@@ -130,6 +134,7 @@ export default tseslint.config(
                   }),
                 },
                 { from: file({ anyOf: ["config", "config-global", "main"] }) },
+                { from: element("repository") },
                 {
                   from: element("service", { captured: { name: "!gateway" } }),
                 },
@@ -149,6 +154,7 @@ export default tseslint.config(
                   }),
                 },
                 { to: file({ anyOf: ["config-global", "config", "main"] }) },
+                { to: element("repository") },
               ],
             },
           ],
