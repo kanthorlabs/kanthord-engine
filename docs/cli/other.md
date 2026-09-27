@@ -33,8 +33,8 @@ Help is a parser facility, not a fourth global command.
 3. `kanthord config show [--config <path>]` — implemented; local, no route.
 4. `kanthord serve [server] [--config <path>]` — implemented; local application
    startup, no outbound API route. Opens the server's HTTP listener.
-5. `kanthord serve worker` — target application; currently rejected. Startup is
-   local; the future runtime calls public API operations afterward.
+5. `kanthord serve worker [--endpoint <url>] [--token <jwt>]` — implemented; local
+   application startup; the runtime calls public API operations afterward.
 6. `kanthord jwt [username] [--name <display>] [--config <path>]` — implemented
    human issuance; local, no route.
 7. `kanthord jwt --binding <binding> [--name <display>] [--config <path>]` —
@@ -163,10 +163,9 @@ delete, login, logout, credential-saving, or secret-rotation commands. The serve
 reads it. Issuing or using a token does not save it here. Local service commands
 that do not resolve a client, notably `gateway openapi`, do not read it.
 
-**Target requirement:** the future worker application uses the same
+The worker application uses the same
 [`--endpoint`](./common-flags.md#--endpoint) and
-[`--token`](./common-flags.md#--token) resolution rules. This establishes
-resolution, not a completed worker-runtime argument contract; see
+[`--token`](./common-flags.md#--token) resolution rules; see
 [serve worker](#serve-worker).
 
 ## Output and exit behavior
@@ -418,9 +417,8 @@ kanthord serve [server] [--config <path>]
 constructs the server rather than calling an API operation.
 
 - `application`: optional positional enum; implemented accepted value `server`,
-  default `server`. Any other supplied value currently fails with
-  `cli.serve.unsupported_application`. The target enum also includes `worker`,
-  discussed separately below.
+  default `server`. The value `worker` selects the subcommand below. Any other
+  supplied value fails with `cli.serve.unsupported_application`.
 - [`--config`](./common-flags.md#--config): the selected file must exist and
   validate.
 - [`--help`](./common-flags.md#--help): no runtime is started.
@@ -463,41 +461,54 @@ undo completed work.
 ### `serve worker`
 
 ```text
-kanthord serve worker
+kanthord serve worker [--endpoint <url>] [--token <jwt>]
 ```
 
-**Target application; current result:** exit `1` with
-`cli.serve.unsupported_application`, before loading configuration or starting
-any worker. There is no implemented worker-runtime entry point.
+**Implemented; route/access: none for startup, local runtime.** This invocation
+starts the remote `worker` application. It calls public API operations over HTTP
+only, and it opens no database.
 
-- `application`: the literal `worker` is required to select this future mode;
-  omitting it selects `server`, not a worker.
-- [`--config`](./common-flags.md#--config): currently a syntactically accepted
-  optional option of `serve`, with the shared path resolution used by server mode. Its meaning
-  for the remote worker runtime remains **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service).
-  The worker application requires `masterKey` from the client configuration file and reads no server database.
-- Endpoint: **target requirement**, one resolved server endpoint with the
-  [`--endpoint`](./common-flags.md#--endpoint) resolution. Worker-specific option
-  declarations remain **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service).
-- Machine JWT: **target requirement**, using
-  [`--token`](./common-flags.md#--token) resolution. Authentication and registration
-  require a valid machine token.
-  Worker-specific flags remain **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service).
-- [`--help`](./common-flags.md#--help): implemented help for the `serve` command;
-  prints the current server-only description without starting an application.
+- `application`: the literal `worker` selects this mode; omitting it selects
+  `server`.
+- [`--endpoint`](./common-flags.md#--endpoint): the server endpoint. It resolves
+  the option, then `KANTHORD_ENDPOINT`, then `cli.yaml` of the configuration
+  directory, and it defaults to `http://127.0.0.1:31415`.
+- [`--token`](./common-flags.md#--token): the machine JWT. It resolves the option,
+  then `KANTHORD_TOKEN`, then `cli.yaml`.
+- `--config` is refused with `cli.serve.worker_config`, because the worker
+  application reads no server configuration.
+- [`--help`](./common-flags.md#--help): prints help without starting an
+  application.
 
-The target startup is local and has no single "serve worker" REST route. The
-runtime subsequently uses HTTP service clients for version discovery,
-registration, work acquisition, evidence, telemetry, and MCP operations. The
-package version must match the version published by the server's OpenAPI-index
-operation; a mismatch must refuse startup with both versions in the diagnostic.
-There is no local-database bypass. Service pages own the operation mappings and
-access rules; an undeclared operation is not a usable route.
+No other option exists. The worker binding, the worker, the agent configuration
+and the instance count come from the server through the binding that the machine
+token names. `masterKey` comes from `cli.yaml` alone, under the
+[client configuration ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-configuration-file).
+The workspace lives under the XDG state directory of the host.
 
-The [Worker sibling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md) rules credential handover, workspace, prompt configuration, heartbeat expiry and containment.
-`masterKey` has no environment variable or option under the [client configuration ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-configuration-file).
-Runtime option and lifecycle details remain **blocked** under [HANDOFF Worker Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-service).
-Stop enforcement and recovery remain **blocked** under [HANDOFF B9](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#b9-failure-and-recovery).
+One process hosts one instance. The machine token carries one client identity,
+and a client identity holds at most one live registration. N registration slots
+of a worker binding need N processes with N machine tokens.
+
+Output: operational JSON log records go to stderr. Startup prints no token and
+requires no terminal. Startup resolves the client configuration, checks
+`masterKey`, checks the server package version, registers the instance, and then
+logs one record `Worker application ready` with `runtimeIdentity`,
+`workerBindingId` and `workerName`. A version mismatch refuses startup with both
+versions in the diagnostic. Until registration is implemented, the record
+`Worker application started` is a startup notice, not readiness. A startup
+failure prints its diagnostic, releases what it acquired and exits `1`.
+
+`SIGINT` and `SIGTERM` stop further startup and further work pulls. The
+application deregisters only a registration whose runtime identity it knows. It
+exits `0` after a successful deregistration or after the `404` that ends its
+registration, and exits `1` on any other deregistration or cleanup failure,
+without a retry. A 10-second watchdog applies only when no execution is live and
+no registration or work pull waits for its answer. `SIGHUP` reopens nothing.
+
+The [Worker sibling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-worker-application) rules the application, credential handover, workspace, prompt configuration, heartbeat expiry and containment.
+Shutdown during a live execution, a registration or a work pull with no answer,
+and a stop deadline in those cases remain **blocked** under [HANDOFF B9](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#b9-failure-and-recovery).
 
 ## Local JWT issuance
 
