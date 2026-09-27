@@ -41,10 +41,12 @@ engine/
 │   │   └── test-support.ts     # Isolated temporary filesystem fixtures
 │   ├── repository/             # Repository shared component: startup version gate and SSH reachability connector
 │   ├── custody/                # Custody component: credential envelope, platform validators, OAuth login sessions, and platform probes
-│   ├── project/                # Project Service and binding lookup ownership
-│   │   ├── contract.ts         # Project operations and ProjectBindings collaboration
+│   ├── project/                # Project Service: projects, binding sets, and binding collaborations
+│   │   ├── contract.ts         # Constants, closed sets, binding schemas, operations, collaboration and dependency types
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
-│   │   └── service.ts          # Private lifecycle, declarations, and binding lookup
+│   │   ├── migrations.ts       # project_project and project_binding tables
+│   │   ├── store.ts            # Binding-set read, compare-and-swap write, pagination, and resource identity derivation
+│   │   └── service.ts          # Lifecycle, operation handlers, and collaboration implementations
 │   ├── mission/                # [planned] Mission graph, criteria, evidence, and outcomes
 │   ├── scheduler/              # Scheduler Service — job table, work queue, and queue reads
 │   │   ├── contract.ts         # WorkQueue collaboration and queue operation declarations
