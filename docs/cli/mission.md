@@ -133,7 +133,7 @@ Every version, revision, `expected*Version` and `expected*Revision` field holds 
 | `revision`, `expectedRevision`                                                                           | Positive safe integers; required where shown. A node starts at revision 1 and takes its next node revision on every content change. The [revision rules](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-revisions) apply. For a task, a revision always means the revision of its objective.     |
 | `expectedMissionVersion`                                                                                 | Positive safe integer; required where shown. The empty mission holds version 1. The [revision rules](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-revisions) list the writes that increment the mission version and those that leave it unchanged.                                             |
 | `attempt`                                                                                                | An attempt field is a nonnegative safe integer, not an opaque entity ID. `0` names a record that the service writes while the attempt of its node reads 0. No attempt field of a record is null.                                                                                                                                                |
-| `Text`                                                                                                   | Nonblank string. Text bounds remain **[blocked][mission-contract]**; the command truncates no text.                                                                                                                                                                                                                                             |
+| `Text`                                                                                                   | Nonblank string of at most `mission.textMaxBytes` UTF-8 bytes, 32768 by default; the command truncates no text.                                                                                                                                                                                                                                 |
 | `Key`                                                                                                    | An action key is `<binding name>.<action name>` under the [action catalog](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md), at most 76 bytes. An observation key matches `[A-Za-z0-9][A-Za-z0-9._-]*` and is nonempty; its bound follows `Text`.                                                     |
 | `SHA256`                                                                                                 | Exactly 64 lower-case hexadecimal characters.                                                                                                                                                                                                                                                                                                   |
 | `Timestamp`                                                                                              | Nonnegative safe integer, Unix milliseconds UTC; observation time may precede acceptance time.                                                                                                                                                                                                                                                  |
@@ -170,9 +170,9 @@ The host-local upload helper combines two remote operations instead of one.
 | 2   | `graph get <mission-id>`                                                                                | `GET /api/mission/:missionId/graph`                        | `mission.graph.get` **[blocked][mission-contract]**         | H      |
 | 3   | `node list <mission-id> [--kind <kind>] [--state <state>] [--parent <node-id>] [--include-retired] [L]` | `GET /api/mission/:missionId/node`                         | `mission.node.list`                                         | H      |
 | 4   | `node get <node-id>`                                                                                    | `GET /api/mission/node/:nodeId`                            | `mission.node.get`                                          | H      |
-| 5   | `node create <mission-id> --file <path> [M]`                                                            | `POST /api/mission/:missionId/node`                        | `mission.node.create` **[blocked][mission-contract]**       | H      |
-| 6   | `node update <node-id> --file <path> [M]`                                                               | `PUT /api/mission/node/:nodeId`                            | `mission.node.update` **[blocked][mission-contract]**       | H      |
-| 7   | `node move <node-id> --file <path> [M]`                                                                 | `POST /api/mission/node/:nodeId/move`                      | `mission.node.move` **[blocked][mission-contract]**         | H      |
+| 5   | `node create <mission-id> --file <path> [M]`                                                            | `POST /api/mission/:missionId/node`                        | `mission.node.create`                                       | H      |
+| 6   | `node update <node-id> --file <path> [M]`                                                               | `PUT /api/mission/node/:nodeId`                            | `mission.node.update`                                       | H      |
+| 7   | `node move <node-id> --file <path> [M]`                                                                 | `POST /api/mission/node/:nodeId/move`                      | `mission.node.move`                                         | H      |
 | 8   | `node revision list <node-id> [L]`                                                                      | `GET /api/mission/node/:nodeId/revision`                   | `mission.node.revision.list`                                | H      |
 | 9   | `node revision get <node-id> <revision>`                                                                | `GET /api/mission/node/:nodeId/revision/:revision`         | `mission.node.revision.get`                                 | H      |
 | 10  | `edge list <mission-id> [--kind <kind>] [--node <node-id>] [L]`                                         | `GET /api/mission/:missionId/edge`                         | `mission.edge.list`                                         | H      |
@@ -181,7 +181,7 @@ The host-local upload helper combines two remote operations instead of one.
 | 13  | `criterion list <node-id> [--revision <revision>] [L]`                                                  | `GET /api/mission/node/:nodeId/criterion`                  | `mission.criterion.list` **[blocked][mission-contract]**    | H      |
 | 14  | `criterion set <node-id> --file <path> [M]`                                                             | `PUT /api/mission/node/:nodeId/criterion`                  | `mission.criterion.set` **[blocked][mission-contract]**     | H      |
 | 15  | `node retire preview <node-id> [--force]`                                                               | `GET /api/mission/node/:nodeId/retire/preview`             | `mission.node.retire.preview`                               | H      |
-| 16  | `node retire <node-id> --file <path> [--force] [M]`                                                     | `POST /api/mission/node/:nodeId/retire`                    | `mission.node.retire` **[blocked][mission-contract]**       | H      |
+| 16  | `node retire <node-id> --file <path> [--force] [M]`                                                     | `POST /api/mission/node/:nodeId/retire`                    | `mission.node.retire`                                       | H      |
 | 17  | `node rebind <mission-id> <binding-id> [--node <node-id>] --file <path> [M]`                            | `POST /api/mission/:missionId/rebind`                      | `mission.node.rebind`                                       | H      |
 
 All positional IDs are required, typed as their names indicate, and have no
@@ -256,10 +256,10 @@ that the current outcome of that objective pins.
 
 ### Import — 2 commands
 
-| #   | Synopsis after `kanthord mission`                              | Proposed HTTP route                           | Proposed operation                                       | Access |
-| --- | -------------------------------------------------------------- | --------------------------------------------- | -------------------------------------------------------- | ------ |
-| 18  | `import preview <mission-id> --file <path> [<plan-file>...]`   | `POST /api/mission/:missionId/import/preview` | `mission.import.preview` **[blocked][mission-contract]** | H      |
-| 19  | `import apply <mission-id> --file <path> [<plan-file>...] [M]` | `POST /api/mission/:missionId/import`         | `mission.import.apply` **[blocked][mission-contract]**   | H      |
+| #   | Synopsis after `kanthord mission`                              | Proposed HTTP route                           | Proposed operation       | Access |
+| --- | -------------------------------------------------------------- | --------------------------------------------- | ------------------------ | ------ |
+| 18  | `import preview <mission-id> --file <path> [<plan-file>...]`   | `POST /api/mission/:missionId/import/preview` | `mission.import.preview` | H      |
+| 19  | `import apply <mission-id> --file <path> [<plan-file>...] [M]` | `POST /api/mission/:missionId/import`         | `mission.import.apply`   | H      |
 
 - `<mission-id>` is a required `MissionId` value.
 - Preview accepts `ImportSnapshot`; apply accepts `ImportApply`.
@@ -412,7 +412,7 @@ All controls recheck admission at commit. Human-control race precedence remains 
 | 49  | `task-result submit <task-id> --file <path> [M]`                        | `POST /api/mission/node/:taskId/task-result`            | `mission.taskResult.submit` **[blocked][mission-contract]**         | E      |
 | 50  | `evidence pending list <mission-id> [L]`                                | `GET /api/mission/:missionId/evidence/pending`          | `mission.evidence.pending.list`                                     | H      |
 | 51  | `evidence pending cleanup <mission-id> [M]`                             | `POST /api/mission/:missionId/evidence/pending/cleanup` | `mission.evidence.pending.cleanup`                                  | H      |
-| 52  | `evidence content remove <evidence-id> [--force] [--reason <text>] [M]` | `DELETE /api/mission/evidence/:evidenceId/content`      | `mission.evidence.content.remove` **[blocked][mission-contract]**   | H      |
+| 52  | `evidence content remove <evidence-id> [--force] [--reason <text>] [M]` | `DELETE /api/mission/evidence/:evidenceId/content`      | `mission.evidence.content.remove`                                   | H      |
 
 Row 38 is the host-local upload helper; the other 20 commands in this group are remote leaves.
 Every positional is required. `<task-id>` is a `NodeId` of kind task.
@@ -616,12 +616,12 @@ Grammar, whole-mission import and create admission have no open block.
 - The grammar block in the import description and the grammar block beside the import schemas have no unresolved reason.
 - The create-admission block has no unresolved reason.
 - The subtree and boundary-reference block has no field or operation to govern; every import covers the whole mission.
-- `mission.node.retire` keeps its mark for `Text` bounds.
+- `mission.node.retire` has no block mark.
 - Every marked inventory row below has a separate unresolved contract.
-- `mission.import.preview` keeps its mark for `Text` bounds.
-- `mission.import.apply` keeps its mark for `Text` bounds.
-- `mission.node.create` keeps its mark for `Text` bounds, not admission.
-- `mission.node.update` and `mission.node.move` keep their marks for `Text` bounds.
+- `mission.import.preview` has no block mark.
+- `mission.import.apply` has no block mark.
+- `mission.node.create` has no block mark.
+- `mission.node.update` and `mission.node.move` have no block mark.
 - `mission.node.pause` keeps its mark for physical-stop recovery and human-control race precedence.
 - `mission.node.resume` keeps its mark for human-control race precedence and `ControlResult` sub-schemas.
 - `mission.node.block` keeps its mark for human-control race precedence only.
@@ -637,12 +637,12 @@ Grammar, whole-mission import and create admission have no open block.
 - Removed: the separate criterion-result schema and its aggregation mark; an assessment holds one result and one required rationale.
 - Removed: the evidence-retention metadata mark; the mission lifetime governs every evidence record.
 - Removed: the human-cleanup and exceptional credential-removal marks; pending cleanup, content removal and `ContentRemoved` have contracts.
-- Kept: content removal needs `Text` bounds.
+- Removed: the content-removal mark; the `Text` bound rules it.
 - Pending list and cleanup have no block marks; the [object evidence contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#object-evidence) defines their schemas.
 - Removed: the task-outcome schema mark; the outcome record ruling defines it.
 - Kept: external-action publication remains open.
-- Kept: `Text` bounds, run-output content bounds and terminal-state retention remain open.
-- Upload begin and complete use E; `Text` bounds remain open for the evidence metadata.
+- Kept: run-output content bounds and terminal-state retention remain open.
+- Upload begin and complete use E.
 
 ## Proposed structured input schemas
 
