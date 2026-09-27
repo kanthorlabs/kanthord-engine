@@ -43,6 +43,7 @@ import { GatewayService } from "../../gateway/index.ts";
 import { gatewayMigrations, createInvocation } from "../../gateway/index.ts";
 import { ProjectService, projectMigrations } from "../../project/index.ts";
 import { WorkerService, workerMigrations } from "../../worker/index.ts";
+import { RepositoryComponent } from "../../repository/index.ts";
 import { OperationRegistry, StoreName } from "../../kernel/operation.ts";
 import {
   background,
@@ -51,11 +52,20 @@ import {
   type Context,
 } from "../../kernel/context.ts";
 
+export type RepositoryConnector = {
+  gitLsRemote(
+    sshUrl: string,
+    context: Context,
+    deadlineMs: number,
+  ): Promise<void>;
+};
+
 export function composeServices(options: {
   config: ServerConfig;
   store: Store;
   logger: Logger;
   health: HealthRegistry;
+  repositoryConnector?: RepositoryConnector;
   registry?: OperationRegistry;
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
@@ -64,6 +74,9 @@ export function composeServices(options: {
     bindingsNaming?: BindingsNamingFn;
   };
 }) {
+  const repoConnector =
+    options.repositoryConnector ??
+    new RepositoryComponent({ health: options.health });
   const envelopeKey = deriveEnvelopeKey(options.config.masterKey);
   const registry = options.registry ?? new OperationRegistry();
   const invocation = createInvocation({
@@ -142,6 +155,7 @@ export function composeServices(options: {
     gateway,
     invocation,
     registry,
+    repoConnector,
   };
 }
 

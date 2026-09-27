@@ -22,6 +22,9 @@ import { ulid } from "ulid";
 import { gatewayFixture } from "./test-support.ts";
 import { custodyOperations } from "../../custody/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
+import { gatewayOperations } from "../../gateway/contract.ts";
+import { HealthRegistry } from "../../kernel/health.ts";
+import { HealthStatus } from "../../kernel/service.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 import { HttpStatus } from "../../kernel/http.ts";
@@ -65,6 +68,27 @@ function layout(directory: string) {
     log: join(env.XDG_STATE_HOME!, "kanthord", "kanthord.log"),
   };
 }
+
+test("composition registers the real repository toolchain probe", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const response = await fixture.request(gatewayOperations.healthcheck.path);
+  assert.equal(response.status, HttpStatus.OK);
+  const body = gatewayOperations.healthcheck.output.parse(
+    await response.json(),
+  );
+  assert.deepEqual(body.services.repository, {
+    toolchain: HealthStatus.Healthy,
+  });
+});
+
+test("injected repository connector skips the tool gate and probe", async (t) => {
+  const health = new HealthRegistry();
+  const repositoryConnector = { gitLsRemote: async () => {} };
+  const fixture = await gatewayFixture(t, { health, repositoryConnector });
+  const checks = await health.check();
+  assert.equal(Object.hasOwn(checks, "repository"), false);
+  assert.equal(fixture.repoConnector, repositoryConnector);
+});
 
 test("composed Custody and Worker share credential and enablement collaborations", async (t) => {
   const fixture = await gatewayFixture(t, {
@@ -258,6 +282,7 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
   assert.deepEqual(JSON.parse(health.body), {
     status: "ok",
     services: {
+      repository: { toolchain: HealthStatus.Healthy },
       server: { gateway: 200, store: 200, log: 200 },
       scheduler: { queue: HttpStatus.OK },
       custody: { credential: 200 },

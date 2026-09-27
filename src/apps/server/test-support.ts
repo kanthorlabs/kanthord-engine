@@ -28,8 +28,10 @@ import { OperationError as GatewayError } from "../../kernel/errors.ts";
 import { KANTHORD_AUTH_USERNAME } from "../../gateway/local.ts";
 import { generateHumanJWT, generateMachineJWT } from "../../gateway/local.ts";
 import { HealthRegistry } from "../../kernel/health.ts";
+import { HealthStatus } from "../../kernel/service.ts";
 
 export const domainHealth = {
+  repository: { toolchain: HealthStatus.Healthy },
   scheduler: { queue: 200 },
   custody: { credential: 200 },
   project: { bindings: 200 },
@@ -122,6 +124,9 @@ export async function gatewayFixture(
   options: {
     registry?: OperationRegistry;
     health?: HealthRegistry;
+    repositoryConnector?: Parameters<
+      typeof composeServices
+    >[0]["repositoryConnector"];
     machines?: MachineDependencies;
     standIns?: Parameters<typeof composeServices>[0]["standIns"];
     path?: string;
@@ -141,24 +146,32 @@ export async function gatewayFixture(
     { service: "project", migrations: projectMigrations },
   ]);
   const logs: string[] = [];
-  const { scheduler, custody, gateway, project, worker, invocation } =
-    composeServices({
-      config,
-      store,
-      registry: options.registry,
-      health: options.health ?? new HealthRegistry(),
-      bindings: options.machines?.project,
-      registrations: options.machines?.worker,
-      standIns: options.standIns,
-      logger: pino(
-        { level: "info" },
-        {
-          write: (line) => {
-            logs.push(line);
-          },
+  const {
+    scheduler,
+    custody,
+    gateway,
+    project,
+    worker,
+    invocation,
+    repoConnector,
+  } = composeServices({
+    config,
+    store,
+    registry: options.registry,
+    health: options.health ?? new HealthRegistry(),
+    repositoryConnector: options.repositoryConnector,
+    bindings: options.machines?.project,
+    registrations: options.machines?.worker,
+    standIns: options.standIns,
+    logger: pino(
+      { level: "info" },
+      {
+        write: (line) => {
+          logs.push(line);
         },
-      ),
-    });
+      },
+    ),
+  });
   t.after(async () => {
     const failures: Error[] = [];
     try {
@@ -191,6 +204,7 @@ export async function gatewayFixture(
   const request = (path: string, init?: RequestInit) =>
     fetch(endpoint + path, init);
   return {
+    repoConnector,
     scheduler,
     custody,
     gateway,
