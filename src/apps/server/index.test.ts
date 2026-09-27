@@ -18,6 +18,10 @@ import { writePrivate } from "../../kernel/files.ts";
 import { Store } from "../../kernel/store.ts";
 import { isString } from "../../kernel/values.ts";
 import { GATEWAY_STARTED_MESSAGE } from "../../gateway/index.ts";
+import { ulid } from "ulid";
+import { gatewayFixture } from "./test-support.ts";
+import { custodyOperations } from "../../custody/contract.ts";
+import { workerOperations } from "../../worker/contract.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 import { HttpStatus } from "../../kernel/http.ts";
@@ -26,6 +30,14 @@ const EMPTY_OUTPUT = "";
 const EMPTY_LOG_CONTENT = "";
 const LIFECYCLE_VERIFIED_OUTPUT = "verified\n";
 const SHUTDOWN_DEADLINE_MS = 10000;
+const CREDENTIAL_NAME = "composition-credential";
+const AGENT_NAME = "swe@1";
+const PROVIDER_NAME = "primary";
+const PROVIDER_KIND = "openai-compatible";
+const MODEL_NAME = "composition-model";
+const FIRST_REVISION = 1;
+const REASONING_LEVEL = "off";
+const BASE_URL = "https://example.com/v1";
 const entry = new URL("../../main.ts", import.meta.url).href;
 function layout(directory: string) {
   const env: NodeJS.ProcessEnv = {
@@ -53,6 +65,89 @@ function layout(directory: string) {
     log: join(env.XDG_STATE_HOME!, "kanthord", "kanthord.log"),
   };
 }
+
+test("composed Custody and Worker share credential and enablement collaborations", async (t) => {
+  const fixture = await gatewayFixture(t, {
+    standIns: { entriesOfAgent: () => [], bindingsNaming: () => [] },
+  });
+  const headers = {
+    Authorization: `Bearer ${fixture.token}`,
+    "Content-Type": "application/json",
+    "Idempotency-Key": ulid(),
+  };
+  const created = await fixture.request(custodyOperations.create.path, {
+    method: custodyOperations.create.method,
+    headers,
+    body: JSON.stringify({
+      name: CREDENTIAL_NAME,
+      platform: PROVIDER_KIND,
+      metadata: {
+        baseUrl: BASE_URL,
+        models: [],
+      },
+      secret: { key: "composition-secret" },
+    }),
+  });
+  assert.equal(created.status, HttpStatus.OK, await created.text());
+  const updated = await fixture.request(
+    custodyOperations.update_metadata.path.replace(
+      ":credentialName",
+      CREDENTIAL_NAME,
+    ),
+    {
+      method: custodyOperations.update_metadata.method,
+      headers: { ...headers, "Idempotency-Key": ulid() },
+      body: JSON.stringify({
+        expectedRevision: FIRST_REVISION,
+        metadata: {
+          baseUrl: BASE_URL,
+          models: [{ id: MODEL_NAME, reasoningLevels: [REASONING_LEVEL] }],
+        },
+      }),
+    },
+  );
+  assert.equal(updated.status, HttpStatus.OK, await updated.text());
+  const put = await fixture.request(
+    workerOperations["agent.enablement.put"].path.replace(
+      ":agentName",
+      AGENT_NAME,
+    ),
+    {
+      method: workerOperations["agent.enablement.put"].method,
+      headers: { ...headers, "Idempotency-Key": ulid() },
+      body: JSON.stringify({
+        agentProviders: [
+          {
+            name: PROVIDER_NAME,
+            provider: PROVIDER_KIND,
+            credential: CREDENTIAL_NAME,
+          },
+        ],
+        defaultConfiguration: {
+          agentProvider: PROVIDER_NAME,
+          modelIdentifier: MODEL_NAME,
+          reasoningEffort: REASONING_LEVEL,
+        },
+      }),
+    },
+  );
+  assert.equal(put.status, HttpStatus.OK, await put.text());
+  fixture.store.transaction((tx) => {
+    assert.deepEqual(
+      fixture.custody.credentialDependents(tx, CREDENTIAL_NAME),
+      {
+        agentProviders: [
+          { agentName: AGENT_NAME, providerName: PROVIDER_NAME },
+        ],
+        bindings: [],
+      },
+    );
+    assert.equal(
+      fixture.custody.credentialMetadata(tx, CREDENTIAL_NAME)?.name,
+      CREDENTIAL_NAME,
+    );
+  });
+});
 
 test("serve rejects unsafe owned directories/files and releases earlier resources after startup failure", async (t) => {
   const paths = layout(temporary(t));

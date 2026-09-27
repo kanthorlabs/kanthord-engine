@@ -10,8 +10,6 @@ import {
   CustodyComponent,
   custodyMigrations,
   deriveEnvelopeKey,
-  type AgentProvidersDependentOnFn,
-  type EnablementsDependentOnModelFn,
   type BindingsNamingFn,
 } from "../../custody/index.ts";
 import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
@@ -25,7 +23,10 @@ import {
 } from "../../scheduler/contract.ts";
 import { unwired } from "./unwired.ts";
 import type { ProjectBindings } from "../../project/contract.ts";
-import type { WorkerRegistrations } from "../../worker/contract.ts";
+import type {
+  EntriesOfAgent,
+  WorkerRegistrations,
+} from "../../worker/contract.ts";
 import { audit, ensureDirectory } from "../../kernel/files.ts";
 import { Diagnostic, diagnostic, asError } from "../../kernel/errors.ts";
 import {
@@ -59,8 +60,7 @@ export function composeServices(options: {
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
   standIns?: {
-    agentProvidersDependentOn?: AgentProvidersDependentOnFn;
-    enablementsDependentOnModel?: EnablementsDependentOnModelFn;
+    entriesOfAgent?: EntriesOfAgent;
     bindingsNaming?: BindingsNamingFn;
   };
 }) {
@@ -98,12 +98,10 @@ export function composeServices(options: {
     envelopeKey,
     logger: options.logger,
     health: options.health,
-    agentProvidersDependentOn:
-      options.standIns?.agentProvidersDependentOn ??
-      (() => unwired("agentProvidersDependentOn")()),
-    enablementsDependentOnModel:
-      options.standIns?.enablementsDependentOnModel ??
-      (() => unwired("enablementsDependentOnModel")()),
+    agentProvidersDependentOn: (tx, name) =>
+      worker.agentProvidersDependentOn(tx, name),
+    enablementsDependentOnModel: (tx, name, model) =>
+      worker.enablementsDependentOnModel(tx, name, model),
     bindingsNaming:
       options.standIns?.bindingsNaming ?? (() => unwired("bindingsNaming")()),
   });
@@ -111,10 +109,11 @@ export function composeServices(options: {
     config: {},
     health: options.health,
     registrations: options.registrations,
-    custodySuitability: () => unwired("custodySuitability")(),
-    credentialMetadata: () => unwired("credentialMetadata")(),
-    modelListCheck: () => unwired("modelListCheck")(),
-    entriesOfAgent: () => unwired("entriesOfAgent")(),
+    custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
+    credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
+    modelListCheck: (tx, name) => custody.modelListCheck(tx, name),
+    entriesOfAgent:
+      options.standIns?.entriesOfAgent ?? (() => unwired("entriesOfAgent")()),
   });
   const project: ProjectService = new ProjectService({
     config: {},
