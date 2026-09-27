@@ -17,6 +17,7 @@ import {
   LIST_LIMIT_MAX,
   ProjectErrorCode,
   REPOSITORY_PLATFORM,
+  repositoryConfigSchema,
   STORAGE_PLATFORM,
   WORKER_PLATFORM,
   type BindingChange,
@@ -286,6 +287,28 @@ export function readCurrentBindings(tx: Transaction): StoredBinding[] {
   assert.ok(tx.database.isTransaction);
   assert.ok(rows.every((row) => row.removed_at === null));
   return rows.map(toBinding);
+}
+
+export function readCurrentRepositories(
+  tx: Transaction,
+): Array<{ projectName: string; name: string; address: string }> {
+  const rows = tx.database
+    .prepare(
+      `SELECT b.*, p.name AS project_name FROM project_binding b
+      JOIN project_project p ON p.id = b.project_id
+      WHERE b.resource_identity LIKE ?
+        AND b.revision = (${latestRevisionQuery}) AND b.removed_at IS NULL`,
+    )
+    .all(`${BindingKind.Repository}${RESOURCE_SEPARATOR}%`) as Array<
+    BindingRow & { project_name: string }
+  >;
+  assert.ok(tx.database.isTransaction);
+  assert.ok(rows.every((row) => row.removed_at === null));
+  return rows.map((row) => ({
+    projectName: row.project_name,
+    name: row.name,
+    address: repositoryConfigSchema.parse(JSON.parse(row.config)).address,
+  }));
 }
 
 export function readCurrentBindingByName(

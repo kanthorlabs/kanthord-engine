@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { ProjectService, type Dependencies } from "./service.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
-import { HealthRegistry } from "../kernel/health.ts";
+import {
+  HealthRegistry,
+  HealthScope,
+  ResourceStatus,
+} from "../kernel/health.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
 import {
@@ -29,6 +33,8 @@ import {
   LS_REMOTE_TIMEOUT_MS,
   PROJECT_PROMPT_MAX_BYTES,
   REPOSITORY_PLATFORM,
+  RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+  RESOURCE_TARGET_KIND_REPOSITORY,
   STORAGE_PLATFORM,
   WorkerField,
   bindingSetWriteInputSchema,
@@ -169,18 +175,27 @@ test("Project declares every operation and owns its lifecycle probe", async (t) 
     [...CORE_OPERATIONS].sort(),
   );
   assert.equal(await project.resolveWorkerBinding("absent", background), null);
+  assert.deepEqual(await project.healthcheck(), {
+    bindings: HealthStatus.Unavailable,
+  });
   assert.deepEqual(await health.check(), {
     project: { bindings: HealthStatus.Unavailable },
   });
   const starting = project.start();
   assert.equal(starting, project.start());
   assert.equal(await starting, null);
+  assert.deepEqual(await project.healthcheck(), {
+    bindings: HealthStatus.Healthy,
+  });
   assert.deepEqual(await health.check(), {
     project: { bindings: HealthStatus.Healthy },
   });
   const stopping = project.stop();
   assert.equal(stopping, project.stop());
   assert.equal(await stopping, null);
+  assert.deepEqual(await project.healthcheck(), {
+    bindings: HealthStatus.Unavailable,
+  });
   assert.ok((await project.start()) instanceof Error);
 });
 
@@ -560,6 +575,7 @@ const AGENT_GET_KEY = "agentConfiguration.get";
 const UNKNOWN_AGENT = "undeclared";
 const MODEL = "model";
 const REPOSITORY_ADDRESS = "git@github.com:owner/repo.git";
+const HEALTH_DEADLINE_MS = 1000;
 const SECOND_REPOSITORY_ADDRESS = "git@github.com:owner/other.git";
 const REPOSITORY_CREDENTIAL = "github-key";
 const STORAGE_CREDENTIAL = "s3-key";
@@ -1623,6 +1639,153 @@ function persistBindings(
     bindings: Object.fromEntries(readCurrentBindingSet(tx, projectId)),
   };
 }
+
+test("resource inventory reads current repository revisions and excludes removed and non-repository bindings", (t) => {
+  let calls = NO_CALLS;
+  const f = fixture(t, {
+    repositoryConnector: {
+      async gitLsRemote() {
+        calls++;
+      },
+    },
+  });
+  const entries = f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const removed = insertProject(tx, OTHER_NAME);
+    persistBindings(tx, removed.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+    });
+    persistBindings(tx, removed.id, {});
+    persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+      [SECOND_REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS),
+      [WORKER_NAME]: workerBinding(),
+      [STORAGE_NAME]: storageBinding(),
+    });
+    persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: {
+        ...repositoryBinding(),
+        config: { ...repositoryBinding().config, available: false },
+      },
+      [SECOND_REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS),
+      [WORKER_NAME]: workerBinding(),
+      [STORAGE_NAME]: storageBinding(),
+    });
+    return f.project.resourceInventory(tx);
+  });
+  assert.equal(calls, NO_CALLS);
+  assert.equal(entries.length, TWO_CALLS);
+  assert.deepEqual(
+    entries
+      .map(({ scope, project, name, target, capability }) => ({
+        scope,
+        project,
+        name,
+        target,
+        capability,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [
+      { name: REPOSITORY_NAME, address: REPOSITORY_ADDRESS },
+      { name: SECOND_REPOSITORY_NAME, address: SECOND_REPOSITORY_ADDRESS },
+    ]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(({ name, address }) => ({
+        scope: HealthScope.Project,
+        project: PROJECT_NAME,
+        name: encodeURIComponent(name),
+        target: `${RESOURCE_TARGET_KIND_REPOSITORY}:${address}`,
+        capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+      })),
+  );
+  assert.equal(entries[NO_ITEMS]?.check instanceof Function, true);
+});
+
+test("resource checks pass the caller deadline and distinguish success, failure and cancellation", async (t) => {
+  let calls = NO_CALLS;
+  let failure: Error | null = null;
+  const f = fixture(t, {
+    repositoryConnector: {
+      async gitLsRemote(address, context, remaining) {
+        calls++;
+        assert.equal(address, REPOSITORY_ADDRESS);
+        const deadline = context.deadline();
+        assert.ok(deadline !== null);
+        assert.ok(remaining > NO_ITEMS);
+        assert.ok(remaining <= deadline - beforeCall);
+        assert.equal(f.store.database.isTransaction, false);
+        if (context.err()) throw context.err();
+        if (failure) throw failure;
+      },
+    },
+  });
+  const entry = f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    persistBindings(tx, project.id, { [REPOSITORY_NAME]: repositoryBinding() });
+    return f.project.resourceInventory(tx)[NO_ITEMS];
+  });
+  assert.ok(entry);
+  assert.equal(calls, NO_CALLS);
+  let beforeCall = Date.now();
+  const context = new CancellationContext(
+    background,
+    beforeCall + HEALTH_DEADLINE_MS,
+  );
+  t.after(() => context.cancel());
+  assert.equal(await entry.check(context), ResourceStatus.Healthy);
+  failure = new Error("SSH failed");
+  beforeCall = Date.now();
+  assert.equal(await entry.check(context), ResourceStatus.Unhealthy);
+  const cancelled = new CancellationContext(
+    background,
+    Date.now() + HEALTH_DEADLINE_MS,
+  );
+  t.after(() => cancelled.cancel());
+  cancelled.cancel();
+  beforeCall = Date.now();
+  assert.equal(await entry.check(cancelled), ResourceStatus.Unknown);
+  assert.equal(calls, REVISION_THREE);
+});
+
+test("resource inventory keeps separate checks for the same repository address across projects", async (t) => {
+  let calls = NO_CALLS;
+  const f = fixture(t, {
+    repositoryConnector: {
+      async gitLsRemote(address, context, remaining) {
+        calls++;
+        assert.equal(address, REPOSITORY_ADDRESS);
+        assert.ok(context.deadline() !== null);
+        assert.ok(remaining > NO_ITEMS);
+      },
+    },
+  });
+  const entries = f.store.transaction((tx) => {
+    for (const name of [PROJECT_NAME, OTHER_NAME]) {
+      const project = insertProject(tx, name);
+      persistBindings(tx, project.id, {
+        [REPOSITORY_NAME]: repositoryBinding(),
+      });
+    }
+    return f.project.resourceInventory(tx);
+  });
+  assert.equal(calls, NO_CALLS);
+  assert.equal(entries.length, TWO_CALLS);
+  assert.deepEqual(
+    new Set(entries.map((entry) => entry.project)),
+    new Set([PROJECT_NAME, OTHER_NAME]),
+  );
+  assert.notEqual(entries[NO_ITEMS]?.check, entries[ONE_CALL]?.check);
+  const context = new CancellationContext(
+    background,
+    Date.now() + HEALTH_DEADLINE_MS,
+  );
+  t.after(() => context.cancel());
+  for (const entry of entries) {
+    assert.equal(await entry.check(context), ResourceStatus.Healthy);
+    assert.ok(calls <= TWO_CALLS);
+  }
+  assert.equal(calls, TWO_CALLS);
+});
 
 test("entriesOfAgent selects latest workers across projects, strips selectors and preserves null and empty entries", (t) => {
   const workers: string[] = [];

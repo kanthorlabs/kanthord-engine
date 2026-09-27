@@ -13,7 +13,13 @@ import {
   type Healthcheck,
   type Service,
 } from "../kernel/service.ts";
-import type { HealthRegistry } from "../kernel/health.ts";
+import {
+  HealthScope,
+  ResourceStatus,
+  type HealthRegistry,
+  type ResourceCheck,
+  type ResourceEntry,
+} from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { throwIfCancelled } from "../kernel/context.ts";
 import {
@@ -28,6 +34,8 @@ import {
   PROJECT_PROMPT_MAX_BYTES,
   ProjectErrorCode,
   REPOSITORY_PLATFORM,
+  RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+  RESOURCE_TARGET_KIND_REPOSITORY,
   STORAGE_PLATFORM,
   WorkerField,
   bindingEditSchema,
@@ -60,6 +68,7 @@ import {
   listRevisions,
   readCurrentBindingSet,
   readCurrentBindings,
+  readCurrentRepositories,
   readCurrentBindingByName,
   readCredentialBindings,
   hasBindingTombstone,
@@ -611,6 +620,34 @@ export class ProjectService implements Service, ProjectBindings {
     } finally {
       unsubscribe();
     }
+  }
+  resourceInventory(tx: Transaction): ResourceEntry[] {
+    return readCurrentRepositories(tx).map(({ projectName, name, address }) => {
+      const check: ResourceCheck = async (context) => {
+        try {
+          const deadline = context.deadline();
+          assert.ok(deadline !== null);
+          await this.repositoryConnector.gitLsRemote(
+            address,
+            context,
+            deadline - Date.now(),
+          );
+          return ResourceStatus.Healthy;
+        } catch {
+          return context.err()
+            ? ResourceStatus.Unknown
+            : ResourceStatus.Unhealthy;
+        }
+      };
+      return {
+        scope: HealthScope.Project,
+        project: projectName,
+        name: encodeURIComponent(name),
+        target: `${RESOURCE_TARGET_KIND_REPOSITORY}:${address}`,
+        capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+        check,
+      };
+    });
   }
   async healthcheck(): Promise<Healthcheck> {
     return {
