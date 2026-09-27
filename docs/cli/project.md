@@ -196,7 +196,7 @@ other request fields. Read commands have no body. Proposed project metadata is
 
 Creation allocates a project identity and an empty binding set at version `1`.
 The server returns that version. A mission belongs intrinsically to its project; it is
-not a binding. Creation calls the Mission collaboration `createMission` in the same transaction. The mission starts empty at mission revision 1. No operation creates or deletes a mission.
+not a binding. Creation calls the Mission collaboration `createMission` in the same transaction. The mission starts empty at mission version 1. No operation creates or deletes a mission.
 A project name is unique on the server and is the natural key of creation. Creation or rename to a name that another project holds returns 409 with code `project.name_conflict` and the holder identity in `error.details`. A retry of creation after a restart returns 409 when the name exists, and the CLI prints the holder identity. Rename commits in one transaction; the last write wins under the unique name. Rename keeps the same project identity and bindings.
 
 No deletion, archival, project membership, or ownership-transfer command is

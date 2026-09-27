@@ -267,7 +267,7 @@ transport correlation alone never deduplicates a domain effect.
 does not prove cleanup has finished and undoes no committed effect. Cancelling
 a work pull releases no committed claim and ends no accepted obligation.
 Closing an MCP stream ends the connection, not the domain session. An increment
-of `gateway.tokenGeneration` and a server restart invalidate every issued JWT,
+of `gateway.tokenVersion` and a server restart invalidate every issued JWT,
 but cancel no request already verified.
 
 Stopping the CLI, closing a connection, restarting the server without a
@@ -275,7 +275,7 @@ configuration change, and generating another JWT do not revoke a JWT. Domain
 cancellation, claim revocation, registration termination, and token revocation
 require their owning contract; one does not imply another. The [Gateway signing
 key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
-defines generation-based revocation.
+defines version-based revocation.
 
 **Current signal behavior:** `serve server` installs graceful-stop handlers.
 The one-shot remote CLI commands do not establish a shared signal-handling or
@@ -568,7 +568,7 @@ derive the signing key using HKDF-SHA-256 with an empty salt and the label
 `gateway/jwt-hs256/v1`, and sign with HS256. Both include `iat` and `exp` in
 JWT Unix seconds and a fresh bare ULID `jti`; `exp = iat + gateway.tokenLifetime`.
 The [Gateway signing key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
-sets the target label to `gateway/jwt-hs256/v<tokenGeneration>`.
+sets the target label to `gateway/jwt-hs256/v<tokenVersion>`.
 The CLI has no lifetime, algorithm, issuer, audience, custom-claims, subject-ID,
 or signing-key override flags.
 The [Gateway JWT ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-jwt) declares the closed header and claim contract.
@@ -588,7 +588,7 @@ recorder.
 Issuance and a server restart without a configuration change revoke no earlier
 token. The target removes the denylist under the [Gateway signing key
 ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key):
-an increment of `gateway.tokenGeneration` and a restart invalidate every issued
+an increment of `gateway.tokenVersion` and a restart invalidate every issued
 JWT while other derived keys stay unchanged. A token remains usable subject to
 verification, expiry, and, for machines, binding availability. Replacing
 `masterKey` invalidates tokens and also affects every other key derived from it;

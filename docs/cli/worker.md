@@ -204,7 +204,7 @@ banned JWT or a binding that the Project resolver rejects; that refusal is not
 evidence of a completed registration-cleanup implementation. The [Gateway signing
 key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
 removes the denylist from the target and revokes every JWT after an increment
-of `gateway.tokenGeneration` and a restart.
+of `gateway.tokenVersion` and a restart.
 
 Source checks: [CLI integration tests](../../src/apps/server/cli-worker.test.ts),
 [registration integration tests](../../src/apps/server/gateway-registration.test.ts)
