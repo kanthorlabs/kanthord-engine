@@ -90,8 +90,7 @@ export async function authenticationFixture(
   }).getProperties();
   const store = storeAt();
   t.after(() => store.close());
-  const authentication = new Authentication(store, config.masterKey, lookups);
-  authentication.sweep();
+  const authentication = new Authentication(config.masterKey, lookups);
   return { config, store, authentication, ...(await tokens(config)) };
 }
 

@@ -105,7 +105,7 @@ test("a closed SQLite database is reported alongside other registered services",
   assert.deepEqual(errorSchema.parse(await response.json()).error.details, {
     gateway: {
       ...gateway,
-      authentication: 503,
+      authentication: 200,
       idempotency: 200,
       invocation: 503,
     },

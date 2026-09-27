@@ -255,7 +255,7 @@ test("work requires a live registration and machine JWTs never authorize human v
   );
 });
 
-test("direct machine identities recheck bans, binding availability and registration before input validation", async (t) => {
+test("direct machine identities recheck binding availability and registration before input validation", async (t) => {
   const fixture = await fixtureForRegistration(t);
   assert.ok(
     (await fixture.client.register(input)).type ===
@@ -276,8 +276,6 @@ test("direct machine identities recheck bans, binding availability and registrat
   assert.equal((await invoke()).status, HttpStatus.Unauthorized);
   binding.available = true;
   fixture.machines.worker.restart();
-  assert.equal((await invoke()).status, HttpStatus.Unauthorized);
-  fixture.gateway.authentication.ban(identity.jti, Date.now() + 60000);
   assert.equal((await invoke()).status, HttpStatus.Unauthorized);
   assert.equal(fixture.machines.worker.registrations.size, NO_REGISTRATIONS);
 });

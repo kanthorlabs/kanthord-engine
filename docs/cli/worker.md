@@ -200,10 +200,10 @@ are in memory; a stale stored answer grants no renewed registration.
 the same transaction as acceptance. Binding removal/unavailability and server
 restart end the registration. These rules need production integration beyond
 the current default collaborators. The current authentication path refuses a
-banned JWT or a binding that the Project resolver rejects; that refusal is not
+binding that the Project resolver rejects; that refusal is not
 evidence of a completed registration-cleanup implementation. The [Gateway signing
 key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
-removes the denylist from the target and revokes every JWT after an increment
+revokes every JWT after an increment
 of `gateway.tokenVersion` and a restart.
 
 Source checks: [CLI integration tests](../../src/apps/server/cli-worker.test.ts),

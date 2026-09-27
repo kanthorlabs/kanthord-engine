@@ -1,5 +1,4 @@
 import { verify } from "hono/jwt";
-import type { Store } from "../kernel/store.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { isString } from "../kernel/values.ts";
 import { background, type Context } from "../kernel/context.ts";
@@ -30,17 +29,10 @@ export interface AuthenticationLookups {
   worker: Pick<WorkerRegistrations, "findByClient">;
 }
 export class Authentication {
-  private readonly store: Store;
   private readonly key: Promise<CryptoKey>;
   private readonly machines?: AuthenticationLookups;
-  private readonly denylist = new Map<string, number>();
 
-  constructor(
-    store: Store,
-    masterKey: string,
-    dependencies?: AuthenticationLookups,
-  ) {
-    this.store = store;
+  constructor(masterKey: string, dependencies?: AuthenticationLookups) {
     this.key = signingKey(masterKey);
     this.machines = dependencies;
   }
@@ -48,43 +40,9 @@ export class Authentication {
   async healthcheck(): Promise<boolean> {
     try {
       await this.key;
-      this.store.database
-        .prepare("SELECT jti FROM gateway_token_denylist LIMIT 1")
-        .get();
       return true;
     } catch {
       return false;
-    }
-  }
-
-  sweep(): void {
-    this.store.transaction(({ database }) => {
-      database
-        .prepare("DELETE FROM gateway_token_denylist WHERE expires_at <= ?")
-        .run(Date.now());
-    });
-    this.denylist.clear();
-    for (const row of this.store.database
-      .prepare("SELECT jti, expires_at FROM gateway_token_denylist")
-      .all())
-      this.denylist.set(String(row.jti), Number(row.expires_at));
-  }
-
-  ban(jti: string, expiresAt: number): void {
-    const previous = this.denylist.get(jti);
-    try {
-      this.store.transaction(({ database }) => {
-        database
-          .prepare(
-            "INSERT OR REPLACE INTO gateway_token_denylist VALUES (?, ?, ?)",
-          )
-          .run(jti, expiresAt, Date.now());
-        this.denylist.set(jti, expiresAt);
-      });
-    } catch (error) {
-      if (previous === undefined) this.denylist.delete(jti);
-      else this.denylist.set(jti, previous);
-      throw error;
     }
   }
 
@@ -121,7 +79,6 @@ export class Authentication {
   ): Promise<CallerIdentity> {
     if (!isHumanIdentity(identity) && !isMachineIdentity(identity))
       throw unauthorized();
-    if (this.denylist.has(identity.jti)) throw unauthorized();
     if (isHumanIdentity(identity))
       return mintHumanIdentity(identity.accountId, identity.name, identity.jti);
     const current = await this.resolveMachine(
@@ -159,8 +116,7 @@ export class Authentication {
       !Number.isSafeInteger(claims.iat) ||
       !Number.isSafeInteger(claims.exp) ||
       claims.exp! <= Math.floor(Date.now() / MILLISECONDS_PER_SECOND) ||
-      !validText(claims.name, MAX_DISPLAY_NAME_LENGTH) ||
-      this.denylist.has(claims.jti)
+      !validText(claims.name, MAX_DISPLAY_NAME_LENGTH)
     )
       throw unauthorized();
     if (claims.kind === IdentityKind.Human) {

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { decode, sign } from "hono/jwt";
 import { ulid } from "ulid";
-import { background } from "../../kernel/context.ts";
 import { deriveKey } from "../../kernel/json.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { isHumanIdentity } from "../../kernel/caller.ts";
@@ -24,7 +23,7 @@ async function tokenKey(masterKey: string) {
   );
 }
 
-test("expired and banned human and machine JWTs fail HTTP and banned direct identities fail before validation", async (t) => {
+test("expired human and machine JWTs fail HTTP", async (t) => {
   const fixture = await gatewayFixture(t, { machines: fakeMachines() });
   const key = await tokenKey(fixture.config.masterKey);
   for (const token of [
@@ -43,29 +42,13 @@ test("expired and banned human and machine JWTs fail HTTP and banned direct iden
       key,
       "HS256",
     );
-    fixture.gateway.authentication.ban(
-      identity.jti,
-      claims.exp! * MILLISECONDS_PER_SECOND,
-    );
-    for (const invalid of [expired, token]) {
-      const response = await fixture.request(operation.path, {
-        method: operation.method,
-        headers: {
-          Authorization: `Bearer ${invalid}`,
-          "Idempotency-Key": ulid(),
-        },
-      });
-      assert.equal(response.status, HttpStatus.Unauthorized);
-    }
-    const direct = await fixture.gateway.invocation.invoke(
-      operation.id,
-      { invalid: true },
-      { identity },
-    );
-    assert.equal(direct.status, HttpStatus.Unauthorized);
-    await assert.rejects(
-      fixture.gateway.authentication.recheck(identity, background),
-      /Authentication required/,
-    );
+    const response = await fixture.request(operation.path, {
+      method: operation.method,
+      headers: {
+        Authorization: `Bearer ${expired}`,
+        "Idempotency-Key": ulid(),
+      },
+    });
+    assert.equal(response.status, HttpStatus.Unauthorized);
   }
 });

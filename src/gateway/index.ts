@@ -19,11 +19,7 @@ export function createInvocation(options: {
   tokenLifetime: number;
   lookups?: AuthenticationLookups;
 }): Invocation {
-  const authentication = new Authentication(
-    options.stores[StoreName.Operational],
-    options.masterKey,
-    options.lookups,
-  );
+  const authentication = new Authentication(options.masterKey, options.lookups);
   const idempotency = new Idempotency(options.idempotencyTtl);
   return new Invocation(
     options.registry,

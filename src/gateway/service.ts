@@ -108,7 +108,6 @@ export class GatewayService implements Service {
   }
 
   private async open(): Promise<void> {
-    this.authentication.sweep();
     this.registerRoutes();
     const server = createAdaptorServer({
       fetch: (request, env) => this.app.fetch(request, env as HttpBindings),

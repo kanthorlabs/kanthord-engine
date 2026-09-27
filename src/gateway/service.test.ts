@@ -115,7 +115,7 @@ test("a locally generated JWT authenticates the default human and forwards only 
   assert.ok(!fixture.logs.join("").includes(token));
 });
 
-test("JWT verification rejects expiry, wrong algorithm, invalid usernames, account claims, other master keys and bans", async (t) => {
+test("JWT verification rejects expiry, wrong algorithm, invalid usernames, account claims and other master keys", async (t) => {
   const registry = new OperationRegistry();
   registry.register(protectedRead, (_input, caller) => ({
     accountId: isHumanIdentity(caller.identity)
@@ -152,15 +152,6 @@ test("JWT verification rejects expiry, wrong algorithm, invalid usernames, accou
     (
       await fixture.request("/api/identity", {
         headers: { Authorization: `Bearer ${otherAlgorithm}` },
-      })
-    ).status,
-    HttpStatus.Unauthorized,
-  );
-  fixture.gateway.authentication.ban(String(claims.jti), claims.exp! * 1000);
-  assert.equal(
-    (
-      await fixture.request("/api/identity", {
-        headers: { Authorization: `Bearer ${token}` },
       })
     ).status,
     HttpStatus.Unauthorized,

@@ -46,7 +46,7 @@ test("service migrations own distinct prefixes and create only tables in their n
         );
       }
     }
-    assert.deepEqual(tables(store), ["gateway_token_denylist"]);
+    assert.deepEqual(tables(store), []);
   } finally {
     store.close();
   }

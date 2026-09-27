@@ -77,12 +77,10 @@ sends no such header. A truthy resolved token becomes
 Gateway verifies the HS256 signature with the server-derived signing key,
 requires safe-integer `iat` and `exp` claims and an unexpired `exp`, validates
 the human username and display name as nonblank strings of 1–64 characters,
-requires a string `jti`, checks the session denylist in the current source,
-and enforces the `human` access policy. The [Gateway signing key
+requires a string `jti` and enforces the `human` access policy. The [Gateway signing key
 ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
-removes the denylist from the target and uses `gateway.tokenVersion` for
-revocation. The human token cannot carry `binding`. A missing credential, wrong
-signature, expired or denied token, or machine token fails with HTTP `401` and
+uses `gateway.tokenVersion` for revocation. The human token cannot carry `binding`. A missing credential, wrong
+signature, expired token, or machine token fails with HTTP `401` and
 `gateway.authentication.unauthorized`. A username allowlist or
 account database is not involved. The identity is established by Gateway,
 not by a caller-supplied identity field.
@@ -253,7 +251,7 @@ logout, and rotation commands are not part of this specification.
 | OpenAPI package version    | Architecture calls for publishing the package version in the index for worker/server compatibility checks. The emitter currently hardcodes `info.version: 1.0.0`; the package version is different. Package-version publication and compatibility enforcement must not be inferred from this generator.                                                                                                                                                                 |
 | Help completeness          | The target requires help to state every default and validation rule. Current `--endpoint` help says only “Server endpoint”; this page specifies behavior that help still needs to expose. The inherited unused endpoint option also appears in local `openapi` help.                                                                                                                                                                                                    |
 | Credential validation      | The server verification checks above are implemented. Local validation of option/environment token values is weaker than the client-file schema. The [JWT ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-jwt) declares the closed header and claim contract. Global issuance syntax stays in [other commands](./other.md).                                                                                       |
-| User management and bans   | The system holds no user management, and no user, session-list, revoke or ban command exists. The [Gateway signing key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key) revokes every JWT through `gateway.tokenVersion`.                                                                                                                                                                             |
+| User management            | The system holds no user management, and no user, session-list or revoke command exists. The [Gateway signing key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key) revokes every JWT through `gateway.tokenVersion`.                                                                                                                                                                                  |
 | Future services in OpenAPI | The current CLI explicitly assembles Gateway and Worker contracts. A future declared service must be added to the emission set and published files as well as server routing; the generator does not scan source directories automatically.                                                                                                                                                                                                                             |
 
 ## Implementation references

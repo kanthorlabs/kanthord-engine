@@ -3,7 +3,6 @@ import { test } from "node:test";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import pino from "pino";
-import { ulid } from "ulid";
 import { decode } from "hono/jwt";
 import { temporary } from "../kernel/test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
@@ -15,8 +14,6 @@ import { composeGateway } from "./test-support.ts";
 import { CancellationContext } from "../kernel/context.ts";
 import { isString } from "../kernel/values.ts";
 import { HealthStatus } from "../kernel/service.ts";
-
-const LIVE_DENYLIST_ENTRIES = 1;
 
 test("concurrent starts share startup and restart preserves locally issued human JWTs without storing credentials", async (t) => {
   const path = join(temporary(t), "kanthord.db");
@@ -53,14 +50,10 @@ test("concurrent starts share startup and restart preserves locally issued human
       .get(),
     undefined,
   );
-  assert.deepEqual(
-    store.database.prepare("SELECT * FROM gateway_token_denylist").all(),
-    [],
-  );
   assert.equal(await gateway.stop(), null);
 });
 
-test("a failed listener releases resources and startup sweeps expired bans", async (t) => {
+test("a failed listener releases resources", async (t) => {
   const listener = createServer();
   await new Promise<void>((resolve) =>
     listener.listen(0, "127.0.0.1", resolve),
@@ -73,13 +66,6 @@ test("a failed listener releases resources and startup sweeps expired bans", asy
   const store = new Store(":memory:");
   t.after(() => store.close());
   store.migrate([{ service: "gateway", migrations: gatewayMigrations }]);
-  store.transaction(({ database }) => {
-    const insert = database.prepare(
-      "INSERT INTO gateway_token_denylist VALUES (?, ?, ?)",
-    );
-    insert.run(ulid(), Date.now() - 1, Date.now() - 1000);
-    insert.run(ulid(), Date.now() + 60000, Date.now());
-  });
   const gateway = composeGateway({
     store,
     config: configuration({
@@ -92,12 +78,6 @@ test("a failed listener releases resources and startup sweeps expired bans", asy
   assert.match((await gateway.start())!.message, /cannot bind/);
   assert.equal(gateway.address(), undefined);
   assert.equal(gateway.invocation.idempotency.healthcheck(), true);
-  assert.equal(
-    store.database
-      .prepare("SELECT count(*) AS count FROM gateway_token_denylist")
-      .get()?.count,
-    LIVE_DENYLIST_ENTRIES,
-  );
   assert.equal(await gateway.stop(), null);
 });
 

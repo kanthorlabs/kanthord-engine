@@ -76,4 +76,4 @@ Ulrich ruled on 2026-09-27: the Custody table stays `credential` with no prefix.
 
 ## D16 — Pre-existing deviations are findings, not blockers
 
-`gateway_token_denylist` (against `gateway-service.impl.md:487`) and `static/openapi.yaml` (against `gateway-service.impl.md:217`) predate ERD 1. No ERD 1 plan changes them. Aelita reports them to Ulrich outside the plans.
+Ulrich removed `gateway_token_denylist` on 2026-09-27, so the Gateway owns no table as `gateway-service.impl.md:487` rules. `static/openapi.yaml` (against `gateway-service.impl.md:217`) predates ERD 1. No ERD 1 plan changes it.

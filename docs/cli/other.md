@@ -594,8 +594,8 @@ client-config persistence. Terminal-only output does not detect a terminal
 recorder.
 
 Issuance and a server restart without a configuration change revoke no earlier
-token. The target removes the denylist under the [Gateway signing key
-ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key):
+token. Under the [Gateway signing key
+ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key),
 an increment of `gateway.tokenVersion` and a restart invalidate every issued
 JWT while other derived keys stay unchanged. A token remains usable subject to
 verification, expiry, and, for machines, binding availability. Replacing

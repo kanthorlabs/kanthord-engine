@@ -204,14 +204,14 @@ No seam for another plan. Plan 07 is the terminal assembly plan.
 - Do:
   1. Add a new `test("all ERD 1 migrations produce exactly the expected tables", ...)`.
   2. Apply the full `services` array (same order as Task 07.3) to one in-memory store.
-  3. Declare `const ERD1_TABLES = ["credential", "gateway_token_denylist", "mission_dependency", "mission_mission", "mission_node", "mission_node_revision", "project_binding", "project_project", "scheduler_job", "worker_agent_enablement"]` as a named constant.
+  3. Declare `const ERD1_TABLES = ["credential", "mission_dependency", "mission_mission", "mission_node", "mission_node_revision", "project_binding", "project_project", "scheduler_job", "worker_agent_enablement"]` as a named constant.
   4. Assert `tables(store).sort()` equals `ERD1_TABLES.sort()`.
   5. Assert `credential` is the one table whose name does not start with a service prefix, and that every other table name starts with the prefix of its owning service. Import `CUSTODY_SERVICE_NAME` from `src/custody/contract.ts` to identify the custody service without a bare string.
   6. Assert that no service other than custody produces an unprefixed table.
 - Rules:
   - `00-index.md` B1: Plan 01 adds the prefix exemption; Plan 07 adds the combined assertion here.
   - `architecture.impl.md:17`: the expected table array is a named constant.
-  - `gateway_token_denylist` is a pre-existing deviation kept unchanged per D16.
+  - The Gateway owns no table: Ulrich removed `gateway_token_denylist` on 2026-09-27, and `gatewayMigrations` is empty.
 - Done when:
   - The new test passes.
   - Removing any single name from `ERD1_TABLES` fails the test.
@@ -299,7 +299,7 @@ No seam for another plan. Plan 07 is the terminal assembly plan.
 
 None. All old blockers from the prior draft are resolved or superseded:
 
-- Old B1 (`gateway_token_denylist`) — pre-existing deviation; unchanged per D16.
+- Old B1 (`gateway_token_denylist`) — removed by Ulrich on 2026-09-27; the Gateway owns no table.
 - Old B2 (TrackingInterface method set) — D8 removes Tracking from ERD 1.
 - Old B3 (two-part error codes) — resolved globally by `00-index.md` B3 ruling; every plan uses three-part codes.
 - Old B4 (`credential.credential.not_found` code form) — code is `credential.credential.not_found` (three parts) per Plan 01 task 01.6; Task 07.7 uses this verbatim.
