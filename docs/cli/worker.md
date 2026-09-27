@@ -247,7 +247,7 @@ kanthord worker list [--limit <count>] [--cursor <opaque>]
 No positional arguments or filters. Required token: human JWT. Request:
 `params: {}`, `query: { limit, cursor? }`, no body. `limit` and `cursor` use the
 shared types, requiredness, defaults and validation. Proposed HTTP `200` returns
-one page of worker summaries in descending primary-key order by exact name,
+one page of worker summaries in ascending alphabetical order by exact name,
 under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination). Each item contains
 `name: WorkerName`, `host: "kanthord" | "external-harness"`,
 `declaredNodeStates: string[]` and `requiredNodeFormat: string[]`.
@@ -388,7 +388,7 @@ body is absent and success answers HTTP `200` with the enablement record.
 
 Uses `[L] [R]`, no positional arguments and no filters. Query holds `limit` and
 optional `cursor`. Returns `{ items, nextCursor }`, paged by agent name in
-descending order. It lists records, not catalog agents without an enablement.
+ascending alphabetical order. It lists records, not catalog agents without an enablement.
 
 ### `agent enablement get <agent-name>`
 
