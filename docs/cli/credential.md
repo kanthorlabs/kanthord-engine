@@ -160,7 +160,7 @@ an unknown name answers proposed `404 credential.not_found`.
 ## `rotate <credential-name>`
 
 The required `CredentialName` maps to `params.credentialName`; query is empty.
-The required file supplies `{ secret }` and an optional `metadata`. The secret shape of the
+The required file supplies `{ expectedRevision, secret }` and an optional `metadata`. `expectedRevision` is the newest live revision that the human read. The secret shape of the
 platform determines its closed secret schema. `api_key` and `s3_access_key` use the create schemas.
 An OAuth secret is `{ refresh, access, expires }`, the pi-ai credential shape;
 initial OAuth material enters only through a login session. The file has no
@@ -178,9 +178,9 @@ This command does not rotate `masterKey`.
 ## `update-metadata <credential-name>`
 
 The required `CredentialName` maps to `params.credentialName`; query is empty.
-The required file supplies exactly `{ metadata }`, a complete replacement that
+The required file supplies exactly `{ expectedRevision, metadata }`, with the newest live revision that the human read and a complete replacement that
 matches the platform schema. It accepts no secret or platform change.
-The edit updates the newest live revision in place and adds no revision. Proposed HTTP `200` returns
+The edit inserts the next revision with the secret of the newest live revision, and the older revisions stay live. Proposed HTTP `200` returns
 the credential answer. An `openai-compatible.baseUrl` change fails; a rotation sets a new one.
 Removal of a model used by a default or entry fails and lists its dependents;
 the check and update are atomic. No remote probe supplies approval.
@@ -245,24 +245,25 @@ The name-conflict code is ruled; the other code spellings and mappings below
 are proposed. Errors contain no secret. Dependency refusals list dependents in
 `error.details`.
 
-| HTTP | Code                                 | Condition                                                 |
-| ---- | ------------------------------------ | --------------------------------------------------------- |
-| 409  | `credential.name_conflict`           | Name already held; details identify the holder.           |
-| 404  | `credential.not_found`               | Unknown credential identity or reference.                 |
-| 400  | `credential.invalid_input`           | Invalid local schema, secret or metadata.                 |
-| 400  | `credential.platform_unsupported`    | Platform is outside the closed set.                       |
-| 400  | `credential.entry_unsupported`       | Platform does not accept this entry method.               |
-| 400  | `credential.platform_mismatch`       | Use requests a platform other than the record's platform. |
-| 409  | `credential.metadata.base_url_fixed` | Metadata edit changes `baseUrl` outside a rotation.       |
-| 404  | `credential.revision.not_found`      | Unknown revision of the named credential.                 |
-| 409  | `credential.revision.newest_live`    | Revoke names the newest live revision.                    |
-| 409  | `credential.revision.ended`          | Revoke names a drained or revoked revision.               |
-| 409  | `credential.revision.revoked`        | A pinned use names a revoked revision.                    |
-| 409  | `credential.metadata.model_in_use`   | Removed model has dependent defaults or entries.          |
-| 404  | `credential.login.not_found`         | Unknown login session.                                    |
-| 409  | `credential.login.pending`           | Another session is pending for this platform and human.   |
-| 409  | `credential.login.value_not_awaited` | Session awaits no value.                                  |
-| 400  | `credential.login.mode_unsupported`  | Platform offers multiple modes but not the selected one.  |
+| HTTP | Code                                 | Condition                                                  |
+| ---- | ------------------------------------ | ---------------------------------------------------------- |
+| 409  | `credential.name_conflict`           | Name already held; details identify the holder.            |
+| 404  | `credential.not_found`               | Unknown credential identity or reference.                  |
+| 400  | `credential.invalid_input`           | Invalid local schema, secret or metadata.                  |
+| 400  | `credential.platform_unsupported`    | Platform is outside the closed set.                        |
+| 400  | `credential.entry_unsupported`       | Platform does not accept this entry method.                |
+| 400  | `credential.platform_mismatch`       | Use requests a platform other than the record's platform.  |
+| 409  | `credential.metadata.base_url_fixed` | Metadata edit changes `baseUrl` outside a rotation.        |
+| 404  | `credential.revision.not_found`      | Unknown revision of the named credential.                  |
+| 409  | `credential.revision.newest_live`    | Revoke names the newest live revision.                     |
+| 409  | `credential.revision.ended`          | Revoke names a drained or revoked revision.                |
+| 409  | `credential.revision.revoked`        | A pinned use names a revoked revision.                     |
+| 409  | `credential.revision_conflict`       | Rotation or metadata edit names a stale expected revision. |
+| 409  | `credential.metadata.model_in_use`   | Removed model has dependent defaults or entries.           |
+| 404  | `credential.login.not_found`         | Unknown login session.                                     |
+| 409  | `credential.login.pending`           | Another session is pending for this platform and human.    |
+| 409  | `credential.login.value_not_awaited` | Session awaits no value.                                   |
+| 400  | `credential.login.mode_unsupported`  | Platform offers multiple modes but not the selected one.   |
 
 ## Boundaries
 

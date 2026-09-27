@@ -122,17 +122,17 @@ and deregistration require no live registration.
 The inventory includes these nine **proposed** commands. `[R]`, `[M]` and
 `[L]` use the [common synopsis definitions](./common-flags.md#synopsis-markers).
 
-| Status | Command after `kanthord worker`                                         | Route                                                                   | Operation ID                              | Access / registration |
-| ------ | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------- | --------------------- |
-| P      | `agent enablement list [L] [R]`                                         | `GET /api/worker/agent/enablement`                                      | `worker.agent.enablement.list`            | `human`; proposed     |
-| P      | `agent enablement get <agent-name> [R]`                                 | `GET /api/worker/agent/enablement/:agentName`                           | `worker.agent.enablement.get`             | `human`; proposed     |
-| P      | `agent enablement put <agent-name> --file <path> [M] [R]`               | `PUT /api/worker/agent/enablement/:agentName`                           | `worker.agent.enablement.put`             | `human`; proposed     |
-| P      | `agent enablement enable <agent-name> [M] [R]`                          | `POST /api/worker/agent/enablement/:agentName/enable`                   | `worker.agent.enablement.enable`          | `human`; proposed     |
-| P      | `agent enablement disable <agent-name> [M] [R]`                         | `POST /api/worker/agent/enablement/:agentName/disable`                  | `worker.agent.enablement.disable`         | `human`; proposed     |
-| P      | `agent enablement remove <agent-name> [M] [R]`                          | `DELETE /api/worker/agent/enablement/:agentName`                        | `worker.agent.enablement.remove`          | `human`; proposed     |
-| P      | `agent enablement provider add <agent-name> --file <path> [M] [R]`      | `POST /api/worker/agent/enablement/:agentName/provider`                 | `worker.agent.enablement.provider.add`    | `human`; proposed     |
-| P      | `agent enablement provider remove <agent-name> <provider-name> [M] [R]` | `DELETE /api/worker/agent/enablement/:agentName/provider/:providerName` | `worker.agent.enablement.provider.remove` | `human`; proposed     |
-| P      | `provider check --credential <credential-name> [R]`                     | `POST /api/worker/provider/check`                                       | `worker.provider.check`                   | `human`; proposed     |
+| Status | Command after `kanthord worker`                                                                        | Route                                                                   | Operation ID                              | Access / registration |
+| ------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- | ----------------------------------------- | --------------------- |
+| P      | `agent enablement list [L] [R]`                                                                        | `GET /api/worker/agent/enablement`                                      | `worker.agent.enablement.list`            | `human`; proposed     |
+| P      | `agent enablement get <agent-name> [R]`                                                                | `GET /api/worker/agent/enablement/:agentName`                           | `worker.agent.enablement.get`             | `human`; proposed     |
+| P      | `agent enablement put <agent-name> --file <path> [M] [R]`                                              | `PUT /api/worker/agent/enablement/:agentName`                           | `worker.agent.enablement.put`             | `human`; proposed     |
+| P      | `agent enablement enable <agent-name> --expected-revision <revision> [M] [R]`                          | `POST /api/worker/agent/enablement/:agentName/enable`                   | `worker.agent.enablement.enable`          | `human`; proposed     |
+| P      | `agent enablement disable <agent-name> --expected-revision <revision> [M] [R]`                         | `POST /api/worker/agent/enablement/:agentName/disable`                  | `worker.agent.enablement.disable`         | `human`; proposed     |
+| P      | `agent enablement remove <agent-name> --expected-revision <revision> [M] [R]`                          | `DELETE /api/worker/agent/enablement/:agentName`                        | `worker.agent.enablement.remove`          | `human`; proposed     |
+| P      | `agent enablement provider add <agent-name> --file <path> [M] [R]`                                     | `POST /api/worker/agent/enablement/:agentName/provider`                 | `worker.agent.enablement.provider.add`    | `human`; proposed     |
+| P      | `agent enablement provider remove <agent-name> <provider-name> --expected-revision <revision> [M] [R]` | `DELETE /api/worker/agent/enablement/:agentName/provider/:providerName` | `worker.agent.enablement.provider.remove` | `human`; proposed     |
+| P      | `provider check --credential <credential-name> [R]`                                                    | `POST /api/worker/provider/check`                                       | `worker.provider.check`                   | `human`; proposed     |
 
 The static `/api/worker/agent/enablement` path takes precedence over `/:agentName`.
 
@@ -399,29 +399,34 @@ Uses `[R]`. Returns one enablement. An absent record answers the proposed
 ### `agent enablement put <agent-name> --file <path>`
 
 Uses `[M] [R]`. The required file supplies exactly
-`{ agentProviders, defaultConfiguration }`, with both fields required and no
-default. It creates or replaces the complete configuration. Proposed creation
+`{ expectedRevision, agentProviders, defaultConfiguration }`. `agentProviders`
+and `defaultConfiguration` are required with no default. `expectedRevision` is
+the latest revision of the agent that the human read, and it is absent only when
+the agent holds no row. It creates or replaces the complete configuration. Proposed creation
 sets `state: enabled`; replacement preserves the record's state. The explicit
 `enable` and `disable` commands change that state. Omitted agent providers are
 removals and must pass the dependency check. A retained name cannot change its
 provider. A credential change is a revision. The answer is the saved record.
 
-### `agent enablement enable <agent-name>`
+### `agent enablement enable <agent-name> --expected-revision <revision>`
 
+The required `--expected-revision` names the latest revision of the agent that the human read.
 Uses `[M] [R]`. Sets an existing record to `enabled` after configuration
 validation. It creates no missing record and selects no default value for the
 human. It returns the enabled record.
 
-### `agent enablement disable <agent-name>`
+### `agent enablement disable <agent-name> --expected-revision <revision>`
 
+The required `--expected-revision` names the latest revision of the agent that the human read.
 Uses `[M] [R]`. Sets an existing record to `disabled` and returns it.
 Disablement is the only stop switch; it is allowed with dependent bindings.
 It refuses every later resolution, including a complete entry, so the instance
 healthcheck fails and no claim follows. Bindings remain. It recalls no handover
 in flight. An agent provider has no independent disablement.
 
-### `agent enablement remove <agent-name>`
+### `agent enablement remove <agent-name> --expected-revision <revision>`
 
+The required `--expected-revision` names the latest revision of the agent that the human read.
 Uses `[M] [R]`. Removal fails while any worker binding of a worker that references
 this agent exists. The refusal lists those bindings. The dependency check and
 removal commit in one transaction. Proposed success is
@@ -429,13 +434,14 @@ removal commit in one transaction. Proposed success is
 
 ### `agent enablement provider add <agent-name> --file <path>`
 
-Uses `[M] [R]`. The required file supplies exactly `{ name, provider, credential }`,
+Uses `[M] [R]`. The required file supplies exactly `{ expectedRevision, name, provider, credential }`,
 with all fields required. It adds a named agent provider to an existing record
 and returns the revised enablement. A duplicate name fails. Use `put` to revise
 a credential reference or default configuration.
 
-### `agent enablement provider remove <agent-name> <provider-name>`
+### `agent enablement provider remove <agent-name> <provider-name> --expected-revision <revision>`
 
+The required `--expected-revision` names the latest revision of the agent that the human read.
 Uses `[M] [R]`. Removes one named agent provider and returns the revised record.
 Removal fails while a default configuration or binding entry names it, and the
 refusal lists those dependents. The check and removal are atomic. An enablement
@@ -450,6 +456,7 @@ dependents when applicable. No error holds secret material.
 | HTTP | Proposed code                                             | Condition                                                                                   |
 | ---- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | 404  | `worker.agent.enablement.not_found`                       | No enablement exists.                                                                       |
+| 409  | `worker.agent.enablement.revision_conflict`               | A write names a stale or absent expected revision; details hold the current revision.       |
 | 400  | `worker.agent.enablement.unavailable`                     | An agent has no enabled enablement at binding write or resolution; details name that agent. |
 | 409  | `worker.agent.enablement.invalidates_bindings`            | A configuration change invalidates dependent worker bindings; details list them.            |
 | 409  | `worker.agent.enablement.in_use`                          | Enablement removal has dependent worker bindings; details list them.                        |
