@@ -64,10 +64,10 @@ Every other ERD 1 task is unblocked.
 
 ## Provides
 
-| Seam               | TypeScript signature                                            | Owner file                | Consumer plans   |
-| ------------------ | --------------------------------------------------------------- | ------------------------- | ---------------- |
-| `createMission`    | `(tx: Transaction, projectId: string, actor: HumanActor): void` | `src/mission/contract.ts` | 05 (wired in 07) |
-| `liveNodesPinning` | `(tx: Transaction, bindingId: string): string[]`                | `src/mission/contract.ts` | 05 (wired in 07) |
+| Seam               | TypeScript signature                                            | Owner file                | Consumer plans                                                     |
+| ------------------ | --------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------ |
+| `createMission`    | `(tx: Transaction, projectId: string, actor: HumanActor): void` | `src/mission/contract.ts` | 05 (wired in 06.24; Plan 07 removes the `standIns` infrastructure) |
+| `liveNodesPinning` | `(tx: Transaction, bindingId: string): string[]`                | `src/mission/contract.ts` | 05 (wired in 06.24; Plan 07 removes the `standIns` infrastructure) |
 
 ## Tasks
 
@@ -186,8 +186,8 @@ filename: PlanFileName, content: ContentSchema })`.
 previousRevision: z.number().int().positive().nullable(),
 changedFields: z.array(z.string()),
 tasks: z.array(z.strictObject({ id: identitySchema("node"),
-  change: z.enum(["created","updated","moved-in","moved-out","retired"]),
-  changedFields: z.array(z.string()) })).optional() })`.
+change: z.enum(["created","updated","moved-in","moved-out","retired"]),
+changedFields: z.array(z.string()) })).optional() })`.
      `RevisionSchema`: `z.strictObject({ nodeId: identitySchema("node"),
 filename: PlanFileName, revision: z.number().int().positive(),
 reason: z.string(), actor: ActorSchema, createdAt: z.number().int(),
@@ -198,14 +198,14 @@ z.strictObject({ kind: z.literal("human"), account: z.string(), name: z.string()
 z.strictObject({ kind: z.literal("service"), service: z.string() }) ])`.
      `EdgeSchema`: `z.discriminatedUnion("kind", [
 z.strictObject({ kind: z.literal("containment"), parentId: identitySchema("node"),
-  childId: identitySchema("node") }),
+childId: identitySchema("node") }),
 z.strictObject({ kind: z.literal("dependency"), dependentId: identitySchema("node"),
-  dependsOnId: identitySchema("node") }) ])`.
+dependsOnId: identitySchema("node") }) ])`.
      `NodeChange`: `z.strictObject({ missionVersion: z.number().int().positive(),
 revisions: z.array(RevisionSchema), retiredNodeIds: z.array(identitySchema("node")),
 addedEdges: z.array(EdgeSchema), removedEdges: z.array(EdgeSchema),
 openAttemptsUnchanged: z.array(z.strictObject({ nodeId: identitySchema("node"),
-  attempt: z.number().int().nonnegative() })) })`.
+attempt: z.number().int().nonnegative() })) })`.
      `RetirePreview`: `z.strictObject({ nodeId: identitySchema("node"), force: z.boolean(),
 missionVersion: z.number().int().positive(), retiredNodeIds: z.array(identitySchema("node")),
 removedEdges: z.array(EdgeSchema), previewDigest: z.string().regex(/^[0-9a-f]{64}$/) })`.
@@ -283,8 +283,8 @@ createdAt: z.number().int() })`.
 - Do:
   1. In `service.ts`: declare `Dependencies` interface with `config: MissionConfig`,
      `health?: HealthRegistry`, `bindings: MissionBindings`, `workQueue: WorkQueue`.
-     Colocated tests inject fakes for `bindings` and `workQueue`. Plan 07 wires the
-     real implementations. `D4`: collaborations are required, never optional.
+     Colocated tests inject fakes for `bindings` and `workQueue`. Task 06.24 wires the
+     real implementations into the composition root. `D4`: collaborations are required, never optional.
      Implement `MissionService` as `Service` with `start`, `quiesce`, `stop`, `run`,
      `healthcheck`, and `declare(registry: OperationRegistry): void`.
      Implement `createMission(tx, projectId, actor)` and `liveNodesPinning(tx, bindingId)`
@@ -1265,6 +1265,225 @@ isClaimable=true` (insert job). Then recompute and reconcile parent
   - Retired-node check precedes other checks.
   - All domain errors are `OperationError`.
 - Done when: `pnpm run verify` passes; all priority tests pass.
+
+### 06.23 Import the Mission config fragment into `src/config/index.ts`
+
+- Files: `engine/src/config/index.ts` (edit)
+- Do:
+  1. Import `missionConfigSchema` and `type MissionConfig` from `"../mission/index.ts"`.
+  2. Add `mission: missionConfigSchema` to the `fragments` object.
+  3. Add `mission: MissionConfig` to the `ServerConfig` interface.
+- Rules:
+  - `architecture.impl.md:282–288`: only applications import `src/config/index.ts`.
+  - Only `mission` is added here; custody, scheduler and repository add no config section (D8).
+- Done when:
+  - `pnpm run verify` passes.
+  - `src/config/index.test.ts` asserts that `mission.consecutiveLossLimit` defaults to `3` and that `configuration({ masterKey, mission: { consecutiveLossLimit: 3 } })` passes.
+
+### 06.24 Wire `MissionService` into the composition root, update `test-support.ts`, and regenerate OpenAPI
+
+- Files:
+  - `engine/src/apps/server/index.ts` (edit)
+  - `engine/src/apps/server/test-support.ts` (edit)
+  - `engine/src/apps/cli/index.ts` (edit — line 298)
+  - `engine/static/openapi.yaml` (regenerate)
+  - `engine/static/openapi/**` (regenerate)
+  - `engine/src/apps/server/openapi-integration.test.ts` (edit)
+- Do:
+  1. In `src/apps/server/index.ts`:
+     a. Add `MissionService` and `missionMigrations` to imports from `"../../mission/index.ts"`.
+     b. Hoist `let mission: MissionService` alongside the other forward-reference declarations.
+     c. Add two optional fields to the `composeServices` options type:
+     - `repositoryConnector?: { gitLsRemote(sshUrl: string, context: Context, deadlineMs: number): Promise<void> }`.
+     - `inventoryOverrides?: { custody?: (tx: Transaction) => ResourceEntry[]; worker?: (tx: Transaction) => ResourceEntry[]; project?: (tx: Transaction) => ResourceEntry[] }`.
+       d. Resolve the repository connector before service construction:
+       `const repoConnector = options.repositoryConnector ?? new RepositoryComponent({ health: options.health })`.
+       e. Construct `mission` at position 4 (after `worker`, before `project`):
+       `mission = new MissionService({ config: options.config.mission, health: options.health, workQueue, bindings: { resolveBinding: (tx, pid, name) => project.resolveBinding(tx, pid, name), getBindingRevision: (tx, bid) => project.getBindingRevision(tx, bid) } })`.
+       Closures capture `project` by reference.
+       f. In the `ProjectService` constructor, replace `unwired("createMission")` with
+       `(tx, pid, actor) => mission.createMission(tx, pid, actor)` and replace
+       `unwired("liveNodesPinning")` with `(tx, bid) => mission.liveNodesPinning(tx, bid)`.
+       Remove `createMission` and `liveNodesPinning` from the `standIns` type; delete those keys from every fixture call that passes them.
+       Closures capture `mission` by reference.
+       g. Add `mission` to `declare(registry)` before `project`. When `options.inventoryOverrides` is present, its fields replace the real inventory closures in the `gateway.declare` call.
+       h. Add `{ service: "mission", migrations: missionMigrations }` to `store.migrate([...])` at position 6 (after worker, before project).
+       i. Set `services = [scheduler, custody, worker, mission, project, gateway]`. Push the `mission` stop closure to `releases` at position 4 (scheduler push first, gateway push last, so reverse-pop stops gateway first and scheduler last).
+       j. Return `{ custody, scheduler, worker, project, mission, gateway, invocation, registry }`.
+  2. In `src/apps/server/test-support.ts`:
+     a. Add `repositoryConnector?` and `inventoryOverrides?` optional fixture fields; pass both to `composeServices`.
+     b. Add `{ service: "mission", migrations: missionMigrations }` to the migration list.
+     c. Start `mission` at position 4 in fixture startup; stop in reverse order.
+     d. Expose `mission` from the fixture return.
+  3. In `src/apps/cli/index.ts` at the `apiOperations` declaration: add `import { missionOperations } from "../../mission/contract.ts"`; append `...Object.values(missionOperations)` to the `apiOperations` array after the project entries (plan 01 task 01.14 sets the array form).
+  4. Run `pnpm run build && node bin/kanthord.mjs gateway openapi` from `engine/`; commit the regenerated files under `static/`.
+  5. In `openapi-integration.test.ts`: import `missionOperations`; append `...Object.values(missionOperations)` to the `apiOperations` array; add a schema-and-response assertion for at least one `mission.*` path.
+- Rules:
+  - Construction order: scheduler(1), custody(2), worker(3), mission(4), project(5), gateway(6). `architecture.impl.md:427–430`.
+  - Stop order reverses construction. `architecture.impl.md:449–469`.
+  - `MissionBindings` has `resolveBinding` and `getBindingRevision` (task 06.2).
+  - No `unwired` stub for `createMission` or `liveNodesPinning` remains after this task (D14). Remove those keys from the `standIns` type; Plan 07 deletes the `standIns` option entirely when it deletes the `unwired` module.
+  - `RepositoryComponent` has no lifecycle; omit it from `services` and `releases`.
+  - `engine/AGENTS.md` (Regenerate OpenAPI): change declarations first, run the command, commit, verify.
+  - No code comments.
+- Done when:
+  - `pnpm run verify` passes.
+  - `src/apps/server/index.test.ts` asserts all six domain services start and that a stop call after start failure releases in reverse construction order.
+  - `project create` through the test fixture succeeds; calling the `mission.get` gateway endpoint with that `projectId` returns a body with a `missionId` field (gateway-level check; the CLI command is wired in task 06.25).
+  - `@apidevtools/swagger-parser` validates the emitted document; the emitted directory matches the committed directory exactly.
+
+### 06.25 Add mission read commands
+
+- Files:
+  - `engine/src/apps/cli/mission.ts` (new)
+  - `engine/src/apps/cli/index.ts` (edit)
+- Do:
+  1. Create `src/apps/cli/mission.ts`; export `addMissionCommand(program: Command): void`. Add group `mission` with `--endpoint <url>` and `--token <token>` via `singleUse` coercions; set action to help.
+  2. Export `validateMissionId(id: string, code: string): void`; throw `Diagnostic(code, "...")` when `id` does not match `/^mission_[0-9A-HJKMNP-TV-Z]{26}$/`.
+  3. Export `validateNodeId(id: string, code: string): void`; throw `Diagnostic(code, "...")` when `id` does not match `/^node_[0-9A-HJKMNP-TV-Z]{26}$/`.
+  4. Add leaf `get <project-id>`: validate `projectId` against `/^project_[0-9A-HJKMNP-TV-Z]{26}$/`; `requireToken`; call `["get"]({ params: { projectId }, query: {}, body: null })`; `handleReadResult`; print `JSON.stringify(data)`.
+  5. Add leaf `node list <mission-id>` with options `--kind`, `--state`, `--parent`, `--include-retired`, `--limit`, `--cursor`: validate mission ID; validate `--kind` against `initiative | objective | task`; throw `Diagnostic("cli.mission.node.list.kind_state_conflict", "...")` when `--kind task` and `--state` are both present; validate `--parent` node ID when supplied; call `["node.list"]`; print `JSON.stringify(data)`.
+  6. Add leaf `node get <node-id>`: validate node ID; call `["node.get"]`; print `JSON.stringify(data)`.
+  7. Add leaf `node revision list <node-id>` with `--limit`, `--cursor`: validate node ID; call `["node.revision.list"]`; print `JSON.stringify(data)`.
+  8. Add leaf `node revision get <node-id> <revision>`: validate node ID; `parsePositiveInt(revision, "cli.mission.node.revision.get.invalid_revision")` → `rev`; call `["node.revision.get"]({ params: { nodeId, revision: rev }, query: {}, body: null })`; print `JSON.stringify(data)`.
+  9. Add leaf `edge list <mission-id>` with options `--kind`, `--node`, `--limit`, `--cursor`: validate mission ID; validate `--kind` against `containment | dependency`; validate `--node` node ID when supplied; call `["edge.list"]`; print `JSON.stringify(data)`.
+  10. Add leaf `node retire preview <node-id>` with boolean `--force` (default false): validate node ID; call `["node.retire.preview"]({ params: { nodeId }, query: { force: String(opts.force ?? false) }, body: null })`; print `JSON.stringify(data)`.
+  11. Add leaf `export <mission-id>` with required `--format` and required `--out`: validate mission ID; validate `--format` against `markdown | json`; call `["export"]`; for `markdown` write each `{ filename, content }` from `data.files` to `join(opts.out, entry.filename)`; for `json` write `JSON.stringify(data)` to `opts.out`; print `JSON.stringify({ missionId: data.missionId, missionVersion: data.missionVersion })`.
+  12. In `src/apps/cli/index.ts`: import `addMissionCommand`; replace the `CommandName.Mission` help-only stub with `addMissionCommand(program)`.
+  13. Fold read-command local-validation cases into `src/apps/server/e2e-mission-service.test.ts`.
+- Rules:
+  - All read commands define no `--idempotency-key`. `export` is `mutation: false`.
+  - Operation keys use the short form without the `mission.` prefix.
+  - No code comments.
+- Done when:
+  - `pnpm run verify` is green.
+  - `mission get --help` exits 0; stdout matches `<project-id>`.
+  - `mission node list --help` exits 0; stdout matches `--kind`, `--state`, `--parent`, `--include-retired`.
+  - `mission node list --endpoint http://localhost:31415 --token t mission_01ARZ3NDEKTSV4RRFFQ69G5FAA --kind task --state Available` exits nonzero; stderr matches `cli.mission.node.list.kind_state_conflict`.
+  - `mission node revision get --endpoint http://localhost:31415 --token t node_01ARZ3NDEKTSV4RRFFQ69G5FAA notanint` exits nonzero; stderr matches `cli.mission.node.revision.get.invalid_revision`.
+  - `mission export --endpoint http://localhost:31415 --token t mission_01ARZ3NDEKTSV4RRFFQ69G5FAA --format xml --out /tmp/x` exits nonzero; stderr matches `cli.mission.export.invalid_format`.
+  - Live-server test: `mission get --token <tok> <projectId>` exits 0; stdout is JSON with `missionId`.
+  - Live-server test: `mission export --token <tok> <missionId> --format markdown --out <empty-dir>` exits 0; directory contains exported files.
+
+### 06.26 Add mission node edit commands
+
+- Files:
+  - `engine/src/apps/cli/mission.ts` (edit)
+- Do: Inside `addMissionCommand`, add three node mutation commands. All use `--idempotency-key` and `--file`.
+  1. Add leaf `node create <mission-id>`: validate mission ID; `requireToken`; `resolveKey` → `key`; `readJsonFileAs(opts.file, nodeCreateBodySchema)` → body (`{ filename, kind, content, reason, expectedMissionVersion, parentId?, expectedParentRevision? }`); call `["node.create"]({ params: { missionId }, query: {}, body }, { idempotencyKey: key })`; print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  2. Add leaf `node update <node-id>`: validate node ID; `resolveKey` → `key`; `readJsonFileAs(opts.file, nodeUpdateBodySchema)` → body (`{ filename, content, reason, expectedRevision, expectedMissionVersion }`); call `["node.update"]`; print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  3. Add leaf `node move <node-id>`: validate node ID; `resolveKey` → `key`; `readJsonFileAs(opts.file, nodeMoveBodySchema)` → body (`{ newParentId, reason, expectedMissionVersion, expectedRevision, expectedOldParentRevision, expectedNewParentRevision }`); call `["node.move"]`; print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  4. Fold node-edit local-validation cases into `src/apps/server/e2e-mission-service.test.ts`.
+- Rules:
+  - `idempotencyKey` in the second arg of client calls.
+  - `readJsonFileAs` validates against plan 06 body schemas; no unchecked cast.
+  - No code comments.
+- Done when:
+  - `pnpm run verify` is green.
+  - `mission node create --help` exits 0; stdout matches `--file`.
+  - `mission node create --endpoint http://localhost:31415 --token t mission_01ARZ3NDEKTSV4RRFFQ69G5FAA --file /nonexistent.json` exits nonzero; stderr matches `cli.file.not_found`.
+  - `mission node create --endpoint http://localhost:31415 --token t mission_01ARZ3NDEKTSV4RRFFQ69G5FAA --file <invalid-schema.json>` exits nonzero; stderr matches `cli.file.schema_invalid`.
+  - Live-server test: `mission node create --token <tok> <missionId> --file <valid.json>` exits 0; stdout is JSON with `revisions` and `idempotencyKey`.
+  - Idempotent replay: same request with same `--idempotency-key` exits 0; `revisions[0].nodeId` matches first call.
+
+### 06.27 Add mission graph, rebind, and priority commands
+
+- Files:
+  - `engine/src/apps/cli/mission.ts` (edit)
+- Do: Inside `addMissionCommand`, add five mutation commands.
+  1. Add leaf `dependency add <node-id> <depends-on-id>`: validate both node IDs; `resolveKey` → `key`; `readJsonFileAs(opts.file, graphEditBodySchema)` → body (`{ reason, expectedMissionVersion }`); call `["dependency.add"]({ params: { nodeId, dependsOnId }, query: {}, body }, { idempotencyKey: key })`; print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  2. Add leaf `dependency remove <node-id> <depends-on-id>`: same structure as add but calls `["dependency.remove"]`; diagnostic codes use prefix `cli.mission.dependency_remove`.
+  3. Add leaf `criterion set <node-id>`: validate node ID; `resolveKey` → `key`; `readJsonFileAs(opts.file, criterionSetBodySchema)` → body (`{ criterion, verifications, reason, expectedRevision, expectedMissionVersion }`); call `["criterion.set"]`; print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  4. Add leaf `node rebind <mission-id> <binding-id>` with optional `--node <node-id>`: validate mission ID; validate `bindingId` against `/^binding_[0-9A-HJKMNP-TV-Z]{26}$/`; validate `--node` node ID when supplied; `resolveKey` → `key`; `readJsonFileAs(opts.file, rebindFileSchema)` → `fileBody` (`{ reason, expectedMissionVersion }`); build body `{ bindingId, reason: fileBody.reason, expectedMissionVersion: fileBody.expectedMissionVersion, ...(opts.node ? { nodeId: opts.node } : {}) }`; call `["node.rebind"]`; print `JSON.stringify({ nodeChange: data.nodeChange, skipped: data.skipped, idempotencyKey: key })`.
+  5. Add leaf `node priority set <node-id>`: validate node ID; `resolveKey` → `key`; `readJsonFileAs(opts.file, prioritySetBodySchema)` → body (`{ value, expectedMissionVersion }`); call `["node.priority.set"]`; print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  6. Fold graph-rebind-priority local-validation cases into `src/apps/server/e2e-mission-service.test.ts`.
+- Rules:
+  - `node.rebind` body field is `bindingId`; the `<binding-id>` positional injects it.
+  - `PrioritySet` body fields are `value` (not `priority`) and `expectedMissionVersion`; no `expectedRevision`.
+  - `rebindFileSchema` validates `{ reason, expectedMissionVersion }` only; `bindingId` comes from the positional and `nodeId` from `--node`.
+  - `idempotencyKey` in second arg of client calls.
+  - No code comments.
+- Done when:
+  - `pnpm run verify` is green.
+  - `mission dependency add --help` exits 0.
+  - `mission criterion set --help` exits 0; stdout matches `--file`.
+  - `mission node rebind --help` exits 0; stdout matches `--node`.
+  - `mission node priority set --help` exits 0; stdout matches `--file`.
+  - `mission node rebind --endpoint http://localhost:31415 --token t mission_01ARZ3NDEKTSV4RRFFQ69G5FAA invalid_bid --file f.json` exits nonzero; stderr matches `cli.mission.node.rebind.invalid_binding_id`.
+  - Live-server test: `mission dependency add --token <tok> <nodeId> <dependsOnId> --file <graphedit.json>` exits 0.
+
+### 06.28 Add mission retire and import commands
+
+- Files:
+  - `engine/src/apps/cli/mission.ts` (edit)
+- Do: Inside `addMissionCommand`, add three commands.
+  1. Add leaf `node retire <node-id>` with boolean `--force` (default false) and required `--file`: validate node ID; `resolveKey` → `key`; `readJsonFileAs(opts.file, retireFileSchema)` → `fileBody` (`{ reason, expectedMissionVersion, previewDigest }`); build body `{ reason: fileBody.reason, expectedMissionVersion: fileBody.expectedMissionVersion, previewDigest: fileBody.previewDigest, force: opts.force ?? false }`; call `["node.retire"]`; print `JSON.stringify({ ...data, idempotencyKey: key })`. `node retire` and `node retire preview` are sibling leaves under the `node` group; neither is a parent of the other.
+  2. Add leaf `import preview <mission-id>` with required `--file` and variadic `[<plan-file>...]`: validate mission ID; `requireToken`; `readJsonFileAs(opts.file, importManifestBaseSchema)` → manifest (`{ format, missionVersion, reason }`); for `format: "markdown"` throw `Diagnostic("cli.mission.import.files_conflict", "...")` when both positionals and `manifest.files` exist, otherwise build `files` from positionals or `manifest.files`; for `format: "json"` throw `Diagnostic("cli.mission.import.positionals_not_accepted", "...")` when positionals are present, otherwise read `entries` from the full manifest; call `["import.preview"]({ params: { missionId }, query: {}, body })`; print `JSON.stringify(data)`. This command is `mutation: false`; define no `--idempotency-key`.
+  3. Add leaf `import apply <mission-id>` with required `--file`, variadic `[<plan-file>...]`, and `--idempotency-key`: same manifest parsing as `import preview`; validate with `importApplyManifestSchema` (extends base with required `previewDigest` and `confirmedRetirements`); `resolveKey` → `key`; call `["import.apply"]`; print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  4. Fold retire-and-import local-validation cases into `src/apps/server/e2e-mission-service.test.ts`.
+- Rules:
+  - `import preview` defines no `--idempotency-key` (`mutation: false`).
+  - `force` on `node retire` injects into body; the file never carries `force`.
+  - `import.preview` body is not null; it is the full `ImportSnapshotBase`.
+  - `idempotencyKey` on `import.apply` in second arg.
+  - No code comments.
+- Done when:
+  - `pnpm run verify` is green.
+  - `mission node retire --help` exits 0; stdout matches `--force`, `--file`.
+  - `mission import preview --help` exits 0; stdout matches `--file`.
+  - `mission import apply --help` exits 0; stdout matches `--file`, `--idempotency-key`.
+  - `mission import preview --endpoint http://localhost:31415 --token t mission_01ARZ3NDEKTSV4RRFFQ69G5FAA --file manifest.json plan1.md plan2.md` with `manifest.json` containing `files` exits nonzero; stderr matches `cli.mission.import.files_conflict`.
+  - Live-server test: Markdown import round-trip (`import preview`, confirm digest, `import apply`) exits 0 with updated `missionVersion`.
+
+### 06.E E2E proof
+
+- Files: `engine/src/apps/server/e2e-mission-service.test.ts` (new)
+- Do: Write the E2E test file per the `## E2E` section. Use `gatewayFixture` from `src/apps/server/test-support.ts` and `kanthord(args, env)` from `src/apps/server/cli-support.ts`. For scenarios that write repository bindings, pass `repositoryConnector: { gitLsRemote: async () => {} }` to `gatewayFixture`. Declare all fixed strings as named constants.
+- Rules:
+  - Setup goes through the CLI only; state checks are CLI reads, never store reads.
+  - stdout is parsed as JSON where the CLI page says the command prints JSON.
+  - A refusal asserts the exact exit code and the error code at the start of stderr.
+  - No code comments.
+- Done when:
+  - `node --test --test-timeout=30000 src/apps/server/e2e-mission-service.test.ts` passes.
+  - `pnpm run verify` passes.
+
+## E2E
+
+- Test file: `src/apps/server/e2e-mission-service.test.ts` (runs in `pnpm run verify`).
+- Harness: `gatewayFixture` from `src/apps/server/test-support.ts` starts the real server on a loopback port with an in-memory store; `kanthord(args, env)` from `src/apps/server/cli-support.ts` runs the CLI as a subprocess with disposable XDG state, `KANTHORD_ENDPOINT = fixture.endpoint` and `KANTHORD_TOKEN = fixture.token`. Plan 05 passed `standIns: { createMission: <no-write stand-in>, liveNodesPinning: () => [] }` to `gatewayFixture`; Plan 06 (task 06.24) removes both — no stand-ins remain after this plan.
+- Rules: setup goes through the CLI only; the state check is a CLI read, never a store read; a refusal asserts the exact exit code and the error code at the start of stderr; stdout is parsed as JSON where the CLI page says the command prints JSON.
+- Note: `liveNodesPinning` feeds only `credentialDependents.bindings` (`project-service.impl.md:180`); ERD 1 has no credential removal route; proven in colocated tests only.
+
+| Id     | Commands                                                                                                                                                                                                                                                                                                                                                                                                                                       | Exit    | Expect                                                                                                                                                             |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| E06.1  | `kanthord project create --name test-proj`; then `kanthord mission get <projectId>`                                                                                                                                                                                                                                                                                                                                                            | 0, 0    | Second stdout parses as JSON; `id` field starts with `mission_`                                                                                                    |
+| E06.2  | Replay `project create` from E06.1 with same `--idempotency-key`                                                                                                                                                                                                                                                                                                                                                                               | 0       | stdout `projectId` matches E06.1; `mission get <projectId>` returns same `missionId`                                                                               |
+| E06.3  | `kanthord project binding apply <projectId> --file <binding.json>` (repository binding); fixture passes `repositoryConnector: { gitLsRemote: async () => {} }`                                                                                                                                                                                                                                                                                 | 0       | stdout parses as JSON; `bindingSetVersion: 1`                                                                                                                      |
+| E06.4  | `kanthord mission node create <missionId> --file <initiative.json>` (kind: initiative, no parentId); then `kanthord scheduler queue peek <nodeId>` where `nodeId = revisions[0].nodeId`                                                                                                                                                                                                                                                        | 0, 0    | First stdout has `revisions[0].nodeId` starting with `node_`; second stdout shows a job for `<nodeId>`                                                             |
+| E06.5  | `kanthord mission node get <nodeId>`                                                                                                                                                                                                                                                                                                                                                                                                           | 0       | stdout `state: "Available"`, `kind: "initiative"`                                                                                                                  |
+| E06.6  | `kanthord mission node create <missionId> --file <objective.json>` (kind: objective, parentId: initiative, content.bindings: [binding name from E06.3, resolved server-side to binding ID])                                                                                                                                                                                                                                                    | 0       | stdout `revisions` non-empty; `missionVersion` incremented                                                                                                         |
+| E06.7  | `kanthord mission node create <missionId> --file <task.json>` (kind: task, parentId: objective)                                                                                                                                                                                                                                                                                                                                                | 0       | stdout `missionVersion` incremented                                                                                                                                |
+| E06.8  | `kanthord mission node list <missionId>`                                                                                                                                                                                                                                                                                                                                                                                                       | 0       | stdout `items` has 3 elements                                                                                                                                      |
+| E06.9  | `kanthord mission node update <objNodeId> --file <update.json>`                                                                                                                                                                                                                                                                                                                                                                                | 0       | stdout `missionVersion` incremented                                                                                                                                |
+| E06.10 | `kanthord mission node revision list <objNodeId>`                                                                                                                                                                                                                                                                                                                                                                                              | 0       | stdout `items` non-empty                                                                                                                                           |
+| E06.11 | `kanthord mission node revision get <objNodeId> 1`                                                                                                                                                                                                                                                                                                                                                                                             | 0       | stdout `revision: 1`                                                                                                                                               |
+| E06.12 | `kanthord mission node move <taskId> --file <move.json>` (newParentId: second objective)                                                                                                                                                                                                                                                                                                                                                       | 0       | stdout `missionVersion` incremented                                                                                                                                |
+| E06.13 | `kanthord mission dependency add <obj1Id> <obj2Id> --file <edit.json>`; then `kanthord mission node get <obj1Id>`                                                                                                                                                                                                                                                                                                                              | 0, 0    | Second stdout `state: "Pending"`                                                                                                                                   |
+| E06.14 | `kanthord mission dependency remove <obj1Id> <obj2Id> --file <edit.json>`; then `kanthord mission node get <obj1Id>`                                                                                                                                                                                                                                                                                                                           | 0, 0    | Second stdout `state: "Available"`                                                                                                                                 |
+| E06.15 | `kanthord mission edge list <missionId>`                                                                                                                                                                                                                                                                                                                                                                                                       | 0       | stdout `items` non-empty                                                                                                                                           |
+| E06.16 | `kanthord mission criterion set <objNodeId> --file <criterion.json>`                                                                                                                                                                                                                                                                                                                                                                           | 0       | stdout `missionVersion` incremented                                                                                                                                |
+| E06.17 | `kanthord mission node retire preview <obj1Id>`                                                                                                                                                                                                                                                                                                                                                                                                | 0       | stdout `previewDigest` non-empty                                                                                                                                   |
+| E06.18 | `kanthord mission node retire <obj1Id> --file <retire.json>` (previewDigest from E06.17)                                                                                                                                                                                                                                                                                                                                                       | 0       | stdout `retiredNodeIds` includes `<obj1Id>`                                                                                                                        |
+| E06.19 | `kanthord mission import preview <missionId> --file <preview.json>` (format: json)                                                                                                                                                                                                                                                                                                                                                             | 0       | stdout `previewDigest` non-empty                                                                                                                                   |
+| E06.20 | `kanthord mission import apply <missionId> --file <apply.json>` (previewDigest from E06.19); then `kanthord scheduler queue peek <newNodeId>` where `newNodeId` is a node ID from `assignedIds` in the import apply response                                                                                                                                                                                                                   | 0, 0    | First stdout `missionVersion` incremented; second stdout shows a job for `<newNodeId>`                                                                             |
+| E06.21 | `kanthord mission export <missionId> --format json --out <out.json>`                                                                                                                                                                                                                                                                                                                                                                           | 0       | stdout parses as JSON; `missionId` and `missionVersion` present                                                                                                    |
+| E06.22 | `kanthord mission node rebind <missionId> <bindingId2> --file <rebind.json>` where `bindingId2` is the new revision after updating the binding set via `project binding apply`                                                                                                                                                                                                                                                                 | 0       | stdout `nodeChange.missionVersion` present                                                                                                                         |
+| E06.23 | `kanthord mission node priority set <obj2Id> --file <priority.json>`                                                                                                                                                                                                                                                                                                                                                                           | 0       | stdout `id` matches `<obj2Id>`                                                                                                                                     |
+| E06.24 | Replay `mission node create` from E06.4 with same `--idempotency-key`                                                                                                                                                                                                                                                                                                                                                                          | 0       | stdout `revisions[0].nodeId` matches E06.4                                                                                                                         |
+| E06.25 | `kanthord mission node create <missionId> --file <large_text.json>` (content.name byte-length 32769 bytes, exceeding default `mission.textMaxBytes` of 32768)                                                                                                                                                                                                                                                                                  | 1       | stderr starts with `mission.node.content_invalid:`                                                                                                                 |
+| E06.26 | `kanthord mission node create <missionId> --file <child_of_retired.json>` (kind: task, parentId: retired node from E06.18)                                                                                                                                                                                                                                                                                                                     | 1       | stderr starts with `mission.node.retired:`                                                                                                                         |
+| E06.27 | `kanthord project binding apply <projectId> --file <add-binding.json>` → get `bindingId`; then `kanthord project binding apply <projectId> --file <tombstone.json>` (same binding name omitted from the set, same `expectedBindingSetVersion + 1`); then `kanthord mission node rebind <missionId> <bindingId> --file <rebind.json>` (`<rebind.json>` contains `{ reason, expectedMissionVersion }` only; the positional supplies `bindingId`) | 0, 0, 1 | First two exits 0; third stderr starts with `mission.binding.removed:`; a subsequent `kanthord mission node get <nodeId>` confirms the pinned binding is unchanged |
 
 ## Blockers
 

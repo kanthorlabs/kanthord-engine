@@ -309,10 +309,12 @@ project_id = ? AND resource_identity = ?` (all rows including tombstones) + 1.
   - All comparisons against fixed strings use named constants (`architecture.impl.md:17-20`).
 - Done when: all `store.test.ts` tests pass; `pnpm run verify` passes.
 
-### 05.4 Register `project.create`, `project.list`, `project.get`, `project.rename`; implement `resolveWorkerBinding`
+### 05.4 Register `project.create`, `project.list`, `project.get`, `project.rename`; implement `resolveWorkerBinding`; add `projectOperations` and regenerate OpenAPI
 
 - Files: `src/project/service.ts` (edit), `src/project/service.test.ts` (edit),
-  `src/apps/server/index.ts` (edit)
+  `src/apps/server/index.ts` (edit), `src/apps/cli/index.ts` (edit),
+  `src/apps/server/openapi-integration.test.ts` (edit), `static/openapi.yaml` (regenerate),
+  `static/openapi/**` (regenerate)
 - Do:
   1. Extend `Dependencies` and update `src/apps/server/index.ts`:
      - Add `operationalStore: Store` (required; the composition root passes the real store
@@ -329,9 +331,9 @@ project_id = ? AND resource_identity = ?` (all rows including tombstones) + 1.
        (`createMission`, `liveNodesPinning`, `validateEntry`, `custodySuitability`,
        `repositoryConnector`, `workerAgentsOf`, `workerAgentView`).
        Import `unwired` from `./unwired.ts` (created by Plan 03).
-       `Project` is constructed before `Worker` in `index.ts`; `workerAgentsOf` and
-       `workerAgentView` use `unwired`, not a late-bound closure. Plan 07 replaces every
-       `unwired(...)` with the real implementation and deletes `unwired.ts`. (D14)
+       Task 05.10 replaces `validateEntry`, `custodySuitability`, `repositoryConnector`,
+       `workerAgentsOf`, and `workerAgentView` stubs with real closures. Plan 06 replaces
+       `createMission` and `liveNodesPinning`. Plan 07 deletes `unwired.ts`. (D14)
   2. Register `project.create`:
      - Natural key: `{ name }`.
      - `caller.commit((tx) => { ... })`:
@@ -381,17 +383,35 @@ project_id = ? AND resource_identity = ?` (all rows including tombstones) + 1.
      - `resolveWorkerBinding` returns `null` for: removed binding, non-worker binding,
        absent binding, binding with `instanceCount = 0`, binding where the group's latest
        revision is a tombstone after the pinned revision.
+  8. In `src/apps/cli/index.ts`, at the `apiOperations` declaration (line 298):
+     - Import `projectOperations` from `"../../project/contract.ts"`.
+     - Plan 01 task 01.14 converts `apiOperations` from an object spread to an array (Custody
+       and Project share short keys such as `list`, `get`, `create`; an object spread keeps only
+       the last definition). Append `...Object.values(projectOperations)` to the array.
+  9. Run `pnpm run build && node bin/kanthord.mjs gateway openapi` from `engine/` to regenerate
+     `static/openapi.yaml` and `static/openapi/**`.
+  10. In `src/apps/server/openapi-integration.test.ts`:
+  - Import `projectOperations`; append `...Object.values(projectOperations)` to the
+    `apiOperations` array.
+  - Assert at least one path from `project.*` (for example `project.create` at `/api/project`)
+    and one from `project.binding.*` (for example `project.bindingSet.write` at
+    `/api/project/:projectId/binding-set`) appear in the emitted document with the correct
+    HTTP method.
 - Rules:
   - `project.create` is idempotent by `name`; retry returns 409 (`engine/docs/cli/project.md:142`).
   - No `actor` field in operation input; actor derives from `caller.identity`.
   - `project.name.conflict` is the three-part code per Aelita's 2026-09-27 ruling.
   - All collaborations are required (D4); colocated tests inject fakes.
   - `operationalStore` receives `options.store` from the composition root (D14).
-  - Peer collaborations receive `unwired("<seam>")` at construction; Plan 07 wires real
-    implementations (D14).
+  - Peer collaborations receive `unwired("<seam>")` at construction; task 05.10 wires
+    real implementations for all except `createMission` and `liveNodesPinning`. (D14)
   - `resolveWorkerBinding` uses `this.operationalStore.transaction` (D3); it is not a
     handler and has no `CallerContext`.
-- Done when: all `service.test.ts` tests pass; `pnpm run verify` passes.
+  - `apiOperations` is an array after plan 01 task 01.14; use `Object.values()` to append.
+  - Service key prefix `project`; `openapi.ts:51` validates (D9).
+  - Regenerate after changing declarations; commit generated files (`engine/AGENTS.md`).
+- Done when: all `service.test.ts` tests pass; `pnpm run verify` passes; `@apidevtools/swagger-parser`
+  validates the emitted document; the emitted directory matches the committed directory exactly.
 
 ### 05.5 Register binding-set write and binding read operations
 
@@ -680,6 +700,265 @@ revision: row.revision, tombstone, disabled }`.
   - Import `ResourceEntry`, `ResourceStatus`, `ResourceCheck`, `HealthScope` from
     `../kernel/health.ts`; declare no local equivalents.
 - Done when: all new `service.test.ts` tests pass; `pnpm run verify` passes.
+
+### 05.10 Wire Project with real collaborations; replace bindingsNaming and entriesOfAgent stubs; add standIns option
+
+- Files: `src/apps/server/index.ts` (edit)
+- Do:
+  1. Hoist `let project: ProjectService` before the service construction block. Remove
+     `const` from the existing `ProjectService` assignment.
+  2. Update the `ProjectService` constructor call:
+     - Replace `custodySuitability: unwired("custodySuitability")` with
+       `custodySuitability: (tx, req) => custody.custodySuitability(tx, req)`.
+     - Replace `validateEntry: unwired("validateEntry")` with
+       `validateEntry: (tx, name, entry) => worker.validateEntry(tx, name, entry)`.
+     - Replace `workerAgentsOf: unwired("workerAgentsOf")` with
+       `workerAgentsOf: (name) => worker.workerAgentsOf(name)`.
+     - Replace `workerAgentView: unwired("workerAgentView")` with
+       `workerAgentView: (tx, wname, aname, entry) => worker.workerAgentView(tx, wname, aname, entry)`.
+     - Replace `repositoryConnector: unwired("repositoryConnector")` with
+       `repositoryConnector: repoConnector` (`repoConnector` is declared by Plan 04 in
+       `composeServices` as `options.repositoryConnector ?? new RepositoryComponent({ health: options.health })`).
+     - Replace `createMission: unwired("createMission")` with
+       `createMission: options.standIns?.createMission ?? unwired("createMission")`.
+     - Replace `liveNodesPinning: unwired("liveNodesPinning")` with
+       `liveNodesPinning: options.standIns?.liveNodesPinning ?? unwired("liveNodesPinning")`.
+  3. In the `CustodyComponent` constructor call, replace
+     `bindingsNaming: unwired("bindingsNaming")` with
+     `bindingsNaming: (tx, name) => project.bindingsNaming(tx, name)`.
+  4. In the `WorkerService` constructor call, replace
+     `entriesOfAgent: unwired("entriesOfAgent")` with
+     `entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name)`.
+  5. In the `standIns` option type of `composeServices` (Plan 01 task 01.14), delete the keys
+     `bindingsNaming` and `entriesOfAgent`, and add `createMission?: CreateMissionFn` and
+     `liveNodesPinning?: LiveNodesPinningFn`. Import both types from `../../project/contract.ts`.
+     `gatewayFixture` derives its type from `composeServices` and already forwards `standIns`.
+- Rules:
+  - Closures that capture `project` are safe: they are called only after `project` is
+    assigned (`architecture.impl.md:427–430`).
+  - `repoConnector` is declared in `composeServices` by Plan 04 (D5).
+  - Stand-ins answer the true state of the absent peer: `createMission` returns without a write
+    (no mission table yet); `liveNodesPinning` returns `[]`. Plan 06 replaces both.
+  - The server application never passes `standIns`; only `gatewayFixture` forwards it (D14).
+  - No code comments.
+- Done when: `pnpm run verify` passes; `src/apps/server/index.test.ts` still passes.
+
+### 05.11 Add project core CLI commands
+
+- Files: `src/apps/cli/project.ts` (create), `src/apps/cli/index.ts` (edit)
+- Do:
+  1. Import `projectOperations` from `"../../project/contract.ts"`. Import helpers from
+     `"./shared.ts"`. Import `resolveClient` from `"./resolver.ts"`.
+  2. Export `addProjectCommand(program: Command): void`. Add group `project` with
+     `--endpoint <url>` (coercion `singleUse("--endpoint")`) and `--token <token>`
+     (coercion `singleUse("--token")`). Set action to help.
+  3. All `httpClient` calls: `httpClient(projectOperations, endpoint, token)`.
+     Read commands define no `--idempotency-key`.
+  4. Export `validateProjectId(id: string, code: string): void` (internal to
+     `project.ts`): throw `Diagnostic(code, "...")` when `id` does not match
+     `/^project_[0-9A-HJKMNP-TV-Z]{26}$/`.
+  5. Add leaf `create --name <name>`:
+     - `--name` coercion: `singleUse("--name")`; required.
+     - Validate `name` against `/^[a-z][a-z0-9-]{0,62}$/`; throw
+       `Diagnostic("cli.project.create.invalid_name", "...")`.
+     - `requireToken(opts.token, "cli.project.create.token_required")`.
+     - `resolveKey(opts)` → `key`.
+     - Call client `["create"]({ params: {}, query: {}, body: { name } }, { idempotencyKey: key })`.
+     - `handleMutationResult(result, "cli.project.create.indeterminate", key)` → data.
+     - Print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  6. Add leaf `list`:
+     - Options: `--limit` and `--cursor` (coercions `singleUse`).
+     - `requireToken(opts.token, "cli.project.list.token_required")`.
+     - Validate `--limit`: when present, `parsePositiveInt(opts.limit, "cli.pagination.limit_invalid")`;
+       clamp 1–1000; throw `Diagnostic("cli.pagination.limit_out_of_range", "...")` outside
+       range. Default to 100.
+     - Call client `["list"]({ params: {}, query: { limit, cursor: opts.cursor }, body: null })`.
+     - `handleReadResult(result, "cli.project.list.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+  7. Add leaf `get <project-id>`:
+     - `validateProjectId(projectId, "cli.project.get.invalid_project_id")`.
+     - `requireToken(opts.token, "cli.project.get.token_required")`.
+     - Call client `["get"]({ params: { projectId }, query: {}, body: null })`.
+     - `handleReadResult(result, "cli.project.get.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+  8. Add leaf `rename <project-id> --name <name>`:
+     - `--name` coercion: `singleUse("--name")`; required.
+     - `validateProjectId(projectId, "cli.project.rename.invalid_project_id")`.
+     - Validate `name` against `/^[a-z][a-z0-9-]{0,62}$/`; throw
+       `Diagnostic("cli.project.rename.invalid_name", "...")`.
+     - `requireToken(opts.token, "cli.project.rename.token_required")`.
+     - `resolveKey(opts)` → `key`.
+     - Call client `["rename"]({ params: { projectId }, query: {}, body: { name } }, { idempotencyKey: key })`.
+     - `handleMutationResult(result, "cli.project.rename.indeterminate", key)` → data.
+     - Print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  9. In `src/apps/cli/constants.ts`: add `Project = "project"` to `CommandName` if not
+     already present.
+  10. In `src/apps/cli/index.ts`: import `addProjectCommand`; replace the
+      `CommandName.Project` help-only stub with a call to `addProjectCommand(program)`.
+- Rules:
+  - Read commands define no `--idempotency-key`; Commander's unknown-option rejection applies.
+  - `idempotencyKey` goes in the second argument of mutation client calls.
+  - Operation keys are short, no `project.` prefix.
+  - No code comments.
+- Done when: `pnpm run verify` is green. Local validation cases (invalid name, missing token,
+  invalid project ID, create/list/get/rename success) are verified by the E2E table.
+
+### 05.12 Add project binding CLI commands
+
+- Files: `src/apps/cli/project.ts` (edit)
+- Do: Inside `addProjectCommand`, add a `binding` sub-group with help action.
+  1. Add leaf `binding list <project-id>`:
+     - Options: `--kind <kind>` (repeatable: `.option("--kind <kind>", ..., (v, acc: string[] = []) => [...acc, v])`),
+       `--state <state>` (coercion `singleUse("--state")`),
+       `--limit` and `--cursor` (coercions `singleUse`).
+     - `validateProjectId(projectId, "cli.project.binding.list.invalid_project_id")`.
+     - Validate each supplied `--kind` value against the `BindingKind` enum from
+       `project/contract.ts`; throw
+       `Diagnostic("cli.project.binding.list.invalid_kind", "...")` on unknown value.
+     - Validate `--state` against `current | removed | all`; throw
+       `Diagnostic("cli.project.binding.list.invalid_state", "...")` on other value.
+     - `requireToken(opts.token, "cli.project.binding.list.token_required")`.
+     - Validate pagination; default limit 100.
+     - Call client `["binding.list"]({ params: { projectId }, query: { kind: opts.kind, state: opts.state, limit, cursor }, body: null })`.
+     - `handleReadResult(result, "cli.project.binding.list.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+  2. Add leaf `binding get <project-id> <binding-id>`:
+     - `validateProjectId(projectId, "cli.project.binding.get.invalid_project_id")`.
+     - Validate `bindingId` against `/^binding_[0-9A-HJKMNP-TV-Z]{26}$/`; throw
+       `Diagnostic("cli.project.binding.get.invalid_binding_id", "...")`.
+     - `requireToken(opts.token, "cli.project.binding.get.token_required")`.
+     - Call client `["binding.get"]({ params: { projectId, bindingId }, query: {}, body: null })`.
+     - `handleReadResult(result, "cli.project.binding.get.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+  3. Add leaf `binding export <project-id>`:
+     - `validateProjectId(projectId, "cli.project.binding.export.invalid_project_id")`.
+     - `requireToken(opts.token, "cli.project.binding.export.token_required")`.
+     - Call client `["bindingSet.get"]({ params: { projectId }, query: {}, body: null })`.
+     - `handleReadResult(result, "cli.project.binding.export.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+  4. Add leaf `binding apply <project-id> --file <path>`:
+     - `--file` coercion: `singleUse("--file")`.
+     - `validateProjectId(projectId, "cli.project.binding.apply.invalid_project_id")`.
+     - `requireToken(opts.token, "cli.project.binding.apply.token_required")`.
+     - `resolveKey(opts)` → `key`.
+     - `readJsonFileAs(opts.file, bindingSetWriteInputSchema)` → body.
+       (`bindingSetWriteInputSchema` is the body schema from task 05.2.)
+     - Call client `["bindingSet.write"]({ params: { projectId }, query: {}, body }, { idempotencyKey: key })`.
+     - `handleMutationResult(result, "cli.project.binding.apply.indeterminate", key)` → data.
+     - Print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  5. Add leaf `binding revision list <project-id> <binding-id>`:
+     - Options: `--limit` and `--cursor` (coercions `singleUse`).
+     - `validateProjectId(projectId, "cli.project.binding.revision.list.invalid_project_id")`.
+     - Validate `bindingId` against `/^binding_[0-9A-HJKMNP-TV-Z]{26}$/`; throw
+       `Diagnostic("cli.project.binding.revision.list.invalid_binding_id", "...")`.
+     - `requireToken(opts.token, "cli.project.binding.revision.list.token_required")`.
+     - Validate pagination; default limit 100.
+     - Call client `["bindingRevision.list"]({ params: { projectId, bindingId }, query: { limit, cursor }, body: null })`.
+     - `handleReadResult(result, "cli.project.binding.revision.list.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+- Rules:
+  - `binding list`, `binding get`, `binding export`, `binding revision list` define no
+    `--idempotency-key`.
+  - `binding apply` passes `idempotencyKey` in the second argument of the client call.
+  - `--kind` is the only repeatable option (`engine/docs/cli/project.md`).
+  - `BindingKind` enum from `project/contract.ts`; validate each `--kind` value against it.
+  - No code comments.
+- Done when: `pnpm run verify` is green. Local validation cases (invalid project ID, missing file)
+  and success paths (apply, list, get, export, revision list) are verified by the E2E table.
+
+### 05.13 Add project agent CLI commands
+
+- Files: `src/apps/cli/project.ts` (edit)
+- Do: Inside `addProjectCommand`, add an `agent` sub-group with help action.
+  1. Add leaf `agent list <project-id> <worker-binding-id>`:
+     - Options: `--limit` and `--cursor` (coercions `singleUse`).
+     - `validateProjectId(projectId, "cli.project.agent.list.invalid_project_id")`.
+     - Validate `workerBindingId` against `/^binding_[0-9A-HJKMNP-TV-Z]{26}$/`; throw
+       `Diagnostic("cli.project.agent.list.invalid_binding_id", "...")`.
+     - `requireToken(opts.token, "cli.project.agent.list.token_required")`.
+     - Validate pagination; default limit 100.
+     - Call client `["agentConfiguration.list"]({ params: { projectId, bindingId: workerBindingId }, query: { limit, cursor }, body: null })`.
+       (Route parameter is `bindingId`; CLI argument name is `workerBindingId`.)
+     - `handleReadResult(result, "cli.project.agent.list.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+  2. Add leaf `agent get <project-id> <worker-binding-id> <agent-name>`:
+     - `validateProjectId(projectId, "cli.project.agent.get.invalid_project_id")`.
+     - Validate `workerBindingId` against `/^binding_[0-9A-HJKMNP-TV-Z]{26}$/`; throw
+       `Diagnostic("cli.project.agent.get.invalid_binding_id", "...")`.
+     - `requireToken(opts.token, "cli.project.agent.get.token_required")`.
+     - Call client `["agentConfiguration.get"]({ params: { projectId, bindingId: workerBindingId, agentName }, query: {}, body: null })`.
+     - `handleReadResult(result, "cli.project.agent.get.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+- Rules:
+  - Route parameter is `bindingId` (not `workerBindingId`); task 05.2 schema uses `bindingId`.
+  - Both commands define no `--idempotency-key`.
+  - No code comments.
+- Done when: `pnpm run verify` is green. Local validation cases and agent list/get success paths
+  are verified by the E2E table.
+
+### 05.E E2E proof
+
+- Files: `src/apps/server/e2e-project-service.test.ts` (create)
+- Do:
+  1. Create the file. Use `gatewayFixture` from `src/apps/server/test-support.ts` and
+     `kanthord(args, env)` from `src/apps/server/cli-support.ts`.
+  2. For every fixture that creates a project or writes a binding-set, pass
+     `standIns: { createMission: (tx, pid, actor) => {}, liveNodesPinning: (tx, bid) => [] }`.
+     For every fixture that writes a repository binding, also pass
+     `repositoryConnector: { gitLsRemote: async () => {} }`. Plan 06 replaces the stand-ins;
+     Plan 04 wires the real connector. Remove both from each fixture call after those plans land.
+  3. Import named constants from `src/project/contract.ts` for every fixed string compared
+     in assertions.
+  4. Implement each scenario in the `## E2E` table.
+- Rules:
+  - Setup goes through the CLI only; state checks are CLI reads, never store reads.
+  - A refusal asserts the exact exit code and the error code at the start of stderr.
+  - stdout is parsed as JSON where the CLI page says the command prints JSON.
+  - Each test is self-contained with its own `gatewayFixture`.
+  - No code comments.
+- Done when: `node --test --test-timeout=30000 src/apps/server/e2e-project-service.test.ts`
+  passes; `pnpm run verify` passes.
+
+## E2E
+
+- Test file: `src/apps/server/e2e-project-service.test.ts` (runs in `pnpm run verify`).
+- Harness: `gatewayFixture` from `src/apps/server/test-support.ts` starts the real server on
+  a loopback port with an in-memory store; `kanthord(args, env)` from
+  `src/apps/server/cli-support.ts` runs the CLI as a subprocess with disposable XDG state,
+  `KANTHORD_ENDPOINT = fixture.endpoint` and `KANTHORD_TOKEN = fixture.token`. Each fixture that
+  creates a project or writes a binding-set passes
+  `standIns: { createMission: (tx, pid, actor) => {}, liveNodesPinning: (tx, bid) => [] }`
+  (Plan 06 replaces both) and, for repository binding writes,
+  `repositoryConnector: { gitLsRemote: async () => {} }` (Plan 04). After Plan 06 and Plan 04
+  land, remove those stand-ins from every fixture call that passes them.
+- Rules: setup goes through the CLI only; the state check is a CLI read, never a store read;
+  a refusal asserts the exact exit code and the error code at the start of stderr; stdout is
+  parsed as JSON where the CLI page says the command prints JSON.
+
+| Id     | Commands                                                                                                                                                                                                                                                             | Exit | Expect                                                                                                                        |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------- |
+| E05.1  | `credential create` (anthropic); `project create --name my-proj` (standIn active)                                                                                                                                                                                    | 0    | stdout has `id` starting with `project_`; `bindingSetVersion: 1`; `idempotencyKey` field                                      |
+| E05.2  | Re-send `project create --name my-proj` with same `--idempotency-key`                                                                                                                                                                                                | 0    | Same `id` as E05.1 (idempotent replay)                                                                                        |
+| E05.3  | `project list`                                                                                                                                                                                                                                                       | 0    | `items[0].name === "my-proj"`; `items[0].bindingSetVersion === 1`; `nextCursor: null`                                         |
+| E05.4  | `project get <projectId>`                                                                                                                                                                                                                                            | 0    | stdout has `id`, `name`, `bindingSetVersion`, `createdAt`                                                                     |
+| E05.5  | `project rename <projectId> --name my-proj-2`                                                                                                                                                                                                                        | 0    | stdout has `name: "my-proj-2"`; `idempotencyKey` field                                                                        |
+| E05.6  | `credential create` (github); `project binding apply <projectId> --file <v1.json>` (one repository binding: `git@github.com:owner/repo.git`, credential `github`; `gitLsRemote` injected as no-op)                                                                   | 0    | stdout has `bindingSetVersion: 2`; `changes[0].kind === "created"`; `idempotencyKey` field                                    |
+| E05.7  | Re-send `project binding apply` with same `--idempotency-key`                                                                                                                                                                                                        | 0    | Same `bindingSetVersion: 2`                                                                                                   |
+| E05.8  | `project binding list <projectId>`                                                                                                                                                                                                                                   | 0    | `items[0].kind === "repository"`; `nextCursor: null`                                                                          |
+| E05.9  | `project binding get <projectId> <bindingId>`                                                                                                                                                                                                                        | 0    | stdout has `id`, `projectId`, `name`, `kind: "repository"`, `resourceIdentity`, `revision: 1`, `createdAt`; `removedAt: null` |
+| E05.10 | `project binding export <projectId>`                                                                                                                                                                                                                                 | 0    | stdout has `version: 2`; `bindings` object keyed by binding name; parses as `BindingSetWrite`                                 |
+| E05.11 | `project binding revision list <projectId> <bindingId>`                                                                                                                                                                                                              | 0    | `items` has one revision; `nextCursor: null`                                                                                  |
+| E05.12 | `worker agent enablement put swe@1 --file <e.json>`; `project binding apply <projectId> --file <v2.json>` (adds worker binding `worker: "general@1"`, `entries: [{ agent: "swe@1", agentProvider: "default" }]`); `project agent list <projectId> <workerBindingId>` | 0    | agent list `items` has one entry; `items[0].agent === "swe@1"`; `items[0].valid === true`                                     |
+| E05.13 | `project agent get <projectId> <workerBindingId> swe@1`                                                                                                                                                                                                              | 0    | stdout has `agent: "swe@1"`, `worker`, `workerBindingId`, `bindingSetVersion`; `valid: true`                                  |
+| E05.14 | `project create --name INVALID_NAME`                                                                                                                                                                                                                                 | 1    | stderr starts with `cli.project.create.invalid_name:`                                                                         |
+| E05.15 | `project binding apply <projectId> --file /nonexistent.json`                                                                                                                                                                                                         | 1    | stderr starts with `cli.file.not_found:`                                                                                      |
+| E05.16 | `project binding apply <projectId> --file <w.json>` (worker binding `worker: "general@1"` with `entries: [{ agent: "swe@1" }]`; no enablement for `swe@1` in the fixture)                                                                                            | 1    | stderr starts with `worker.agent.enablement.unavailable:`                                                                     |
+| E05.17 | `worker agent enablement put swe@1 --file <e.json>`; `project binding apply <projectId> --file <w.json>` (worker entry `{ agent: "swe@1", agentProvider: "default" }`); `worker agent enablement remove swe@1 --expected-revision 1`                                 | 1    | last command: stderr starts with `worker.agent.enablement.in_use:`                                                            |
+| E05.18 | Same setup as E05.17 (without the remove); `worker agent enablement put swe@1 --file <invalidating.json>` (removes the `default` provider that the binding entry references)                                                                                         | 1    | stderr starts with `worker.agent.enablement.invalidates_bindings:`                                                            |
+
+`bindingsNaming` and `liveNodesPinning` are proved in colocated tests only; ERD 1 has no
+credential removal route that reaches `bindingsNaming`, and `liveNodesPinning` guards the
+resolution path, not the CLI boundary.
 
 ## Blockers
 

@@ -173,6 +173,118 @@ None. This plan creates the Scheduler Service from scratch.
   - No `schedulerConfigSchema` import in `src/config/index.ts`; Scheduler adds no config section. (`00-index.md`: "Custody, Scheduler and Repository add no config section.")
 - Done when: `pnpm run verify` passes; the migration isolation test for `"scheduler"` passes and finds exactly `scheduler_job`; the combined migration test includes `"scheduler_job"` in its table assertion.
 
+### 02.5 Wire SchedulerService into the composition root, expand the OpenAPI inventory, and regenerate static files
+
+- Files:
+  - `src/apps/server/index.ts` (edit)
+  - `src/apps/server/test-support.ts` (edit)
+  - `src/apps/cli/index.ts` (edit — line 298)
+  - `src/apps/server/openapi-integration.test.ts` (edit)
+  - `static/openapi.yaml` (regenerated)
+  - `static/openapi/**` fragments (regenerated)
+- Do — index.ts:
+  1. Add imports: `SchedulerService`, `schedulerMigrations` from `"../../scheduler/index.ts"`; `type WorkQueue` from `"../../scheduler/contract.ts"`.
+  2. In `Server.open`, add `{ service: "scheduler", migrations: schedulerMigrations }` to the `store.migrate` call after the custody entry.
+  3. Inside `composeServices`, before custody construction, add: `const scheduler = new SchedulerService({ config: {}, health: options.health })`.
+  4. Create the work-queue adapter: `const workQueue: WorkQueue = { insert: (tx, n, p, pr) => scheduler.insert(tx, n, p, pr), delete: (tx, n) => scheduler.delete(tx, n), priorityUpdate: (tx, n, pr) => scheduler.priorityUpdate(tx, n, pr) }`. Plan 06 passes `workQueue` to `MissionService`.
+  5. Call `scheduler.declare(registry)` in the declare block before the custody declare call.
+  6. Add `scheduler` to the `services` array at position 1 (before custody). Push a `scheduler.stop` closure into `releases` at the same position so the reverse-pop sequence stops scheduler last.
+  7. Add `scheduler` and `workQueue` to the `composeServices` return value.
+- Do — test-support.ts:
+  1. Add imports: `SchedulerService`, `schedulerMigrations` from `"../../scheduler/index.ts"`.
+  2. Add `{ service: "scheduler", migrations: schedulerMigrations }` to the `gatewayFixture` migration list after the custody entry.
+  3. In fixture startup, construct `const scheduler = new SchedulerService({ config: {}, health: options.health })` and call `await scheduler.start()` before custody starts.
+  4. Call `scheduler.declare(registry)` in the fixture declare block before the custody declare call, using the same `registry` reference passed to other services.
+  5. In fixture teardown, call `await scheduler.stop()` after custody stops.
+  6. Expose `scheduler` in the fixture return value.
+- Do — OpenAPI:
+  1. In `src/apps/cli/index.ts` at the `apiOperations` declaration: add `import { schedulerOperations } from "../../scheduler/contract.ts"` and append `...Object.values(schedulerOperations)` to the `apiOperations` array (plan 01 task 01.14 sets the array form).
+  2. From `engine/`, run `pnpm run build && node bin/kanthord.mjs gateway openapi`. Commit the updated `static/openapi.yaml` and all regenerated `static/openapi/**` fragment files.
+  3. In `src/apps/server/openapi-integration.test.ts`: import `schedulerOperations` from `"../../scheduler/contract.ts"`; append `...Object.values(schedulerOperations)` to the `apiOperations` array; add assertions:
+     - Assert `resolved.paths?.[schedulerOperations.queueList.path]?.get?.operationId` equals `schedulerOperations.queueList.id`.
+     - Assert the queueList 200 response schema has an `items` property of type `array` and a `nextCursor` property that is nullable.
+     - Assert `resolved.paths?.[schedulerOperations.queuePeek.path]?.get?.operationId` equals `schedulerOperations.queuePeek.id`.
+     - Assert the queuePeek 200 response schema has a `job` property that is nullable.
+- Rules:
+  - Construction order: scheduler before custody. (`architecture.impl.md:427–430`.)
+  - Stop order: reverse of construction; scheduler stops last. (`architecture.impl.md:449–469`.)
+  - `config: {}` satisfies `Dependencies.config: Record<string, never>` (task 02.3).
+  - `WorkQueue` method names are `insert`, `delete`, `priorityUpdate` (task 02.2).
+  - `openapi-integration.test.ts` compares every static file byte-for-byte against `serializeOpenAPIFile(document)`. Regeneration is required in this task.
+  - No code comments.
+- Done when: `pnpm run verify` passes; static files are regenerated and committed; the openapi-integration test asserts scheduler path operation ids and scheduler response schema shapes; existing integration tests pass with scheduler in the migration list.
+
+### 02.6 Add scheduler CLI command group
+
+- Files:
+  - `src/apps/cli/scheduler.ts` (new)
+  - `src/apps/cli/constants.ts` (edit)
+  - `src/apps/cli/index.ts` (edit)
+- Do:
+  1. Import `schedulerOperations`, `QUEUE_LIST_LIMIT_MIN`, `QUEUE_LIST_LIMIT_MAX`, `QUEUE_LIST_LIMIT_DEFAULT` from `../../scheduler/contract.ts`. Import `Command` from `commander`. Import `httpClient` from `../../gateway/client.ts`. Import `Diagnostic` from `../../kernel/errors.ts`. Import `requireToken`, `handleReadResult`, `singleUse`, `parsePositiveInt` from `./shared.ts`.
+  2. Export `addSchedulerCommand(program: Command): void`. Add group `scheduler` with `--endpoint <url>` (coercion `singleUse("--endpoint")`) and `--token <token>` (coercion `singleUse("--token")`). Set action to help.
+  3. Add sub-group `queue`. Set action to help.
+  4. Add leaf `queue list <project-id>`:
+     - Validate `projectId` matches `/^project_[0-9A-HJKMNP-TV-Z]{26}$/`; throw `Diagnostic("cli.scheduler.queue.list.invalid_project_id", "...")`.
+     - Options: `--limit` (coercion `singleUse("--limit")`) and `--cursor` (coercion `singleUse("--cursor")`).
+     - `requireToken(opts.token, "cli.scheduler.queue.list.token_required")`.
+     - When `--limit` is present: call `parsePositiveInt(opts.limit, "cli.pagination.limit_invalid")` → `parsed`; throw `Diagnostic("cli.pagination.limit_out_of_range", "...")` when `parsed < QUEUE_LIST_LIMIT_MIN || parsed > QUEUE_LIST_LIMIT_MAX`; otherwise use `parsed` as `limit`. When absent, use `QUEUE_LIST_LIMIT_DEFAULT` as `limit`.
+     - Call `httpClient(schedulerOperations, endpoint, token)["queueList"]({ params: { projectId }, query: { limit, cursor: opts.cursor }, body: null })`.
+     - `handleReadResult(result, "cli.scheduler.queue.list.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+  5. Add leaf `queue peek <project-id>`:
+     - Validate `projectId` matches `/^project_[0-9A-HJKMNP-TV-Z]{26}$/`; throw `Diagnostic("cli.scheduler.queue.peek.invalid_project_id", "...")`.
+     - `requireToken(opts.token, "cli.scheduler.queue.peek.token_required")`.
+     - Call `httpClient(schedulerOperations, endpoint, token)["queuePeek"]({ params: { projectId }, query: {}, body: null })`.
+     - `handleReadResult(result, "cli.scheduler.queue.peek.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+  6. In `src/apps/cli/constants.ts`: add `Scheduler = "scheduler"` to `CommandName`.
+  7. In `src/apps/cli/index.ts`: import `addSchedulerCommand`; replace the `CommandName.Scheduler` help-only stub with a call to `addSchedulerCommand(program)`.
+- Rules:
+  - Operation keys are `"queueList"` and `"queuePeek"` (camelCase, task 02.2).
+  - Both commands define no `--idempotency-key`.
+  - Use `QUEUE_LIST_LIMIT_MIN`, `QUEUE_LIST_LIMIT_MAX`, `QUEUE_LIST_LIMIT_DEFAULT` from `src/scheduler/contract.ts`; no bare numeric literals in comparisons.
+  - No code comments.
+- Done when: `pnpm run verify` passes; `scheduler queue list --help` exits 0 and stdout contains `<project-id>`; `scheduler queue peek --help` exits 0; `scheduler queue peek` without its positional argument exits nonzero (Commander parse error).
+
+### 02.E E2E proof
+
+- Files:
+  - `src/apps/server/e2e-scheduler-job.test.ts` (create)
+- Do:
+  1. Import from `node:assert/strict` and `node:test`. Import `gatewayFixture` from `./test-support.ts`. Import `kanthord`, `environment` from `./cli-support.ts`. Import `temporary` from `../../kernel/test-support.ts`.
+  2. Declare named constants: `const SYNTHETIC_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAA"`, `const EXIT_SUCCESS = 0`, `const EXIT_FAILURE = 1`.
+  3. Write test `"E02.1 queue list returns empty items for an empty project"`: start `gatewayFixture`; call `kanthord(["scheduler", "queue", "list", SYNTHETIC_PROJECT_ID], { ...environment(temporary(t)), KANTHORD_ENDPOINT: fixture.endpoint, KANTHORD_TOKEN: fixture.token })`; assert exit code `EXIT_SUCCESS`; parse stdout as JSON; assert `data.items` is an empty array and `data.nextCursor` is null.
+  4. Write test `"E02.2 queue peek returns null job for an empty project"`: same fixture and env; call `kanthord(["scheduler", "queue", "peek", SYNTHETIC_PROJECT_ID], ...)`; assert exit code `EXIT_SUCCESS`; parse stdout; assert `data.job` is null.
+  5. Write test `"E02.3 invalid project-id refusal"`: call `kanthord(["scheduler", "queue", "list", "badid"], { ...environment(temporary(t)), KANTHORD_ENDPOINT: fixture.endpoint, KANTHORD_TOKEN: fixture.token })`; assert exit code `EXIT_FAILURE`; assert stderr starts with `"cli.scheduler.queue.list.invalid_project_id:"`.
+  6. Write test `"E02.4 missing token refusal"`: call `kanthord(["scheduler", "queue", "list", SYNTHETIC_PROJECT_ID], { ...environment(temporary(t)), KANTHORD_ENDPOINT: fixture.endpoint, KANTHORD_TOKEN: "" })`; assert exit code `EXIT_FAILURE`; assert stderr starts with `"cli.scheduler.queue.list.token_required:"`.
+  7. Write test `"E02.5 limit out of range refusal"`: call `kanthord(["scheduler", "queue", "list", SYNTHETIC_PROJECT_ID, "--limit", "1001"], { ...environment(temporary(t)), KANTHORD_ENDPOINT: fixture.endpoint, KANTHORD_TOKEN: fixture.token })`; assert exit code `EXIT_FAILURE`; assert stderr starts with `"cli.pagination.limit_out_of_range:"`.
+  8. Write test `"E02.6 malformed cursor refusal"`: call `kanthord(["scheduler", "queue", "list", SYNTHETIC_PROJECT_ID, "--cursor", "dGVzdA"], { ...environment(temporary(t)), KANTHORD_ENDPOINT: fixture.endpoint, KANTHORD_TOKEN: fixture.token })`; assert exit code `EXIT_FAILURE`; assert stderr starts with `"system.pagination.cursor_invalid:"`. (Cursor `dGVzdA` is base64url for `"test"` — it survives the round-trip check but fails `identitySchema("job")`.)
+- Rules:
+  - Each test starts a fresh `gatewayFixture` inside its own `test(..., async (t) => { ... })` block.
+  - The empty-queue tests use `SYNTHETIC_PROJECT_ID`; the scheduler handler returns empty results for any project ID with no jobs, and no project record must exist.
+  - `KANTHORD_ENDPOINT` and `KANTHORD_TOKEN` override their base-environment equivalents per test.
+  - Named constants for all fixed strings in comparisons. (`docs/brainstorm/architecture.impl.md:17–20`.)
+  - No code comments.
+- Done when: `node --test --test-timeout=30000 src/apps/server/e2e-scheduler-job.test.ts` passes all 6 tests; `pnpm run verify` passes.
+
+## E2E
+
+- Test file: `src/apps/server/e2e-scheduler-job.test.ts` (runs in `pnpm run verify`).
+- Harness: `gatewayFixture` from `src/apps/server/test-support.ts` starts the real server on a loopback port with an in-memory store; `kanthord(args, env)` from `src/apps/server/cli-support.ts` runs the CLI as a subprocess with disposable XDG state, `KANTHORD_ENDPOINT = fixture.endpoint` and `KANTHORD_TOKEN = fixture.token`.
+- Rules: setup goes through the CLI only; the state check is a CLI read, never a store read; a refusal asserts the exact exit code and the error code at the start of stderr; stdout is parsed as JSON where the CLI page says the command prints JSON.
+
+| Id    | Commands                                                                     | Exit | Expect                                                                                                                                        |
+| ----- | ---------------------------------------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| E02.1 | `kanthord scheduler queue list <SYNTHETIC_PROJECT_ID>`                       | 0    | stdout `{"items":[],"nextCursor":null}` — field name `items` from `scheduler.md`: "Every list result is `{ "items": [...], "nextCursor": null | string }`" |
+| E02.2 | `kanthord scheduler queue peek <SYNTHETIC_PROJECT_ID>`                       | 0    | stdout `{"job":null}` — field `job` from `scheduler.md` queue peek: "`null` for an empty queue"                                               |
+| E02.3 | `kanthord scheduler queue list badid`                                        | 1    | stderr starts with `cli.scheduler.queue.list.invalid_project_id:`                                                                             |
+| E02.4 | `kanthord scheduler queue list <SYNTHETIC_PROJECT_ID>` (KANTHORD_TOKEN = "") | 1    | stderr starts with `cli.scheduler.queue.list.token_required:`                                                                                 |
+| E02.5 | `kanthord scheduler queue list <SYNTHETIC_PROJECT_ID> --limit 1001`          | 1    | stderr starts with `cli.pagination.limit_out_of_range:`                                                                                       |
+| E02.6 | `kanthord scheduler queue list <SYNTHETIC_PROJECT_ID> --cursor dGVzdA`       | 1    | stderr starts with `system.pagination.cursor_invalid:` — cursor decodes to `"test"`, fails `identitySchema("job")`                            |
+
+Scenarios where the queue contains jobs (non-null `job` on peek, non-empty `items` on list) require a mission import to populate the scheduler; plan 06 owns those scenarios.
+
 ## Blockers
 
 None.

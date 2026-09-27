@@ -27,7 +27,8 @@ This plan does not deliver:
 - ERD 2 pin and handover calls (`pinCredential`, `liveExecutionsPinning`, execution store
   view, handover envelope).
 - An HTTP removal route (no removal operation in ERD 1 CLI spec).
-- Composition of injected collaboration implementations (wired in Plan 07).
+- Real `agentProvidersDependentOn` and `enablementsDependentOnModel` implementations (Plan 03 provides them).
+- Real `bindingsNaming` implementation (Plan 05 provides it).
 
 ## Sources
 
@@ -47,6 +48,8 @@ This plan does not deliver:
 - `docs/reference/erd/01-setup.md#custody` — `credential` table columns, unique index,
   Custody constraints, additional authenticated data rule.
 - `engine/docs/cli/credential.md` — 9 operations, HTTP routes, error codes, record schemas.
+- `engine/docs/cli/common-flags.md` — flag resolution order, pagination contract,
+  single-use enforcement.
 - `engine/AGENTS.md#add-a-service`, `#add-a-migration`, `#add-an-operation` — file
   structure and migration rules.
 - `engine/.agents/plan/00-index.md` — ESLint element rule, migration prefix exemption,
@@ -58,8 +61,10 @@ None. The `credential` table has no ERD 1 peer dependency.
 
 The injected collaborations `agentProvidersDependentOn` and `enablementsDependentOnModel`
 come from Plan 03, and `bindingsNaming` comes from Plan 05. Plan 01 declares their types
-inline and accepts them as required dependencies. Tests inject fakes. Plan 07 wires the
-real implementations.
+inline and accepts them as required dependencies. Plan 01 places `unwired` stubs for all
+three in the composition root and in `gatewayFixture`. Plan 03 replaces
+`agentProvidersDependentOn` and `enablementsDependentOnModel`. Plan 05 replaces
+`bindingsNaming`.
 
 ## Provides
 
@@ -72,6 +77,29 @@ real implementations.
 | `modelListCheck`               | `(tx: Transaction, credentialName: string): ResourceCheck` — reads the newest live revision of the name inside `tx`; returns a closure that runs the `GET /models` probe (anthropic, openai-compatible); a missing revision or a non-model-list platform returns a closure that answers `unknown` without a remote call                                 | `src/custody/service.ts` | 03, 07         |
 
 ## Tasks
+
+### 01.0 Fix the read commit gate in `src/gateway/invocation.ts`
+
+- Files:
+  - `engine/src/gateway/invocation.ts` (edit)
+  - `engine/src/gateway/invocation.test.ts` (create or edit)
+- Do:
+  1. In `engine/src/gateway/invocation.ts`, change line 326.
+     Current: `if (!reservation || committed) throw new Error("A mutation commits exactly once.")`.
+     Replace with: `if (committed) throw new Error("caller.commit: called twice.")`.
+  2. At line 340, change `this.idempotency.complete(reservation!, committed, operation.secret)` to
+     `if (reservation) this.idempotency.complete(reservation, committed, operation.secret)`.
+  3. In `src/gateway/invocation.test.ts` (create in `src/gateway/` or add to the existing test if one exists), add two tests using a minimal fake operation registry and fake store:
+     - `"read operation commits once"`: register a read operation (mutation false) with no `Idempotency-Key` header; call the handler which calls `caller.commit`; assert the call returns successfully with HTTP 200.
+     - `"second commit throws"`: register any operation; in the handler closure call `caller.commit` twice; assert the second call (inside the handler) throws an error whose message contains `"called twice"`. Do not assert HTTP status or invocation return value for this test — `Invocation.execute` catches errors and converts them to a generic failure response; the throw must be asserted at the handler level.
+- Rules:
+  - Every operation (read and mutation alike) may call `caller.commit` exactly once (`architecture.impl.md:618`).
+  - The idempotency record completes only when a reservation exists (reads have no reservation; `architecture.impl.md:683`).
+  - No code comments.
+- Done when:
+  - `node --test src/gateway/invocation.test.ts` passes both new tests.
+  - The existing read handlers in Plans 01–06 (for example `credential.get`, `credential.list`) can call `caller.commit` without the error.
+  - `pnpm run verify` passes.
 
 ### 01.1 Create scaffold: table migration, operation contracts, ESLint element, migration test
 
@@ -764,6 +792,387 @@ real implementations.
   - `node --test src/custody/resource-healthcheck.test.ts` passes all probe, inventory and
     dispatch tests.
   - `pnpm run verify` passes.
+
+### 01.11 Create the `unwired` module
+
+- Files:
+  - `engine/src/apps/server/unwired.ts` (create)
+  - `engine/src/apps/server/unwired.test.ts` (create)
+- Do:
+  1. Create `engine/src/apps/server/unwired.ts`. Import `CodedError` from
+     `../../kernel/errors.ts`. Export `function unwired(seam: string): (...args: never[]) => never`.
+     The returned function throws
+     `new CodedError("system.composition.unwired", seam + " is not wired.")` when called.
+  2. Create `engine/src/apps/server/unwired.test.ts`. Write one test using `node:test` and
+     `node:assert/strict`: calling the function returned by `unwired("agentProvidersDependentOn")`
+     throws a `CodedError` with code `"system.composition.unwired"`.
+- Rules:
+  - The returned function never returns; it always throws when called.
+  - Error code `"system.composition.unwired"` has three parts (`architecture.impl.md:339`).
+  - No code comments.
+- Done when:
+  - `node --test src/apps/server/unwired.test.ts` passes.
+  - `pnpm run verify` passes.
+
+### 01.12 Create `src/apps/server/cli-support.ts`
+
+- Files:
+  - `engine/src/apps/server/cli-support.ts` (create)
+  - `engine/src/apps/server/cli-worker.test.ts` (edit)
+- Do:
+  1. Create `engine/src/apps/server/cli-support.ts`. Import `execFile` from `node:child_process`,
+     `join` from `node:path`, `existsSync` from `node:fs`, `isNumber` from
+     `../../kernel/values.ts`, and `assert` from `node:assert/strict`.
+     Export two functions:
+     - `kanthord(args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number; stdout: string; stderr: string }>`:
+       Assert `args.length > 0` and `env.XDG_CONFIG_HOME`. Run the entry at
+       `new URL("../../main.ts", import.meta.url).href` as a subprocess with
+       `execFile(process.execPath, ["--input-type=module", "-e", ...], { env, timeout: 10000 }, ...)`.
+       Return `{ code, stdout, stderr }` with the subprocess exit code.
+     - `environment(directory: string): NodeJS.ProcessEnv`:
+       Assert `directory.startsWith("/")` and `existsSync(directory)`. Return
+       `{ ...process.env, XDG_CONFIG_HOME: directory, KANTHORD_CONFIG: join(directory, "absent.yaml"), KANTHORD_ENDPOINT: "http://127.0.0.1:1", KANTHORD_TOKEN: undefined }`.
+  2. Edit `engine/src/apps/server/cli-worker.test.ts`.
+     Remove the local `command` function definition and the local `environment` function definition.
+     Add `import { kanthord as command, environment } from "./cli-support.ts"`. No other logic
+     changes.
+- Rules:
+  - `KANTHORD_ENDPOINT` defaults to a dead address; E2E tests override it with the fixture endpoint.
+  - No code comments.
+- Done when:
+  - `node --test src/apps/server/cli-worker.test.ts` passes without logic changes.
+  - `pnpm run verify` passes.
+
+### 01.13 Add shared CLI helper module
+
+- Files:
+  - `engine/src/apps/cli/shared.ts` (create)
+  - `engine/src/apps/cli/shared.test.ts` (create)
+- Do:
+  1. Export `detectDuplicateKeys(text: string): void`.
+     Walk `text` character by character; maintain a nesting stack of `Set<string>`.
+     Push a new `Set` on `{`; pop on `}`.
+     When inside an object, scan each JSON string key: read from `"` through the next unescaped `"`,
+     interpret `\\` escape sequences to produce the key value. After the `:`, check the key
+     against the current `Set`; throw `Diagnostic("cli.file.duplicate_key", key)` if found;
+     otherwise add the key. Skip strings that are values (after `:` or in arrays).
+     Throw `Diagnostic("cli.file.not_json", "...")` on any tokenizer error.
+  2. Export `readJsonFile(path: string, requirePrivate = false): unknown`.
+     Throw `Diagnostic("cli.file.invalid_path", "stdin is not accepted")` when `path === "-"`.
+     When `requirePrivate` is false: call `statSync(path, { throwIfNoEntry: false })` from
+     `node:fs`; throw `Diagnostic("cli.file.not_found", "...")` when undefined; throw
+     `Diagnostic("cli.file.not_regular", "...")` when `stat.isFile()` is false; call
+     `readFileSync(path)`; decode with `new TextDecoder("utf-8", { fatal: true }).decode(buffer)`;
+     catch `TypeError` and throw `Diagnostic("cli.file.encoding_invalid", "...")`.
+     When `requirePrivate` is true: call `statSync(path, { throwIfNoEntry: false })`; throw
+     `Diagnostic("cli.file.not_found", "...")` when undefined; throw
+     `Diagnostic("cli.file.not_regular", "...")` when not a file; call `readPrivate(path)` from
+     `../../kernel/files.ts`; its `system.files.invalid_permissions` propagates unmodified.
+     Call `detectDuplicateKeys(text)`. Call `JSON.parse(text)`; catch `SyntaxError` and throw
+     `Diagnostic("cli.file.not_json", "...")`. Throw `Diagnostic("cli.file.not_object", "...")`
+     when the parsed value is not a plain object. Return the parsed value.
+  3. Export `readJsonFileAs<S extends z.ZodTypeAny>(path: string, schema: S, requirePrivate = false): z.infer<S>`.
+     Call `readJsonFile(path, requirePrivate)` → `raw`. Call `schema.safeParse(raw)`; throw
+     `Diagnostic("cli.file.schema_invalid", JSON.stringify(result.error))` on failure.
+     Return `result.data`.
+  4. Export `resolveKey(options: { idempotencyKey?: string }): string`.
+     When `options.idempotencyKey` is present, validate with `ulidSchema.safeParse`; throw
+     `Diagnostic("cli.idempotency_key.invalid", "...")` on failure; return the value.
+     When absent, return `ulid()`.
+  5. Export `handleMutationResult<T>(result: OperationResult<T>, indeterminateCode: string, key: string): T`.
+     On `OperationResultType.Completed` return `result.data`. On `OperationResultType.Failure`
+     throw `Diagnostic(result.error.error.code, JSON.stringify({ ...result.error.error, idempotencyKey: key }))`.
+     On `OperationResultType.Indeterminate` throw
+     `Diagnostic(indeterminateCode, "retry with --idempotency-key " + key)`.
+  6. Export `handleReadResult<T>(result: OperationResult<T>, indeterminateCode: string): T`.
+     On `OperationResultType.Completed` return `result.data`. On `OperationResultType.Failure`
+     throw `Diagnostic(result.error.error.code, JSON.stringify(result.error.error))`.
+     On `OperationResultType.Indeterminate` throw
+     `Diagnostic(indeterminateCode, "retry the command")`.
+  7. Export `requireToken(token: string | undefined, code: string): asserts token is string`.
+     Throw `Diagnostic(code, "a token is required")` when token is undefined or blank.
+  8. Export `parsePositiveInt(value: string, code: string): number`.
+     Parse with `Number(value)`; throw `Diagnostic(code, "not a positive integer")` when not
+     a finite positive safe integer.
+  9. Export `singleUse(name: string): (value: string, previous: string | undefined) => string`.
+     Return a Commander coercion. When `previous` is not undefined, throw
+     `Diagnostic("cli.option.duplicate", name + " may not be repeated")`. Otherwise return `value`.
+  10. In `src/apps/cli/shared.test.ts` add unit tests using `node:test` and `node:assert/strict`.
+- Rules:
+  - `readPrivate` from `../../kernel/files.ts`; its missing-path behavior throws
+    `system.files.inspect_failed`, not ENOENT — always check existence with `statSync` before
+    calling it.
+  - `ulidSchema` from `../../kernel/identity.ts`; `ulid` from `ulid`.
+  - `OperationResultType` from `../../kernel/operation.ts`.
+  - `z` from `zod`.
+  - No code comments.
+- Done when:
+  - `pnpm run verify` is green.
+  - Test: `readJsonFile("-")` throws `cli.file.invalid_path`.
+  - Test: `readJsonFile("/nonexistent/path.json")` throws `cli.file.not_found`.
+  - Test: `readJsonFile` on a regular file with `{"a":1}` returns `{ a: 1 }`.
+  - Test: `readJsonFile` on a file with `[1,2]` throws `cli.file.not_object`.
+  - Test: `readJsonFile` on a file with `{"a":1,"a":2}` throws `cli.file.duplicate_key`.
+  - Test: `readJsonFile` on a file with `{"x":{"a":1,"a":2}}` throws `cli.file.duplicate_key`
+    (nested duplicate).
+  - Test: `resolveKey({ idempotencyKey: "not-a-ulid" })` throws `cli.idempotency_key.invalid`.
+  - Test: `resolveKey({ idempotencyKey: "01ARZ3NDEKTSV4RRFFQ69G5FAA" })` returns the key.
+  - Test: `resolveKey({})` returns a 26-character string.
+  - Test: `parsePositiveInt("0", "cli.test.bad_int")` throws `cli.test.bad_int`.
+  - Test: `parsePositiveInt("1", "cli.test.bad_int")` returns 1.
+  - Test: `singleUse("--endpoint")("a", "b")` throws `cli.option.duplicate`.
+  - Test: `singleUse("--endpoint")("a", undefined)` returns `"a"`.
+  - Test: `handleMutationResult` on Failure includes `idempotencyKey` in the thrown diagnostic's
+    message.
+
+### 01.14 Wire Custody into the composition root, extend `gatewayFixture`, and publish OpenAPI
+
+- Files:
+  - `engine/src/custody/index.ts` (edit)
+  - `engine/src/apps/server/index.ts` (edit)
+  - `engine/src/apps/server/test-support.ts` (edit)
+  - `engine/src/apps/cli/index.ts` (edit, line 298)
+  - `engine/static/openapi.yaml` (regenerate)
+  - `engine/static/openapi/**` (regenerate)
+  - `engine/src/apps/server/openapi-integration.test.ts` (edit)
+- Do:
+  1. In `engine/src/custody/index.ts`, add
+     `export { deriveEnvelopeKey } from "./envelope.ts"`.
+  2. In `engine/src/apps/server/index.ts`:
+     a. Add imports: `CustodyComponent`, `custodyMigrations`, `deriveEnvelopeKey` from
+     `../../custody/index.ts`; `CUSTODY_SERVICE_NAME` from `../../custody/contract.ts`;
+     `unwired` from `./unwired.ts`.
+     b. Add `{ service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations }` before the
+     `gateway` entry in `store.migrate([...])`.
+     c. Add `standIns?: { agentProvidersDependentOn?: AgentProvidersDependentOnFn; enablementsDependentOnModel?: EnablementsDependentOnModelFn; bindingsNaming?: BindingsNamingFn }` to the
+     `Options` type of `composeServices`. `AgentProvidersDependentOnFn`,
+     `EnablementsDependentOnModelFn` and `BindingsNamingFn` are the dependency function types
+     from `../../custody/index.ts`. The server application never passes `standIns`.
+     d. In `composeServices`, add
+     `const envelopeKey = deriveEnvelopeKey(options.config.masterKey)` before any service
+     construction.
+     e. Declare `let custody: CustodyComponent` as a hoisted variable.
+     f. Reorder construction so that `custody` is assigned first, before `worker` and `project`.
+     Assign `custody = new CustodyComponent({ envelopeKey, logger: options.logger, health: options.health, agentProvidersDependentOn: options.standIns?.agentProvidersDependentOn ?? ((tx, name) => unwired("agentProvidersDependentOn")(tx, name)), enablementsDependentOnModel: options.standIns?.enablementsDependentOnModel ?? ((tx, name, model) => unwired("enablementsDependentOnModel")(tx, name, model)), bindingsNaming: options.standIns?.bindingsNaming ?? ((tx, name) => unwired("bindingsNaming")(tx, name)) })`.
+     g. Call `custody.declare(registry)` before `project.declare(registry)` and
+     `worker.declare(registry)`.
+     h. Set `services = [custody, worker, project, gateway]`. Push releases in the same order;
+     the reverse-pop sequence stops `gateway` first and `custody` last.
+     i. Update `engine/src/apps/server/index.test.ts` to match the new construction and stop
+     order.
+     j. Return `{ custody, project, worker, gateway, invocation, registry }` from
+     `composeServices`.
+  3. In `engine/src/apps/server/test-support.ts`:
+     a. Import `custodyMigrations` from `../../custody/index.ts` and `CUSTODY_SERVICE_NAME` from
+     `../../custody/contract.ts`.
+     b. Add `{ service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations }` before the
+     `gateway` entry in `store.migrate([...])`.
+     c. Add `standIns?: Parameters<typeof composeServices>[0]["standIns"]` to the
+     `gatewayFixture` options type. Forward `standIns` to `composeServices`.
+     d. Extract `custody` from the `composeServices` result.
+     e. Start services in construction order: `[custody, worker, project, gateway]`.
+     f. Add `custody` to the quiesce call.
+     g. Stop in reverse construction order: `[gateway, project, worker, custody]`.
+     h. Return `custody` from the fixture.
+  4. In `engine/src/apps/cli/index.ts` at line 298 where `const apiOperations` is declared:
+     a. Add import for `custodyOperations` from `../../custody/contract.ts`.
+     b. Replace the object spread with an array, because two operation sets share short client keys such as `list` and `get`, and an object spread keeps only the last one:
+     `const apiOperations = [...Object.values(gatewayOperations), ...Object.values(custodyOperations), ...Object.values(workerOperations)]`.
+     c. Change `writeOpenAPI(Object.values(apiOperations), ...)` at line 278 to `writeOpenAPI(apiOperations, ...)`.
+  5. In `engine/src/apps/server/openapi-integration.test.ts`:
+     a. Import `custodyOperations` from `../../custody/contract.ts`.
+     b. Replace the test's `apiOperations` object with the same array form as step 4b, and change `emitOpenAPIFiles(Object.values(apiOperations))` to `emitOpenAPIFiles(apiOperations)`.
+     c. Add an assertion for at least one `credential.*` path.
+  6. Run `pnpm run build && node bin/kanthord.mjs gateway openapi` from the `engine/` directory.
+     Commit the regenerated files under `static/`.
+- Rules:
+  - Construction order: custody before worker, worker before project, project before gateway
+    (`architecture.impl.md:427–430`).
+  - Stop order: gateway first, then project, then worker, then custody
+    (`architecture.impl.md:449–469`).
+  - `standIns` keys override `unwired` stubs; the server application never passes `standIns`.
+    Plan 03 removes `agentProvidersDependentOn` and `enablementsDependentOnModel` from the type.
+    Plan 05 removes `bindingsNaming`. Plan 07 removes `standIns` when no key remains.
+  - `deriveEnvelopeKey(config.masterKey)` derives the cipher key; `CustodyComponent` never
+    receives `masterKey` itself.
+  - `engine/AGENTS.md` (Regenerate OpenAPI): change declarations first; run the command;
+    commit; verify. `service: "credential"` on all custody operations (D9).
+  - No code comments.
+- Done when:
+  - `pnpm run verify` passes.
+  - `src/apps/server/index.test.ts` passes with the updated construction and stop order.
+  - `custody` is available from `composeServices` and `gatewayFixture`.
+  - The emitted OpenAPI document includes all 9 `credential.*` paths.
+
+### 01.15 Add credential read commands
+
+- Files:
+  - `engine/src/apps/cli/credential.ts` (create)
+  - `engine/src/apps/cli/constants.ts` (edit)
+  - `engine/src/apps/cli/index.ts` (edit)
+- Do:
+  1. Create `engine/src/apps/cli/credential.ts`. Import `custodyOperations` from
+     `../../custody/contract.ts`. Import helpers from `./shared.ts`. Import `resolveClient`
+     from `./resolver.ts`.
+  2. Export `addCredentialCommand(program: Command): void`. Add group `credential` with
+     `--endpoint <url>` (coercion `singleUse("--endpoint")`) and `--token <token>` (coercion
+     `singleUse("--token")`). Set action to help.
+  3. All `httpClient` calls: `httpClient(custodyOperations, endpoint, token)`.
+     All read commands define no `--idempotency-key`. Commander rejects an unknown
+     `--idempotency-key` on read commands.
+  4. Add leaf `list`:
+     - Options: `--platform <platform>` (coercion `singleUse("--platform")`),
+       `--limit <count>` (coercion `singleUse("--limit")`),
+       `--cursor <cursor>` (coercion `singleUse("--cursor")`).
+     - `requireToken(opts.token, "cli.credential.list.token_required")`.
+     - Validate `--limit`: when present,
+       `parsePositiveInt(opts.limit, "cli.pagination.limit_invalid")`; clamp to 1–1000;
+       throw `Diagnostic("cli.pagination.limit_out_of_range", "...")` when outside range.
+       Default to 100.
+     - Call client `["list"]({ params: {}, query: { platform: opts.platform, limit, cursor: opts.cursor }, body: null })`.
+     - `handleReadResult(result, "cli.credential.list.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+  5. Add leaf `get <credential-name>`:
+     - `requireToken(opts.token, "cli.credential.get.token_required")`.
+     - Call client `["get"]({ params: { credentialName: name }, query: {}, body: null })`.
+     - `handleReadResult(result, "cli.credential.get.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+  6. Add leaf `login-status <session>`:
+     - `requireToken(opts.token, "cli.credential.login_status.token_required")`.
+     - Call client `["login_status"]({ params: { sessionId: session }, query: {}, body: null })`.
+     - `handleReadResult(result, "cli.credential.login_status.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+  7. In `engine/src/apps/cli/constants.ts`: add `Credential = "credential"` to `CommandName`.
+  8. In `engine/src/apps/cli/index.ts`: import `addCredentialCommand`; call it inside
+     `createProgram` after `addJWTCommand`.
+- Rules:
+  - Read commands define no `--idempotency-key`; Commander's unknown-option rejection applies.
+  - Operation keys are short, no `credential.` prefix.
+  - No code comments.
+- Done when:
+  - `pnpm run verify` is green.
+
+### 01.16 Add credential mutation commands
+
+- Files:
+  - `engine/src/apps/cli/credential.ts` (edit)
+- Do: Inside `addCredentialCommand`, after the read commands, add these six mutation commands.
+  All accept `--idempotency-key <key>` (coercion `singleUse("--idempotency-key")`).
+  1. Add leaf `create --file <path>`:
+     - `--file` coercion: `singleUse("--file")`.
+     - `requireToken(opts.token, "cli.credential.create.token_required")`.
+     - `resolveKey(opts)` → `key`.
+     - `readJsonFileAs(opts.file, credentialCreateSchema, true)` → body.
+     - Call client `["create"]({ params: {}, query: {}, body }, { idempotencyKey: key })`.
+     - `handleMutationResult(result, "cli.credential.create.indeterminate", key)` → data.
+     - Print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  2. Add leaf `rotate <credential-name> --file <path>`:
+     - `--file` coercion: `singleUse("--file")`.
+     - `requireToken`; `resolveKey` → `key`.
+     - `readJsonFileAs(opts.file, credentialRotateBodySchema, true)` → body (private file;
+       body contains the new secret material).
+     - Call client `["rotate"]({ params: { credentialName: name }, query: {}, body }, { idempotencyKey: key })`.
+     - `handleMutationResult(result, "cli.credential.rotate.indeterminate", key)` → data.
+     - Print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  3. Add leaf `update-metadata <credential-name> --file <path>`:
+     - `--file` coercion: `singleUse("--file")`.
+     - `requireToken`; `resolveKey` → `key`.
+     - `readJsonFileAs(opts.file, credentialUpdateMetadataBodySchema)` → body (ordinary file).
+     - Call client `["update_metadata"]({ params: { credentialName: name }, query: {}, body }, { idempotencyKey: key })`.
+     - `handleMutationResult(result, "cli.credential.update_metadata.indeterminate", key)` → data.
+     - Print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  4. Add leaf `revoke <credential-name> <revision>`:
+     - `parsePositiveInt(revision, "cli.credential.revoke.invalid_revision")` → `rev`.
+     - `requireToken`; `resolveKey` → `key`.
+     - Call client `["revoke"]({ params: { credentialName: name, revision: rev }, query: {}, body: null }, { idempotencyKey: key })`.
+     - `handleMutationResult(result, "cli.credential.revoke.indeterminate", key)` → data.
+     - Print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  5. Add leaf `login <platform> --name <name>`:
+     - `--name` coercion: `singleUse("--name")`; required.
+     - `--mode <mode>` coercion: `singleUse("--mode")`; optional; accepted values `browser`
+       and `device`; throw `Diagnostic("cli.credential.login.invalid_mode", "...")` on other
+       value.
+     - `requireToken`; `resolveKey` → `key`.
+     - Call client `["login"]({ params: {}, query: {}, body: { platform, name: opts.name, mode: opts.mode } }, { idempotencyKey: key })`.
+     - `handleMutationResult(result, "cli.credential.login.indeterminate", key)` → data.
+     - Print one line per field to `process.stdout`: `sessionId`, `address`, `code`,
+       `expiresAt`, then `idempotencyKey: key`. A `null` `code` (browser mode) prints an
+       empty line. The command never polls (`credential.md` line-output exception).
+  6. Add leaf `login-code <session> <value>`:
+     - `requireToken`; `resolveKey` → `key`.
+     - Call client `["login_code"]({ params: { sessionId: session }, query: {}, body: { value } }, { idempotencyKey: key })`.
+     - `handleMutationResult(result, "cli.credential.login_code.indeterminate", key)` → data.
+     - Print `JSON.stringify({ ...data, idempotencyKey: key })`.
+- Rules:
+  - `create` and `rotate` pass `requirePrivate = true` to `readJsonFileAs`.
+  - `update-metadata` passes `requirePrivate = false`.
+  - `idempotencyKey` goes in the second argument of the client call, not in `body`.
+  - Field name is `expiresAt`, not `expiry` (`credential.md` login response fields).
+  - No code comments.
+- Done when:
+  - `pnpm run verify` is green.
+
+### 01.E E2E proof
+
+- Files:
+  - `engine/src/apps/server/e2e-custody.test.ts` (create)
+- Do:
+  Create `engine/src/apps/server/e2e-custody.test.ts` using `node:test`.
+  Each test uses one fresh `gatewayFixture` (no `standIns` needed; see `## E2E` Harness).
+  The env is built with `environment(temporary(t))` extended with
+  `KANTHORD_ENDPOINT: fixture.endpoint` and `KANTHORD_TOKEN: fixture.token`. Every JSON
+  stdout is parsed with `JSON.parse`; every refusal asserts exit code 1 and that
+  `stderr.startsWith("<code>:")`. Write one test per scenario in the table in `## E2E`.
+  Local-validation cases (file not found, duplicate option, invalid revision, invalid mode)
+  do not start a server; they run in the same file with `environment(temporary(t))` and a
+  dead `KANTHORD_ENDPOINT`.
+- Rules:
+  - Setup goes through the CLI only.
+  - State checks are CLI reads, never store reads.
+  - No code comments. Each test is self-contained; every test creates its own credentials and
+    runs all setup commands inside that test.
+- Done when:
+  - `node --test --test-timeout=30000 src/apps/server/e2e-custody.test.ts` passes.
+  - `pnpm run verify` passes.
+
+## E2E
+
+- Test file: `src/apps/server/e2e-custody.test.ts` (runs in `pnpm run verify`).
+- Harness: `gatewayFixture` from `src/apps/server/test-support.ts` starts the real server on
+  a loopback port with an in-memory store; `kanthord(args, env)` from
+  `src/apps/server/cli-support.ts` runs the CLI as a subprocess with disposable XDG state,
+  `KANTHORD_ENDPOINT = fixture.endpoint` and `KANTHORD_TOKEN = fixture.token`. No `standIns`
+  are needed: E01.7 rotates with no model removal and E01.9 adds a model without removing one,
+  so `enablementsDependentOnModel` is not reached; no E01 path deletes a credential, so
+  `agentProvidersDependentOn` and `bindingsNaming` are not reached. Plan 03 replaces
+  `agentProvidersDependentOn` and `enablementsDependentOnModel`. Plan 05 replaces
+  `bindingsNaming`.
+- Rules: setup goes through the CLI only; the state check is a CLI read, never a store read;
+  a refusal asserts the exact exit code and the error code at the start of stderr; stdout is
+  parsed as JSON where the CLI page says the command prints JSON.
+
+| Id     | Commands                                                                                                                                                               | Exit | Expect                                                                                                               |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------- |
+| E01.1  | `credential create --file <anthropic.json>` then `credential get <name>`                                                                                               | 0, 0 | stdout JSON: `name`, `platform === "anthropic"`, `revisions[0].revision === 1`; no `secret` field in either response |
+| E01.2  | `credential create --file <same-name.json>` with a different `--idempotency-key` (same name)                                                                           | 1    | stderr starts `credential.name.conflict:`                                                                            |
+| E01.3  | `credential create --file <anthropic.json>` with same `--idempotency-key` as first create in E01.3's own setup                                                         | 0    | stdout JSON identical to the first create in this test; `revisions` still has 1 entry                                |
+| E01.4  | `credential list`                                                                                                                                                      | 0    | stdout JSON: `items` array contains the created name; no `secret`                                                    |
+| E01.5  | `credential list --platform anthropic` then `credential list --platform github`                                                                                        | 0, 0 | first `items` contains the anthropic name; second `items` is empty                                                   |
+| E01.6  | `credential get nonexistent`                                                                                                                                           | 1    | stderr starts `credential.credential.not_found:`                                                                     |
+| E01.7  | `credential rotate <github-name> --file <rotate.json>` (`expectedRevision: 1`; same secret; no model removal) then `credential get <github-name>`                      | 0, 0 | stdout JSON: `revisions` has 2 entries; no `secret` in any revision                                                  |
+| E01.8  | `credential rotate <github-name> --file <stale.json>` (`expectedRevision: 0`; stale)                                                                                   | 1    | stderr starts `credential.revision.conflict:`                                                                        |
+| E01.9  | `credential update-metadata <oai-name> --file <meta.json>` (openai-compatible; add model `gpt-4o`, no removal; `expectedRevision: 1`) then `credential get <oai-name>` | 0, 0 | stdout JSON: `revisions` has 2 entries; newest revision `metadata.models` contains `gpt-4o`; no `secret`             |
+| E01.10 | create `<github-name>`, rotate (`expectedRevision: 1`) to get revision 2, then `credential revoke <github-name> 1` then `credential get <github-name>`                 | 0, 0 | stdout JSON: revision 1 has `endedAt` non-null; revision 2 has `endedAt === null`                                    |
+| E01.11 | create `<github-name>`, rotate to get revision 2, then `credential revoke <github-name> 2` (newest live)                                                               | 1    | stderr starts `credential.revision.newest_live:`                                                                     |
+| E01.12 | `credential login github --name n`                                                                                                                                     | 1    | stderr starts `credential.entry.unsupported:` (`github` does not accept OAuth entry)                                 |
+| E01.13 | `credential login-status login_session_01ARZ3NDEKTSV4RRFFQ69G5FAV` (valid format, absent)                                                                              | 1    | stderr starts `credential.login.not_found:`                                                                          |
+| E01.14 | `credential login-code login_session_01ARZ3NDEKTSV4RRFFQ69G5FAV value` (valid format, absent)                                                                          | 1    | stderr starts `credential.login.not_found:`                                                                          |
+
+Model-removal refusal on `rotate` and `update-metadata` (`credential.metadata.model_in_use`)
+is tested in plan 03, which provides the real `enablementsDependentOnModel` implementation.
+Binding-naming refusal is tested in plan 05, which provides the real `bindingsNaming`
+implementation. The `login` and `login-code` success paths require pi-ai OAuth interaction;
+plan 01 tests refusal paths only for those commands.
 
 ## Blockers
 

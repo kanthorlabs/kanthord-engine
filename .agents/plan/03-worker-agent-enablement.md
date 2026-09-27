@@ -15,6 +15,12 @@ This plan delivers:
 
 The static worker catalog module is created in this plan. `validateEntry` needs it to resolve agent names by worker name and to list the agents of a worker. `worker.agent.get` is out of ERD 1: its prompts (`docs/brainstorm/worker-service.impl.md:225`) and its tools (`:281`) ship with the native runtime, so ERD 1 declares no placeholder for them.
 
+This plan also absorbs:
+
+- Tasks 08.11 and 08.12: eight `worker agent enablement` CLI commands added to `src/apps/cli/worker.ts`.
+- Worker part of 07.3: real `custodySuitability`, `credentialMetadata` and `modelListCheck` closures from `CustodyComponent` wired into `WorkerService` in `src/apps/server/index.ts`; Custody's `agentProvidersDependentOn` and `enablementsDependentOnModel` stubs replaced with real closures from `WorkerService`; `entriesOfAgent` remains `unwired("entriesOfAgent")` until Plan 05.
+- Worker part of 07.6: `workerOperations` confirmed in the `apiOperations` spread; OpenAPI regenerated for the eight new operations; `openapi-integration.test.ts` updated.
+
 ## Sources
 
 - `docs/brainstorm/worker-service.md#agent-configuration` — enablement lifecycle, validation order, refusal rules
@@ -36,7 +42,7 @@ The static worker catalog module is created in this plan. `validateEntry` needs 
 
 ## Depends on
 
-- Plan 01 → `custodySuitability(tx, req): void` and `credentialMetadata(tx, credentialName): CredentialMetadataRecord | null` (declared as input dependency types in `contract.ts`; implementations injected in Plan 07)
+- Plan 01 → `custodySuitability(tx, req): void` and `credentialMetadata(tx, credentialName): CredentialMetadataRecord | null` (declared as input dependency types in `contract.ts`; implementations wired in task 03.7); `unwired(seam: string)` from `src/apps/server/unwired.ts` (created by Plan 01; used by task 03.5 for `entriesOfAgent` and by Plan 01 itself for `agentProvidersDependentOn` and `enablementsDependentOnModel` until task 03.7 replaces them); `kanthord(args, env)` from `src/apps/server/cli-support.ts` (created by Plan 01; used by task 03.E)
 - Transaction-sharing mechanism (00) → `Transaction` type from `src/kernel/store.ts`
 
 ## Provides
@@ -212,7 +218,7 @@ The static worker catalog module is created in this plan. `validateEntry` needs 
 
 ### 03.5 Implement operation handlers and collaborations
 
-- Files: `src/worker/contract.ts` (edit), `src/worker/service.ts` (edit), `src/worker/service.test.ts` (edit), `src/worker/index.ts` (edit), `engine/AGENTS.md` (edit), `src/apps/server/unwired.ts` (create), `src/apps/server/unwired.test.ts` (create), `src/apps/server/index.ts` (edit)
+- Files: `src/worker/contract.ts` (edit), `src/worker/service.ts` (edit), `src/worker/service.test.ts` (edit), `src/worker/index.ts` (edit), `engine/AGENTS.md` (edit), `static/openapi.yaml` and `static/openapi/**` (regenerate), `src/apps/server/openapi-integration.test.ts` (edit), `src/apps/server/index.ts` (edit)
 
 - Do:
   1. In `src/worker/contract.ts`, add all eight `worker.agent.*` operations to the `workerOperations` const object using exact routes, IDs and access policies from `engine/docs/cli/worker.md`. For each operation:
@@ -228,13 +234,14 @@ The static worker catalog module is created in this plan. `validateEntry` needs 
        - `"agent.enablement.put"`: `PUT /api/worker/agent/enablement/:agentName`, mutation; input `{ expectedRevision: z.number().int().positive().optional(), agentProviders: z.array(agentProviderItemSchema).min(1), defaultConfiguration: defaultConfigurationSchema }` (strict); output matches documented record
        - `"agent.enablement.enable"`: `POST /api/worker/agent/enablement/:agentName/enable`, mutation; input `{ expectedRevision: z.number().int().positive() }`; output matches documented record
        - `"agent.enablement.disable"`: `POST /api/worker/agent/enablement/:agentName/disable`, mutation; input `{ expectedRevision: z.number().int().positive() }`; output matches documented record
-       - `"agent.enablement.remove"`: `DELETE /api/worker/agent/enablement/:agentName`, mutation; input `{ expectedRevision: z.number().int().positive() }`; output `{ agentName: z.string() }` (no `removed` field unless `worker.md` lists it)
+       - `"agent.enablement.remove"`: `DELETE /api/worker/agent/enablement/:agentName`, mutation; input `{ expectedRevision: z.number().int().positive() }`; output `z.strictObject({ agentName: z.string(), removed: z.literal(true) })` (`worker.md:432–433`)
        - `"agent.enablement.provider.add"`: `POST /api/worker/agent/enablement/:agentName/provider`, mutation; input `{ expectedRevision: z.number().int().positive(), name: z.string().min(1), provider: agentProviderKindSchema, credential: z.string().min(1) }` (strict); output matches documented record
        - `"agent.enablement.provider.remove"`: `DELETE /api/worker/agent/enablement/:agentName/provider/:providerName`, mutation; input `{ expectedRevision: z.number().int().positive() }`; output matches documented record
   2. Extend `Dependencies` interface in `service.ts` with required collaborations (D4):
-     - `custodySuitability: CustodySuitability` (required; `src/apps/server/index.ts` passes `unwired("custodySuitability")` until Plan 07 wires the real implementation)
-     - `credentialMetadata: CredentialMetadataFn` (required; `src/apps/server/index.ts` passes `unwired("credentialMetadata")` until Plan 07 wires the real implementation)
-     - `entriesOfAgent: EntriesOfAgent` (required; `src/apps/server/index.ts` passes `unwired("entriesOfAgent")` until Plan 07 wires the real implementation)
+     - `custodySuitability: CustodySuitability` (required; `src/apps/server/index.ts` passes `unwired("custodySuitability")` until task 03.7 wires the real implementation)
+     - `credentialMetadata: CredentialMetadataFn` (required; `src/apps/server/index.ts` passes `unwired("credentialMetadata")` until task 03.7 wires the real implementation)
+     - `entriesOfAgent: EntriesOfAgent` (required; `src/apps/server/index.ts` passes `unwired("entriesOfAgent")` until Plan 05 wires the real implementation)
+     - `modelListCheck` is added by task 03.6 step 3 after the type is declared
   3. Declare a private `validateEffectiveConfig(tx: Transaction, agentName: string, agentProviders: AgentProviderItem[], effectiveConfig: DefaultConfiguration): void` helper that:
      a. Resolves the effective provider: finds the item in `agentProviders` whose `name` equals `effectiveConfig.agentProvider`; throws 404 `worker.agent.enablement.provider.not_found` if absent.
      b. Calls `this.custodySuitability(tx, { credential: item.credential, platform: item.provider })`; rethrows as 400 `worker.agent.configuration.credential_unsuitable` on failure.
@@ -258,7 +265,7 @@ The static worker catalog module is created in this plan. `validateEntry` needs 
      k. Return the inserted row projected to the wire type.
   9. Implement `worker.agent.enablement.enable` handler: call `getLatestRevision` and `getEnablement`, verify `expectedRevision`, call `validateEffectiveConfig` for the current configuration and for all dependent entries, insert next revision with `state: EnablementState.Enabled`, return wire type.
   10. Implement `worker.agent.enablement.disable` handler: call `getLatestRevision` and `getEnablement`, verify `expectedRevision`, insert next revision with `state: EnablementState.Disabled` — disablement skips dependent binding check per `worker-service.md#agent-configuration`, return wire type.
-  11. Implement `worker.agent.enablement.remove` handler: call `getLatestRevision` and `getEnablement`, verify `expectedRevision`, call `entriesOfAgent(tx, agentName)` — if non-empty answer 409 `worker.agent.enablement.in_use`; else insert tombstone (copy current providers and configuration, set `removedAt = Date.now()`), return `{ agentName }`.
+  11. Implement `worker.agent.enablement.remove` handler: call `getLatestRevision` and `getEnablement`, verify `expectedRevision`, call `entriesOfAgent(tx, agentName)` — if non-empty answer 409 `worker.agent.enablement.in_use`; else insert tombstone (copy current providers and configuration, set `removedAt = Date.now()`), return `{ agentName, removed: true }` (`worker.md:432–433`).
   12. Implement `worker.agent.enablement.provider.add` handler: call `getLatestRevision` and `getEnablement`, verify `expectedRevision`, check name uniqueness (409 `worker.agent.enablement.provider.name_conflict`), validate new provider suitability with `validateEffectiveConfig`, validate dependent entries, insert next revision with appended provider, return wire type.
   13. Implement `worker.agent.enablement.provider.remove` handler: call `getLatestRevision` and `getEnablement`, verify `expectedRevision`, find provider by name (404 `worker.agent.enablement.provider.not_found`), check at least one provider remains after removal (400 `worker.agent.enablement.provider.required`), call `entriesOfAgent(tx, agentName)` and check if any entry names the removed provider (409 `worker.agent.enablement.provider.in_use`), check if the current `defaultConfiguration.agentProvider` names the removed provider (409 `worker.agent.enablement.provider.in_use`), validate dependent entries, insert next revision with provider removed, return wire type.
   14. Expose `validateEntry(tx, workerName, entry): void` as a method on `WorkerService`:
@@ -281,7 +288,7 @@ The static worker catalog module is created in this plan. `validateEntry` needs 
       e. Collect validation issues without throwing: check that `effectiveConfig.agentProvider` names an item in `enablement.agentProviders`; if present, call `credentialMetadata` to validate `modelIdentifier` and check `reasoningEffort` against the closed set. Record each failure as `{ path: [<field>], code: <error-code> }`.
       f. Resolve `provider` and `credential` from the matching `agentProviders` item; set both fields to `null` when the provider item is absent (an issue is already recorded in step e).
       g. Return `{ defaults, effective: issues.length === 0 ? { agentProvider, provider, credential, modelIdentifier, reasoningEffort } : null, valid: issues.length === 0, issues }`.
-  19. Create `src/apps/server/unwired.ts` (D14): export function `unwired(seam: string): (...args: never[]) => never` that returns a function throwing `new CodedError("system.composition.unwired", seam + " is not wired.")`. Create `src/apps/server/unwired.test.ts`: assert that calling the returned function throws a `CodedError` with code `"system.composition.unwired"` and a message containing the seam name. Edit `src/apps/server/index.ts` at the `WorkerService` constructor call: pass `custodySuitability: unwired("custodySuitability")`, `credentialMetadata: unwired("credentialMetadata")` and `entriesOfAgent: unwired("entriesOfAgent")` in the dependencies object.
+  19. Import `unwired` from `"./unwired.ts"` (created by Plan 01) in `src/apps/server/index.ts`. Edit `src/apps/server/index.ts` at the `WorkerService` constructor call: pass `custodySuitability: unwired("custodySuitability")`, `credentialMetadata: unwired("credentialMetadata")` and `entriesOfAgent: unwired("entriesOfAgent")` in the dependencies object. Task 03.6 step 5 adds `modelListCheck: unwired("modelListCheck")`; task 03.7 replaces the Custody-owned stubs with real closures.
   20. Edit `engine/AGENTS.md`: update the `src/worker/` directory entry to list the new files: `migrations.ts`, `catalog.ts`, `enablements.ts`; update the description to state enablement lifecycle and collaborations.
   21. Extend `service.test.ts` with tests:
       - `worker.agent.enablement.list` pages correctly in ascending agent-name order
@@ -301,6 +308,7 @@ The static worker catalog module is created in this plan. `validateEntry` needs 
       - `workerAgentsOf` returns `["swe@1"]` for `"general@1"` and `[]` for `"claude@1"`
       - `workerAgentView` returns a valid `WorkerAgentView` for an enabled agent; returns `valid: false` with a populated `issues` array for a disabled enablement; returns `null` for an unknown agent or worker name
 
+  22. Regenerate OpenAPI with `pnpm run build && node bin/kanthord.mjs gateway openapi` (`engine/AGENTS.md` "Regenerate OpenAPI"). `workerOperations` is already in the `apiOperations` spread of `src/apps/cli/index.ts:298` and of `src/apps/server/openapi-integration.test.ts`. In `openapi-integration.test.ts`, assert that the eight operation ids `worker.agent.enablement.list`, `worker.agent.enablement.get`, `worker.agent.enablement.put`, `worker.agent.enablement.enable`, `worker.agent.enablement.disable`, `worker.agent.enablement.remove`, `worker.agent.enablement.provider.add` and `worker.agent.enablement.provider.remove` appear in the emitted document, by exact string.
 - Rules:
   - All handlers run inside `caller.commit((tx) => { ... })` (`architecture.impl.md:105–117`)
   - Collaborations receive `tx`, open no transaction and commit none (`architecture.impl.md:583–596`)
@@ -311,14 +319,15 @@ The static worker catalog module is created in this plan. `validateEntry` needs 
   - No bare string or numeric literals in comparisons — use named constants from catalog and enablements modules
   - No code comments
   - `validateEntry` is exposed as a method so Plan 05 can call it as a Kind 2 collaboration (`architecture.impl.md:583–596`)
-  - All collaborations (`custodySuitability`, `credentialMetadata`, `entriesOfAgent`) are required; colocated tests inject fakes; Plan 07 wires the real implementations (D4)
+  - All collaborations (`custodySuitability`, `credentialMetadata`, `entriesOfAgent`) are required; colocated tests inject fakes; task 03.7 wires the Custody-owned ones; Plan 05 wires `entriesOfAgent`; `modelListCheck` is added and wired by tasks 03.6 and 03.7 (D4)
   - Reads use `caller.commit` per D3 (`architecture.impl.md:618`, `:683`)
+  - The operations and the regenerated OpenAPI land in this task, because `src/apps/server/openapi-integration.test.ts` compares the live registry and the static files with `apiOperations` (D13)
 
 - Done when:
   - `pnpm run verify` passes
+  - `static/openapi.yaml` and `static/openapi/**` hold the eight `worker.agent.*` operations
   - Tests assert each operation, each refusal code, the validation order, tombstone-aware revision concurrency, and the five collaboration behaviors (`validateEntry`, `agentProvidersDependentOn`, `enablementsDependentOnModel`, `workerAgentsOf`, `workerAgentView`)
   - All `worker.agent.*` error codes match exactly the strings in `worker.md`
-  - Calling any `unwired(...)` function throws `CodedError` with code `"system.composition.unwired"`
 
 ### 03.6 Declare and implement the agent provider health inventory
 
@@ -352,12 +361,143 @@ The static worker catalog module is created in this plan. `validateEntry` needs 
   - The pagination loop enumerates all enablements; a fixed upper limit is not sufficient.
   - `resourceInventory` is synchronous: it reads rows inside the caller's transaction, performs no network call, and returns closures. The `modelListCheck(tx, item.credential)` call obtains the closure inside `tx`.
   - Plan 07 calls `resourceInventory` inside one `caller.commit`, then runs the closures after the commit.
-  - `modelListCheck` is required in `Dependencies`; plan 03 passes `unwired("modelListCheck")`; plan 07 wires `custody.modelListCheck` (`00-index.md` Seams, `modelListCheck`).
+  - `modelListCheck` is required in `Dependencies`; step 5 of this task adds `unwired("modelListCheck")` to the constructor call; task 03.7 replaces it with `custody.modelListCheck` (`00-index.md` Seams, `modelListCheck`).
   - No code comments.
 
 - Done when:
   - `pnpm run verify` passes.
   - Tests assert inventory completeness across enabled and disabled enablement states, tombstone exclusion through `listEnablements`, scope and project fields, percent-encoded naming, prefixed target key, capability constant, and probe delegation without stored results.
+
+### 03.7 Wire Custody collaborations into WorkerService
+
+- Files: `src/apps/server/index.ts` (edit)
+
+- Do:
+  1. In `composeServices`, locate the `WorkerService` constructor call and replace:
+     - `custodySuitability: unwired("custodySuitability")` → `(tx, req) => custody.custodySuitability(tx, req)`
+     - `credentialMetadata: unwired("credentialMetadata")` → `(tx, name) => custody.credentialMetadata(tx, name)`
+     - `modelListCheck: unwired("modelListCheck")` → `(tx, name) => custody.modelListCheck(tx, name)`
+  2. Locate the `CustodyComponent` constructor call and replace the `options.standIns?.<key> ?? unwired(...)` expressions that Plan 01 task 01.14 wrote:
+     - `agentProvidersDependentOn` → `(tx, name) => worker.agentProvidersDependentOn(tx, name)`
+     - `enablementsDependentOnModel` → `(tx, name, model) => worker.enablementsDependentOnModel(tx, name, model)`
+  3. In the `WorkerService` constructor call, pass `entriesOfAgent: options.standIns?.entriesOfAgent ?? unwired("entriesOfAgent")`. Plan 05 replaces it.
+  4. In the `standIns` option type of `composeServices` (Plan 01 task 01.14), delete the keys `agentProvidersDependentOn` and `enablementsDependentOnModel`, and add `entriesOfAgent?: EntriesOfAgentFn` (the inline type of `src/worker/contract.ts`). `gatewayFixture` derives its type from `composeServices`, so it needs no edit.
+  5. Declare both `custody` and `worker` as `let` variables in `composeServices` before their constructor calls so the forward-reference closures resolve at call time, not at construction time (`architecture.impl.md:427–430`).
+
+- Rules:
+  - Closures capture `custody` and `worker` by reference; neither is read before construction completes.
+  - Construction order: custody(2), worker(3) (`architecture.impl.md:427–430`).
+  - No new unwired stubs are added by this task.
+  - The E2E fixture of this plan passes `standIns: { entriesOfAgent: () => [] }` (D14).
+  - No code comments.
+
+- Done when:
+  - `pnpm run verify` passes.
+  - `gatewayFixture` starts without errors; custody suitability and credential metadata calls succeed in integration tests.
+
+### 03.8 Add agent enablement CLI commands
+
+- Files: `src/apps/cli/worker.ts` (edit)
+
+- Do:
+  1. Add `--token <token>` option (coercion `singleUse("--token")`) to the top-level `worker` group so leaf commands inherit it.
+  2. After the `register` command, add sub-group `agent` (action: help). Within it add sub-group `enablement` (action: help).
+  3. Import helpers (`requireToken`, `resolveKey`, `parsePositiveInt`, `readJsonFileAs`, `handleReadResult`, `handleMutationResult`, `httpClient`) from `./shared.ts`. Import `workerOperations` from `../../worker/contract.ts` (already imported if present).
+  4. Declare `agentEnablementPutBodySchema` in `worker.ts`: `z.strictObject({ expectedRevision: z.number().int().positive().optional(), agentProviders: z.array(agentProviderItemSchema).min(1), defaultConfiguration: defaultConfigurationSchema })`.
+  5. Declare `providerAddBodySchema` in `worker.ts`: `z.strictObject({ expectedRevision: z.number().int().positive(), name: z.string().min(1), provider: agentProviderKindSchema, credential: z.string().min(1) })`.
+  6. Add leaf `agent enablement list`:
+     - Options: `--limit` and `--cursor` (coercions `singleUse`). Default limit 100.
+     - `requireToken(opts.token, "cli.worker.agent.enablement.list.token_required")`.
+     - Call `httpClient(workerOperations, endpoint, token)["agent.enablement.list"]({ params: {}, query: { limit, cursor }, body: null })`.
+     - `handleReadResult(result, "cli.worker.agent.enablement.list.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+  7. Add leaf `agent enablement get <agent-name>`:
+     - `requireToken`.
+     - Call client `["agent.enablement.get"]({ params: { agentName }, query: {}, body: null })`.
+     - `handleReadResult(result, "cli.worker.agent.enablement.get.indeterminate")` → data.
+     - Print `JSON.stringify(data)`.
+  8. Add leaf `agent enablement put <agent-name> --file <path>`:
+     - `--file` coercion: `singleUse("--file")`. `requireToken`; `resolveKey` → `key`.
+     - `readJsonFileAs(opts.file, agentEnablementPutBodySchema)` → body.
+     - Call client `["agent.enablement.put"]({ params: { agentName }, query: {}, body }, { idempotencyKey: key })`.
+     - `handleMutationResult(result, "cli.worker.agent.enablement.put.indeterminate", key)` → data.
+     - Print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  9. Add leaf `agent enablement enable <agent-name> --expected-revision <revision>`:
+     - `--expected-revision` coercion: `singleUse`; required. `parsePositiveInt(opts.expectedRevision, "cli.worker.agent.enablement.enable.invalid_revision")` → `rev`.
+     - `requireToken`; `resolveKey` → `key`.
+     - Call client `["agent.enablement.enable"]({ params: { agentName }, query: {}, body: { expectedRevision: rev } }, { idempotencyKey: key })`.
+     - `handleMutationResult(result, "cli.worker.agent.enablement.enable.indeterminate", key)` → data.
+     - Print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  10. Add leaf `agent enablement disable <agent-name> --expected-revision <revision>`: same as enable; calls `["agent.enablement.disable"]`; diagnostic codes `cli.worker.agent.enablement.disable.*`.
+  11. Add leaf `agent enablement remove <agent-name> --expected-revision <revision>`: same revision validation; calls `["agent.enablement.remove"]`; print `JSON.stringify({ agentName: data.agentName, idempotencyKey: key })`; diagnostic codes `cli.worker.agent.enablement.remove.*`.
+  12. Add sub-group `provider` under `enablement` (action: help).
+  13. Add leaf `agent enablement provider add <agent-name> --file <path>`:
+      - `--file` coercion: `singleUse`. `requireToken`; `resolveKey` → `key`.
+      - `readJsonFileAs(opts.file, providerAddBodySchema)` → body.
+      - Call client `["agent.enablement.provider.add"]({ params: { agentName }, query: {}, body }, { idempotencyKey: key })`.
+      - `handleMutationResult(result, "cli.worker.agent.enablement.provider.add.indeterminate", key)` → data.
+      - Print `JSON.stringify({ ...data, idempotencyKey: key })`.
+  14. Add leaf `agent enablement provider remove <agent-name> <provider-name> --expected-revision <revision>`:
+      - `--expected-revision` coercion: `singleUse`; required. `parsePositiveInt(opts.expectedRevision, "cli.worker.agent.enablement.provider.remove.invalid_revision")` → `rev`.
+      - `requireToken`; `resolveKey` → `key`.
+      - Call client `["agent.enablement.provider.remove"]({ params: { agentName, providerName }, query: {}, body: { expectedRevision: rev } }, { idempotencyKey: key })`.
+      - `handleMutationResult(result, "cli.worker.agent.enablement.provider.remove.indeterminate", key)` → data.
+      - Print `JSON.stringify({ ...data, idempotencyKey: key })`.
+
+- Rules:
+  - Read commands (`list`, `get`) define no `--idempotency-key`.
+  - `idempotencyKey` goes in the second argument of all mutation client calls.
+  - Do not remove or change the existing `register` command.
+  - Operation keys use dotted form without the `worker.` prefix.
+  - `readJsonFileAs` validates against the body schemas declared in this task.
+  - No code comments.
+
+- Done when:
+  - `pnpm run verify` passes.
+  - `worker agent enablement list --help` exits 0.
+  - `worker agent enablement get --help` exits 0.
+  - `worker agent enablement put --help` exits 0; stdout matches `--file`.
+  - `worker agent enablement enable --help`, `disable --help`, `remove --help` exit 0.
+  - `worker agent enablement provider add --help` exits 0; stdout matches `--file`.
+  - `worker agent enablement provider remove --help` exits 0.
+  - `worker register --help` still exits 0 (register unchanged).
+
+### 03.E E2E proof
+
+- Files: `src/apps/server/e2e-worker-agent-enablement.test.ts` (create)
+
+- Do: Create `src/apps/server/e2e-worker-agent-enablement.test.ts`. Each test uses `gatewayFixture` from `test-support.ts` and `kanthord` from `cli-support.ts`. The scenarios in the `## E2E` table below are the tests. Pass `standIns: { entriesOfAgent: () => [] }` to `gatewayFixture` (D14 stand-in option introduced by Plan 01; Plan 05 replaces it and removes this key from the `standIns` type). The stand-in is sufficient for E03 because no E03 scenario exercises `in_use` or `invalidates_bindings` paths; Plan 05 wires the real implementation and proves those paths.
+
+- Done when:
+  - `node --test --test-timeout=30000 src/apps/server/e2e-worker-agent-enablement.test.ts` passes.
+  - `pnpm run verify` passes.
+
+## E2E
+
+- Test file: `src/apps/server/e2e-worker-agent-enablement.test.ts` (runs in `pnpm run verify`).
+- Harness: `gatewayFixture({ standIns: { entriesOfAgent: () => [] } })` from `src/apps/server/test-support.ts` starts the real server on a loopback port with an in-memory store; the `entriesOfAgent` stand-in (D14, Plan 01) is replaced by Plan 05. `kanthord(args, env)` from `src/apps/server/cli-support.ts` runs the CLI as a subprocess with disposable XDG state, `KANTHORD_ENDPOINT = fixture.endpoint` and `KANTHORD_TOKEN = fixture.token`.
+- Rules: Each table row is one self-contained test case that creates its own fresh `gatewayFixture`; "After E03.X" means the test case runs the listed prerequisite commands in order within that same fixture before the command under test — tests do not share fixtures or state across rows. Setup goes through the CLI only; the state check is a CLI read, never a store read; a refusal asserts the exact exit code and the error code at the start of stderr; stdout is parsed as JSON where the CLI page says the command prints JSON. No E03 scenario exercises a path that requires live bindings.
+
+| Id     | Commands                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Exit          | Expect                                                                                                                                                                                                                                                                                                                                                             |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| E03.1  | `kanthord credential create --file <anthropic-cred.json>` (name `"anthro-1"`, platform `"anthropic"`); `kanthord worker agent enablement put swe@1 --file <enablement.json>` (`agentProviders: [{name:"default",provider:"anthropic",credential:"anthro-1"}]`, `defaultConfiguration:{agentProvider:"default",modelIdentifier:"claude-3-5-sonnet-20241022",reasoningEffort:"off"}`; no `expectedRevision`)                                                                                                                                                                                                                                                                                                                                  | 0, 0          | second stdout: `agentName: "swe@1"`, `state: "enabled"`, `revision: 1`                                                                                                                                                                                                                                                                                             |
+| E03.2  | After E03.1: `kanthord worker agent enablement list`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 0             | stdout `items` array contains one item with `agentName: "swe@1"`, `nextCursor: null`                                                                                                                                                                                                                                                                               |
+| E03.3  | After E03.1: `kanthord worker agent enablement get swe@1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 0             | stdout: `agentName: "swe@1"`, `revision: 1`, `state: "enabled"`                                                                                                                                                                                                                                                                                                    |
+| E03.4  | After E03.1: `kanthord worker agent enablement put swe@1 --file <enablement.json>` with `expectedRevision: 99`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | 1             | stderr starts with `worker.agent.enablement.revision_conflict:`                                                                                                                                                                                                                                                                                                    |
+| E03.5  | After E03.1: `kanthord worker agent enablement disable swe@1 --expected-revision 1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 0             | stdout: `state: "disabled"`, `revision: 2`                                                                                                                                                                                                                                                                                                                         |
+| E03.6  | After E03.5: `kanthord worker agent enablement enable swe@1 --expected-revision 2`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 0             | stdout: `state: "enabled"`, `revision: 3`                                                                                                                                                                                                                                                                                                                          |
+| E03.7  | After E03.6: `kanthord worker agent enablement provider add swe@1 --file <provider-add.json>` (`expectedRevision:3`, `name:"backup"`, `provider:"anthropic"`, `credential:"anthro-1"`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | 0             | stdout: `revision: 4`, `agentProviders` length 2                                                                                                                                                                                                                                                                                                                   |
+| E03.8  | After E03.7: `kanthord worker agent enablement provider remove swe@1 backup --expected-revision 4`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 0             | stdout: `revision: 5`, `agentProviders` length 1                                                                                                                                                                                                                                                                                                                   |
+| E03.9  | After E03.8: `kanthord worker agent enablement remove swe@1 --expected-revision 5`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 0             | stdout: `agentName: "swe@1"`                                                                                                                                                                                                                                                                                                                                       |
+| E03.10 | After E03.9: `kanthord worker agent enablement get swe@1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 1             | stderr starts with `worker.agent.enablement.not_found:`                                                                                                                                                                                                                                                                                                            |
+| E03.11 | `kanthord credential create --file <openai-cred.json>` (name `"oai-1"`, platform `"openai-compatible"`, no models); `kanthord credential update-metadata oai-1 --file <meta-two-models.json>` (adds models `"gpt-4o"` and `"gpt-4-turbo"`); `kanthord worker agent enablement put re@1 --file <enablement-oai.json>` (`agentProviders:[{name:"default",provider:"openai-compatible",credential:"oai-1"}]`, `modelIdentifier:"gpt-4o"`, `reasoningEffort:"off"`); `kanthord credential update-metadata oai-1 --file <meta-drop-turbo.json>` (removes only `"gpt-4-turbo"` — not referenced by the enablement); `kanthord credential update-metadata oai-1 --file <meta-drop-gpt4o.json>` (removes `"gpt-4o"` — referenced by the enablement) | 0, 0, 0, 0, 1 | fourth command exits 0 (non-referenced model removed successfully); fifth stderr starts with `credential.metadata.model_in_use:`; subsequent `kanthord credential get oai-1` confirms `"gpt-4o"` still in metadata; `kanthord worker agent enablement get re@1` confirms `modelIdentifier:"gpt-4o"` unchanged (proves `enablementsDependentOnModel` and atomicity) |
+| E03.12 | `kanthord worker agent enablement put swe@1 --file <enablement.json> --idempotency-key <ulid>`; repeat same command with same `--idempotency-key`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 0, 0          | both stdout: same `revision`; second call replays the first                                                                                                                                                                                                                                                                                                        |
+| E03.13 | `kanthord worker agent enablement enable swe@1 --endpoint http://127.0.0.1:1 --token t --expected-revision abc`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | 1             | stderr starts with `cli.worker.agent.enablement.enable.invalid_revision:`                                                                                                                                                                                                                                                                                          |
+| E03.14 | `kanthord worker agent enablement put swe@1 --endpoint http://127.0.0.1:1 --file enablement.json` (no `--token` option; `KANTHORD_TOKEN` is explicitly unset in the subprocess environment so the env var does not supply a token)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 1             | stderr starts with `cli.worker.agent.enablement.put.token_required:`                                                                                                                                                                                                                                                                                               |
+| E03.15 | After E03.1: `kanthord worker agent enablement put unknown-agent@1 --file <enablement.json>` (no `expectedRevision`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 1             | stderr starts with `worker.agent.not_found:`                                                                                                                                                                                                                                                                                                                       |
+| E03.16 | After E03.1: `kanthord worker agent enablement provider remove swe@1 default --expected-revision 1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 1             | stderr starts with `worker.agent.enablement.provider.required:` (last provider)                                                                                                                                                                                                                                                                                    |
+
+Note on scope boundaries: Task 03.7 implements `agentProvidersDependentOn` as a real closure — Custody's stub is replaced with `(tx, name) => worker.agentProvidersDependentOn(tx, name)`. The write-guard is active in ERD 1 at the service level. However, plan 01 delivers no HTTP credential-delete route, so the guard cannot be exercised through an E2E test in this plan. E2E proof of the credential-delete refusal is deferred to ERD 2 when that route exists. `worker.agent.enablement.in_use` (remove while binding exists), `worker.agent.enablement.invalidates_bindings`, and `worker.agent.enablement.unavailable` (binding write) require a live `entriesOfAgent` from Plan 05; those rows do not appear in E03.
 
 ## Blockers
 

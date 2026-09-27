@@ -137,6 +137,42 @@ No seam. The worker app produces no collaboration type that another ERD 1 plan c
 
 - Done when: `pnpm run verify` passes. Tests cover pre-start, version-check failure, failed-start with absent `masterKey` and post-quiesce states.
 
+### 09.E E2E proof
+
+- Files:
+  - `src/apps/server/e2e-worker-app.test.ts`
+
+- Do:
+  1. Define `spawnWorker(args: string[], env: NodeJS.ProcessEnv)` using `spawn` from `node:child_process`. It invokes the CLI by the same `--input-type=module -e` entry pattern as `kanthord()` in `src/apps/server/cli-support.ts`, but returns immediately without waiting for exit. It collects stderr as UTF-8 lines split on `\n` and buffers all collected lines. It returns `{ waitForLine(predicate: (line: string) => boolean): Promise<string>; kill(signal: NodeJS.Signals): void; exited: Promise<{ code: number | null; stderr: string[] }> }`. `waitForLine` checks already-collected lines first, then waits for new ones; it rejects after `SPAWN_LINE_TIMEOUT_MS = 15000` ms and also rejects immediately when the process exits before a match. `exited` resolves with the exit code and the complete collected stderr lines, only after the stderr stream closes.
+  2. For cleanup in `t.after()`: send `SIGTERM` to the process, wait for exit up to `CLEANUP_WAIT_MS = 5000` ms, and send `SIGKILL` if the process has not exited. A test that asserts on graceful shutdown must not use `t.after()` cleanup as its exit-code source; it must record exit code from the test's own `await proc.exited`.
+  3. Create `cli.yaml` with `writePrivate` from `src/kernel/files.ts`, which sets mode `0600`. The "setup through CLI only" rule does not apply to `cli.yaml`, because no CLI command creates or modifies it.
+  4. For E09.4, create a `node:http` server bound to `127.0.0.1:0` that answers `GET /api/openapi.yaml` with a JSON body `{ info: { version: FAKE_VERSION } }` where `FAKE_VERSION = "0.0.0"`. Start it before the spawn and close it in `t.after()`. Derive the fake endpoint from the bound port.
+  5. For E09.5 and E09.6, call `gatewayFixture(t, { machines: fakeMachines() })` and set `KANTHORD_TOKEN` to `await fixture.machineToken(TEST_WORKER_BINDING)`.
+  6. Write one test per row in the `## E2E` table.
+
+- Rules:
+  - E09.1 uses `kanthord` from `src/apps/server/cli-support.ts` (provided by plan 01); E09.2 through E09.6 use `spawnWorker`.
+  - E09.2 and E09.3 start no fixture server; `KANTHORD_ENDPOINT` points to `UNREACHABLE_ENDPOINT = "http://127.0.0.1:1"`.
+  - Named constants for every fixed string or number; no code comments.
+
+- Done when: `node --test --test-timeout=30000 src/apps/server/e2e-worker-app.test.ts` passes and `pnpm run verify` passes.
+
+## E2E
+
+- Test file: `src/apps/server/e2e-worker-app.test.ts` (runs in `pnpm run verify`).
+- Harness: `gatewayFixture` from `src/apps/server/test-support.ts` starts the real server on a loopback port with an in-memory store; `kanthord(args, env)` from `src/apps/server/cli-support.ts` (plan 01) runs the CLI as a subprocess with disposable XDG state; `spawnWorker(args, env)`, defined in the test file, starts `kanthord serve worker` as a long-running subprocess and exposes `waitForLine`, `kill` and `exited`; `cli.yaml` is created with `writePrivate` from `src/kernel/files.ts` at mode `0600`.
+- Rules: setup goes through the CLI only, except `cli.yaml` which has no CLI create command and is written directly as a private file; the state check is a CLI read, never a store read; a refusal asserts the exact exit code and the error code at the start of stderr; stdout is parsed as JSON where the CLI page says the command prints JSON.
+- ERD 1: registration is ERD 2; `Worker application ready` is not emitted in ERD 1; `Worker application started` is the only startup notice. On shutdown in ERD 1, no `runtimeIdentity` exists, so the worker makes no deregistration call; exit 0 follows a successful stop lifecycle, and exit 1 follows a cleanup failure or watchdog expiry.
+
+| Id    | Commands                                                                                                                                                                                                                                                         | Exit | Expect                                                                                                                                                                                                                                               |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| E09.1 | `kanthord serve worker --config <path>`                                                                                                                                                                                                                          | 1    | stderr starts with `cli.serve.worker_config:`                                                                                                                                                                                                        |
+| E09.2 | `spawnWorker(["serve", "worker"], env)`; no `cli.yaml`; `KANTHORD_ENDPOINT = UNREACHABLE_ENDPOINT`                                                                                                                                                               | 1    | stderr starts with `worker.start.master_key_absent:`                                                                                                                                                                                                 |
+| E09.3 | `spawnWorker(["serve", "worker"], env)`; `cli.yaml` with `masterKey` of 16 bytes encoded in base64; `KANTHORD_ENDPOINT = UNREACHABLE_ENDPOINT`                                                                                                                   | 1    | stderr starts with `worker.start.master_key_invalid:`                                                                                                                                                                                                |
+| E09.4 | `spawnWorker(["serve", "worker"], env)`; valid `masterKey` in `cli.yaml`; `KANTHORD_ENDPOINT` pointing to a fake HTTP server that returns `{ info: { version: "0.0.0" } }` for `GET /api/openapi.yaml`                                                           | 1    | stderr starts with `worker.version.mismatch:`; stderr contains both the local package version and `0.0.0`                                                                                                                                            |
+| E09.5 | `spawnWorker(["serve", "worker"], env)`; valid `masterKey`; `KANTHORD_ENDPOINT = fixture.endpoint`; `KANTHORD_TOKEN = await fixture.machineToken(TEST_WORKER_BINDING)`; `waitForLine` matching `Worker application started`; send `SIGTERM`; await `proc.exited` | 0    | `waitForLine` resolves with a valid JSON line whose parsed `msg` equals `"Worker application started"`; `proc.exited.stderr` contains exactly one line matching `Worker application started` and no line matching `Worker application ready`; exit 0 |
+| E09.6 | same spawn as E09.5; `waitForLine` matching `Worker application started`; send `SIGHUP`; wait `SIGHUP_WAIT_MS = 200` ms; assert process still alive; send `SIGTERM`; await `proc.exited`                                                                         | 0    | process alive after `SIGHUP`; exit 0 after `SIGTERM`                                                                                                                                                                                                 |
+
 ## Blockers
 
 None.

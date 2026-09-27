@@ -54,20 +54,28 @@ Ulrich ruled on 2026-09-27: a `Text` value is a nonblank string of at most `miss
 
 `architecture.impl.md:529–535` closes the set of top-level names; it does not require an empty group. Plan 08 adds no group without an ERD 1 command (no Intake or Tracking stub) and registers no BLOCKED command. A command outside ERD 1 is absent.
 
-## D13 — CLI round-trip proof
+## D13 — Vertical slices and the E2E section
 
-Plan 08 proves each command group end to end with one subprocess test file per group under `src/apps/server/cli-<group>.test.ts`, following the existing `src/apps/server/cli-worker.test.ts` pattern. Plan 08 runs after Plan 07. Plan 08 does not regenerate OpenAPI; Plan 07 owns it.
+Ulrich ruled on 2026-09-27: each plan is a vertical slice. It wires its own service or component into `composeServices`, adds its own CLI group, and ends with an `## E2E` section and a last task `NN.E`.
 
-Index blocker B5 extends this decision: every plan gains a CLI end-to-end section once Ulrich rules its format.
+- The test file is `src/apps/server/e2e-<plan slug>.test.ts`, and `pnpm run verify` runs it. `gatewayFixture` starts the real server on a loopback port with an in-memory store. `kanthord(args, env)` from `src/apps/server/cli-support.ts` runs the CLI as a subprocess with disposable XDG state.
+- The scenario table holds the id `E<plan>.<n>`, the exact commands, the exit codes and the expected stdout fields or error code. Every command, option, output field and code comes verbatim from the CLI page and the owning design page.
+- Setup goes through the CLI. The state check is a CLI read, never a store read. A capability with no CLI command (liveness, the health report) is driven over HTTP in the same file.
+- A remote service is faked through a fixture injection point, never reached over the network.
+- The task that declares a service's routes also adds its operations to `apiOperations` of `src/apps/server/openapi-integration.test.ts` and to `src/apps/cli/index.ts:298`, and regenerates `static/openapi.yaml` and `static/openapi/**`.
 
-## D14 — Required dependencies before Plan 07
+## D14 — Unwired peers and stand-ins
 
-`src/apps/server/index.ts:61–66` already constructs `ProjectService` and `WorkerService`. A plan that adds a required dependency to one of them edits that construction call in the same task, so `pnpm run verify` stays green:
+A plan constructs its service in `src/apps/server/index.ts` in the construction order scheduler, custody, worker, mission, project, gateway. For a peer that a later plan wires, it passes `unwired("<seam name>")` from `src/apps/server/unwired.ts` (Plan 01 creates it): the function throws `new CodedError("system.composition.unwired", "<seam name> is not wired.")`, so the production server fails closed.
 
-- It passes the real value when the composition root already holds it (for example the operational store).
-- It passes `unwired("<seam name>")` for a peer collaboration that Plan 07 wires. `unwired` lives in `src/apps/server/unwired.ts` (the first plan that needs it creates it): it returns a function that throws `new CodedError("system.composition.unwired", "<seam name> is not wired.")`. It fails closed; it never answers "no dependents".
-- Plan 07 replaces every `unwired(...)` and deletes `unwired.ts`, and a Plan 07 test asserts that no `unwired` import remains.
-  This is the only edit of `src/apps/server/index.ts` that a plan other than Plan 07 makes. New services (Custody, Scheduler, Mission, Repository) are not constructed before Plan 07.
+Ulrich ruled on 2026-09-27 the stand-in rule. `composeServices` takes an optional `standIns` option, and only `gatewayFixture` passes it. A stand-in answers the true state of the absent peer: a dependency query answers `[]`, and `createMission` answers without a write. The plan that wires the real peer deletes the stand-in and adds the E2E scenario that proves the real rule. Plan 07 deletes `unwired.ts` and the `standIns` option, and a Plan 07 test asserts that no `unwired` import remains.
+
+| Seam                                                               | Placed by | Replaced by |
+| ------------------------------------------------------------------ | --------- | ----------- |
+| Custody `agentProvidersDependentOn`, `enablementsDependentOnModel` | 01        | 03          |
+| Custody `bindingsNaming`                                           | 01        | 05          |
+| Worker `entriesOfAgent`                                            | 03        | 05          |
+| Project `createMission`, `liveNodesPinning`                        | 05        | 06          |
 
 ## D15 — Table name
 

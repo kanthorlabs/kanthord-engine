@@ -235,6 +235,95 @@ g. Export `checkRepositoryTools(): void`.
   - A conformant host resolves `{ toolchain: HealthStatus.Healthy }`.
   - `registry.check(background)` returns a map that contains `"repository": { toolchain: HealthStatus.Healthy }`.
 
+### 04.4 Wire RepositoryComponent into `composeServices` and `gatewayFixture`
+
+- Files:
+  - `src/apps/server/index.ts` (edit)
+  - `src/apps/server/test-support.ts` (edit)
+
+- Do:
+  1. Edit `src/apps/server/index.ts`.
+     a. Import `RepositoryComponent` from `"../../repository/index.ts"`.
+     b. Add optional field `repositoryConnector?: { gitLsRemote(sshUrl: string, context: Context, deadlineMs: number): Promise<void> }` to the `composeServices` options object type.
+     c. At the start of `composeServices`, before service construction, resolve: `const repoConnector = options.repositoryConnector ?? new RepositoryComponent({ health: options.health })`.
+     d. Add `repoConnector` to the `composeServices` return object: `return { project, worker, gateway, invocation, registry, repoConnector }`.
+     e. Do not add `repoConnector` to `services` or `releases`; `RepositoryComponent` has no lifecycle.
+
+  2. Edit `src/apps/server/test-support.ts`.
+     a. Add optional field `repositoryConnector?: { gitLsRemote(sshUrl: string, context: Context, deadlineMs: number): Promise<void> }` to the `gatewayFixture` options type.
+     b. Pass `repositoryConnector: options.repositoryConnector` to `composeServices`.
+
+- Rules:
+  - `RepositoryComponent` has no lifecycle; do not add it to `services` or `releases`.
+  - When `repositoryConnector` is provided, `RepositoryComponent` is not constructed and the startup tool gate does not run.
+  - Adding `repoConnector` to the return object makes the local variable used and lets Plan 05 consume it.
+  - No code comments.
+
+- Done when:
+  - `pnpm run verify` passes in `engine/`.
+  - `composeServices` return type includes `repoConnector`.
+  - A `gatewayFixture()` call without `repositoryConnector` constructs `RepositoryComponent` and registers `"repository"` in the `HealthRegistry`.
+  - A `gatewayFixture({ repositoryConnector: { gitLsRemote: async () => {} } })` call uses the fake connector and does not construct `RepositoryComponent`.
+
+## E2E
+
+- Test file: `src/apps/server/e2e-repository.test.ts` (runs in `pnpm run verify`).
+- Harness: `gatewayFixture` from `src/apps/server/test-support.ts` starts the real server on a loopback port with an in-memory store; `kanthord(args, env)` from `src/apps/server/cli-support.ts` (provided by Plan 01) runs the CLI as a subprocess with disposable XDG state, `KANTHORD_ENDPOINT = fixture.endpoint` and `KANTHORD_TOKEN = fixture.token`.
+- Rules: setup goes through the CLI only; the state check is a CLI read, never a store read; a refusal asserts the exact exit code and the error code at the start of stderr; stdout is parsed as JSON where the CLI page says the command prints JSON. `GET /api/healthcheck` has no CLI command; its row uses `HTTP` in the Commands column per the capability rule.
+
+| Id    | Commands                                                                                                                                                                                                       | Exit | Expect                                                                           |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | -------------------------------------------------------------------------------- |
+| E04.1 | `kanthord serve` subprocess; env holds a valid config at `KANTHORD_CONFIG` and a `PATH` that contains only symlinks to system bash and ssh (not git)                                                           | 1    | stderr starts with `repository.connector.tool_missing: git: not found`           |
+| E04.2 | `HTTP GET /api/healthcheck` via `fixture.request(gatewayOperations.healthcheck.path)` (`gateway.md:249`; current component route; plan 07.8 renames it to `/api/liveness`); no `repositoryConnector` injection | 200  | response body `services.repository` equals `{ toolchain: HealthStatus.Healthy }` |
+
+### 04.E E2E proof
+
+- Files:
+  - `src/apps/server/e2e-repository.test.ts` (create)
+
+- Do:
+  1. Import `test` from `node:test`.
+     Import `assert` from `node:assert/strict`.
+     Import `join` from `node:path`.
+     Import `mkdirSync`, `symlinkSync` from `node:fs`.
+     Import `temporary` from `../../kernel/test-support.ts`.
+     Import `kanthord`, `environment` from `./cli-support.ts`.
+     Import `gatewayFixture` from `./test-support.ts`.
+     Import `{ CheckErrorCode }` from `../../repository/check.ts`.
+     Import `{ HealthStatus }` from `../../kernel/service.ts`.
+     Import `{ gatewayOperations }` from `../../gateway/contract.ts`.
+
+  2. Write test `"serve refuses startup when git is absent from PATH"`:
+     a. `const dir = temporary(t)`.
+     b. `const cfgPath = join(dir, "kanthord.yaml")`.
+     c. `const baseEnv = { ...environment(dir), KANTHORD_CONFIG: cfgPath }`.
+     d. Call `const initResult = await kanthord(["config", "init"], { ...baseEnv, PATH: process.env.PATH! })` to write the config file at `cfgPath`. Assert `initResult.code === 0`.
+     e. Create `toolsDir = join(dir, "tools")` with `mkdirSync(toolsDir)`.
+     f. Symlink system bash and ssh into `toolsDir`: `symlinkSync(which("bash"), join(toolsDir, "bash"))` and `symlinkSync(which("ssh"), join(toolsDir, "ssh"))`. Use `import { execFileSync } from "node:child_process"` and `execFileSync("which", ["bash"]).toString().trim()` to resolve paths.
+     g. `const result = await kanthord(["serve"], { ...baseEnv, PATH: toolsDir })`.
+     h. Assert `result.code === 1`.
+     i. Assert `result.stderr.startsWith(CheckErrorCode.ToolMissing + ": git: not found")`.
+
+  3. Write test `"GET /api/healthcheck returns repository.toolchain map"`:
+     a. `const fixture = await gatewayFixture(t)` — no `repositoryConnector` injection; real `RepositoryComponent` is constructed.
+     b. `const response = await fixture.request(gatewayOperations.healthcheck.path)`.
+     c. Assert `response.status === 200`.
+     d. `const body = await response.json()`.
+     e. Assert `body.services.repository` deep-equals `{ toolchain: HealthStatus.Healthy }`.
+
+- Rules:
+  - Use `CheckErrorCode.ToolMissing` from `../../repository/check.ts`; no bare string `"repository.connector.tool_missing"`.
+  - Use `HealthStatus.Healthy` from `../../kernel/service.ts`; no bare `200`.
+  - Do not inject `repositoryConnector` in test 3; the real `RepositoryComponent` must register `"repository"` in the health map.
+  - The tools directory for test 2 contains bash and ssh symlinks but no git, guaranteeing that `checkRepositoryTools()` fails specifically at the git check.
+  - No code comments.
+
+- Done when:
+  - `node --test --test-timeout=30000 src/apps/server/e2e-repository.test.ts` passes.
+  - `pnpm run verify` passes in `engine/`.
+  - Test 2 asserts exit code `1` and stderr starts with `repository.connector.tool_missing: git: not found`.
+  - Test 3 asserts HTTP 200 and `services.repository` equals `{ toolchain: HealthStatus.Healthy }`.
+
 ## Blockers
 
 None. Plan 04 uses `repository.connector.tool_missing` and `repository.connector.tool_version`, both three-part codes. The `RepositoryComponent.gitLsRemote` seam is recorded in the `00-index.md` Seams table. The `00-index.md` Plan 04 boundary no longer mentions `octokit`.
