@@ -164,6 +164,21 @@ export function insertNode(
   }
 }
 
+export function updateNodePriority(
+  tx: Transaction,
+  nodeId: string,
+  priority: number,
+): void {
+  const result = tx.database
+    .prepare("UPDATE mission_node SET priority = ? WHERE id = ?")
+    .run(priority, nodeId);
+  assert.equal(
+    result.changes,
+    UPDATED_NODE_COUNT,
+    "Priority update requires one node.",
+  );
+}
+
 export function updateNodeFilename(
   tx: Transaction,
   nodeId: string,

@@ -416,6 +416,8 @@ const UNKNOWN_NODE_ID = "node_00000000000000000000000000";
 const UNKNOWN_MISSION_ID = "mission_00000000000000000000000000";
 const IMPORT_PREVIEW_PATH = "/api/mission/:missionId/import/preview";
 const PRIORITY = 42;
+const NEGATIVE_PRIORITY = -42;
+const PRIORITY_PATH = "/api/mission/node/:nodeId/priority";
 const QueueAction = { Insert: "insert", Delete: "delete" } as const;
 type QueueCall = {
   action: string;
@@ -1954,6 +1956,219 @@ function updateBody(f: ReturnType<typeof nodeFixture>, id: string): NodeUpdate {
     reason: REASON,
   };
 }
+
+function priorityFixture(t: TestContext) {
+  const f = nodeFixture(t);
+  const jobs = new Map<string, { id: string; priority: number }>();
+  const updates: Array<{ nodeId: string; priority: number }> = [];
+  f.queue.insert = (_tx, nodeId, _projectId, priority) => {
+    jobs.set(nodeId, { id: createIdentity("job"), priority });
+  };
+  f.queue.delete = (_tx, nodeId) => {
+    jobs.delete(nodeId);
+  };
+  f.queue.priorityUpdate = (tx, nodeId, priority) => {
+    assert.equal(readNode(tx, nodeId)?.priority, priority);
+    updates.push({ nodeId, priority });
+    const job = jobs.get(nodeId);
+    if (job) jobs.set(nodeId, { ...job, priority });
+  };
+  const operation = missionOperations["node.priority.set"];
+  function set(
+    nodeId: string,
+    value: number,
+    expectedMissionVersion = f.version(),
+  ) {
+    const input = operation.input.parse({
+      params: { nodeId },
+      query: {},
+      body: { value, expectedMissionVersion },
+    });
+    return nodeSchema.parse(
+      f.registry.get(operation.id).handler(input, f.caller),
+    );
+  }
+  function refuses(
+    nodeId: string,
+    value: number,
+    code: string,
+    details: unknown,
+    status: number = HttpStatus.Conflict,
+    expectedMissionVersion = f.version(),
+  ) {
+    const before = f.snapshot();
+    const beforeJobs = [...jobs];
+    const commits = f.commits();
+    assert.throws(
+      () => set(nodeId, value, expectedMissionVersion),
+      (error) => {
+        assert.ok(error instanceof OperationError);
+        assert.equal(error.status, status);
+        assert.equal(error.code, code);
+        if (details !== undefined) assert.deepEqual(error.details, details);
+        return true;
+      },
+    );
+    assert.equal(f.commits(), commits + ONE_COMMIT);
+    assert.deepEqual(f.snapshot(), before);
+    assert.deepEqual([...jobs], beforeJobs);
+  }
+  return { ...f, jobs, updates, operation, set, refuses };
+}
+
+test("node.priority.set declares a human POST write with a closed safe-integer input", (t) => {
+  const f = priorityFixture(t);
+  const op = f.operation;
+  assert.equal(op.method, HttpMethod.Post);
+  assert.equal(op.path, PRIORITY_PATH);
+  assert.equal(op.access, AccessPolicy.Human);
+  assert.equal(op.mutation, true);
+  const valid = {
+    params: { nodeId: UNKNOWN_NODE_ID },
+    query: {},
+    body: { value: ZERO, expectedMissionVersion: ONE },
+  };
+  assert.equal(op.input.safeParse(valid).success, true);
+  for (const value of [
+    0.5,
+    "42",
+    Number.MAX_SAFE_INTEGER + ONE,
+    Number.MIN_SAFE_INTEGER - ONE,
+  ]) {
+    assert.equal(
+      op.input.safeParse({ ...valid, body: { ...valid.body, value } }).success,
+      false,
+    );
+  }
+  assert.equal(
+    op.input.safeParse({ ...valid, body: { ...valid.body, reason: REASON } })
+      .success,
+    false,
+  );
+});
+
+test("node.priority.set reads absent priority as zero and overwrites without revision or version change", (t) => {
+  const f = priorityFixture(t);
+  const id = f.objective();
+  const get = missionOperations["node.get"];
+  const input = get.input.parse({
+    params: { nodeId: id },
+    query: {},
+    body: null,
+  });
+  const initial = nodeSchema.parse(
+    f.registry.get(get.id).handler(input, f.caller),
+  );
+  assert.equal(initial.kind, NodeKind.Objective);
+  if (initial.kind !== NodeKind.Objective)
+    throw new Error(UNEXPECTED_COLLABORATION);
+  assert.equal(initial.priority, ZERO);
+  const version = f.version();
+  const revisions = f.snapshot().revisions;
+  const job = f.jobs.get(id);
+  assert.ok(job);
+  const commits = f.commits();
+  const first = f.set(id, PRIORITY, version);
+  assert.equal(f.commits(), commits + ONE_COMMIT);
+  assert.equal(first.kind, NodeKind.Objective);
+  if (first.kind !== NodeKind.Objective)
+    throw new Error(UNEXPECTED_COLLABORATION);
+  assert.equal(first.priority, PRIORITY);
+  assert.equal(f.jobs.get(id)?.id, job.id);
+  assert.equal(f.jobs.get(id)?.priority, PRIORITY);
+  const second = f.set(id, NEGATIVE_PRIORITY, version);
+  assert.equal(second.kind, NodeKind.Objective);
+  if (second.kind !== NodeKind.Objective)
+    throw new Error(UNEXPECTED_COLLABORATION);
+  assert.equal(second.priority, NEGATIVE_PRIORITY);
+  assert.equal(f.node(id)?.priority, NEGATIVE_PRIORITY);
+  assert.deepEqual(f.updates, [
+    { nodeId: id, priority: PRIORITY },
+    { nodeId: id, priority: NEGATIVE_PRIORITY },
+  ]);
+  assert.deepEqual(f.jobs.get(id), { id: job.id, priority: NEGATIVE_PRIORITY });
+  assert.equal(f.version(), version);
+  assert.deepEqual(f.snapshot().revisions, revisions);
+});
+
+test("node.priority.set accepts both signed limits and zero on initiatives and objectives without a job", (t) => {
+  const f = priorityFixture(t);
+  const initiative = f.initiative();
+  const objective = f.create(f.body(NodeKind.Objective, initiative)).revisions[
+    ZERO
+  ]!.nodeId;
+  const version = f.version();
+  for (const [id, value] of [
+    [initiative, Number.MIN_SAFE_INTEGER],
+    [objective, Number.MAX_SAFE_INTEGER],
+    [objective, ZERO],
+  ] as const) {
+    const answer = f.set(id, value, version);
+    assert.equal(answer.kind === NodeKind.Task ? null : answer.priority, value);
+    assert.equal(f.node(id)?.priority, value);
+  }
+  assert.equal(f.jobs.has(initiative), false);
+  assert.equal(f.version(), version);
+});
+
+test("node.priority.set checks existence, retirement, version, task and terminal in order", (t) => {
+  const f = priorityFixture(t);
+  const id = f.objective();
+  const task = f.create(f.body(NodeKind.Task, id)).revisions[ZERO]!.tasks![
+    ZERO
+  ]!.id;
+  const version = f.version();
+  f.refuses(
+    UNKNOWN_NODE_ID,
+    PRIORITY,
+    MissionErrorCode.NodeNotFound,
+    undefined,
+    HttpStatus.NotFound,
+  );
+  f.refuses(
+    id,
+    PRIORITY,
+    MissionErrorCode.VersionConflict,
+    { current: version },
+    HttpStatus.Conflict,
+    MISSION_INITIAL_VERSION,
+  );
+  f.refuses(
+    task,
+    PRIORITY,
+    MissionErrorCode.PriorityTask,
+    { nodeId: task },
+    HttpStatus.BadRequest,
+  );
+  f.setState(id, NodeState.Completed);
+  f.refuses(id, PRIORITY, MissionErrorCode.Terminal, { nodeId: id });
+  f.store.database
+    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+    .run(RETIRED_AT, id);
+  f.refuses(
+    id,
+    PRIORITY,
+    MissionErrorCode.Retired,
+    { nodeId: id },
+    HttpStatus.Conflict,
+    MISSION_INITIAL_VERSION,
+  );
+});
+
+test("node.priority.set rolls back its node update if the queue fails", (t) => {
+  const f = priorityFixture(t);
+  const id = f.initiative();
+  f.queue.priorityUpdate = () => {
+    throw new Error(UNEXPECTED_COLLABORATION);
+  };
+  const before = f.snapshot();
+  assert.throws(
+    () => f.set(id, PRIORITY),
+    new RegExp(UNEXPECTED_COLLABORATION),
+  );
+  assert.deepEqual(f.snapshot(), before);
+  assert.equal(f.node(id)?.priority, null);
+});
 
 test("node.update no-op and changed objective fields preserve version and write exact revisions", (t) => {
   const f = nodeFixture(t);

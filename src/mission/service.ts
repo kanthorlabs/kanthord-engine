@@ -20,6 +20,7 @@ import {
   ActorKind,
   MISSION_SERVICE_NAME,
   MissionErrorCode,
+  NodeKind,
   missionOperations,
   type HumanActor,
   type MissionBindings,
@@ -39,6 +40,7 @@ import { setCriterion, updateNode } from "./node-update.ts";
 import {
   getNode,
   getRevision,
+  nodeRecord,
   nodeCursor,
   nodePage,
   requireNode,
@@ -49,8 +51,9 @@ import {
   insertMission,
   readLiveNodesPinning,
   readMissionByProject,
+  updateNodePriority,
 } from "./store.ts";
-import { requireMission } from "./write.ts";
+import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 
 const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
 const QUERY_TRUE = "true";
@@ -254,6 +257,26 @@ export class MissionService implements Service, MissionCollaborations {
             this.dependencies.config.textMaxBytes,
           ),
         ),
+    );
+    registry.register(
+      missionOperations["node.priority.set"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) => {
+          const node = requireNode(tx, params.nodeId);
+          requireActive(node);
+          requireMission(tx, node.mission_id, body.expectedMissionVersion);
+          if (node.kind === NodeKind.Task)
+            throw new OperationError(
+              HttpStatus.BadRequest,
+              MissionErrorCode.PriorityTask,
+              "Tasks have no priority.",
+              { nodeId: node.id },
+            );
+          requireNonterminal(node);
+          updateNodePriority(tx, node.id, body.value);
+          this.dependencies.workQueue.priorityUpdate(tx, node.id, body.value);
+          return nodeRecord(tx, { ...node, priority: body.value });
+        }),
     );
     registry.register(
       missionOperations["node.move"],

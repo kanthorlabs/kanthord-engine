@@ -732,6 +732,19 @@ export const missionOperations = {
     output: nodeChangeSchema,
     description: "Retire a mission node and its descendants.",
   },
+  "node.priority.set": {
+    ...writeOperation,
+    id: "mission.node.priority.set",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:nodeId/priority",
+    input: z.strictObject({
+      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      query: z.strictObject({}),
+      body: prioritySetSchema,
+    }),
+    output: nodeSchema,
+    description: "Set the priority of a mission initiative or objective.",
+  },
   "node.move": {
     ...writeOperation,
     id: "mission.node.move",
