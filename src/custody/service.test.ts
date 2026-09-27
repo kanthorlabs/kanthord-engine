@@ -7,12 +7,19 @@ import { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
 import { HealthStatus } from "../kernel/service.ts";
-import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
+import {
+  IN_MEMORY_DATABASE,
+  Store,
+  type Transaction,
+} from "../kernel/store.ts";
 import {
   custodyOperations,
   CUSTODY_SERVICE_NAME,
   type CredentialMetadataFn,
   type CustodySuitabilityFn,
+  type AgentProvidersDependentOnFn,
+  type BindingsNamingFn,
+  type EnablementsDependentOnModelFn,
 } from "./contract.ts";
 import { decrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
@@ -25,6 +32,14 @@ const NAME_CONFLICT_CODE = "credential.name.conflict";
 const REVISION_CONFLICT_CODE = "credential.revision.conflict";
 const CREDENTIAL_NOT_FOUND_CODE = "credential.credential.not_found";
 const PLATFORM_MISMATCH_CODE = "credential.platform.mismatch";
+const MODEL_IN_USE_CODE = "credential.metadata.model_in_use";
+const REMOVED_MODEL = "removed";
+const KEPT_MODEL = "kept";
+const DEPENDENT_AGENT = "dependent-agent";
+const RemovalMode = {
+  MetadataEdit: "metadata edit",
+  Rotation: "rotation",
+} as const;
 const NEXT_REVISION = FIRST_REVISION + 1;
 const THIRD_REVISION = NEXT_REVISION + 1;
 const ROTATED_BASE_URL = "https://other.example/v1";
@@ -62,7 +77,13 @@ const inputs = [
   },
 ];
 
-function fixture() {
+function fixture(
+  collaborations: {
+    agentProvidersDependentOn?: AgentProvidersDependentOnFn;
+    bindingsNaming?: BindingsNamingFn;
+    enablementsDependentOnModel?: EnablementsDependentOnModelFn;
+  } = {},
+) {
   const store = new Store(IN_MEMORY_DATABASE);
   store.migrate([
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
@@ -73,14 +94,28 @@ function fixture() {
       logs.push(record),
   } as unknown as Logger;
   const health = new HealthRegistry();
-  const component = new CustodyComponent({ envelopeKey: key, logger, health });
+  const component = new CustodyComponent({
+    envelopeKey: key,
+    logger,
+    health,
+    agentProvidersDependentOn:
+      collaborations.agentProvidersDependentOn ?? (() => []),
+    bindingsNaming: collaborations.bindingsNaming ?? (() => []),
+    enablementsDependentOnModel:
+      collaborations.enablementsDependentOnModel ?? (() => []),
+  });
   const registry = new OperationRegistry();
   component.declare(registry);
+  let lastTransaction: Transaction | undefined;
   const caller: CallerContext = {
     identity: { kind: "human", accountId: "alice", name: "Alice", jti: "j" },
     context: background,
     requestId: "request",
-    commit: (write) => store.transaction(write),
+    commit: (write) =>
+      store.transaction((tx) => {
+        lastTransaction = tx;
+        return write(tx);
+      }),
   };
   function invoke(
     operation: (typeof custodyOperations)[keyof typeof custodyOperations],
@@ -120,6 +155,7 @@ function fixture() {
   return {
     store,
     component,
+    lastTransaction: () => lastTransaction,
     registry,
     health,
     logs,
@@ -584,6 +620,117 @@ test("credential metadata returns only nonsecret fields from the newest live rev
   }
 });
 
+for (const mode of Object.values(RemovalMode)) {
+  test(`${mode} refuses dependent model removal and permits unused model removal`, () => {
+    const calls: {
+      tx: Transaction;
+      credentialName: string;
+      modelId: string;
+    }[] = [];
+    let dependents = [{ agentName: DEPENDENT_AGENT }];
+    const f = fixture({
+      enablementsDependentOnModel: (tx, credentialName, modelId) => {
+        calls.push({ tx, credentialName, modelId });
+        return dependents;
+      },
+    });
+    try {
+      f.create(inputs[2]);
+      const baseUrl = (inputs[2]!.metadata as { baseUrl: string }).baseUrl;
+      const existing = {
+        baseUrl,
+        models: [{ id: REMOVED_MODEL }, { id: KEPT_MODEL }],
+      };
+      f.updateMetadata("openai", {
+        expectedRevision: FIRST_REVISION,
+        metadata: existing,
+      });
+      const next = { baseUrl, models: [{ id: KEPT_MODEL }] };
+      const change = () =>
+        mode === RemovalMode.Rotation
+          ? f.rotate("openai", {
+              expectedRevision: NEXT_REVISION,
+              secret: apiSecret,
+              metadata: next,
+            })
+          : f.updateMetadata("openai", {
+              expectedRevision: NEXT_REVISION,
+              metadata: next,
+            });
+      assert.throws(change, (error) => {
+        assert.ok(error instanceof OperationError);
+        assert.equal(error.status, HttpStatus.Conflict);
+        assert.equal(error.code, MODEL_IN_USE_CODE);
+        assert.deepEqual(error.details, {
+          models: [{ model: REMOVED_MODEL, agents: [DEPENDENT_AGENT] }],
+        });
+        return true;
+      });
+      assert.strictEqual(calls[0]!.tx, f.lastTransaction());
+      assert.equal(
+        (f.get("openai") as { revisions: unknown[] }).revisions.length,
+        NEXT_REVISION,
+      );
+      assert.equal(calls.length, FIRST_REVISION);
+      assert.deepEqual(
+        calls.map(({ credentialName, modelId }) => ({
+          credentialName,
+          modelId,
+        })),
+        [{ credentialName: "openai", modelId: REMOVED_MODEL }],
+      );
+      dependents = [];
+      const result = change() as { revisions: { revision: number }[] };
+      assert.equal(result.revisions.length, THIRD_REVISION);
+      assert.equal(result.revisions[0]!.revision, THIRD_REVISION);
+      assert.equal(calls.length, NEXT_REVISION);
+      assert.deepEqual(
+        calls.map(({ credentialName, modelId }) => ({
+          credentialName,
+          modelId,
+        })),
+        [
+          { credentialName: "openai", modelId: REMOVED_MODEL },
+          { credentialName: "openai", modelId: REMOVED_MODEL },
+        ],
+      );
+      assert.strictEqual(calls[1]!.tx, f.lastTransaction());
+    } finally {
+      f.store.close();
+    }
+  });
+}
+
+test("credentialDependents returns both injected collaborations' results", () => {
+  const agentProviders = [{ agentName: "agent", providerName: "provider" }];
+  const bindings = [{ bindingId: "binding", projectId: "project" }];
+  const calls: { tx: Transaction; name: string }[] = [];
+  const f = fixture({
+    agentProvidersDependentOn: (tx, name) => {
+      calls.push({ tx, name });
+      return agentProviders;
+    },
+    bindingsNaming: (tx, name) => {
+      calls.push({ tx, name });
+      return bindings;
+    },
+  });
+  try {
+    f.store.transaction((tx) => {
+      assert.deepEqual(f.component.credentialDependents(tx, "openai"), {
+        agentProviders,
+        bindings,
+      });
+      assert.deepEqual(calls, [
+        { tx, name: "openai" },
+        { tx, name: "openai" },
+      ]);
+    });
+  } finally {
+    f.store.close();
+  }
+});
+
 test("lifecycle reports health and joins cancellation", async () => {
   const f = fixture();
   try {
@@ -606,6 +753,9 @@ test("lifecycle reports health and joins cancellation", async () => {
     const other = new CustodyComponent({
       envelopeKey: key,
       logger: { info() {} } as unknown as Logger,
+      agentProvidersDependentOn: () => [],
+      bindingsNaming: () => [],
+      enablementsDependentOnModel: () => [],
     });
     const context = new CancellationContext();
     const running = other.run(context);

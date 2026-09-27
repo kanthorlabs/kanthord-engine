@@ -23,6 +23,11 @@ import {
   LIST_LIMIT_DEFAULT,
   type CredentialAnswer,
   type CredentialMetadata,
+  type AgentProviderDependent,
+  type BindingRevision,
+  type AgentProvidersDependentOnFn,
+  type BindingsNamingFn,
+  type EnablementsDependentOnModelFn,
 } from "./contract.ts";
 import { decrypt, encrypt } from "./envelope.ts";
 import {
@@ -39,6 +44,9 @@ export interface Dependencies {
   envelopeKey: Buffer;
   logger: Logger;
   health?: HealthRegistry;
+  agentProvidersDependentOn: AgentProvidersDependentOnFn;
+  bindingsNaming: BindingsNamingFn;
+  enablementsDependentOnModel: EnablementsDependentOnModelFn;
 }
 
 const CustodyErrorCode = {
@@ -51,6 +59,7 @@ const CustodyErrorCode = {
   PlatformMismatch: "credential.platform.mismatch",
   RevisionConflict: "credential.revision.conflict",
   BaseUrlFixed: "credential.metadata.base_url_fixed",
+  ModelInUse: "credential.metadata.model_in_use",
   RevisionNotFound: "credential.revision.not_found",
   RevisionEnded: "credential.revision.ended",
   NewestLive: "credential.revision.newest_live",
@@ -176,10 +185,16 @@ export class CustodyComponent implements Service {
   private started = false;
   private readonly envelopeKey: Buffer;
   private readonly logger: Logger;
+  private readonly agentProvidersDependentOn: AgentProvidersDependentOnFn;
+  private readonly bindingsNaming: BindingsNamingFn;
+  private readonly enablementsDependentOnModel: EnablementsDependentOnModelFn;
 
   constructor(dependencies: Dependencies) {
     this.envelopeKey = dependencies.envelopeKey;
     this.logger = dependencies.logger;
+    this.agentProvidersDependentOn = dependencies.agentProvidersDependentOn;
+    this.bindingsNaming = dependencies.bindingsNaming;
+    this.enablementsDependentOnModel = dependencies.enablementsDependentOnModel;
     dependencies.health?.register(CUSTODY_HEALTH_NAME, () =>
       this.healthcheck(),
     );
@@ -236,6 +251,16 @@ export class CustodyComponent implements Service {
       name: row.name,
       platform: row.platform,
       metadata: row.metadata === null ? null : JSON.parse(row.metadata),
+    };
+  }
+
+  credentialDependents(
+    tx: Transaction,
+    credentialName: string,
+  ): { agentProviders: AgentProviderDependent[]; bindings: BindingRevision[] } {
+    return {
+      agentProviders: this.agentProvidersDependentOn(tx, credentialName),
+      bindings: this.bindingsNaming(tx, credentialName),
     };
   }
 
@@ -366,9 +391,21 @@ export class CustodyComponent implements Service {
     credentialName: string,
     removedIds: string[],
   ): void {
-    void tx;
-    void credentialName;
-    void removedIds;
+    const models = removedIds
+      .map((model) => ({
+        model,
+        agents: this.enablementsDependentOnModel(tx, credentialName, model).map(
+          ({ agentName }) => agentName,
+        ),
+      }))
+      .filter(({ agents }) => agents.length > NO_ROWS);
+    if (models.length > NO_ROWS)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.ModelInUse,
+        "Credential model is in use.",
+        { models },
+      );
   }
 
   private checkModels(

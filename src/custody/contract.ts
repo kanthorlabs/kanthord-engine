@@ -32,6 +32,29 @@ export type CredentialMetadataFn = (
   credentialName: string,
 ) => CredentialMetadata | null;
 
+export type AgentProviderDependent = {
+  agentName: string;
+  providerName: string;
+};
+export type BindingRevision = {
+  bindingId: string;
+  projectId: string;
+};
+export type AgentEnablement = { agentName: string };
+export type AgentProvidersDependentOnFn = (
+  tx: Transaction,
+  credentialName: string,
+) => AgentProviderDependent[];
+export type BindingsNamingFn = (
+  tx: Transaction,
+  credentialName: string,
+) => BindingRevision[];
+export type EnablementsDependentOnModelFn = (
+  tx: Transaction,
+  credentialName: string,
+  modelId: string,
+) => AgentEnablement[];
+
 const emptyParams = z.strictObject({});
 const emptyQuery = z.strictObject({});
 const credentialParams = z.strictObject({ credentialName: z.string().min(1) });
