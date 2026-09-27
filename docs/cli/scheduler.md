@@ -22,7 +22,7 @@ design. Open recovery decisions remain open, even where a candidate command
 shape is otherwise complete.
 
 The Scheduler owns jobs, claims, execution records, leases,
-live-execution accounting, wait records, delivery admission and observation
+live-execution accounting, delivery admission and observation
 obligations. Mission owns nodes, attempts, pinned revisions, evidence,
 assessments, outcomes, external objects and accepted observation records.
 Worker owns registrations, runtime identities, healthchecks, compatibility
@@ -200,8 +200,7 @@ kanthord scheduler queue list <project-id> [--limit <count>] [--cursor <opaque>]
 [`--cursor`](./common-flags.md#--cursor) have the shared definitions. There are
 no other query fields or JSON body. The list returns a page of `Job`
 records in descending job-identity order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
-This inspection order does not change queue selection. Held-out jobs remain
-visible so a human can understand a wait. Reading changes no job.
+This inspection order does not change queue selection. Reading changes no job.
 The list is a live view of current jobs and holds no history.
 
 ### `queue peek`
@@ -214,7 +213,7 @@ The required positional input maps to path `projectId` and has no default.
 No query or body is accepted. Returns the required field
 `{ "job": Job | null }`, with `null` for an empty queue. It reads
 the first job in priority descending, then job identity ascending order,
-and removes nothing, including when that job is held out. It neither predicts a particular instance's compatible
+and removes nothing. It neither predicts a particular instance's compatible
 selection nor reserves a node for a subsequent pull.
 
 ### Proposed `Job` result
@@ -227,13 +226,10 @@ Every field below is required in a result; none has a client default.
 | `projectId`, `nodeId` | Project and Mission node references. Only an initiative or objective can be queued; never a task.      |
 | `claimKind`           | Enum `steps` or `evaluation`, admitted by Mission state.                                               |
 | `priority`            | Safe integer copied from the Mission-owned priority. An absent node priority is Mission's default `0`. |
-| `heldOut`             | Boolean; a job waiting on a named fact is excluded from selection while that fact remains unsatisfied. |
-| `waitFor`             | `WaitFact` defined under release, or `null` when there is no recorded wait.                            |
 
-A priority change preserves the job identity. Holding out a job also
-preserves it; a release with further work creates a new job. Membership
-means claimable work subject to the wait record, not necessarily Mission
-state `Available`. Neither priority, age, inspection nor a stale job admits
+A priority change preserves the job identity. A release with further work
+creates a new job when the node is claimable. Membership means claimable work,
+not necessarily Mission state `Available`. Neither priority, age, inspection nor a stale job admits
 a claim. Mission state and every admission condition are rechecked at claim.
 
 ## Work acquisition
@@ -266,14 +262,15 @@ it cannot acquire a chosen node or authorize its own claim.
 1. Worker vouches for the runtime association, a fresh instance healthcheck
    and the worker's published compatibility declarations. The instance has
    at most one outstanding pull or one live execution.
-2. Scheduler selects the first non-held-out job that the claimant admits
+2. Scheduler selects the first job that the claimant admits
    in the project's queue order. Compatibility includes exact worker name,
    declared node state and required node format, using the pinned revision
    of an open attempt or the current revision before the first claim.
 3. Selection and claim are one atomic acquisition. They recheck Mission
-   state, readiness/continuation, the wait fact, binding availability and
+   state, the Mission condition, binding availability and
    count, compatibility and one-claim-per-node exclusion. A node must be
-   `Available` for a steps claim or eligible `Waiting`/`External.Requested`
+   `Available` for a steps claim (with terminal objectives on an initiative)
+   or eligible `Waiting`/`External.Requested`
    for an evaluation claim. A `Blocked`, `Paused`, `Pending`, terminal or
    incompatible node cannot be forced through this path.
 4. An accepted claim mints the execution identity and counts one execution
@@ -405,23 +402,9 @@ kanthord scheduler execution release <execution-id> --file <path> [--idempotency
 Required opaque `<execution-id>` maps to path `executionId`, with no default.
 No query fields are accepted. The required file supplies the following fields.
 
-| JSON file field | Requiredness / type         | Default and validation                                                                                                                                                                                                         |
-| --------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `furtherWork`   | Required boolean.           | No default. `false` declares no further work for this release; it does not assert success, close an attempt or manufacture an assessment. `true` requests the supported further-work path of the current claim kind.           |
-| `waitFor`       | Optional `WaitFact` object. | Absent means no named wait. Permitted only with `furtherWork: true`; must describe an admitted fact of this node/attempt. The server checks the named fact against Mission, not the caller's assertion that it is unsatisfied. |
-
-`WaitFact` is exactly one of these proposed closed objects:
-
-| Form                      | Required fields and validation                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Child-set terminal fact   | `type: "children-terminal"`; `childNodeIds: string[]`, nonempty and unique. Each ID names a member of the Mission-owned child set relevant to the continuation. The server verifies the whole required set, so omitting a required child cannot satisfy a wait early. Terminal-state meaning comes from Mission. The form remains **[blocked][scheduler-contract]** under the request and response schemas (child-set wait fact) question.                         |
-| External observation fact | `type: "external-observation"`; `externalObjectId: string`. It names the external object whose accepted observation is required for this continuation. The server derives the required end state from the recorded action/prerequisite. The caller supplies neither an arbitrary platform address nor an invented observed state. An accepted observation that already establishes the end state satisfies the wait at once; the release is accepted, not refused. |
-
-The child-set representation must remain tied to Mission's graph: a graph
-change rechecks the wait rather than treating this submitted list as permanent
-authority. An external-object reference is checked against its recorded node,
-attempt and action; reusing a remote pull-request number across attempts is
-not sufficient correlation.
+| JSON file field | Requiredness / type | Default and validation                                                                                                                                                                                               |
+| --------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `furtherWork`   | Required boolean.   | No default. `false` declares no further work for this release; it does not assert success, close an attempt or manufacture an assessment. `true` requests the supported further-work path of the current claim kind. |
 
 **Effects and prerequisites:**
 
@@ -429,23 +412,22 @@ not sufficient correlation.
   Mission routes the release using its accepted facts. A supported release
   leaves the attempt open; it never opens a replacement attempt by itself.
 - A steps release with no further work requires the evidence and task-result
-  obligations owned by Mission/Worker. A steps release with further work and
-  no wait requires the accepted run output and checkpoint/push obligations
-  of Worker. Those records are submitted through their owning services; the
+  obligations owned by Mission/Worker. A steps release with further work
+  requires the accepted run output and checkpoint/push obligations of
+  Worker. Those records are submitted through their owning services; the
   release body contains no evidence, assessment, outcome or shell command.
 - A reviewer release is supported only after the current passing assessment
   and the action-performer path allow it: returned items consist solely of
-  submitted external objects and actions awaiting prerequisites. If an
-  action awaits a prerequisite, the release names its observation wait fact.
+  submitted external objects and actions awaiting prerequisites.
   When all requests are submitted, Mission routes the release to
-  `External.Requested`. A passing assessment with no required external action
-  already ends the claim; no fresh release is needed to declare completion.
-- A release with further work creates the appropriate new job. A
-  named wait records the fact and holds the job out. The write reads current
-  accepted facts in the same serialized transaction: an already-satisfied
-  fact satisfies the wait immediately, and a concurrent fact cannot be lost.
-  Mission releases the hold in the transaction accepting the fact. The next
-  compatible pull receives the continuation; there is no pushed assignment.
+  `External.Requested` and inserts no job. The transaction that makes the
+  continuation condition hold inserts the evaluation job. A passing assessment
+  with no required external action already ends the claim; no fresh release
+  is needed to declare completion.
+- Mission inserts the job of the node in the transaction that makes the node
+  claimable, and that is the release itself when the node is claimable at once.
+  No job exists while a node waits. The next compatible pull receives the
+  continuation; there is no pushed assignment.
 
 Proposed success is HTTP `200` with required fields
 `{ "executionId": string, "releasedAt": timestamp }`; the CLI adds its key.
@@ -580,11 +562,11 @@ signed delivery, and a human or machine token is not delivery verification.
   node to the next compatible pull ahead of order. The request owns no claim,
   waits boundedly for a claim and still obeys admission. No external authority
   or CLI operation is declared here; it is not a human `run-node` escape hatch.
-- **Wakeups, pool turns, wait satisfaction and loss sweeps:** these are
+- **Wakeups, pool turns and loss sweeps:** these are
   Scheduler-owned processing. An idle project consumes no turn, a waiting
   pull holds no permit, and one execution occupies no scheduling processor.
   There is no public `tick`, `drain`, `force-release`, `declare-loss`,
-  `reset-epoch`, `reset-budget` or arbitrary held-out-job removal.
+  `reset-epoch` or `reset-budget`.
 - **External action performance:** Worker derives action operands from the
   attempt and evidence, and Mission owns resulting records. It is not
   Scheduler delivery admission or a queue write.
