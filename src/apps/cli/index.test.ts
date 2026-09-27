@@ -88,6 +88,71 @@ test("CLI help works offline, config help resolves its path, and unsupported nam
   assert.equal(invocation(["worker", "--help"], env).status, ExitCode.Success);
 });
 
+test("worker agent enablement commands expose offline help and validate inputs before I/O", (t) => {
+  const env = environment(temporary(t));
+  for (const [path, fileRequired] of [
+    [["list"], false],
+    [["get"], false],
+    [["put"], true],
+    [["enable"], false],
+    [["disable"], false],
+    [["remove"], false],
+    [["provider", "add"], true],
+    [["provider", "remove"], false],
+  ] as const) {
+    const help = invocation(
+      ["worker", "agent", "enablement", ...path, "--help"],
+      env,
+    );
+    assert.equal(help.status, ExitCode.Success, help.stderr);
+    if (fileRequired) assert.match(help.stdout, /--file <path>/);
+  }
+  assert.equal(
+    invocation(["worker", "register", "--help"], env).status,
+    ExitCode.Success,
+  );
+  const invalid = invocation(
+    [
+      "worker",
+      "agent",
+      "enablement",
+      "enable",
+      "swe@1",
+      "--endpoint",
+      "http://127.0.0.1:1",
+      "--token",
+      "t",
+      "--expected-revision",
+      "abc",
+    ],
+    env,
+  );
+  assert.equal(invalid.status, ExitCode.Failure);
+  assert.match(
+    invalid.stderr,
+    /^cli\.worker\.agent\.enablement\.enable\.invalid_revision:/,
+  );
+  const missingToken = invocation(
+    [
+      "worker",
+      "agent",
+      "enablement",
+      "put",
+      "swe@1",
+      "--endpoint",
+      "http://127.0.0.1:1",
+      "--file",
+      "enablement.json",
+    ],
+    env,
+  );
+  assert.equal(missingToken.status, ExitCode.Failure);
+  assert.match(
+    missingToken.stderr,
+    /^cli\.worker\.agent\.enablement\.put\.token_required:/,
+  );
+});
+
 test("serve worker rejects server configuration and uses a single transport diagnostic without starting", (t) => {
   const directory = temporary(t);
   const env = environment(directory);
