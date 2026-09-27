@@ -8,6 +8,7 @@ import {
 import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
 import { custodyMigrations } from "../../custody/index.ts";
 import { gatewayMigrations } from "../../gateway/index.ts";
+import { WORKER_SERVICE_NAME } from "../../worker/contract.ts";
 import { workerMigrations } from "../../worker/index.ts";
 import { projectMigrations } from "../../project/index.ts";
 import { SCHEDULER_SERVICE_NAME } from "../../scheduler/contract.ts";
@@ -16,12 +17,13 @@ import { schedulerMigrations } from "../../scheduler/index.ts";
 const services: Migrations = [
   { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
   { service: "gateway", migrations: gatewayMigrations },
-  { service: "worker", migrations: workerMigrations },
+  { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
   { service: "project", migrations: projectMigrations },
   { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
 ];
 const HISTORY_TABLE = "migration";
 const CREDENTIAL_TABLE = "credential";
+const WORKER_AGENT_ENABLEMENT_TABLE = "worker_agent_enablement";
 const SCHEDULER_JOB_TABLE = "scheduler_job";
 const INTEGRITY_OK = "ok";
 
@@ -57,7 +59,11 @@ test("service migrations own distinct prefixes and create only tables in their n
         );
       }
     }
-    assert.deepEqual(tables(store), [CREDENTIAL_TABLE, SCHEDULER_JOB_TABLE]);
+    assert.deepEqual(tables(store), [
+      CREDENTIAL_TABLE,
+      WORKER_AGENT_ENABLEMENT_TABLE,
+      SCHEDULER_JOB_TABLE,
+    ]);
   } finally {
     store.close();
   }
@@ -79,6 +85,8 @@ test("each service migration set applies alone to an empty store", () => {
       );
       if (service.service === SCHEDULER_SERVICE_NAME)
         assert.deepEqual(tables(store), [SCHEDULER_JOB_TABLE]);
+      if (service.service === WORKER_SERVICE_NAME)
+        assert.deepEqual(tables(store), [WORKER_AGENT_ENABLEMENT_TABLE]);
       if (service.service === CUSTODY_SERVICE_NAME) {
         assert.deepEqual(
           store.database
