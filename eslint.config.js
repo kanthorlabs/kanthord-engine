@@ -25,7 +25,8 @@ export default tseslint.config(
         { type: "kernel", pattern: "src/kernel" },
         {
           type: "service",
-          pattern: "src/(project|mission|scheduler|worker|tracking|gateway)",
+          pattern:
+            "src/(custody|project|mission|scheduler|worker|tracking|gateway)",
           capture: ["name"],
         },
         { type: "apps-server", pattern: "src/apps/server" },

@@ -5,16 +5,20 @@ import {
   IN_MEMORY_DATABASE,
   type Migrations,
 } from "../../kernel/store.ts";
+import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
+import { custodyMigrations } from "../../custody/index.ts";
 import { gatewayMigrations } from "../../gateway/index.ts";
 import { workerMigrations } from "../../worker/index.ts";
 import { projectMigrations } from "../../project/index.ts";
 
 const services: Migrations = [
+  { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
   { service: "gateway", migrations: gatewayMigrations },
   { service: "worker", migrations: workerMigrations },
   { service: "project", migrations: projectMigrations },
 ];
 const HISTORY_TABLE = "migration";
+const CREDENTIAL_TABLE = "credential";
 const INTEGRITY_OK = "ok";
 
 function tables(store: Store): string[] {
@@ -36,6 +40,9 @@ test("service migrations own distinct prefixes and create only tables in their n
       applied.push(service);
       store.migrate(applied);
       for (const name of tables(store).filter((name) => !before.has(name))) {
+        const isCredentialException =
+          service.service === CUSTODY_SERVICE_NAME && name === CREDENTIAL_TABLE;
+        if (isCredentialException) continue;
         assert.ok(
           name.startsWith(`${service.service}_`),
           `${service.service} created ${name}`,
@@ -46,7 +53,7 @@ test("service migrations own distinct prefixes and create only tables in their n
         );
       }
     }
-    assert.deepEqual(tables(store), []);
+    assert.deepEqual(tables(store), [CREDENTIAL_TABLE]);
   } finally {
     store.close();
   }
@@ -66,6 +73,36 @@ test("each service migration set applies alone to an empty store", () => {
         store.database.prepare("PRAGMA integrity_check").get()?.integrity_check,
         INTEGRITY_OK,
       );
+      if (service.service === CUSTODY_SERVICE_NAME) {
+        assert.deepEqual(
+          store.database
+            .prepare(
+              `SELECT name, type, "notnull", pk FROM pragma_table_info('${CREDENTIAL_TABLE}')`,
+            )
+            .all()
+            .map((row) => ({ ...row })),
+          [
+            { name: "id", type: "TEXT", notnull: 1, pk: 1 },
+            { name: "name", type: "TEXT", notnull: 1, pk: 0 },
+            { name: "platform", type: "TEXT", notnull: 1, pk: 0 },
+            { name: "revision", type: "INTEGER", notnull: 1, pk: 0 },
+            { name: "nonce", type: "BLOB", notnull: 1, pk: 0 },
+            { name: "ciphertext", type: "BLOB", notnull: 1, pk: 0 },
+            { name: "metadata", type: "TEXT", notnull: 0, pk: 0 },
+            { name: "created_at", type: "INTEGER", notnull: 1, pk: 0 },
+            { name: "ended_at", type: "INTEGER", notnull: 0, pk: 0 },
+          ],
+        );
+        assert.deepEqual(
+          store.database
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_autoindex%'",
+            )
+            .all()
+            .map((row) => ({ ...row })),
+          [{ name: "credential_name_revision" }],
+        );
+      }
     } finally {
       store.close();
     }
