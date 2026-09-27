@@ -20,6 +20,25 @@ export function insertMission(
   return id;
 }
 
+export function readNodeState(tx: Transaction, nodeId: string): string | null {
+  const row = tx.database
+    .prepare("SELECT state FROM mission_node WHERE id = ?")
+    .get(nodeId) as { state: string | null } | undefined;
+  return row?.state ?? null;
+}
+
+export function readCurrentChildStates(
+  tx: Transaction,
+  parentId: string,
+): Array<string | null> {
+  const rows = tx.database
+    .prepare(
+      "SELECT state FROM mission_node WHERE parent_id = ? AND retired_at IS NULL",
+    )
+    .all(parentId) as Array<{ state: string | null }>;
+  return rows.map((row) => row.state);
+}
+
 export function readLiveNodesPinning(
   tx: Transaction,
   bindingId: string,
