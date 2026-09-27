@@ -28,6 +28,7 @@ import {
 } from "./contract.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
+import { exportMission } from "./export.ts";
 import { previewImport } from "./import.ts";
 import { applyImport } from "./import-apply.ts";
 import { createNode } from "./node-create.ts";
@@ -89,6 +90,16 @@ export class MissionService implements Service, MissionCollaborations {
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(missionOperations.export, ({ params, query }, caller) =>
+      caller.commit((tx) =>
+        exportMission(
+          tx,
+          params.missionId,
+          query.format,
+          this.dependencies.bindings,
+        ),
+      ),
+    );
     registry.register(
       missionOperations["import.apply"],
       ({ params, body }, caller) =>

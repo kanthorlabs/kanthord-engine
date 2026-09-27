@@ -340,11 +340,37 @@ export const importEntrySchema = z.strictObject({
   dependsOn: z.array(z.string().min(1)).optional(),
 });
 export type ImportEntry = z.infer<typeof importEntrySchema>;
+export const exportEntrySchema = z.strictObject({
+  filename: planFileNameSchema,
+  id: identitySchema(NODE_IDENTITY_PREFIX),
+  kind: nodeKindSchema,
+  name: z.string().min(1),
+  requirement: z.string().min(1),
+  criterion: z.string().min(1),
+  verifications: z.array(z.string().min(1)).min(1),
+  bindings: z.array(z.string()),
+  parent: planFileNameSchema.optional(),
+  dependsOn: z.array(planFileNameSchema).optional(),
+});
+export type ExportEntry = z.infer<typeof exportEntrySchema>;
 export const planFileEntrySchema = z.strictObject({
   filename: z.string().min(1),
   content: z.string(),
 });
 export type PlanFileEntry = z.infer<typeof planFileEntrySchema>;
+export const exportAnswerSchema = z.union([
+  z.strictObject({
+    missionId: identitySchema(MISSION_IDENTITY_PREFIX),
+    missionVersion: z.number().int().positive(),
+    entries: z.array(exportEntrySchema),
+  }),
+  z.strictObject({
+    missionId: identitySchema(MISSION_IDENTITY_PREFIX),
+    missionVersion: z.number().int().positive(),
+    files: z.array(planFileEntrySchema),
+  }),
+]);
+export type ExportAnswer = z.infer<typeof exportAnswerSchema>;
 
 const importBase = {
   missionId: identitySchema("mission"),
@@ -510,6 +536,18 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  export: {
+    ...readOperation,
+    id: "mission.export",
+    method: HttpMethod.Get,
+    path: "/api/mission/:missionId/export",
+    input: readInput(
+      z.strictObject({ missionId: identitySchema(MISSION_IDENTITY_PREFIX) }),
+      z.strictObject({ format: importFormatSchema }),
+    ),
+    output: exportAnswerSchema,
+    description: "Export the current mission plan.",
+  },
   "import.apply": {
     ...writeOperation,
     id: "mission.import.apply",

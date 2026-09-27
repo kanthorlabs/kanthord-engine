@@ -23,6 +23,8 @@ import {
   ActorKind,
   ImportFormat,
   importPreviewSchema,
+  exportAnswerSchema,
+  type ExportAnswer,
   importResultSchema,
   type ImportApply,
   type ImportResult,
@@ -57,6 +59,8 @@ import {
 import { missionMigrations } from "./migrations.ts";
 import { nodeRecord } from "./node-read.ts";
 import { importDigest, normalizeImportSnapshot } from "./import.ts";
+import { serializePlanFile } from "./export.ts";
+import { parsePlanFile } from "./parser.ts";
 import { MissionService, humanActor, type Dependencies } from "./service.ts";
 import { CONTENT_FIELDS, TASKS_FIELD, ContentField } from "./content.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
@@ -127,28 +131,40 @@ type Collaborators = Pick<Dependencies, "bindings" | "workQueue">;
 function makeService(
   health: HealthRegistry,
   collaborators: Collaborators = { bindings, workQueue },
+  textMaxBytes = TEXT_MAX_BYTES,
 ): MissionService {
   return new MissionService({
     config: {
       consecutiveLossLimit: CONSECUTIVE_LOSS_LIMIT,
-      textMaxBytes: TEXT_MAX_BYTES,
+      textMaxBytes,
     },
     health,
     ...collaborators,
   });
 }
 
-function fixture(t: TestContext, collaborators?: Collaborators) {
+function fixture(
+  t: TestContext,
+  collaborators?: Collaborators,
+  textMaxBytes?: number,
+) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
   store.migrate([
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
   ]);
-  return { store, mission: makeService(new HealthRegistry(), collaborators) };
+  return {
+    store,
+    mission: makeService(new HealthRegistry(), collaborators, textMaxBytes),
+  };
 }
 
-function handlerFixture(t: TestContext, collaborators?: Collaborators) {
-  const { store, mission } = fixture(t, collaborators);
+function handlerFixture(
+  t: TestContext,
+  collaborators?: Collaborators,
+  textMaxBytes?: number,
+) {
+  const { store, mission } = fixture(t, collaborators, textMaxBytes);
   const registry = new OperationRegistry();
   mission.declare(registry);
   let commits = 0;
@@ -420,7 +436,24 @@ const bindingMap = new Map([
   ],
 ]);
 
-function nodeFixture(t: TestContext) {
+function nodeFixture(
+  t: TestContext,
+  bindingRevision: MissionBindings["getBindingRevision"] = (_tx, id) => {
+    const match = [...bindingMap.entries()].find(
+      ([, value]) => value.bindingId === id,
+    );
+    return match === undefined
+      ? null
+      : {
+          ...match[1],
+          name: match[0],
+          revision: FIRST_REVISION,
+          tombstone: false,
+          disabled: false,
+        };
+  },
+  textMaxBytes?: number,
+) {
   const calls: QueueCall[] = [];
   const queue: WorkQueue = {
     insert(_tx, nodeId, projectId, priority) {
@@ -433,16 +466,21 @@ function nodeFixture(t: TestContext) {
       throw new Error(UNEXPECTED_COLLABORATION);
     },
   };
-  const f = handlerFixture(t, {
-    workQueue: queue,
-    bindings: {
-      ...bindings,
-      resolveBinding: (_tx, projectId, name) => {
-        assert.equal(projectId, PROJECT_ID);
-        return bindingMap.get(name) ?? null;
+  const f = handlerFixture(
+    t,
+    {
+      workQueue: queue,
+      bindings: {
+        ...bindings,
+        resolveBinding: (_tx, projectId, name) => {
+          assert.equal(projectId, PROJECT_ID);
+          return bindingMap.get(name) ?? null;
+        },
+        getBindingRevision: bindingRevision,
       },
     },
-  });
+    textMaxBytes,
+  );
   f.store.transaction((tx) =>
     f.mission.createMission(tx, PROJECT_ID, HUMAN_ACTOR),
   );
@@ -1360,8 +1398,12 @@ const EndpointReason = {
 const CURSOR_ENCODING = "base64url";
 const REASON_FIELD = "reason";
 
-function dependencyFixture(t: TestContext) {
-  const f = nodeFixture(t);
+function dependencyFixture(
+  t: TestContext,
+  bindingRevision?: MissionBindings["getBindingRevision"],
+  textMaxBytes?: number,
+) {
+  const f = nodeFixture(t, bindingRevision, textMaxBytes);
   f.store.database.exec(
     "CREATE TABLE test_mission_job (node_id TEXT PRIMARY KEY)",
   );
@@ -3576,8 +3618,12 @@ const IMPORT_NEW_TASK = "new-task.md";
 const IMPORT_NEW_PARENT = "new-parent.md";
 const IMPORT_NODE_COUNT = 4;
 
-function importApplyFixture(t: TestContext) {
-  const f = dependencyFixture(t);
+function importApplyFixture(
+  t: TestContext,
+  bindingRevision?: MissionBindings["getBindingRevision"],
+  textMaxBytes?: number,
+) {
+  const f = dependencyFixture(t, bindingRevision, textMaxBytes);
   function entry(
     filename: string,
     kind: NodeKind,
@@ -4282,6 +4328,195 @@ test("import.apply Markdown uses the same digest, revisions, graph and no-op beh
   assert.equal(second.missionVersion, result.missionVersion);
   assert.deepEqual(second.assignedIds, result.assignedIds);
   assert.deepEqual(f.state(), before);
+});
+
+const EXPORT_PATH = "/api/mission/:missionId/export";
+
+function invokeExport(
+  f: ReturnType<typeof importApplyFixture>,
+  format: ImportFormat,
+  missionId = f.missionId,
+): ExportAnswer {
+  const operation = missionOperations.export;
+  const input = operation.input.parse({
+    params: { missionId },
+    query: { format },
+    body: null,
+  });
+  const commits = f.commits();
+  const answer = exportAnswerSchema.parse(
+    f.registry.get(operation.id).handler(input, f.caller),
+  );
+  assert.equal(f.commits(), commits + ONE_COMMIT);
+  return answer;
+}
+
+for (const format of [ImportFormat.Json, ImportFormat.Markdown]) {
+  test(`mission.export ${format} round-trips through import without writes`, (t) => {
+    const f = importApplyFixture(t);
+    f.apply(f.request());
+    const declaration = missionOperations.export;
+    assert.equal(declaration.method, HttpMethod.Get);
+    assert.equal(declaration.path, EXPORT_PATH);
+    assert.equal(declaration.access, AccessPolicy.Human);
+    assert.equal(declaration.mutation, false);
+    assert.throws(() =>
+      declaration.input.parse({
+        params: { missionId: f.missionId },
+        query: {},
+        body: null,
+      }),
+    );
+    const before = f.state();
+    const answer = invokeExport(f, format);
+    assert.equal(answer.missionVersion, f.version());
+    const payload: ImportSnapshot =
+      "entries" in answer
+        ? { ...answer, format: ImportFormat.Json, reason: REASON }
+        : { ...answer, format: ImportFormat.Markdown, reason: REASON };
+    const preview = f.preview(payload);
+    assert.deepEqual(preview.violations, []);
+    assert.deepEqual(preview.updates, []);
+    assert.deepEqual(preview.retirements, []);
+    const applied = f.apply({
+      ...payload,
+      previewDigest: preview.previewDigest,
+      confirmedRetirements: [],
+    });
+    assert.deepEqual(applied.changes.revisions, []);
+    assert.equal(applied.missionVersion, answer.missionVersion);
+    assert.deepEqual(f.state(), before);
+    if ("entries" in answer) {
+      assert.deepEqual(
+        answer.entries.map((entry) => entry.filename),
+        [
+          INITIATIVE_FILENAME,
+          OBJECTIVE_FILENAME,
+          OTHER_FILENAME,
+          TASK_FILENAME,
+        ],
+      );
+      const initiative = answer.entries.find(
+        (entry) => entry.kind === NodeKind.Initiative,
+      )!;
+      const objective = answer.entries.find(
+        (entry) => entry.filename === OBJECTIVE_FILENAME,
+      )!;
+      const task = answer.entries.find(
+        (entry) => entry.kind === NodeKind.Task,
+      )!;
+      assert.equal(Object.hasOwn(initiative, "parent"), false);
+      assert.deepEqual(initiative.dependsOn, []);
+      assert.equal(objective.parent, INITIATIVE_FILENAME);
+      assert.deepEqual(objective.bindings, [REPOSITORY_NAME]);
+      assert.equal(Object.hasOwn(task, "dependsOn"), false);
+      assert.equal(task.parent, OBJECTIVE_FILENAME);
+    } else {
+      assert.match(
+        answer.files.find((file) => file.filename === OBJECTIVE_FILENAME)!
+          .content,
+        /api-repo/,
+      );
+      assert.doesNotMatch(
+        answer.files.find((file) => file.filename === OBJECTIVE_FILENAME)!
+          .content,
+        new RegExp(BINDING_ID),
+      );
+    }
+  });
+}
+
+test("mission.export excludes retired nodes and refuses an unknown mission", (t) => {
+  const f = importApplyFixture(t);
+  const result = f.apply(f.request());
+  const retired = result.assignedIds.find(
+    (item) => item.filename === TASK_FILENAME,
+  )!.nodeId;
+  f.store.database
+    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+    .run(RETIRED_AT, retired);
+  for (const format of [ImportFormat.Json, ImportFormat.Markdown]) {
+    const answer = invokeExport(f, format);
+    const filenames =
+      "entries" in answer
+        ? answer.entries.map((entry) => entry.filename)
+        : answer.files.map((file) => file.filename);
+    assert.equal(filenames.includes(TASK_FILENAME), false);
+    assert.equal(filenames.length, IMPORT_NODE_COUNT - ONE);
+  }
+  assert.throws(
+    () => invokeExport(f, ImportFormat.Json, UNKNOWN_MISSION_ID),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.NotFound);
+      assert.equal(error.code, MissionErrorCode.MissionNotFound);
+      return true;
+    },
+  );
+});
+
+test("mission.export refuses a missing pinned binding with a plain error", (t) => {
+  const missing: MissionBindings["getBindingRevision"] = () => null;
+  const f = importApplyFixture(t, missing);
+  f.apply(f.request());
+  assert.throws(
+    () => invokeExport(f, ImportFormat.Json),
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error instanceof OperationError, false);
+      assert.match(error.message, /Missing binding revision/);
+      return true;
+    },
+  );
+});
+
+const OVERSIZE_REQUIREMENT = "x".repeat(10 * 1024 * 1024);
+const LARGE_TEXT_MAX_BYTES = 12 * 1024 * 1024;
+test("mission.export enforces the 10 MiB serialized answer bound", (t) => {
+  const f = importApplyFixture(t, undefined, LARGE_TEXT_MAX_BYTES);
+  const body = f.body();
+  body.content.requirement = OVERSIZE_REQUIREMENT;
+  f.create(body);
+  for (const format of [ImportFormat.Json, ImportFormat.Markdown]) {
+    assert.throws(
+      () => invokeExport(f, format),
+      (error) => {
+        assert.ok(error instanceof OperationError);
+        assert.equal(error.status, HttpStatus.PayloadTooLarge);
+        assert.equal(error.code, MissionErrorCode.ExportTooLarge);
+        return true;
+      },
+    );
+  }
+});
+
+test("serializePlanFile round-trips YAML-special verification strings", () => {
+  const entry = exportAnswerSchema.parse({
+    missionId: UNKNOWN_MISSION_ID,
+    missionVersion: FIRST_REVISION,
+    entries: [
+      {
+        filename: OBJECTIVE_FILENAME,
+        id: UNKNOWN_NODE_ID,
+        kind: NodeKind.Objective,
+        parent: INITIATIVE_FILENAME,
+        dependsOn: [],
+        bindings: [REPOSITORY_NAME],
+        verifications: ["echo key: value", "echo #hash", 'echo "quoted"'],
+        name: "Objective",
+        requirement: "A requirement",
+        criterion: "A criterion",
+      },
+    ],
+  });
+  assert.ok("entries" in entry);
+  const objective = entry.entries[ZERO]!;
+  const parsed = parsePlanFile(
+    objective.filename,
+    serializePlanFile(objective),
+  );
+  assert.deepEqual(parsed, objective);
+  assert.deepEqual(parsed.verifications, objective.verifications);
 });
 
 test("MissionService refuses to restart after stop", async () => {
