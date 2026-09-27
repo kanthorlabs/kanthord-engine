@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import SwaggerParser from "@apidevtools/swagger-parser";
 import { gatewayFixture } from "./test-support.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
+import { custodyOperations } from "../../custody/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import {
   openapiPath,
@@ -13,11 +14,24 @@ import {
   serializeOpenAPIFile,
 } from "../../gateway/local.ts";
 import { HttpStatus } from "../../kernel/http.ts";
+import { isObject } from "../../kernel/values.ts";
 const MAX_OPENAPI_FRAGMENT_LINES = 200;
-const apiOperations = { ...gatewayOperations, ...workerOperations };
+const CREDENTIAL_COLLECTION_FRAGMENT = "openapi/credential/create.yaml";
+const CREDENTIAL_COLLECTION_MAX_LINES = 300;
+const apiOperations = [
+  ...Object.values(gatewayOperations),
+  ...Object.values(custodyOperations),
+  ...Object.values(workerOperations),
+];
 test("published OpenAPI validates, matches the registry exactly, and describes real responses", async (t) => {
-  const files = emitOpenAPIFiles(Object.values(apiOperations));
+  const files = emitOpenAPIFiles(apiOperations);
   const emitted = files["openapi.yaml"];
+  const custodyPaths = new Set(
+    Object.values(custodyOperations).map(({ path }) =>
+      path.replace(/:([^/]+)/g, "{$1}"),
+    ),
+  );
+  for (const path of custodyPaths) assert.ok(path in emitted.paths, path);
   const root = dirname(openapiPath());
   const stored = readFileSync(openapiPath(), "utf8");
   const fragments = readdirSync(join(root, "openapi"), { recursive: true })
@@ -30,12 +44,30 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   for (const [file, document] of Object.entries(files)) {
     const content = readFileSync(join(root, file), "utf8");
     assert.equal(content, serializeOpenAPIFile(document), file);
+    let maxLines = MAX_OPENAPI_FRAGMENT_LINES;
+    if (file === CREDENTIAL_COLLECTION_FRAGMENT) {
+      assert.ok("pathItem" in document);
+      assert.ok(isObject(document.pathItem));
+      assert.deepEqual(
+        Object.keys(document.pathItem).sort(),
+        [
+          custodyOperations.create.method.toLowerCase(),
+          custodyOperations.list.method.toLowerCase(),
+        ].sort(),
+      );
+      maxLines = CREDENTIAL_COLLECTION_MAX_LINES;
+    }
     assert.ok(
-      content.split("\n").length <= MAX_OPENAPI_FRAGMENT_LINES,
+      content.split("\n").length <= maxLines,
       `${file} must stay small enough to review as one scope`,
     );
   }
   const resolved = await SwaggerParser.validate(openapiPath());
+  for (const operation of Object.values(custodyOperations)) {
+    const path = operation.path.replace(/:([^/]+)/g, "{$1}");
+    const method = operation.method.toLowerCase() as "get" | "post" | "put";
+    assert.equal(resolved.paths?.[path]?.[method]?.operationId, operation.id);
+  }
   const fixture = await gatewayFixture(t);
   assert.deepEqual(
     Object.keys(

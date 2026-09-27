@@ -6,6 +6,16 @@ import {
   type ServerConfig,
 } from "../../config/index.ts";
 import type { Logger } from "pino";
+import {
+  CustodyComponent,
+  custodyMigrations,
+  deriveEnvelopeKey,
+  type AgentProvidersDependentOnFn,
+  type EnablementsDependentOnModelFn,
+  type BindingsNamingFn,
+} from "../../custody/index.ts";
+import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
+import { unwired } from "./unwired.ts";
 import type { ProjectBindings } from "../../project/contract.ts";
 import type { WorkerRegistrations } from "../../worker/contract.ts";
 import { audit, ensureDirectory } from "../../kernel/files.ts";
@@ -40,7 +50,13 @@ export function composeServices(options: {
   registry?: OperationRegistry;
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
+  standIns?: {
+    agentProvidersDependentOn?: AgentProvidersDependentOnFn;
+    enablementsDependentOnModel?: EnablementsDependentOnModelFn;
+    bindingsNaming?: BindingsNamingFn;
+  };
 }) {
+  const envelopeKey = deriveEnvelopeKey(options.config.masterKey);
   const registry = options.registry ?? new OperationRegistry();
   const invocation = createInvocation({
     registry,
@@ -58,18 +74,33 @@ export function composeServices(options: {
       },
     },
   });
-  const project: ProjectService = new ProjectService({
-    config: {},
+  const custody = new CustodyComponent({
+    store: options.store,
+    envelopeKey,
+    logger: options.logger,
     health: options.health,
-    bindings: options.bindings,
+    agentProvidersDependentOn:
+      options.standIns?.agentProvidersDependentOn ??
+      (() => unwired("agentProvidersDependentOn")()),
+    enablementsDependentOnModel:
+      options.standIns?.enablementsDependentOnModel ??
+      (() => unwired("enablementsDependentOnModel")()),
+    bindingsNaming:
+      options.standIns?.bindingsNaming ?? (() => unwired("bindingsNaming")()),
   });
   const worker: WorkerService = new WorkerService({
     config: {},
     health: options.health,
     registrations: options.registrations,
   });
-  project.declare(registry);
+  const project: ProjectService = new ProjectService({
+    config: {},
+    health: options.health,
+    bindings: options.bindings,
+  });
+  custody.declare(registry);
   worker.declare(registry);
+  project.declare(registry);
   const gateway = new GatewayService({
     config: options.config.gateway,
     logger: options.logger,
@@ -79,7 +110,7 @@ export function composeServices(options: {
   });
   gateway.declare(registry);
   registry.seal({ [StoreName.Operational]: options.store });
-  return { project, worker, gateway, invocation, registry };
+  return { custody, project, worker, gateway, invocation, registry };
 }
 
 export class Server implements Service {
@@ -137,21 +168,24 @@ export class Server implements Service {
       this.store = new Store(join(paths.data, "kanthord.db"));
       this.releases.push(() => this.store!.close());
       this.store.migrate([
+        { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
         { service: "gateway", migrations: gatewayMigrations },
         { service: "worker", migrations: workerMigrations },
         { service: "project", migrations: projectMigrations },
       ]);
       throwIfCancelled(this.shutdown);
-      const { project, worker, gateway, invocation } = composeServices({
-        config,
-        store: this.store,
-        logger: this.log.logger,
-        health: this.health,
-      });
+      const { custody, project, worker, gateway, invocation } = composeServices(
+        {
+          config,
+          store: this.store,
+          logger: this.log.logger,
+          health: this.health,
+        },
+      );
       this.gateway = gateway;
       this.invocation = invocation;
       this.releases.push(() => invocation.stop());
-      const services = [project, worker, gateway];
+      const services = [custody, worker, project, gateway];
       this.services = services;
       for (const service of services) this.releases.push(() => service.stop());
       for (const service of services) {

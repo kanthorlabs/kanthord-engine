@@ -164,8 +164,9 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
     status: "ok",
     services: {
       server: { gateway: 200, store: 200, log: 200 },
-      project: { bindings: 200 },
+      custody: { credential: 200 },
       worker: { registrations: 200 },
+      project: { bindings: 200 },
       gateway: {
         listener: 200,
         authentication: 200,
@@ -270,6 +271,7 @@ test("server lifecycle returns errors, reports owned health and releases every r
     const report = await server.health.check();
     assert.deepEqual(report.server, { gateway: 200, store: 200, log: 200 });
     assert.deepEqual(report['test-worker'], { 'instance-one': 200 });
+    assert.deepEqual(report.custody, { credential: 200 });
     assert.deepEqual(report.worker, { registrations: 200 });
     assert.deepEqual(report.project, { bindings: 200 });
     assert.equal(report.gateway.listener, 200);
@@ -329,6 +331,7 @@ test("server quiesces concurrently, drains with direct calls available, joins th
       `
     import assert from 'node:assert/strict';
     import { Server } from ${JSON.stringify(new URL("./index.ts", import.meta.url).href)};
+    import { CustodyComponent } from ${JSON.stringify(new URL("../../custody/index.ts", import.meta.url).href)};
     import { ProjectService } from ${JSON.stringify(new URL("../../project/index.ts", import.meta.url).href)};
     import { WorkerService } from ${JSON.stringify(new URL("../../worker/index.ts", import.meta.url).href)};
     import { GatewayService } from ${JSON.stringify(new URL("../../gateway/index.ts", import.meta.url).href)};
@@ -340,20 +343,25 @@ test("server quiesces concurrently, drains with direct calls available, joins th
     let quiesced = 0;
     const signalled = new Set();
     const released = new Set();
-    for (const [name, type] of [['project', ProjectService], ['worker', WorkerService], ['gateway', GatewayService]]) {
+    for (const [name, type] of [['custody', CustodyComponent], ['worker', WorkerService], ['project', ProjectService], ['gateway', GatewayService]]) {
+      const start = type.prototype.start;
+      type.prototype.start = function() {
+        events.push('start-' + name);
+        return start.call(this);
+      };
       const quiesce = type.prototype.quiesce;
       type.prototype.quiesce = function() {
         if (signalled.has(name)) return quiesce.call(this);
         signalled.add(name);
         events.push('quiesce-' + name);
         const task = quiesce.call(this);
-        if (++quiesced === 3) gate.resolve();
+        if (++quiesced === 4) gate.resolve();
         return gate.promise.then(() => task);
       };
       const drain = type.prototype.drain;
       type.prototype.drain = async function() {
         if (!released.size) {
-          assert.equal(quiesced, 3);
+          assert.equal(quiesced, 4);
           assert.equal(server.store.healthcheck(), true);
           assert.equal(server.log.healthcheck(), true);
           const result = await server.gateway.invocation.invoke('gateway.openapi', { params: {}, query: {}, body: null });
@@ -380,9 +388,11 @@ test("server quiesces concurrently, drains with direct calls available, joins th
     OperationalLog.prototype.close = function() { events.push('log'); return closeLog.call(this); };
     assert.equal(await server.start(), null);
     assert.equal(await server.stop(), null);
-    assert.deepEqual(events.slice(0, 3), ['quiesce-project', 'quiesce-worker', 'quiesce-gateway']);
-    assert.deepEqual(events.slice(3, 6).sort(), ['drain-gateway', 'drain-project', 'drain-worker']);
-    assert.deepEqual(events.slice(6), ['stop-gateway', 'stop-worker', 'stop-project', 'store', 'log']);
+    assert.deepEqual([...new Set(events.filter(event => event.startsWith('start-')))], ['start-custody', 'start-worker', 'start-project', 'start-gateway']);
+    const shutdown = events.filter(event => !event.startsWith('start-'));
+    assert.deepEqual(shutdown.slice(0, 4), ['quiesce-custody', 'quiesce-worker', 'quiesce-project', 'quiesce-gateway']);
+    assert.deepEqual(shutdown.slice(4, 8).sort(), ['drain-custody', 'drain-gateway', 'drain-project', 'drain-worker']);
+    assert.deepEqual(shutdown.slice(8), ['stop-gateway', 'stop-project', 'stop-worker', 'stop-custody', 'store', 'log']);
   `,
     ],
     { env: paths.env, encoding: "utf8", timeout: 15000 },

@@ -4,6 +4,22 @@ info:
   title: kanthord
   version: 28.0.1
 paths:
+  /api/credential:
+    $ref: ./openapi/credential/create.yaml#/pathItem
+  /api/credential/{credentialName}:
+    $ref: ./openapi/credential/get.yaml#/pathItem
+  /api/credential/login:
+    $ref: ./openapi/credential/login.yaml#/pathItem
+  /api/credential/login/{sessionId}/code:
+    $ref: ./openapi/credential/login_code.yaml#/pathItem
+  /api/credential/login/{sessionId}:
+    $ref: ./openapi/credential/login_status.yaml#/pathItem
+  /api/credential/{credentialName}/revision/{revision}/revoke:
+    $ref: ./openapi/credential/revoke.yaml#/pathItem
+  /api/credential/{credentialName}/revision:
+    $ref: ./openapi/credential/rotate.yaml#/pathItem
+  /api/credential/{credentialName}/metadata:
+    $ref: ./openapi/credential/update_metadata.yaml#/pathItem
   /api/healthcheck:
     $ref: ./openapi/gateway/healthcheck.yaml#/pathItem
   /api/openapi.yaml:

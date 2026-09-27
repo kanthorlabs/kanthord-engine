@@ -1,4 +1,5 @@
 import { workerOperations } from "../../worker/contract.ts";
+import { custodyOperations } from "../../custody/contract.ts";
 import assert from "node:assert/strict";
 import { Command, CommanderError } from "commander";
 import { dirname } from "node:path";
@@ -275,7 +276,7 @@ function addGatewayCommand(program: Command): void {
     .description("Emit the package OpenAPI contract locally")
     .action(() => {
       const path = openapiPath();
-      writeOpenAPI(Object.values(apiOperations), dirname(path));
+      writeOpenAPI(apiOperations, dirname(path));
       process.stdout.write(`${path}\n`);
     });
 }
@@ -295,4 +296,8 @@ export async function runCLI(
   }
 }
 
-const apiOperations = { ...gatewayOperations, ...workerOperations };
+const apiOperations = [
+  ...Object.values(gatewayOperations),
+  ...Object.values(custodyOperations),
+  ...Object.values(workerOperations),
+];
