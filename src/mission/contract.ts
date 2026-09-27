@@ -75,6 +75,9 @@ export const MissionErrorCode = {
   RetireMismatch: "mission.node.retire_mismatch",
   PriorityTask: "mission.node.priority_task",
   PlanInvalid: "mission.import.plan_invalid",
+  MissionMismatch: "mission.import.mission_mismatch",
+  ReferenceKindInvalid: "mission.import.reference_kind_invalid",
+  KindChanged: "mission.import.kind_changed",
   UnresolvedReference: "mission.import.unresolved_reference",
   DuplicateFile: "mission.import.duplicate_file",
   UnknownId: "mission.import.unknown_id",
@@ -325,7 +328,7 @@ export const retirePreviewSchema = z.strictObject({
 });
 export type RetirePreview = z.infer<typeof retirePreviewSchema>;
 export const importEntrySchema = z.strictObject({
-  filename: planFileNameSchema,
+  filename: z.string().min(1),
   kind: nodeKindSchema,
   name: z.string().min(1),
   requirement: z.string().min(1),
@@ -333,12 +336,12 @@ export const importEntrySchema = z.strictObject({
   verifications: z.array(z.string().min(1)).min(1),
   bindings: z.array(z.string()),
   id: identitySchema("node").optional(),
-  parent: planFileNameSchema.optional(),
-  dependsOn: z.array(planFileNameSchema).optional(),
+  parent: z.string().min(1).optional(),
+  dependsOn: z.array(z.string().min(1)).optional(),
 });
 export type ImportEntry = z.infer<typeof importEntrySchema>;
 export const planFileEntrySchema = z.strictObject({
-  filename: planFileNameSchema,
+  filename: z.string().min(1),
   content: z.string(),
 });
 export type PlanFileEntry = z.infer<typeof planFileEntrySchema>;
