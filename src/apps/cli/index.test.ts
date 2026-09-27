@@ -18,6 +18,8 @@ import { ExitCode } from "./constants.ts";
 
 const EMPTY_OUTPUT = "";
 const PROJECT_GET = "get";
+const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const SINGLE_DIAGNOSTIC_LINE = 1;
 const TOKEN_LIFETIME_SECONDS = 600;
 const entry = new URL("../../main.ts", import.meta.url).href;
@@ -134,6 +136,95 @@ test("project commands expose offline help and validate inputs before I/O", (t) 
         : ["list"];
     const result = invocation(
       ["project", ...args, "--idempotency-key", "key"],
+      env,
+    );
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /unknown option/);
+  }
+});
+
+test("project binding commands expose help and reject invalid inputs before I/O", (t) => {
+  const env = environment(temporary(t));
+  const group = invocation(["project", "binding", "--help"], env);
+  assert.equal(group.status, ExitCode.Success, group.stderr);
+  for (const leaf of ["list", "get", "export", "apply", "revision"]) {
+    assert.match(group.stdout, new RegExp(`\\b${leaf}\\b`));
+    assert.equal(
+      invocation(["project", "binding", leaf, "--help"], env).status,
+      ExitCode.Success,
+    );
+  }
+  const revision = invocation(
+    ["project", "binding", "revision", "--help"],
+    env,
+  );
+  assert.equal(revision.status, ExitCode.Success);
+  assert.match(revision.stdout, /list/);
+  assert.equal(
+    invocation(["project", "binding", "revision", "list", "--help"], env)
+      .status,
+    ExitCode.Success,
+  );
+  for (const [args, code] of [
+    [["list", "invalid"], "cli.project.binding.list.invalid_project_id"],
+    [
+      ["list", PROJECT_ID, "--kind", "unknown"],
+      "cli.project.binding.list.invalid_kind",
+    ],
+    [
+      ["list", PROJECT_ID, "--state", "unknown"],
+      "cli.project.binding.list.invalid_state",
+    ],
+    [
+      ["list", PROJECT_ID, "--limit", "1001"],
+      "cli.pagination.limit_out_of_range",
+    ],
+    [
+      ["get", PROJECT_ID, "invalid"],
+      "cli.project.binding.get.invalid_binding_id",
+    ],
+    [["export", "invalid"], "cli.project.binding.export.invalid_project_id"],
+    [
+      ["apply", "invalid", "--file", "missing.json"],
+      "cli.project.binding.apply.invalid_project_id",
+    ],
+    [
+      ["revision", "list", PROJECT_ID, "invalid"],
+      "cli.project.binding.revision.list.invalid_binding_id",
+    ],
+    [
+      ["revision", "list", "invalid", BINDING_ID],
+      "cli.project.binding.revision.list.invalid_project_id",
+    ],
+    [
+      ["apply", PROJECT_ID, "--file", "missing.json", "--token", "t"],
+      "cli.file.not_found",
+    ],
+  ] as const) {
+    const result = invocation(["project", "binding", ...args], env);
+    assert.equal(result.status, ExitCode.Failure, result.stderr);
+    assert.match(result.stderr, new RegExp(`^${code.replaceAll(".", "\\.")}:`));
+    assert.equal(result.stdout, EMPTY_OUTPUT);
+  }
+  for (const args of [
+    ["list", PROJECT_ID],
+    ["get", PROJECT_ID, BINDING_ID],
+    ["export", PROJECT_ID],
+    ["apply", PROJECT_ID, "--file", "missing.json"],
+    ["revision", "list", PROJECT_ID, BINDING_ID],
+  ]) {
+    const result = invocation(["project", "binding", ...args], env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /\.token_required:/);
+  }
+  for (const args of [
+    ["list", PROJECT_ID],
+    ["get", PROJECT_ID, BINDING_ID],
+    ["export", PROJECT_ID],
+    ["revision", "list", PROJECT_ID, BINDING_ID],
+  ]) {
+    const result = invocation(
+      ["project", "binding", ...args, "--idempotency-key", "key"],
       env,
     );
     assert.equal(result.status, ExitCode.Failure);
