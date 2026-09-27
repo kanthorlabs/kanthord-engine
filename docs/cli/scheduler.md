@@ -224,7 +224,6 @@ Every field below is required in a result; none has a client default.
 | --------------------- | ------------------------------------------------------------------------------------------------------ |
 | `jobId`               | `job_<ulid>`; the ULID carries the creation time of the job.                                           |
 | `projectId`, `nodeId` | Project and Mission node references. Only an initiative or objective can be queued; never a task.      |
-| `claimKind`           | Enum `steps` or `evaluation`, admitted by Mission state.                                               |
 | `priority`            | Safe integer copied from the Mission-owned priority. An absent node priority is Mission's default `0`. |
 
 A priority change preserves the job identity. A release with further work
