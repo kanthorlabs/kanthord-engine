@@ -328,7 +328,10 @@ test("atomic writes preserve existing init destinations and clean failed publica
   const directory = temporary(t);
   const path = join(directory, "kanthord.yaml");
   writePrivate(path, "original");
-  assert.throws(() => writePrivate(path, "replacement"), /absent destination/);
+  assert.throws(
+    () => writePrivate(path, "replacement"),
+    /destination must be absent/,
+  );
   assert.equal(readFileSync(path, "utf8"), ORIGINAL_CONTENT);
   assert.deepEqual(readdirSync(directory), ["kanthord.yaml"]);
   writePrivate(path, "replacement", true);

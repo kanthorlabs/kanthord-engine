@@ -118,7 +118,7 @@ export function writePrivate(
     if (error instanceof Diagnostic) throw error;
     throw new Diagnostic(
       "system.files.publish_failed",
-      `${path}: cannot publish file; init requires an absent destination.`,
+      `${path}: cannot publish file; the destination must be absent.`,
     );
   } finally {
     if (fd !== undefined) closeSync(fd);
