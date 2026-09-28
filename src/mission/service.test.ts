@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
-import { mintHumanIdentity } from "../kernel/caller-mint.ts";
+import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
@@ -171,7 +171,7 @@ function handlerFixture(
   mission.declare(registry);
   let commits = 0;
   const caller: CallerContext = {
-    identity: mintHumanIdentity(ACCOUNT_ID, DISPLAY_NAME, TOKEN_ID),
+    identity: testHumanIdentity(ACCOUNT_ID, DISPLAY_NAME, TOKEN_ID),
     context: background,
     requestId: "request",
     commit: (fn) => {

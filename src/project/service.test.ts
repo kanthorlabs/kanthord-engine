@@ -15,7 +15,7 @@ import {
   type Transaction,
 } from "../kernel/store.ts";
 import { createIdentity, identitySchema } from "../kernel/identity.ts";
-import { mintHumanIdentity } from "../kernel/caller-mint.ts";
+import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -109,7 +109,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
   project.declare(registry);
   let commits = NO_CALLS;
   const caller: CallerContext = {
-    identity: mintHumanIdentity(ACCOUNT, DISPLAY_NAME, "jti"),
+    identity: testHumanIdentity(ACCOUNT, DISPLAY_NAME, "jti"),
     context: background,
     requestId: "request",
     commit: (fn) => {

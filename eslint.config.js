@@ -130,26 +130,19 @@ export default tseslint.config(
               disallow: [
                 {
                   from: element({
-                    anyOf: ["kernel", "apps-server", "apps-cli", "apps-worker"],
+                    anyOf: ["apps-server", "apps-cli", "apps-worker"],
+                  }),
+                },
+                {
+                  from: element("kernel", {
+                    fileInternalPath: "!test-identity.ts",
                   }),
                 },
                 { from: file({ anyOf: ["config", "config-global", "main"] }) },
                 { from: element("repository") },
                 {
                   from: element("service", {
-                    captured: { name: "!(gateway|project|mission)" },
-                  }),
-                },
-                {
-                  from: element("service", {
-                    captured: { name: "project" },
-                    fileInternalPath: "!service.test.ts",
-                  }),
-                },
-                {
-                  from: element("service", {
-                    captured: { name: "mission" },
-                    fileInternalPath: "!service.test.ts",
+                    captured: { name: "!(gateway)" },
                   }),
                 },
               ],
@@ -193,13 +186,34 @@ export default tseslint.config(
     languageOptions: { ecmaVersion: "latest", sourceType: "module" },
   },
   {
-    files: ["src/**/*.ts"],
-    ignores: ["src/kernel/caller-mint.ts"],
+    files: ["src/**/*.test.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
         {
           patterns: [
+            {
+              group: ["**/caller.ts"],
+              importNames: ["callerProvenance"],
+              message: "Only caller-mint.ts may access caller provenance.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/**/*.ts"],
+    ignores: ["src/**/*.test.ts", "src/kernel/caller-mint.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/test-identity.ts"],
+              message: "Only test files may import test-identity.ts.",
+            },
             {
               group: ["**/caller.ts"],
               importNames: ["callerProvenance"],
