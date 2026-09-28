@@ -293,7 +293,7 @@ authorship/approval. Attribution records the submitting human only.
 
 | #   | Synopsis after `kanthord mission`                                | Proposed HTTP route                  | Proposed operation | Access |
 | --- | ---------------------------------------------------------------- | ------------------------------------ | ------------------ | ------ |
-| 21  | `export <mission-id> --format <markdown\|json> --out <path> [R]` | `GET /api/mission/:missionId/export` | `mission.export`   | H      |
+| 20  | `export <mission-id> --format <markdown\|json> --out <path> [R]` | `GET /api/mission/:missionId/export` | `mission.export`   | H      |
 
 - The required `--format` maps to the query `format=markdown` or `format=json`, with no default.
 - The required `<mission-id>` is a `MissionId`; access is `human`.
@@ -313,14 +313,14 @@ authorship/approval. Attribution records the submitting human only.
 
 | #   | Synopsis after `kanthord mission`                             | Proposed HTTP route                       | Proposed operation                                      | Access |
 | --- | ------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------- | ------ |
-| 22  | `node priority set <node-id> --file <path> [M]`               | `POST /api/mission/node/:nodeId/priority` | `mission.node.priority.set`                             | H      |
-| 23  | `node pause <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/pause`    | `mission.node.pause` **[blocked][mission-recovery]**    | H      |
-| 24  | `node resume <node-id> --file <path> [M]`                     | `POST /api/mission/node/:nodeId/resume`   | `mission.node.resume` **[blocked][mission-contract]**   | H      |
-| 25  | `node block <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/block`    | `mission.node.block` **[blocked][mission-contract]**    | H      |
-| 26  | `node unblock <node-id> --file <path> [M]`                    | `POST /api/mission/node/:nodeId/unblock`  | `mission.node.unblock` **[blocked][mission-contract]**  | H      |
-| 27  | `node ready <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/ready`    | `mission.node.ready`                                    | H      |
-| 28  | `node override <node-id> --result <result> --file <path> [M]` | `POST /api/mission/node/:nodeId/override` | `mission.node.override` **[blocked][mission-contract]** | H      |
-| 29  | `node discard <node-id> --file <path> [M]`                    | `POST /api/mission/node/:nodeId/discard`  | `mission.node.discard` **[blocked][mission-contract]**  | H      |
+| 21  | `node priority set <node-id> --file <path> [M]`               | `POST /api/mission/node/:nodeId/priority` | `mission.node.priority.set`                             | H      |
+| 22  | `node pause <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/pause`    | `mission.node.pause` **[blocked][mission-recovery]**    | H      |
+| 23  | `node resume <node-id> --file <path> [M]`                     | `POST /api/mission/node/:nodeId/resume`   | `mission.node.resume` **[blocked][mission-contract]**   | H      |
+| 24  | `node block <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/block`    | `mission.node.block` **[blocked][mission-contract]**    | H      |
+| 25  | `node unblock <node-id> --file <path> [M]`                    | `POST /api/mission/node/:nodeId/unblock`  | `mission.node.unblock` **[blocked][mission-contract]**  | H      |
+| 26  | `node ready <node-id> --file <path> [M]`                      | `POST /api/mission/node/:nodeId/ready`    | `mission.node.ready`                                    | H      |
+| 27  | `node override <node-id> --result <result> --file <path> [M]` | `POST /api/mission/node/:nodeId/override` | `mission.node.override` **[blocked][mission-contract]** | H      |
+| 28  | `node discard <node-id> --file <path> [M]`                    | `POST /api/mission/node/:nodeId/discard`  | `mission.node.discard` **[blocked][mission-contract]**  | H      |
 
 `<node-id>` is required; state-changing controls accept initiatives/objectives
 only.
@@ -391,27 +391,27 @@ All controls recheck admission at commit. Human-control race precedence remains 
 
 | #   | Synopsis after `kanthord mission`                                       | Proposed HTTP route                                     | Proposed operation                                                  | Access |
 | --- | ----------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------- | ------ |
-| 32  | `attempt list <node-id> [L]`                                            | `GET /api/mission/node/:nodeId/attempt`                 | `mission.attempt.list` **[blocked][mission-contract]**              | H      |
-| 33  | `attempt get <node-id> <attempt>`                                       | `GET /api/mission/node/:nodeId/attempt/:attempt`        | `mission.attempt.get` **[blocked][mission-contract]**               | H      |
-| 34  | `evidence list <node-id> [--attempt <attempt>] [L]`                     | `GET /api/mission/node/:nodeId/evidence`                | `mission.evidence.list` **[blocked][mission-contract]**             | H      |
-| 35  | `evidence get <evidence-id>`                                            | `GET /api/mission/evidence/:evidenceId`                 | `mission.evidence.get` **[blocked][mission-contract]**              | H      |
-| 36  | `evidence submit <node-id> --file <path> [M]`                           | `POST /api/mission/node/:nodeId/evidence`               | `mission.evidence.submit` **[blocked][mission-contract]**           | E      |
-| 37  | `evidence content get <evidence-id>`                                    | `GET /api/mission/evidence/:evidenceId/content`         | `mission.evidence.content.get` **[blocked][mission-contract]**      | H      |
-| 38  | `evidence upload <node-id> <path> [M]`                                  | Host-local helper; begin and complete routes below      | `mission.evidence.upload.begin`, `mission.evidence.upload.complete` | E      |
-| 39  | `run-output list <node-id> [--attempt <attempt>] [L]`                   | `GET /api/mission/node/:nodeId/run-output`              | `mission.runOutput.list` **[blocked][mission-contract]**            | H      |
-| 40  | `run-output get <node-id> <execution-id>`                               | `GET /api/mission/node/:nodeId/run-output/:executionId` | `mission.runOutput.get` **[blocked][mission-contract]**             | H      |
-| 41  | `run-output submit <node-id> --file <path> [M]`                         | `POST /api/mission/node/:nodeId/run-output`             | `mission.runOutput.submit` **[blocked][mission-contract]**          | E      |
-| 44  | `assessment list <node-id> [--attempt <attempt>] [L]`                   | `GET /api/mission/node/:nodeId/assessment`              | `mission.assessment.list` **[blocked][mission-contract]**           | H      |
-| 45  | `assessment get <assessment-id>`                                        | `GET /api/mission/assessment/:assessmentId`             | `mission.assessment.get` **[blocked][mission-contract]**            | H      |
-| 46  | `assessment submit <node-id> --file <path> [M]`                         | `POST /api/mission/node/:nodeId/assessment`             | `mission.assessment.submit` **[blocked][mission-contract]**         | E      |
-| 47  | `outcome list <node-id> [--attempt <attempt>] [L]`                      | `GET /api/mission/node/:nodeId/outcome`                 | `mission.outcome.list` **[blocked][mission-contract]**              | H      |
-| 48  | `outcome get <outcome-id>`                                              | `GET /api/mission/outcome/:outcomeId`                   | `mission.outcome.get` **[blocked][mission-contract]**               | H      |
-| 49  | `task-result submit <task-id> --file <path> [M]`                        | `POST /api/mission/node/:taskId/task-result`            | `mission.taskResult.submit` **[blocked][mission-contract]**         | E      |
-| 50  | `evidence pending list <mission-id> [L]`                                | `GET /api/mission/:missionId/evidence/pending`          | `mission.evidence.pending.list`                                     | H      |
-| 51  | `evidence pending cleanup <mission-id> [M]`                             | `POST /api/mission/:missionId/evidence/pending/cleanup` | `mission.evidence.pending.cleanup`                                  | H      |
-| 52  | `evidence content remove <evidence-id> [--force] [--reason <text>] [M]` | `DELETE /api/mission/evidence/:evidenceId/content`      | `mission.evidence.content.remove`                                   | H      |
+| 29  | `attempt list <node-id> [L]`                                            | `GET /api/mission/node/:nodeId/attempt`                 | `mission.attempt.list` **[blocked][mission-contract]**              | H      |
+| 30  | `attempt get <node-id> <attempt>`                                       | `GET /api/mission/node/:nodeId/attempt/:attempt`        | `mission.attempt.get` **[blocked][mission-contract]**               | H      |
+| 31  | `evidence list <node-id> [--attempt <attempt>] [L]`                     | `GET /api/mission/node/:nodeId/evidence`                | `mission.evidence.list` **[blocked][mission-contract]**             | H      |
+| 32  | `evidence get <evidence-id>`                                            | `GET /api/mission/evidence/:evidenceId`                 | `mission.evidence.get` **[blocked][mission-contract]**              | H      |
+| 33  | `evidence submit <node-id> --file <path> [M]`                           | `POST /api/mission/node/:nodeId/evidence`               | `mission.evidence.submit` **[blocked][mission-contract]**           | E      |
+| 34  | `evidence content get <evidence-id>`                                    | `GET /api/mission/evidence/:evidenceId/content`         | `mission.evidence.content.get` **[blocked][mission-contract]**      | H      |
+| 35  | `evidence upload <node-id> <path> [M]`                                  | Host-local helper; begin and complete routes below      | `mission.evidence.upload.begin`, `mission.evidence.upload.complete` | E      |
+| 36  | `run-output list <node-id> [--attempt <attempt>] [L]`                   | `GET /api/mission/node/:nodeId/run-output`              | `mission.runOutput.list` **[blocked][mission-contract]**            | H      |
+| 37  | `run-output get <node-id> <execution-id>`                               | `GET /api/mission/node/:nodeId/run-output/:executionId` | `mission.runOutput.get` **[blocked][mission-contract]**             | H      |
+| 38  | `run-output submit <node-id> --file <path> [M]`                         | `POST /api/mission/node/:nodeId/run-output`             | `mission.runOutput.submit` **[blocked][mission-contract]**          | E      |
+| 39  | `assessment list <node-id> [--attempt <attempt>] [L]`                   | `GET /api/mission/node/:nodeId/assessment`              | `mission.assessment.list` **[blocked][mission-contract]**           | H      |
+| 40  | `assessment get <assessment-id>`                                        | `GET /api/mission/assessment/:assessmentId`             | `mission.assessment.get` **[blocked][mission-contract]**            | H      |
+| 41  | `assessment submit <node-id> --file <path> [M]`                         | `POST /api/mission/node/:nodeId/assessment`             | `mission.assessment.submit` **[blocked][mission-contract]**         | E      |
+| 42  | `outcome list <node-id> [--attempt <attempt>] [L]`                      | `GET /api/mission/node/:nodeId/outcome`                 | `mission.outcome.list` **[blocked][mission-contract]**              | H      |
+| 43  | `outcome get <outcome-id>`                                              | `GET /api/mission/outcome/:outcomeId`                   | `mission.outcome.get` **[blocked][mission-contract]**               | H      |
+| 44  | `task-result submit <task-id> --file <path> [M]`                        | `POST /api/mission/node/:taskId/task-result`            | `mission.taskResult.submit` **[blocked][mission-contract]**         | E      |
+| 45  | `evidence pending list <mission-id> [L]`                                | `GET /api/mission/:missionId/evidence/pending`          | `mission.evidence.pending.list`                                     | H      |
+| 46  | `evidence pending cleanup <mission-id> [M]`                             | `POST /api/mission/:missionId/evidence/pending/cleanup` | `mission.evidence.pending.cleanup`                                  | H      |
+| 47  | `evidence content remove <evidence-id> [--force] [--reason <text>] [M]` | `DELETE /api/mission/evidence/:evidenceId/content`      | `mission.evidence.content.remove`                                   | H      |
 
-Row 38 is the host-local upload helper; the other 18 commands in this group are remote leaves.
+Row 35 is the host-local upload helper; the other 18 commands in this group are remote leaves.
 Every positional is required. `<task-id>` is a `NodeId` of kind task.
 `--attempt` accepts a nonnegative safe integer, including 0.
 A positional `<attempt>` names an opened attempt and requires a positive safe integer.
@@ -490,12 +490,12 @@ effect. A completed historical record remains attributed to its original attempt
 
 | #   | Synopsis after `kanthord mission`                          | Proposed HTTP route                                                         | Proposed operation                                            | Access |
 | --- | ---------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------- | ------ |
-| 53  | `external-action list <node-id> [--attempt <attempt>] [L]` | `GET /api/mission/node/:nodeId/external-action`                             | `mission.externalAction.list` **[blocked][mission-contract]** | H      |
-| 54  | `external-action get <node-id> <attempt> <action-key>`     | `GET /api/mission/node/:nodeId/attempt/:attempt/external-action/:actionKey` | `mission.externalAction.get` **[blocked][mission-contract]**  | H      |
-| 55  | `external-object list <node-id> [--attempt <attempt>] [L]` | `GET /api/mission/node/:nodeId/external-object`                             | `mission.externalObject.list` **[blocked][mission-contract]** | H      |
-| 56  | `external-object get <external-object-id>`                 | `GET /api/mission/external-object/:externalObjectId`                        | `mission.externalObject.get` **[blocked][mission-contract]**  | H      |
-| 57  | `observation list <node-id> [--attempt <attempt>] [L]`     | `GET /api/mission/node/:nodeId/observation`                                 | `mission.observation.list` **[blocked][mission-contract]**    | H      |
-| 58  | `observation get <observation-id>`                         | `GET /api/mission/observation/:observationId`                               | `mission.observation.get` **[blocked][mission-contract]**     | H      |
+| 48  | `external-action list <node-id> [--attempt <attempt>] [L]` | `GET /api/mission/node/:nodeId/external-action`                             | `mission.externalAction.list` **[blocked][mission-contract]** | H      |
+| 49  | `external-action get <node-id> <attempt> <action-key>`     | `GET /api/mission/node/:nodeId/attempt/:attempt/external-action/:actionKey` | `mission.externalAction.get` **[blocked][mission-contract]**  | H      |
+| 50  | `external-object list <node-id> [--attempt <attempt>] [L]` | `GET /api/mission/node/:nodeId/external-object`                             | `mission.externalObject.list` **[blocked][mission-contract]** | H      |
+| 51  | `external-object get <external-object-id>`                 | `GET /api/mission/external-object/:externalObjectId`                        | `mission.externalObject.get` **[blocked][mission-contract]**  | H      |
+| 52  | `observation list <node-id> [--attempt <attempt>] [L]`     | `GET /api/mission/node/:nodeId/observation`                                 | `mission.observation.list` **[blocked][mission-contract]**    | H      |
+| 53  | `observation get <observation-id>`                         | `GET /api/mission/observation/:observationId`                               | `mission.observation.get` **[blocked][mission-contract]**     | H      |
 
 All positionals are required. `<action-key>` is a Project-defined natural key
 in that attempt's required action set. `--attempt` follows the all-attempts default
@@ -537,17 +537,17 @@ The execution identity is the first positional in every synopsis. The server der
 
 | #   | Synopsis after `kanthord mission`                             | Proposed HTTP route                                                    | Proposed operation                                                          | Access |
 | --- | ------------------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------ |
-| 59  | `execution pinned-revision get <execution-id>`                | `GET /api/mission/execution/:executionId/pinned-revision`              | `mission.execution.pinnedRevision.get` **[blocked][mission-contract]**      | E      |
-| 60  | `execution revision list <execution-id> [L]`                  | `GET /api/mission/execution/:executionId/revision`                     | `mission.execution.revision.list` **[blocked][mission-contract]**           | E      |
-| 61  | `execution revision get <execution-id> <revision>`            | `GET /api/mission/execution/:executionId/revision/:revision`           | `mission.execution.revision.get` **[blocked][mission-contract]**            | E      |
-| 62  | `execution run-output list <execution-id> [L]`                | `GET /api/mission/execution/:executionId/run-output`                   | `mission.execution.runOutput.list` **[blocked][mission-contract]**          | E      |
-| 63  | `execution task-outcome list <execution-id> [L]`              | `GET /api/mission/execution/:executionId/task-outcome`                 | `mission.execution.taskOutcome.list` **[blocked][mission-contract]**        | E      |
-| 64  | `execution evidence list <execution-id> [L]`                  | `GET /api/mission/execution/:executionId/evidence`                     | `mission.execution.evidence.list` **[blocked][mission-contract]**           | E      |
-| 65  | `execution evidence content get <execution-id> <evidence-id>` | `GET /api/mission/execution/:executionId/evidence/:evidenceId/content` | `mission.execution.evidence.content.get` **[blocked][mission-contract]**    | E      |
-| 66  | `execution objective list <execution-id> [L]`                 | `GET /api/mission/execution/:executionId/objective`                    | `mission.execution.objective.list` **[blocked][mission-contract]**          | E      |
-| 67  | `execution objective outcome list <execution-id> [L]`         | `GET /api/mission/execution/:executionId/objective/outcome`            | `mission.execution.objective.outcome.list` **[blocked][mission-contract]**  | E      |
-| 68  | `execution objective evidence list <execution-id> [L]`        | `GET /api/mission/execution/:executionId/objective/evidence`           | `mission.execution.objective.evidence.list` **[blocked][mission-contract]** | E      |
-| 69  | `execution cleared-outcome get <execution-id>`                | `GET /api/mission/execution/:executionId/cleared-outcome`              | `mission.execution.clearedOutcome.get` **[blocked][mission-contract]**      | E      |
+| 54  | `execution pinned-revision get <execution-id>`                | `GET /api/mission/execution/:executionId/pinned-revision`              | `mission.execution.pinnedRevision.get` **[blocked][mission-contract]**      | E      |
+| 55  | `execution revision list <execution-id> [L]`                  | `GET /api/mission/execution/:executionId/revision`                     | `mission.execution.revision.list` **[blocked][mission-contract]**           | E      |
+| 56  | `execution revision get <execution-id> <revision>`            | `GET /api/mission/execution/:executionId/revision/:revision`           | `mission.execution.revision.get` **[blocked][mission-contract]**            | E      |
+| 57  | `execution run-output list <execution-id> [L]`                | `GET /api/mission/execution/:executionId/run-output`                   | `mission.execution.runOutput.list` **[blocked][mission-contract]**          | E      |
+| 58  | `execution task-outcome list <execution-id> [L]`              | `GET /api/mission/execution/:executionId/task-outcome`                 | `mission.execution.taskOutcome.list` **[blocked][mission-contract]**        | E      |
+| 59  | `execution evidence list <execution-id> [L]`                  | `GET /api/mission/execution/:executionId/evidence`                     | `mission.execution.evidence.list` **[blocked][mission-contract]**           | E      |
+| 60  | `execution evidence content get <execution-id> <evidence-id>` | `GET /api/mission/execution/:executionId/evidence/:evidenceId/content` | `mission.execution.evidence.content.get` **[blocked][mission-contract]**    | E      |
+| 61  | `execution objective list <execution-id> [L]`                 | `GET /api/mission/execution/:executionId/objective`                    | `mission.execution.objective.list` **[blocked][mission-contract]**          | E      |
+| 62  | `execution objective outcome list <execution-id> [L]`         | `GET /api/mission/execution/:executionId/objective/outcome`            | `mission.execution.objective.outcome.list` **[blocked][mission-contract]**  | E      |
+| 63  | `execution objective evidence list <execution-id> [L]`        | `GET /api/mission/execution/:executionId/objective/evidence`           | `mission.execution.objective.evidence.list` **[blocked][mission-contract]** | E      |
+| 64  | `execution cleared-outcome get <execution-id>`                | `GET /api/mission/execution/:executionId/cleared-outcome`              | `mission.execution.clearedOutcome.get` **[blocked][mission-contract]**      | E      |
 
 The reads return the same record schemas as the human reads and never a revision newer than the pinned one.
 The pinned-revision read returns `Revision` with tasks and the complete node content.
