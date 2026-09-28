@@ -8,7 +8,7 @@ Gateway command is proposed here.
 This is an internal target specification with an implementation snapshot of
 2026-09-23, not a released-package guarantee. See the [CLI index](./README.md)
 for status definitions and [shared conventions and other commands](./other.md)
-for client configuration, output conventions, and the top-level `jwt` command.
+for client configuration, output conventions, and the `jwt` group with `generate` and `inspect`.
 JWT issuance belongs to that global command, even though Gateway implements
 the signing and verification mechanism.
 

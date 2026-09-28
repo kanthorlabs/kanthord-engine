@@ -6,12 +6,7 @@ import { missionOperations } from "../../mission/contract.ts";
 import assert from "node:assert/strict";
 import { Command, CommanderError } from "commander";
 import { dirname } from "node:path";
-import {
-  configPath,
-  initialConfig,
-  loadConfig,
-  showConfig,
-} from "../../config/index.ts";
+import { initialConfig, loadConfig, showConfig } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { Diagnostic, diagnostic } from "../../kernel/errors.ts";
 import { Server } from "../server/index.ts";
@@ -21,17 +16,10 @@ import { openapiPath } from "../../gateway/local.ts";
 import { writeOpenAPI } from "../../gateway/local.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
-import {
-  generateHumanJWT,
-  generateMachineJWT,
-  parseHumanUsername,
-  parseDisplayName,
-  parseWorkerBinding,
-  requireTokenTerminal,
-} from "../../gateway/local.ts";
-import { KANTHORD_AUTH_USERNAME } from "../../gateway/local.ts";
 import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
+import { addJWTCommand } from "./jwt.ts";
+import { configHelp, effectivePath } from "./config-path.ts";
 import { addCredentialCommand } from "./credential.ts";
 import { addProjectCommand } from "./project.ts";
 import { addMissionCommand } from "./mission.ts";
@@ -42,16 +30,6 @@ import {
   PROGRAM_NAME,
   SERVER_APPLICATION,
 } from "./constants.ts";
-
-function effectivePath(command: Command): string {
-  return configPath(command.optsWithGlobals().config as string | undefined);
-}
-function configHelp(command: Command): void {
-  command.addHelpText(
-    "after",
-    () => `\nConfiguration file: ${effectivePath(command)}`,
-  );
-}
 
 export async function initConfig(path: string): Promise<void> {
   const content = initialConfig();
@@ -151,6 +129,7 @@ export function createProgram(
   const program = new Command()
     .name(PROGRAM_NAME)
     .description("kanthord work orchestration server and CLI");
+  program.option("--verbose", "Show verbose output", false);
   program.exitOverride();
   program.allowExcessArguments(false);
   program.configureHelp({ showGlobalOptions: true });
@@ -182,63 +161,6 @@ export function createProgram(
   assert.equal(names.length, Object.keys(CommandName).length);
   assert.equal(new Set(names).size, names.length);
   return program;
-}
-
-function addJWTCommand(program: Command): void {
-  assert.equal(program.name(), PROGRAM_NAME);
-  assert.ok(
-    !program.commands.some((command) => command.name() === CommandName.JWT),
-  );
-  const jwt = program
-    .command(CommandName.JWT)
-    .description("Generate a human or machine JWT locally")
-    .argument(
-      "[username]",
-      `Human username (nonblank, 1–64 characters; default: ${KANTHORD_AUTH_USERNAME})`,
-      parseHumanUsername,
-    )
-    .option(
-      "--name <display>",
-      "Display name (nonblank, 1–64 characters; defaults to subject)",
-      parseDisplayName,
-    )
-    .option(
-      "--binding <worker binding>",
-      "Issue a machine JWT (nonblank binding, 1–128 characters; no username)",
-      parseWorkerBinding,
-    )
-    .option("--config <path>", "YAML server configuration file")
-    .action(
-      async (
-        username: string | undefined,
-        options: { name?: string; binding?: string },
-        command: Command,
-      ) => {
-        if (options.binding !== undefined && username !== undefined)
-          throw new Diagnostic(
-            "cli.jwt.username_with_binding",
-            "jwt: a username cannot be combined with --binding.",
-          );
-        requireTokenTerminal(process.stdout);
-        const config = loadConfig(effectivePath(command));
-        const { token } =
-          options.binding === undefined
-            ? await generateHumanJWT(
-                config.masterKey,
-                config.gateway.tokenLifetime,
-                username,
-                options.name,
-              )
-            : await generateMachineJWT(
-                config.masterKey,
-                config.gateway.tokenLifetime,
-                options.binding,
-                options.name,
-              );
-        process.stdout.write(`${token}\n`);
-      },
-    );
-  configHelp(jwt);
 }
 
 function addGatewayCommand(program: Command): void {

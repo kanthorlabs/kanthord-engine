@@ -77,7 +77,9 @@ engine/
 │       ├── server/             # Service construction, startup, shutdown, and integration tests
 │       │   └── index.ts        # Compose configuration, log, store, registry, and services
 │       ├── cli/                # Non-interactive commands and client configuration
-│       │   ├── index.ts        # Commander dispatch and local configuration, JWT, and Gateway commands
+│       │   ├── index.ts        # Commander dispatch and local configuration and Gateway commands
+│       │   ├── jwt.ts          # Local JWT generation, inspection, and claim rendering
+│       │   ├── config-path.ts  # Shared server configuration path and help text
 │       │   ├── constants.ts    # CLI command names and exit codes
 │       │   └── worker.ts       # Worker command group
 │       └── worker/             # Remote worker application skeleton

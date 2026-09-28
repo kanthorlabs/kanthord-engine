@@ -49,7 +49,7 @@ The pages distinguish three kinds of information:
 - **Open or blocked:** an open decision lives in the root [HANDOFF](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md). A blocked row links its item.
 
 Inspected 2026-09-24: the source currently supplies `config init|validate|show`, `serve` with the
-`server` application, human and machine `jwt` generation, `worker register`,
+`server` application, human and machine `jwt generate` issuance, `worker register`,
 `gateway verify`, and `gateway openapi`. The `project`, `mission`, `scheduler`,
 and `tracking` groups currently provide help only. The `intake` group is not registered in the dispatcher, even for help. `serve worker` is implemented; it checks the server version and waits for cancellation, but does not register, pull, or execute work. Registration also depends on server-side collaborators; a CLI
 parser and an operation declaration alone do not establish a working journey.

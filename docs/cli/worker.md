@@ -8,7 +8,7 @@ presence here does not establish implementation.
 
 See the [CLI index](./README.md) for shared conventions and
 [other commands](./other.md) for `serve worker`, server configuration and local
-`jwt` issuance. Worker binding edits, instance counts, availability, agent
+`jwt generate` issuance. Worker binding edits, instance counts, availability, agent
 entries and effective configuration inspection belong to [Project](./project.md).
 The Worker Service owns agent enablement and effective configuration resolution.
 [Credential](./credential.md) covers credential management.
@@ -177,7 +177,7 @@ string of length `1..128` under the current output schema.
 
 The CLI prints one JSON line with `runtimeIdentity` and `idempotencyKey`, saves no configuration and prints no token.
 Success exits with zero; failure exits with a non-zero status. Registration creates no client identity,
-worker definition or human account. The credential comes from local `jwt`
+worker definition or human account. The credential comes from local `jwt generate`
 issuance described in [other commands](./other.md).
 
 The implementation permits at most one live registration per client identity. A

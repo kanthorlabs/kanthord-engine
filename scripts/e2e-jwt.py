@@ -145,7 +145,7 @@ class Run:
 
     def jwt(self, *args):
         master, slave = pty.openpty()
-        child = subprocess.Popen([NODE, "bin/kanthord.mjs", "jwt", *args],
+        child = subprocess.Popen([NODE, "bin/kanthord.mjs", "jwt", "generate", *args],
                                  cwd=ENGINE, env=self.env, stdin=subprocess.DEVNULL,
                                  stdout=slave, stderr=subprocess.PIPE)
         os.close(slave)
@@ -241,7 +241,7 @@ class Run:
         self.step("cli-generation", {
             "default": self.inspect(default, prepared["masterKey"], "kanthorlabs"),
             "explicit": self.inspect(custom, prepared["masterKey"], self.tag),
-            "commands": ["kanthord jwt", f"kanthord jwt {self.tag}"],
+            "commands": ["kanthord jwt generate", f"kanthord jwt generate {self.tag}"],
         })
         observations = []
         for name, token, username in [("default", default, "kanthorlabs"), ("explicit", custom, self.tag)]:

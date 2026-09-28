@@ -18,6 +18,7 @@ validation in command documents. Heading anchors remain usable when lines move.
 | ----------------------------------------- | ----------------------------------------------- |
 | [`--endpoint`](#--endpoint)               | Select the remote server.                       |
 | [`--token`](#--token)                     | Supply a bearer credential.                     |
+| [`--verbose`](#--verbose)                 | Show extra output where supported.              |
 | [`--help`](#--help)                       | Display usage without running the command.      |
 | [`--config`](#--config)                   | Select the local server configuration file.     |
 | [`--file`](#--file)                       | Read a named structured-input file.             |
@@ -54,6 +55,13 @@ POST.
 [`--cursor <opaque>`](#--cursor). Only commands explicitly declaring pagination
 accept them, including a paginated query where its owning page specifies one.
 A bounded catalogue or single-object read does not inherit them automatically.
+
+## `--verbose`
+
+`--verbose` is a root boolean option with default `false`. Commands with no
+verbose output ignore it. `jwt generate` is the one command with verbose
+output: it prints claims after the token. `jwt inspect` always prints claims.
+Place `--verbose` before or after the command.
 
 ## `--endpoint`
 
@@ -131,7 +139,7 @@ command-specific path annotations. Help is not a separate root command.
 
 **Implemented local server-configuration option:** `--config <path>` is an
 optional string with no literal option default. It belongs to `config`,
-`serve`, and `jwt`, not the root or service commands. Its use by the worker
+`serve`, and `jwt generate`, not the root or service commands. Its use by the worker
 application is governed by the separate
 [`serve worker` contract](./other.md#serve-worker), not inferred from server mode.
 
@@ -167,7 +175,7 @@ a directory, a special input device, terminal input, inline JSON, or an implicit
 editor.
 There are no prompts or interactive confirmations. This convention replaces
 neither server/client YAML configuration nor a raw append-log format; none of
-the global `config`, `serve`, or `jwt` forms accepts it.
+the global `config`, `serve`, or `jwt generate` forms accepts it.
 
 The command page enumerates the JSON fields, types, requiredness, defaults,
 validation, and mapping to operation input. The current proposals require one

@@ -492,14 +492,14 @@ test("top-level jwt uses its optional username or the constant default, the conf
   const config = loadConfig(env.KANTHORD_CONFIG!);
   config.gateway.tokenLifetime = TOKEN_LIFETIME_SECONDS;
   writePrivate(env.KANTHORD_CONFIG!, stringify(config), true);
-  const redirected = invocation(["jwt"], env);
+  const redirected = invocation(["jwt", "generate"], env);
   assert.equal(redirected.status, ExitCode.Failure);
   assert.equal(redirected.stdout, EMPTY_OUTPUT);
   assert.match(redirected.stderr, /terminal/);
-  const help = invocation(["jwt", "--help"], env);
+  const help = invocation(["jwt", "generate", "--help"], env);
   assert.equal(help.status, ExitCode.Success);
   assert.match(help.stdout, /--config <path>/);
-  assert.match(help.stdout, /Usage: kanthord jwt .*\[username\]/);
+  assert.match(help.stdout, /Usage: kanthord jwt generate .*\[username\]/);
   assert.ok(help.stdout.includes(KANTHORD_AUTH_USERNAME));
   assert.ok(help.stdout.includes(env.KANTHORD_CONFIG!));
   const tokens: string[] = [];
@@ -507,6 +507,7 @@ test("top-level jwt uses its optional username or the constant default, the conf
     const result = invocation(
       [
         "jwt",
+        "generate",
         ...(username === undefined ? [] : [username]),
         "--config",
         env.KANTHORD_CONFIG!,
@@ -535,7 +536,7 @@ test("top-level jwt uses its optional username or the constant default, the conf
   assert.equal(new Set(tokens).size, tokens.length);
   assert.deepEqual(readdirSync(directory), ["kanthord.yaml"]);
   for (const args of [[""], [" "], ["u".repeat(65)], ["ulrich", "extra"]]) {
-    const invalid = invocation(["jwt", ...args], env, true);
+    const invalid = invocation(["jwt", "generate", ...args], env, true);
     assert.notEqual(invalid.status, ExitCode.Success);
     assert.equal(invalid.stdout, EMPTY_OUTPUT);
   }
@@ -547,7 +548,11 @@ test("jwt accepts display names and issues fresh machine identities without open
   writePrivate(env.KANTHORD_CONFIG!, initialConfig());
   const name = "A display name";
   const binding = "worker-binding";
-  const human = invocation(["jwt", "ulrich", "--name", name], env, true);
+  const human = invocation(
+    ["jwt", "generate", "ulrich", "--name", name],
+    env,
+    true,
+  );
   assert.equal(human.status, ExitCode.Success, human.stderr);
   assert.equal(decode(human.stdout.trim()).payload.name, name);
   const subjects = new Set<string>();
@@ -555,7 +560,13 @@ test("jwt accepts display names and issues fresh machine identities without open
   const ISSUANCES = 2;
   for (let index = 0; index < ISSUANCES; index++) {
     const result = invocation(
-      ["jwt", "--binding", binding, ...(index ? ["--name", name] : [])],
+      [
+        "jwt",
+        "generate",
+        "--binding",
+        binding,
+        ...(index ? ["--name", name] : []),
+      ],
       env,
       true,
     );
@@ -573,14 +584,14 @@ test("jwt accepts display names and issues fresh machine identities without open
   assert.equal(subjects.size, ISSUANCES);
   assert.equal(sessions.size, ISSUANCES);
   const conflict = invocation(
-    ["jwt", "ulrich", "--binding", binding],
+    ["jwt", "generate", "ulrich", "--binding", binding],
     env,
     true,
   );
   assert.equal(conflict.status, ExitCode.Failure);
   assert.match(conflict.stderr, /^cli\.jwt\.username_with_binding:/);
   assert.equal(conflict.stdout, EMPTY_OUTPUT);
-  const redirected = invocation(["jwt", "--binding", binding], env);
+  const redirected = invocation(["jwt", "generate", "--binding", binding], env);
   assert.equal(redirected.status, ExitCode.Failure);
   assert.equal(redirected.stdout, EMPTY_OUTPUT);
   for (const options of [
@@ -589,11 +600,90 @@ test("jwt accepts display names and issues fresh machine identities without open
     ["--binding", " "],
     ["--binding", "b".repeat(129)],
   ]) {
-    const invalid = invocation(["jwt", ...options], env, true);
+    const invalid = invocation(["jwt", "generate", ...options], env, true);
     assert.equal(invalid.status, ExitCode.Failure);
     assert.equal(invalid.stdout, EMPTY_OUTPUT);
   }
   assert.deepEqual(readdirSync(directory), ["kanthord.yaml"]);
+});
+
+test("jwt group, verbose generation, inspection and token precedence", (t) => {
+  const directory = temporary(t);
+  const env = environment(directory);
+  writePrivate(env.KANTHORD_CONFIG!, initialConfig());
+  const group = invocation(["jwt"], env);
+  assert.equal(group.status, ExitCode.Success);
+  assert.match(group.stdout, /generate/);
+  assert.match(group.stdout, /inspect/);
+  const generated = invocation(
+    ["jwt", "generate", "ulrich", "--verbose"],
+    env,
+    true,
+  );
+  assert.equal(generated.status, ExitCode.Success, generated.stderr);
+  const [token, ...claimLines] = generated.stdout.split("\n");
+  assert.ok(token);
+  const claimList = `${claimLines.join("\n")}`;
+  const payload = decode(token).payload;
+  assert.deepEqual(
+    claimLines.slice(1, -2).map((line) => line.split(": ")[0]),
+    Object.keys(payload),
+  );
+  for (const key of ["iat", "exp"]) {
+    const seconds = payload[key];
+    assert.match(
+      claimList,
+      new RegExp(
+        `${key}: ${seconds} # ${new Date(Number(seconds) * 1000).toISOString().replace(".000Z", "Z")}`,
+      ),
+    );
+  }
+  assert.ok(claimList.startsWith("---\n"));
+  assert.ok(claimList.endsWith("---\n"));
+  const rootVerbose = invocation(["--verbose", "jwt", "generate"], env, true);
+  assert.equal(rootVerbose.status, ExitCode.Success, rootVerbose.stderr);
+  assert.match(rootVerbose.stdout, /^\S+\n---\n/);
+  const plain = invocation(["jwt", "generate"], env, true);
+  assert.equal(plain.status, ExitCode.Success, plain.stderr);
+  assert.match(plain.stdout, /^\S+\n$/);
+  const inspect = invocation(["jwt", "inspect", token], env);
+  assert.equal(inspect.status, ExitCode.Success, inspect.stderr);
+  assert.equal(inspect.stdout, claimList);
+  const other = plain.stdout.trim();
+  writePrivate(clientConfigPath(env), `token: ${other}\n`);
+  assert.equal(
+    invocation(["jwt", "inspect"], env).stdout,
+    invocation(["jwt", "inspect", other], env).stdout,
+  );
+  assert.equal(
+    invocation(["jwt", "inspect"], { ...env, KANTHORD_TOKEN: token }).stdout,
+    claimList,
+  );
+  assert.equal(
+    invocation(["jwt", "inspect", other], { ...env, KANTHORD_TOKEN: token })
+      .stdout,
+    invocation(["jwt", "inspect", other], env).stdout,
+  );
+  const absent = invocation(["jwt", "inspect"], environment(temporary(t)));
+  assert.equal(absent.status, ExitCode.Failure);
+  assert.match(absent.stderr, /^cli\.jwt\.inspect\.token_required:/);
+  for (const invalid of [
+    "not-a-jwt",
+    `${Buffer.from("{}").toString("base64url")}.${Buffer.from("[]").toString("base64url")}.sig`,
+  ]) {
+    const result = invocation(["jwt", "inspect", invalid], env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /^cli\.jwt\.inspect\.malformed_token:/);
+    assert.ok(!result.stderr.includes(invalid));
+  }
+  assert.notEqual(
+    invocation(["jwt", "inspect", "--config", "x"], env).status,
+    ExitCode.Success,
+  );
+  const baseline = invocation(["config", "validate"], env);
+  const verbose = invocation(["config", "validate", "--verbose"], env);
+  assert.equal(verbose.stdout, baseline.stdout);
+  assert.equal(verbose.status, baseline.status);
 });
 
 test("launcher rejects an unsupported runtime before importing application code", () => {
