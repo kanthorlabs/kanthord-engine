@@ -310,3 +310,9 @@ const apiOperations = [
   ...Object.values(projectOperations),
   ...Object.values(missionOperations),
 ];
+const allOperationIds = apiOperations.map((operation) => operation.id);
+assert.equal(
+  new Set(allOperationIds).size,
+  allOperationIds.length,
+  "operation ID collision",
+);
