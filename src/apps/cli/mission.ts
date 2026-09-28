@@ -2,13 +2,16 @@ import assert from "node:assert/strict";
 import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Command } from "commander";
+import { z } from "zod";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { ensureDirectory, writePrivate } from "../../kernel/files.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import type { OperationResult } from "../../kernel/operation.ts";
 import {
+  criterionSetSchema,
   edgeKindSchema,
+  graphEditSchema,
   ImportFormat,
   importFormatSchema,
   MISSION_IDENTITY_PREFIX,
@@ -17,6 +20,8 @@ import {
   NODE_IDENTITY_PREFIX,
   nodeCreateSchema,
   nodeUpdateSchema,
+  prioritySetSchema,
+  rebindSchema,
   NODE_LIST_LIMIT_DEFAULT,
   NODE_LIST_LIMIT_MAX,
   NodeKind,
@@ -38,6 +43,15 @@ import {
 const CREATE = "create";
 const UPDATE = "update";
 const MOVE = "move";
+const ADD = "add";
+const REMOVE = "remove";
+const SET = "set";
+const DEPENDENCY = "dependency";
+const CRITERION = "criterion";
+const REBIND = "rebind";
+const PRIORITY = "priority";
+const BINDING_IDENTITY_PREFIX = "binding";
+const REBIND_FILE_SCHEMA = rebindSchema.omit({ bindingId: true, nodeId: true });
 const FILE_OPTION = "--file";
 const KEY_OPTION = "--idempotency-key";
 const GET = "get";
@@ -84,6 +98,21 @@ const RETIRE_PREVIEW_INVALID_NODE_ID =
 const EXPORT_INVALID_MISSION_ID = "cli.mission.export.invalid_mission_id";
 const EXPORT_INVALID_FORMAT = "cli.mission.export.invalid_format";
 const EXPORT_OUT_NOT_EMPTY = "cli.mission.export.out_not_empty";
+const DEPENDENCY_ADD_INVALID_NODE_ID =
+  "cli.mission.dependency.add.invalid_node_id";
+const DEPENDENCY_ADD_INVALID_DEPENDS_ON_ID =
+  "cli.mission.dependency.add.invalid_depends_on_id";
+const DEPENDENCY_REMOVE_INVALID_NODE_ID =
+  "cli.mission.dependency.remove.invalid_node_id";
+const DEPENDENCY_REMOVE_INVALID_DEPENDS_ON_ID =
+  "cli.mission.dependency.remove.invalid_depends_on_id";
+const CRITERION_SET_INVALID_NODE_ID =
+  "cli.mission.criterion.set.invalid_node_id";
+const REBIND_INVALID_MISSION_ID = "cli.mission.node.rebind.invalid_mission_id";
+const REBIND_INVALID_BINDING_ID = "cli.mission.node.rebind.invalid_binding_id";
+const REBIND_INVALID_NODE_ID = "cli.mission.node.rebind.invalid_node_id";
+const PRIORITY_SET_INVALID_NODE_ID =
+  "cli.mission.node.priority.set.invalid_node_id";
 
 type ReadCommand =
   | typeof GET
@@ -183,58 +212,139 @@ async function nodeGet(nodeId: string, command: Command): Promise<void> {
   printResult(result, NODE_GET);
 }
 
-async function nodeCreate(missionId: string, command: Command): Promise<void> {
-  validateMissionId(missionId, NODE_CREATE_INVALID_MISSION_ID);
+async function mutate<S extends z.ZodTypeAny, T extends object>(
+  command: Command,
+  name: string,
+  schema: S,
+  invoke: (
+    api: ReturnType<typeof httpClient<typeof missionOperations>>,
+    body: z.infer<S>,
+    key: string,
+  ) => Promise<OperationResult<T>>,
+): Promise<void> {
   const options = command.optsWithGlobals();
   const { endpoint, token } = resolveClient(options);
-  requireToken(token, "cli.mission.node.create.token_required");
+  requireToken(token, `cli.mission.${name}.token_required`);
   const key = resolveKey(options);
-  const body = readJsonFileAs(options.file, nodeCreateSchema);
-  const result = await httpClient(missionOperations, endpoint, token)[
-    "node.create"
-  ]({ params: { missionId }, query: {}, body }, { idempotencyKey: key });
+  const body = readJsonFileAs(options.file, schema);
+  const result = await invoke(
+    httpClient(missionOperations, endpoint, token),
+    body,
+    key,
+  );
   const data = handleMutationResult(
     result,
-    "cli.mission.node.create.indeterminate",
+    `cli.mission.${name}.indeterminate`,
     key,
   );
   process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+}
+
+async function nodeCreate(missionId: string, command: Command): Promise<void> {
+  validateMissionId(missionId, NODE_CREATE_INVALID_MISSION_ID);
+  await mutate(command, "node.create", nodeCreateSchema, (api, body, key) =>
+    api["node.create"](
+      { params: { missionId }, query: {}, body },
+      { idempotencyKey: key },
+    ),
+  );
 }
 
 async function nodeUpdate(nodeId: string, command: Command): Promise<void> {
   validateNodeId(nodeId, NODE_UPDATE_INVALID_NODE_ID);
-  const options = command.optsWithGlobals();
-  const { endpoint, token } = resolveClient(options);
-  requireToken(token, "cli.mission.node.update.token_required");
-  const key = resolveKey(options);
-  const body = readJsonFileAs(options.file, nodeUpdateSchema);
-  const result = await httpClient(missionOperations, endpoint, token)[
-    "node.update"
-  ]({ params: { nodeId }, query: {}, body }, { idempotencyKey: key });
-  const data = handleMutationResult(
-    result,
-    "cli.mission.node.update.indeterminate",
-    key,
+  await mutate(command, "node.update", nodeUpdateSchema, (api, body, key) =>
+    api["node.update"](
+      { params: { nodeId }, query: {}, body },
+      { idempotencyKey: key },
+    ),
   );
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
 }
 
 async function nodeMove(nodeId: string, command: Command): Promise<void> {
   validateNodeId(nodeId, NODE_MOVE_INVALID_NODE_ID);
-  const options = command.optsWithGlobals();
-  const { endpoint, token } = resolveClient(options);
-  requireToken(token, "cli.mission.node.move.token_required");
-  const key = resolveKey(options);
-  const body = readJsonFileAs(options.file, moveSchema);
-  const result = await httpClient(missionOperations, endpoint, token)[
-    "node.move"
-  ]({ params: { nodeId }, query: {}, body }, { idempotencyKey: key });
-  const data = handleMutationResult(
-    result,
-    "cli.mission.node.move.indeterminate",
-    key,
+  await mutate(command, "node.move", moveSchema, (api, body, key) =>
+    api["node.move"](
+      { params: { nodeId }, query: {}, body },
+      { idempotencyKey: key },
+    ),
   );
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+}
+
+async function dependencyEdit(
+  nodeId: string,
+  dependsOnId: string,
+  command: Command,
+  action: typeof ADD | typeof REMOVE,
+): Promise<void> {
+  const name = `dependency.${action}` as const;
+  validateNodeId(
+    nodeId,
+    action === ADD
+      ? DEPENDENCY_ADD_INVALID_NODE_ID
+      : DEPENDENCY_REMOVE_INVALID_NODE_ID,
+  );
+  validateNodeId(
+    dependsOnId,
+    action === ADD
+      ? DEPENDENCY_ADD_INVALID_DEPENDS_ON_ID
+      : DEPENDENCY_REMOVE_INVALID_DEPENDS_ON_ID,
+  );
+  await mutate(command, name, graphEditSchema, (api, body, key) =>
+    api[name](
+      { params: { nodeId, dependsOnId }, query: {}, body },
+      { idempotencyKey: key },
+    ),
+  );
+}
+
+async function criterionSet(nodeId: string, command: Command): Promise<void> {
+  validateNodeId(nodeId, CRITERION_SET_INVALID_NODE_ID);
+  await mutate(command, "criterion.set", criterionSetSchema, (api, body, key) =>
+    api["criterion.set"](
+      { params: { nodeId }, query: {}, body },
+      { idempotencyKey: key },
+    ),
+  );
+}
+
+async function nodeRebind(
+  missionId: string,
+  bindingId: string,
+  command: Command,
+): Promise<void> {
+  validateMissionId(missionId, REBIND_INVALID_MISSION_ID);
+  if (!identitySchema(BINDING_IDENTITY_PREFIX).safeParse(bindingId).success)
+    throw new Diagnostic(REBIND_INVALID_BINDING_ID, "invalid binding ID");
+  const nodeId = command.optsWithGlobals().node as string | undefined;
+  if (nodeId !== undefined) validateNodeId(nodeId, REBIND_INVALID_NODE_ID);
+  await mutate(command, "node.rebind", REBIND_FILE_SCHEMA, (api, file, key) =>
+    api["node.rebind"](
+      {
+        params: { missionId },
+        query: {},
+        body: {
+          ...file,
+          bindingId,
+          ...(nodeId === undefined ? {} : { nodeId }),
+        },
+      },
+      { idempotencyKey: key },
+    ),
+  );
+}
+
+async function prioritySet(nodeId: string, command: Command): Promise<void> {
+  validateNodeId(nodeId, PRIORITY_SET_INVALID_NODE_ID);
+  await mutate(
+    command,
+    "node.priority.set",
+    prioritySetSchema,
+    (api, body, key) =>
+      api["node.priority.set"](
+        { params: { nodeId }, query: {}, body },
+        { idempotencyKey: key },
+      ),
+  );
 }
 
 async function revisionList(nodeId: string, command: Command): Promise<void> {
@@ -392,9 +502,11 @@ export function addMissionCommand(program: Command): void {
     );
   addNodeCommands(mission);
   addEdgeCommands(mission);
+  addDependencyCommands(mission);
+  addCriterionCommands(mission);
 }
 
-function addNodeMutationOptions(command: Command): Command {
+function addMutationOptions(command: Command): Command {
   return command
     .requiredOption(
       FILE_OPTION + " <path>",
@@ -438,7 +550,7 @@ function addNodeCommands(mission: Command): void {
     .action((nodeId: string, _options, command: Command) =>
       nodeGet(nodeId, command),
     );
-  addNodeMutationOptions(
+  addMutationOptions(
     node
       .command(CREATE)
       .description("Create a mission node as JSON")
@@ -446,7 +558,7 @@ function addNodeCommands(mission: Command): void {
   ).action((missionId: string, _options, command: Command) =>
     nodeCreate(missionId, command),
   );
-  addNodeMutationOptions(
+  addMutationOptions(
     node
       .command(UPDATE)
       .description("Update a mission node as JSON")
@@ -454,7 +566,7 @@ function addNodeCommands(mission: Command): void {
   ).action((nodeId: string, _options, command: Command) =>
     nodeUpdate(nodeId, command),
   );
-  addNodeMutationOptions(
+  addMutationOptions(
     node
       .command(MOVE)
       .description("Move a mission node as JSON")
@@ -475,6 +587,36 @@ function addNodeCommands(mission: Command): void {
       retirePreview(nodeId, command),
     );
   addRevisionCommands(node);
+  addNodeRebind(node);
+  addNodePriority(node);
+}
+
+function addNodeRebind(node: Command): void {
+  addMutationOptions(
+    node
+      .command(REBIND)
+      .description("Rebind mission nodes")
+      .argument("<mission-id>", "Mission ID")
+      .argument("<binding-id>", "Binding ID")
+      .option("--node <node-id>", "Rebind only this node", singleUse("--node")),
+  ).action((missionId: string, bindingId: string, _options, command: Command) =>
+    nodeRebind(missionId, bindingId, command),
+  );
+}
+
+function addNodePriority(node: Command): void {
+  const priority = node
+    .command(PRIORITY)
+    .description("Mission node priority commands");
+  priority.action(() => priority.help());
+  addMutationOptions(
+    priority
+      .command(SET)
+      .description("Set node priority")
+      .argument("<node-id>", "Node ID"),
+  ).action((nodeId: string, _options, command: Command) =>
+    prioritySet(nodeId, command),
+  );
 }
 
 function addRevisionCommands(node: Command): void {
@@ -496,6 +638,40 @@ function addRevisionCommands(node: Command): void {
     .action((nodeId: string, rev: string, _options, command: Command) =>
       revisionGet(nodeId, rev, command),
     );
+}
+
+function addDependencyCommands(mission: Command): void {
+  const dependency = mission
+    .command(DEPENDENCY)
+    .description("Mission dependency commands");
+  dependency.action(() => dependency.help());
+  for (const action of [ADD, REMOVE] as const) {
+    addMutationOptions(
+      dependency
+        .command(action)
+        .description(`${action} a dependency`)
+        .argument("<node-id>", "Dependent node ID")
+        .argument("<depends-on-id>", "Prerequisite node ID"),
+    ).action(
+      (nodeId: string, dependsOnId: string, _options, command: Command) =>
+        dependencyEdit(nodeId, dependsOnId, command, action),
+    );
+  }
+}
+
+function addCriterionCommands(mission: Command): void {
+  const criterion = mission
+    .command(CRITERION)
+    .description("Mission criterion commands");
+  criterion.action(() => criterion.help());
+  addMutationOptions(
+    criterion
+      .command(SET)
+      .description("Set node criterion")
+      .argument("<node-id>", "Node ID"),
+  ).action((nodeId: string, _options, command: Command) =>
+    criterionSet(nodeId, command),
+  );
 }
 
 function addEdgeCommands(mission: Command): void {

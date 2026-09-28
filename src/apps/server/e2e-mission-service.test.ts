@@ -36,6 +36,16 @@ const CREATE = "create";
 const GET = "get";
 const UPDATE = "update";
 const MOVE = "move";
+const ADD = "add";
+const REMOVE = "remove";
+const SET = "set";
+const DEPENDENCY = "dependency";
+const CRITERION = "criterion";
+const REBIND = "rebind";
+const PRIORITY = "priority";
+const PRIORITY_VALUE = 42;
+const INVALID_BINDING_ID = "invalid_bid";
+const INVALID_BINDING_CODE = "cli.mission.node.rebind.invalid_binding_id";
 const APPLY = "apply";
 const BINDING = "binding";
 const CREDENTIAL = "credential";
@@ -377,6 +387,37 @@ test("mission node create help and local file and identity validation", async (t
   }
 });
 
+test("mission graph commands expose flags and reject invalid rebind IDs offline", async (t) => {
+  const { env } = isolated(t);
+  for (const path of [
+    [DEPENDENCY, ADD, FILE],
+    [CRITERION, SET, FILE],
+    [NODE, REBIND, NODE_OPTION],
+    [NODE, PRIORITY, SET, FILE],
+  ]) {
+    const flag = path.at(-1)!;
+    const result = await kanthord([MISSION, ...path.slice(0, -1), HELP], env);
+    assert.equal(result.code, SUCCESS, result.stderr);
+    assert.ok(result.stdout.includes(flag));
+  }
+  refusal(
+    await kanthord(
+      [
+        MISSION,
+        NODE,
+        REBIND,
+        MISSION_ID,
+        INVALID_BINDING_ID,
+        FILE,
+        "f.json",
+        ...LOCAL_FLAGS,
+      ],
+      env,
+    ),
+    INVALID_BINDING_CODE,
+  );
+});
+
 test("mission node create replay, update and move task between objectives", async (t) => {
   const fixture = await setup(t);
   const mission = await createMission(fixture);
@@ -509,6 +550,95 @@ test("mission node create replay, update and move task between objectives", asyn
     await kanthord([MISSION, NODE, GET, taskId], fixture.env),
   );
   assert.equal(read.parentId, newParent);
+  const graphFile = (version: number) =>
+    jsonFile(fixture, `graph-${version}.json`, {
+      reason: REASON,
+      expectedMissionVersion: version,
+    });
+  const added = success<Mutation>(
+    await kanthord(
+      [
+        MISSION,
+        DEPENDENCY,
+        ADD,
+        oldParent,
+        newParent,
+        FILE,
+        graphFile(moved.missionVersion),
+      ],
+      fixture.env,
+    ),
+  );
+  assert.equal(added.missionVersion, moved.missionVersion + ONE);
+  assert.ok(added.idempotencyKey);
+  const pending = success<{ state: string }>(
+    await kanthord([MISSION, NODE, GET, oldParent], fixture.env),
+  );
+  assert.equal(pending.state, NodeState.Pending);
+  const removed = success<Mutation>(
+    await kanthord(
+      [
+        MISSION,
+        DEPENDENCY,
+        REMOVE,
+        oldParent,
+        newParent,
+        FILE,
+        graphFile(added.missionVersion),
+      ],
+      fixture.env,
+    ),
+  );
+  assert.equal(removed.missionVersion, added.missionVersion + ONE);
+  const available = success<{ state: string; visibleRevision: number }>(
+    await kanthord([MISSION, NODE, GET, oldParent], fixture.env),
+  );
+  assert.equal(available.state, NodeState.Available);
+  assert.ok(available.visibleRevision >= ONE);
+  const criterion = success<Mutation>(
+    await kanthord(
+      [
+        MISSION,
+        CRITERION,
+        SET,
+        oldParent,
+        FILE,
+        jsonFile(fixture, "criterion.json", {
+          criterion: "Revised criterion",
+          verifications: ["true"],
+          reason: REASON,
+          expectedRevision: available.visibleRevision,
+          expectedMissionVersion: removed.missionVersion,
+        }),
+      ],
+      fixture.env,
+    ),
+  );
+  assert.equal(criterion.missionVersion, removed.missionVersion + ONE);
+  const priority = success<{
+    id: string;
+    priority: number;
+    idempotencyKey: string;
+  }>(
+    await kanthord(
+      [
+        MISSION,
+        NODE,
+        PRIORITY,
+        SET,
+        newParent,
+        FILE,
+        jsonFile(fixture, "priority.json", {
+          value: PRIORITY_VALUE,
+          expectedMissionVersion: criterion.missionVersion,
+        }),
+      ],
+      fixture.env,
+    ),
+  );
+  assert.equal(priority.id, newParent);
+  assert.equal(priority.priority, PRIORITY_VALUE);
+  assert.ok(priority.idempotencyKey);
 });
 
 test("mission get reads the empty mission created with its project", async (t) => {
