@@ -16,6 +16,7 @@ import {
 export const KANTHORD_AUTH_USERNAME = "kanthorlabs";
 const MILLISECONDS_PER_SECOND = 1000;
 const MIN_TOKEN_LIFETIME = 0;
+const CLIENT_SECRET_LABEL_PREFIX = "worker/client-secret/v1/";
 export interface TokenResponse {
   token: string;
   expiresAt: number;
@@ -50,6 +51,12 @@ export function parseWorkerBinding(value: unknown): string {
       "binding: expected a nonblank string of 1–128 characters.",
     );
   return value;
+}
+
+export function deriveClientSecret(masterKey: string, sub: string): string {
+  return deriveKey(masterKey, `${CLIENT_SECRET_LABEL_PREFIX}${sub}`).toString(
+    "base64",
+  );
 }
 
 export function signingKey(masterKey: string): Promise<CryptoKey> {

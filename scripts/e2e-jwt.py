@@ -53,7 +53,7 @@ def terminal_read(master, process, pattern):
                 break
             match = re.search(pattern, data)
             if match:
-                return match.group(1).decode()
+                return tuple(group.decode() for group in match.groups())
         if process.poll() is not None:
             break
     raise AssertionError("Terminal did not produce the expected JWT")
@@ -117,7 +117,7 @@ class Run:
                 "Step 05: missing, tampered, expired, wrong-key and malformed tokens produce HTTP 401 and CLI exit 1.",
                 "Step 06: an environment token allows verify without login; removed commands fail; OpenAPI publishes human verification and worker registration.",
                 "Step 07: SIGTERM exit 0, removed home and closed port prove cleanup.",
-                "Step 08: scan every evidence file for the sentinel, all JWTs and master keys.",
+                "Step 08: scan every evidence file for the sentinel, all JWTs, client secrets and master keys.",
             ],
         }
         self.save()
@@ -150,8 +150,15 @@ class Run:
                                  stdout=slave, stderr=subprocess.PIPE)
         os.close(slave)
         try:
-            token = terminal_read(master, child, rb"^" + TOKEN)
-            self.secrets.append(token)
+            machine = "--binding" in args
+            pattern = rb"^token: " + TOKEN + rb"clientSecret: ([^\r\n]+)\r?\n" if machine else rb"^" + TOKEN
+            values = terminal_read(master, child, pattern)
+            self.secrets.extend(values)
+            token = values[0]
+            if machine:
+                secret = base64.b64decode(values[1], validate=True)
+                require(len(secret) == 32 and base64.b64encode(secret).decode() == values[1],
+                        "Machine client secret is not canonical 32-byte base64")
             require(child.wait(timeout=10) == 0, "JWT command failed")
             return token
         finally:
@@ -399,7 +406,7 @@ class Run:
             self.failure = "Credential sweep failed; affected artifacts were redacted"
             self.metadata.update({"verdict": "FAIL", "failure": self.failure, "redactedArtifacts": leaked})
         else:
-            self.step("secrecy", {"sentinelSweepPassed": True, "rawTokensRecorded": False, "masterKeysRecorded": False})
+            self.step("secrecy", {"sentinelSweepPassed": True, "rawTokensRecorded": False, "clientSecretsRecorded": False, "masterKeysRecorded": False})
         self.save()
         self.report()
         print(json.dumps({"verdict": self.metadata["verdict"], "report": str(self.path / "report.md"), "cleanup": self.metadata.get("cleanup")}))

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
-import { stringify } from "yaml";
-import { directories } from "../../config/index.ts";
+import { parse, stringify } from "yaml";
+import { configuration, directories } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { packageVersion } from "../../kernel/version.ts";
@@ -68,12 +68,12 @@ function workerEnvironment(t: TestContext): NodeJS.ProcessEnv {
   return env;
 }
 
-function clientFile(env: NodeJS.ProcessEnv, masterKey: string): void {
+function clientFile(env: NodeJS.ProcessEnv, clientSecret: string): void {
   assert.ok(env.XDG_CONFIG_HOME);
-  assert.ok(masterKey);
+  assert.ok(clientSecret);
   writePrivate(
     join(directories(env).config, "cli.yaml"),
-    stringify({ masterKey }),
+    stringify({ clientSecret }),
   );
 }
 
@@ -274,6 +274,59 @@ async function liveEnvironment(
   return { env, token };
 }
 
+test("worker starts from the machine JWT fragment pasted below endpoint without exposing secrets", async (t) => {
+  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
+  const env = workerEnvironment(t);
+  env.KANTHORD_ENDPOINT = undefined;
+  env.KANTHORD_TOKEN = undefined;
+  const configPath = join(env.XDG_CONFIG_HOME!, "issuance.yaml");
+  writePrivate(
+    configPath,
+    stringify(
+      configuration({ masterKey: fixture.config.masterKey }).getProperties(),
+    ),
+  );
+  const entry = new URL("../../main.ts", import.meta.url).href;
+  const args = [
+    "jwt",
+    "generate",
+    "--binding",
+    TEST_WORKER_BINDING,
+    "--config",
+    configPath,
+  ];
+  const generated = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `process.stdout.isTTY=true;process.argv=[process.execPath,'kanthord',...${JSON.stringify(args)}];await import(${JSON.stringify(entry)});`,
+    ],
+    { env, encoding: "utf8", timeout: SPAWN_LINE_TIMEOUT_MS },
+  );
+  assert.equal(generated.status, EXIT_SUCCESS, generated.stderr);
+  assert.equal(generated.stderr, EMPTY);
+  writePrivate(
+    join(directories(env).config, "cli.yaml"),
+    `endpoint: ${fixture.endpoint}\n${generated.stdout}`,
+  );
+  const { token, clientSecret } = parse(generated.stdout);
+  assert.ok(token);
+  assert.ok(clientSecret);
+  const proc = spawnWorker(WORKER_ARGS, env);
+  try {
+    await proc.waitForLine((line) => line.includes(STARTED));
+    proc.kill("SIGTERM");
+    const result = await within(proc.exited, CLEANUP_WAIT_MS);
+    assert.equal(result.code, EXIT_SUCCESS);
+    assert.equal(result.stdout, EMPTY);
+    assert.ok(!result.stderr.join(NEWLINE).includes(token));
+    assert.ok(!result.stderr.join(NEWLINE).includes(clientSecret));
+  } finally {
+    await stopWorker(proc);
+  }
+});
+
 test("E09.1 worker refuses --config", async (t) => {
   const env = workerEnvironment(t);
   const result = await kanthord(
@@ -284,22 +337,22 @@ test("E09.1 worker refuses --config", async (t) => {
   assert.ok(result.stderr.startsWith("cli.serve.worker_config:"));
 });
 
-test("E09.2 absent masterKey refuses before network", async (t) => {
+test("E09.2 absent clientSecret refuses before network", async (t) => {
   const env = workerEnvironment(t);
   const proc = spawnWorker(WORKER_ARGS, env);
   try {
-    await failure(proc, "worker.start.master_key_absent");
+    await failure(proc, "worker.start.client_secret_absent");
   } finally {
     await stopWorker(proc);
   }
 });
 
-test("E09.3 invalid masterKey refuses before network", async (t) => {
+test("E09.3 invalid clientSecret refuses before network", async (t) => {
   const env = workerEnvironment(t);
   clientFile(env, randomBytes(INVALID_KEY_BYTES).toString("base64"));
   const proc = spawnWorker(WORKER_ARGS, env);
   try {
-    await failure(proc, "worker.start.master_key_invalid");
+    await failure(proc, "worker.start.client_secret_invalid");
   } finally {
     await stopWorker(proc);
   }

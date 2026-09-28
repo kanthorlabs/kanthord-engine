@@ -23,14 +23,14 @@ import {
 } from "../../gateway/client.ts";
 
 const KEEPALIVE_INTERVAL_MS = 60000;
-const MASTER_KEY_BYTES = 32;
+const CLIENT_SECRET_BYTES = 32;
 const WORKER_STOP_WATCHDOG_MS = 10000;
 const WORKER_STOP_EXIT_FAILURE = 1;
 
 function ignoreHangup(): void {}
 
 export interface WorkerOptions extends Partial<
-  Omit<ClientConfiguration, "masterKey">
+  Omit<ClientConfiguration, "clientSecret">
 > {
   env?: NodeJS.ProcessEnv;
   context?: Context;
@@ -61,19 +61,19 @@ export class Worker implements Service {
       );
     this.startTask ??= lifecycle(async () => {
       const config = resolveClient(this.options, this.options.env);
-      if (config.masterKey === undefined)
+      if (config.clientSecret === undefined)
         throw new Diagnostic(
-          "worker.start.master_key_absent",
-          "worker: masterKey is required in cli.yaml.",
+          "worker.start.client_secret_absent",
+          "worker: clientSecret is required in cli.yaml.",
         );
-      const key = Buffer.from(config.masterKey, "base64");
+      const secret = Buffer.from(config.clientSecret, "base64");
       if (
-        key.length !== MASTER_KEY_BYTES ||
-        key.toString("base64") !== config.masterKey
+        secret.length !== CLIENT_SECRET_BYTES ||
+        secret.toString("base64") !== config.clientSecret
       )
         throw new Diagnostic(
-          "worker.start.master_key_invalid",
-          "worker: masterKey must be a base64 encoding of exactly 32 bytes.",
+          "worker.start.client_secret_invalid",
+          "worker: clientSecret must be a base64 encoding of exactly 32 bytes.",
         );
       const client = httpClient(
         gatewayOperations,

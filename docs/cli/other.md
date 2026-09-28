@@ -140,17 +140,19 @@ file's fields use those contracts; its location and file checks follow below.
 
 ### `cli.yaml` and its effects
 
-The target file holds `endpoint`, `token` and `masterKey` under the [client configuration ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-configuration-file).
-Only `serve worker` reads `masterKey`; service-group commands ignore it.
-It holds the server's 32-byte key in base64 and accepts no option or environment override.
-The source snapshot below does not override that contract.
+The file accepts `endpoint`, `token` and `clientSecret` under the [client configuration ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-configuration-file).
+Only `serve worker` reads `clientSecret`; service-group commands ignore it.
+The client secret is a canonical base64 encoding of 32 bytes.
+It has no environment variable and no option.
+See the [client-secret ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-secret).
+A `masterKey` field fails with `cli.config.invalid`.
 
 The path is `<XDG configuration directory>/kanthord/cli.yaml`, normally
 `~/.config/kanthord/cli.yaml`. There is no `--client-config` path option and
 `KANTHORD_CONFIG` does not select this file. An absent file is allowed. When
-present, the current source accepts only optional `endpoint` and `token` fields in one YAML mapping.
-The target also accepts `masterKey` as stated above. It shares the bounded YAML
-parser described under [server configuration](#server-configuration).
+present, it accepts only optional `endpoint`, `token` and `clientSecret` fields
+in one YAML mapping. It shares the bounded YAML parser described under
+[server configuration](#server-configuration).
 
 The operator supplies the file manually. Current file checks require a regular
 file owned by the running user with exact mode `0600`, reject symlinks and
@@ -183,7 +185,7 @@ Current domain results (`gateway verify`, `worker register`) are one JSON value
 followed by a newline on stdout. `worker register` includes its idempotency key.
 Local output has explicit exceptions: help is text, `config init` and
 `config validate` print status/path text, `config show` prints masked YAML, and
-`jwt generate` prints a raw token only to terminal stdout. `jwt inspect`
+`jwt generate` prints a human token or a machine client fragment only to terminal stdout. `jwt inspect`
 prints the claim list to any stdout. `serve` is long-running and
 produces operational logs, not a domain-result JSON object.
 
@@ -490,7 +492,7 @@ only, and it opens no database.
 
 No other option exists. The worker binding, the worker, the agent configuration
 and the instance count come from the server through the binding that the machine
-token names. `masterKey` comes from `cli.yaml` alone, under the
+token names. `clientSecret` comes from `cli.yaml` alone, under the
 [client configuration ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-configuration-file).
 The workspace lives under the XDG state directory of the host.
 
@@ -500,7 +502,8 @@ of a worker binding need N processes with N machine tokens.
 
 Output: operational JSON log records go to stderr. Startup prints no token and
 requires no terminal. Startup resolves the client configuration, checks
-`masterKey`, checks the server package version, registers the instance, and then
+`clientSecret` for a canonical 32-byte base64 value, checks the server package
+version, registers the instance, and then
 logs one record `Worker application ready` with `runtimeIdentity`,
 `resourceIdentity` and `workerName`. A version mismatch refuses startup with both
 versions in the diagnostic. Until registration is implemented, the record
@@ -577,6 +580,22 @@ the named binding exists or is available; Gateway checks it on later use, and
 a token for an absent/unavailable binding fails verification. Registration is
 a separate Worker operation.
 
+Without `--verbose`, machine mode prints this `cli.yaml` fragment:
+
+```yaml
+token: <jwt>
+clientSecret: <secret>
+```
+
+Each line ends with a newline. Paste the fragment below `endpoint:` in private
+`cli.yaml`. The command derives the client secret from the server `masterKey`
+and the new token's `sub`. It uses HKDF-SHA256 with an empty salt, the label
+`"worker/client-secret/v1/" + sub`, and 32 output bytes in canonical base64.
+The `v1` matches the current signing-key label. The code does not yet implement
+`tokenVersion`. See the [client-secret ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-secret).
+The server stores no client secret. Each new machine token has a different
+client secret. Human mode issues no client secret.
+
 ### Token inspection
 
 ```text
@@ -604,7 +623,8 @@ jti: 01K6...
 ---
 ```
 
-`jwt generate --verbose` prints this same claim list after its JWT line.
+`jwt generate --verbose` prints this same claim list after the human JWT line
+or the two-line machine fragment.
 
 ### Signing, output, errors, and persistence
 
@@ -623,8 +643,10 @@ be a terminal. A file, pipe, command substitution, or other non-terminal stdout
 fails with `cli.output.terminal_required` and exit `1`, before configuration
 loading and token signing. Stdin need not be a terminal and is never read.
 
-Without `--verbose`, stdout contains only `<JWT>\n` and exit is `0`.
-With `--verbose`, stdout contains the JWT line followed by the claim list.
+Without `--verbose`, human mode prints exactly `<JWT>\n`. Machine mode prints
+exactly `token: <jwt>\nclientSecret: <secret>\n`, as shown above. Exit is `0`.
+With `--verbose`, the same claim list follows the human JWT line or the machine
+fragment. It adds no client secret to the claims.
 No secret is printed to stderr. Invalid inputs, an absent or
 invalid configuration, failed terminal check, or signing failure exits nonzero
 without a successful token result. There is no output-file option or automatic
@@ -635,11 +657,13 @@ Issuance and a server restart without a configuration change revoke no earlier
 token. Under the [Gateway signing key
 ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key),
 an increment of `gateway.tokenVersion` and a restart invalidate every issued
-JWT while other derived keys stay unchanged. A token remains usable subject to
-verification, expiry, and, for machines, binding availability. Replacing
-`masterKey` invalidates tokens and also affects every other key derived from it;
-this specification adds no secret-rotation command or recovery workflow. A lost
-machine token cannot be reissued with the same client identity through this CLI;
+JWT and change every client secret. The Custody key stays unchanged.
+A token remains usable subject to verification, expiry, and, for machines,
+binding availability. Replacing
+`masterKey` invalidates tokens and changes every client secret and every other
+key derived from it. This specification adds no secret-rotation command or
+recovery workflow. The CLI cannot reissue a lost machine token with the same
+client identity;
 new issuance creates a new identity and its
 registration/capacity consequences belong to Worker.
 

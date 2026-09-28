@@ -22,13 +22,14 @@ const MISMATCH_CODE = "worker.version.mismatch";
 const UNAVAILABLE_CODE = "worker.version.unavailable";
 const OPENAPI_PATH = "/api/openapi.yaml";
 const AUTHORIZATION = "Bearer test-token";
-const MASTER_KEY_BYTES = 32;
+const CLIENT_SECRET_BYTES = 32;
 const SHORT_KEY_BYTES = 16;
-const ABSENT_CODE = "worker.start.master_key_absent";
-const INVALID_CODE = "worker.start.master_key_invalid";
+const ABSENT_CODE = "worker.start.client_secret_absent";
+const INVALID_CODE = "worker.start.client_secret_invalid";
+const INVALID_CONFIG_CODE = "cli.config.invalid";
 const NON_BASE64_KEY = "not a base64 key!";
-const ENV_MASTER_KEY = "environment-key";
-const OPTION_MASTER_KEY = "option-key";
+const ENV_CLIENT_SECRET = "environment-secret";
+const OPTION_CLIENT_SECRET = "option-secret";
 const NO_REQUESTS = 0;
 const CHILD_START_TIMEOUT_MS = 5000;
 const CHILD_EXIT_TIMEOUT_MS = 5000;
@@ -86,7 +87,9 @@ async function fixture(t: TestContext, version: string) {
   const env = { XDG_CONFIG_HOME: directory };
   writePrivate(
     clientConfigPath(env),
-    stringify({ masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64") }),
+    stringify({
+      clientSecret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
+    }),
   );
   return {
     endpoint: `http://127.0.0.1:${address.port}`,
@@ -191,7 +194,7 @@ test("worker healthcheck stays unavailable after version mismatch", async (t) =>
   });
 });
 
-test("worker healthcheck stays unavailable after absent masterKey", async (t) => {
+test("worker healthcheck stays unavailable after absent clientSecret", async (t) => {
   const options = await fixture(t, packageVersion());
   unlinkSync(clientConfigPath(options.env));
   const worker = new Worker({ ...options, log: () => {} });
@@ -203,7 +206,7 @@ test("worker healthcheck stays unavailable after absent masterKey", async (t) =>
   });
 });
 
-test("worker refuses an absent masterKey before contacting the server", async (t) => {
+test("worker refuses an absent clientSecret before contacting the server", async (t) => {
   const options = await fixture(t, packageVersion());
   unlinkSync(clientConfigPath(options.env));
   const messages: string[] = [];
@@ -217,15 +220,19 @@ test("worker refuses an absent masterKey before contacting the server", async (t
   assert.equal(options.requests(), NO_REQUESTS);
 });
 
-test("worker refuses invalid and non-canonical masterKeys before contacting the server", async (t) => {
+test("worker refuses invalid and non-canonical clientSecrets before contacting the server", async (t) => {
   const options = await fixture(t, packageVersion());
   const invalidKeys = [
     randomBytes(SHORT_KEY_BYTES).toString("base64"),
     NON_BASE64_KEY,
-    `${randomBytes(MASTER_KEY_BYTES).toString("base64")}=`,
+    `${randomBytes(CLIENT_SECRET_BYTES).toString("base64")}=`,
   ];
-  for (const masterKey of invalidKeys) {
-    writePrivate(clientConfigPath(options.env), stringify({ masterKey }), true);
+  for (const clientSecret of invalidKeys) {
+    writePrivate(
+      clientConfigPath(options.env),
+      stringify({ clientSecret }),
+      true,
+    );
     const messages: string[] = [];
     const error = await new Worker({
       ...options,
@@ -238,20 +245,39 @@ test("worker refuses invalid and non-canonical masterKeys before contacting the 
   }
 });
 
-test("client reads masterKey only from cli.yaml while accepting service configuration", async (t) => {
+test("client reads clientSecret only from cli.yaml while accepting service configuration", async (t) => {
   const options = await fixture(t, packageVersion());
-  const masterKey = randomBytes(MASTER_KEY_BYTES).toString("base64");
-  writePrivate(clientConfigPath(options.env), stringify({ masterKey }), true);
-  const env = { ...options.env, KANTHORD_MASTER_KEY: ENV_MASTER_KEY };
-  assert.equal(resolveClient({}, env).masterKey, masterKey);
+  const clientSecret = randomBytes(CLIENT_SECRET_BYTES).toString("base64");
+  writePrivate(
+    clientConfigPath(options.env),
+    stringify({ clientSecret }),
+    true,
+  );
+  const env = { ...options.env, KANTHORD_CLIENT_SECRET: ENV_CLIENT_SECRET };
+  assert.equal(resolveClient({}, env).clientSecret, clientSecret);
   assert.equal(
-    resolveClient({ masterKey: OPTION_MASTER_KEY }, env).masterKey,
-    masterKey,
+    resolveClient({ clientSecret: OPTION_CLIENT_SECRET }, env).clientSecret,
+    clientSecret,
   );
   unlinkSync(clientConfigPath(options.env));
   assert.equal(
-    resolveClient({ masterKey: OPTION_MASTER_KEY }, env).masterKey,
+    resolveClient({ clientSecret: OPTION_CLIENT_SECRET }, env).clientSecret,
     undefined,
+  );
+});
+
+test("client rejects a masterKey field without disclosing its value", async (t) => {
+  const options = await fixture(t, packageVersion());
+  const masterKey = randomBytes(CLIENT_SECRET_BYTES).toString("base64");
+  writePrivate(clientConfigPath(options.env), stringify({ masterKey }), true);
+  assert.throws(
+    () => resolveClient({}, options.env),
+    (error: unknown) => {
+      assert.ok(error instanceof Diagnostic);
+      assert.equal(error.code, INVALID_CONFIG_CODE);
+      assert.ok(!error.message.includes(masterKey));
+      return true;
+    },
   );
 });
 

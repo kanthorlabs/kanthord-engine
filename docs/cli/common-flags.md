@@ -60,7 +60,8 @@ A bounded catalogue or single-object read does not inherit them automatically.
 
 `--verbose` is a root boolean option with default `false`. Commands with no
 verbose output ignore it. `jwt generate` is the one command with verbose
-output: it prints claims after the token. `jwt inspect` always prints claims.
+output: it prints claims after the human token or the machine `token` and
+`clientSecret` fragment. `jwt inspect` always prints claims.
 Place `--verbose` before or after the command.
 
 ## `--endpoint`

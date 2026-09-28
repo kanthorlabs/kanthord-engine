@@ -5,6 +5,7 @@ import { loadConfig } from "../../config/index.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { isNumber, isObject, isString } from "../../kernel/values.ts";
 import {
+  deriveClientSecret,
   generateHumanJWT,
   generateMachineJWT,
   KANTHORD_AUTH_USERNAME,
@@ -118,7 +119,15 @@ export function addJWTCommand(program: Command): void {
                 options.binding,
                 options.name,
               );
-        process.stdout.write(`${token}\n`);
+        if (options.binding === undefined) process.stdout.write(`${token}\n`);
+        else {
+          const { sub } = decode(token).payload;
+          assert.ok(isString(sub));
+          const clientSecret = deriveClientSecret(config.masterKey, sub);
+          process.stdout.write(
+            `token: ${token}\nclientSecret: ${clientSecret}\n`,
+          );
+        }
         if (command.optsWithGlobals().verbose)
           process.stdout.write(renderClaims(token));
       },

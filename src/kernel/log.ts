@@ -35,6 +35,7 @@ export const redactionPaths = [
   "req.body.token",
   "req.body.masterKey",
   "config.masterKey",
+  "config.clientSecret",
 ];
 
 export class OperationalLog {
