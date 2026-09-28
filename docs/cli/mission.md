@@ -51,9 +51,9 @@ provides a project ID; `mission get` returns that project's mission ID.
   none of these independently: its content belongs to its objective's revision,
   and its execution records name the objective's attempt and pinned revision.
   Task order in a plan is not a Mission scheduling order.
-- At most one node attempt is open. Its node revision and required external
-  actions are frozen at opening. A Project configuration change reaches the
-  next attempt. Records never migrate between attempts, and closed attempts
+- At most one node attempt is open. Its node revision is pinned at opening,
+  and its required external actions derive from the binding row that the
+  pinned revision names. Records never migrate between attempts, and closed attempts
   never reopen. Revision numbers and attempts are independent.
 - `Completed` and `Discarded` are terminal. No edit, unblock, override or outcome
   correction reaches a terminal node. Follow-up work requires a new node. A
@@ -249,8 +249,8 @@ that the current outcome of that objective pins.
   removal requires a nonterminal dependent. Terminal edit prohibition still
   applies. These special conditions replace import eligibility for dependency
   edits on both write paths. Same-transaction routing updates all affected
-  claim-free nodes between `Pending` and `Available`; an execution-end fact is
-  not undone by adding a dependency.
+  claim-free nodes between `Pending` and `Available`; a node in `Waiting` is
+  not routed back by adding a dependency.
 - `criterion list` returns `Page<Text>` with the single criterion text and its content-owner revision.
   `criterion set` accepts `CriterionSet`, returns `NodeChange`, and replaces the criterion and verifications as one human revision.
   It creates no independent criterion revision, state or opaque criterion ID.
@@ -338,13 +338,16 @@ only. `<unblock-id>` is the required `UnblockId` of an accepted unblock.
   or reviewer claim if present and keeps the attempt open. Eligible states are
   `Pending`, `Available`, `Executing`, `Waiting`, `Evaluating`,
   `External.Requested`, `External.Success`, `External.Failed`. Physical stop and reuse remain **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service)**.
-- Resume accepts `HumanAct`, returns `ControlResult`, and requires `Paused`.
-  It reads the frozen action set, requests and accepted observations first:
+- Resume accepts `Resume`, returns `ControlResult`, and requires `Paused`.
+  It reads the required external actions, requests and accepted observations first:
   a non-success action end selects `External.Failed`; requested actions all at
   expected end select `External.Success`; otherwise any requested action
-  selects `External.Requested`; otherwise execution-ended selects `Waiting`;
-  otherwise closure selects `Available` or `Pending`. It never opens an attempt
-  or invalidates a passing assessment merely by resuming.
+  selects `External.Requested`; otherwise `target` selects the state.
+  `Waiting` requires readiness and otherwise answers 409 `mission.node.not_ready`.
+  `Available` selects `Available` or `Pending` by closure, under the
+  [node resume ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#node-resume).
+  It never opens an attempt, resets no loss count, and never invalidates a
+  passing assessment merely by resuming.
 - Block accepts `HumanAct`, returns `ControlResult`, and requires `Paused`.
   It records the human reason in an outcome, closes an open attempt and writes
   owed task outcomes. When the attempt reads 0, it opens or closes no attempt.
@@ -363,12 +366,12 @@ only. `<unblock-id>` is the required `UnblockId` of an accepted unblock.
   `Available` and readiness: every task has a current outcome of the objective's
   open attempt, or every objective of an initiative is terminal, and no action
   is unresolved. Child success is not required. It opens attempt 1 only when
-  none exists, freezes its facts and reaches `Waiting`; it does not publish an
+  none exists, pins its revision and reaches `Waiting`; it does not publish an
   assessment. When the attempt reads 0, an objective is ready only when it holds no current task.
   An initiative with attempt 0 is ready only when every current objective is terminal.
   A node that is not ready answers 409 `mission.node.not_ready`.
   Its `details` hold `tasksWithoutOutcome`, `objectivesNotTerminal` and `unresolvedActions`, under the [node ready ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#node-ready).
-  A ready act while the attempt reads 0 opens attempt 1 with the execution-end fact.
+  A ready act while the attempt reads 0 opens attempt 1.
   It reaches `Waiting` in the same transaction.
 - Override accepts `Override`, returns `ControlResult`, and
   creates an outcome with human-assertion basis and the requested `result`, referencing any
@@ -428,7 +431,7 @@ attempt/evaluation lists and run-output operations require an initiative or
 objective. A task attempt is not manufactured for convenience.
 
 - Attempt list/get return `Page<Attempt>` / `Attempt`, including pinned revision,
-  frozen required external actions, execution-end fact, closure and outcome
+  derived required external actions, closure and outcome
   references. They never open, close or retry an attempt.
 - Evidence list/get return `Page<Evidence>` / `Evidence`. Submit accepts
   `EvidenceSubmit` and returns `Evidence`. The live execution may submit for its
@@ -507,11 +510,11 @@ effect. A completed historical record remains attributed to its original attempt
 | 58  | `observation get <observation-id>`                         | `GET /api/mission/observation/:observationId`                               | `mission.observation.get` **[blocked][mission-contract]**     | H      |
 
 All positionals are required. `<action-key>` is a Project-defined natural key
-in that attempt's frozen action set. `--attempt` follows the all-attempts default
+in that attempt's required action set. `--attempt` follows the all-attempts default
 above. These records belong to initiatives/objectives; tasks reject these calls.
 An initiative's required-action and request sets are empty.
 
-- Action reads return `Page<ExternalAction>` / `ExternalAction`: frozen
+- Action reads return `Page<ExternalAction>` / `ExternalAction`: derived
   configuration, predecessor, expected end, request and accepted observation
   references. Object reads return `Page<ExternalObject>` / `ExternalObject`.
   Observation reads return `Page<Observation>` / `Observation`, including landing
@@ -526,7 +529,7 @@ An initiative's required-action and request sets are empty.
   projection of that publication is specified: a live claim alone does not
   authorize an arbitrary human/client write of an external object.
   Action performance requires a current passing assessment and an eligible
-  frozen required action; a following action requires its predecessor's accepted
+  required action; a following action requires its predecessor's accepted
   expected end state before request. Publication and lost-acknowledgement recovery remain **blocked** under [HANDOFF Worker and Project Services](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-and-project-services).
 - The record names the action, Project binding, remote address and display
   label. One binding may serve many separately identified external objects.
@@ -712,6 +715,7 @@ The [graph write answer](https://github.com/kanthorlabs/kanthord/blob/main/docs/
 | Schema          | Fields, requiredness and validation                                                                                                                                                                                                                                                                                                                                                                                                                |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `HumanAct`      | Required `reason: Text`, `expectedMissionVersion: positive integer`, `expectedState: State`, `expectedAttempt: nonnegative integer`. Zero asserts that no attempt opened. A positive value identifies the latest node attempt, including the closed attempt on a blocked node. The specific command's state rules apply; no default current target.                                                                                                |
+| `Resume`        | Every field of `HumanAct`, plus required `target: "Available" \| "Waiting"`. External action records take precedence over `target`. `Waiting` requires readiness. `Available` selects `Pending` when the closure does not hold.                                                                                                                                                                                                                    |
 | `PrioritySet`   | Required `value: signed safe integer`, `expectedMissionVersion: positive integer`. No expected content revision: priority lives outside it. Any signed safe integer is valid, with no narrower bound. Only initiatives and objectives accept priority. A task write answers `mission.node.priority_task`. The service requires a nonterminal node with no live claim at commit.                                                                    |
 | `Override`      | Every field of `HumanAct`, plus required `result` with the closed set `success`, and optional `landedCommit: RepositoryAddress`, admitted only with `result: success`. Absence of `landedCommit` asserts success without landed-commit evidence; it does not infer a commit. A supplied commit is permitted only for the objective's repository binding. Existing evidence remains; the actor, time, basis and outcome record are server-authored. |
 | `Unblock`       | Required `blockedAttempt: nonnegative integer`, `expectedRevision: positive integer`, `expectedMissionVersion: positive integer`. Zero means the blocked case with attempt 0. A mismatch with the current attempt answers 409 `mission.node.state_conflict`. Optional `change: UnblockChange`; omission preserves current content. No independent direction/recommendation field.                                                                  |
@@ -807,7 +811,7 @@ The service refuses an assessment that asserts success with a failed or unrun it
 This gate applies to both task and reviewer assessments.
 Judgement decides success only after every verification passes.
 
-The actor, accepted time, record identity, currentness, required-action snapshot
+The actor, accepted time, record identity, currentness, derived required actions
 and outcome basis are server-derived. They cannot be forged through extra JSON
 fields. Tested-input binding is an attributable executor assertion unless a
 clean isolated checkout establishes it; a zero exit code proves only that the
@@ -846,7 +850,7 @@ The `attempt` of `ControlResult` is an attempt object or null, not a node-attemp
 | `ImportResult`     | `missionId: MissionId`, `missionVersion: positive integer`, `assignedIds: {filename: PlanFileName, nodeId: NodeId}[]`, `changes: NodeChange`, `actor: Actor`, `acceptedAt: Timestamp`. The map covers the accepted set, including unchanged known nodes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `ControlResult`    | `node: Node`, `attempt: Attempt \| null`, `outcome: Outcome \| null`, `taskOutcomeIds: OutcomeId[]`, `actor: Actor`, `acceptedAt: Timestamp`. Null means this act wrote no such record, not an unfinished implicit evaluation. An override, discard or block while the attempt reads 0 returns `attempt: null`. It returns the written outcome with `attempt: 0` and `taskOutcomeIds: []`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `UnblockRecord`    | `id: UnblockId`, `nodeId: NodeId`, `clearedAttempt: nonnegative integer`, `openedAttempt: nonnegative integer`, `pinnedRevision: positive integer \| null`, `resultingRevision: positive integer`, `state: "Pending" \| "Available"`, `actor: Actor`, `createdAt: Timestamp`. When the attempt reads 0, `clearedAttempt` and `openedAttempt` hold 0, and `pinnedRevision` stays null. The act creates no attempt.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `Attempt`          | `nodeId: NodeId`, `attempt: nonnegative integer`, `nodeRevision: positive integer`, `requiredExternalActions: FrozenAction[]`, `openedAt: Timestamp`, `closedAt: Timestamp \| null`, `executionEnded: boolean`, `outcomeIds: OutcomeId[]`, optional `unblockId: UnblockId`. This record names an opened attempt of 1 or more. No live configuration refresh rewrites this record's frozen facts.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `Attempt`          | `nodeId: NodeId`, `attempt: nonnegative integer`, `nodeRevision: positive integer`, `requiredExternalActions: FrozenAction[]`, `openedAt: Timestamp`, `closedAt: Timestamp \| null`, `outcomeIds: OutcomeId[]`, optional `unblockId: UnblockId`, derived from the unblock whose `openedAttempt` equals `attempt`. This record names an opened attempt of 1 or more. `requiredExternalActions` derives from the binding row that `nodeRevision` names.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `FrozenAction`     | `key: Key`, `bindingId: BindingId`, `action: "pull_request" \| "merge_push"`, `expectedEndState: ExpectedEndState`, `follows: Key \| null`, `configuration: { baseBranch: Text }` under [the attempt](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-attempt). `follows` is null for a repository strategy. A further binding kind adds its own values with its design. Initiative array is empty.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `Evidence`         | `id: EvidenceId`, `nodeId: NodeId`, `attempt: nonnegative integer`, `nodeRevision: positive integer`, `subject: Text`, `scope: "node" \| "task"`, `address: Address`, `provenance: Actor`, `createdAt: Timestamp`, `redacted: boolean`, `removedBy: Actor \| null`, `removedReason: Text \| null`; optional `redactionDescription: Text`, `correctsEvidenceId: EvidenceId`, `machineCheck: MachineCheck`. The latter fields have the same conditional requiredness as `EvidenceSubmit`. Attempt 0 applies only to the landed-commit evidence of a success override. The override supplies that evidence while the attempt of its node reads 0. Object evidence also requires `storageBindingId: BindingId`, `size: nonnegative safe integer` and `mediaType: Text`.                                                                                                                                                                                                                                                              |
 | `StoredContent`    | Inline: `evidenceId: EvidenceId`, `address: ProducedAddress`, and all `ContentBytes` fields. Object: `evidenceId: EvidenceId`, `address: ObjectAddress`, `mediaType: Text`, `size: nonnegative safe integer`, `getUrl: string`, `expiresAt: Timestamp`. The object answer grants one GET to the reader's component. Removed content answers `ContentRemoved`. Repository-only evidence answers 409 `mission.evidence.content_repository` with the address in `details`, under the [evidence content rules](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#evidence-content).                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -982,7 +986,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `mission.node.create_refused`                         | The parent state forbids creation.                                                                                                                              | node create, node move                                                                                                                          |
 | 409   | `mission.node.filename_conflict`                      | A live node already uses the plan filename.                                                                                                                     | node create, node update, node move, import apply                                                                                               |
 | 404   | `mission.node.not_found`                              | The node does not exist.                                                                                                                                        | node get, node list, node revision list, node revision get, node create, node update, node move, node rebind, dependency add, dependency remove |
-| 409   | `mission.node.not_ready`                              | Proposed. Required task outcomes, objectives or actions are unresolved.                                                                                         | node ready                                                                                                                                      |
+| 409   | `mission.node.not_ready`                              | Proposed. Required task outcomes, objectives or actions are unresolved.                                                                                         | node ready, node resume                                                                                                                         |
 | 400   | `mission.node.priority_task`                          | The named node is a task, which has no priority.                                                                                                                | node priority set                                                                                                                               |
 | 409   | `mission.node.retire_has_dependents`                  | The node has nonterminal dependents and force is absent.                                                                                                        | node retire                                                                                                                                     |
 | 409   | `mission.node.retire_mismatch`                        | The retire preview digest differs from the current retirement plan.                                                                                             | node retire                                                                                                                                     |
