@@ -1,6 +1,6 @@
 # Worker CLI specification
 
-This is the future specification for `kanthord worker`. It contains **18 command leaves: 1 implemented command and 17 proposed commands**. The proposed command
+This is the future specification for `kanthord worker`. It contains **19 command leaves: 1 implemented command and 18 proposed commands**. The proposed command
 names, routes, operation IDs, access policies, JSON fields and defaults below are
 design proposals, not published API or working CLI commands. The behavioral
 requirements identified as **target design** come from the Worker design; their
@@ -107,17 +107,18 @@ Heartbeat, handover, deregistration, the five inspection reads and provider chec
 Live registration and execution requirements appear per operation; registration
 and deregistration require no live registration.
 
-| Status | Command after `kanthord worker`          | Route                                          | Operation ID                 | Access / registration                                                             |
-| ------ | ---------------------------------------- | ---------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------- |
-| I      | `register`                               | `POST /api/worker/register`                    | `worker.register`            | `client`; no live registration required                                           |
-| P      | `heartbeat [--token <jwt>]`              | `POST /api/worker/heartbeat`                   | `worker.heartbeat`           | `client`; live registration                                                       |
-| P      | `handover [--token <jwt>]`               | `POST /api/worker/handover`                    | `worker.handover`            | `client`; live registration and live execution                                    |
-| P      | `list`                                   | `GET /api/worker/catalog`                      | `worker.catalog.list`        | `human`                                                                           |
-| P      | `get <worker-name>`                      | `GET /api/worker/catalog/:workerName`          | `worker.catalog.get`         | `human`                                                                           |
-| P      | `agent get <agent-name>`                 | `GET /api/worker/agent/:agentName`             | `worker.agent.get`           | `human`                                                                           |
-| P      | `instance list`                          | `GET /api/worker/instance`                     | `worker.instance.list`       | `human`                                                                           |
-| P      | `instance get <runtime-identity>`        | `GET /api/worker/instance/:runtimeIdentity`    | `worker.instance.get`        | `human`                                                                           |
-| P      | `instance deregister <runtime-identity>` | `DELETE /api/worker/instance/:runtimeIdentity` | `worker.instance.deregister` | `client`; no live registration required; ownership by client, binding and project |
+| Status | Command after `kanthord worker`          | Route                                               | Operation ID                 | Access / registration                                                             |
+| ------ | ---------------------------------------- | --------------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------- |
+| I      | `register`                               | `POST /api/worker/register`                         | `worker.register`            | `client`; no live registration required                                           |
+| P      | `heartbeat [--token <jwt>]`              | `POST /api/worker/heartbeat`                        | `worker.heartbeat`           | `client`; live registration                                                       |
+| P      | `handover [--token <jwt>]`               | `POST /api/worker/handover`                         | `worker.handover`            | `client`; live registration and live execution                                    |
+| P      | `list`                                   | `GET /api/worker/catalog`                           | `worker.catalog.list`        | `human`                                                                           |
+| P      | `get <worker-name>`                      | `GET /api/worker/catalog/:workerName`               | `worker.catalog.get`         | `human`                                                                           |
+| P      | `agent get <agent-name>`                 | `GET /api/worker/agent/:agentName`                  | `worker.agent.get`           | `human`                                                                           |
+| P      | `instance list`                          | `GET /api/worker/instance`                          | `worker.instance.list`       | `human`                                                                           |
+| P      | `instance get <runtime-identity>`        | `GET /api/worker/instance/:runtimeIdentity`         | `worker.instance.get`        | `human`                                                                           |
+| P      | `instance deregister <runtime-identity>` | `DELETE /api/worker/instance/:runtimeIdentity`      | `worker.instance.deregister` | `client`; no live registration required; ownership by client, binding and project |
+| P      | `instance resume <runtime-identity>`     | `POST /api/worker/instance/:runtimeIdentity/resume` | `worker.instance.resume`     | `human`; mutation                                                                 |
 
 The inventory includes these nine **proposed** commands. `[R]`, `[M]` and
 `[L]` use the [common synopsis definitions](./common-flags.md#synopsis-markers).
@@ -183,8 +184,11 @@ issuance described in [other commands](./other.md).
 The implementation permits at most one live registration per client identity. A
 new key while that registration remains live returns `409`. The same key under
 the same client replays the original identity while that registration remains
-live. A recorded replay whose registration has ended is rejected with `409`
-`gateway.registration.stale`; it does not recreate or transfer the instance.
+live. The target design replaces that `409`: a registration of a client identity
+that holds a live registration answers that registration with any key, so a
+restarted program keeps its runtime identity. A recorded replay whose
+registration has ended is rejected with `409` `gateway.registration.stale`;
+it does not recreate or transfer the instance.
 Cancellation does not deregister an accepted registration. There is no automatic
 CLI retry. Declared failures print their HTTP status and key; indeterminate
 results print the key and instruct explicit reuse of it.
@@ -197,11 +201,12 @@ restart behavior from this CLI specification. Runtime registrations themselves
 are in memory; a stale stored answer grants no renewed registration.
 
 **Target design:** registration must also check the binding's instance count in
-the same transaction as acceptance. Binding removal/unavailability and server
-restart end the registration. These rules need production integration beyond
-the current default collaborators. The current authentication path refuses a
-binding that the Project resolver rejects; that refusal is not
-evidence of a completed registration-cleanup implementation. The [Gateway signing
+the same transaction as acceptance. Binding removal/unavailability ends the
+registration. A server restart keeps it and sets its last heartbeat to the start
+time. These rules need production integration beyond the current default
+collaborators. The current authentication path refuses a binding that the
+Project resolver rejects; that refusal is not evidence of a completed
+registration-cleanup implementation. The [Gateway signing
 key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
 revokes every JWT after an increment
 of `gateway.tokenVersion` and a restart.
@@ -566,9 +571,11 @@ within the TTL and one process. The operation declares no replay guard.
 Every target that is no live registration of the caller answers `404`
 `worker.instance.not_found`, including an ended registration, another client's
 instance, a server-placement instance and a newer registration of the same
-client identity, which stays intact. A retry after a restart answers `404`, and
-the caller reads it after its own call as the end of its registration. A revoked
-credential or unavailable binding gains no authentication bypass for cleanup.
+client identity, which stays intact. A retry after a restart runs the handler
+again: it ends a registration that is still live and answers `404` for one that
+already ended. The caller reads that `404` after its own call as the end of its
+registration. A revoked credential or unavailable binding gains no
+authentication bypass for cleanup.
 
 The effect is to end the registration, preventing later work pulls and execution
 operations under it. Scheduler owns any live execution's liveness disposition.
@@ -576,6 +583,27 @@ Success does not prove the remote process stopped, release an execution, or
 authorize reuse of its workspace. Dead-process cleanup, physical-stop enforcement
 and capacity reuse stay with B9 SC5 and W5. The same client identity registers
 again with a fresh idempotency key after expiry or deregistration.
+
+### `instance resume <runtime-identity>`
+
+```text
+kanthord worker instance resume <runtime-identity> [--idempotency-key <key>]
+```
+
+Required `runtime-identity: RuntimeIdentity`, no default, maps to
+`params.runtimeIdentity`. Empty query and absent body. Required token: human
+JWT. The shared mutation key applies. HTTP `200` returns
+`{ "runtimeIdentity": "...", "registered": true }`; the CLI adds its key.
+
+The [resume contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#resume-of-a-registration)
+declares `worker.instance.resume` as a `human` mutation at
+`POST /api/worker/instance/:runtimeIdentity/resume`, with `unary` lifetime, the
+default 30 s timeout and the default 10 MiB body limit. It reopens an ended
+registration only while that registration is the claimant of a live execution,
+and it takes the slot through the Project instance-count collaboration in the
+same transaction. The next registration of the client identity answers that
+registration, and its work pull returns the live execution. A resume of a live
+registration changes nothing. A lost execution is never revived.
 
 ## MCP and repository actions
 
@@ -679,34 +707,38 @@ or caller-selected remote destination.
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP  | Code                                                           | Condition                                                          | Commands                                                                                                               |
-| ----- | -------------------------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| local | `worker.version.unavailable`                                   | The server package version is unavailable.                         | serve worker                                                                                                           |
-| local | `worker.version.mismatch`                                      | The server package version differs.                                | serve worker                                                                                                           |
-| local | `worker.start.client_secret_invalid`                           | The clientSecret is not a canonical 32-byte base64 value.          | serve worker                                                                                                           |
-| local | `worker.start.client_secret_absent`                            | The worker has no clientSecret in cli.yaml.                        | serve worker                                                                                                           |
-| local | `cli.worker.agent.enablement.disable.invalid_revision`         | The `<expected-revision>` argument is not a positive safe integer. | agent enablement disable                                                                                               |
-| local | `cli.worker.agent.enablement.enable.invalid_revision`          | The `<expected-revision>` argument is not a positive safe integer. | agent enablement enable                                                                                                |
-| local | `cli.worker.agent.enablement.provider.remove.invalid_revision` | The `<expected-revision>` argument is not a positive safe integer. | agent enablement provider remove                                                                                       |
-| local | `cli.worker.agent.enablement.remove.invalid_revision`          | The `<expected-revision>` argument is not a positive safe integer. | agent enablement remove                                                                                                |
-| local | `cli.worker.register.invalid_idempotency_key`                  | The `--idempotency-key` value is not a canonical ULID.             | register                                                                                                               |
-| 400   | `worker.agent.configuration.credential_unsuitable`             | The selected credential is not suitable for the provider.          | binding apply, agent enablement put, agent enablement provider add                                                     |
-| 400   | `worker.agent.configuration.invalid`                           | A worker or entry configuration fails shape validation.            | binding apply, agent enablement put                                                                                    |
-| 400   | `worker.agent.configuration.model_unknown`                     | The selected model is absent from the catalog.                     | agent enablement put, binding apply                                                                                    |
-| 400   | `worker.agent.configuration.override_not_allowed`              | An entry overrides a forbidden field.                              | binding apply                                                                                                          |
-| 400   | `worker.agent.configuration.reasoning_effort_unsupported`      | The selected model does not support this reasoning level.          | agent enablement put, binding apply                                                                                    |
-| 409   | `worker.agent.enablement.in_use`                               | Worker bindings still use the enablement.                          | agent enablement remove                                                                                                |
-| 409   | `worker.agent.enablement.invalidates_bindings`                 | The change invalidates dependent bindings.                         | agent enablement put, agent enablement disable                                                                         |
-| 404   | `worker.agent.enablement.not_found`                            | The live enablement does not exist.                                | agent enablement get, agent enablement mutations                                                                       |
-| 409   | `worker.agent.enablement.provider.fixed`                       | An edit changes a retained provider.                               | agent enablement put                                                                                                   |
-| 409   | `worker.agent.enablement.provider.in_use`                      | Defaults or entries still use this provider.                       | agent enablement put, agent enablement provider remove                                                                 |
-| 409   | `worker.agent.enablement.provider.name_conflict`               | An agent provider already uses this name.                          | agent enablement put, agent enablement provider add                                                                    |
-| 404   | `worker.agent.enablement.provider.not_found`                   | The agent provider does not exist.                                 | agent enablement put, agent enablement provider remove, binding apply                                                  |
-| 400   | `worker.agent.enablement.provider.required`                    | The write leaves no agent provider.                                | agent enablement put, agent enablement provider remove                                                                 |
-| 409   | `worker.agent.enablement.revision_conflict`                    | The expected enablement revision is stale.                         | agent enablement mutations                                                                                             |
-| 400   | `worker.agent.enablement.unavailable`                          | The agent lacks a live enabled configuration.                      | binding apply, agent configuration reads                                                                               |
-| 404   | `worker.agent.not_found`                                       | The agent name is absent from the worker catalog.                  | agent enablement get, agent enablement put, agent enablement enable, agent enablement disable, agent enablement remove |
-| 400   | `worker.provider.invalid_input`                                | Proposed. The provider check input fails validation.               | provider check                                                                                                         |
+| HTTP  | Code                                                           | Condition                                                                     | Commands                                                                                                               |
+| ----- | -------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| local | `worker.version.unavailable`                                   | The server package version is unavailable.                                    | serve worker                                                                                                           |
+| local | `worker.version.mismatch`                                      | The server package version differs.                                           | serve worker                                                                                                           |
+| local | `worker.start.client_secret_invalid`                           | The clientSecret is not a canonical 32-byte base64 value.                     | serve worker                                                                                                           |
+| local | `worker.start.client_secret_absent`                            | The worker has no clientSecret in cli.yaml.                                   | serve worker                                                                                                           |
+| local | `cli.worker.agent.enablement.disable.invalid_revision`         | The `<expected-revision>` argument is not a positive safe integer.            | agent enablement disable                                                                                               |
+| local | `cli.worker.agent.enablement.enable.invalid_revision`          | The `<expected-revision>` argument is not a positive safe integer.            | agent enablement enable                                                                                                |
+| local | `cli.worker.agent.enablement.provider.remove.invalid_revision` | The `<expected-revision>` argument is not a positive safe integer.            | agent enablement provider remove                                                                                       |
+| local | `cli.worker.agent.enablement.remove.invalid_revision`          | The `<expected-revision>` argument is not a positive safe integer.            | agent enablement remove                                                                                                |
+| local | `cli.worker.register.invalid_idempotency_key`                  | The `--idempotency-key` value is not a canonical ULID.                        | register                                                                                                               |
+| 400   | `worker.agent.configuration.credential_unsuitable`             | The selected credential is not suitable for the provider.                     | binding apply, agent enablement put, agent enablement provider add                                                     |
+| 400   | `worker.agent.configuration.invalid`                           | A worker or entry configuration fails shape validation.                       | binding apply, agent enablement put                                                                                    |
+| 400   | `worker.agent.configuration.model_unknown`                     | The selected model is absent from the catalog.                                | agent enablement put, binding apply                                                                                    |
+| 400   | `worker.agent.configuration.override_not_allowed`              | An entry overrides a forbidden field.                                         | binding apply                                                                                                          |
+| 400   | `worker.agent.configuration.reasoning_effort_unsupported`      | The selected model does not support this reasoning level.                     | agent enablement put, binding apply                                                                                    |
+| 409   | `worker.agent.enablement.in_use`                               | Worker bindings still use the enablement.                                     | agent enablement remove                                                                                                |
+| 409   | `worker.agent.enablement.invalidates_bindings`                 | The change invalidates dependent bindings.                                    | agent enablement put, agent enablement disable                                                                         |
+| 404   | `worker.agent.enablement.not_found`                            | The live enablement does not exist.                                           | agent enablement get, agent enablement mutations                                                                       |
+| 409   | `worker.agent.enablement.provider.fixed`                       | An edit changes a retained provider.                                          | agent enablement put                                                                                                   |
+| 409   | `worker.agent.enablement.provider.in_use`                      | Defaults or entries still use this provider.                                  | agent enablement put, agent enablement provider remove                                                                 |
+| 409   | `worker.agent.enablement.provider.name_conflict`               | An agent provider already uses this name.                                     | agent enablement put, agent enablement provider add                                                                    |
+| 404   | `worker.agent.enablement.provider.not_found`                   | The agent provider does not exist.                                            | agent enablement put, agent enablement provider remove, binding apply                                                  |
+| 400   | `worker.agent.enablement.provider.required`                    | The write leaves no agent provider.                                           | agent enablement put, agent enablement provider remove                                                                 |
+| 409   | `worker.agent.enablement.revision_conflict`                    | The expected enablement revision is stale.                                    | agent enablement mutations                                                                                             |
+| 400   | `worker.agent.enablement.unavailable`                          | The agent lacks a live enabled configuration.                                 | binding apply, agent configuration reads                                                                               |
+| 404   | `worker.agent.not_found`                                       | The agent name is absent from the worker catalog.                             | agent enablement get, agent enablement put, agent enablement enable, agent enablement disable, agent enablement remove |
+| 404   | `worker.instance.not_found`                                    | The runtime identity is unknown, ended, not owned or at the server placement. | instance get, instance deregister, instance resume                                                                     |
+| 409   | `worker.instance.no_live_execution`                            | The registration is the claimant of no live execution.                        | instance resume                                                                                                        |
+| 409   | `worker.instance.client_live`                                  | The client identity holds another live registration.                          | instance resume                                                                                                        |
+| 409   | `worker.instance.slot_unavailable`                             | The binding has no free slot or is unavailable.                               | instance resume                                                                                                        |
+| 400   | `worker.provider.invalid_input`                                | Proposed. The provider check input fails validation.                          | provider check                                                                                                         |
 
 `error.details` names the agent and lists affected bindings or other dependents when applicable. No error holds secret material.
 
