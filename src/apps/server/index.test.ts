@@ -543,9 +543,14 @@ test("server startup failure releases Mission in reverse construction order and 
     import { ProjectService } from ${JSON.stringify(new URL("../../project/index.ts", import.meta.url).href)};
     import { GatewayService } from ${JSON.stringify(new URL("../../gateway/index.ts", import.meta.url).href)};
     const events = [];
+    const starts = [];
     const failure = new Error('gateway startup failed');
-    GatewayService.prototype.start = async () => failure;
     for (const [name, type] of [['scheduler', SchedulerService], ['custody', CustodyComponent], ['worker', WorkerService], ['mission', MissionService], ['project', ProjectService], ['gateway', GatewayService]]) {
+      const start = type.prototype.start;
+      type.prototype.start = function() {
+        starts.push(name);
+        return name === 'gateway' ? Promise.resolve(failure) : start.call(this);
+      };
       const stop = type.prototype.stop;
       type.prototype.stop = function() {
         events.push(name);
@@ -554,6 +559,7 @@ test("server startup failure releases Mission in reverse construction order and 
     }
     const server = new Server();
     assert.equal(await server.start(), failure);
+    assert.deepEqual(starts, ['scheduler', 'custody', 'worker', 'mission', 'project', 'gateway']);
     assert.deepEqual(events, ['gateway', 'project', 'mission', 'worker', 'custody', 'scheduler']);
     assert.equal(await server.stop(), null);
     assert.equal(await server.stop(), null);

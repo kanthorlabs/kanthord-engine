@@ -40,6 +40,7 @@ import { OperationalLog } from "../../kernel/log.ts";
 import { Store } from "../../kernel/store.ts";
 import { HealthRegistry } from "../../kernel/health.ts";
 import { GatewayService } from "../../gateway/index.ts";
+import type { ResourceInventories } from "../../gateway/contract.ts";
 import {
   gatewayMigrations,
   createInvocation,
@@ -67,6 +68,7 @@ export function composeServices(options: {
   registry?: OperationRegistry;
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
+  inventoryOverrides?: Partial<ResourceInventories>;
 }) {
   const repoConnector =
     options.repositoryConnector ??
@@ -160,9 +162,15 @@ export function composeServices(options: {
     () =>
       options.store.transaction((tx) =>
         collectInventories(tx, {
-          custody: (tx) => custody.resourceInventory(tx),
-          worker: (tx) => worker.resourceInventory(tx),
-          project: (tx) => project.resourceInventory(tx),
+          custody:
+            options.inventoryOverrides?.custody ??
+            ((tx) => custody.resourceInventory(tx)),
+          worker:
+            options.inventoryOverrides?.worker ??
+            ((tx) => worker.resourceInventory(tx)),
+          project:
+            options.inventoryOverrides?.project ??
+            ((tx) => project.resourceInventory(tx)),
         }),
       ),
     options.logger,
