@@ -345,7 +345,6 @@ fields are server-owned; the caller supplies none when acquiring work.
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `executionId`, `projectId`, `nodeId` | Opaque references with the identifier rules above.                                                                                                                                                                                                                                                                                                                                                                           |
 | `claimant`                           | Object with required `workerBindingId`, `resourceIdentity` and `runtimeIdentity` strings. `workerBindingId` is the latest binding row at the claim. For a registered instance, also requires `clientId` (`client_identity_<ulid>`) and `name` (nonblank string, 1–64 characters) read from the registration of `runtimeIdentity`. These two attribution fields are absent for a hosted instance without a registered client. |
-| `claimKind`                          | Enum `steps` or `evaluation`, fixed for the entire lifetime of the claim.                                                                                                                                                                                                                                                                                                                                                    |
 | `attempt`                            | Positive safe integer counter of the node's attempt.                                                                                                                                                                                                                                                                                                                                                                         |
 | `pinnedRevision`                     | Positive safe JSON integer revision counter; proposed scalar pending adoption with Mission.                                                                                                                                                                                                                                                                                                                                  |
 | `credentials`                        | Array of `credential_<ulid>` strings: the credential revisions that the execution pins, `[]` at the claim.                                                                                                                                                                                                                                                                                                                   |
@@ -387,7 +386,7 @@ renewal does not prove present liveness.
 
 Renewal serializes with loss declaration, release, revocation and completion.
 A new renewal of an ended, revoked or lost claim fails. Renewal consumes no
-additional count and changes no attempt or claim kind. A hosted execution's
+additional count and changes no attempt. A hosted execution's
 renewal loop runs outside its agent at an interval shorter than lease expiry;
 this one-shot command supplies a primitive for an external orchestrator, not
 a scheduler loop or a daemon.
@@ -403,7 +402,7 @@ No query fields are accepted. The required file supplies the following fields.
 
 | JSON file field | Requiredness / type | Default and validation                                                                                                                                                                                               |
 | --------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `furtherWork`   | Required boolean.   | No default. `false` declares no further work for this release; it does not assert success, close an attempt or manufacture an assessment. `true` requests the supported further-work path of the current claim kind. |
+| `furtherWork`   | Required boolean.   | No default. `false` declares no further work for this release; it does not assert success, close an attempt or manufacture an assessment. `true` requests the supported further-work path of the current node state. |
 
 **Effects and prerequisites:**
 
