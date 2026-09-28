@@ -131,6 +131,9 @@ export async function gatewayFixture(
       typeof composeServices
     >[0]["repositoryConnector"];
     machines?: MachineDependencies;
+    inventoryOverrides?: Parameters<
+      typeof composeServices
+    >[0]["inventoryOverrides"];
     path?: string;
   } = {},
 ) {
@@ -166,6 +169,7 @@ export async function gatewayFixture(
     repositoryConnector: options.repositoryConnector,
     bindings: options.machines?.project,
     registrations: options.machines?.worker,
+    inventoryOverrides: options.inventoryOverrides,
     logger: pino(
       { level: "info" },
       {
