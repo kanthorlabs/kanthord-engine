@@ -395,7 +395,7 @@ The Project write calls `validateEntry` for every agent, including an agent
 without an explicit entry, inside the transaction. A write is refused when an
 agent of the worker has no enabled enablement; the refusal names the agent.
 The proposed code is `worker.agent.enablement.unavailable`. Model and reasoning
-validation use the proposed Worker codes in [Worker](./worker.md#agent-enablement-refusals--proposed).
+validation use the proposed Worker codes in [Worker](./worker.md#error-codes).
 The Project Service holds entries and asks the Worker Service for effective
 configuration; it resolves none itself. A later disablement refuses resolution
 and leaves the worker binding in place.
