@@ -149,39 +149,38 @@ client file therefore cannot block this local generator.
 
 ### Input and local filesystem effects
 
-The target command writes OpenAPI files for every declared service operation, including `worker.register`.
-The [operation registry ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-operation-registry) declares `static/openapi/index.yaml` and `/api/openapi/index.yaml`.
-It requires the package version in the index and directory-path output.
-The source snapshot below does not override that target.
-
-The generator uses the operation declarations imported into the CLI, currently
-all four Gateway operations and `worker.register`. It emits OpenAPI `3.1.0`
-YAML from their schemas, access policies, timeouts, mutation flags, responses,
-and parameter definitions. It starts no server, connects to none, opens no
-database, and does not discover the operation set of a running server.
+The command writes OpenAPI files for every operation that the CLI imports from
+the Gateway, Custody, Worker, Scheduler, Project and Mission contracts, under
+the [operation registry ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-operation-registry).
+It emits OpenAPI `3.1.0` YAML from their schemas, access policies, timeouts,
+mutation flags, responses and parameter definitions. It starts no server,
+connects to none, opens no database, and does not discover the operation set
+of a running server. The index carries the package version in `info.version`.
 
 Paths are relative to the installed engine package, not the current working
 directory. `openapiPath()` resolves the index through the Gateway module's
-location; in an engine checkout the complete generated artifact is:
+location. The generated artifact has this layout:
 
 ```text
 static/
-├── openapi.yaml                     # Root index with relative references
+├── openapi.yaml                     # Root index: one relative reference per URL path
 └── openapi/
-    ├── gateway/
-    │   ├── healthcheck.yaml
-    │   ├── liveness.yaml
-    │   ├── openapi.yaml
-    │   ├── openapiFile.yaml
-    │   └── verify.yaml
-    ├── worker/
-    │   └── register.yaml
+    ├── <service>/
+    │   └── <operation>.yaml         # One fragment per URL path
     └── shared/
-        └── components.yaml
+        └── components.yaml          # bearerAuth, IdempotencyKey, Error
 ```
 
-These seven files are one multi-file contract. Copy or package the index
-together with the referenced directory, retaining its relative layout.
+A fragment holds the path item of one URL path with every method at that
+path, and the full input and output schemas of each of those operations.
+`<operation>` is the alphabetically first operation identity at that path
+without its service prefix, so a new operation that sorts first renames the
+fragment. No fragment shares a domain schema with another fragment. A fragment
+has a soft limit of 500 lines; the integration test reports a larger fragment
+and never fails on its size.
+
+The files are one multi-file contract. Copy or package the index together with
+the referenced directory, retaining its relative layout.
 
 The action creates parent directories as needed, overwrites the generated
 destinations, and publishes the referenced files before the root index. It
@@ -245,14 +244,14 @@ endpoint alone does not justify adding a CLI command. Worker registration and
 other services' operations retain their owning command groups. Removed login,
 logout, and rotation commands are not part of this specification.
 
-| Topic                      | Current source versus design / future decision                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenAPI artifact and URLs  | The ruled target is a directory of service-scoped files. Source implements that contract with a root index at `static/openapi.yaml` and references under `static/openapi/`, served at `/api/openapi.yaml` and `/api/openapi/:service/:file`. The engine follows the [operation registry ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-operation-registry). A root index does not make the contract single-file. |
-| OpenAPI package version    | Architecture calls for publishing the package version in the index for worker/server compatibility checks. The emitter currently hardcodes `info.version: 1.0.0`; the package version is different. Package-version publication and compatibility enforcement must not be inferred from this generator.                                                                                                                                                                 |
-| Help completeness          | The target requires help to state every default and validation rule. Current `--endpoint` help says only “Server endpoint”; this page specifies behavior that help still needs to expose. The inherited unused endpoint option also appears in local `openapi` help.                                                                                                                                                                                                    |
-| Credential validation      | The server verification checks above are implemented. Local validation of option/environment token values is weaker than the client-file schema. The [JWT ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-jwt) declares the closed header and claim contract. Global issuance syntax stays in [other commands](./other.md).                                                                                       |
-| User management            | The system holds no user management, and no user, session-list or revoke command exists. The [Gateway signing key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key) revokes every JWT through `gateway.tokenVersion`.                                                                                                                                                                                  |
-| Future services in OpenAPI | The current CLI explicitly assembles Gateway and Worker contracts. A future declared service must be added to the emission set and published files as well as server routing; the generator does not scan source directories automatically.                                                                                                                                                                                                                             |
+| Topic                      | Current source versus design / future decision                                                                                                                                                                                                                                                                                                                                    |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAPI artifact and URLs  | The index `static/openapi.yaml` answers at `/api/openapi.yaml`, and each fragment `static/openapi/<service>/<file>` answers at `/api/openapi/:service/:file`. Source matches the [operation registry ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-operation-registry).                                                   |
+| OpenAPI package version    | The index carries the `version` of `package.json` in `info.version`. Compatibility enforcement stays with the worker startup check.                                                                                                                                                                                                                                               |
+| Help completeness          | The target requires help to state every default and validation rule. Current `--endpoint` help says only “Server endpoint”; this page specifies behavior that help still needs to expose. The inherited unused endpoint option also appears in local `openapi` help.                                                                                                              |
+| Credential validation      | The server verification checks above are implemented. Local validation of option/environment token values is weaker than the client-file schema. The [JWT ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-jwt) declares the closed header and claim contract. Global issuance syntax stays in [other commands](./other.md). |
+| User management            | The system holds no user management, and no user, session-list or revoke command exists. The [Gateway signing key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key) revokes every JWT through `gateway.tokenVersion`.                                                                                            |
+| Future services in OpenAPI | The CLI assembles the Gateway, Custody, Worker, Scheduler, Project and Mission contracts explicitly. A future declared service must be added to the emission set and to server routing; the generator does not scan source directories.                                                                                                                                           |
 
 ## Error codes
 
