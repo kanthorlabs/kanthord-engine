@@ -129,24 +129,24 @@ both fields are required; `items` contains at most `limit` records and
 reads one page; there is no implicit unbounded traversal or polling loop.
 The shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination) applies; pagination reserves no work.
 
-Mutation requests carry the key in `Idempotency-Key`. On `work pull` and
+Mutation requests carry the key in `Idempotency-Key`. On
 `execution renew-lease` the CLI also sends body `requestId` equal to `request_`
 followed by that key, under the [durable requests](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#durable-requests) of the Scheduler.
-`execution release` carries no request identifier; it is idempotent by the
-execution identity. The CLI generates `requestId`; it is not an editable
-JSON-file field. This preserves one domain request identity when an explicit
-key is reused by another CLI process. It is separate from Gateway's
+`work pull` carries no request identifier; it is idempotent by the runtime
+identity. `execution release` carries no request identifier; it is idempotent
+by the execution identity. The CLI generates `requestId`; it is not an
+editable JSON-file field. This preserves one domain request identity when an
+explicit key is reused by another CLI process. It is separate from Gateway's
 per-transport `X-Request-Id`.
 
-The Scheduler must bind a request identity to its validated payload and caller
-scope. Reusing it with different input is a conflict. An accepted work pull
-replays its original result before new admission checks inside Scheduler,
-without a second execution or count. Gateway authentication still applies.
-The scope includes project, claimant binding and runtime identity; another
-instance receives no accepted execution. Even an ended claim keeps its
-accepted pull result, and replay restores no authority. A no-work result ends
-that logical request: a later search uses a new key/request identity. Renewal
-and release need their own accepted-request replay to avoid repeated effects.
+A work pull is idempotent by the runtime identity. A pull from an instance
+that holds a live execution returns that execution before new admission checks
+inside Scheduler, without a second execution or count. Gateway authentication
+still applies. Another instance never receives that execution. After the
+execution ends, a pull selects new work, and an ended claim restores no
+authority. A renewal binds its request identity to its execution: an identity
+that a later renewal superseded is a conflict. A release is idempotent by the
+execution identity.
 
 The [Gateway replay component](../../src/gateway/idempotency.ts) holds records in memory with a TTL.
 The [idempotency ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#idempotency-of-a-mutation) also requires handler-owned natural-key idempotency.
@@ -156,9 +156,9 @@ No command automatically retries. A client can retry an uncertain mutation
 with the same inputs and explicit key. A timeout, disconnect or Ctrl-C ends
 the wait for a response; it undoes no committed claim, release or renewal.
 A cancelled waiting pull leaves no uncommitted reservation.
-If acquisition committed before disconnection, the claimant recovers the
-original answer by replay rather than issuing a fresh pull. Shutdown stops
-new claims, cancels waiting pulls, and preserves accepted obligations.
+If acquisition committed before disconnection, the next pull of the same
+runtime identity returns the live execution. Shutdown stops new claims,
+cancels waiting pulls, and preserves accepted obligations.
 
 [scheduler-contract]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery
 
@@ -240,8 +240,7 @@ kanthord scheduler work pull --file <path> [--idempotency-key <key>]
 ```
 
 There are no positional arguments or query fields. The required file supplies
-the following proposed fields. The CLI adds the generated `requestId` defined
-above to form the HTTP JSON body.
+the following proposed fields. The file forms the HTTP JSON body.
 
 | JSON file field    | Requiredness / type     | Default and validation                                                                    |
 | ------------------ | ----------------------- | ----------------------------------------------------------------------------------------- |
