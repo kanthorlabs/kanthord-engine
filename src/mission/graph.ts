@@ -58,6 +58,30 @@ export function buildDependencyClosureOf(
   return closure;
 }
 
+export function waitEdges(
+  nodeIds: readonly string[],
+  parentMap: Map<string, string>,
+): DepEdge[] {
+  const edges: DepEdge[] = [];
+  for (const child of nodeIds) {
+    const parent = parentMap.get(child);
+    if (parent !== undefined)
+      edges.push({ dependent: parent, dependsOn: child });
+  }
+  return edges;
+}
+
+export function hasDependencyCycle(
+  nodeIds: readonly string[],
+  edges: DepEdge[],
+  parentMap: Map<string, string>,
+): boolean {
+  return detectCycle([
+    ...closureEdges(nodeIds, edges, parentMap),
+    ...waitEdges(nodeIds, parentMap),
+  ]);
+}
+
 export function closureEdges(
   nodeIds: Iterable<string>,
   allEdges: DepEdge[],

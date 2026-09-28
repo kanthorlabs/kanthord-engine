@@ -1572,6 +1572,34 @@ test("dependency addition rejects direct, self and inherited ancestor closure cy
   );
 });
 
+test("dependency addition rejects an objective depending on its own initiative without writes", (t) => {
+  const f = dependencyFixture(t);
+  const objective = f.objective();
+  const initiative = f.node(objective)!.parent_id!;
+  f.refuses(
+    DependencyOperation.Add,
+    objective,
+    initiative,
+    MissionErrorCode.Cycle,
+  );
+});
+
+test("dependency addition rejects crossed initiative waits without writes", (t) => {
+  const f = dependencyFixture(t);
+  const first = f.initiative();
+  const objective = f.create(f.body(NodeKind.Objective, first)).revisions[ZERO]!
+    .nodeId;
+  const second = f.create({ ...f.body(), filename: OTHER_FILENAME }).revisions[
+    ZERO
+  ]!.nodeId;
+  const other = f.create({
+    ...f.body(NodeKind.Objective, second),
+    filename: "crossed.md",
+  }).revisions[ZERO]!.nodeId;
+  f.edit(DependencyOperation.Add, objective, second);
+  f.refuses(DependencyOperation.Add, other, first, MissionErrorCode.Cycle);
+});
+
 test("dependency addition validates task endpoints in either position and cross-mission endpoints", (t) => {
   const f = dependencyFixture(t);
   const { nodeId, dependsOnId } = f.pair();
@@ -2879,6 +2907,19 @@ test("node.move rejects a newly closed dependency cycle and rolls back containme
     .revisions[ZERO]!.nodeId;
   f.edit(DependencyOperation.Add, newParent, objective);
   f.refuses(objective, newParent, MissionErrorCode.Cycle);
+});
+
+test("node.move refuses moving an objective under the initiative it depends on", (t) => {
+  const f = moveFixture(t);
+  const oldParent = f.initiative();
+  const objective = f.create(f.body(NodeKind.Objective, oldParent)).revisions[
+    ZERO
+  ]!.nodeId;
+  const newParent = f.create({ ...f.body(), filename: OTHER_FILENAME })
+    .revisions[ZERO]!.nodeId;
+  f.edit(DependencyOperation.Add, objective, newParent);
+  f.refuses(objective, newParent, MissionErrorCode.Cycle);
+  assert.equal(f.node(objective)?.parent_id, oldParent);
 });
 
 const INVALID_RETIRE_DIGEST = "0".repeat(64);

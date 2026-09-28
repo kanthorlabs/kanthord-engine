@@ -13,7 +13,7 @@ import {
   type NodeChange,
   type WorkQueue,
 } from "./contract.ts";
-import { closureEdges, detectCycle } from "./graph.ts";
+import { hasDependencyCycle } from "./graph.ts";
 import { requireNode } from "./node-read.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
@@ -68,12 +68,10 @@ function validateCycle(
     { dependent: edge.dependentId, dependsOn: edge.dependsOnId },
   ];
   if (
-    detectCycle(
-      closureEdges(
-        nodes.map((node) => node.id),
-        edges,
-        parents,
-      ),
+    hasDependencyCycle(
+      nodes.map((node) => node.id),
+      edges,
+      parents,
     )
   )
     throw new OperationError(

@@ -733,6 +733,20 @@ test("closure detects a cycle inherited from an initiative dependency on its obj
   assert.deepEqual(result.creates, []);
 });
 
+test("import rejects an objective depending on its own initiative without creates", (t) => {
+  const { resolve } = fixture(t, []);
+  const result = resolve(change(hierarchy(), "o.md", { dependsOn: ["a.md"] }));
+  assert.deepEqual(
+    result.violations.map(({ code, filename, nodeId }) => ({
+      code,
+      filename,
+      nodeId,
+    })),
+    [{ code: MissionErrorCode.Cycle, filename: null, nodeId: null }],
+  );
+  assert.deepEqual(result.creates, []);
+});
+
 test("direct dependency cycles are rejected", (t) => {
   const { resolve } = fixture(t, []);
   const result = resolve([

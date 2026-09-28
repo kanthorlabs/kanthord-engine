@@ -15,7 +15,7 @@ import {
   type Revision,
   type WorkQueue,
 } from "./contract.ts";
-import { closureEdges, detectCycle } from "./graph.ts";
+import { hasDependencyCycle } from "./graph.ts";
 import { requireNode } from "./node-read.ts";
 import { revisionFromRow } from "./revision.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
@@ -83,12 +83,10 @@ function checkCycle(tx: Transaction, missionId: string): void {
     if (node.parent_id !== null) parents.set(node.id, node.parent_id);
   }
   if (
-    detectCycle(
-      closureEdges(
-        nodes.map((node) => node.id),
-        readDependencies(tx, missionId),
-        parents,
-      ),
+    hasDependencyCycle(
+      nodes.map((node) => node.id),
+      readDependencies(tx, missionId),
+      parents,
     )
   )
     throw new OperationError(

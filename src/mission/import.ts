@@ -25,7 +25,7 @@ import {
   type MissionBindings,
   type Violation,
 } from "./contract.ts";
-import { closureEdges, detectCycle, type DepEdge } from "./graph.ts";
+import { hasDependencyCycle, type DepEdge } from "./graph.ts";
 import { nodeRecord } from "./node-read.ts";
 import { parsePlanFile, type ParsedPlanFile } from "./parser.ts";
 import {
@@ -379,7 +379,7 @@ function resolveGraph(result: ResolvedImport): void {
   const runnable = result.resolvedEntries
     .filter((item) => item.entry.kind !== NodeKind.Task)
     .map((item) => item.key);
-  if (detectCycle(closureEdges(runnable, edges, result.parentMap)))
+  if (hasDependencyCycle(runnable, edges, result.parentMap))
     result.violations.push(
       violation(
         MissionErrorCode.Cycle,

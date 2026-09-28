@@ -4,6 +4,8 @@ import {
   buildDependencyClosureOf,
   closureEdges,
   detectCycle,
+  hasDependencyCycle,
+  waitEdges,
   type DepEdge,
 } from "./graph.ts";
 
@@ -94,6 +96,37 @@ test("cross-initiative inheritance reveals a cycle absent from raw edges", () =>
   );
 });
 
+test("an objective depending on its own initiative closes a wait cycle", () => {
+  const nodes = ["i", "o"];
+  const parents = new Map([["o", "i"]]);
+  const edges = [edge("o", "i")];
+  assert.equal(detectCycle(closureEdges(nodes, edges, parents)), false);
+  assert.deepEqual(waitEdges(nodes, parents), [edge("i", "o")]);
+  assert.equal(hasDependencyCycle(nodes, edges, parents), true);
+});
+
+test("crossed objective dependencies on initiatives close a wait cycle", () => {
+  const nodes = ["I", "O", "J", "P"];
+  const parents = new Map([
+    ["O", "I"],
+    ["P", "J"],
+  ]);
+  const edges = [edge("O", "J"), edge("P", "I")];
+  assert.equal(detectCycle(closureEdges(nodes, edges, parents)), false);
+  assert.equal(hasDependencyCycle(nodes, edges, parents), true);
+});
+
+test("sibling objective dependency does not close a wait cycle", () => {
+  const nodes = ["i", "a", "b"];
+  const parents = new Map([
+    ["a", "i"],
+    ["b", "i"],
+  ]);
+  const edges = [edge("a", "b")];
+  assert.deepEqual(waitEdges(nodes, parents), [edge("i", "a"), edge("i", "b")]);
+  assert.equal(hasDependencyCycle(nodes, edges, parents), false);
+});
+
 test("a DAG with inherited dependencies has no closure cycle", () => {
   const parents = new Map([
     ["a", "A"],
@@ -106,4 +139,8 @@ test("a DAG with inherited dependencies has no closure cycle", () => {
     new Set(["b"]),
   );
   assert.equal(detectCycle(inherited), false);
+  assert.equal(
+    hasDependencyCycle(["A", "a", "B", "b", "c"], edges, parents),
+    false,
+  );
 });
