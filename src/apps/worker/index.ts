@@ -21,8 +21,11 @@ import {
 } from "../../gateway/client.ts";
 
 const KEEPALIVE_INTERVAL_MS = 60000;
+const MASTER_KEY_BYTES = 32;
 
-export interface WorkerOptions extends Partial<ClientConfiguration> {
+export interface WorkerOptions extends Partial<
+  Omit<ClientConfiguration, "masterKey">
+> {
   env?: NodeJS.ProcessEnv;
   context?: Context;
   log?: (message: string) => void;
@@ -51,6 +54,20 @@ export class Worker implements Service {
       );
     this.startTask ??= lifecycle(async () => {
       const config = resolveClient(this.options, this.options.env);
+      if (config.masterKey === undefined)
+        throw new Diagnostic(
+          "worker.start.master_key_absent",
+          "worker: masterKey is required in cli.yaml.",
+        );
+      const key = Buffer.from(config.masterKey, "base64");
+      if (
+        key.length !== MASTER_KEY_BYTES ||
+        key.toString("base64") !== config.masterKey
+      )
+        throw new Diagnostic(
+          "worker.start.master_key_invalid",
+          "worker: masterKey must be a base64 encoding of exactly 32 bytes.",
+        );
       const client = httpClient(
         gatewayOperations,
         config.endpoint,

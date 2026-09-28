@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { temporary } from "../../kernel/test-support.ts";
@@ -21,6 +22,16 @@ const PROJECT_GET = "get";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const SINGLE_DIAGNOSTIC_LINE = 1;
+const MASTER_KEY_BYTES = 32;
+const WORKER_UNREACHABLE_ARGS = [
+  "serve",
+  "worker",
+  "--endpoint",
+  "http://127.0.0.1:1",
+  "--token",
+  "x",
+];
+const CLIENT_CONFIG_ENTRIES = ["kanthord", join("kanthord", "cli.yaml")];
 const TOKEN_LIFETIME_SECONDS = 600;
 const entry = new URL("../../main.ts", import.meta.url).href;
 function invocation(args: string[], env: NodeJS.ProcessEnv, terminal = false) {
@@ -356,7 +367,7 @@ test("worker agent enablement commands expose offline help and validate inputs b
   );
 });
 
-test("serve worker rejects server configuration and uses a single transport diagnostic without starting", (t) => {
+test("serve worker rejects server configuration and requires a masterKey before contacting an unavailable server", (t) => {
   const directory = temporary(t);
   const env = environment(directory);
   const config = invocation(
@@ -365,10 +376,25 @@ test("serve worker rejects server configuration and uses a single transport diag
   );
   assert.equal(config.status, ExitCode.Failure);
   assert.match(config.stderr, /^cli\.serve\.worker_config:/);
-  const unavailable = invocation(
-    ["serve", "worker", "--endpoint", "http://127.0.0.1:1", "--token", "x"],
-    env,
-  );
+  const absent = invocation(WORKER_UNREACHABLE_ARGS, env);
+  assert.equal(absent.status, ExitCode.Failure);
+  assert.equal(absent.stdout, EMPTY_OUTPUT);
+  assert.equal(absent.stderr.trim().split("\n").length, SINGLE_DIAGNOSTIC_LINE);
+  assert.match(absent.stderr, /^worker\.start\.master_key_absent:/);
+  assert.deepEqual(readdirSync(directory), []);
+});
+
+test("serve worker with a masterKey reports an unavailable server without changing cli.yaml", (t) => {
+  const directory = temporary(t);
+  const env = environment(directory);
+  const path = clientConfigPath(env);
+  const content = stringify({
+    masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
+  });
+  writePrivate(path, content);
+  const filesBefore = readdirSync(directory, { recursive: true });
+  assert.deepEqual(filesBefore, CLIENT_CONFIG_ENTRIES);
+  const unavailable = invocation(WORKER_UNREACHABLE_ARGS, env);
   assert.equal(unavailable.status, ExitCode.Failure);
   assert.equal(unavailable.stdout, EMPTY_OUTPUT);
   assert.equal(
@@ -376,7 +402,8 @@ test("serve worker rejects server configuration and uses a single transport diag
     SINGLE_DIAGNOSTIC_LINE,
   );
   assert.match(unavailable.stderr, /^worker\.version\.unavailable:/);
-  assert.deepEqual(readdirSync(directory), []);
+  assert.deepEqual(readdirSync(directory, { recursive: true }), filesBefore);
+  assert.equal(readFileSync(path, "utf8"), content);
 });
 
 test("config init is non-interactive, writes validated private configuration without displaying secrets and preserves existing files", (t) => {

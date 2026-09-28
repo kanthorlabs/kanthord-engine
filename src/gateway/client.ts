@@ -33,10 +33,12 @@ const endpoint = z.url().refine((value) => {
 const clientSchema = z.strictObject({
   endpoint: endpoint.optional(),
   token: z.string().min(1).optional(),
+  masterKey: z.string().optional(),
 });
 export interface ClientConfiguration {
   endpoint: string;
   token?: string;
+  masterKey?: string;
 }
 export const clientConfigPath = (env = process.env) =>
   join(directories(env).config, "cli.yaml");
@@ -63,6 +65,7 @@ export function resolveClient(
       stored.endpoint ??
       "http://127.0.0.1:31415",
     token: options.token ?? env.KANTHORD_TOKEN ?? stored.token,
+    masterKey: stored.masterKey,
   };
   if (!endpoint.safeParse(resolved.endpoint).success)
     throw new Diagnostic(
