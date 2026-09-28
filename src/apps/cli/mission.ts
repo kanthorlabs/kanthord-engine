@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { lstatSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import { Command } from "commander";
 import { z } from "zod";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
@@ -14,6 +14,9 @@ import {
   graphEditSchema,
   ImportFormat,
   importFormatSchema,
+  importSnapshotSchema,
+  importApplySchema,
+  retireSchema,
   MISSION_IDENTITY_PREFIX,
   missionOperations,
   moveSchema,
@@ -61,6 +64,18 @@ const EDGE = "edge";
 const REVISION = "revision";
 const RETIRE = "retire";
 const PREVIEW = "preview";
+const IMPORT = "import";
+const APPLY = "apply";
+const IMPORT_PREVIEW = "import.preview";
+const IMPORT_APPLY = "import.apply";
+const NODE_RETIRE = "node.retire";
+const RETIRE_FILE_SCHEMA = retireSchema.omit({ force: true });
+const UTF8 = "utf8";
+const FILE_NOT_FOUND = "cli.file.not_found";
+const FILE_NOT_REGULAR = "cli.file.not_regular";
+const RETIRE_INVALID_NODE_ID = "cli.mission.node.retire.invalid_node_id";
+const MISSING_FILE_OPTION = "commander.missingMandatoryOptionValue";
+const UNKNOWN_OPTION = "commander.unknownOption";
 const EXPORT = "export";
 const NODE_LIST = "node.list";
 const NODE_GET = "node.get";
@@ -122,6 +137,7 @@ type ReadCommand =
   | typeof REVISION_GET
   | typeof EDGE_LIST
   | typeof RETIRE_PREVIEW
+  | typeof IMPORT_PREVIEW
   | typeof EXPORT;
 
 export function validateMissionId(id: string, code: string): void {
@@ -395,6 +411,13 @@ async function edgeList(missionId: string, command: Command): Promise<void> {
 }
 
 async function retirePreview(nodeId: string, command: Command): Promise<void> {
+  for (const [option, flag] of [
+    ["file", FILE_OPTION],
+    ["idempotencyKey", KEY_OPTION],
+  ] as const) {
+    if (command.optsWithGlobals()[option] !== undefined)
+      command.error(`unknown option '${flag}'`, { code: UNKNOWN_OPTION });
+  }
   validateNodeId(nodeId, RETIRE_PREVIEW_INVALID_NODE_ID);
   const options = command.optsWithGlobals();
   const result = await client(command, RETIRE_PREVIEW)[RETIRE_PREVIEW]({
@@ -403,6 +426,118 @@ async function retirePreview(nodeId: string, command: Command): Promise<void> {
     body: null,
   });
   printResult(result, RETIRE_PREVIEW);
+}
+
+async function nodeRetire(nodeId: string, command: Command): Promise<void> {
+  validateNodeId(nodeId, RETIRE_INVALID_NODE_ID);
+  const options = command.optsWithGlobals();
+  if (options.file === undefined)
+    command.error("required option '--file <path>' not specified", {
+      code: MISSING_FILE_OPTION,
+    });
+  await mutate(command, NODE_RETIRE, RETIRE_FILE_SCHEMA, (api, file, key) =>
+    api[NODE_RETIRE](
+      {
+        params: { nodeId },
+        query: {},
+        body: { ...file, force: Boolean(options.force) },
+      },
+      { idempotencyKey: key },
+    ),
+  );
+}
+
+function readPlanFile(path: string) {
+  const stat = statSync(path, { throwIfNoEntry: false });
+  if (!stat) throw new Diagnostic(FILE_NOT_FOUND, `${path}: file not found`);
+  if (!stat.isFile())
+    throw new Diagnostic(FILE_NOT_REGULAR, `${path}: not a regular file`);
+  return { filename: basename(path), content: readFileSync(path, UTF8) };
+}
+
+function importFileSchema<S extends z.ZodTypeAny>(
+  schema: S,
+  missionId: string,
+  paths: string[],
+  name: typeof IMPORT_PREVIEW | typeof IMPORT_APPLY,
+) {
+  assert.ok(
+    identitySchema(MISSION_IDENTITY_PREFIX).safeParse(missionId).success,
+  );
+  assert.ok(name === IMPORT_PREVIEW || name === IMPORT_APPLY);
+  return z
+    .record(z.string(), z.unknown())
+    .transform((manifest): unknown => {
+      const body = {
+        ...manifest,
+        missionId:
+          manifest.missionId === undefined ? missionId : manifest.missionId,
+      };
+      if (manifest.format === ImportFormat.Json && paths.length > EMPTY)
+        throw new Diagnostic(
+          `cli.mission.${name}.positionals_not_accepted`,
+          "JSON imports do not accept plan-file positionals",
+        );
+      if (manifest.format !== ImportFormat.Markdown) return body;
+      if (paths.length > EMPTY && Object.hasOwn(manifest, "files"))
+        throw new Diagnostic(
+          `cli.mission.${name}.files_conflict`,
+          "supply plan-file positionals or files, not both",
+        );
+      return {
+        ...body,
+        files:
+          paths.length > EMPTY
+            ? paths.map(readPlanFile)
+            : manifest.files === undefined
+              ? []
+              : manifest.files,
+      };
+    })
+    .pipe(schema);
+}
+
+async function importPreview(
+  missionId: string,
+  paths: string[],
+  command: Command,
+): Promise<void> {
+  validateMissionId(
+    missionId,
+    `cli.mission.${IMPORT_PREVIEW}.invalid_mission_id`,
+  );
+  const api = client(command, IMPORT_PREVIEW);
+  const body = readJsonFileAs(
+    command.optsWithGlobals().file,
+    importFileSchema(importSnapshotSchema, missionId, paths, IMPORT_PREVIEW),
+  );
+  const result = await api[IMPORT_PREVIEW]({
+    params: { missionId },
+    query: {},
+    body,
+  });
+  printResult(result, IMPORT_PREVIEW);
+}
+
+async function importApply(
+  missionId: string,
+  paths: string[],
+  command: Command,
+): Promise<void> {
+  validateMissionId(
+    missionId,
+    `cli.mission.${IMPORT_APPLY}.invalid_mission_id`,
+  );
+  await mutate(
+    command,
+    IMPORT_APPLY,
+    importFileSchema(importApplySchema, missionId, paths, IMPORT_APPLY),
+    (api, body, key) =>
+      api[IMPORT_APPLY](
+        { params: { missionId }, query: {}, body },
+        { idempotencyKey: key },
+      ),
+  );
 }
 
 function validateExportDirectory(path: string): void {
@@ -504,6 +639,38 @@ export function addMissionCommand(program: Command): void {
   addEdgeCommands(mission);
   addDependencyCommands(mission);
   addCriterionCommands(mission);
+  addImportCommands(mission);
+}
+
+function addImportCommands(mission: Command): void {
+  const imports = mission
+    .command(IMPORT)
+    .description("Mission import commands");
+  imports.action(() => imports.help());
+  for (const action of [PREVIEW, APPLY] as const) {
+    const command = imports
+      .command(action)
+      .description(`${action} a mission import as JSON`)
+      .argument("<mission-id>", "Mission ID")
+      .argument("[plan-file...]", "Markdown plan files in import order")
+      .requiredOption(
+        FILE_OPTION + " <path>",
+        "Import controls JSON file",
+        singleUse(FILE_OPTION),
+      );
+    if (action === APPLY)
+      command.option(
+        KEY_OPTION + " <key>",
+        "Mutation key",
+        singleUse(KEY_OPTION),
+      );
+    command.action(
+      (missionId: string, paths: string[], _options, leaf: Command) =>
+        action === PREVIEW
+          ? importPreview(missionId, paths, leaf)
+          : importApply(missionId, paths, leaf),
+    );
+  }
 }
 
 function addMutationOptions(command: Command): Command {
@@ -576,8 +743,18 @@ function addNodeCommands(mission: Command): void {
   );
   const retire = node
     .command(RETIRE)
-    .description("Mission node retirement commands");
-  retire.action(() => retire.help());
+    .description("Retire a mission node or preview retirement")
+    .argument("<node-id>", "Node ID")
+    .option(
+      FILE_OPTION + " <path>",
+      "Required retirement JSON file",
+      singleUse(FILE_OPTION),
+    )
+    .option(KEY_OPTION + " <key>", "Mutation key", singleUse(KEY_OPTION))
+    .option("--force", "Remove dependencies of nonterminal dependents", false)
+    .action((nodeId: string, _options, command: Command) =>
+      nodeRetire(nodeId, command),
+    );
   retire
     .command(PREVIEW)
     .description("Preview node retirement as JSON")
