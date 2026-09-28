@@ -17,6 +17,7 @@ import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
 import { missionMigrations } from "../../mission/index.ts";
 
 const PROJECT_SERVICE_NAME = "project";
+const GATEWAY_SERVICE_NAME = "gateway";
 
 const services: Migrations = [
   { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
@@ -43,6 +44,19 @@ const MISSION_TABLES = [
   MISSION_DEPENDENCY_TABLE,
 ];
 const INTEGRITY_OK = "ok";
+const NO_PREFIX_MATCHES = 0;
+const SINGLE_PREFIX_MATCH = 1;
+const ERD1_TABLES = [
+  CREDENTIAL_TABLE,
+  MISSION_DEPENDENCY_TABLE,
+  MISSION_MISSION_TABLE,
+  MISSION_NODE_TABLE,
+  MISSION_NODE_REVISION_TABLE,
+  PROJECT_BINDING_TABLE,
+  PROJECT_PROJECT_TABLE,
+  SCHEDULER_JOB_TABLE,
+  WORKER_AGENT_ENABLEMENT_TABLE,
+];
 
 function tables(store: Store): string[] {
   return store.database
@@ -202,6 +216,69 @@ test("each service migration set applies alone to an empty store", () => {
       }
     } finally {
       store.close();
+    }
+  }
+});
+
+test("all ERD 1 migrations produce exactly the expected tables", () => {
+  const erd1Services: Migrations = [
+    { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
+    { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
+    { service: GATEWAY_SERVICE_NAME, migrations: gatewayMigrations },
+    { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
+    { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
+    { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
+  ];
+  const prefixes = erd1Services.map(({ service }) => `${service}_`);
+  assert.equal(new Set(prefixes).size, erd1Services.length);
+  const store = new Store(IN_MEMORY_DATABASE);
+  try {
+    const applied: Migrations[number][] = [];
+    const owners = new Map<string, string>();
+    for (const service of erd1Services) {
+      const before = new Set(tables(store));
+      applied.push(service);
+      store.migrate(applied);
+      for (const name of tables(store).filter((name) => !before.has(name))) {
+        owners.set(name, service.service);
+      }
+    }
+    assert.deepEqual([...tables(store)].sort(), [...ERD1_TABLES].sort());
+    for (const name of tables(store)) {
+      const matches = erd1Services.filter(({ service }) =>
+        name.startsWith(`${service}_`),
+      );
+      if (name === CREDENTIAL_TABLE) {
+        assert.equal(matches.length, NO_PREFIX_MATCHES);
+        assert.equal(owners.get(name), CUSTODY_SERVICE_NAME);
+      } else {
+        assert.equal(matches.length, SINGLE_PREFIX_MATCH, name);
+        assert.equal(owners.get(name), matches[0]!.service);
+      }
+    }
+    assert.deepEqual(
+      tables(store).filter(
+        (name) => !prefixes.some((prefix) => name.startsWith(prefix)),
+      ),
+      [CREDENTIAL_TABLE],
+    );
+  } finally {
+    store.close();
+  }
+  for (const service of erd1Services) {
+    const isolated = new Store(IN_MEMORY_DATABASE);
+    try {
+      isolated.migrate([service]);
+      for (const name of tables(isolated)) {
+        assert.ok(
+          name.startsWith(`${service.service}_`) ||
+            (name === CREDENTIAL_TABLE &&
+              service.service === CUSTODY_SERVICE_NAME),
+          `${service.service} created ${name}`,
+        );
+      }
+    } finally {
+      isolated.close();
     }
   }
 });
