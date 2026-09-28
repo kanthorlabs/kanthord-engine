@@ -87,13 +87,15 @@ No seam. The worker app produces no collaboration type that another ERD 1 plan c
   - `src/gateway/client.ts`
   - `src/apps/worker/index.ts`
   - `src/apps/worker/index.test.ts`
+  - `src/apps/cli/index.test.ts`
 
 - Do:
   1. In `src/gateway/client.ts`, change `clientSchema` from `z.strictObject({ endpoint, token })` to `z.strictObject({ endpoint: ..., token: ..., masterKey: z.string().optional() })`. Add `masterKey?: string` to the `ClientConfiguration` interface.
   2. In `src/gateway/client.ts`, verify that `resolveClient` passes `masterKey` through the returned object unchanged (no fallback, no env var, no option).
   3. In `src/apps/worker/index.ts`, after `resolveClient`, validate `config.masterKey`: if absent, throw `new Diagnostic("worker.start.master_key_absent", "worker: masterKey is required in cli.yaml.")`. If present and not a valid base64 encoding of exactly 32 bytes, throw `new Diagnostic("worker.start.master_key_invalid", "worker: masterKey must be a base64 encoding of exactly 32 bytes.")`.
-  4. Use `Buffer.from(config.masterKey, "base64")` and assert `.length === 32` for the byte-length check.
-  5. In `src/apps/worker/index.test.ts`, add a test that an absent `masterKey` in `cli.yaml` fails start with `worker.start.master_key_absent`. Add a test that a present but invalid value (wrong byte length) fails start with `worker.start.master_key_invalid`. Add a test that a valid 32-byte base64 key passes the check and reaches `Worker application started`.
+  4. Decode with `Buffer.from(config.masterKey, "base64")`. Require exactly 32 bytes and a canonical base64 round trip (`key.toString("base64") === config.masterKey`). Refuse a non-canonical encoding with `worker.start.master_key_invalid`.
+  5. In `src/apps/worker/index.test.ts`, test absent, wrong-length and non-canonical keys and a valid key that reaches `Worker application started`.
+  6. In `src/apps/cli/index.test.ts`, keep two isolated transport tests. Without `cli.yaml`, assert one `worker.start.master_key_absent` diagnostic line, empty stdout and an empty directory. With a valid `masterKey` in `cli.yaml`, assert one `worker.version.unavailable` diagnostic line, empty stdout, and that the recursive directory listing and `cli.yaml` content are unchanged.
 
 - Rules:
   - `masterKey` has no environment variable and no CLI option (`gateway-service.impl.md#the-client-configuration-file`).

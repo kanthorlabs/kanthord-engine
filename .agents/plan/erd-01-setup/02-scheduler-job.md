@@ -183,7 +183,7 @@ None. This plan creates the Scheduler Service from scratch.
   - `static/openapi.yaml` (regenerated)
   - `static/openapi/**` fragments (regenerated)
 - Do — index.ts:
-  1. Add imports: `SchedulerService`, `schedulerMigrations` from `"../../scheduler/index.ts"`; `type WorkQueue` from `"../../scheduler/contract.ts"`.
+  1. Add imports: `SchedulerService`, `schedulerMigrations` from `"../../scheduler/index.ts"`; `type WorkQueue` from `"../../scheduler/contract.ts"`. Include `scheduler: { queue: 200 }` in `domainHealth`.
   2. In `Server.open`, add `{ service: "scheduler", migrations: schedulerMigrations }` to the `store.migrate` call after the custody entry.
   3. Inside `composeServices`, before custody construction, add: `const scheduler = new SchedulerService({ config: {}, health: options.health })`.
   4. Create the work-queue adapter: `const workQueue: WorkQueue = { insert: (tx, n, p, pr) => scheduler.insert(tx, n, p, pr), delete: (tx, n) => scheduler.delete(tx, n), priorityUpdate: (tx, n, pr) => scheduler.priorityUpdate(tx, n, pr) }`. Plan 06 passes `workQueue` to `MissionService`.
@@ -191,12 +191,12 @@ None. This plan creates the Scheduler Service from scratch.
   6. Add `scheduler` to the `services` array at position 1 (before custody). Push a `scheduler.stop` closure into `releases` at the same position so the reverse-pop sequence stops scheduler last.
   7. Add `scheduler` and `workQueue` to the `composeServices` return value.
 - Do — test-support.ts:
-  1. Add imports: `SchedulerService`, `schedulerMigrations` from `"../../scheduler/index.ts"`.
+  1. Use the scheduler returned by `composeServices`; do not construct or declare another scheduler in the fixture.
   2. Add `{ service: "scheduler", migrations: schedulerMigrations }` to the `gatewayFixture` migration list after the custody entry.
-  3. In fixture startup, construct `const scheduler = new SchedulerService({ config: {}, health: options.health })` and call `await scheduler.start()` before custody starts.
-  4. Call `scheduler.declare(registry)` in the fixture declare block before the custody declare call, using the same `registry` reference passed to other services.
-  5. In fixture teardown, call `await scheduler.stop()` after custody stops.
-  6. Expose `scheduler` in the fixture return value.
+  3. Start the composition-owned scheduler before custody.
+  4. Quiesce the composition-owned scheduler with the other services.
+  5. Stop it last in fixture teardown.
+  6. Expose that scheduler in the fixture return value.
 - Do — OpenAPI:
   1. In `src/apps/cli/index.ts` at the `apiOperations` declaration: add `import { schedulerOperations } from "../../scheduler/contract.ts"` and append `...Object.values(schedulerOperations)` to the `apiOperations` array (plan 01 task 01.14 sets the array form).
   2. From `engine/`, run `pnpm run build && node bin/kanthord.mjs gateway openapi`. Commit the updated `static/openapi.yaml` and all regenerated `static/openapi/**` fragment files.

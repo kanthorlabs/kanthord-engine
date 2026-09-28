@@ -580,7 +580,8 @@ three in the composition root and in `gatewayFixture`. Plan 03 replaces
   - `engine/src/custody/service.ts`
   - `engine/src/custody/service.test.ts`
 - Do:
-  1. In `engine/src/custody/service.ts`, add `private readonly sessions = new LoginSessionStore()`.
+  1. Give `CustodyComponent.Dependencies` a required `store: Store`, plus optional `oauthProviders` and `now` functions. The composition root passes its operational store. The default OAuth provider is the builtin github-copilot provider. Tests inject providers but run the real `Models.login` and its `CredentialStore.modify` handoff. The default clock reads `Date.now()`.
+     In `engine/src/custody/service.ts`, add `private readonly sessions = new LoginSessionStore()`.
      Update `quiesce()` and `stop()` to cancel any running pi-ai login interactions (cancel the
      `CancellationContext` that owns background login work).
      Implement three handlers:
@@ -594,16 +595,16 @@ three in the composition root and in `gatewayFixture`. Plan 03 replaces
        - Start pi-ai `models.login(providerId, "oauth", interaction)` asynchronously, where the interaction adapter:
          - On `select`: returns the mapped mode; records `address` and `code` in the session with `updateAddress`.
          - On `progress` or `info`: records the message with `updateLastMessage`.
-         - On `manual_code`, `text` or `secret` prompt: waits for a value supplied through `credential.login_code`.
+         - Answer only the known github-copilot enterprise-domain `text` prompt with an empty value (`github.com`). Every other `manual_code`, `text` or `secret` prompt waits for a value supplied through `credential.login_code`.
          - On login success: calls the completion transaction (see below).
          - On failure or expiry: calls `this.sessions.fail(id, reason)` or `this.sessions.expire(id)`.
        - Completion transaction (called by the interaction adapter on success):
-         - Begin a new store transaction.
+         - Run inside pi-ai `CredentialStore.modify` using `this.store.transaction`. Re-check the session state inside the transaction; failed or expired sessions store nothing.
          - Re-check name conflict; throw `OperationError(409, "credential.name.conflict", ...)` with details if name taken (commit-time race).
          - Mint `id = createIdentity("credential")`.
          - Encrypt the received OAuth secret `{ refresh, access, expires }` with `encrypt(envelopeKey, id, platform, secret)`.
          - Insert credential row with `revision = 1`, `metadata = NULL`, `ended_at = NULL`.
-         - Call `this.sessions.complete(sessionId)`.
+         - After the transaction commits, call `this.sessions.complete(sessionId)`.
          - Call `this.logger.info({ credentialId: id, humanIdentity }, "credential login completed")`.
        - Before `caller.commit`, await the first interaction event that records the address: `auth_url` in browser mode, `device_code` in device mode (`docs/brainstorm/custody.impl.md` "the OAuth login": the adapter records `auth_url` as the address and `device_code` as the code and address). Bound the wait by the operation timeout and the caller `Context`. If the session fails first, answer its failure.
        - Return `{ sessionId, address, code, expiresAt }`: `address` is always set; `code` is `null` in browser mode. `credential.login` answers address and code, and `credential.login_status` answers no address (`custody.impl.md` "the OAuth login", `engine/docs/cli/credential.md:237`).
@@ -621,10 +622,10 @@ three in the composition root and in `gatewayFixture`. Plan 03 replaces
      - Login start with name `login` returns 400 `credential.input.invalid`.
      - Second login start for same platform and human (non-expired) returns 409 `credential.login.pending`.
      - Name conflict at login start returns 409 `credential.name.conflict`.
-     - Name conflict at login commit (simulated via stub interaction adapter) returns 409 `credential.name.conflict`.
+     - Name conflict at login completion through the real `Models.login` and injected offline OAuth provider returns 409 `credential.name.conflict`.
      - Successful completion inserts credential row with `revision = 1` and null metadata.
      - Failed session creates no credential row.
-     - Expired session creates no credential row.
+     - Expired session creates no credential row, even when it expires during `CredentialStore.modify`.
      - No token, ciphertext or secret in any login answer.
      - Login status returns current state; `login_status` of expired session returns 404.
 - Rules:
@@ -708,7 +709,7 @@ three in the composition root and in `gatewayFixture`. Plan 03 replaces
        Any other status → `ResourceStatus.Unhealthy`.
        Network error or cancellation → `ResourceStatus.Unknown`.
      - `probeS3(accessKeyId: string, secretAccessKey: string, endpoint: string, bucket: string, region: string, context: Context): Promise<ResourceStatusValue>`:
-       Add `@aws-sdk/client-s3` to `dependencies` in `engine/package.json` at an exact version, like every other dependency.
+       Pin `@aws-sdk/client-s3` to `3.1139.0`, the newest exact version permitted by the unchanged three-day `minimumReleaseAge` in `engine/pnpm-workspace.yaml`. Do not add an exclusion.
        Construct `new S3Client({ endpoint, region, credentials: { accessKeyId, secretAccessKey } })`.
        Bridge the `Context` to an `AbortController`.
        Call `client.send(new HeadBucketCommand({ Bucket: bucket }), { abortSignal })`.
@@ -979,7 +980,7 @@ three in the composition root and in `gatewayFixture`. Plan 03 replaces
      b. Replace the object spread with an array, because two operation sets share short client keys such as `list` and `get`, and an object spread keeps only the last one:
      `const apiOperations = [...Object.values(gatewayOperations), ...Object.values(custodyOperations), ...Object.values(workerOperations)]`.
      c. Change `writeOpenAPI(Object.values(apiOperations), ...)` at line 278 to `writeOpenAPI(apiOperations, ...)`.
-  5. In `engine/src/apps/server/openapi-integration.test.ts`:
+  5. In `engine/src/apps/server/openapi-integration.test.ts`, keep a soft 500-line bound for each OpenAPI fragment. A larger fragment passes and prints `t.diagnostic` with its file and line count. Do not add named fragment exceptions.
      a. Import `custodyOperations` from `../../custody/contract.ts`.
      b. Replace the test's `apiOperations` object with the same array form as step 4b, and change `emitOpenAPIFiles(Object.values(apiOperations))` to `emitOpenAPIFiles(apiOperations)`.
      c. Add an assertion for at least one `credential.*` path.
@@ -1151,22 +1152,22 @@ three in the composition root and in `gatewayFixture`. Plan 03 replaces
   a refusal asserts the exact exit code and the error code at the start of stderr; stdout is
   parsed as JSON where the CLI page says the command prints JSON.
 
-| Id     | Commands                                                                                                                                                               | Exit | Expect                                                                                                               |
-| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------- |
-| E01.1  | `credential create --file <anthropic.json>` then `credential get <name>`                                                                                               | 0, 0 | stdout JSON: `name`, `platform === "anthropic"`, `revisions[0].revision === 1`; no `secret` field in either response |
-| E01.2  | `credential create --file <same-name.json>` with a different `--idempotency-key` (same name)                                                                           | 1    | stderr starts `credential.name.conflict:`                                                                            |
-| E01.3  | `credential create --file <anthropic.json>` with same `--idempotency-key` as first create in E01.3's own setup                                                         | 0    | stdout JSON identical to the first create in this test; `revisions` still has 1 entry                                |
-| E01.4  | `credential list`                                                                                                                                                      | 0    | stdout JSON: `items` array contains the created name; no `secret`                                                    |
-| E01.5  | `credential list --platform anthropic` then `credential list --platform github`                                                                                        | 0, 0 | first `items` contains the anthropic name; second `items` is empty                                                   |
-| E01.6  | `credential get nonexistent`                                                                                                                                           | 1    | stderr starts `credential.credential.not_found:`                                                                     |
-| E01.7  | `credential rotate <github-name> --file <rotate.json>` (`expectedRevision: 1`; same secret; no model removal) then `credential get <github-name>`                      | 0, 0 | stdout JSON: `revisions` has 2 entries; no `secret` in any revision                                                  |
-| E01.8  | `credential rotate <github-name> --file <stale.json>` (`expectedRevision: 0`; stale)                                                                                   | 1    | stderr starts `credential.revision.conflict:`                                                                        |
-| E01.9  | `credential update-metadata <oai-name> --file <meta.json>` (openai-compatible; add model `gpt-4o`, no removal; `expectedRevision: 1`) then `credential get <oai-name>` | 0, 0 | stdout JSON: `revisions` has 2 entries; newest revision `metadata.models` contains `gpt-4o`; no `secret`             |
-| E01.10 | create `<github-name>`, rotate (`expectedRevision: 1`) to get revision 2, then `credential revoke <github-name> 1` then `credential get <github-name>`                 | 0, 0 | stdout JSON: revision 1 has `endedAt` non-null; revision 2 has `endedAt === null`                                    |
-| E01.11 | create `<github-name>`, rotate to get revision 2, then `credential revoke <github-name> 2` (newest live)                                                               | 1    | stderr starts `credential.revision.newest_live:`                                                                     |
-| E01.12 | `credential login github --name n`                                                                                                                                     | 1    | stderr starts `credential.entry.unsupported:` (`github` does not accept OAuth entry)                                 |
-| E01.13 | `credential login-status login_session_01ARZ3NDEKTSV4RRFFQ69G5FAV` (valid format, absent)                                                                              | 1    | stderr starts `credential.login.not_found:`                                                                          |
-| E01.14 | `credential login-code login_session_01ARZ3NDEKTSV4RRFFQ69G5FAV value` (valid format, absent)                                                                          | 1    | stderr starts `credential.login.not_found:`                                                                          |
+| Id     | Commands                                                                                                                                                                                                                                 | Exit | Expect                                                                                                               |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------- |
+| E01.1  | `credential create --file <anthropic.json>` then `credential get <name>`                                                                                                                                                                 | 0, 0 | stdout JSON: `name`, `platform === "anthropic"`, `revisions[0].revision === 1`; no `secret` field in either response |
+| E01.2  | `credential create --file <same-name.json>` with a different `--idempotency-key` (same name)                                                                                                                                             | 1    | stderr starts `credential.name.conflict:`                                                                            |
+| E01.3  | `credential create --file <anthropic.json>` with same `--idempotency-key` as first create in E01.3's own setup                                                                                                                           | 0    | stdout JSON identical to the first create in this test; `revisions` still has 1 entry                                |
+| E01.4  | `credential list`                                                                                                                                                                                                                        | 0    | stdout JSON: `items` array contains the created name; no `secret`                                                    |
+| E01.5  | `credential list --platform anthropic` then `credential list --platform github`                                                                                                                                                          | 0, 0 | first `items` contains the anthropic name; second `items` is empty                                                   |
+| E01.6  | `credential get nonexistent`                                                                                                                                                                                                             | 1    | stderr starts `credential.credential.not_found:`                                                                     |
+| E01.7  | `credential rotate <github-name> --file <rotate.json>` (`expectedRevision: 1`; same secret; no model removal) then `credential get <github-name>`                                                                                        | 0, 0 | stdout JSON: `revisions` has 2 entries; no `secret` in any revision                                                  |
+| E01.8  | Read the current revision by CLI; rotate successfully; then `credential rotate <github-name> --file <stale.json>` with the observed revision from before that rotation. Separately submit `expectedRevision: 0` to local CLI validation. | 1, 1 | Stale revision: stderr starts `credential.revision.conflict:`; zero: stderr starts `cli.file.schema_invalid:`        |
+| E01.9  | `credential update-metadata <oai-name> --file <meta.json>` (openai-compatible; add model `gpt-4o`, no removal; `expectedRevision: 1`) then `credential get <oai-name>`                                                                   | 0, 0 | stdout JSON: `revisions` has 2 entries; newest revision `metadata.models` contains `gpt-4o`; no `secret`             |
+| E01.10 | create `<github-name>`, rotate (`expectedRevision: 1`) to get revision 2, then `credential revoke <github-name> 1` then `credential get <github-name>`                                                                                   | 0, 0 | stdout JSON: revision 1 has `endedAt` non-null; revision 2 has `endedAt === null`                                    |
+| E01.11 | create `<github-name>`, rotate to get revision 2, then `credential revoke <github-name> 2` (newest live)                                                                                                                                 | 1    | stderr starts `credential.revision.newest_live:`                                                                     |
+| E01.12 | `credential login github --name n`                                                                                                                                                                                                       | 1    | stderr starts `credential.entry.unsupported:` (`github` does not accept OAuth entry)                                 |
+| E01.13 | `credential login-status login_session_01ARZ3NDEKTSV4RRFFQ69G5FAV` (valid format, absent)                                                                                                                                                | 1    | stderr starts `credential.login.not_found:`                                                                          |
+| E01.14 | `credential login-code login_session_01ARZ3NDEKTSV4RRFFQ69G5FAV value` (valid format, absent)                                                                                                                                            | 1    | stderr starts `credential.login.not_found:`                                                                          |
 
 Model-removal refusal on `rotate` and `update-metadata` (`credential.metadata.model_in_use`)
 is tested in plan 03, which provides the real `enablementsDependentOnModel` implementation.

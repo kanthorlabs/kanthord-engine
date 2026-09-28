@@ -74,7 +74,7 @@ Leaves to Plan 08: CLI command file for the `project` group.
 | `entriesOfAgent`     | `(tx: Transaction, agentName: string): AgentDependentBinding[]`                                                                                                                                                                                                                                                                                 | `src/project/contract.ts` | 03             |
 | `bindingsNaming`     | `(tx: Transaction, credentialName: string): BindingRevision[]`                                                                                                                                                                                                                                                                                  | `src/project/contract.ts` | 01             |
 | `resolveBinding`     | `(tx: Transaction, projectId: string, bindingName: string): { bindingId: string; resourceIdentity: string } \| null`                                                                                                                                                                                                                            | `src/project/contract.ts` | 06 (per D7)    |
-| `getBindingRevision` | `(tx: Transaction, bindingId: string): { bindingId: string; name: string; resourceIdentity: string; revision: number; tombstone: boolean; disabled: boolean } \| null`                                                                                                                                                                          | `src/project/contract.ts` | 06             |
+| `getBindingRevision` | `(tx: Transaction, bindingId: string): { bindingId: string; projectId: string; name: string; resourceIdentity: string; revision: number; tombstone: boolean; disabled: boolean } \| null`                                                                                                                                                       | `src/project/contract.ts` | 06             |
 | `resourceInventory`  | `(tx: Transaction): ResourceEntry[]` — current (non-tombstoned) repository bindings; each entry has `scope: HealthScope.Project`, project name, percent-encoded binding name, `repository:<address>` target, `network git read` capability, and a `check` closure that calls `gitLsRemote`; `ResourceEntry` imported from `../kernel/health.ts` | `src/project/service.ts`  | 07             |
 
 ## Tasks
@@ -313,7 +313,8 @@ project_id = ? AND resource_identity = ?` (all rows including tombstones) + 1.
 
 - Files: `src/project/service.ts` (edit), `src/project/service.test.ts` (edit),
   `src/apps/server/index.ts` (edit), `src/apps/cli/index.ts` (edit),
-  `src/apps/server/openapi-integration.test.ts` (edit), `static/openapi.yaml` (regenerate),
+  `src/apps/server/openapi-integration.test.ts` (edit), `src/kernel/test-identity.ts` (test seam),
+  `eslint.config.js` (import boundary), `static/openapi.yaml` (regenerate),
   `static/openapi/**` (regenerate)
 - Do:
   1. Extend `Dependencies` and update `src/apps/server/index.ts`:
@@ -374,7 +375,7 @@ project_id = ? AND resource_identity = ?` (all rows including tombstones) + 1.
      - Remove `NO_OPERATIONS` assertion; assert registry contains exactly four operation IDs.
      - Create succeeds and returns correct fields.
      - Create duplicate name returns 409 `project.name.conflict` with holder `id`.
-     - `createMission` stub called inside `caller.commit`.
+     - Use `testHumanIdentity(accountId, name, jti)` from `src/kernel/test-identity.ts` for a verified human. Refuse an unminted plain identity. `createMission` runs inside the insert transaction; a failure rolls back the project insert.
      - Project list returns items in descending `id` order with pagination.
      - Project get returns 404 `project.project.not_found` for absent id.
      - Rename to taken name returns 409 `project.name.conflict`.
@@ -383,20 +384,15 @@ project_id = ? AND resource_identity = ?` (all rows including tombstones) + 1.
      - `resolveWorkerBinding` returns `null` for: removed binding, non-worker binding,
        absent binding, binding with `instanceCount = 0`, binding where the group's latest
        revision is a tombstone after the pinned revision.
-  8. In `src/apps/cli/index.ts`, at the `apiOperations` declaration (line 298):
+  8. In `eslint.config.js`, allow only `src/gateway/` and `src/kernel/test-identity.ts` to import `caller-mint.ts`. Allow only `*.test.ts` files to import `test-identity.ts`. Export `testHumanIdentity(accountId, name, jti)` from the kernel test seam. Do not add a per-file exception for a service test.
+  9. In `src/apps/cli/index.ts`, at the `apiOperations` declaration (line 298):
      - Import `projectOperations` from `"../../project/contract.ts"`.
-     - Plan 01 task 01.14 converts `apiOperations` from an object spread to an array (Custody
-       and Project share short keys such as `list`, `get`, `create`; an object spread keeps only
-       the last definition). Append `...Object.values(projectOperations)` to the array.
-  9. Run `pnpm run build && node bin/kanthord.mjs gateway openapi` from `engine/` to regenerate
-     `static/openapi.yaml` and `static/openapi/**`.
-  10. In `src/apps/server/openapi-integration.test.ts`:
-  - Import `projectOperations`; append `...Object.values(projectOperations)` to the
-    `apiOperations` array.
-  - Assert at least one path from `project.*` (for example `project.create` at `/api/project`)
-    and one from `project.binding.*` (for example `project.bindingSet.write` at
-    `/api/project/:projectId/binding-set`) appear in the emitted document with the correct
-    HTTP method.
+     - Append only the four registered operations (`project.create`, `project.list`, `project.get`, `project.rename`) to `apiOperations`. Later tasks append their registered operations.
+  10. Run `pnpm run build && node bin/kanthord.mjs gateway openapi` from `engine/` to regenerate
+      `static/openapi.yaml` and `static/openapi/**`.
+  11. In `src/apps/server/openapi-integration.test.ts`:
+  - Import `projectOperations`; append only the four operations registered in this task to the `apiOperations` array.
+  - Assert the registered `project.create` path and method. Keep the registry and static publication inventories equal. Use a soft 500-line fragment bound: larger fragments pass with `t.diagnostic` reporting the file and line count; add no named exceptions.
 - Rules:
   - `project.create` is idempotent by `name`; retry returns 409 (`engine/docs/cli/project.md:142`).
   - No `actor` field in operation input; actor derives from `caller.identity`.
@@ -415,7 +411,9 @@ project_id = ? AND resource_identity = ?` (all rows including tombstones) + 1.
 
 ### 05.5 Register binding-set write and binding read operations
 
-- Files: `src/project/service.ts` (edit), `src/project/service.test.ts` (edit)
+- Files: `src/project/service.ts` (edit), `src/project/service.test.ts` (edit),
+  `src/apps/cli/index.ts` (edit), `src/apps/server/openapi-integration.test.ts` (edit),
+  `static/openapi.yaml` and `static/openapi/**` (regenerate)
 - Do:
   1. Register `project.bindingSet.write` in `declare(registry)`:
      - **Whole-set `superRefine`** on `body.bindings`:
@@ -428,8 +426,7 @@ project_id = ? AND resource_identity = ?` (all rows including tombstones) + 1.
        absent reference or wrong-kind target (CLI:470-472).
        e. Cycle check: detect cycles in `action_end_state.follows.binding` references;
        refuse a cycle (CLI:348).
-       f. For external-harness workers: refuse `config.entries` or `config.resourceBudget`
-       (CLI:373).
+       f. Check external-harness fields in the handler after Worker name validation, not in `superRefine`.
        g. For each worker binding: agent selectors in `config.entries` must be unique
        (CLI:379); no duplicate agent name in entries.
      - For each `repository` binding in the submission, call
@@ -448,7 +445,8 @@ project_id = ? AND resource_identity = ?` (all rows including tombstones) + 1.
        - Throw if `config.instanceCount < INSTANCE_COUNT_MIN ||
 config.instanceCount > INSTANCE_COUNT_MAX` (code:
          `project.bindings.worker.instance_count_range`; `project-service.impl.md:129`).
-       - For each declared agent of the worker (from `this.workerAgentsOf(config.worker)`):
+       - Get declared agents with `this.workerAgentsOf(config.worker)`. If none, first call `this.validateEntry(tx, config.worker, null)` to reject an unknown worker as `worker.agent.configuration.invalid`. For a known external-harness worker, refuse `entries` or `resourceBudget` with 400 `project.bindings.worker.field_forbidden` and details `{ binding, field }`.
+       - For each declared agent of the worker:
          find the matching entry in `config.entries` if present; strip the `agent` field
          to produce `WorkerEntry | null`; call
          `this.validateEntry(tx, config.worker, workerEntry)`.
@@ -510,6 +508,7 @@ config.instanceCount > INSTANCE_COUNT_MAX` (code:
     (`project-service.impl.md:127-128`; `architecture.impl.md:591`).
   - `repositoryConnector`, `custodySuitability`, `validateEntry`, and `workerAgentsOf` are
     required (D4); tests inject stubs.
+  - Add only the five binding operations registered here to both OpenAPI inventories. Regenerate `static/`; retain a soft 500-line fragment bound with `t.diagnostic` for larger files, without named exceptions.
   - `instanceCount` range check runs in the handler (domain error code); zod schema uses
     `z.number().int()` without `.min()/.max()`.
   - Worker entries: strip `agent` selector before calling `validateEntry` (seam type is
@@ -518,7 +517,9 @@ config.instanceCount > INSTANCE_COUNT_MAX` (code:
 
 ### 05.6 Register agent configuration views
 
-- Files: `src/project/service.ts` (edit), `src/project/service.test.ts` (edit)
+- Files: `src/project/service.ts` (edit), `src/project/service.test.ts` (edit),
+  `src/apps/cli/index.ts` (edit), `src/apps/server/openapi-integration.test.ts` (edit),
+  `static/openapi.yaml` and `static/openapi/**` (regenerate)
 - Do:
   1. Register `project.agentConfiguration.list` in `declare(registry)`:
      - `caller.commit((tx) => { ... })`:
@@ -546,7 +547,7 @@ config.instanceCount > INSTANCE_COUNT_MAX` (code:
   - Read operations; no mutation, no remote call.
   - `workerAgentsOf` and `workerAgentView` are declared in Plan 03 `contract.ts` per D6;
     implementations are required (D4); tests inject stubs.
-- Done when: agent-view tests pass; `pnpm run verify` passes.
+- Done when: append the two registered agent-view operations to both OpenAPI inventories, regenerate `static/`, then use `Object.values(projectOperations)` for the complete set of eleven. Agent-view tests and `pnpm run verify` pass.
 
 ### 05.7 Implement `entriesOfAgent`, `bindingsNaming`, `resolveBinding`, and `getBindingRevision` collaborations
 
@@ -579,7 +580,7 @@ config.instanceCount > INSTANCE_COUNT_MAX` (code:
        select that max-revision row.
      - Return `{ bindingId: row.id, resourceIdentity: row.resourceIdentity }` or `null`.
   4. Declare `BindingRevisionResult` type in `contract.ts`:
-     `{ bindingId: string; name: string; resourceIdentity: string; revision: number; tombstone: boolean; disabled: boolean }`.
+     `{ bindingId: string; projectId: string; name: string; resourceIdentity: string; revision: number; tombstone: boolean; disabled: boolean }`.
   5. Implement `getBindingRevision(tx: Transaction, bindingId: string): BindingRevisionResult | null`
      as a public method on `ProjectService`:
      - Select the row with `id = bindingId`; return null if absent.
@@ -590,7 +591,7 @@ config.instanceCount > INSTANCE_COUNT_MAX` (code:
        first colon-part of `resource_identity`; for a worker kind (`BindingKind.Worker`),
        disabled when `config.instanceCount === INSTANCE_COUNT_MIN`; for other kinds,
        disabled when `config.available === false`. Cite `01-setup.md:205`.
-     - Return `{ bindingId: row.id, name: row.name, resourceIdentity: row.resource_identity,
+     - Return `{ bindingId: row.id, projectId: row.project_id, name: row.name, resourceIdentity: row.resource_identity,
 revision: row.revision, tombstone, disabled }`.
   6. Update `src/project/service.test.ts`:
      - `entriesOfAgent`: explicit entry present; no explicit entry returns `entry: null`;
@@ -935,26 +936,27 @@ revision: row.revision, tombstone, disabled }`.
   a refusal asserts the exact exit code and the error code at the start of stderr; stdout is
   parsed as JSON where the CLI page says the command prints JSON.
 
-| Id     | Commands                                                                                                                                                                                                                                                             | Exit | Expect                                                                                                                        |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------- |
-| E05.1  | `credential create` (anthropic); `project create --name my-proj` (standIn active)                                                                                                                                                                                    | 0    | stdout has `id` starting with `project_`; `bindingSetVersion: 1`; `idempotencyKey` field                                      |
-| E05.2  | Re-send `project create --name my-proj` with same `--idempotency-key`                                                                                                                                                                                                | 0    | Same `id` as E05.1 (idempotent replay)                                                                                        |
-| E05.3  | `project list`                                                                                                                                                                                                                                                       | 0    | `items[0].name === "my-proj"`; `items[0].bindingSetVersion === 1`; `nextCursor: null`                                         |
-| E05.4  | `project get <projectId>`                                                                                                                                                                                                                                            | 0    | stdout has `id`, `name`, `bindingSetVersion`, `createdAt`                                                                     |
-| E05.5  | `project rename <projectId> --name my-proj-2`                                                                                                                                                                                                                        | 0    | stdout has `name: "my-proj-2"`; `idempotencyKey` field                                                                        |
-| E05.6  | `credential create` (github); `project binding apply <projectId> --file <v1.json>` (one repository binding: `git@github.com:owner/repo.git`, credential `github`; `gitLsRemote` injected as no-op)                                                                   | 0    | stdout has `bindingSetVersion: 2`; `changes[0].kind === "created"`; `idempotencyKey` field                                    |
-| E05.7  | Re-send `project binding apply` with same `--idempotency-key`                                                                                                                                                                                                        | 0    | Same `bindingSetVersion: 2`                                                                                                   |
-| E05.8  | `project binding list <projectId>`                                                                                                                                                                                                                                   | 0    | `items[0].kind === "repository"`; `nextCursor: null`                                                                          |
-| E05.9  | `project binding get <projectId> <bindingId>`                                                                                                                                                                                                                        | 0    | stdout has `id`, `projectId`, `name`, `kind: "repository"`, `resourceIdentity`, `revision: 1`, `createdAt`; `removedAt: null` |
-| E05.10 | `project binding export <projectId>`                                                                                                                                                                                                                                 | 0    | stdout has `version: 2`; `bindings` object keyed by binding name; parses as `BindingSetWrite`                                 |
-| E05.11 | `project binding revision list <projectId> <bindingId>`                                                                                                                                                                                                              | 0    | `items` has one revision; `nextCursor: null`                                                                                  |
-| E05.12 | `worker agent enablement put swe@1 --file <e.json>`; `project binding apply <projectId> --file <v2.json>` (adds worker binding `worker: "general@1"`, `entries: [{ agent: "swe@1", agentProvider: "default" }]`); `project agent list <projectId> <workerBindingId>` | 0    | agent list `items` has one entry; `items[0].agent === "swe@1"`; `items[0].valid === true`                                     |
-| E05.13 | `project agent get <projectId> <workerBindingId> swe@1`                                                                                                                                                                                                              | 0    | stdout has `agent: "swe@1"`, `worker`, `workerBindingId`, `bindingSetVersion`; `valid: true`                                  |
-| E05.14 | `project create --name INVALID_NAME`                                                                                                                                                                                                                                 | 1    | stderr starts with `cli.project.create.invalid_name:`                                                                         |
-| E05.15 | `project binding apply <projectId> --file /nonexistent.json`                                                                                                                                                                                                         | 1    | stderr starts with `cli.file.not_found:`                                                                                      |
-| E05.16 | `project binding apply <projectId> --file <w.json>` (worker binding `worker: "general@1"` with `entries: [{ agent: "swe@1" }]`; no enablement for `swe@1` in the fixture)                                                                                            | 1    | stderr starts with `worker.agent.enablement.unavailable:`                                                                     |
-| E05.17 | `worker agent enablement put swe@1 --file <e.json>`; `project binding apply <projectId> --file <w.json>` (worker entry `{ agent: "swe@1", agentProvider: "default" }`); `worker agent enablement remove swe@1 --expected-revision 1`                                 | 1    | last command: stderr starts with `worker.agent.enablement.in_use:`                                                            |
-| E05.18 | Same setup as E05.17 (without the remove); `worker agent enablement put swe@1 --file <invalidating.json>` (removes the `default` provider that the binding entry references)                                                                                         | 1    | stderr starts with `worker.agent.enablement.invalidates_bindings:`                                                            |
+| Id     | Commands                                                                                                                                                                                                                                                                                                                           | Exit | Expect                                                                                                                                                                             |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| E05.1  | `credential create` (anthropic); `project create --name my-proj` (standIn active)                                                                                                                                                                                                                                                  | 0    | stdout has `id` starting with `project_`; `bindingSetVersion: 1`; `idempotencyKey` field                                                                                           |
+| E05.2  | Re-send `project create --name my-proj` with same `--idempotency-key`                                                                                                                                                                                                                                                              | 0    | Same `id` as E05.1 (idempotent replay)                                                                                                                                             |
+| E05.3  | `project list`                                                                                                                                                                                                                                                                                                                     | 0    | `items[0].name === "my-proj"`; `items[0].bindingSetVersion === 1`; `nextCursor: null`                                                                                              |
+| E05.4  | `project get <projectId>`                                                                                                                                                                                                                                                                                                          | 0    | stdout has `id`, `name`, `bindingSetVersion`, `createdAt`                                                                                                                          |
+| E05.5  | `project rename <projectId> --name my-proj-2`                                                                                                                                                                                                                                                                                      | 0    | stdout has `name: "my-proj-2"`; `idempotencyKey` field                                                                                                                             |
+| E05.6  | `credential create` (github); `project binding apply <projectId> --file <v1.json>` (one repository binding: `git@github.com:owner/repo.git`, credential `github`; `gitLsRemote` injected as no-op)                                                                                                                                 | 0    | stdout has `bindingSetVersion: 2`; `changes[0].kind === "created"`; `idempotencyKey` field                                                                                         |
+| E05.7  | Re-send `project binding apply` with same `--idempotency-key`                                                                                                                                                                                                                                                                      | 0    | Same `bindingSetVersion: 2`                                                                                                                                                        |
+| E05.8  | `project binding list <projectId>`                                                                                                                                                                                                                                                                                                 | 0    | `items[0].kind === "repository"`; `nextCursor: null`                                                                                                                               |
+| E05.9  | `project binding get <projectId> <bindingId>`                                                                                                                                                                                                                                                                                      | 0    | stdout has `id`, `projectId`, `name`, `kind: "repository"`, `resourceIdentity`, `revision: 1`, `createdAt`; `removedAt: null`                                                      |
+| E05.10 | `project binding export <projectId>`                                                                                                                                                                                                                                                                                               | 0    | stdout has `version: 2`; `bindings` object keyed by binding name; parses as `BindingSetWrite`                                                                                      |
+| E05.11 | `project binding revision list <projectId> <bindingId>`                                                                                                                                                                                                                                                                            | 0    | `items` has one revision; `nextCursor: null`                                                                                                                                       |
+| E05.12 | `worker agent enablement put swe@1 --file <e.json>`; `project binding apply <projectId> --file <v2.json>` (adds worker binding `worker: "general@1"`, `entries: [{ agent: "swe@1", agentProvider: "default", modelIdentifier: "claude-sonnet-4-5", reasoningEffort: "off" }]`); `project agent list <projectId> <workerBindingId>` | 0    | agent list `items` has one entry; `items[0].agent === "swe@1"`; `items[0].valid === true`                                                                                          |
+| E05.13 | In the same fixture, run the E05.12 setup; then `project agent get <projectId> <workerBindingId> swe@1`                                                                                                                                                                                                                            | 0    | stdout has `agent: "swe@1"`, `worker`, `workerBindingId`, `bindingSetVersion`; `valid: true`                                                                                       |
+| E05.14 | `project create --name INVALID_NAME`                                                                                                                                                                                                                                                                                               | 1    | stderr starts with `cli.project.create.invalid_name:`                                                                                                                              |
+| E05.15 | `project binding apply <projectId> --file /nonexistent.json`                                                                                                                                                                                                                                                                       | 1    | stderr starts with `cli.file.not_found:`                                                                                                                                           |
+| E05.16 | `project binding apply <projectId> --file <w.json>` (worker binding `worker: "general@1"` with `entries: [{ agent: "swe@1", modelIdentifier: "claude-sonnet-4-5" }]`; no enablement for `swe@1` in the fixture)                                                                                                                    | 1    | stderr starts with `worker.agent.enablement.unavailable:`                                                                                                                          |
+| E05.17 | `worker agent enablement put swe@1 --file <e.json>`; `project binding apply <projectId> --file <w.json>` (worker entry `{ agent: "swe@1", agentProvider: "default", modelIdentifier: "claude-sonnet-4-5", reasoningEffort: "off" }`); `worker agent enablement remove swe@1 --expected-revision 1`                                 | 1    | last command: stderr starts with `worker.agent.enablement.in_use:`                                                                                                                 |
+| E05.18 | Same setup as E05.17 (without the remove); put `<invalidating.json>` with only `backup` on the same credential and defaults naming `backup`, removing the bound `default` provider.                                                                                                                                                | 1    | stderr starts `worker.agent.enablement.provider.in_use:`; CLI reads show unchanged enablement revision and defaults, and unchanged stored entry with agent view `valid: true`      |
+| E05.19 | Enable swe@1 with default provider `default`, model `claude-sonnet-4-6`, effort `off`; bind a tuning entry `{ agent: "swe@1", reasoningEffort: "max" }`; put a new enablement with default model `claude-sonnet-4-5`.                                                                                                              | 1    | stderr starts `worker.agent.enablement.invalidates_bindings:`; CLI reads show unchanged enablement revision and defaults, and unchanged stored entry with agent view `valid: true` |
 
 `bindingsNaming` and `liveNodesPinning` are proved in colocated tests only; ERD 1 has no
 credential removal route that reaches `bindingsNaming`, and `liveNodesPinning` guards the
