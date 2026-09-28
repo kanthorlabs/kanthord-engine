@@ -45,13 +45,11 @@ test("E04.1 serve refuses startup when git is absent from PATH", async (t) => {
   );
 });
 
-test("E04.2 GET /api/healthcheck returns repository.toolchain map", async (t) => {
+test("E04.2 GET /api/liveness returns repository.toolchain map", async (t) => {
   const fixture = await gatewayFixture(t);
-  const response = await fixture.request(gatewayOperations.healthcheck.path);
+  const response = await fixture.request(gatewayOperations.liveness.path);
   assert.equal(response.status, HttpStatus.OK);
-  const body = gatewayOperations.healthcheck.output.parse(
-    await response.json(),
-  );
+  const body = gatewayOperations.liveness.output.parse(await response.json());
   assert.deepEqual(body.services.repository, {
     toolchain: HealthStatus.Healthy,
   });

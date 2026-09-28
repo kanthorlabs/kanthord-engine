@@ -8,6 +8,7 @@ import { Idempotency } from "./idempotency.ts";
 import { Invocation } from "./invocation.ts";
 export { GatewayService, type GatewayDependencies } from "./service.ts";
 export { gatewayMigrations } from "./migrations.ts";
+export { collectInventories } from "./health-report.ts";
 export { gatewayConfigSchema, type GatewayConfig } from "./config.ts";
 export { directClient } from "./direct-client.ts";
 export { GATEWAY_STARTED_MESSAGE } from "./constants.ts";

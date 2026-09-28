@@ -385,8 +385,8 @@ can themselves be absent. There is no declared counter-query schema or dedicated
 Tracking statistics/status operation.
 
 Server component health belongs to the ruled [`gateway.liveness` operation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#component-healthchecks),
-`GET /api/liveness`, access `public`; the current source still serves this
-contract as `gateway.healthcheck` at `GET /api/healthcheck`, declared in the
+`GET /api/liveness`, access `public`; the source serves this
+contract as `gateway.liveness` at `GET /api/liveness`, declared in the
 [Gateway contract](../../src/gateway/contract.ts). It reports registered
 components, not fictitious health for an absent Tracking service. Tracking is
 an internal component, not an external resource, so it has no resource

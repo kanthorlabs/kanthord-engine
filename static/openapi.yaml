@@ -22,6 +22,8 @@ paths:
     $ref: ./openapi/credential/update_metadata.yaml#/pathItem
   /api/healthcheck:
     $ref: ./openapi/gateway/healthcheck.yaml#/pathItem
+  /api/liveness:
+    $ref: ./openapi/gateway/liveness.yaml#/pathItem
   /api/openapi.yaml:
     $ref: ./openapi/gateway/openapi.yaml#/pathItem
   /api/openapi/{service}/{file}:

@@ -17,6 +17,7 @@ import {
   type AuthenticationLookups,
 } from "./authentication.ts";
 import { gatewayConfigSchema, type GatewayConfig } from "./config.ts";
+import type { InventoryCollector } from "./contract.ts";
 import { gatewayMigrations } from "./migrations.ts";
 import { GatewayService } from "./service.ts";
 import { createInvocation } from "./index.ts";
@@ -101,6 +102,7 @@ export function composeGateway(options: {
   registry?: OperationRegistry;
   health?: HealthRegistry;
   lookups?: AuthenticationLookups;
+  collect?: InventoryCollector;
 }): GatewayService {
   const registry = options.registry ?? new OperationRegistry();
   const invocation = createInvocation({
@@ -118,7 +120,11 @@ export function composeGateway(options: {
     invocation,
     health: options.health,
   });
-  gateway.declare(registry);
+  gateway.declare(
+    registry,
+    options.collect ?? (() => ({ entries: [], missingInventories: [] })),
+    options.logger,
+  );
   registry.seal({ [StoreName.Operational]: options.store });
   return gateway;
 }
@@ -129,6 +135,7 @@ export async function gatewayFixture(
     registry?: OperationRegistry;
     health?: HealthRegistry;
     lookups?: AuthenticationLookups;
+    collect?: InventoryCollector;
     path?: string;
   } = {},
 ) {

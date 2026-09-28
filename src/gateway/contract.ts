@@ -11,9 +11,49 @@ import {
   MAX_HUMAN_USERNAME_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
 } from "../kernel/caller.ts";
-import { componentHealthSchema } from "../kernel/health.ts";
+import {
+  componentHealthSchema,
+  ResourceStatus,
+  type ResourceEntry,
+} from "../kernel/health.ts";
+import type { Transaction } from "../kernel/store.ts";
 import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
 export const HEALTHCHECK_OK = "ok" as const;
+export const MAX_CONCURRENT_CHECKS = 32;
+export const RESOURCE_CHECK_DEADLINE_MS = 10000;
+export const REPORT_MARGIN_MS = 5000;
+export const OWNER_CUSTODY = "custody";
+export const OWNER_WORKER = "worker";
+export const OWNER_PROJECT = "project";
+
+export type InventoryOwner =
+  typeof OWNER_CUSTODY | typeof OWNER_WORKER | typeof OWNER_PROJECT;
+export interface ResourceInventories {
+  custody: (tx: Transaction) => ResourceEntry[];
+  worker: (tx: Transaction) => ResourceEntry[];
+  project: (tx: Transaction) => ResourceEntry[];
+}
+export interface InventorySnapshot {
+  entries: { owner: InventoryOwner; entry: ResourceEntry }[];
+  missingInventories: InventoryOwner[];
+}
+export type InventoryCollector = () => InventorySnapshot;
+
+export const resourceEntrySchema = z.strictObject({
+  status: z.enum([
+    ResourceStatus.Healthy,
+    ResourceStatus.Unhealthy,
+    ResourceStatus.Unknown,
+  ]),
+  capability: z.string().min(1),
+});
+const resourceMapSchema = z.record(z.string().min(1), resourceEntrySchema);
+const ownerSchema = z
+  .strictObject({
+    global: resourceMapSchema,
+    projects: z.record(z.string().min(1), resourceMapSchema),
+  })
+  .meta({ id: "ResourceHealthOwner" });
 
 const base = {
   service: "gateway",
@@ -25,18 +65,37 @@ const base = {
   status: HttpStatus.OK,
 } as const;
 export const gatewayOperations = {
-  healthcheck: {
+  liveness: {
     ...base,
-    id: "gateway.healthcheck",
+    id: "gateway.liveness",
     method: HttpMethod.Get,
-    path: "/api/healthcheck",
+    path: "/api/liveness",
     input: emptyInput,
     output: z.strictObject({
       status: z.literal(HEALTHCHECK_OK),
       services: z.record(z.string(), componentHealthSchema),
     }),
     description:
-      "Report the owned component status of every registered service, including the server's SQLite store and log. Any unavailable service or component returns 503 with the complete service map in error.details.",
+      "Report component liveness for every registered service, including the server's SQLite store and log. Any unavailable service or component returns 503 with the complete service map in error.details.",
+  },
+  healthcheck: {
+    ...base,
+    id: "gateway.healthcheck",
+    method: HttpMethod.Get,
+    path: "/api/healthcheck",
+    access: AccessPolicy.Human,
+    timeoutMs: 120000,
+    input: emptyInput,
+    output: z.strictObject({
+      services: z.strictObject({
+        project: ownerSchema,
+        intake: ownerSchema,
+        worker: ownerSchema,
+      }),
+      shared: z.strictObject({ custody: ownerSchema }),
+    }),
+    description:
+      "Check resource health on demand, grouped by owner and scope. Returns every inventory entry with status and capability, including unknown for unfinished checks. A missing inventory returns 503 with missingInventories in error.details.",
   },
   verify: {
     ...base,

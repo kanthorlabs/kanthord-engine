@@ -118,7 +118,7 @@ test("HTTP against a closed port is indeterminate", async () => {
   const result = await httpClient(
     gatewayOperations,
     `http://127.0.0.1:${address.port}`,
-  ).healthcheck(input);
+  ).liveness(input);
   assert.equal(result.type, OperationResultType.Indeterminate);
 });
 

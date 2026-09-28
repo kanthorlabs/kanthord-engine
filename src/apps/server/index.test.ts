@@ -71,11 +71,9 @@ function layout(directory: string) {
 
 test("composition starts all six services and registers the real repository toolchain probe", async (t) => {
   const fixture = await gatewayFixture(t);
-  const response = await fixture.request(gatewayOperations.healthcheck.path);
+  const response = await fixture.request(gatewayOperations.liveness.path);
   assert.equal(response.status, HttpStatus.OK);
-  const body = gatewayOperations.healthcheck.output.parse(
-    await response.json(),
-  );
+  const body = gatewayOperations.liveness.output.parse(await response.json());
   for (const [name, checks] of Object.entries(domainHealth))
     assert.deepEqual(body.services[name], checks, name);
   assert.equal(body.services.gateway?.listener, HealthStatus.Healthy);
@@ -259,7 +257,7 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
   const health = await new Promise<{ status: number; body: string }>(
     (resolve, reject) => {
       const call = request(
-        `http://127.0.0.1:${port}/api/healthcheck`,
+        `http://127.0.0.1:${port}/api/liveness`,
         { headers: { Host: "localhost" } },
         (response) => {
           let body = "";

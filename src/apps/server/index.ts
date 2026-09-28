@@ -40,7 +40,11 @@ import { OperationalLog } from "../../kernel/log.ts";
 import { Store } from "../../kernel/store.ts";
 import { HealthRegistry } from "../../kernel/health.ts";
 import { GatewayService } from "../../gateway/index.ts";
-import { gatewayMigrations, createInvocation } from "../../gateway/index.ts";
+import {
+  gatewayMigrations,
+  createInvocation,
+  collectInventories,
+} from "../../gateway/index.ts";
 import { ProjectService, projectMigrations } from "../../project/index.ts";
 import { WorkerService, workerMigrations } from "../../worker/index.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
@@ -151,7 +155,18 @@ export function composeServices(options: {
     invocation,
     health: options.health,
   });
-  gateway.declare(registry);
+  gateway.declare(
+    registry,
+    () =>
+      options.store.transaction((tx) =>
+        collectInventories(tx, {
+          custody: (tx) => custody.resourceInventory(tx),
+          worker: (tx) => worker.resourceInventory(tx),
+          project: (tx) => project.resourceInventory(tx),
+        }),
+      ),
+    options.logger,
+  );
   registry.seal({ [StoreName.Operational]: options.store });
   return {
     scheduler,

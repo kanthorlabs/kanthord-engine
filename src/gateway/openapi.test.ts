@@ -18,7 +18,7 @@ test("OpenAPI projection validates service scopes without making the kernel regi
   const registry = new OperationRegistry();
   assert.doesNotThrow(() =>
     registry.register(
-      { ...gatewayOperations.healthcheck, service: "../escape" },
+      { ...gatewayOperations.liveness, service: "../escape" },
       () => ({
         status: HEALTHCHECK_OK,
         services: { gateway: { listener: HealthStatus.Healthy } },
@@ -34,7 +34,7 @@ test("OpenAPI projection validates service scopes without making the kernel regi
 test("OpenAPI scopes isolate services and keep methods sharing a path in one referenced path item", async (t) => {
   const root = temporary(t);
   const read = {
-    ...gatewayOperations.healthcheck,
+    ...gatewayOperations.liveness,
     id: "project.read",
     service: "project",
     path: "/api/projects/:projectId",
@@ -51,7 +51,7 @@ test("OpenAPI scopes isolate services and keep methods sharing a path in one ref
     mutation: true,
   } as const;
   const mission = {
-    ...gatewayOperations.healthcheck,
+    ...gatewayOperations.liveness,
     id: "mission.read",
     service: "mission",
     path: "/api/mission",

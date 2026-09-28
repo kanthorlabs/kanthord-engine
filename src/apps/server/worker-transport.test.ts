@@ -14,10 +14,10 @@ const ExpectedErrorCode = {
   HostNotAllowed: "gateway.http.host_not_allowed",
   BodyTooLarge: "gateway.request.body_too_large",
 } as const;
-test("real listener serves unversioned health, applies host/origin policy and uses one failure envelope", async (t) => {
+test("real listener serves unversioned liveness, applies host/origin policy and uses one failure envelope", async (t) => {
   const fixture = await gatewayFixture(t);
   fixture.config.gateway.allowedOrigins.push("https://allowed.example");
-  const response = await fixture.request("/api/healthcheck");
+  const response = await fixture.request("/api/liveness");
   assert.equal(response.status, HttpStatus.OK);
   assert.deepEqual(await response.json(), {
     status: "ok",
@@ -53,7 +53,7 @@ test("real listener serves unversioned health, applies host/origin policy and us
   const forbidden = await new Promise<{ status: number; body: string }>(
     (resolve, reject) => {
       const request = httpRequest(
-        fixture.endpoint + "/api/healthcheck",
+        fixture.endpoint + "/api/liveness",
         { headers: { Host: "evil.example", "X-Forwarded-Host": "localhost" } },
         (response) => {
           let body = "";
@@ -89,19 +89,19 @@ test("real listener serves unversioned health, applies host/origin policy and us
     ALLOWED_ORIGIN,
   );
   assert.equal(preflight.headers.get("access-control-allow-credentials"), null);
-  const untrusted = await fixture.request("/api/healthcheck", {
+  const untrusted = await fixture.request("/api/liveness", {
     headers: { Origin: "https://evil.example" },
   });
   assert.equal(untrusted.headers.get("access-control-allow-origin"), null);
   const client = testClient(fixture.gateway.app) as unknown as {
     api: {
-      healthcheck: {
+      liveness: {
         $get: (input: object, options: object) => Promise<Response>;
       };
     };
   };
   assert.equal(
-    (await client.api.healthcheck.$get({}, { headers: { Host: "localhost" } }))
+    (await client.api.liveness.$get({}, { headers: { Host: "localhost" } }))
       .status,
     HttpStatus.OK,
   );

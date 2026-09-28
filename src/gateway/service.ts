@@ -34,7 +34,7 @@ import { GatewayError, respondError } from "./errors.ts";
 import type { Idempotency } from "./idempotency.ts";
 import type { Invocation } from "./invocation.ts";
 import { parseJSON } from "./json.ts";
-import { gatewayOperations } from "./contract.ts";
+import { gatewayOperations, type InventoryCollector } from "./contract.ts";
 import { registerGatewayOperations } from "./declarations.ts";
 import { AccessPolicy, OperationLifetime } from "../kernel/operation.ts";
 import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
@@ -84,9 +84,16 @@ export class GatewayService implements Service {
     this.app = this.createApp();
   }
 
-  declare(registry: OperationRegistry): void {
-    registerGatewayOperations(registry, (context) =>
-      this.health.check(context),
+  declare(
+    registry: OperationRegistry,
+    collect: InventoryCollector,
+    logger: Logger,
+  ): void {
+    registerGatewayOperations(
+      registry,
+      (context) => this.health.check(context),
+      collect,
+      logger,
     );
   }
 

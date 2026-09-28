@@ -592,7 +592,7 @@ test("component health reports stopped in-memory idempotency with integer codes"
   assert.equal(components.listener, HealthStatus.Healthy);
   assert.equal(components.authentication, HealthStatus.Healthy);
   assert.ok(Object.values(components).every(Number.isInteger));
-  const response = await fixture.request("/api/healthcheck");
+  const response = await fixture.request("/api/liveness");
   assert.equal(response.status, HttpStatus.ServiceUnavailable);
   const body = errorSchema.parse(await response.json());
   assert.deepEqual(body.error.details, { gateway: components });

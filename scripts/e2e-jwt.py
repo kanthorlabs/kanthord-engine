@@ -298,7 +298,7 @@ class Run:
             require(self.daemon.poll() is None, "Server exited before readiness")
             # A refused connection is expected only while this fresh listener binds.
             try:
-                status, body = self.request("/api/healthcheck")
+                status, body = self.request("/api/liveness")
             except ConnectionRefusedError:
                 status, body = None, None
             if status == 200:

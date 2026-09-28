@@ -397,8 +397,8 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   assert.match(mission.id, /^mission_/);
   assert.equal(mission.projectId, project.id);
   assert.equal(mission.version, MISSION_INITIAL_VERSION);
-  const health = await fixture.request(gatewayOperations.healthcheck.path);
-  gatewayOperations.healthcheck.output.parse(await health.json());
+  const health = await fixture.request(gatewayOperations.liveness.path);
+  gatewayOperations.liveness.output.parse(await health.json());
   const published = await fixture.request("/api/openapi.yaml");
   assert.equal(published.status, HttpStatus.OK);
   assert.match(published.headers.get("content-type")!, /application\/yaml/);

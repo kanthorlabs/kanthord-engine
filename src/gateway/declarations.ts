@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import type { Logger } from "pino";
 import { dirname, join } from "node:path";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import { isHumanIdentity } from "../kernel/caller.ts";
@@ -7,7 +8,12 @@ import type { ServiceHealthchecks } from "../kernel/health.ts";
 import type { Context } from "../kernel/context.ts";
 import { GatewayError, unauthorized } from "./errors.ts";
 import { OPENAPI_INDEX_FILE, openAPIFileNames } from "./openapi.ts";
-import { gatewayOperations, HEALTHCHECK_OK } from "./contract.ts";
+import {
+  gatewayOperations,
+  HEALTHCHECK_OK,
+  type InventoryCollector,
+} from "./contract.ts";
+import { resourceHealthReport } from "./health-report.ts";
 import { openapiPath } from "./local.ts";
 
 const EMPTY_SERVICE_COUNT = 0;
@@ -15,19 +21,24 @@ const EMPTY_SERVICE_COUNT = 0;
 export function registerGatewayOperations(
   registry: OperationRegistry,
   healthcheck: (context: Context) => Promise<ServiceHealthchecks>,
+  collect: InventoryCollector,
+  logger: Logger,
 ): void {
-  registry.register(gatewayOperations.healthcheck, async (_input, caller) => {
+  registry.register(gatewayOperations.liveness, async (_input, caller) => {
     const services = await healthcheck(caller.context);
     const checks = Object.values(services);
     if (checks.length === EMPTY_SERVICE_COUNT || !checks.every(healthy))
       throw new GatewayError(
         503,
-        "gateway.healthcheck.unhealthy",
+        "gateway.liveness.unhealthy",
         "One or more services are unavailable.",
         services,
       );
     return { status: HEALTHCHECK_OK, services };
   });
+  registry.register(gatewayOperations.healthcheck, (_input, caller) =>
+    resourceHealthReport(caller, collect, logger),
+  );
   registry.register(gatewayOperations.verify, (_input, caller) => {
     if (!isHumanIdentity(caller.identity)) throw unauthorized();
     return {
