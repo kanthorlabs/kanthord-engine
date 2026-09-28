@@ -1,14 +1,14 @@
 # Agent instructions
 
 The design pages and implementation siblings in the kanthord repository under
-`docs/brainstorm/` hold the rules. This file explains where things are and how to
-do routine contributor tasks.
+`docs/brainstorm/` hold the rules. This file explains where things are, how to
+do routine contributor tasks, and the working rules for agents.
 
 ## Project structure
 
 ```text
 engine/
-├── AGENTS.md                    # Project map and routine contributor tasks
+├── AGENTS.md                    # Project map, contributor tasks, and working rules
 ├── README.md                    # Project entry point
 ├── package.json                 # Runtime requirements, dependencies, and commands
 ├── pnpm-lock.yaml               # Locked dependency graph
@@ -218,3 +218,18 @@ pnpm run build && node bin/kanthord.mjs gateway openapi
 
 Review the changes under `static/`. Run `pnpm run verify`; the projection and
 HTTP integration tests compare the generated files with the published assets.
+
+## Working rules
+
+- Keep no backward compatibility. The project has no deployment yet.
+- Edit `.agents/plan/*` only in a main session or by hand. `scripts/lane-check.sh`
+  denies it to every lane role.
+- Never plan a story whose change edits a plan document. No lane role can
+  execute it, and a `Paths:` line cannot authorize it.
+- Expect other sessions to write sibling plans at the same time. Before you ask
+  for a ruling on a shared token, list `.agents/plan/` again and search the
+  sibling plans for the token. Name each sibling that already made the choice.
+- Re-anchor a drifted `file:line` citation to the sentence or code block that
+  the citing text means. Never re-anchor it to the first match of the identifier.
+- Re-anchor only the citations that your own edit shifted, in the files that
+  you edited. Leave other drift alone.
