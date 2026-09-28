@@ -382,7 +382,7 @@ No query fields are accepted. The required file supplies the following fields.
   leaves the attempt open; it never opens a replacement attempt by itself.
 - A steps release with no further work requires the evidence and task-result
   obligations owned by Mission/Worker. A steps release with further work
-  requires the accepted run output and checkpoint/push obligations of
+  requires the checkpoint/push obligations of
   Worker. Those records are submitted through their owning services; the
   release body contains no evidence, assessment, outcome or shell command.
 - A reviewer release is supported only after the current passing assessment
