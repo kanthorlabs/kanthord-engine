@@ -30,7 +30,7 @@ const endpoint = z.url().refine((value) => {
     !url.hash
   );
 });
-const clientSchema = z.strictObject({
+export const clientSchema = z.strictObject({
   endpoint: endpoint.optional(),
   token: z.string().min(1).optional(),
   clientSecret: z.string().optional(),
@@ -42,6 +42,14 @@ export interface ClientConfiguration {
 }
 export const clientConfigPath = (env = process.env) =>
   join(directories(env).config, "cli.yaml");
+
+export function validateClientEndpoint(value: string): void {
+  if (!endpoint.safeParse(value).success)
+    throw new Diagnostic(
+      "cli.config.invalid_endpoint",
+      "endpoint: expected an absolute HTTP(S) URL without credentials, query or fragment.",
+    );
+}
 
 export function resolveClient(
   options: Partial<ClientConfiguration> = {},
@@ -67,11 +75,7 @@ export function resolveClient(
     token: options.token ?? env.KANTHORD_TOKEN ?? stored.token,
     clientSecret: stored.clientSecret,
   };
-  if (!endpoint.safeParse(resolved.endpoint).success)
-    throw new Diagnostic(
-      "cli.config.invalid_endpoint",
-      "endpoint: expected an absolute HTTP(S) URL without credentials, query or fragment.",
-    );
+  validateClientEndpoint(resolved.endpoint);
   return resolved;
 }
 

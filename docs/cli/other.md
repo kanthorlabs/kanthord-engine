@@ -154,17 +154,18 @@ present, it accepts only optional `endpoint`, `token` and `clientSecret` fields
 in one YAML mapping. It shares the bounded YAML parser described under
 [server configuration](#server-configuration).
 
-The operator supplies the file manually. Current file checks require a regular
-file owned by the running user with exact mode `0600`, reject symlinks and
+`jwt generate --output` in human mode creates an absent file. The operator may
+also write it manually. Current file checks require a regular file owned by
+the running user with exact mode `0600`, reject symlinks and
 special permission bits, and validate the opened descriptor using
 `O_NOFOLLOW`. A narrower mode is rejected as well as a wider one. The resolver
 reads and validates a present file even when flags override both values, so
 an invalid file still fails the invocation.
 
-The current CLI reads this file and provides no client-config create, update,
-delete, login, logout, credential-saving, or secret-rotation commands. The server never
-reads it. Issuing or using a token does not save it here. Local service commands
-that do not resolve a client, notably `gateway openapi`, do not read it.
+No command updates or deletes this file. No login, logout or secret-rotation
+command exists. The server never reads it. Issuance without `--output` saves
+nothing here. Using a token does not save it here. Local service commands that
+do not resolve a client, notably `gateway openapi`, do not read it.
 
 The worker application uses the same
 [`--endpoint`](./common-flags.md#--endpoint) and
@@ -185,9 +186,11 @@ Current domain results (`gateway verify`, `worker register`) are one JSON value
 followed by a newline on stdout. `worker register` includes its idempotency key.
 Local output has explicit exceptions: help is text, `config init` and
 `config validate` print status/path text, `config show` prints masked YAML, and
-`jwt generate` prints a human token or a machine client fragment only to terminal stdout. `jwt inspect`
-prints the claim list to any stdout. `serve` is long-running and
-produces operational logs, not a domain-result JSON object.
+`jwt generate` without `--output` prints a human token or a machine client
+fragment only to terminal stdout. With `--output`, it prints the created file
+path to any stdout. `jwt inspect` prints the claim list to any stdout.
+`serve` is long-running and produces operational logs, not a domain-result
+JSON object.
 
 **PROPOSED:** new unary domain commands follow the existing JSON result style
 without requiring a `--json` flag. Their owning pages define the exact result
@@ -523,16 +526,18 @@ and a stop deadline in those cases remain **blocked** under [HANDOFF B9](https:/
 
 ## Local JWT issuance
 
-JWT generation has two mutually exclusive modes under the `jwt` group. Both call **no route**, require **no running server**, open **no database**,
-and write **no file**. Possession of the validated server configuration provides
-the signing material; there is no API access policy to pass on this local path.
+JWT generation has two mutually exclusive modes under the `jwt` group. Both
+call **no route**, require **no running server**, and open **no database**.
+Without `--output`, they write **no file**. Possession of the validated server
+configuration provides the signing material; there is no API access policy
+to pass on this local path.
 Gateway owns subsequent JWT verification and access policy; see
 [Gateway commands and JWT use](./gateway.md).
 
 ### Human token
 
 ```text
-kanthord jwt generate [username] [--name <display>] [--config <path>]
+kanthord jwt generate [username] [--name <display>] [--output [path]] [--endpoint <url>] [--config <path>]
 ```
 
 - `username`: optional positional string, default `kanthorlabs`, the exported
@@ -549,6 +554,45 @@ kanthord jwt generate [username] [--name <display>] [--config <path>]
   mode; combining it with a username is an error, not two issuance requests.
 - [`--help`](./common-flags.md#--help): displays the default username and
   resolved configuration path.
+- `--output [path]`: write a new private client configuration file instead of
+  the token on stdout. Without a value, use the default client path,
+  `<XDG configuration directory>/kanthord/cli.yaml`, normally
+  `~/.config/kanthord/cli.yaml`. Resolve an explicit relative path against the
+  working directory. The command creates an absent file only. Readers use only
+  the default path; a file at another path is an export.
+- `--endpoint <url>`: endpoint written to the `--output` file. It requires
+  `--output`. Use an absolute HTTP(S) URL without credentials, query or fragment,
+  under the [endpoint rule](./common-flags.md#--endpoint). The command contacts
+  no server. It does not copy an endpoint from the environment or an existing
+  client file.
+
+Before configuration load or signing, check these conditions in order:
+
+1. A username with `--binding` fails with `cli.jwt.username_with_binding`.
+2. `--output` with `--binding` fails with `cli.jwt.output_with_binding`.
+3. `--endpoint` without `--output` fails with `cli.jwt.endpoint_without_output`.
+4. An invalid `--endpoint` fails with `cli.config.invalid_endpoint`.
+
+These failures write no file and print no token. Without `--output`, the
+terminal requirement and token output stay unchanged. With `--output`, no
+terminal check applies. Validate the document with the client configuration
+schema, then serialize it as YAML. It holds only `token`, or `endpoint` then
+`token` when `--endpoint` is given.
+
+Create an absent destination directory at `0700`. Write a same-directory
+`0600` temporary file, flush and close it, then link it to the destination
+without replacement and remove the temporary file. An existing destination
+fails with `system.files.publish_failed` and stays byte-identical. No force
+option exists. A failed publication prints no token.
+
+On success stdout is exactly `Created <absolute path>\n`. With `--verbose`,
+the existing claim list follows that line. The token is never printed to
+stdout or stderr when `--output` is used.
+
+```sh
+kanthord jwt generate --output
+kanthord jwt generate ulrich --output ./ulrich.cli.yaml --endpoint https://tunnel.example
+```
 
 Generate claims `kind: "human"`, `sub: <username>`, and `name: <display>`, with
 no `binding`. Reissuing for the same username preserves that subject but
@@ -623,8 +667,9 @@ jti: 01K6...
 ---
 ```
 
-`jwt generate --verbose` prints this same claim list after the human JWT line
-or the two-line machine fragment.
+`jwt generate --verbose` prints this same claim list after the human JWT line,
+the two-line machine fragment, or the `Created <absolute path>` line with
+`--output`.
 
 ### Signing, output, errors, and persistence
 
@@ -638,20 +683,26 @@ The CLI has no lifetime, algorithm, issuer, audience, custom-claims, subject-ID,
 or signing-key override flags.
 The [Gateway JWT ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-jwt) declares the closed header and claim contract.
 
-After argument validation and the username/binding conflict check, stdout must
-be a terminal. A file, pipe, command substitution, or other non-terminal stdout
-fails with `cli.output.terminal_required` and exit `1`, before configuration
-loading and token signing. Stdin need not be a terminal and is never read.
+After argument validation and the option conflict checks, stdout must be a
+terminal unless `--output` is given. Without `--output`, a file, pipe, command
+substitution, or other non-terminal stdout fails with
+`cli.output.terminal_required` and exit `1`, before configuration loading and
+token signing. Stdin need not be a terminal and is never read.
 
-Without `--verbose`, human mode prints exactly `<JWT>\n`. Machine mode prints
-exactly `token: <jwt>\nclientSecret: <secret>\n`, as shown above. Exit is `0`.
-With `--verbose`, the same claim list follows the human JWT line or the machine
-fragment. It adds no client secret to the claims.
-No secret is printed to stderr. Invalid inputs, an absent or
-invalid configuration, failed terminal check, or signing failure exits nonzero
-without a successful token result. There is no output-file option or automatic
-client-config persistence. Terminal-only output does not detect a terminal
-recorder.
+Without `--output` or `--verbose`, human mode prints exactly `<JWT>\n`.
+Machine mode prints exactly `token: <jwt>\nclientSecret: <secret>\n`, as shown
+above. Exit is `0`. With `--verbose`, the same claim list follows the human JWT
+line or the machine fragment. It adds no client secret to the claims.
+No secret is printed to stderr. Invalid inputs, an absent or invalid
+configuration, failed terminal check, or signing failure exits nonzero without
+a successful token result.
+
+`--output` saves a human token in an absent private client configuration file
+under the [human-token rules](#human-token). It prints only
+`Created <absolute path>\n`, followed by claims when `--verbose` is given.
+It never prints the token, including on a failed publication. Readers use only
+the default client path. Without `--output`, issuance saves no client
+configuration. Terminal-only output does not detect a terminal recorder.
 
 Issuance and a server restart without a configuration change revoke no earlier
 token. Under the [Gateway signing key
@@ -707,7 +758,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `gateway.client.version_unavailable`             | The OpenAPI index cannot supply a valid server package version.                                | serve worker                                              |
 | local           | `cli.command.required`                           | No command was supplied.                                                                       | kanthord                                                  |
 | local           | `cli.config.invalid`                             | The stored `cli.yaml` fails the client configuration schema.                                   | client commands, serve worker                             |
-| local           | `cli.config.invalid_endpoint`                    | The resolved endpoint is not an absolute HTTP(S) URL without credentials, query or fragment.   | remote commands, serve worker                             |
+| local           | `cli.config.invalid_endpoint`                    | The resolved endpoint is not an absolute HTTP(S) URL without credentials, query or fragment.   | remote commands, serve worker, jwt generate               |
 | local           | `cli.file.duplicate_key`                         | The JSON input repeats an object key.                                                          | commands with `--file`                                    |
 | local           | `cli.file.encoding_invalid`                      | The input file is not valid UTF-8.                                                             | commands with `--file`                                    |
 | local           | `cli.file.invalid_path`                          | The `--file` value is `-`; standard input is not accepted.                                     | commands with `--file`                                    |
@@ -717,8 +768,10 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `cli.file.not_regular`                           | The `--file` path names a directory, a device or another non-regular file.                     | commands with `--file`                                    |
 | local           | `cli.file.schema_invalid`                        | The JSON object does not match the command input schema.                                       | commands with `--file`                                    |
 | local           | `cli.idempotency_key.invalid`                    | The `--idempotency-key` value is not a canonical ULID.                                         | mutations with `--idempotency-key`                        |
+| local           | `cli.jwt.endpoint_without_output`                | `--endpoint` is given without `--output`.                                                      | jwt generate                                              |
 | local           | `cli.jwt.inspect.malformed_token`                | The token is not three base64url segments with a JSON object header and a JSON object payload. | jwt inspect                                               |
 | local           | `cli.jwt.inspect.token_required`                 | No argument, KANTHORD_TOKEN or cli.yaml token supplies a token.                                | jwt inspect                                               |
+| local           | `cli.jwt.output_with_binding`                    | `--output` is combined with `--binding`.                                                       | jwt generate                                              |
 | local           | `cli.jwt.username_with_binding`                  | A JWT request names a worker binding and a human username together.                            | jwt generate                                              |
 | local           | `cli.option.duplicate`                           | A single-use option appears more than once.                                                    | commands with single-use flags                            |
 | local           | `cli.output.terminal_required`                   | JWT output would go to a non-terminal standard output.                                         | jwt generate                                              |
@@ -771,11 +824,11 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `system.database.migration.duplicate_service`    | Two migration lists claim the same service name.                                               | serve server                                              |
 | local           | `system.database.migration.incompatible_history` | Stored migrations differ from the daemon migration list.                                       | serve server                                              |
 | local           | `system.database.open_failed`                    | The operational SQLite store cannot open.                                                      | serve server                                              |
-| local           | `system.files.create_failed`                     | A private state or configuration directory cannot be created.                                  | config init, serve server                                 |
+| local           | `system.files.create_failed`                     | A private state or configuration directory cannot be created.                                  | config init, serve server, jwt generate --output          |
 | local           | `system.files.inspect_failed`                    | The process cannot inspect a required private file or directory.                               | config commands, jwt generate, serve server, serve worker |
 | local           | `system.files.invalid_permissions`               | A required private path has the wrong type, owner or POSIX mode.                               | config commands, jwt generate, serve server, serve worker |
 | local           | `system.files.open_failed`                       | A private file cannot be opened without following symlinks.                                    | config commands, jwt generate, serve server, serve worker |
-| local           | `system.files.publish_failed`                    | The private file cannot be published or config init targets an existing file.                  | config init                                               |
+| local           | `system.files.publish_failed`                    | The private file cannot be published or the destination already exists.                        | config init, jwt generate --output                        |
 | local           | `system.lifecycle.stopped`                       | A stopped server cannot start again.                                                           | serve server                                              |
 | 409             | `system.operation.unknown`                       | An unknown error escapes a remote operation without a safe domain code.                        | remote commands                                           |
 | 400             | `system.pagination.cursor_invalid`               | The `--cursor` value is malformed or belongs to another listing.                               | paginated list commands                                   |

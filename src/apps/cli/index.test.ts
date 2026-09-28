@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { temporary } from "../../kernel/test-support.ts";
 import { initialConfig, loadConfig } from "../../config/index.ts";
 import { IdentityKind, CLIENT_IDENTITY_PREFIX } from "../../kernel/caller.ts";
@@ -15,12 +15,17 @@ import { decode, verify } from "hono/jwt";
 import { identitySchema } from "../../kernel/identity.ts";
 import { deriveKey } from "../../kernel/json.ts";
 import { parse, stringify } from "yaml";
-import { PRIVATE_FILE_MODE, writePrivate } from "../../kernel/files.ts";
-import { clientConfigPath } from "../../gateway/client.ts";
+import {
+  PRIVATE_DIRECTORY_MODE,
+  PRIVATE_FILE_MODE,
+  writePrivate,
+} from "../../kernel/files.ts";
+import { clientConfigPath, resolveClient } from "../../gateway/client.ts";
 
 import { ExitCode } from "./constants.ts";
 
 const EMPTY_OUTPUT = "";
+const JWT_OUTPUT = /eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
 const PROJECT_GET = "get";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -502,6 +507,13 @@ test("top-level jwt uses its optional username or the constant default, the conf
   const help = invocation(["jwt", "generate", "--help"], env);
   assert.equal(help.status, ExitCode.Success);
   assert.match(help.stdout, /--config <path>/);
+  assert.match(help.stdout, /--output \[path\]/);
+  assert.match(help.stdout, /--endpoint <url>/);
+  const helpText = help.stdout.replace(/\s+/g, " ");
+  assert.ok(helpText.includes(clientConfigPath(env)));
+  assert.match(helpText, /creates an absent file only/);
+  assert.match(helpText, /readers use only the default path/);
+  assert.match(helpText, /Endpoint written to the --output file/);
   assert.match(help.stdout, /Usage: kanthord jwt generate .*\[username\]/);
   assert.ok(help.stdout.includes(KANTHORD_AUTH_USERNAME));
   assert.ok(help.stdout.includes(env.KANTHORD_CONFIG!));
@@ -543,6 +555,136 @@ test("top-level jwt uses its optional username or the constant default, the conf
     assert.notEqual(invalid.status, ExitCode.Success);
     assert.equal(invalid.stdout, EMPTY_OUTPUT);
   }
+});
+
+test("jwt --output creates a private default client file with a verifiable human token on redirected stdout", async (t) => {
+  const env = environment(temporary(t));
+  writePrivate(env.KANTHORD_CONFIG!, initialConfig());
+  const config = loadConfig(env.KANTHORD_CONFIG!);
+  const result = invocation(["jwt", "generate", "--output"], env);
+  const path = clientConfigPath(env);
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(result.stdout, `Created ${path}\n`);
+  assert.equal(result.stderr, EMPTY_OUTPUT);
+  assert.equal(statSync(path).mode & 0o7777, PRIVATE_FILE_MODE);
+  assert.equal(statSync(dirname(path)).mode & 0o7777, PRIVATE_DIRECTORY_MODE);
+  const document = parse(readFileSync(path, "utf8"));
+  assert.deepEqual(document, { token: document.token });
+  assert.equal(resolveClient({}, env).token, document.token);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new Uint8Array(deriveKey(config.masterKey, "gateway/jwt-hs256/v1")),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
+  const claims = await verify(document.token, key, "HS256");
+  assert.equal(claims.sub, KANTHORD_AUTH_USERNAME);
+  assert.equal(claims.kind, IdentityKind.Human);
+  assert.ok(!result.stdout.includes(document.token));
+  assert.ok(!result.stderr.includes(document.token));
+  assert.doesNotMatch(result.stdout + result.stderr, JWT_OUTPUT);
+});
+
+test("jwt --output resolves an explicit relative export path and writes the endpoint before the token", (t) => {
+  const env = environment(temporary(t));
+  writePrivate(env.KANTHORD_CONFIG!, initialConfig());
+  const path = relative(
+    process.cwd(),
+    join(env.XDG_CONFIG_HOME!, "ulrich.cli.yaml"),
+  );
+  const endpoint = "https://tunnel.example";
+  const username = "ulrich";
+  const result = invocation(
+    ["jwt", "generate", username, "--output", path, "--endpoint", endpoint],
+    env,
+  );
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(result.stdout, `Created ${resolve(path)}\n`);
+  assert.equal(result.stderr, EMPTY_OUTPUT);
+  const content = readFileSync(resolve(path), "utf8");
+  const document = parse(content);
+  assert.deepEqual(document, { endpoint, token: document.token });
+  assert.ok(content.startsWith(`endpoint: ${endpoint}\ntoken: `));
+  assert.equal(decode(document.token).payload.sub, username);
+  assert.ok(!existsSync(clientConfigPath(env)));
+  assert.equal(resolveClient({}, env).token, undefined);
+  assert.ok(!result.stdout.includes(document.token));
+  assert.ok(!result.stderr.includes(document.token));
+  assert.doesNotMatch(result.stdout + result.stderr, JWT_OUTPUT);
+});
+
+test("jwt --output refuses an existing destination without changing its bytes or disclosing a token", (t) => {
+  const directory = temporary(t);
+  const env = environment(directory);
+  writePrivate(env.KANTHORD_CONFIG!, initialConfig());
+  const path = clientConfigPath(env);
+  const content =
+    "endpoint: https://existing.example\ntoken: keep-this-token\n";
+  writePrivate(path, content);
+  const before = readdirSync(directory, { recursive: true });
+  const result = invocation(["jwt", "generate", "--output", "--verbose"], env);
+  assert.equal(result.status, ExitCode.Failure);
+  assert.match(result.stderr, /^system\.files\.publish_failed:/);
+  assert.equal(result.stdout, EMPTY_OUTPUT);
+  assert.deepEqual(readFileSync(path), Buffer.from(content));
+  assert.deepEqual(readdirSync(directory, { recursive: true }), before);
+  assert.doesNotMatch(result.stdout + result.stderr, JWT_OUTPUT);
+  assert.ok(!result.stderr.includes("keep-this-token"));
+});
+
+test("jwt output validation precedes configuration loading and writes no file or token", (t) => {
+  const directory = temporary(t);
+  const env = environment(directory);
+  const before = readdirSync(directory, { recursive: true });
+  const cases: [string[], string][] = [
+    [
+      ["ulrich", "--output", "--binding", "x", "--endpoint", "ftp://x"],
+      "cli.jwt.username_with_binding",
+    ],
+    [
+      ["--output", "--binding", "x", "--endpoint", "ftp://x"],
+      "cli.jwt.output_with_binding",
+    ],
+    [["--output", "--binding", "x"], "cli.jwt.output_with_binding"],
+    [["--endpoint", "http://x"], "cli.jwt.endpoint_without_output"],
+    [["--endpoint", "ftp://x"], "cli.jwt.endpoint_without_output"],
+    ...[
+      "ftp://x",
+      "relative",
+      "https://user@x",
+      "https://x?query",
+      "https://x#fragment",
+    ].map((endpoint): [string[], string] => [
+      ["--output", "--endpoint", endpoint],
+      "cli.config.invalid_endpoint",
+    ]),
+    [["--output"], "system.config.not_found"],
+  ];
+  for (const [options, code] of cases) {
+    const result = invocation(["jwt", "generate", ...options], env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.ok(result.stderr.startsWith(`${code}:`), result.stderr);
+    assert.equal(result.stdout, EMPTY_OUTPUT);
+    assert.deepEqual(readdirSync(directory, { recursive: true }), before);
+    assert.doesNotMatch(result.stdout + result.stderr, JWT_OUTPUT);
+  }
+});
+
+test("jwt --verbose --output prints creation then the existing claim list without the token", (t) => {
+  const env = environment(temporary(t));
+  writePrivate(env.KANTHORD_CONFIG!, initialConfig());
+  const result = invocation(["jwt", "generate", "--verbose", "--output"], env);
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(result.stderr, EMPTY_OUTPUT);
+  const path = clientConfigPath(env);
+  const { token } = parse(readFileSync(path, "utf8"));
+  const inspected = invocation(["jwt", "inspect", token], env);
+  assert.equal(inspected.status, ExitCode.Success, inspected.stderr);
+  assert.equal(result.stdout, `Created ${path}\n${inspected.stdout}`);
+  assert.ok(!result.stdout.includes(token));
+  assert.ok(!result.stderr.includes(token));
+  assert.doesNotMatch(result.stdout + result.stderr, JWT_OUTPUT);
 });
 
 test("JWT generation requires terminal output before loading configuration in both modes", (t) => {

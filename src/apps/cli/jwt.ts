@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
+import { stringify } from "yaml";
 import { Command } from "commander";
 import { decode } from "hono/jwt";
 import { loadConfig } from "../../config/index.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
+import { writePrivate } from "../../kernel/files.ts";
 import { isNumber, isObject, isString } from "../../kernel/values.ts";
 import {
   deriveClientSecret,
@@ -14,7 +17,12 @@ import {
   parseWorkerBinding,
   requireTokenTerminal,
 } from "../../gateway/local.ts";
-import { resolveClient } from "../../gateway/client.ts";
+import {
+  clientConfigPath,
+  clientSchema,
+  resolveClient,
+  validateClientEndpoint,
+} from "../../gateway/client.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
 import { configHelp, effectivePath } from "./config-path.ts";
 
@@ -62,6 +70,35 @@ function renderClaims(token: string): string {
   return `---\n${lines.join("\n")}\n---\n`;
 }
 
+interface GenerateOptions {
+  name?: string;
+  binding?: string;
+  output?: string | boolean;
+  endpoint?: string;
+}
+
+function validateGenerateOptions(
+  username: string | undefined,
+  options: GenerateOptions,
+): void {
+  if (options.binding !== undefined && username !== undefined)
+    throw new Diagnostic(
+      "cli.jwt.username_with_binding",
+      "jwt: a username cannot be combined with --binding.",
+    );
+  if (options.output !== undefined && options.binding !== undefined)
+    throw new Diagnostic(
+      "cli.jwt.output_with_binding",
+      "jwt generate: --output cannot be combined with --binding.",
+    );
+  if (options.endpoint !== undefined && options.output === undefined)
+    throw new Diagnostic(
+      "cli.jwt.endpoint_without_output",
+      "jwt generate: --endpoint requires --output.",
+    );
+  if (options.endpoint !== undefined) validateClientEndpoint(options.endpoint);
+}
+
 export function addJWTCommand(program: Command): void {
   assert.equal(program.name(), PROGRAM_NAME);
   assert.ok(
@@ -91,19 +128,20 @@ export function addJWTCommand(program: Command): void {
       "Issue a machine JWT (nonblank binding, 1–128 characters; no username)",
       parseWorkerBinding,
     )
+    .option(
+      "--output [path]",
+      `Write private client configuration (default: ${clientConfigPath()}); creates an absent file only; readers use only the default path`,
+    )
+    .option("--endpoint <url>", "Endpoint written to the --output file")
     .option("--config <path>", "YAML server configuration file")
     .action(
       async (
         username: string | undefined,
-        options: { name?: string; binding?: string },
+        options: GenerateOptions,
         command: Command,
       ) => {
-        if (options.binding !== undefined && username !== undefined)
-          throw new Diagnostic(
-            "cli.jwt.username_with_binding",
-            "jwt: a username cannot be combined with --binding.",
-          );
-        requireTokenTerminal(process.stdout);
+        validateGenerateOptions(username, options);
+        if (options.output === undefined) requireTokenTerminal(process.stdout);
         const config = loadConfig(effectivePath(command));
         const { token } =
           options.binding === undefined
@@ -119,7 +157,20 @@ export function addJWTCommand(program: Command): void {
                 options.binding,
                 options.name,
               );
-        if (options.binding === undefined) process.stdout.write(`${token}\n`);
+        if (options.output !== undefined) {
+          const path = isString(options.output)
+            ? resolve(options.output)
+            : clientConfigPath();
+          const document = clientSchema.parse({
+            ...(options.endpoint === undefined
+              ? {}
+              : { endpoint: options.endpoint }),
+            token,
+          });
+          writePrivate(path, stringify(document));
+          process.stdout.write(`Created ${path}\n`);
+        } else if (options.binding === undefined)
+          process.stdout.write(`${token}\n`);
         else {
           const { sub } = decode(token).payload;
           assert.ok(isString(sub));

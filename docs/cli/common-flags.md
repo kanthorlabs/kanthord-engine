@@ -60,8 +60,9 @@ A bounded catalogue or single-object read does not inherit them automatically.
 
 `--verbose` is a root boolean option with default `false`. Commands with no
 verbose output ignore it. `jwt generate` is the one command with verbose
-output: it prints claims after the human token or the machine `token` and
-`clientSecret` fragment. `jwt inspect` always prints claims.
+output: it prints claims after the human token, the machine `token` and
+`clientSecret` fragment, or the `Created <absolute path>` line with `--output`.
+`jwt inspect` always prints claims.
 Place `--verbose` before or after the command.
 
 ## `--endpoint`
@@ -87,6 +88,8 @@ A local service action such as `gateway openapi` may inherit the parser option
 without resolving, validating, or using its value; its command page states that
 exception. Worker-application option support is specified separately under
 [`serve worker`](./other.md#serve-worker).
+`jwt generate --endpoint` only writes the value into the `--output` file and
+contacts nothing.
 
 ## `--token`
 
