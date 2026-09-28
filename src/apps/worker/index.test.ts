@@ -11,6 +11,7 @@ import { packageVersion } from "../../kernel/version.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 import { HttpStatus } from "../../kernel/http.ts";
+import { HealthStatus } from "../../kernel/service.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { clientConfigPath, resolveClient } from "../../gateway/client.ts";
 import { Worker, runWorker } from "./index.ts";
@@ -96,6 +97,31 @@ async function fixture(t: TestContext, version: string) {
   };
 }
 
+test("worker healthcheck is unavailable before start", async () => {
+  const worker = new Worker();
+  assert.deepEqual(await worker.healthcheck(), {
+    client: HealthStatus.Unavailable,
+  });
+  assert.equal(await worker.stop(), null);
+});
+
+test("worker healthcheck becomes unavailable on quiesce before stop", async (t) => {
+  const options = await fixture(t, packageVersion());
+  const worker = new Worker({ ...options, log: () => {} });
+  try {
+    assert.equal(await worker.start(), null);
+    assert.deepEqual(await worker.healthcheck(), {
+      client: HealthStatus.Healthy,
+    });
+    assert.equal(await worker.quiesce(), null);
+    assert.deepEqual(await worker.healthcheck(), {
+      client: HealthStatus.Unavailable,
+    });
+  } finally {
+    assert.equal(await worker.stop(), null);
+  }
+});
+
 test("matching worker starts once and joins context cancellation without server configuration or database", async (t) => {
   const options = await fixture(t, packageVersion());
   const filesBefore = readdirSync(options.directory, { recursive: true });
@@ -152,6 +178,29 @@ test("version mismatch names both versions, starts nothing and releases signal l
     filesBefore,
   );
   assert.equal(process.listenerCount("SIGTERM"), signals);
+});
+
+test("worker healthcheck stays unavailable after version mismatch", async (t) => {
+  const options = await fixture(t, MISMATCH_VERSION);
+  const worker = new Worker({ ...options, log: () => {} });
+  const error = await worker.start();
+  assert.ok(error instanceof Diagnostic);
+  assert.equal(error.code, MISMATCH_CODE);
+  assert.deepEqual(await worker.healthcheck(), {
+    client: HealthStatus.Unavailable,
+  });
+});
+
+test("worker healthcheck stays unavailable after absent masterKey", async (t) => {
+  const options = await fixture(t, packageVersion());
+  unlinkSync(clientConfigPath(options.env));
+  const worker = new Worker({ ...options, log: () => {} });
+  const error = await worker.start();
+  assert.ok(error instanceof Diagnostic);
+  assert.equal(error.code, ABSENT_CODE);
+  assert.deepEqual(await worker.healthcheck(), {
+    client: HealthStatus.Unavailable,
+  });
 });
 
 test("worker refuses an absent masterKey before contacting the server", async (t) => {
