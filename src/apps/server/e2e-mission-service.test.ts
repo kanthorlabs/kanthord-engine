@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { ulid } from "ulid";
 import {
   PRIVATE_DIRECTORY_MODE,
   PRIVATE_FILE_MODE,
@@ -14,9 +15,11 @@ import {
   MISSION_INITIAL_VERSION,
   NodeKind,
   NodeState,
+  type NodeChange,
   type ExportAnswer,
   type Mission,
 } from "../../mission/contract.ts";
+import { BindingKind, REPOSITORY_PLATFORM } from "../../project/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
@@ -31,6 +34,24 @@ const MISSION = "mission";
 const PROJECT = "project";
 const CREATE = "create";
 const GET = "get";
+const UPDATE = "update";
+const MOVE = "move";
+const APPLY = "apply";
+const BINDING = "binding";
+const CREDENTIAL = "credential";
+const FILE = "--file";
+const ONE = 1;
+const TWO = 2;
+const REPOSITORY_NAME = "repo";
+const REPOSITORY_ADDRESS = "git@github.com:owner/repo.git";
+const REASON = "planning edit";
+const CONTENT = {
+  name: "Plan",
+  requirement: "Do the work",
+  criterion: "Work is done",
+  verifications: ["Check result"],
+  bindings: [],
+};
 const NODE = "node";
 const LIST = "list";
 const REVISION = "revision";
@@ -75,6 +96,8 @@ const KIND_STATE_CONFLICT = "cli.mission.node.list.kind_state_conflict";
 const INVALID_REVISION_CODE = "cli.mission.node.revision.get.invalid_revision";
 const INVALID_FORMAT_CODE = "cli.mission.export.invalid_format";
 const OUT_NOT_EMPTY = "cli.mission.export.out_not_empty";
+const FILE_NOT_FOUND = "cli.file.not_found";
+const FILE_SCHEMA_INVALID = "cli.file.schema_invalid";
 const DUPLICATE_OPTION = "cli.option.duplicate";
 const LIMIT_INVALID = "cli.pagination.limit_invalid";
 const LIMIT_OUT_OF_RANGE = "cli.pagination.limit_out_of_range";
@@ -171,6 +194,7 @@ const INVALID_CASES = [
 
 type Result = Awaited<ReturnType<typeof kanthord>>;
 type Fixture = { directory: string; env: NodeJS.ProcessEnv };
+type Mutation = NodeChange & { idempotencyKey: string };
 
 function isolated(t: TestContext): Fixture {
   const directory = temporary(t);
@@ -226,6 +250,43 @@ async function createMission(fixture: Fixture): Promise<Mission> {
   return mission;
 }
 
+function jsonFile(fixture: Fixture, name: string, body: unknown): string {
+  assert.ok(fixture.directory);
+  assert.ok(name.endsWith(".json"));
+  const path = join(fixture.directory, name);
+  writePrivate(path, JSON.stringify(body));
+  return path;
+}
+
+async function createNode(
+  fixture: Fixture,
+  missionId: string,
+  kind: NodeKind,
+  version: number,
+  parentId?: string,
+  parentRevision = ONE,
+): Promise<Mutation> {
+  assert.ok(missionId);
+  assert.ok(Number.isSafeInteger(version));
+  const body = {
+    filename: `${kind}-${version}.md`,
+    kind,
+    content: {
+      ...CONTENT,
+      bindings: kind === NodeKind.Objective ? [REPOSITORY_NAME] : [],
+    },
+    reason: REASON,
+    expectedMissionVersion: version,
+    ...(parentId === undefined
+      ? {}
+      : { parentId, expectedParentRevision: parentRevision }),
+  };
+  const path = jsonFile(fixture, `${kind}-${version}.json`, body);
+  return success<Mutation>(
+    await kanthord([MISSION, NODE, CREATE, missionId, FILE, path], fixture.env),
+  );
+}
+
 function exportArgs(missionId: string, format: string, out: string): string[] {
   assert.ok(missionId.startsWith(`${MISSION_IDENTITY_PREFIX}_`));
   assert.ok(out);
@@ -273,6 +334,182 @@ for (const { path, code } of READ_LEAVES) {
     assert.deepEqual(readdirSync(directory), []);
   });
 }
+
+test("mission node create help and local file and identity validation", async (t) => {
+  const { directory, env } = isolated(t);
+  const help = await kanthord([MISSION, NODE, CREATE, HELP], env);
+  assert.equal(help.code, SUCCESS, help.stderr);
+  assert.ok(help.stdout.includes(FILE));
+  const missing = join(directory, "missing.json");
+  const args = [MISSION, NODE, CREATE, MISSION_ID, FILE, missing];
+  refusal(await kanthord([...args, ...LOCAL_FLAGS], env), FILE_NOT_FOUND);
+  const invalid = join(directory, "invalid.json");
+  writePrivate(invalid, JSON.stringify({ kind: NodeKind.Initiative }));
+  refusal(
+    await kanthord(
+      [MISSION, NODE, CREATE, MISSION_ID, FILE, invalid, ...LOCAL_FLAGS],
+      env,
+    ),
+    FILE_SCHEMA_INVALID,
+  );
+  for (const [leaf, id, code] of [
+    [CREATE, MISSION_ID, "cli.mission.node.create.token_required"],
+    [UPDATE, NODE_ID, "cli.mission.node.update.token_required"],
+    [MOVE, NODE_ID, "cli.mission.node.move.token_required"],
+  ] as const) {
+    refusal(
+      await kanthord([MISSION, NODE, leaf, id, FILE, invalid], env),
+      code,
+    );
+  }
+  for (const [leaf, code] of [
+    [CREATE, "cli.mission.node.create.invalid_mission_id"],
+    [UPDATE, "cli.mission.node.update.invalid_node_id"],
+    [MOVE, "cli.mission.node.move.invalid_node_id"],
+  ] as const) {
+    refusal(
+      await kanthord(
+        [MISSION, NODE, leaf, INVALID, FILE, invalid, ...LOCAL_FLAGS],
+        env,
+      ),
+      code,
+    );
+  }
+});
+
+test("mission node create replay, update and move task between objectives", async (t) => {
+  const fixture = await setup(t);
+  const mission = await createMission(fixture);
+  const key = ulid();
+  const initiativeFile = jsonFile(fixture, "initiative.json", {
+    filename: "initiative.md",
+    kind: NodeKind.Initiative,
+    content: CONTENT,
+    reason: REASON,
+    expectedMissionVersion: mission.version,
+  });
+  const createArgs = [
+    MISSION,
+    NODE,
+    CREATE,
+    mission.id,
+    FILE,
+    initiativeFile,
+    KEY,
+    key,
+  ];
+  const created = success<Mutation>(await kanthord(createArgs, fixture.env));
+  assert.equal(created.idempotencyKey, key);
+  assert.equal(created.revisions.length, ONE);
+  const initiativeId = created.revisions[0]!.nodeId;
+  const replayed = success<Mutation>(await kanthord(createArgs, fixture.env));
+  assert.equal(replayed.revisions[0]?.nodeId, initiativeId);
+  assert.deepEqual(replayed, created);
+  const updated = success<Mutation>(
+    await kanthord(
+      [
+        MISSION,
+        NODE,
+        UPDATE,
+        initiativeId,
+        FILE,
+        jsonFile(fixture, "update.json", {
+          filename: "initiative.md",
+          content: { ...CONTENT, name: "Updated plan" },
+          reason: REASON,
+          expectedRevision: ONE,
+          expectedMissionVersion: TWO,
+        }),
+      ],
+      fixture.env,
+    ),
+  );
+  assert.equal(updated.missionVersion, created.missionVersion + ONE);
+  assert.equal(updated.revisions[0]?.revision, TWO);
+  assert.ok(updated.idempotencyKey);
+  const credential = jsonFile(fixture, "credential.json", {
+    name: REPOSITORY_PLATFORM,
+    platform: REPOSITORY_PLATFORM,
+    metadata: null,
+    secret: { key: "test-secret" },
+  });
+  success(await kanthord([CREDENTIAL, CREATE, FILE, credential], fixture.env));
+  const bindingFile = jsonFile(fixture, "binding.json", {
+    version: ONE,
+    bindings: {
+      [REPOSITORY_NAME]: {
+        kind: BindingKind.Repository,
+        config: {
+          available: true,
+          platform: REPOSITORY_PLATFORM,
+          address: REPOSITORY_ADDRESS,
+          strategy: { baseBranch: "main" },
+          credential: REPOSITORY_PLATFORM,
+        },
+      },
+    },
+  });
+  const binding = success<{ bindingSetVersion: number }>(
+    await kanthord(
+      [PROJECT, BINDING, APPLY, mission.projectId, FILE, bindingFile],
+      fixture.env,
+    ),
+  );
+  assert.equal(binding.bindingSetVersion, TWO);
+  const first = await createNode(
+    fixture,
+    mission.id,
+    NodeKind.Objective,
+    updated.missionVersion,
+    initiativeId,
+    TWO,
+  );
+  const second = await createNode(
+    fixture,
+    mission.id,
+    NodeKind.Objective,
+    first.missionVersion,
+    initiativeId,
+    TWO,
+  );
+  const oldParent = first.revisions[0]!.nodeId;
+  const newParent = second.revisions[0]!.nodeId;
+  const task = await createNode(
+    fixture,
+    mission.id,
+    NodeKind.Task,
+    second.missionVersion,
+    oldParent,
+  );
+  const taskId = task.revisions[0]?.tasks?.[0]?.id;
+  assert.ok(taskId);
+  const moved = success<Mutation>(
+    await kanthord(
+      [
+        MISSION,
+        NODE,
+        MOVE,
+        taskId,
+        FILE,
+        jsonFile(fixture, "move.json", {
+          newParentId: newParent,
+          reason: REASON,
+          expectedMissionVersion: task.missionVersion,
+          expectedRevision: TWO,
+          expectedOldParentRevision: TWO,
+          expectedNewParentRevision: ONE,
+        }),
+      ],
+      fixture.env,
+    ),
+  );
+  assert.equal(moved.missionVersion, task.missionVersion + ONE);
+  assert.ok(moved.idempotencyKey);
+  const read = success<{ parentId: string }>(
+    await kanthord([MISSION, NODE, GET, taskId], fixture.env),
+  );
+  assert.equal(read.parentId, newParent);
+});
 
 test("mission get reads the empty mission created with its project", async (t) => {
   await createMission(await setup(t));

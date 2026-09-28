@@ -13,7 +13,10 @@ import {
   importFormatSchema,
   MISSION_IDENTITY_PREFIX,
   missionOperations,
+  moveSchema,
   NODE_IDENTITY_PREFIX,
+  nodeCreateSchema,
+  nodeUpdateSchema,
   NODE_LIST_LIMIT_DEFAULT,
   NODE_LIST_LIMIT_MAX,
   NodeKind,
@@ -23,12 +26,20 @@ import {
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
 import { validateProjectId } from "./project.ts";
 import {
+  handleMutationResult,
   handleReadResult,
   parsePositiveInt,
+  readJsonFileAs,
   requireToken,
+  resolveKey,
   singleUse,
 } from "./shared.ts";
 
+const CREATE = "create";
+const UPDATE = "update";
+const MOVE = "move";
+const FILE_OPTION = "--file";
+const KEY_OPTION = "--idempotency-key";
 const GET = "get";
 const LIST = "list";
 const NODE = "node";
@@ -55,6 +66,10 @@ const NODE_LIST_INVALID_KIND = "cli.mission.node.list.invalid_kind";
 const NODE_LIST_INVALID_STATE = "cli.mission.node.list.invalid_state";
 const KIND_STATE_CONFLICT = "cli.mission.node.list.kind_state_conflict";
 const NODE_GET_INVALID_NODE_ID = "cli.mission.node.get.invalid_node_id";
+const NODE_CREATE_INVALID_MISSION_ID =
+  "cli.mission.node.create.invalid_mission_id";
+const NODE_UPDATE_INVALID_NODE_ID = "cli.mission.node.update.invalid_node_id";
+const NODE_MOVE_INVALID_NODE_ID = "cli.mission.node.move.invalid_node_id";
 const REVISION_LIST_INVALID_NODE_ID =
   "cli.mission.node.revision.list.invalid_node_id";
 const REVISION_GET_INVALID_NODE_ID =
@@ -166,6 +181,60 @@ async function nodeGet(nodeId: string, command: Command): Promise<void> {
     body: null,
   });
   printResult(result, NODE_GET);
+}
+
+async function nodeCreate(missionId: string, command: Command): Promise<void> {
+  validateMissionId(missionId, NODE_CREATE_INVALID_MISSION_ID);
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, "cli.mission.node.create.token_required");
+  const key = resolveKey(options);
+  const body = readJsonFileAs(options.file, nodeCreateSchema);
+  const result = await httpClient(missionOperations, endpoint, token)[
+    "node.create"
+  ]({ params: { missionId }, query: {}, body }, { idempotencyKey: key });
+  const data = handleMutationResult(
+    result,
+    "cli.mission.node.create.indeterminate",
+    key,
+  );
+  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+}
+
+async function nodeUpdate(nodeId: string, command: Command): Promise<void> {
+  validateNodeId(nodeId, NODE_UPDATE_INVALID_NODE_ID);
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, "cli.mission.node.update.token_required");
+  const key = resolveKey(options);
+  const body = readJsonFileAs(options.file, nodeUpdateSchema);
+  const result = await httpClient(missionOperations, endpoint, token)[
+    "node.update"
+  ]({ params: { nodeId }, query: {}, body }, { idempotencyKey: key });
+  const data = handleMutationResult(
+    result,
+    "cli.mission.node.update.indeterminate",
+    key,
+  );
+  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+}
+
+async function nodeMove(nodeId: string, command: Command): Promise<void> {
+  validateNodeId(nodeId, NODE_MOVE_INVALID_NODE_ID);
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, "cli.mission.node.move.token_required");
+  const key = resolveKey(options);
+  const body = readJsonFileAs(options.file, moveSchema);
+  const result = await httpClient(missionOperations, endpoint, token)[
+    "node.move"
+  ]({ params: { nodeId }, query: {}, body }, { idempotencyKey: key });
+  const data = handleMutationResult(
+    result,
+    "cli.mission.node.move.indeterminate",
+    key,
+  );
+  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
 }
 
 async function revisionList(nodeId: string, command: Command): Promise<void> {
@@ -325,6 +394,16 @@ export function addMissionCommand(program: Command): void {
   addEdgeCommands(mission);
 }
 
+function addNodeMutationOptions(command: Command): Command {
+  return command
+    .requiredOption(
+      FILE_OPTION + " <path>",
+      "Node JSON file",
+      singleUse(FILE_OPTION),
+    )
+    .option(KEY_OPTION + " <key>", "Mutation key", singleUse(KEY_OPTION));
+}
+
 function addNodeCommands(mission: Command): void {
   const node = mission.command(NODE).description("Mission node commands");
   node.action(() => node.help());
@@ -359,6 +438,30 @@ function addNodeCommands(mission: Command): void {
     .action((nodeId: string, _options, command: Command) =>
       nodeGet(nodeId, command),
     );
+  addNodeMutationOptions(
+    node
+      .command(CREATE)
+      .description("Create a mission node as JSON")
+      .argument("<mission-id>", "Mission ID"),
+  ).action((missionId: string, _options, command: Command) =>
+    nodeCreate(missionId, command),
+  );
+  addNodeMutationOptions(
+    node
+      .command(UPDATE)
+      .description("Update a mission node as JSON")
+      .argument("<node-id>", "Node ID"),
+  ).action((nodeId: string, _options, command: Command) =>
+    nodeUpdate(nodeId, command),
+  );
+  addNodeMutationOptions(
+    node
+      .command(MOVE)
+      .description("Move a mission node as JSON")
+      .argument("<node-id>", "Node ID"),
+  ).action((nodeId: string, _options, command: Command) =>
+    nodeMove(nodeId, command),
+  );
   const retire = node
     .command(RETIRE)
     .description("Mission node retirement commands");
