@@ -521,14 +521,14 @@ remote application belongs to `serve worker` in [other commands](./other.md).
 ### `instance list`
 
 ```text
-kanthord worker instance list [--project <project-id>] [--binding <binding-id>] [--limit <count>] [--cursor <opaque>]
+kanthord worker instance list [--project <project-id>] [--binding <binding-name>] [--limit <count>] [--cursor <opaque>]
 ```
 
-| Input                                                                            | Requiredness / type / default                                                 | Mapping and validation                                                                                                   |
-| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--project <project-id>`                                                         | Optional `ProjectId`; omitted means all projects visible to the human         | `query.projectId`; retain and validate the declared prefix.                                                              |
-| `--binding <binding-id>`                                                         | Optional `BindingId`; omitted means all worker bindings in the selected scope | `query.workerBindingId`; must identify a worker binding. If `--project` is also supplied, the binding must belong to it. |
-| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Shared pagination flags                                                       | Shared query mapping.                                                                                                    |
+| Input                                                                            | Requiredness / type / default                                                  | Mapping and validation                                                                                                             |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `--project <project-id>`                                                         | Optional `ProjectId`; omitted means all projects visible to the human          | `query.projectId`; retain and validate the declared prefix.                                                                        |
+| `--binding <binding-name>`                                                       | Optional binding name; omitted means all worker bindings in the selected scope | `query.resourceIdentity` as `worker:kanthord:<binding-name>`; requires `--project`, and the project must hold that worker binding. |
+| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Shared pagination flags                                                        | Shared query mapping.                                                                                                              |
 
 Required token: human JWT. Empty params, absent body. Proposed HTTP `200` returns
 one page of the instance records defined below in descending runtime-identity
@@ -550,16 +550,16 @@ Proposed HTTP `200` returns one instance record; unknown or ended instances retu
 
 The proposed instance record contains:
 
-| Field                                                           | Type and presence                                                                                                                   |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `runtimeIdentity`, `projectId`, `workerBindingId`, `workerName` | Required identities/natural key of the instance and its owning binding.                                                             |
-| `host`                                                          | Required string, one of `kanthord`, `external-harness`.                                                                             |
-| `placement`                                                     | String, one of `server`, `worker`, for kanthord-hosted instances; omitted for external harnesses.                                   |
-| `clientId`, `name`                                              | Client identity using the declared `client_identity` prefix and display-name string, present for registered instances only. No JWT. |
-| `activity`                                                      | Required string, one of `idle`, `pulling`, `executing`, describing known server activity, not proof that a remote process is alive. |
-| `draining`                                                      | Required boolean; true when a server-hosted instance is scheduled to retire after its current execution.                            |
-| `executionId`                                                   | Present only while executing, naming the Scheduler execution record.                                                                |
-| `registered`                                                    | Required boolean; registration state, separate from execution lease state and physical process liveness.                            |
+| Field                                                            | Type and presence                                                                                                                   |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `runtimeIdentity`, `projectId`, `resourceIdentity`, `workerName` | Required identities/natural key of the instance and its owning binding.                                                             |
+| `host`                                                           | Required string, one of `kanthord`, `external-harness`.                                                                             |
+| `placement`                                                      | String, one of `server`, `worker`, for kanthord-hosted instances; omitted for external harnesses.                                   |
+| `clientId`, `name`                                               | Client identity using the declared `client_identity` prefix and display-name string, present for registered instances only. No JWT. |
+| `activity`                                                       | Required string, one of `idle`, `pulling`, `executing`, describing known server activity, not proof that a remote process is alive. |
+| `draining`                                                       | Required boolean; true when a server-hosted instance is scheduled to retire after its current execution.                            |
+| `executionId`                                                    | Present only while executing, naming the Scheduler execution record.                                                                |
+| `registered`                                                     | Required boolean; registration state, separate from execution lease state and physical process liveness.                            |
 
 Both commands are read-only. Durable execution and trace attribution are queried
 through Scheduler and Tracking. They do not infer a dead process from silence.

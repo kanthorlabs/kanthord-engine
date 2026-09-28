@@ -500,7 +500,7 @@ Output: operational JSON log records go to stderr. Startup prints no token and
 requires no terminal. Startup resolves the client configuration, checks
 `masterKey`, checks the server package version, registers the instance, and then
 logs one record `Worker application ready` with `runtimeIdentity`,
-`workerBindingId` and `workerName`. A version mismatch refuses startup with both
+`resourceIdentity` and `workerName`. A version mismatch refuses startup with both
 versions in the diagnostic. Until registration is implemented, the record
 `Worker application started` is a startup notice, not readiness. A startup
 failure prints its diagnostic, releases what it acquired and exits `1`.
