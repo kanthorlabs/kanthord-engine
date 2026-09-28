@@ -86,6 +86,8 @@ and [Worker contract](../../src/worker/contract.ts); dispatch is in the
 
 ## Maintaining the specification
 
+Every error code that the engine answers stands on the `docs/cli/` page of its command group; every command page holds an error-code table with the HTTP status, code and condition of each code its commands answer.
+
 When implementing a command, settle its open decisions, declare its operation
 and access policy, implement its CLI adapter, and update its status here.
 Verify that the help, arguments, request schema, cancellation, and retry rules

@@ -230,3 +230,32 @@ entity ID for it. The shared [pagination rule](https://github.com/kanthorlabs/ka
 uses descending primary-key order and a base64url last-key cursor that does not
 expire; a malformed cursor returns `400`. Lists take no snapshot or work
 reservation, and a refresh of the first page shows new records.
+
+## Error codes
+
+Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
+
+| HTTP  | Code                                   | Condition                                                                                    | Commands            |
+| ----- | -------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------- |
+| local | `cli.config.invalid_endpoint`          | The resolved endpoint is not an absolute HTTP(S) URL without credentials, query or fragment. | `--endpoint`        |
+| local | `cli.file.duplicate_key`               | The JSON input repeats an object key.                                                        | `--file`            |
+| local | `cli.file.encoding_invalid`            | The input file is not valid UTF-8.                                                           | `--file`            |
+| local | `cli.file.invalid_path`                | The `--file` value is `-`; standard input is not accepted.                                   | `--file`            |
+| local | `cli.file.not_found`                   | The `--file` path does not exist.                                                            | `--file`            |
+| local | `cli.file.not_json`                    | The input file is not valid JSON.                                                            | `--file`            |
+| local | `cli.file.not_object`                  | The JSON input is null, an array or a scalar, not an object.                                 | `--file`            |
+| local | `cli.file.not_regular`                 | The `--file` path names a directory, a device or another non-regular file.                   | `--file`            |
+| local | `cli.file.schema_invalid`              | The JSON object does not match the command input schema.                                     | `--file`            |
+| local | `cli.idempotency_key.invalid`          | The key is not a canonical ULID.                                                             | `--idempotency-key` |
+| local | `cli.pagination.limit_invalid`         | The limit is not a positive safe integer.                                                    | `--limit`           |
+| local | `cli.pagination.limit_out_of_range`    | The limit exceeds 1000.                                                                      | `--limit`           |
+| local | `cli.<group>.<command>.token_required` | No nonblank JWT is available for the command.                                                | `--token`           |
+| 400   | `system.pagination.cursor_invalid`     | The `--cursor` value is malformed or belongs to another listing.                             | `--cursor`          |
+| local | `system.config.cyclic_alias`           | A YAML alias creates a cycle.                                                                | `--config`          |
+| local | `system.config.invalid_field`          | The server configuration contains an unknown or invalid field.                               | `--config`          |
+| local | `system.config.invalid_mapping`        | The YAML root is not one mapping, or a nested value is not a plain mapping or array.         | `--config`          |
+| local | `system.config.invalid_yaml`           | The YAML cannot be parsed as one mapping with unique string keys.                            | `--config`          |
+| local | `system.config.not_found`              | The selected server configuration file is absent.                                            | `--config`          |
+| local | `system.config.too_deep`               | The configuration exceeds 32 levels of nesting.                                              | `--config`          |
+| local | `system.config.too_large`              | The configuration YAML exceeds 1 MiB.                                                        | `--config`          |
+| local | `system.config.too_many_values`        | The configuration exceeds 4096 values.                                                       | `--config`          |

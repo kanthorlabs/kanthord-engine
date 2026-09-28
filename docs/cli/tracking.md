@@ -419,6 +419,14 @@ An indeterminate mutation is distinguished from a known refusal and carries
 the reusable idempotency key. This proposal uses the shared `0`/`1` exit codes;
 the partial-output format must be adopted with the operation contract.
 
+## Error codes
+
+Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
+
+| HTTP | Code | Condition                | Commands          |
+| ---- | ---- | ------------------------ | ----------------- |
+| —    | —    | No code is declared yet. | proposed commands |
+
 ## Optional design provenance
 
 The rules needed to read this page are stated above. These links record their

@@ -447,32 +447,6 @@ Removal fails while a default configuration or binding entry names it, and the
 refusal lists those dependents. The check and removal are atomic. An enablement
 must still hold at least one agent provider.
 
-### Agent enablement refusals — proposed
-
-These code spellings and HTTP mappings are proposed; the linked design owns the
-refusals. `error.details` names the agent and lists affected bindings or other
-dependents when applicable. No error holds secret material.
-
-| HTTP | Proposed code                                             | Condition                                                                                   |
-| ---- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| 404  | `worker.agent.enablement.not_found`                       | No enablement exists.                                                                       |
-| 409  | `worker.agent.enablement.revision_conflict`               | A write names a stale or absent expected revision; details hold the current revision.       |
-| 400  | `worker.agent.enablement.unavailable`                     | An agent has no enabled enablement at binding write or resolution; details name that agent. |
-| 409  | `worker.agent.enablement.invalidates_bindings`            | A configuration change invalidates dependent worker bindings; details list them.            |
-| 409  | `worker.agent.enablement.in_use`                          | Enablement removal has dependent worker bindings; details list them.                        |
-| 409  | `worker.agent.enablement.provider.name_conflict`          | Agent provider name already exists.                                                         |
-| 404  | `worker.agent.enablement.provider.not_found`              | A selected agent provider is absent.                                                        |
-| 409  | `worker.agent.enablement.provider.fixed`                  | A retained agent provider changes its provider.                                             |
-| 409  | `worker.agent.enablement.provider.in_use`                 | Removal has dependent defaults or entries; details list them.                               |
-| 400  | `worker.agent.enablement.provider.required`               | A write leaves no agent provider.                                                           |
-| 400  | `worker.agent.configuration.override_not_allowed`         | Entry has a field outside the allowlist, including nonempty `options`.                      |
-| 400  | `worker.agent.configuration.invalid`                      | Configuration shape or entry form is invalid.                                               |
-| 400  | `worker.agent.configuration.model_unknown`                | Model is absent from the selected catalog or metadata.                                      |
-| 400  | `worker.agent.configuration.reasoning_effort_unsupported` | No source establishes the requested reasoning level for the selected model.                 |
-| 400  | `worker.agent.configuration.credential_unsuitable`        | Custody refuses the credential/platform pair.                                               |
-
-Unknown catalog agents use `404 worker.agent.not_found`.
-
 ## `provider check` — proposed
 
 ```text
@@ -700,6 +674,41 @@ model/repository/platform connectors, webhook decoding, prompt composition,
 lease/agent loops, workspace cleanup or collaboration functions. The MCP server
 exposes no direct platform write and no raw git push, merge, credential export
 or caller-selected remote destination.
+
+## Error codes
+
+Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
+
+| HTTP  | Code                                                           | Condition                                                          | Commands                                                                                                               |
+| ----- | -------------------------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| local | `worker.version.unavailable`                                   | The server package version is unavailable.                         | serve worker                                                                                                           |
+| local | `worker.version.mismatch`                                      | The server package version differs.                                | serve worker                                                                                                           |
+| local | `worker.start.master_key_invalid`                              | The masterKey is not a canonical 32-byte base64 value.             | serve worker                                                                                                           |
+| local | `worker.start.master_key_absent`                               | The worker has no masterKey.                                       | serve worker                                                                                                           |
+| local | `cli.worker.agent.enablement.disable.invalid_revision`         | The `<expected-revision>` argument is not a positive safe integer. | agent enablement disable                                                                                               |
+| local | `cli.worker.agent.enablement.enable.invalid_revision`          | The `<expected-revision>` argument is not a positive safe integer. | agent enablement enable                                                                                                |
+| local | `cli.worker.agent.enablement.provider.remove.invalid_revision` | The `<expected-revision>` argument is not a positive safe integer. | agent enablement provider remove                                                                                       |
+| local | `cli.worker.agent.enablement.remove.invalid_revision`          | The `<expected-revision>` argument is not a positive safe integer. | agent enablement remove                                                                                                |
+| local | `cli.worker.register.invalid_idempotency_key`                  | The `--idempotency-key` value is not a canonical ULID.             | register                                                                                                               |
+| 400   | `worker.agent.configuration.credential_unsuitable`             | The selected credential is not suitable for the provider.          | binding apply, agent enablement put, agent enablement provider add                                                     |
+| 400   | `worker.agent.configuration.invalid`                           | A worker or entry configuration fails shape validation.            | binding apply, agent enablement put                                                                                    |
+| 400   | `worker.agent.configuration.model_unknown`                     | The selected model is absent from the catalog.                     | agent enablement put, binding apply                                                                                    |
+| 400   | `worker.agent.configuration.override_not_allowed`              | An entry overrides a forbidden field.                              | binding apply                                                                                                          |
+| 400   | `worker.agent.configuration.reasoning_effort_unsupported`      | The selected model does not support this reasoning level.          | agent enablement put, binding apply                                                                                    |
+| 409   | `worker.agent.enablement.in_use`                               | Worker bindings still use the enablement.                          | agent enablement remove                                                                                                |
+| 409   | `worker.agent.enablement.invalidates_bindings`                 | The change invalidates dependent bindings.                         | agent enablement put, agent enablement disable                                                                         |
+| 404   | `worker.agent.enablement.not_found`                            | The live enablement does not exist.                                | agent enablement get, agent enablement mutations                                                                       |
+| 409   | `worker.agent.enablement.provider.fixed`                       | An edit changes a retained provider.                               | agent enablement put                                                                                                   |
+| 409   | `worker.agent.enablement.provider.in_use`                      | Defaults or entries still use this provider.                       | agent enablement put, agent enablement provider remove                                                                 |
+| 409   | `worker.agent.enablement.provider.name_conflict`               | An agent provider already uses this name.                          | agent enablement put, agent enablement provider add                                                                    |
+| 404   | `worker.agent.enablement.provider.not_found`                   | The agent provider does not exist.                                 | agent enablement put, agent enablement provider remove, binding apply                                                  |
+| 400   | `worker.agent.enablement.provider.required`                    | The write leaves no agent provider.                                | agent enablement put, agent enablement provider remove                                                                 |
+| 409   | `worker.agent.enablement.revision_conflict`                    | The expected enablement revision is stale.                         | agent enablement mutations                                                                                             |
+| 400   | `worker.agent.enablement.unavailable`                          | The agent lacks a live enabled configuration.                      | binding apply, agent configuration reads                                                                               |
+| 404   | `worker.agent.not_found`                                       | The agent name is absent from the worker catalog.                  | agent enablement get, agent enablement put, agent enablement enable, agent enablement disable, agent enablement remove |
+| 400   | `worker.provider.invalid_input`                                | Proposed. The provider check input fails validation.               | provider check                                                                                                         |
+
+`error.details` names the agent and lists affected bindings or other dependents when applicable. No error holds secret material.
 
 ## Design provenance
 

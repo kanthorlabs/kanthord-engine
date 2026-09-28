@@ -573,6 +573,19 @@ signed delivery, and a human or machine token is not delivery verification.
   and override belong to Mission's human authority path. Scheduler inspection
   and machine lease operations cannot take their place.
 
+## Error codes
+
+Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
+
+| HTTP  | Code                                          | Condition                                                                 | Commands                                            |
+| ----- | --------------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------- |
+| local | `cli.scheduler.queue.list.invalid_project_id` | The `<project-id>` argument is not a canonical `project_<ulid>` identity. | queue list                                          |
+| local | `cli.scheduler.queue.peek.invalid_project_id` | The `<project-id>` argument is not a canonical `project_<ulid>` identity. | queue peek                                          |
+| 409   | `scheduler.execution.not_owner`               | Proposed. The client does not own the execution.                          | claim get, execution renew-lease, execution release |
+| 409   | `scheduler.execution.release_conflict`        | Proposed. The execution was already released with a different result.     | execution release                                   |
+| 409   | `scheduler.execution.renewal_superseded`      | Proposed. Another renewal superseded this lease renewal.                  | execution renew-lease                               |
+| local | `scheduler.lifecycle.stopped`                 | A stopped Scheduler Service cannot start again.                           | serve server                                        |
+
 ## Design provenance
 
 - [Scheduler rules](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md)

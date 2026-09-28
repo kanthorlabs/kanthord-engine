@@ -254,6 +254,14 @@ logout, and rotation commands are not part of this specification.
 | User management            | The system holds no user management, and no user, session-list or revoke command exists. The [Gateway signing key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key) revokes every JWT through `gateway.tokenVersion`.                                                                                                                                                                                  |
 | Future services in OpenAPI | The current CLI explicitly assembles Gateway and Worker contracts. A future declared service must be added to the emission set and published files as well as server routing; the generator does not scan source directories automatically.                                                                                                                                                                                                                             |
 
+## Error codes
+
+Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
+
+| HTTP | Code | Condition                | Commands          |
+| ---- | ---- | ------------------------ | ----------------- |
+| —    | —    | No code is declared yet. | proposed commands |
+
 ## Implementation references
 
 - [CLI dispatch and options](../../src/apps/cli/index.ts),

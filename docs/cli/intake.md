@@ -454,6 +454,16 @@ as namespace. Proposed Intake codes are:
 | `intake.subscription.source_binding_disabled` | Disabled-source admission remains **[blocked][intake-contract]**.                                                                                                                                     |
 | `intake.delivery.not_found`                   | No Intake delivery matches the get identity; proposed `404`.                                                                                                                                          |
 
+## Error codes
+
+Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
+
+| HTTP | Code                                          | Condition                                   | Commands            |
+| ---- | --------------------------------------------- | ------------------------------------------- | ------------------- |
+| 404  | `intake.delivery.not_found`                   | Proposed. The delivery does not exist.      | delivery get        |
+| 409  | `intake.subscription.duplicate_kind`          | Proposed. The source already has this kind. | subscription create |
+| —    | `intake.subscription.source_binding_disabled` | Proposed. The source binding is disabled.   | subscription create |
+
 ## Optional design provenance
 
 The rules needed to read this page appear above. These links record their
