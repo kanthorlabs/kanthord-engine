@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 import { readdirSync, unlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { stringify } from "yaml";
@@ -8,7 +9,7 @@ import { CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { isString } from "../../kernel/values.ts";
+import { isObject, isString } from "../../kernel/values.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { clientConfigPath, resolveClient } from "../../gateway/client.ts";
@@ -28,6 +29,37 @@ const NON_BASE64_KEY = "not a base64 key!";
 const ENV_MASTER_KEY = "environment-key";
 const OPTION_MASTER_KEY = "option-key";
 const NO_REQUESTS = 0;
+const CHILD_START_TIMEOUT_MS = 5000;
+const CHILD_EXIT_TIMEOUT_MS = 5000;
+const WORKER_STOP_WATCHDOG_MS = 10000;
+const AFTER_WATCHDOG_MS = WORKER_STOP_WATCHDOG_MS + 1;
+const WORKER_STOP_EXIT_FAILURE = 1;
+const EXIT_SUCCESS = 0;
+const ONE_RECORD = 1;
+const SHORT_WAIT_MS = 20;
+const RUNNING_STATE = "running";
+const CHILD_SCRIPT = `
+  import { runWorker } from ${JSON.stringify(new URL("./index.ts", import.meta.url).href)};
+  const error = await runWorker(JSON.parse(process.env.WORKER_OPTIONS));
+  if (error) { process.stderr.write(error.message); process.exitCode = 1; }
+`;
+
+async function bounded<T>(promise: Promise<T>, duration: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Timed out waiting for worker")),
+          duration,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function fixture(t: TestContext, version: string) {
   let requests = 0;
@@ -172,6 +204,105 @@ test("client reads masterKey only from cli.yaml while accepting service configur
     resolveClient({ masterKey: OPTION_MASTER_KEY }, env).masterKey,
     undefined,
   );
+});
+
+test("default worker log is one JSON line on stderr without the token", async (t) => {
+  const options = await fixture(t, packageVersion());
+  const child = spawn(
+    process.execPath,
+    ["--input-type=module", "-e", CHILD_SCRIPT],
+    {
+      env: { ...process.env, WORKER_OPTIONS: JSON.stringify(options) },
+      stdio: ["ignore", "ignore", "pipe"],
+    },
+  );
+  const started = Promise.withResolvers<void>();
+  const exited = Promise.withResolvers<{
+    code: number | null;
+    signal: NodeJS.Signals | null;
+  }>();
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString();
+    if (stderr.includes(`${STARTED_MESSAGE}"`)) started.resolve();
+  });
+  child.on("error", (error) => {
+    started.reject(error);
+    exited.reject(error);
+  });
+  child.on("exit", (code, signal) => {
+    started.reject(new Error("Worker exited before startup"));
+    exited.resolve({ code, signal });
+  });
+  try {
+    await bounded(started.promise, CHILD_START_TIMEOUT_MS);
+    child.kill("SIGTERM");
+    assert.deepEqual(await bounded(exited.promise, CHILD_EXIT_TIMEOUT_MS), {
+      code: EXIT_SUCCESS,
+      signal: null,
+    });
+    const lines = stderr.split("\n").filter(Boolean);
+    const records: unknown[] = lines.map((line) => JSON.parse(line));
+    assert.equal(
+      records.filter(
+        (record) =>
+          isObject(record) && "msg" in record && record.msg === STARTED_MESSAGE,
+      ).length,
+      ONE_RECORD,
+    );
+    assert.equal(lines.length, ONE_RECORD);
+    assert.ok(!stderr.includes(options.token));
+  } finally {
+    child.kill("SIGKILL");
+    await bounded(exited.promise, CHILD_EXIT_TIMEOUT_MS);
+  }
+});
+
+test("SIGHUP leaves worker healthy and unregisters its handler on termination", async (t) => {
+  const options = await fixture(t, packageVersion());
+  const started = Promise.withResolvers<void>();
+  const before = process.listenerCount("SIGHUP");
+  const worker = new Worker({ ...options, log: () => started.resolve() });
+  const running = worker.run();
+  try {
+    await bounded(started.promise, CHILD_START_TIMEOUT_MS);
+    process.emit("SIGHUP");
+    const outcome = await Promise.race([
+      running.then(() => "settled"),
+      new Promise<string>((resolve) =>
+        setTimeout(() => resolve(RUNNING_STATE), SHORT_WAIT_MS),
+      ),
+    ]);
+    assert.equal(outcome, RUNNING_STATE);
+    assert.deepEqual(await worker.healthcheck(), { client: HttpStatus.OK });
+  } finally {
+    process.emit("SIGTERM");
+    assert.equal(await bounded(running, CHILD_EXIT_TIMEOUT_MS), null);
+  }
+  assert.equal(process.listenerCount("SIGHUP"), before);
+});
+
+test("stop watchdog exits on a stalled stop and is cleared after completion", async (t) => {
+  const exits: unknown[] = [];
+  const stalled = new Worker();
+  t.mock.method(stalled, "quiesce", () => new Promise<null>(() => {}));
+  t.mock.method(process, "exit", (code?: number | string | null) => {
+    exits.push(code);
+    return undefined as never;
+  });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    void stalled.stop();
+    t.mock.timers.tick(WORKER_STOP_WATCHDOG_MS);
+    assert.deepEqual(exits, [WORKER_STOP_EXIT_FAILURE]);
+    const finished = new Worker();
+    assert.equal(await finished.stop(), null);
+    t.mock.timers.tick(AFTER_WATCHDOG_MS);
+    assert.deepEqual(exits, [WORKER_STOP_EXIT_FAILURE]);
+  } finally {
+    t.mock.timers.reset();
+    t.mock.restoreAll();
+  }
 });
 
 test("worker signal stops cleanly and unavailable server yields a distinct diagnostic", async (t) => {

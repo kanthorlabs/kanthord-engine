@@ -5,6 +5,8 @@ import {
   type Context,
 } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
+import { LogDestination, OperationalLog } from "../../kernel/log.ts";
+import { directories } from "../../kernel/xdg.ts";
 import {
   HealthStatus,
   lifecycle,
@@ -22,6 +24,10 @@ import {
 
 const KEEPALIVE_INTERVAL_MS = 60000;
 const MASTER_KEY_BYTES = 32;
+const WORKER_STOP_WATCHDOG_MS = 10000;
+const WORKER_STOP_EXIT_FAILURE = 1;
+
+function ignoreHangup(): void {}
 
 export interface WorkerOptions extends Partial<
   Omit<ClientConfiguration, "masterKey">
@@ -39,6 +45,7 @@ export class Worker implements Service {
   private stopTask?: Promise<Error | null>;
   private started = false;
   private keepalive?: NodeJS.Timeout;
+  private operationalLog?: OperationalLog;
 
   constructor(options: WorkerOptions = {}) {
     this.options = options;
@@ -88,12 +95,15 @@ export class Worker implements Service {
           "worker.version.mismatch",
           `worker: package version ${local} differs from server version ${version}.`,
         );
-      const log =
-        this.options.log ??
-        ((message: string) => {
-          process.stderr.write(`${message}\n`);
-        });
-      log("Worker application started");
+      if (this.options.log) {
+        this.options.log("Worker application started");
+      } else {
+        this.operationalLog = new OperationalLog(
+          { level: "info", destination: LogDestination.StandardError },
+          directories(this.options.env).state,
+        );
+        this.operationalLog.logger.info("Worker application started");
+      }
       this.started = true;
       this.keepalive = setInterval(() => {}, KEEPALIVE_INTERVAL_MS);
     });
@@ -109,11 +119,23 @@ export class Worker implements Service {
 
   stop(): Promise<Error | null> {
     this.stopTask ??= lifecycle(async () => {
-      const error = await this.quiesce();
-      await this.startTask;
-      this.started = false;
-      clearInterval(this.keepalive);
-      if (error) throw error;
+      const watchdog = setTimeout(
+        () => process.exit(WORKER_STOP_EXIT_FAILURE),
+        WORKER_STOP_WATCHDOG_MS,
+      );
+      try {
+        const error = await this.quiesce();
+        await this.startTask;
+        if (error) throw error;
+      } finally {
+        this.started = false;
+        clearInterval(this.keepalive);
+        try {
+          await this.operationalLog?.close();
+        } finally {
+          clearTimeout(watchdog);
+        }
+      }
     });
     return this.stopTask;
   }
@@ -126,6 +148,7 @@ export class Worker implements Service {
     };
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
+    process.on("SIGHUP", ignoreHangup);
     const unsubscribe = context.onCancel(stop);
     try {
       if (context.err()) return (await this.stop()) ?? context.err();
@@ -137,6 +160,7 @@ export class Worker implements Service {
       unsubscribe();
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
+      process.off("SIGHUP", ignoreHangup);
     }
   }
 
