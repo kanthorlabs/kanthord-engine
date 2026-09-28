@@ -559,7 +559,8 @@ kanthord jwt --binding <binding> [--name <display>] [--config <path>]
 - `--binding <binding>`: required to select machine mode; string, no default;
   currently nonblank and 1–128 characters with the exact value preserved.
   Current local validation does not enforce a binding entity prefix.
-  The target requires `binding_<ulid>` under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
+  The target requires `--project <project id>` with `--binding <binding name>`, and the token holds
+  `project_id` and `resource_identity` (`worker:kanthord:<binding name>`) under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
 - `username`: forbidden with `--binding`. Even a valid human username produces
   `cli.jwt.username_with_binding` and no token.
 - `--name <display>`: optional nonblank string of 1–64 characters; default the
