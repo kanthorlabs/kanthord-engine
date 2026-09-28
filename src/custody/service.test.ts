@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import {
+  createModels,
   createProvider,
+  type AuthPrompt,
   type Provider,
   type ProviderAuthInteraction,
   type OAuthCredential,
 } from "@earendil-works/pi-ai";
+import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import type { Logger } from "pino";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -32,7 +35,10 @@ import { decrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { Platform } from "./platforms.ts";
 import { CustodyComponent } from "./service.ts";
-import { COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER } from "./login.ts";
+import {
+  COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER,
+  OAUTH_PROVIDER_IDS,
+} from "./login.ts";
 import { LoginSessionState, SESSION_EXPIRY_MS } from "./sessions.ts";
 
 const FIRST_REVISION = 1;
@@ -869,6 +875,41 @@ function rejectsWith(status: number, code: string) {
     error.status === status &&
     error.code === code;
 }
+
+test("Copilot built-in OAuth prompt matches the enterprise placeholder", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const textPromptType = "text";
+  const noFetchCalls = 0;
+  let fetchCalls = noFetchCalls;
+  globalThis.fetch = async () => {
+    fetchCalls++;
+    throw new Error("OAuth prompt test must not fetch");
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const controller = new AbortController();
+  let firstPrompt: AuthPrompt | undefined;
+  const models = createModels();
+  models.setProvider(githubCopilotProvider());
+  await assert.rejects(
+    models.login(OAUTH_PROVIDER_IDS[Platform.GitHubCopilot]!, "oauth", {
+      signal: controller.signal,
+      prompt: async (prompt) => {
+        firstPrompt ??= prompt;
+        controller.abort();
+        throw new Error("Stop before network access");
+      },
+      notify: () => {},
+    }),
+  );
+  assert.equal(firstPrompt?.type, textPromptType);
+  assert.equal(
+    firstPrompt?.type === textPromptType ? firstPrompt.placeholder : undefined,
+    COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER,
+  );
+  assert.equal(fetchCalls, noFetchCalls);
+});
 
 test("OAuth uses real pi-ai modify, defaults Copilot enterprise, and stores only the encrypted secret", async (t) => {
   const finish = Promise.withResolvers<OAuthCredential>();
