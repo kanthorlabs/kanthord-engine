@@ -259,10 +259,9 @@ Do not blindly retry with a new key, loop indefinitely on 409, assume a timeout
 rolled back a mutation, or claim that reusing a key guarantees exactly-once
 effects across server restarts.
 
-Some domain operations additionally need a durable `requestId`. The Scheduler lease renewal derives it as `request_<same-key-ulid>` from the CLI's bare idempotency key. The Scheduler release carries none.
-It does not apply to every mutation. It is distinct
-from Gateway's transport `X-Request-Id`, which identifies one HTTP request;
-transport correlation alone never deduplicates a domain effect.
+No domain operation carries a durable `requestId`. The idempotency key is
+distinct from Gateway's transport `X-Request-Id`, which identifies one HTTP
+request; transport correlation alone never deduplicates a domain effect.
 
 ### Cancellation is not revocation
 

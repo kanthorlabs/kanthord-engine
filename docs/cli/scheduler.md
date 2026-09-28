@@ -64,8 +64,8 @@ The [Scheduler operation contracts](https://github.com/kanthorlabs/kanthord/blob
 ### Identifiers, timestamps and revisions
 
 - `<project-id>` is a required opaque project identity, using the declared
-  `project_<ulid>` convention. `<request-id>` uses `request_<ulid>` and a
-  client identity uses the declared `client_identity_<ulid>` convention.
+  `project_<ulid>` convention. A client identity uses the declared
+  `client_identity_<ulid>` convention.
   The ULID suffix is canonical uppercase and 26 characters long. Use the
   [shared identity scalar](../../src/kernel/identity.ts), not a bare ULID.
 - `<execution-id>` uses `execution_<ulid>` and `<obligation-id>` uses
@@ -129,24 +129,18 @@ both fields are required; `items` contains at most `limit` records and
 reads one page; there is no implicit unbounded traversal or polling loop.
 The shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination) applies; pagination reserves no work.
 
-Mutation requests carry the key in `Idempotency-Key`. On
-`execution renew-lease` the CLI also sends body `requestId` equal to `request_`
-followed by that key, under the [durable requests](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#durable-requests) of the Scheduler.
-`work pull` carries no request identifier; it is idempotent by the runtime
-identity. `execution release` carries no request identifier; it is idempotent
-by the execution identity. The CLI generates `requestId`; it is not an
-editable JSON-file field. This preserves one domain request identity when an
-explicit key is reused by another CLI process. It is separate from Gateway's
-per-transport `X-Request-Id`.
+Mutation requests carry the key in `Idempotency-Key`. No Scheduler command
+carries a domain request identifier. `work pull` is idempotent by the runtime
+identity, and `execution renew-lease` and `execution release` are idempotent
+by the execution identity. The key is separate from Gateway's per-transport
+`X-Request-Id`.
 
 A work pull is idempotent by the runtime identity. A pull from an instance
 that holds a live execution returns that execution before new admission checks
 inside Scheduler, without a second execution or count. Gateway authentication
 still applies. Another instance never receives that execution. After the
 execution ends, a pull selects new work, and an ended claim restores no
-authority. A renewal binds its request identity to its execution: an identity
-that a later renewal superseded is a conflict. A release is idempotent by the
-execution identity.
+authority. A renewal and a release are idempotent by the execution identity.
 
 The [Gateway replay component](../../src/gateway/idempotency.ts) holds records in memory with a TTL.
 The [idempotency ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#idempotency-of-a-mutation) also requires handler-owned natural-key idempotency.
@@ -374,18 +368,16 @@ kanthord scheduler execution renew-lease <execution-id> [--idempotency-key <key>
 ```
 
 Required opaque `<execution-id>` maps to path `executionId`, with no default.
-There is no query or input file. The HTTP body is the closed generated object
-`{ "requestId": "request_<same-key-ulid>" }`. No expiry, duration, claimant,
-priority or replacement execution is accepted from the caller.
+There is no query or input file. The HTTP body is the closed empty object
+`{}`. No expiry, duration, claimant, priority or replacement execution is
+accepted from the caller.
 
 The authenticated holder renews its current live claim. Proposed success is
 HTTP `200` with `{ "executionId": string, "lease": Lease }`, both fields
 required and `Lease` shaped as the `ExecutionRecord.lease` object. Scheduler
-chooses the renewed expiry under its eventual lease policy. Replay of the
-same request returns the same accepted renewal rather than extending it
-again; a later renewal uses a new key. A key that a later renewal superseded
-answers 409 `scheduler.execution.renewal_superseded`. A replayed acknowledgement of an old
-renewal does not prove present liveness.
+chooses the renewed expiry under its eventual lease policy. Each accepted
+renewal sets the expiry from its acceptance time, so a repeat renews again.
+A replayed acknowledgement of an old renewal does not prove present liveness.
 
 Renewal serializes with loss declaration, release, revocation and completion.
 A new renewal of an ended, revoked or lost claim fails. Renewal consumes no
@@ -585,7 +577,6 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `cli.scheduler.queue.peek.invalid_project_id` | The `<project-id>` argument is not a canonical `project_<ulid>` identity. | queue peek                                          |
 | 409   | `scheduler.execution.not_owner`               | Proposed. The client does not own the execution.                          | claim get, execution renew-lease, execution release |
 | 409   | `scheduler.execution.release_conflict`        | Proposed. The execution was already released with a different result.     | execution release                                   |
-| 409   | `scheduler.execution.renewal_superseded`      | Proposed. Another renewal superseded this lease renewal.                  | execution renew-lease                               |
 | local | `scheduler.lifecycle.stopped`                 | A stopped Scheduler Service cannot start again.                           | serve server                                        |
 
 ## Design provenance
