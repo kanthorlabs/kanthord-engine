@@ -490,7 +490,7 @@ objective. A task attempt is not manufactured for convenience.
   The service fills missing task outcomes at a closure that a human act causes.
   The [outcome record ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-outcome-record) governs these outcomes; early-task-failure recovery remains **blocked** under [HANDOFF Mission Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#mission-service-1).
 
-Claim acquisition, release and renewal belong to Scheduler. Ordinary evaluation
+Claim acquisition and release belong to Scheduler. Ordinary evaluation
 dispatch is not requested by the steps executor. Attempt closure ends every
 execution and evaluation attempt in flight; late submissions cannot gain current
 effect. A completed historical record remains attributed to its original attempt.
@@ -893,7 +893,7 @@ aliases for internal mechanisms.
   assessment currency recomputation and missing-task-outcome completion are
   service responsibilities. There is no `mission reconcile`, `queue insert`,
   `attempt open`, `attempt close`, `evaluation retry` or `set-state` command.
-- Claim, lease renewal, release, loss declaration and work pull belong to Scheduler.
+- Claim, release, loss declaration and work pull belong to Scheduler.
   Worker registration and platform action performance belong to their owners.
   Mission records are not platform merge/push/notification commands.
 - Accepted observations are written by authorized observers, including after

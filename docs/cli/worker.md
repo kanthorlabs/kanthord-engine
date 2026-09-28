@@ -12,7 +12,7 @@ See the [CLI index](./README.md) for shared conventions and
 entries and effective configuration inspection belong to [Project](./project.md).
 The Worker Service owns agent enablement and effective configuration resolution.
 [Credential](./credential.md) covers credential management.
-Work pull, claims, execution records, lease renewal and release belong to
+Work pull, claims, execution records and release belong to
 [Scheduler](./scheduler.md).
 
 ## Current implementation boundary
@@ -285,15 +285,20 @@ Proposed HTTP `200` returns the summary fields plus:
 
 - `harness: string` for an external worker, naming its hosting harness.
 - `method: "steps" | "evaluation"` and `agentName: AgentName` for a native worker.
-- `resourceBudget: { turns: integer, wallTimeMs: integer }` for a native worker.
-  `general@1` and `reviewer@1` declare `{ turns: 200, wallTimeMs: 7200000 }`.
-  Both fields are positive safe integers. A native worker binding can override
-  the default. [Stop and budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#stop-and-budget)
-  defines a turn as one `turn_end` event and wall time from claim response to release.
-  `claude@1` and `opencode@1` declare no resource budget.
+- `resourceBudget` for every worker, with a required positive safe integer
+  `wallTimeMs` and an optional positive safe integer `turns`.
+  `general@1` and `reviewer@1` default to
+  `{ turns: 200, wallTimeMs: 7200000 }`; `claude@1` and `opencode@1`
+  default to `{ wallTimeMs: 7200000 }`. Every worker binding may override the
+  default. [Stop and budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#stop-and-budget)
+  defines a turn as one `turn_end` event of the pi agent loop and measures wall
+  time from the execution's `createdAt`. After budget end, execution code
+  checkpoints, pushes and releases, with cleanup bounded by `expiredAt`.
+  An external harness must release before its `expiredAt`.
 
-Absent/inapplicable native fields are omitted for externally hosted workers. The
-result changes no registration, pool, project configuration or scheduling state.
+Absent/inapplicable native fields other than `resourceBudget` are omitted for
+externally hosted workers. The result changes no registration, pool, project
+configuration or scheduling state.
 An unknown exact worker name returns `404 worker.catalog.not_found`.
 
 ### `agent get <agent-name>`
@@ -538,7 +543,7 @@ The proposed instance record contains:
 | `activity`                                                       | Required string, one of `idle`, `pulling`, `executing`, describing known server activity, not proof that a remote process is alive. |
 | `draining`                                                       | Required boolean; true when a server-hosted instance is scheduled to retire after its current execution.                            |
 | `executionId`                                                    | Present only while executing, naming the Scheduler execution record.                                                                |
-| `registered`                                                     | Required boolean; registration state, separate from execution lease state and physical process liveness.                            |
+| `registered`                                                     | Required boolean; registration state, separate from execution claim state and physical process liveness.                            |
 
 Both commands are read-only. Durable execution and trace attribution are queried
 through Scheduler and Tracking. They do not infer a dead process from silence.
@@ -699,7 +704,7 @@ WebSocket or deprecated HTTP+SSE transport requirement.
 
 This protocol/session lifecycle is not a set of extra CLI commands. Nor are
 model/repository/platform connectors, webhook decoding, prompt composition,
-lease/agent loops, workspace cleanup or collaboration functions. The MCP server
+agent loops, workspace cleanup or collaboration functions. The MCP server
 exposes no direct platform write and no raw git push, merge, credential export
 or caller-selected remote destination.
 

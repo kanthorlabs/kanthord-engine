@@ -21,16 +21,16 @@ The ownership and admission requirements stated here come from the service
 design. Open recovery decisions remain open, even where a candidate command
 shape is otherwise complete.
 
-The Scheduler owns jobs, claims, execution records, leases,
+The Scheduler owns jobs, claims, execution records, fixed deadlines,
 live-execution accounting, delivery admission and observation
-obligations. Mission owns nodes, attempts, pinned revisions, evidence,
-assessments, outcomes, external objects and accepted observation records.
+obligations and their leases. Mission owns nodes, attempts, pinned revisions,
+evidence, assessments, outcomes, external objects and accepted observation records.
 Worker owns registrations, runtime identities, healthchecks, compatibility
 declarations and execution hosting. Project owns bindings, configured counts,
 resource authorization and delivery verification.
 
-The proposed public surface has **10 remote commands**: seven read operations
-and three mutations. Group/resource help is local and calls no operation.
+The proposed public surface has **9 remote commands**: seven read operations
+and two mutations. Group/resource help is local and calls no operation.
 
 ## Shared input, output and access rules
 
@@ -46,7 +46,7 @@ Only the applicability and Scheduler-specific requirements are listed here.
 | [`--endpoint`](./common-flags.md#--endpoint)                                     | Every remote command.                                                                                                       |
 | [`--token`](./common-flags.md#--token)                                           | Every remote command requires a resolved token of the identity kind in its access policy. Missing credentials fail locally. |
 | [`--help`](./common-flags.md#--help)                                             | Every group and leaf.                                                                                                       |
-| [`--idempotency-key`](./common-flags.md#--idempotency-key)                       | The three mutations only.                                                                                                   |
+| [`--idempotency-key`](./common-flags.md#--idempotency-key)                       | The two mutations only.                                                                                                     |
 | [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Paginated `list` commands only.                                                                                             |
 | [`--file`](./common-flags.md#--file)                                             | Required on `work pull` and `execution release`; their sections define the JSON fields.                                     |
 
@@ -99,16 +99,16 @@ token does not become a worker by supplying a runtime or execution ID.
 `client` means a Gateway-verified machine JWT and a live Worker registration.
 Gateway resolves its project and worker binding, and Worker vouches for the
 runtime association. A caller-supplied identifier must match that association.
-Claim inspection, renewal and release additionally require that the execution
-belongs to that client identity and runtime.
-Renewal and release declare the live-execution requirement, so the invocation
-chain proves it before the handler; `claim get` declares none and its handler
-checks ownership, or answers 403 `scheduler.execution.not_owner`. No handler
-repeats the proof. A holder whose release answer was lost reads `claim get`
-after a refused retry.
-They transfer no execution to
-another registration. Current access-policy names are defined in the
-[operation contract](../../src/kernel/operation.ts).
+Claim inspection and release additionally require that the execution
+belongs to that client identity and runtime. Release declares the live-execution
+requirement, so the invocation chain proves it before the handler. Its write
+transaction repeats the full proof; failure answers 409
+`scheduler.execution.not_running`. `claim get` declares no live-execution
+requirement and its handler checks ownership, or answers 403
+`scheduler.execution.not_owner`. After a lost release answer and a refused
+retry, the holder reads `claim get`, which shows `finished`. Neither command
+transfers an execution to another registration. Current access-policy names
+are defined in the [operation contract](../../src/kernel/operation.ts).
 
 Delivery ingress uses `delivery` verification, described in [Intake](./intake.md#routes-without-a-command). A
 platform signature is neither a human JWT nor an execution identity. No
@@ -131,8 +131,8 @@ The shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/d
 
 Mutation requests carry the key in `Idempotency-Key`. No Scheduler command
 carries a domain request identifier. `work pull` is idempotent by the runtime
-identity, and `execution renew-lease` and `execution release` are idempotent
-by the execution identity. The key is separate from Gateway's per-transport
+identity. `execution release` carries no domain request identifier and
+stores no release receipt. The key is separate from Gateway's per-transport
 `X-Request-Id`.
 
 A work pull is idempotent by the runtime identity. A pull from an instance
@@ -140,15 +140,17 @@ that holds a live execution returns that execution before new admission checks
 inside Scheduler, without a second execution or count. Gateway authentication
 still applies. Another instance never receives that execution. After the
 execution ends, a pull selects new work, and an ended claim restores no
-authority. A renewal and a release are idempotent by the execution identity.
+authority. A release ends the execution at most once; a retry after the end
+meets the refusal of the proof.
 
 The [Gateway replay component](../../src/gateway/idempotency.ts) holds records in memory with a TTL.
-The [idempotency ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#idempotency-of-a-mutation) also requires handler-owned natural-key idempotency.
-Neither mechanism transfers a claim across a runtime-registration boundary.
+The [idempotency ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#idempotency-of-a-mutation) governs replay. Work pull uses runtime identity;
+release stores no receipt and a retry after the end is refused. Gateway replay
+transfers no claim across a runtime-registration boundary.
 
 No command automatically retries. A client can retry an uncertain mutation
 with the same inputs and explicit key. A timeout, disconnect or Ctrl-C ends
-the wait for a response; it undoes no committed claim, release or renewal.
+the wait for a response; it undoes no committed claim or release.
 A cancelled waiting pull leaves no uncommitted reservation.
 If acquisition committed before disconnection, the next pull of the same
 runtime identity returns the live execution. Shutdown stops new claims,
@@ -171,8 +173,7 @@ listed by a command. Read requests have no body. Every route in this table is
 | `claim get <execution-id>`                                                             | `scheduler.claim.get`                                                     | `GET /api/scheduler/claim/:executionId`                                      | `client`; owned claim read; **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)** |
 | `execution list <project-id> [--node <node-id>] [--limit <count>] [--cursor <opaque>]` | `scheduler.execution.list` **[blocked][scheduler-contract]**              | `GET /api/scheduler/project/:projectId/execution`                            | `human`; read                                                                                                                                          |
 | `execution get <execution-id>`                                                         | `scheduler.execution.get`                                                 | `GET /api/scheduler/execution/:executionId`                                  | `human`; read; **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)**              |
-| `execution renew-lease <execution-id> [--idempotency-key <key>]`                       | `scheduler.execution.renew-lease` **[blocked][scheduler-contract]**       | `POST /api/scheduler/execution/:executionId/renew-lease`                     | `client`; owned live execution mutation                                                                                                                |
-| `execution release <execution-id> --file <path> [--idempotency-key <key>]`             | `scheduler.execution.release` **[blocked][scheduler-contract]**           | `POST /api/scheduler/execution/:executionId/release`                         | `client`; owned live execution mutation                                                                                                                |
+| `execution release <execution-id> --file <path> [--idempotency-key <key>]`             | `scheduler.execution.release`                                             | `POST /api/scheduler/execution/:executionId/release`                         | `client`; owned live execution mutation                                                                                                                |
 | `observation-obligation list <project-id> [--limit <count>] [--cursor <opaque>]`       | `scheduler.observation-obligation.list` **[blocked][scheduler-contract]** | `GET /api/scheduler/project/:projectId/observation-obligation`               | `human`; read                                                                                                                                          |
 | `observation-obligation get <project-id> <obligation-id>`                              | `scheduler.observation-obligation.get` **[blocked][scheduler-contract]**  | `GET /api/scheduler/project/:projectId/observation-obligation/:obligationId` | `human`; read                                                                                                                                          |
 
@@ -300,7 +301,7 @@ Required opaque `<execution-id>` maps to path `executionId`; no default,
 query or body. Returns an `ExecutionRecord` for the authenticated client's
 own runtime. It can report that the execution has ended while that same
 registration remains live; it grants no authority from the historical result.
-A different client or runtime cannot use this command to take or renew the
+A different client or runtime cannot use this command to take the
 claim. After registration ends, use human execution inspection for history.
 This read is a snapshot; every later execution operation rechecks liveness.
 
@@ -345,10 +346,10 @@ fields are server-owned; the caller supplies none when acquiring work.
 | `attempt`                            | Positive safe integer counter of the node's attempt.                                                                                                                                                                                                                                                                                                                                                                         |
 | `pinnedRevision`                     | Positive safe JSON integer revision counter; proposed scalar pending adoption with Mission.                                                                                                                                                                                                                                                                                                                                  |
 | `credentials`                        | Array of `credential_<ulid>` strings: the credential revisions that the execution pins, `[]` at the claim.                                                                                                                                                                                                                                                                                                                   |
-| `claimState`                         | Proposed inspection enum `live`, `released`, `revoked` or `lost`. These are claim lifecycle labels, not new Mission node states. `lost` records the accepted loss declaration. The closed set remains **[blocked][scheduler-contract]** under the request and response schemas (claim state) question.                                                                                                                       |
-| `lease`                              | Object with required `expiresAt` timestamp, `renewedAt` timestamp or `null`, and `lossDeclaredAt` timestamp or `null`. Scheduler alone determines expiry.                                                                                                                                                                                                                                                                    |
+| `claimState`                         | Derived enum `running`, `lost` or `finished`: `running` when `endedAt` is null and time is before `expiredAt`; `lost` when `endedAt` is at or after `expiredAt`, or is null and time is at or after `expiredAt`; `finished` when `endedAt` is before `expiredAt` after release, assessment end or revocation.                                                                                                                |
+| `expiredAt`                          | Timestamp. The fixed deadline that the claim sets once.                                                                                                                                                                                                                                                                                                                                                                      |
 | `createdAt`                          | Claim acceptance timestamp.                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `endedAt`                            | End timestamp or `null` while live.                                                                                                                                                                                                                                                                                                                                                                                          |
+| `endedAt`                            | End timestamp or `null` before a terminal write.                                                                                                                                                                                                                                                                                                                                                                             |
 | `traceId`, `rootSpanId`              | Opaque owner-returned `TraceID` and `SpanID` strings respectively; identity validation remains **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#tracking-service)**.                                                                                                                                                                                                                 |
 
 Trace and span validation follows
@@ -359,32 +360,7 @@ requires neither W3C hexadecimal IDs nor an invented entity prefix.
 The attribution comes from the registration of `runtimeIdentity` and survives deregistration, because the Worker Service keeps the ended registration row.
 A display name authenticates and groups nothing.
 
-## Lease renewal and release
-
-### `execution renew-lease`
-
-```text
-kanthord scheduler execution renew-lease <execution-id> [--idempotency-key <key>]
-```
-
-Required opaque `<execution-id>` maps to path `executionId`, with no default.
-There is no query or input file. The HTTP body is the closed empty object
-`{}`. No expiry, duration, claimant, priority or replacement execution is
-accepted from the caller.
-
-The authenticated holder renews its current live claim. Proposed success is
-HTTP `200` with `{ "executionId": string, "lease": Lease }`, both fields
-required and `Lease` shaped as the `ExecutionRecord.lease` object. Scheduler
-chooses the renewed expiry under its eventual lease policy. Each accepted
-renewal sets the expiry from its acceptance time, so a repeat renews again.
-A replayed acknowledgement of an old renewal does not prove present liveness.
-
-Renewal serializes with loss declaration, release, revocation and completion.
-A new renewal of an ended, revoked or lost claim fails. Renewal consumes no
-additional count and changes no attempt. A hosted execution's
-renewal loop runs outside its agent at an interval shorter than lease expiry;
-this one-shot command supplies a primitive for an external orchestrator, not
-a scheduler loop or a daemon.
+## Release
 
 ### `execution release`
 
@@ -423,40 +399,48 @@ No query fields are accepted. The required file supplies the following fields.
   continuation; there is no pushed assignment.
 
 Proposed success is HTTP `200` with required fields
-`{ "executionId": string, "releasedAt": timestamp }`; the CLI adds its key.
-At the handler, a duplicate returns the accepted release without ending a second
-execution, double-decrementing a count or creating a second job. A duplicate
-with another payload answers 409 `scheduler.execution.release_conflict`.
-The invocation chain refuses a retry after the claim ends before the handler;
-the holder reads `claim get` for the accepted end. This receipt is not an outcome
-record or an assertion that the node is immediately claimable.
+`{ "executionId": string, "endedAt": timestamp }`; the CLI adds its key.
+The invocation chain proves a live execution before the handler. The release
+transaction checks the claimant, null `endedAt` and time before `expiredAt`
+again; failure answers 409 `scheduler.execution.not_running`. Of two terminal
+writes only one wins and routes Mission. A release retry after the end meets
+the refusal of the proof; after a lost answer the holder reads `claim get`,
+which shows `finished`. There is no stored release receipt. A lost claim
+cannot release. This answer is not an outcome record or an assertion that the
+node is immediately claimable.
 
 There is no `failure`, `cannotProgress`, `retryBudget`, `force` or arbitrary
 target-state field. Failure dispositions remain **blocked** under [HANDOFF Cannot progress](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#cannot-progress).
 
 ### Liveness, epochs and cancellation boundaries
 
-Lease validity, Worker healthcheck, observed telemetry progress and Mission
-readiness are separate facts. A healthcheck and silent logs establish no live
-claim and no failed assessment. A provider outage authorizes no substitution
+The deadline of a running claim, Worker healthcheck, observed telemetry
+progress and Mission readiness are separate facts. A healthcheck and silent
+logs establish no live claim and no failed assessment. A provider outage authorizes no substitution
 and creates no block condition by itself.
 
 The live execution identity must match the node's current claim. Human pause,
 discard and the applicable success override revoke the claim through Mission;
 the revocation is accepted before a later operation's admission can read it.
-Loss revokes authority at the loss declaration, not at a replacement claim.
-Both paths remove the execution from its claimant count. An already-admitted
+Loss revokes authority at the expiry, not at a replacement claim.
+Revocation before expiry is no loss; revocation of a lost claim takes effect
+at the expiry. Both paths remove the execution from its claimant count. An already-admitted
 remote operation follows Project's rules; revocation does not undo it.
 
-Lease duration and renewal cadence remain **[blocked][scheduler-contract]**.
-The command exposes no client-selected epoch.
-The execution/current-claim comparison and accepted revocation or loss govern liveness under the [Scheduler design](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#liveness).
+The claim fixes `expiredAt` at `createdAt` plus effective `wallTimeMs` plus
+1000 times `scheduler.releaseReserve` (default 600 seconds); a sweep settles
+expired unsettled rows every 30 seconds under the [Scheduler design](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#liveness).
+A claim, work-pull lookup, registration resume or Mission transition settles
+an expired unsettled row before checking its own preconditions. A hosted
+execution gets an in-process abort from the transaction ending it; every
+other execution learns of the end at its first refused call and aborts then.
 
 Expiry is not proof that a runtime stopped. A stopped or revoked execution
 must publish no later effect, and Mission/Project refuse stale admission.
-Physical stop and safe reuse remain **blocked** under [HANDOFF SC5](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service). Inspection, cancellation and renewal commands make no stronger
-guarantee. There is no generic Scheduler cancellation command: a transport
-cancel is not a release, and a human pauses/discards through Mission.
+Physical stop and safe reuse remain **blocked** under [HANDOFF SC5](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service).
+Inspection and cancellation make no stronger guarantee. There is no generic
+Scheduler cancellation command: a transport cancel is not a release, and a
+human pauses/discards through Mission.
 
 ## Observation-obligation inspection
 
@@ -488,13 +472,13 @@ accepted observation record remains a different resource.
 
 All fields are required; nullable fields remain present with `null`.
 
-| Field                                           | Type and meaning                                                                                                                                                                                                                                                            |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `obligationId`, `projectId`, `externalObjectId` | Opaque references; the external object determines correlation and service-identity resolution.                                                                                                                                                                              |
-| `acceptedAt`                                    | Durable obligation acceptance timestamp.                                                                                                                                                                                                                                    |
-| `lease`                                         | Same timestamp shape as `ExecutionRecord.lease`, or `null` before an observer holds it; the lease start remains **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)**. This lease is not a node claim. |
-| `completedAt`                                   | Timestamp or `null` while durable completion has not been established.                                                                                                                                                                                                      |
-| `observationId`                                 | Opaque Mission observation reference or `null` while no accepted observation is associated. Its prefix remains Mission-owned.                                                                                                                                               |
+| Field                                           | Type and meaning                                                                                                                                                                                                                                                                                        |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `obligationId`, `projectId`, `externalObjectId` | Opaque references; the external object determines correlation and service-identity resolution.                                                                                                                                                                                                          |
+| `acceptedAt`                                    | Durable obligation acceptance timestamp.                                                                                                                                                                                                                                                                |
+| `lease`                                         | Object with `expiresAt`, nullable `renewedAt` and nullable `lossDeclaredAt`, or `null` before an observer holds it; the lease start remains **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)**. This lease is not a node claim. |
+| `completedAt`                                   | Timestamp or `null` while durable completion has not been established.                                                                                                                                                                                                                                  |
+| `observationId`                                 | Opaque Mission observation reference or `null` while no accepted observation is associated. Its prefix remains Mission-owned.                                                                                                                                                                           |
 
 The observer has no claimant and no execution ID. It reads through the
 [platform connector of the Repository component](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/repository.md#platform-connector-and-platform-implementations)
@@ -565,19 +549,19 @@ signed delivery, and a human or machine token is not delivery verification.
   Scheduler delivery admission or a queue write.
 - **Human recovery and outcomes:** unblock, pause, resume, discard, priority
   and override belong to Mission's human authority path. Scheduler inspection
-  and machine lease operations cannot take their place.
+  and machine claim operations cannot take their place.
 
 ## Error codes
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP  | Code                                          | Condition                                                                 | Commands                                            |
-| ----- | --------------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------- |
-| local | `cli.scheduler.queue.list.invalid_project_id` | The `<project-id>` argument is not a canonical `project_<ulid>` identity. | queue list                                          |
-| local | `cli.scheduler.queue.peek.invalid_project_id` | The `<project-id>` argument is not a canonical `project_<ulid>` identity. | queue peek                                          |
-| 409   | `scheduler.execution.not_owner`               | Proposed. The client does not own the execution.                          | claim get, execution renew-lease, execution release |
-| 409   | `scheduler.execution.release_conflict`        | Proposed. The execution was already released with a different result.     | execution release                                   |
-| local | `scheduler.lifecycle.stopped`                 | A stopped Scheduler Service cannot start again.                           | serve server                                        |
+| HTTP  | Code                                          | Condition                                                                       | Commands                                        |
+| ----- | --------------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------- |
+| local | `cli.scheduler.queue.list.invalid_project_id` | The `<project-id>` argument is not a canonical `project_<ulid>` identity.       | queue list                                      |
+| local | `cli.scheduler.queue.peek.invalid_project_id` | The `<project-id>` argument is not a canonical `project_<ulid>` identity.       | queue peek                                      |
+| 403   | `scheduler.execution.not_owner`               | The client does not own the execution.                                          | claim get                                       |
+| 409   | `scheduler.execution.not_running`             | The execution is no longer running when its write transaction checks the proof. | execution release, and every execution mutation |
+| local | `scheduler.lifecycle.stopped`                 | A stopped Scheduler Service cannot start again.                                 | serve server                                    |
 
 ## Design provenance
 
