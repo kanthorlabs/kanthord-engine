@@ -43,13 +43,17 @@ The first version supports a native agent at the `worker` placement, and no prox
 
 The order is 01 Mission attempts and human controls, 02 Worker registration, 03 Scheduler execution, 04 Mission execution operations, 05 Custody handover, 06 Worker action performer, 07 native agent runtime, 08 native methods, 09 `worker` application, 10 Gateway composition, CLI and E2E. A plan constructs its seams in `src/apps/server/index.ts` in the ERD 1 construction order scheduler, custody, worker, mission, project, gateway. For a peer seam that a later plan provides, the earlier plan passes `unwired("<seam>")` in production and a `standIns` fake in `gatewayFixture` that answers the true state of the absent peer (ERD 1 D14).
 
-| Seam                                                          | Placed by | Replaced by |
-| ------------------------------------------------------------- | --------- | ----------- |
-| Mission `SchedulerClaims.revoke`, `settle`, `liveExecutionOf` | 01        | 03          |
-| Worker `SchedulerClaims.runningExecutionOfRuntime`            | 02        | 03          |
-| Mission `IntakeStorage`, `IntakeCheck`                        | 04        | ERD 3       |
-| Worker `IntakeActions`                                        | 06        | ERD 3       |
-| Scheduler `TraceIdentity`                                     | 03        | ERD 4       |
+| Seam                                                            | Placed by | Replaced by |
+| --------------------------------------------------------------- | --------- | ----------- |
+| Mission `SchedulerClaims.revoke`, `settle`, `liveExecutionOf`   | 01        | 03          |
+| Mission `SchedulerWakeup.wake` (production: a no-op, see below) | 01        | 03          |
+| Mission `ExecutionAttribution.of`                               | 01        | 03          |
+| Worker `SchedulerClaims.runningExecutionOfRuntime`              | 02        | 03          |
+| Mission `IntakeStorage`, `IntakeCheck`                          | 04        | ERD 3       |
+| Worker `IntakeActions`                                          | 06        | ERD 3       |
+| Scheduler `TraceIdentity`                                       | 03        | ERD 4       |
+
+One exception: the production stand-in of `SchedulerWakeup.wake` is a no-op until plan 03, because no work pull exists before plan 03 and a wakeup has no receiver. An ERD 1 graph write answers as before. Every other production stand-in is `unwired`.
 
 ## D10 — The execution proof
 
