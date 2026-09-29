@@ -110,7 +110,7 @@ A task is one commit of fewer than about 400 changed lines. A plan holds at most
 
 ## D23 — Standing precedents
 
-Two ERD 1 precedents need no debate (`.dev/erd-02/README.md`): an OpenAPI fragment over the line bound takes a named, shape-checked exception in `src/apps/server/openapi-integration.test.ts`, listed in the decision log; a colocated service test that needs a minted identity takes the per-file eslint exception of `eslint.config.js`, once per service. Commit `bf550c2` of ERD 1 replaced the per-file exceptions with the `test-identity.ts` seam, so no ERD 2 plan changes `eslint.config.js`. Plan 02 adds `testMachineIdentity` to `src/kernel/test-identity.ts`, and plan 03 adds it only when plan 02 has not.
+Two ERD 1 precedents need no debate (`.dev/erd-02/README.md`): an OpenAPI fragment over the line bound takes a named, shape-checked exception in `src/apps/server/openapi-integration.test.ts`, listed in the decision log; a colocated service test that needs a minted identity takes the per-file eslint exception of `eslint.config.js`, once per service. Commit `bf550c2` of ERD 1 replaced the per-file exceptions with the `test-identity.ts` seam, so no ERD 2 plan changes an identity exception of `eslint.config.js`. One named boundary change stands: plan 09 lets the element `apps-worker` import `src/worker/index.ts` (the native runtime entry of plan 07) and `src/repository` (the transport), because `kanthord serve worker` hosts the native runtime (`worker-service.impl.md:227`) and the ERD 1 boundary admitted only `contract.ts` and the Gateway client. Plan 02 adds `testMachineIdentity` to `src/kernel/test-identity.ts`, and plan 03 adds it only when plan 02 has not.
 
 ## D24 — Database conventions
 

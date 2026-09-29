@@ -1,0 +1,498 @@
+# Plan 07: Worker Service — native agent runtime
+
+## Scope
+
+This plan delivers:
+
+- The three prompt assets under `static/prompt/` (decision D14), the base prompt and the agent prompt of each agent declaration, and the tool names of `swe@1` and `re@1` in the catalog.
+- The pi loader: the one module that imports `@earendil-works/pi-coding-agent`, after it disables the tool download and gives pi its own directory.
+- `worker.agent.get` with its CLI leaf and its OpenAPI. Plan 02 moved the operation to this plan.
+- The prompt source reader and the prompt composer with its five layers, its sources, its bound, its disable value, its framing, its work prompt and its composition record.
+- The model runtime builder over `ModelRuntime.create`, the `openai-compatible` provider, the map of the model and the effort that fails closed, and the scripted fake provider of the tests (decision D16).
+- The isolated pi session: in-memory settings and session, no discovery, the pinned layers against compaction, and the `turn_end` count.
+- The resource budget, the session tool table with the budget bound of `bash`, the environment hygiene of every child process, and the host check of `rg` and `fd`.
+- The verification runner and the discard of the changes that a verification makes.
+- The repository connector methods `clone`, `fetchAndCheckout`, `pushNodeBranch` and `cloneSnapshot` (an edit of `src/repository/`).
+- The workspace root, its keys, its mode, its retention sweep and the preparation of a checkout, a snapshot and an initiative root.
+- The execution-scoped read `worker.execution.setup.get` with its Project and Mission collaborations. It serves every server-held fact that a `worker` application needs for one execution.
+- The native agent entry `openNativeAgent` that plan 08 calls.
+
+Out of scope:
+
+- The steps method, the evaluation method, the checkpoint commit, the release, the evidence and the assessment (plan 08).
+- The `worker` application, its startup order, its timers, its handover call and its refresh report (plan 09). This plan provides the functions that plan 09 calls and edits no application file (`00-index.md` "Shared files", row `src/apps/worker/index.ts`).
+- The `server` placement and the in-process execution view of custody (decision D8).
+- The MCP tool source and the project tool source of the tool table (decision D5). `worker.agent.get` answers the pi built-in tools alone.
+- The memory of a native agent (`docs/brainstorm/HANDOFF.md:52`, POSTPONED). The handoff protocol, the multi-agent workers, the token and currency budgets, the clarification interface and the live streaming (`HANDOFF.md:54–63`, "Next phase").
+- Every B9 item (decision D1). A task that meets one states the gap in one line.
+
+## Sources
+
+- `docs/brainstorm/worker-service.md:17–60` — the workers, the catalog declaration, the prompts of a declaration, the model connector and the effective configuration.
+- `docs/brainstorm/worker-service.md:98–164` — prompt composition: the five layers, the sources, the precedence, the composer, the record and the resolution once per execution.
+- `docs/brainstorm/worker-service.md:176`, `:217–224` — the pinned binding revision and the worker placement.
+- `docs/brainstorm/worker-service.md:258–324` — executions: the workspace, the node branch, the verifications and the budget end.
+- `docs/brainstorm/worker-service.md:815–824` — memory.
+- `docs/brainstorm/worker-service.vocabulary.md:64–192`, `:296–337` — native agent, prompt layer, prompt source, agent file, prompt composer, effective configuration, workspace, node branch and resource budget.
+- `docs/brainstorm/worker-service.impl.md:11–38` — the native agent runtime and the worker template registry.
+- `docs/brainstorm/worker-service.impl.md:71–103` — the configuration schema and the `openai-compatible` provider.
+- `docs/brainstorm/worker-service.impl.md:179–187` — `worker.agent.get`.
+- `docs/brainstorm/worker-service.impl.md:226–255` — the `worker` application and the configuration fields.
+- `docs/brainstorm/worker-service.impl.md:257–290` — prompt composition and the credential store of an execution.
+- `docs/brainstorm/worker-service.impl.md:326–362` — the tool table, the verifications and the workspace.
+- `docs/brainstorm/worker-service.impl.md:439–478` — commit attribution, stop and budget, trust boundary and traces.
+- `docs/brainstorm/mission-service.impl.md:35–62`, `:178–198` — the node content and the verifications.
+- `docs/brainstorm/repository.md:28–71` and `docs/brainstorm/repository.impl.md:11`, `:40–58` — the repository connector, the write operations, the placement and the SSH environment.
+- `docs/brainstorm/custody.impl.md:127–157` — the credential store of an execution and the handover.
+- `docs/brainstorm/architecture.impl.md:12`, `:56–74`, `:85–86`, `:158`, `:191–203`, `:252–262`, `:341–349`, `:646–659`, `:673`, `:694–699` — no new package, the directories, the file index, the monotonic clock, the digest, the modes, the error codes, the execution proof, the read of a worker and the handler rule.
+- `docs/brainstorm/assets/prompt/base.md`, `swe@1.md`, `re@1.md` — the prompt texts.
+- `engine/docs/cli/worker.md:296–341` — `agent get` and its result fields.
+- `engine/docs/cli/worker.md:707–761`, `engine/docs/cli/other.md:791`, `:820–836` — the error codes.
+- `engine/docs/cli/scheduler.md:336–352` — `ExecutionRecord`.
+- `engine/docs/cli/mission.md:517–533` — the execution-scoped reads.
+- `engine/docs/cli/project.md:326` — `projectPrompt`.
+- `engine/.agents/plan/erd-02-execution/00-index.md`, `decisions.md` — the boundary, the seams and decisions D1 to D26.
+- `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 07 — five gaps of the native agent runtime" — the setup read, the verification deadline, the disable value, the tool binaries and the initiative workspace.
+- pi 0.86.0: `node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts`, `dist/core/sdk.d.ts:10–107`, `dist/core/model-runtime.d.ts:3–100`, `dist/core/resource-loader.d.ts:66–113`, `dist/core/settings-manager.d.ts:179`, `dist/core/session-manager.d.ts:350`, `dist/core/extensions/types.d.ts:515–518`, `:586–591`, `:815–817`, `:924`, `:936`, `:1169–1176`, `dist/core/tools/bash.d.ts:23–69`, `dist/core/tools/find.d.ts:26–38`, `dist/utils/tools-manager.js:9`, `:300–322`, `dist/config.js:421–427`; `node_modules/@earendil-works/pi-ai/dist/models.d.ts:148–195`, `dist/auth/helpers.d.ts:8`, `dist/auth/types.d.ts:15–79`, `dist/providers/faux.d.ts`, `dist/api/openai-responses.lazy.d.ts:2`, `dist/compat.d.ts:22`, `dist/env-api-keys.d.ts:1–12`, `dist/types.d.ts:24–26`, `:785–808`.
+- Root `AGENTS.md` "Contracts", "Database design" and "Rejected proposals".
+
+## Depends on
+
+- ERD 1, merged. The catalog (`src/worker/catalog.ts:21–104`), the contract (`src/worker/contract.ts:65–75`, `:96–133`, `:156–209`), the agent view (`src/worker/service.ts:560–605`), the enablement store (`src/worker/enablements.ts:124`), the model validation (`src/worker/configuration.ts:20–114`), the custody metadata read (`src/custody/service.ts:357–369`) and schema (`src/custody/platforms.ts:60–82`), the repository component (`src/repository/connector.ts:4–22`, `src/repository/index.ts:11–33`, `src/repository/check.ts:83`), the kernel files (`src/kernel/files.ts:23–68`), directories (`src/kernel/xdg.ts:4–21`) and context (`src/kernel/context.ts:34–122`), the worker CLI group (`src/apps/cli/worker.ts:153–163`, `:277–306`).
+- Plan 01, through `00-index.md` "Seams": `ProjectBindings.repositoryPolicyOf`.
+- Plan 02, through `00-index.md` "Seams" and its task 02.2: `WorkerService.declarationOf`, the required `resourceBudget` of every declaration, and the Worker configuration fragment with `worker.globalPrompt` (`WorkerConfig`).
+- Plan 03, through `00-index.md` "Seams": the execution proof (`requiresExecution`, `caller.execution = { executionId, projectId, nodeId, attempt, pinnedRevision, runtimeIdentity, workerBindingId }`, 403 `gateway.invocation.execution_proof_failed`), `ExecutionRecord` with `createdAt` and `expiredAt`, and the CLI leaves `scheduler work pull` and `worker register`.
+- Plan 04, through `00-index.md` "Seams" and its task 04.5: the execution-scoped read `mission.execution.pinnedRevision.get` and the helpers of `src/mission/evidence-content.ts` (`repositoryBindingOf`, the initiative set of `requireTestedInput`).
+- Plan 05, through `00-index.md` "Seams" and the plan table row 05: the handover codec of `src/kernel/handover.ts` (decision D13), the payload of decision D19 and the pi-ai `CredentialStore` builder for the `worker` placement. This plan consumes the store as a pi-ai `CredentialStore` and the item fields `credentialId` and `providerId`.
+
+## Provides
+
+| Seam                                                       | TypeScript signature                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Owner file                                                                         | Consumer plans |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------- |
+| `loadPi`                                                   | `(): Promise<PiCodingAgent>`, with `PiCodingAgent = typeof import("@earendil-works/pi-coding-agent")`; `piAgentDirectory(): string`                                                                                                                                                                                                                                                                                                                                        | `src/worker/pi.ts`                                                                 | 08, 09         |
+| `RepositoryTransport`                                      | `clone(address: string, directory: string, context: Context, deadlineMs: number): Promise<void>`; `fetchAndCheckout(directory: string, branch: string, baseBranch: string, context: Context, deadlineMs: number): Promise<string>`; `pushNodeBranch(directory: string, branch: string, context: Context, deadlineMs: number): Promise<void>`; `cloneSnapshot(address: string, revision: string, directory: string, context: Context, deadlineMs: number): Promise<string>` | `src/worker/contract.ts`; implementation `src/repository/connector.ts`, `index.ts` | 08, 09         |
+| `executionSetupSchema`, `worker.execution.setup.get`       | `{ executionId; workerName; agentName; effectiveConfiguration: { agentProvider; provider; credential; modelIdentifier; reasoningEffort }; credentialId; providerModels: { baseUrl; models: { id; contextWindow?; maxTokens?; reasoningLevels? }[] } \| null; resourceBudget: { turns?; wallTimeMs }; repositories: { bindingId; name; address; baseBranch; projectPrompt: string \| null }[]; globalPrompt: GlobalPromptSource }`                                          | `src/worker/contract.ts`                                                           | 08, 09         |
+| `ProjectBindings.workerBindingRowOf`                       | `(tx: Transaction, bindingId: string): { bindingId: string; projectId: string; workerName: string; entries: { agent: string; agentProvider?: string; modelIdentifier?: string; reasoningEffort?: string }[]; resourceBudget: { turns: number; wallTimeMs: number } \| null } \| null` — the row that the identity names                                                                                                                                                    | `src/project/contract.ts`, `service.ts`                                            | 07             |
+| `MissionService.repositoryBindingIdsOf`                    | `(tx: Transaction, nodeId: string, nodeRevision: number): string[]`                                                                                                                                                                                                                                                                                                                                                                                                        | `src/mission/service.ts`                                                           | 07             |
+| `composePrompt`, `renderWorkPrompt`                        | `composePrompt(input: CompositionInput, context: Context): Promise<ComposedPrompt>`; `renderWorkPrompt(unit: { nodeId: string; revision: number; content: { name; requirement; criterion; verifications } }): WorkPrompt`                                                                                                                                                                                                                                                  | `src/worker/prompt-composer.ts`                                                    | 08             |
+| `ExecutionBudget`                                          | `new ExecutionBudget({ createdAt, expiredAt, resourceBudget })`; `wallDeadline(): number`; `remainingMs(): number`; `turnEnded(): void`; `exhausted(): boolean`; `agentContext(parent): CancellationContext`; `cleanupContext(parent): CancellationContext`                                                                                                                                                                                                                | `src/worker/budget.ts`                                                             | 08, 09         |
+| `runVerifications`, `verificationPassed`, `discardChanges` | `runVerifications({ directory, commands, testedInput, deadline, context }): Promise<Verification>`; `verificationPassed(verification, commands): boolean`; `discardChanges(directory, context, deadlineMs): Promise<void>`                                                                                                                                                                                                                                                 | `src/worker/verification.ts`, `local-git.ts`                                       | 08             |
+| `WorkspaceRoot`                                            | `open(stateDirectory): WorkspaceRoot`; `prepareObjective(…)`, `prepareSnapshot(…)`, `prepareInitiative(…)`, `prepareExecution(…)`, `release(…)`, `sweep(now)`, `startSweeping()`, `stopSweeping()`; `nodeBranchOf(nodeId): string`                                                                                                                                                                                                                                         | `src/worker/workspace.ts`                                                          | 06, 08, 09     |
+| `checkAgentTools`                                          | `(): void` — throws `worker.start.tool_missing`                                                                                                                                                                                                                                                                                                                                                                                                                            | `src/worker/tool-table.ts`                                                         | 09             |
+| `ModelRuntimeFactory`, `createModelRuntime`                | `(input: { credentials: CredentialStore; handoverItem: { credentialId; providerId }; setup: ExecutionSetup; signal: AbortSignal }) => Promise<{ runtime: ModelRuntime; model: Model<Api> }>`                                                                                                                                                                                                                                                                               | `src/worker/model-runtime.ts`                                                      | 08, 09         |
+| `openNativeAgent`                                          | `(input: NativeAgentInput): Promise<NativeAgent>`, with `NativeAgent = { prompt(work: WorkPrompt): Promise<void>; abort(): Promise<void>; readonly budget: ExecutionBudget; readonly composition: CompositionRecord; dispose(): void }`                                                                                                                                                                                                                                    | `src/worker/native-agent.ts`                                                       | 08, 09         |
+| Scripted fake provider                                     | `scriptedProvider(script: FauxResponseStep[]): ScriptedProvider` with `calls: { systemPrompt; messages; apiKey }[]`; `scriptedModelRuntime(provider): ModelRuntimeFactory`                                                                                                                                                                                                                                                                                                 | `src/worker/test-support.ts`                                                       | 08, 09, 10     |
+
+Four differences from `00-index.md` "Seams":
+
+- `RepositoryComponent` methods: `fetchAndCheckout` also takes `baseBranch`, because the first execution creates the node branch from the base branch (`worker-service.md:295`). `clone` takes no branch; `fetchAndCheckout` places the branch. `cloneSnapshot` takes a revision, a commit or `origin/<base branch>`, and answers the checked-out commit.
+- The credential store view of the `worker` placement is the builder of plan 05 (plan table row 05). This plan only checks the handover item against the setup answer.
+- `worker.execution.setup.get`, `workerBindingRowOf` and `repositoryBindingIdsOf` are new rows (debate Q1 of `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 07", `review:Ulrich`).
+- `nodeBranchOf` lives in `src/worker/node-branch.ts` of plan 06 (task 06.4). This plan re-exports it from `src/worker/index.ts` and declares no second copy.
+
+## Tasks
+
+### 07.1 Copy the prompt assets and declare the prompts of the agents
+
+- Files: `static/prompt/base.md`, `static/prompt/swe@1.md`, `static/prompt/re@1.md` (create), `src/worker/prompt-assets.ts` (create), `src/worker/catalog.ts` (edit), `src/worker/catalog.test.ts` (edit)
+- Do:
+  1. Copy the three files of `docs/brainstorm/assets/prompt/` byte for byte into `engine/static/prompt/`.
+  2. In `src/worker/prompt-assets.ts`, read each file once at module load with `readFileSync(new URL("../../static/prompt/<file>", import.meta.url), "utf8")`, in the form of `src/kernel/version.ts:4–11`. Export `BASE_PROMPT`, `SWE_AGENT_PROMPT` and `RE_AGENT_PROMPT`.
+  3. In `AgentDeclaration` (`src/worker/catalog.ts:21–24`), add `basePrompt?: string` and `agentPrompt: string`. Set `basePrompt: BASE_PROMPT` on `swe@1` and `re@1`, `agentPrompt: SWE_AGENT_PROMPT` on `swe@1` and `agentPrompt: RE_AGENT_PROMPT` on `re@1` (`:39–48`).
+  4. Add tests: each prompt is nonempty, decodes as UTF-8 and holds no control character outside tab and newline; `swe@1` and `re@1` hold the same `basePrompt`; the agent prompt of `swe@1` starts with `## Role` and names `swe@1`; the agent prompt of `re@1` names `re@1`.
+- Rules:
+  - The texts are copied verbatim into `engine/static/prompt/`; the catalog reads them at startup and refuses a file that is absent. Decision D14.
+  - One base prompt for `swe@1` and `re@1`, and one agent prompt each. `worker-service.impl.md:272`.
+  - The catalog holds one declaration per agent name with its prompts. `worker-service.impl.md:31`; `worker-service.md:29`.
+  - A change of a text is a new worker version and a root ruling, never a task. Decision D14; `worker-service.md:110–111`.
+  - `static/` ships in the package. `engine/package.json` "files".
+- Done when: `cmp` of each copy against its source in `docs/brainstorm/assets/prompt/` exits 0; `pnpm run verify` passes; the tests pass.
+
+### 07.2 Add the pi loader and the tool names of the catalog
+
+- Files: `src/worker/pi.ts` (create), `src/worker/pi.test.ts` (create), `src/worker/catalog.ts` (edit), `src/worker/tool-table.ts` (create), `src/worker/tool-table.test.ts` (create)
+- Do:
+  1. In `src/worker/pi.ts`, declare `PI_DIRECTORY_NAME = "pi"` and `PI_OFFLINE_VALUE = "1"`. Export `piAgentDirectory()`: `join(directories(process.env).state, PI_DIRECTORY_NAME)` (`src/kernel/xdg.ts:4–21`), computed once and cached.
+  2. Export `loadPi(): Promise<PiCodingAgent>`. On the first call, set `process.env.PI_OFFLINE = PI_OFFLINE_VALUE` and `process.env.PI_CODING_AGENT_DIR = piAgentDirectory()`, then `import("@earendil-works/pi-coding-agent")`. Cache the promise and answer it to every later call.
+  3. Export `type PiCodingAgent = typeof import("@earendil-works/pi-coding-agent")`. Every other module uses `import type` for a pi-coding-agent type.
+  4. In `src/worker/catalog.ts`, declare `BuiltinTool = { Read: "read", Edit: "edit", Write: "write", Grep: "grep", Find: "find", Ls: "ls", Bash: "bash" } as const`. Add `tools: readonly BuiltinTool[]` to `AgentDeclaration`. Set `swe@1` to read, edit, write, grep, find, ls and bash, and `re@1` to read, grep, find and ls.
+  5. In `src/worker/tool-table.ts`, declare `ToolSource = { Builtin: "builtin", KanthordMcp: "kanthord-mcp" } as const`. Export `toolDeclarations(agentName): Promise<{ name: string; source: ToolSource; inputSchema: Record<string, unknown> }[]>`. Load pi and build each definition with its factory (`createReadToolDefinition`, `createEditToolDefinition`, `createWriteToolDefinition`, `createGrepToolDefinition`, `createFindToolDefinition`, `createLsToolDefinition`, `createBashToolDefinition`) and the `cwd` `piAgentDirectory()`, because the parameters of a definition do not depend on its `cwd`. Answer `{ name: definition.name, source: ToolSource.Builtin, inputSchema: JSON.parse(JSON.stringify(definition.parameters)) }` in the catalog order.
+  6. In `src/worker/pi.test.ts`, add a test that reads every `.ts` file under `src/` and asserts that only `src/worker/pi.ts` holds a value import of `@earendil-works/pi-coding-agent`. Add a test that two calls of `loadPi` answer the same module and that `process.env.PI_OFFLINE` equals `PI_OFFLINE_VALUE` after the first call.
+  7. In `src/worker/tool-table.test.ts`, assert the seven names of `swe@1` and the four names of `re@1` in order; `re@1` holds no `edit`, `write` or `bash`; every `inputSchema` has `type: "object"`; every `source` is `builtin`.
+- Rules:
+  - `swe@1` enables read, edit, write, grep, find, ls and bash; `re@1` enables read, grep, find and ls. `worker-service.impl.md:329`.
+  - `re@1` holds no write tool. `worker-service.impl.md:271`.
+  - The hosting application gives pi its own directories. `worker-service.impl.md:20`. pi fixes its binary directory at module load from `PI_CODING_AGENT_DIR` (`dist/utils/tools-manager.js:9`; `dist/config.js:421–427`), so the environment is set before the first import.
+  - pi downloads no tool binary, because `ensureTool` answers no path when `PI_OFFLINE` is set (`dist/utils/tools-manager.js:308–311`). Debate Q4, `review:Ulrich`.
+  - The tool of a declaration has `name`, `source` (`builtin` or `kanthord-mcp`) and `inputSchema`. `engine/docs/cli/worker.md:318`.
+  - The MCP tool source is out of scope. Decision D5. Gap: `worker.agent.get` answers no `kanthord-mcp` tool until the MCP phase (`worker-service.impl.md:330–333`).
+  - The implementation adds no package; the three pi packages are installed. `architecture.impl.md:12`; `engine/package.json:51–53`.
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 07.3 Implement `worker.agent.get` with its CLI leaf
+
+- Files: `src/worker/contract.ts`, `src/worker/service.ts`, `src/worker/service.test.ts`, `src/apps/cli/worker.ts`, `src/apps/server/cli-worker.test.ts`, `src/apps/server/openapi-integration.test.ts` (all edit); `static/openapi.yaml` and `static/openapi/worker/agent.get.yaml` (regenerated)
+- Do:
+  1. In `src/worker/contract.ts`, declare `effectiveConfigurationSchema = z.strictObject({ agentProvider: z.string().min(1), provider: agentProviderKindSchema, credential: z.string().min(1), modelIdentifier: z.string().min(1), reasoningEffort: reasoningEffortSchema }).describe(CONFIGURATION_DESCRIPTION)`. `CONFIGURATION_DESCRIPTION` is: "The Worker Service validates the whole configuration. `modelIdentifier` belongs to `getBuiltinModels(provider)` of pi-ai 0.86.0 or to the `models` metadata of the `openai-compatible` credential. `reasoningEffort` belongs to the supported reasoning levels of that model. JSON Schema validates neither lookup."
+  2. Declare `toolDeclarationSchema = z.strictObject({ name: z.string().min(1), source: z.enum(ToolSource), inputSchema: z.record(z.string(), z.unknown()) })` and `agentDeclarationSchema = z.strictObject({ agentName, configurationSchema: z.record(z.string(), z.unknown()), overridableFields: z.array(z.string()), basePrompt: z.string().optional(), agentPrompt: z.string(), tools: z.array(toolDeclarationSchema), enablement: agentEnablementSchema.nullable() })`.
+  3. Declare `"agent.get"` in `workerOperations`: id `worker.agent.get`, `GET /api/worker/agent/:agentName`, `access: Human`, unary, `mutation: false`, `body: false`, `timeoutMs: ENABLEMENT_TIMEOUT_MS`, input `{ params: agentParams, query: emptyFields, body: z.null() }`, output `agentDeclarationSchema`.
+  4. Register the handler in `declare` (`src/worker/service.ts:681`). Call `requireAgent(params.agentName)` (`:82–90`) first. Await `toolDeclarations(agentName)`. Then run one `caller.commit` that reads `getEnablement(tx, agentName)` (`src/worker/enablements.ts:124`) and answers `wireRecord(row)` or null. Answer `configurationSchema: z.toJSONSchema(effectiveConfigurationSchema)`, `overridableFields` and the prompts of the declaration. Omit `basePrompt` when the declaration holds none.
+  5. In `src/apps/cli/worker.ts`, add the leaf `worker agent get <agent-name>` beside the `enablement` group (`:306`), in the form of `get` (`:153–163`), with `cli.worker.agent.get.token_required` and `cli.worker.agent.get.indeterminate`.
+  6. Regenerate OpenAPI with `pnpm run build && node bin/kanthord.mjs gateway openapi`. Assert the operation id and the path in `openapi-integration.test.ts`.
+  7. Add tests: `swe@1` answers `$schema` `https://json-schema.org/draft/2020-12/schema`, `additionalProperties: false`, the five required properties, no `default` and no `options`, the description of step 1, the base prompt and the agent prompt of task 07.1, seven tools and `enablement: null` before a put; after a put it answers the record, and after a disable it answers `state: "disabled"`; `re@1` answers four tools; `nope@1` answers 404 `worker.agent.not_found`; a machine token answers 401; the read changes no row. Add a CLI test: `worker agent get --help` exits 0.
+- Rules:
+  - The route, the fields, `enablement` null when no record exists, no composed prompt, no agent file read, and 404 `worker.agent.not_found`. `worker-service.impl.md:187`; `:37–38`; `engine/docs/cli/worker.md:300–318`, `:752`.
+  - The configuration schema: draft 2020-12 through `z.toJSONSchema` of `zod` 4.4.3, `additionalProperties: false`, five required properties, no `default`, no `options`, and the whole-configuration description. `worker-service.impl.md:71–88`; `engine/docs/cli/worker.md:320–338`.
+  - `overridableFields` of `swe@1` and `re@1`. `worker-service.impl.md:48`.
+  - A human read is unary, declares `mutation: false`, uses the default 30 s timeout and reads no table of another service. `worker-service.impl.md:181`.
+  - The CLI codes follow the shared forms. `engine/docs/cli/other.md:833–834`; `architecture.impl.md:348`.
+  - Each task publishes exactly the operations that it registers. `00-index.md` "Shared files", row `static/openapi/**`.
+- Done when: `pnpm run verify` passes; the tests pass; `kanthord worker agent get --help` exits 0.
+
+### 07.4 Add the prompt source reader
+
+- Files: `src/worker/prompt-source.ts` (create), `src/worker/prompt-source.test.ts` (create)
+- Do:
+  1. Declare `PROMPT_SOURCE_MAX_BYTES = 32768`, `PROMPT_READ_DEADLINE_MS = 10000`, `DISABLE_VALUE = "-"` and the closed set `SourceState = { Present: "present", Absent: "absent", Invalid: "invalid", Disabled: "disabled" }`, with the closed set `InvalidReason = { TooLarge: "too_large", NotUtf8: "not_utf8", ControlCharacter: "control_character", NotRegularFile: "not_regular_file", OutsideWorkspace: "outside_workspace", Deadline: "deadline", Unreadable: "unreadable" }`.
+  2. Export `validateText(text: string): InvalidReason | null`: `too_large` above `PROMPT_SOURCE_MAX_BYTES` UTF-8 bytes; `control_character` for a code point below U+0020 other than U+0009 and U+000A, or U+007F.
+  3. Export `readAgentFile(path, options: { workspace: string | null; context: Context }): Promise<SourceRead>`, with `SourceRead = { state: "present"; path; text } | { state: "absent"; path } | { state: "invalid"; path; reason }`:
+     - `ENOENT` of the path answers `absent`.
+     - With a `workspace`, resolve `realpath` of the path and of the workspace; a real path outside the real workspace answers `outside_workspace`. Without a `workspace` (a host location), follow every link.
+     - Open the real path with `O_RDONLY | O_NOFOLLOW`, `fstat` the descriptor, and answer `not_regular_file` for any type other than a regular file. Read at most `PROMPT_SOURCE_MAX_BYTES + 1` bytes from that descriptor.
+     - Decode with `new TextDecoder("utf-8", { fatal: true })`; a decode failure answers `not_utf8`. Then apply `validateText`.
+     - Bound the whole read by `new CancellationContext(options.context, Date.now() + PROMPT_READ_DEADLINE_MS)`; its cancellation answers `deadline`. Any other failure answers `unreadable`.
+  4. Export `configuredSource(value: string | null | undefined): { state: "disabled" } | { state: "absent" } | { state: "text"; text: string }` for a configured text: `DISABLE_VALUE` answers `disabled`; `undefined`, null and the empty string answer `absent`; every other value answers `text`.
+  5. Add tests in a temporary directory (`src/kernel/test-support.ts:5`): a present file; an absent file; 32768 bytes pass and 32769 bytes are `too_large`; a byte sequence `0xff` is `not_utf8`; U+0000, U+000D and U+007F are `control_character`, and tab and newline pass; a directory is `not_regular_file`; a link of the workspace that leaves the workspace is `outside_workspace`; a link inside the workspace passes; a host link to a file outside the host directory passes; the text `@other.md` stays literal; `configuredSource` of `"-"`, `""`, `undefined` and `"text"`.
+- Rules:
+  - An agent file is read as UTF-8 Markdown, a control character outside tab and newline is rejected, and no `@` import is resolved. `worker-service.impl.md:262`.
+  - A workspace path that a link resolves outside the workspace is rejected; a host link is followed. `worker-service.impl.md:263–264`; `worker-service.md:151`.
+  - A regular file is read, and no reference inside it is followed. `worker-service.md:150`.
+  - A deadline bounds every read. `worker-service.impl.md:265`.
+  - Every source holds at most 32768 UTF-8 bytes; a source above the bound is invalid. `worker-service.impl.md:276–278`; `worker-service.md:152`.
+  - The exact value `"-"` of a configured source disables its layer; an empty or absent value stays absent. Debate Q3, `review:Ulrich`; `worker-service.md:124–125`; `worker-service.vocabulary.md:105`; `worker-service.impl.md:252`; `engine/docs/cli/project.md:326`.
+  - A closed value set is an enum in code. Root `AGENTS.md` "Database design".
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 07.5 Add the prompt composer
+
+- Files: `src/worker/prompt-composer.ts` (create), `src/worker/prompt-composer.test.ts` (create)
+- Do:
+  1. Declare the closed set `PromptLayer = { Global: "global prompt", Base: "base prompt", Agent: "agent prompt", Project: "project prompt", Work: "work prompt" }` and `PRECEDENCE = [Agent, Base, Work, Project, Global]`.
+  2. Declare `CompositionInput = { workerName; agent: AgentDeclaration; method: WorkerMethod; globalPrompt: GlobalPromptSource; hostHome: string; repository: { name: string; projectPrompt: string | null } | null; workspace: string }`, with `GlobalPromptSource = { state: "absent" } | { state: "disabled" } | { state: "text"; path: string; text: string } | { state: "invalid"; path: string; reason: InvalidReason }`.
+  3. Export `composePrompt(input, context): Promise<ComposedPrompt>`, with `ComposedPrompt = { systemPrompt: string; layers: { global: LayerText | null; project: LayerText | null }; record: CompositionRecord }` and `LayerText = { layer; owner; source; text; marked }`.
+     - Global prompt: take `input.globalPrompt`. `disabled` ends the layer with no read. `text` is the layer. `invalid` makes the layer absent and records the rejection. `absent` passes to `readAgentFile(join(hostHome, ".agents/AGENTS.md"), { workspace: null })`, then to `join(hostHome, ".claude/CLAUDE.md")`. The first present and valid source is the layer; a present and invalid source ends the layer.
+     - Project prompt: apply `configuredSource(repository.projectPrompt)`, then `validateText` to a `text`. `disabled` ends the layer. `absent` passes, for the steps method, to `readAgentFile(join(workspace, "AGENTS.md"), { workspace })`, then to `CLAUDE.md`. For the evaluation method the layer ends after the repository binding, and the composer reads no file of the workspace.
+     - Record `{ layer, owner, source, path, digest }` for each present layer and `{ layer, source, path, reason }` for each rejected source. `digest` is `createHash("sha256").update(text, "utf8").digest("hex")` of the exact layer text. The record holds no text.
+  4. Build `systemPrompt` as the framing, then the base prompt layer when declared, then the agent prompt layer. The framing is: "This prompt holds prompt layers. Each layer names its owner and its source. The precedence from the highest to the lowest is: agent prompt, base prompt, work prompt, project prompt, global prompt. A layer of higher precedence governs a layer of lower precedence. No layer revokes an obligation of the agent prompt or of the base prompt. A layer authorizes no operation." followed by one line `- <layer>: owner <owner>; source <source>.` for each present layer in composition order.
+  5. Mark each layer as `<prompt-layer name="<layer>" owner="<owner>" source="<source>">\n<text>\n</prompt-layer>`. The owners are `operator of the server`, `worker <workerName>`, `project of repository binding <name>` and `node revision <revision> of <nodeId>`. The sources are `configuration of the server: <path>`, `agent file of the host: <path>`, `declaration of <agentName>`, `repository binding <name>`, `agent file of the workspace: <file>` and `pinned node revision <revision>`.
+  6. Export `renderWorkPrompt(unit): WorkPrompt`, with `WorkPrompt = { text; marked; digest }`. `text` is `# <name>\n\n## Requirement\n\n<requirement>\n\n## Criterion\n\n<criterion>\n\n## Verifications\n\n` followed by one line `<n>. <command>` for each verification in list order.
+  7. Add tests with the real configuration values: the configured global prompt wins over the host files and reads no file; `""` takes `~/.agents/AGENTS.md`; an absent `~/.agents/AGENTS.md` takes `~/.claude/CLAUDE.md`; `"-"` reads no host file; an invalid configured source reads no host file and records the rejection; the repository binding wins over `AGENTS.md` of the workspace; a `projectPrompt` of `"-"` reads no workspace file; an absent `projectPrompt` takes `AGENTS.md`, then `CLAUDE.md`; an oversized workspace `AGENTS.md` makes the layer absent and takes no `CLAUDE.md`; a workspace link that leaves the workspace is rejected; the evaluation method reads no workspace file even when the binding holds no project prompt; the digest of a text with a trailing newline differs from the digest of the trimmed text; the record holds no text; the framing lists the present layers in composition order.
+- Rules:
+  - The five layers, their owners and the composition order. `worker-service.md:100–116`; `worker-service.vocabulary.md:71–89`.
+  - The source lists, the first present and valid source, the absent and invalid cases and the disabled layer. `worker-service.md:118–126`; `worker-service.vocabulary.md:91–105`.
+  - The global prompt sources: the file of `worker.globalPrompt`, then `~/.agents/AGENTS.md`, then `~/.claude/CLAUDE.md`. The project prompt sources: the repository binding, then `AGENTS.md`, then `CLAUDE.md` of the workspace root. The evaluation method stops at the repository binding. `worker-service.impl.md:259–261`; `worker-service.md:128–132`.
+  - The composition states the owner, the source and the precedence of every layer. `worker-service.md:134–141`.
+  - pi receives the base prompt and the agent prompt as its system prompt with the framing, and the other layers as separate marked content. `worker-service.impl.md:268–269`.
+  - The layer digest hashes the UTF-8 bytes of the exact text with SHA-256 in lower-case hexadecimal, with no trimming and no JSON quoting. `worker-service.impl.md:267`; `architecture.impl.md:200–201`.
+  - The composer records the selected source, its digest and every rejected source, and no text. `worker-service.md:154–156`.
+  - The work prompt states the requirement, the criterion and the verifications of the work. `worker-service.md:114–115`.
+  - The repository context-file discovery of pi stays disabled, and the composer performs every load. `worker-service.impl.md:266`.
+  - A layer names no value of the effective configuration and adds no tool. `worker-service.md:142–144`.
+  - The framing text is plan text that no page names. The report lists it for Ulrich.
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 07.6 Add the model runtime builder
+
+- Files: `src/worker/model-runtime.ts` (create), `src/worker/model-runtime.test.ts` (create), `src/worker/contract.ts` (edit)
+- Do:
+  1. In `src/worker/contract.ts`, declare `WorkerErrorCode.RuntimeSetupRefused = "worker.runtime.setup_refused"` (code: proposed) and the closed set `SetupRefusal = { ModelUnknown: "model_unknown", ReasoningEffortUnsupported: "reasoning_effort_unsupported", CredentialAbsent: "credential_absent", CredentialRevisionMismatch: "credential_revision_mismatch" }`.
+  2. Declare `ADAPTER_ID: Record<AgentProviderKind, string>` = `anthropic` → `anthropic`, `github-copilot` → `github-copilot`, `openai-compatible` → `openai-compatible`.
+  3. Export `createModelRuntime(input)`: when `handoverItem.providerId !== ADAPTER_ID[provider]`, throw `Diagnostic(RuntimeSetupRefused, …)` with reason `credential_absent`; when `handoverItem.credentialId !== setup.credentialId`, throw with reason `credential_revision_mismatch`. Then call `(await loadPi()).ModelRuntime.create({ credentials, modelsPath: null, allowModelNetwork: false, refreshOnCreate: false, signal })`.
+  4. For `openai-compatible`, build one pi model for each item of `setup.providerModels.models`: `{ id, name: id, api: "openai-responses", provider: "openai-compatible", baseUrl, reasoning, thinkingLevelMap, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: contextWindow ?? 128000, maxTokens: maxTokens ?? 16384 }`. The established levels are `reasoningLevels ?? ["off"]`; `reasoning` is true when a level other than `off` exists; `thinkingLevelMap` maps each level outside the set to `null` and each established `xhigh` or `max` to its own name. Call `createProvider({ id: "openai-compatible", name: agentProvider, baseUrl, auth: { apiKey: envApiKeyAuth(agentProvider + " API key", []) }, models, api: openAIResponsesApi() })` and `runtime.registerNativeProvider(provider)`. Import `createProvider` and `envApiKeyAuth` from `@earendil-works/pi-ai` and `openAIResponsesApi` from `@earendil-works/pi-ai/api/openai-responses.lazy`.
+  5. Export `resolveModel(runtime, setup): Model<Api>`: `runtime.getModel(ADAPTER_ID[provider], modelIdentifier)`; an absent model throws with reason `model_unknown`; a `reasoningEffort` outside `getSupportedThinkingLevels(model)` throws with reason `reasoning_effort_unsupported`.
+  6. Export `type ModelRuntimeFactory` and `defaultModelRuntimeFactory = async (input) => { const runtime = await createModelRuntime(input); return { runtime, model: resolveModel(runtime, input.setup) }; }`.
+  7. Add tests: an `anthropic` setup resolves `claude-sonnet-4-5` with effort `off`; an unknown model and an unsupported effort refuse with their reasons; a foreign `providerId` and a foreign `credentialId` refuse; an `openai-compatible` setup of two models builds both with the metadata base URL, zero costs, the defaults of pi 0.86.0 for an omitted value and `getSupportedThinkingLevels` equal to the established levels; the store answers the key and no environment variable is read (`ANTHROPIC_API_KEY` set in the test process does not reach `runtime.getAuth`); the create performs no network call.
+- Rules:
+  - The adapter builds the runtime with `ModelRuntime.create({ credentials })` over the credential store of the execution. `worker-service.impl.md:18`.
+  - The provider catalog refresh is disabled. `worker-service.impl.md:23`; `dist/core/model-runtime.d.ts:9–18`.
+  - The `openai-compatible` provider: `createProvider` with id `openai-compatible`, the agent provider name, `baseUrl`, `envApiKeyAuth("<agent provider name> API key", [])`, `openAIResponsesApi()`, one model per metadata model with the defaults `128000`, `16384`, `["off"]`, input `["text"]` and zero costs; `setProvider` registers the provider. `worker-service.impl.md:90–103`. `ModelRuntime.registerNativeProvider` performs that `setProvider` (`dist/core/model-runtime.js:143`, `:551–558`).
+  - The view exposes only the credential of the effective agent provider under the pi adapter id; the adapter maps the model and the effort onto the pi model and fails closed. `worker-service.impl.md:286–288`.
+  - The adapter fails closed when the handover item names another revision than the setup answer. Debate Q1, `review:Ulrich`.
+  - A stored credential owns its provider, and pi consults no environment variable for it. `dist/auth/resolve.d.ts` "resolveProviderAuth"; `worker-service.impl.md:290`.
+  - `worker.runtime.setup_refused` (code: proposed): no page names it. The condition is ruled at `worker-service.impl.md:288`. No shared code of `engine/docs/cli/other.md` and no ERD 1 code covers it.
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 07.7 Add the scripted fake provider
+
+- Files: `src/worker/test-support.ts` (create), `src/worker/test-support.test.ts` (create)
+- Do:
+  1. Export `scriptedProvider(script: FauxResponseStep[], options: { providerId: string; modelIdentifier: string })`. Build `core = createFauxCore({ provider: providerId, models: [{ id: modelIdentifier, reasoning: false }] })` and `createProvider({ id: providerId, auth: { apiKey: envApiKeyAuth("scripted API key", []) }, models: core.models, api: { stream: record(core.stream), streamSimple: record(core.streamSimple) } })`. `record(stream)` answers `(model, context, streamOptions) => { calls.push({ systemPrompt: context.systemPrompt, messages: context.messages, apiKey: streamOptions?.apiKey }); return stream(model, context, streamOptions); }`. Call `core.setResponses(script)`.
+  2. Export `scriptedModelRuntime(provider): ModelRuntimeFactory`: call `createModelRuntime(input)`, then `runtime.registerNativeProvider(provider.provider)`, then answer `{ runtime, model: resolveModel(runtime, input.setup) }`.
+  3. Export `anthropicSetup(overrides)`: an `ExecutionSetup` with `agentProvider: "default"`, `provider: "anthropic"`, `credential: "anthro-1"`, `modelIdentifier: "claude-sonnet-4-5"`, `reasoningEffort: "off"` and `resourceBudget: { turns: 200, wallTimeMs: 7200000 }`.
+  4. Re-export `fauxAssistantMessage`, `fauxToolCall` and `fauxText` of `@earendil-works/pi-ai`.
+  5. Add a test: a script of two assistant turns answers both in order through `runtime.completeSimple`; each call records the key of an `InMemoryCredentialStore` that holds `{ type: "api_key", key: "scripted-secret" }` under `anthropic`; the builtin `anthropic` provider is replaced, and no network call happens.
+- Rules:
+  - The fake is a pi-ai 0.86.0 provider under the provider id of the enablement, registered through the provider registration of pi-ai, inside the test process only, with an `api` that answers a scripted sequence of assistant turns and tool calls. Decision D16; `worker-service.impl.md:482–483`.
+  - Every fixture uses the model `claude-sonnet-4-5` and a complete entry form. Decision D16.
+  - No production module imports `src/worker/test-support.ts`. The precedent is `src/kernel/test-support.ts`.
+  - No test performs a real provider call. Decision D16.
+- Done when: `pnpm run verify` passes; the test passes.
+
+### 07.8 Add the isolated pi session
+
+- Files: `src/worker/agent-session.ts` (create), `src/worker/agent-session.test.ts` (create)
+- Do:
+  1. Declare `RUNTIME_SETUP_DEADLINE_MS = 30000`. Export `withDeadline(promise, context)`: race the promise against `new CancellationContext(context, Date.now() + RUNTIME_SETUP_DEADLINE_MS)` and reject with its error on cancellation.
+  2. Export `openSession(input: { cwd; modelRuntime; model; thinkingLevel; systemPrompt; allowlist: string[]; customTools: ToolDefinition[]; extensions: InlineExtension[]; context }): Promise<AgentSession>`. Load pi. Create `SettingsManager.inMemory({ enableInstallTelemetry: false, enableAnalytics: false })`, `SessionManager.inMemory(cwd)` and `new DefaultResourceLoader({ cwd, agentDir: piAgentDirectory(), settingsManager, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true, systemPrompt, extensionFactories: extensions })`. Await `withDeadline(loader.reload(), context)`.
+  3. Await `withDeadline(pi.createAgentSession({ cwd, agentDir: piAgentDirectory(), modelRuntime, model, thinkingLevel, tools: allowlist, customTools, resourceLoader, sessionManager, settingsManager }), context)` and answer `session`.
+  4. Add tests. Before the first `loadPi`, point `HOME` and `XDG_STATE_HOME` of the test process to a temporary directory. Put `AGENTS.md`, `.pi/settings.json`, `.pi/extensions/x.ts` and `.pi/skills/s/SKILL.md` into the `cwd`, and `~/.pi/agent/settings.json` into the home. Run a scripted turn through the provider of task 07.7. Assert: the system prompt of the recorded call starts with the given `systemPrompt` and holds no text of those files; the session holds no extension, skill or prompt template of the files; no entry exists under `~/.pi` and under `piAgentDirectory()` after the run; the session writes no session file; an unresolved `reload` rejects with `system.context.deadline_exceeded` after the deadline of a fake timer.
+- Rules:
+  - The session is created with `createAgentSession({ modelRuntime })`. `worker-service.impl.md:18`.
+  - The discovery of user extensions, skills, prompt templates and themes is disabled; the session manager is in memory; the install telemetry is disabled. `worker-service.impl.md:21–23`. The version check runs only in `main` of pi (`dist/main.js:441–447`), which the adapter never calls.
+  - The repository context-file discovery of pi stays disabled. `worker-service.impl.md:266`.
+  - Every runtime setup call carries a deadline. `worker-service.impl.md:26`. `DefaultResourceLoader.reload` and `createAgentSession` take no signal (`dist/core/resource-loader.d.ts:58`; `dist/core/sdk.d.ts:107`), so the deadline races them.
+  - The hosting application gives pi its own directory. `worker-service.impl.md:20`. pi writes no file under it, so the file index of `architecture.impl.md:76–87` needs no row.
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 07.9 Pin the layers and count the turns
+
+- Files: `src/worker/pinned-layers.ts` (create), `src/worker/pinned-layers.test.ts` (create)
+- Do:
+  1. Declare `LAYER_MESSAGE_TYPE = "kanthord.prompt-layer"`. Export `pinnedLayers(layers: { global: LayerText | null; project: LayerText | null }): { extension: InlineExtension; setWork(work: WorkPrompt): void }`.
+  2. The extension registers `pi.on("context", (event) => ({ messages }))`. `messages` is the custom message `{ role: "custom", customType: LAYER_MESSAGE_TYPE, content: marked, display: false, timestamp }` of the global prompt and of the project prompt that are present, then the custom message of the current work prompt when `event.messages` holds no user message whose text equals the current `work.marked`, then every message of `event.messages` whose `customType` is not `LAYER_MESSAGE_TYPE`.
+  3. Export `countTurns(session, onTurnEnd: () => void): () => void`: `session.subscribe((event) => { if (event.type === TURN_END) onTurnEnd(); })` with `TURN_END = "turn_end"`.
+  4. Add tests with the scripted provider: every recorded call holds the global layer, the project layer and the work prompt in that order after the system prompt; after `session.compact()` with a scripted summary the next call still holds all three layers once; an absent project layer adds no message; a script of three assistant turns with two tool calls counts three `turn_end` events.
+- Rules:
+  - The adapter pins the composed layers against the compaction of pi, so every layer survives a compacted context. `worker-service.impl.md:270`.
+  - No model inference call of the execution drops a layer of its prompt. `worker-service.md:164`.
+  - pi keeps its own compaction logic, and kanthord designs nothing for it. `worker-service.impl.md:477`. The pin uses the `context` event of the pi extension API (`dist/core/extensions/types.d.ts:515–518`, `:815–817`, `:924`).
+  - A turn is one `turn_end` event of the pi agent loop. `worker-service.impl.md:451`; `dist/core/extensions/types.d.ts:586–591`.
+  - A comparison against a fixed string uses a named constant. `architecture.impl.md:17–19`.
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 07.10 Add the resource budget and the session tool table
+
+- Files: `src/worker/budget.ts` (create), `src/worker/budget.test.ts` (create), `src/worker/tool-table.ts` (edit), `src/worker/tool-table.test.ts` (edit), `src/worker/contract.ts` (edit)
+- Do:
+  1. In `src/worker/budget.ts`, export `ExecutionBudget`. The constructor takes `{ createdAt, expiredAt, resourceBudget: { turns?: number; wallTimeMs: number } }`, reads `Date.now()` once and `performance.now()` once, and fixes `wallDeadline = Math.min(createdAt + wallTimeMs, expiredAt)`. `remainingMs()` measures from the `performance.now()` reading. `turnEnded()` counts one turn. `exhausted()` is true when a declared `turns` is reached or `remainingMs()` is 0. `agentContext(parent)` answers `new CancellationContext(parent, wallDeadline)` and cancels it at the turn that exhausts the budget. `cleanupContext(parent)` answers `new CancellationContext(parent, expiredAt)`.
+  2. In `src/worker/tool-table.ts`, export `childEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv`: a copy without every name that `findEnvKeys(provider, env)` reports for each id of `getBuiltinProviders()`, and without `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_OAUTH_TOKEN`.
+  3. Export `sessionTools(pi, agentName, cwd, budget): { allowlist: string[]; customTools: ToolDefinition[] }`. `allowlist` is the tool names of the declaration. For an agent with `bash`, `customTools` holds `pi.createBashToolDefinition(cwd, { operations, spawnHook, exposeSessionEnvironment: false })`. `operations.exec` delegates to `pi.createLocalBashOperations().exec` with `timeout = Math.min(requested ?? limit, limit)`, where `limit = Math.floor((budget.remainingMs() - 1) / 1000)` seconds; a `limit` below 1 rejects with the error `resource budget ended`. `spawnHook` answers the context with `env: childEnvironment(context.env)`.
+  4. Declare `WorkerErrorCode.StartToolMissing = "worker.start.tool_missing"` (code: proposed). Export `checkAgentTools()`: run `rg --version` and `fd --version` with `spawnSync`, and accept `fdfind` for `fd`; throw `Diagnostic(StartToolMissing, "<tool>: not found")` for a tool that cannot run.
+  5. Add tests: `wallDeadline` is `createdAt + wallTimeMs` below `expiredAt` and `expiredAt` above it; a budget with no `turns` never exhausts on turns; a budget of 2 turns exhausts at the second `turnEnded` and cancels `agentContext`; `agentContext` cancels at the wall deadline with a fake timer; `cleanupContext` outlives the wall deadline and ends at `expiredAt`; `childEnvironment` drops `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` and keeps `PATH` and `SSH_AUTH_SOCK`; a `bash` call that asks for 3600 s with 5 s left runs under 4 s; a call with no budget left rejects; the bash child sees no `ANTHROPIC_API_KEY`; `re@1` answers no custom tool; `checkAgentTools` throws `worker.start.tool_missing` with an empty `PATH`.
+- Rules:
+  - The execution enforces the turn budget on pi turn events and aborts the agent when either budget ends. `worker-service.impl.md:464`; `worker-service.md:269`.
+  - Wall time runs from `created_at` of the execution; a duration uses a monotonic clock. `worker-service.impl.md:452`; `architecture.impl.md:158`.
+  - The bash timeout of an agent command stays below the remaining wall-time budget. `worker-service.impl.md:465`. pi takes the timeout in seconds (`dist/core/tools/bash.js:14–24`).
+  - Every cleanup command is bounded by `expired_at`, not by the remaining budget. `worker-service.impl.md:467`.
+  - The pi process inherits no provider environment variable. `worker-service.impl.md:290`. `findEnvKeys` and the three constants are exported by `@earendil-works/pi-ai/compat` (`dist/compat.d.ts:22`; `dist/env-api-keys.d.ts:1–12`).
+  - The start of `kanthord serve worker` refuses a host without `rg` or `fd`, because pi `grep` and `find` spawn them (`dist/core/tools/grep.js:52`; `find.js:119`). Debate Q4, `review:Ulrich`.
+  - `worker.start.tool_missing` (code: proposed): no page names it. The condition is ruled by debate Q4 over `worker-service.impl.md:329`. It sits beside `worker.start.client_secret_absent` (`engine/docs/cli/worker.md:715–716`). No shared code covers it; `repository.connector.tool_missing` names the tools of the repository connector alone (`repository.impl.md:42–43`).
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 07.11 Add the verification runner
+
+- Files: `src/worker/verification.ts` (create), `src/worker/verification.test.ts` (create), `src/worker/local-git.ts` (create), `src/worker/local-git.test.ts` (create)
+- Do:
+  1. In `src/worker/verification.ts`, declare `Verification = { testedInput: TestedInput; results: { command: string; exitCode: number | null; signal: string | null; timedOut: boolean }[] }`, where `TestedInput` is declared inline with the shape of `engine/docs/cli/mission.md:723`, `:738–742`.
+  2. Export `runVerifications({ directory, commands, testedInput, deadline, context })`. For each command in list order: stop when `Date.now() >= deadline` or `context.err()`; spawn `bash` with `["-c", command]`, `cwd: directory`, `env: childEnvironment(process.env)`, `stdio: "ignore"` and `detached: true`; kill the process group with `SIGKILL` at `deadline` and at the cancellation of `context`; on `exit`, record `{ command, exitCode: code, signal, timedOut }`, where `timedOut` is true only for the kill of the deadline; on a spawn `error`, record `{ command, exitCode: null, signal: null, timedOut: false }`; stop after a result with an `exitCode` other than 0. Answer `{ testedInput, results }`.
+  3. Export `verificationPassed(verification, commands)`: true when `results` hold one entry per command and every `exitCode` is 0.
+  4. In `src/worker/local-git.ts`, export `discardChanges(directory, context, deadlineMs)`: `git reset --hard HEAD`, then `git clean -ffd`, through `simpleGit({ baseDir: directory, abort, timeout: { block: deadlineMs } })` in the form of `src/repository/connector.ts:9–21`. Export `headCommit(directory, context, deadlineMs): Promise<string>`: `git rev-parse HEAD`.
+  5. Add tests: `["true", "false", "true"]` answers two results with exit codes 0 and 1 and leaves the third unrun; `exit 3` records 3; `kill -TERM $$` records `signal: "SIGTERM"` and `exitCode: null`; `sleep 5` with a deadline 200 ms ahead records `timedOut: true` and `signal: "SIGKILL"`, and its child `sleep` ends with the group; a deadline already reached answers no result; a cancelled context ends the item with `timedOut: false`; the items run one by one; the child sees no `ANTHROPIC_API_KEY`; `verificationPassed` refuses a short run; `discardChanges` removes a tracked edit and an untracked file of the verification and keeps an ignored file.
+- Rules:
+  - The items run in list order, one by one, through `bash -c` in the workspace root; the run stops at the first failed item; one result per started item; `exitCode` and `signal` null for an unobserved process; an unstarted item has no result; a run passes with one entry per verification and every `exitCode` 0. `mission-service.impl.md:180–191`.
+  - Each item runs under `min(createdAt + wallTimeMs, expiredAt)`; an item whose deadline arrived does not start; a started item that the deadline ends reports `timedOut: true`. Debate Q2, `review:Ulrich`; `mission-service.impl.md:187`.
+  - The execution code, never the agent, runs the verifications, and it discards every change that the verifications make. `worker-service.md:303–304`; `worker-service.impl.md:346`.
+  - A local git operation runs in the workspace and passes through no connector. `worker-service.md:59`.
+  - The workspace root of the run is the root of the execution workspace. `worker-service.impl.md:341`.
+  - Abort does not prove that every descendant process stops. `worker-service.impl.md:461`. Gap: a descendant that leaves the process group survives the kill (B9 W5).
+  - `discardChanges` keeps a file that `.gitignore` names, because git counts it outside the work product. The report lists this choice for Ulrich.
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 07.12 Add the repository connector methods
+
+- Files: `src/repository/connector.ts`, `src/repository/index.ts`, `src/repository/connector.test.ts` (all edit); `src/worker/contract.ts` (edit)
+- Do:
+  1. In `src/repository/connector.ts`, extract `runGit(directory, args, context, deadlineMs, operation)` from `gitLsRemote` (`:4–22`): the same abort controller, timer and `simpleGit({ baseDir, abort, timeout: { block: deadlineMs } })`. Wrap every failure in `Diagnostic("repository.connector.git_failed", "<operation>: git failed.")` (code: proposed). Keep `gitLsRemote` on `runGit` with its current answer.
+  2. Export `clone(address, directory, context, deadlineMs)`: `git clone --no-checkout -- <address> .` in the empty `directory`.
+  3. Export `fetchAndCheckout(directory, branch, baseBranch, context, deadlineMs)`: `git fetch --prune origin`; `git rev-parse --verify --quiet refs/remotes/origin/<branch>`; `git checkout --force -B <branch> origin/<branch>` when the ref exists, otherwise `origin/<baseBranch>`; `git clean -ffd`; answer `git rev-parse HEAD`.
+  4. Export `pushNodeBranch(directory, branch, context, deadlineMs)`: `git push origin refs/heads/<branch>:refs/heads/<branch>`, with no force.
+  5. Export `cloneSnapshot(address, revision, directory, context, deadlineMs)`: `clone`, then `git checkout --detach <revision>`, then answer `git rev-parse HEAD`.
+  6. Add the four methods to `RepositoryComponent` (`src/repository/index.ts:11–33`). In `src/worker/contract.ts`, declare the interface `RepositoryTransport` with the four signatures of "Provides".
+  7. Add tests against a local bare repository with a `main` commit: a clone and a first `fetchAndCheckout` create the node branch at the head of `main`; a push publishes it; a second workspace `fetchAndCheckout` takes the pushed head, not `main`; a non-fast-forward push answers `repository.connector.git_failed` and changes the remote nothing; `cloneSnapshot` of a commit and of `origin/main` answers that commit; an aborted context and a deadline of 1 ms answer `repository.connector.git_failed`; no command line of a git child holds a credential; `GIT_SSH_COMMAND` and `GIT_SSH` stay unset.
+- Rules:
+  - The repository connector performs the network git read and write; a push of the steps execution targets the node branch alone; no generic push exists. `repository.md:28–32`, `:54–65`.
+  - The first execution creates the node branch from the base branch; the execution never rewrites a pushed commit; the node-branch push precedes every release. `worker-service.md:293–298`.
+  - Before the reuse, the checkout comes to the head of the node branch at the repository. `worker-service.md:280`.
+  - `simple-git` 3.36.0 spawns the host `git`; its timeout plugin takes the deadline of the caller; its abort plugin binds to the `Context`. `repository.impl.md:11`, `:45–47`.
+  - The `git` child inherits the SSH environment of the host; no `GIT_SSH_COMMAND`, no `GIT_SSH`, no credential in a URL or on a command line. `repository.impl.md:48`, `:51–58`.
+  - The component runs in the process of its caller; the caller keeps the budget and the cancellation. `repository.md:66–71`.
+  - `repository.connector.git_failed` (code: proposed): no page names it. The condition is ruled at `repository.impl.md:45–47`, and `worker-service.impl.md:378` names the repository connector as the source of the code of a network git write. No shared code covers it.
+  - `src/repository` imports only the kernel. `eslint.config.js:57`.
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 07.13 Add the workspace root, its keys and its sweep
+
+- Files: `src/worker/workspace.ts` (create), `src/worker/workspace.test.ts` (create)
+- Do:
+  1. Declare `WORKSPACES_DIRECTORY = "workspaces"`, `WORKSPACE_RETENTION_MS = 7 * 24 * 3600 * 1000`, `SWEEP_INTERVAL_MS = 3600000`. Import `nodeBranchOf` from `./node-branch.ts` (plan 06 task 06.4), which owns `NODE_BRANCH_PREFIX` and the identity check; declare no second copy.
+  2. Export `WorkspaceRoot.open(stateDirectory)`: `root = join(stateDirectory, WORKSPACES_DIRECTORY)`; `ensureDirectory(root)` (`src/kernel/files.ts:56–68`), which audits the root and no entry under it.
+  3. Keys: `objectiveKey(objectiveId)` = `join(root, objectiveId)` and `objectiveDirectory(objectiveId, bindingId)` = `join(root, objectiveId, bindingId)`; `executionKey(executionId)` = `join(root, executionId)`. Parse each identity with `identitySchema("node")`, `identitySchema("binding")` or `identitySchema("execution")` before the join.
+  4. `hold(key)` adds the key to an in-process set and throws an assertion error for a key already held; `touch(key)` sets the access and modification time of the key directory to now with `utimesSync`; `release(key, kind)` touches an objective key and removes an execution key with `rmSync(key, { recursive: true, force: true })`, then drops the hold.
+  5. `sweep(now)`: for each entry of `root`, skip a held key, `lstat` the entry, and remove it with `rmSync` when its modification time is older than `now - WORKSPACE_RETENTION_MS`. `startSweeping()` runs `sweep` at once and every `SWEEP_INTERVAL_MS` on an `unref` timer; `stopSweeping()` clears the timer.
+  6. Every directory that the root creates takes mode `0700` through `ensureDirectory`.
+  7. Add tests: the root is `0700` and a wider mode of a root that exists throws `system.files.invalid_permissions`; the keys refuse `../x` and a foreign prefix; `nodeBranchOf("node_01ARZ3NDEKTSV4RRFFQ69G5FAA")` answers `kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA`; a second hold throws; the sweep removes an entry of 8 days and keeps an entry of 6 days and a held entry of 8 days; a release of an execution key removes it; a release of an objective key keeps it and sets its time.
+- Rules:
+  - The workspace root is `workspaces/` of the state directory; at the `worker` placement it is the state directory of the host. `worker-service.impl.md:232`, `:356`; `architecture.impl.md:70`.
+  - The steps workspace of an objective is `workspaces/<objective identity>/<repository binding identity>/`; the evaluation workspace is `workspaces/<execution identity>/` and is removed at the release. `worker-service.impl.md:357–358`; `architecture.impl.md:85–86`.
+  - The steps workspace of an initiative is `workspaces/<execution identity>/` and is removed at the release. Debate Q5, `review:Ulrich`; `worker-service.md:283`; `worker-service.vocabulary.md:312`.
+  - A directory under the root holds mode `0700`, and the audit of the start covers the root alone. `worker-service.impl.md:359`; `architecture.impl.md:254–256`.
+  - The retention is 7 days from the end of the last execution of the objective; a sweep runs at the start and every hour. `worker-service.impl.md:360–361`; `worker-service.md:281`.
+  - The node branch takes its name from the node identity. `worker-service.md:294`; `worker-service.vocabulary.md:316`.
+  - A workspace is a directory, not a row. `docs/reference/erd/02-execution.md:31`.
+  - Gap: the hold is in-process only. The quiescence check before a reuse across processes still needs a mechanism (`worker-service.impl.md:462`; B9 W5).
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 07.14 Add the workspace preparation
+
+- Files: `src/worker/workspace.ts` (edit), `src/worker/workspace.test.ts` (edit)
+- Do:
+  1. `prepareObjective({ objectiveId, repository: { bindingId, address, baseBranch }, transport, context, deadlineMs }): Promise<{ directory; head; nodeBranch }>`: `hold` and `touch` the objective key. When `objectiveDirectory` exists, audit it and call `transport.fetchAndCheckout(directory, nodeBranchOf(objectiveId), baseBranch, …)`. Otherwise `ensureDirectory` the key and the directory, call `transport.clone(address, directory, …)`, then `fetchAndCheckout`.
+  2. `prepareSnapshot({ executionId, repository: { address }, commit, transport, … })`: `hold` the execution key, `ensureDirectory` it and call `transport.cloneSnapshot(address, commit, directory, …)`.
+  3. `prepareInitiative({ executionId, repositories, transport, … })`: `hold` the execution key and `ensureDirectory` it. For each repository, `ensureDirectory(join(key, bindingId))` and call `cloneSnapshot(address, "origin/" + baseBranch, …)`. Answer `{ directory: key, testedInput: repositories.map(({ bindingId }, i) => ({ kind: "repository", bindingId, commit: heads[i] })) }`. An empty list answers `testedInput: null`, and the method of plan 08 places the produced evidence.
+  4. `prepareExecution({ executionId })`: `hold` the execution key and `ensureDirectory` it.
+  5. Add tests with the connector of task 07.12 and a local bare repository: a first objective preparation clones and creates the node branch; a second preparation after a push of the node branch reuses the directory and takes the pushed head; an unpushed local commit is replaced by the head at the repository; a snapshot preparation checks out the given commit; an initiative preparation of two bindings answers two subdirectories and one commit per binding at the head of each base branch; an empty initiative answers `testedInput: null`; a failed clone leaves the hold released for a retry.
+- Rules:
+  - The steps workspace of an objective is a checkout of the repository that the pinned revision names, on the node branch; it is reused when the host holds one and created through a network git read otherwise. `worker-service.md:277–280`.
+  - The evaluation workspace is fresh, a clean checkout of the snapshot. `worker-service.md:282`; `worker-service.vocabulary.md:310`.
+  - An initiative uses one subdirectory per distinct repository binding of its current objectives, one tested commit per binding at the base-branch head, and the evidence-placement rule when no objective names a repository. `worker-service.impl.md:342–345`.
+  - The workspace of the steps method on an initiative holds no checkout. `worker-service.md:283`.
+  - A later execution never depends on the continued existence of a workspace. `worker-service.md:824`.
+  - Every network git operation runs through the repository connector with a deadline. `repository.impl.md:46`.
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 07.15 Add the Project and Mission collaborations of the setup read
+
+- Files: `src/project/contract.ts`, `src/project/service.ts`, `src/project/service.test.ts`, `src/mission/evidence-content.ts`, `src/mission/service.ts`, `src/mission/service.test.ts`, `src/worker/contract.ts`, `src/worker/service.ts`, `src/worker/service.test.ts`, `src/apps/server/index.ts` (all edit)
+- Do:
+  1. In `ProjectService`, implement `workerBindingRowOf(tx, bindingId)` beside `getBindingRevision` (`src/project/service.ts:534–564`): `readBindingRevision(tx, bindingId)`; null when the row is absent or its kind is not `worker`; parse `config` with `workerConfigSchema` (`src/project/contract.ts:111–130`); answer `{ bindingId, projectId, workerName: config.worker, entries: config.entries ?? [], resourceBudget: config.resourceBudget ?? null }` of that row, never of the latest row.
+  2. In `src/mission/evidence-content.ts`, extract the initiative set of `requireTestedInput` (plan 04 task 04.5 step 3) into `repositoryBindingIdsOf(tx, bindings, nodeId, nodeRevision)`. For an objective, answer the one repository binding of the pinned revision (`repositoryBindingOf`). For an initiative, answer one binding identity per resource identity of the repository bindings of its current objectives, discarded objectives included, and keep the identity of the greatest `revision` of `bindings.getBindingRevision`. Call it from `requireTestedInput`. Expose it as `MissionService.repositoryBindingIdsOf(tx, nodeId, nodeRevision)`.
+  3. In `src/worker/contract.ts`, declare inline `WorkerBindingRowOf`, `RepositoryPolicyOf` with the fields `{ bindingId; name; address; baseBranch; projectPrompt: string | null }` that this plan reads, and `RepositoryBindingIdsOf`. Add `workerBindingRowOf`, `repositoryPolicyOf`, `repositoryBindingIdsOf` and `dataDirectory: string` to `Dependencies` (`src/worker/service.ts:158–166`) as required fields.
+  4. In `composeServices` (`src/apps/server/index.ts:113–121`), pass `(tx, id) => project.workerBindingRowOf(tx, id)`, `(tx, id) => project.repositoryPolicyOf(tx, id)`, `(tx, n, r) => mission.repositoryBindingIdsOf(tx, n, r)` and `directories(process.env).data`. Give the defaults of `makeService` in `src/worker/service.test.ts` fakes that throw `UNEXPECTED_COLLABORATION`.
+  5. Add tests: `workerBindingRowOf` answers the pinned row after a later revision changes its entries; a repository binding answers null; the call opens no transaction; `repositoryBindingIdsOf` answers the binding of an objective, one identity for two objectives on one binding, the binding of a discarded objective, and `[]` for an initiative with no repository; `requireTestedInput` keeps every test of plan 04.
+- Rules:
+  - Each claim pins the latest revision of the worker binding, and the execution reads the configuration of that revision until it ends. `worker-service.md:176`.
+  - The repository binding that the pinned revision names holds the configured source of the project prompt; the composer reads it through the Project Service. `worker-service.md:128`, `:149`.
+  - An initiative takes one subdirectory per distinct repository binding of its current objectives, discarded objectives included. `worker-service.impl.md:342`, `:344`; plan 04 task 04.5 step 3.
+  - A collaboration takes the caller transaction and opens none; its type is declared inline in the contract of the service that consumes it; the composition root wires it. `architecture.impl.md:592–608`; `00-index.md` "Collaboration-type contract rule".
+  - Every collaboration is required. Decision D4.
+  - The row of the greatest revision per resource identity is plan text under debate Q1 (`review:Ulrich`).
+- Done when: `pnpm run verify` passes; the tests pass; every earlier E2E test passes unchanged.
+
+### 07.16 Implement `worker.execution.setup.get`
+
+- Files: `src/worker/contract.ts`, `src/worker/service.ts`, `src/worker/execution-setup.ts` (create), `src/worker/execution-setup.test.ts` (create), `src/apps/server/openapi-integration.test.ts` (edit); `static/openapi.yaml` and `static/openapi/worker/execution.setup.get.yaml` (regenerated)
+- Do:
+  1. Declare `globalPromptSourceSchema` as the discriminated union on `state` of `{ state: "absent" }`, `{ state: "disabled" }`, `{ state: "text", path, text }` and `{ state: "invalid", path, reason: z.enum(InvalidReason) }`, and `executionSetupSchema` with the fields of "Provides". `providerModels.models` items reuse the field names of the credential metadata (`src/custody/platforms.ts:66–82`) in an inline schema.
+  2. Declare `"execution.setup.get"`: id `worker.execution.setup.get`, `GET /api/worker/execution/:executionId/setup`, `access: Client`, `requiresExecution: true`, unary, `mutation: false`, `body: false`, `timeoutMs: 30000`, input `{ params: { executionId: identitySchema("execution") }, query: {}, body: null }`, output `executionSetupSchema`.
+  3. Declare `WorkerErrorCode.ExecutionNoNativeAgent = "worker.execution.no_native_agent"` (code: proposed).
+  4. In `src/worker/execution-setup.ts`, implement the handler. First resolve the global prompt source from `config.globalPrompt`: `configuredSource` of task 07.4 for `"-"` and `""`; for a path, resolve a relative path against `dataDirectory` and call `readAgentFile(path, { workspace: null })`; map `present` to `text`. Then run one `caller.commit` with `claim = caller.execution`:
+     - `row = workerBindingRowOf(tx, claim.workerBindingId)`, asserted non-null; `declaration = declarationOf(row.workerName)`. A declaration with no `agentName` throws 409 `worker.execution.no_native_agent`.
+     - `entry` = the entry of `row.entries` whose `agent` equals `agentName`, without `agent`, or null. `view = workerAgentView(tx, row.workerName, agentName, entry)` (`src/worker/service.ts:560–605`). An invalid view throws 400 with the code of its first issue and `details: { agentName, issues }`.
+     - `metadata = credentialMetadata(tx, view.effective.credential)`, asserted non-null; `credentialId = metadata.id`; `providerModels` = `{ baseUrl, models }` of the metadata for `openai-compatible`, else null.
+     - `repositories = repositoryBindingIdsOf(tx, claim.nodeId, claim.pinnedRevision).map((id) => repositoryPolicyOf(tx, id))`, each asserted non-null and mapped to `{ bindingId, name, address, baseBranch, projectPrompt }`.
+     - `resourceBudget = row.resourceBudget ?? declaration.resourceBudget`.
+  5. Regenerate OpenAPI and assert the operation id, the path and the absence of a request body.
+  6. Add tests through the direct adapter and the HTTP adapter: a steps claim of `general@1` answers the effective configuration of the enablement, `providerModels: null`, the default budget, one repository with its `projectPrompt` and `globalPrompt: { state: "absent" }`; a binding override answers its `resourceBudget`; a tuning entry changes `reasoningEffort`; an `openai-compatible` enablement answers `baseUrl`, the models and the `credentialId` of the newest live revision; `worker.globalPrompt` `"-"` answers `disabled`, a relative path answers `text` with the path under the data directory, and an oversized file answers `invalid` with `too_large`; a disabled enablement answers 400 `worker.agent.enablement.unavailable`; an ended execution and the execution of another instance answer 403 `gateway.invocation.execution_proof_failed`; a `claude@1` execution answers 409 `worker.execution.no_native_agent`; a human token answers 401; the answer holds no secret; the read writes no row.
+- Rules:
+  - The read of a worker is a `client` operation keyed by the execution identity, and the server derives the rest from the live claim; the chain proves the path identity. `architecture.impl.md:646–659`, `:673`; decision D10.
+  - The binding, the worker and the agent configuration come from the server; the `worker` application reads no server configuration. `worker-service.impl.md:230–231`.
+  - `worker.globalPrompt` is a path of the server configuration; a relative path resolves against the data directory; the loader reads it under the agent-file rules. `worker-service.impl.md:250–254`.
+  - The Worker Service resolves the effective configuration from one snapshot and makes no network call. `worker-service.impl.md:55–57`; `worker-service.md:56`.
+  - Disablement refuses every later resolution. `worker-service.md:87`; `engine/docs/cli/worker.md:751`.
+  - The model metadata of an `openai-compatible` provider comes from the credential metadata of the resolved revision; the Worker Service reads metadata through custody, never the secret. `worker-service.impl.md:69`, `:92`.
+  - Every worker declares `resourceBudget.wallTimeMs`, and a worker binding overrides it. `worker-service.impl.md:446–449`.
+  - A handler runs asynchronous work first and performs one `caller.commit`. `architecture.impl.md:697–698`.
+  - The operation takes no CLI leaf, as `mission.evidence.request` of plan 04. `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 04" Q1.
+  - The operation, its fields and its sources extend the pages. Debate Q1, `review:Ulrich`.
+  - `worker.execution.no_native_agent` (code: proposed): no page names it. The condition is ruled at `worker-service.md:24` and `:94`: an externally hosted worker declares no agent. No shared code covers it.
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 07.17 Add the native agent entry
+
+- Files: `src/worker/native-agent.ts` (create), `src/worker/native-agent.test.ts` (create), `src/worker/index.ts` (edit), `engine/AGENTS.md` (edit)
+- Do:
+  1. Declare `NativeAgentInput = { setup: ExecutionSetup; claim: { executionId; nodeId; createdAt; expiredAt }; nodeKind: NodeKind; method: WorkerMethod; credentials: CredentialStore; handoverItem: { credentialId; providerId }; workspace: string; hostHome: string; modelRuntimeFactory: ModelRuntimeFactory; context: Context }`. `NodeKind` is the inline closed set `objective`, `initiative`..
+  2. Export `openNativeAgent(input)`:
+     1. `budget = new ExecutionBudget({ createdAt, expiredAt, resourceBudget: setup.resourceBudget })`; `agentContext = budget.agentContext(input.context)`.
+     2. `composed = await composePrompt({ workerName: setup.workerName, agent: getAgentDeclaration(setup.agentName), method, globalPrompt: setup.globalPrompt, hostHome, repository: nodeKind === NodeKind.Objective ? setup.repositories[0] : null, workspace }, agentContext)`. An initiative names no repository binding, so its project prompt takes no binding of its objectives.
+     3. `{ runtime, model } = await withDeadline(modelRuntimeFactory({ credentials, handoverItem, setup, signal }), agentContext)`.
+     4. `pins = pinnedLayers(composed.layers)`; `pi = await loadPi()`; `tools = sessionTools(pi, setup.agentName, workspace, budget)`; `session = await openSession({ …, thinkingLevel: setup.effectiveConfiguration.reasoningEffort, extensions: [pins.extension] })`.
+     5. `countTurns(session, () => { budget.turnEnded(); if (budget.exhausted()) void session.abort(); })`; `agentContext.onCancel(() => void session.abort())`.
+  3. `prompt(work)`: `pins.setWork(work)`, then `session.prompt(work.marked, { expandPromptTemplates: false })`, then `session.waitForIdle()`. `abort()` answers `session.abort()`. `dispose()` unsubscribes, calls `session.dispose()` and drops the runtime.
+  4. Export `openNativeAgent`, `WorkspaceRoot`, `nodeBranchOf`, `runVerifications`, `verificationPassed`, `discardChanges`, `headCommit`, `ExecutionBudget`, `renderWorkPrompt`, `checkAgentTools`, `defaultModelRuntimeFactory` and `loadPi` from `src/worker/index.ts`.
+  5. In `engine/AGENTS.md` "Project structure", add one line for each new module of `src/worker/` of this plan and for `static/prompt/`, and extend the description of `src/repository/` with the node-branch transport.
+  6. Add tests with the scripted provider: a `swe@1` agent runs a script of a `write` tool call, a `bash` tool call and a final text, and the files exist in the workspace; a `re@1` agent meets a scripted `write` call with a tool error and no file; a budget of 1 turn stops the agent after the first `turn_end`; a cancelled parent context aborts the agent; the composition record names the selected sources; the fake records the key of the handover store.
+- Rules:
+  - The execution resolves the global, base, agent and project prompts once at its start and holds them until it ends; the work prompt renders for each unit of work. `worker-service.md:158–163`.
+  - A revoked or lost execution stops its agent. `worker-service.md:265`; `worker-service.impl.md:460`.
+  - The execution honours every value of the effective configuration. `worker-service.md:58`.
+  - The tool table and the effective configuration bound every operation. `worker-service.md:144`.
+  - Each execution starts with a fresh agent context, and the context ends with the execution. `worker-service.md:817–822`.
+  - The transcript telemetry is plan 08; the handover enters no transcript. `worker-service.impl.md:476–478`.
+  - Gap: the commit attribution carrier is an epic decision (`worker-service.impl.md:439–442`); this plan makes no commit.
+  - Each plan updates the entry of its directory in `engine/AGENTS.md`. `00-index.md` "Shared files", row `AGENTS.md`.
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 07.E E2E proof
+
+- Files: `src/apps/server/e2e-native-runtime.test.ts` (create)
+- Do:
+  1. Start `gatewayFixture` with the ERD 1 fixture repository connector that answers the `git ls-remote` of a binding write. Run the setup steps of the E2E table through the CLI, in the form of `03-scheduler-execution.md` "E2E" fixture A.
+  2. Create a local bare repository with a `main` commit that holds `AGENTS.md`. Build the test `RepositoryTransport` from `RepositoryComponent` with every `address` replaced by the bare path (decision D15).
+  3. Take the envelope of `worker.handover` through `httpClient(workerOperations, endpoint, generalToken)`, open it with `openEnvelope`, `deriveHandoverKeys(S)` and `handoverAad(X, G)` of `src/kernel/handover.ts`, and build the store with the builder of plan 05. Read the setup and the pinned revision over the HTTP adapter.
+  4. Run the runtime in the test process with `scriptedModelRuntime` and a temporary host home and state directory. Implement the rows in one test and in table order, because each row reads the state of the rows before it.
+- Rules:
+  - The E2E runs the runtime in-process against `gatewayFixture` with the scripted fake provider and a local bare repository, with no method. Decisions D15, D16.
+  - The repository binding keeps its SSH address. Decision D15.
+  - Setup goes through the CLI; the setup read and the handover run over the HTTP adapter from the test process, as the `worker` application does (decision D17 precedent).
+  - Every fixture uses `claude-sonnet-4-5` and a complete entry form. Decision D16.
+  - No test prints a secret; the client secret, the keys and the opened payload stay in local variables. Plan 05 E2E rule.
+- Done when: `node --test --test-timeout=30000 src/apps/server/e2e-native-runtime.test.ts` passes every row; `pnpm run verify` passes.
+
+## E2E
+
+- Test file: `src/apps/server/e2e-native-runtime.test.ts` (runs in `pnpm run verify`).
+- Harness: `gatewayFixture` from `src/apps/server/test-support.ts` with a real server on a loopback port. `kanthord(args, env)` from `src/apps/server/cli-support.ts` runs the CLI. Machine tokens come from `kanthord jwt generate` in the form of `03-scheduler-execution.md` "E2E".
+- Rules: a refusal asserts the exit code and the error code at the start of stderr; stdout is parsed as JSON; the runtime assertions read the workspace, the bare repository and the calls of the scripted provider.
+
+Setup, in order (each command exits 0):
+
+1. `kanthord credential create --file anthropic.json` with `{ "name": "anthro-1", "platform": "anthropic", "metadata": null, "secret": { "key": "e2e-runtime-secret" } }`; the same for `{ "name": "github", "platform": "github", "metadata": null, "secret": { "key": "test-secret" } }`.
+2. `kanthord worker agent enablement put swe@1 --file enablement.json` with `{ "agentProviders": [{ "name": "default", "provider": "anthropic", "credential": "anthro-1" }], "defaultConfiguration": { "agentProvider": "default", "modelIdentifier": "claude-sonnet-4-5", "reasoningEffort": "off" } }`; the same for `re@1`.
+3. `kanthord project create --name runtime` → `projectId`.
+4. `kanthord project binding apply <projectId> --file bindings.json` with `repo` `{ "kind": "repository", "config": { "available": true, "platform": "github", "address": "git@github.com:owner/repo.git", "strategy": { "baseBranch": "main" }, "credential": "github", "projectPrompt": "The work product is TypeScript." } }`, `general` `{ "kind": "worker", "config": { "worker": "general@1", "instanceCount": 1, "entries": [ENTRY] } }` and `lab` `{ "kind": "worker", "config": { "worker": "general@1", "instanceCount": 1, "resourceBudget": { "turns": 1, "wallTimeMs": 600000 }, "entries": [ENTRY] } }`, where `ENTRY` is `{ "agent": "swe@1", "agentProvider": "default", "modelIdentifier": "claude-sonnet-4-5", "reasoningEffort": "off" }`.
+5. `kanthord mission get <projectId>` → `missionId`. `kanthord mission node create` for objective A and objective B, each `{ "kind": "objective", "content": { "name": "Say hello", "requirement": "Write hello.txt", "criterion": "hello.txt exists", "verifications": ["test -f hello.txt"], "bindings": ["repo"] }, … }` → `objectiveA`, `objectiveB`.
+6. `kanthord jwt generate` for `general` → `generalToken` with client secret S, and for `lab` → `labToken`. `kanthord worker register` with each token → G and L.
+7. `kanthord scheduler work pull --file pull(G)` → execution X on one objective; `kanthord scheduler work pull --file pull(L)` → execution Y on the other.
+
+| Id    | Commands                                                                                                                                                                                                                    | Exit     | Expect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| E07.1 | `kanthord worker agent get swe@1`                                                                                                                                                                                           | 0        | `agentName` `swe@1`; `basePrompt` equals `static/prompt/base.md`; `agentPrompt` equals `static/prompt/swe@1.md`; `tools[].name` = `read`, `edit`, `write`, `grep`, `find`, `ls`, `bash`, each `source` `builtin`; `configurationSchema.additionalProperties` false with five `required` names; `enablement.revision` 1                                                                                                                                                                                                                                                                               |
+| E07.2 | `kanthord worker agent get re@1`; `kanthord worker agent get nope@1`                                                                                                                                                        | 0, 1     | first `tools[].name` = `read`, `grep`, `find`, `ls`; second stderr starts with `worker.agent.not_found:`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| E07.3 | HTTP `worker.execution.setup.get` of X with `generalToken`; of Y with `generalToken`                                                                                                                                        | 200, 403 | first `effectiveConfiguration` = `{ "agentProvider": "default", "provider": "anthropic", "credential": "anthro-1", "modelIdentifier": "claude-sonnet-4-5", "reasoningEffort": "off" }`, `providerModels` null, `resourceBudget` `{ "turns": 200, "wallTimeMs": 7200000 }`, `repositories[0]` `{ bindingId: <repo>, name: "repo", address: "git@github.com:owner/repo.git", baseBranch: "main", projectPrompt: "The work product is TypeScript." }`, `globalPrompt.state` `absent`, `credentialId` = the `credentialId` of the handover item; second code `gateway.invocation.execution_proof_failed` |
+| E07.4 | `WorkspaceRoot.open(state).prepareObjective` for X                                                                                                                                                                          | —        | the directory is `workspaces/<objective>/<repo bindingId>/` with mode `0700`; the branch is `kanthord/<objective>` at the head of `main` of the bare repository                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| E07.5 | `openNativeAgent` for X with `~/.agents/AGENTS.md` = "Every answer is short." on the host and a script of `bash` `printf hello > hello.txt`, `read hello.txt` and a final text; `prompt(renderWorkPrompt(pinned revision))` | —        | `hello.txt` exists; three `turn_end` events; every call of the fake holds the key `e2e-runtime-secret`, a system prompt with the framing, the base prompt and the agent prompt, and the marked global, project and work layers in that order; the record names the global prompt from the agent file of the host, the project prompt from repository binding `repo`, and no source of the workspace, although the workspace holds `AGENTS.md`                                                                                                                                                        |
+| E07.6 | The test commits `hello.txt`; `runVerifications` with `["test -f hello.txt", "false", "true"]` and the tested input `{ kind: "repository", bindingId: <repo>, commit: <head> }`; then `discardChanges`                      | —        | `results` = `[{ command: "test -f hello.txt", exitCode: 0, … }, { command: "false", exitCode: 1, … }]`, the third unrun; `verificationPassed` false; the working tree is clean at the head                                                                                                                                                                                                                                                                                                                                                                                                           |
+| E07.7 | `pushNodeBranch` of X; `git ls-remote <bare> refs/heads/kanthord/<objective>`                                                                                                                                               | 0        | the remote ref equals the local head; `main` is unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| E07.8 | HTTP setup read of Y with `labToken`; `prepareObjective` for Y; `openNativeAgent` for Y with a script of three tool calls; `release` of the objective key of Y                                                              | 200      | `resourceBudget` `{ "turns": 1, "wallTimeMs": 600000 }`; the agent stops after one `turn_end`; `budget.exhausted()` true; the fake records one call                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| E07.9 | `WorkspaceRoot.sweep(now + 8 days)` with X held and the key of Y released                                                                                                                                                   | —        | the objective key of Y is removed; the key of X stays                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+
+## Blockers
+
+None open. Five gaps went through one debate round, and the plan applies the verdicts (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 07 — five gaps of the native agent runtime", `review:Ulrich`):
+
+- DEBATE: the source of the execution facts at the `worker` placement - rounds:1 - verdict: CHANGE to a `client` execution-scoped read `worker.execution.setup.get` with the proof of the path identity, a defined source and revision for each value, every repository row of the execution, and a fail-closed check of the handover revision.
+- DEBATE: the timeout of a verification item - rounds:1 - verdict: AGREE, repaired: the deadline is `min(createdAt + wallTimeMs, expiredAt)`; an item past it does not start.
+- DEBATE: the value that disables a prompt layer - rounds:1 - verdict: CHANGE to the reserved exact value `"-"` of `worker.globalPrompt` and of `projectPrompt`, tested through the real configuration values.
+- DEBATE: the `rg` and `fd` binaries of the pi tools `grep` and `find` - rounds:1 - verdict: CHANGE to a start refusal `worker.start.tool_missing` plus `PI_OFFLINE=1` and `PI_CODING_AGENT_DIR` before the first import of pi.
+- DEBATE: the workspace key of a steps execution on an initiative - rounds:1 - verdict: AGREE: `workspaces/<execution identity>/`, removed at the release.
