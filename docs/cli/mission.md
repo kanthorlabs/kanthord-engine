@@ -746,8 +746,8 @@ The reviewer places that produced evidence in the workspace.
 The [verification run](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-verifications) uses list order, one item at a time, never in parallel.
 Each verification runs through `bash -c` in the execution workspace root.
 The run stops at the first failed item.
-The machine check records each started command, its exit code, signal and timeout fact.
-The overall exit code is that of the failed item, null when the failed item ended without an exit status, or 0 when every item passes.
+The `verification` records each started command, its exit code, signal and timeout fact.
+A run passes when `results` hold one entry per verification and every entry has `exitCode` 0.
 The start refuses a host without bash.
 No execution infers a verification from prose.
 The execution code, never the agent, runs the verifications of the pinned revision before judgement, whatever the node kind.
