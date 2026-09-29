@@ -445,8 +445,8 @@ Four differences from `00-index.md` "Seams":
 
 ### 07.E E2E proof
 
-- Files: `src/apps/server/e2e-native-runtime.test.ts` (create)
-- Do:
+- Files: `src/apps/server/e2e-native-runtime.test.ts` (create), `eslint.config.js` (edit)
+- Do: 0. In `eslint.config.js`, add one policy for the test files of `apps-server` (`src/apps/server/{test-support.ts,*.test.ts}`): `{ to: element("service", { captured: { name: "worker" }, fileInternalPath: "test-support.ts" }) }`. The policy of `apps-server` (`:76–89`) admits only `contract.ts` and `index.ts` of a service. Decision D23.
   1. Start `gatewayFixture` with the ERD 1 fixture repository connector that answers the `git ls-remote` of a binding write. Run the setup steps of the E2E table through the CLI, in the form of `03-scheduler-execution.md` "E2E" fixture A.
   2. Create a local bare repository with a `main` commit that holds `AGENTS.md`. Build the test `RepositoryTransport` from `RepositoryComponent` with every `address` replaced by the bare path (decision D15).
   3. Take the envelope of `worker.handover` through `httpClient(workerOperations, endpoint, generalToken)`, open it with `openEnvelope`, `deriveHandoverKeys(S)` and `handoverAad(X, G)` of `src/kernel/handover.ts`, and build the store with the builder of plan 05. Read the setup and the pinned revision over the HTTP adapter.
