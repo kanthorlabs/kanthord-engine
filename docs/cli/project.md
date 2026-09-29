@@ -322,7 +322,7 @@ Common to every `config`:
 - `address`: **required**, nonblank SSH repository address; no default. An HTTPS address fails. The adapter validates and normalizes the repository address.
 - Unsupported addresses and contradictory platform/address combinations fail.
 - `strategy`: **required**, `RepositoryStrategy` object below. It has no inferred base branch, action or trigger.
-- `credential`: **required**, one `CredentialName` of platform `github`; no default. It serves every platform action and the observer read. Git uses the SSH configuration of the host.
+- `credential`: **required**, one `CredentialName` of platform `github`; no default. It serves every platform action of the Intake Service and the check of a request evidence. Git uses the SSH configuration of the host.
 - `projectPrompt`: **optional**, string, absent by default. Absence contributes no binding-provided prompt to Worker prompt composition.
 - The project prompt holds at most 32768 UTF-8 bytes. A larger value refuses the write with `project.bindings.repository.project_prompt_too_large`.
 - The JSON file holds the prompt text, not a client-side path.
@@ -426,11 +426,11 @@ kanthord enforces no object immutability; it records the object version when the
 A human who disables versioning accepts that choice.
 A node without a storage binding accepts only inline evidence content.
 
-Custody mints a presigned grant inside `use` for one operation on one object.
+The Intake Service signs a presigned grant with the material that custody releases, for one operation on one object.
 A PUT grant expires after 1 hour; authorized readers receive a presigned GET through their kanthord component.
 The URL is an API answer, never part of the credential handover or the agent context.
-The storage credential stays in server custody.
-[Mission upload](./mission.md#host-local-evidence-upload) defines begin, direct PUT and complete.
+The storage credential stays inside the server process.
+[Mission upload](./mission.md#host-local-evidence-upload) defines submit, direct PUT and asset complete.
 
 ### Source configuration — partially blocked
 
@@ -565,16 +565,16 @@ update is implied. The source schema and secret display remain **[blocked][proje
 ## Service boundaries: effects that are not commands
 
 - Authorization, `resolveWorkerBinding`, per-operation resolution,
-  one-use grants, `use(grant, request)`, and credential-reference validation are
+  one-use grants, `release(grant)`, and credential-reference validation are
   runtime mechanisms. This page creates no `resolve`, `authorize`, `grant`,
-  `use`, or generic execute-with-credential command from them.
-- Custody derives a remote destination from the authorized entity. The human provider check belongs to Worker and accepts only a credential reference.
+  `release`, or generic execute-with-credential command from them.
+- The holder of released material derives the remote destination from the authorized entity. The human provider check belongs to Worker and accepts only a credential reference.
 - Git operations, platform actions and inference stay in their execution protocols. A local commit, branch and merge are not authenticated capabilities.
 - A machine execution must satisfy binding and live-claim checks on each use.
   An external harness also needs the matching authenticated client, live
   registration, worker binding, instance, claim, and node. CLI-supplied IDs
   alone cannot prove that chain.
-- The Scheduler observer's internal read of an external object is not a human
+- The check of a request evidence by the Mission Service is not a human
   administration command. Its identity and association are service-owned; no
   `--service-identity` option exists.
 - Delivery verification consumes exact bytes and headers, acts on no external

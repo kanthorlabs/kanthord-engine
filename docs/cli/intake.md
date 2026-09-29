@@ -21,8 +21,9 @@ grant of the Project Service, keeps that material in memory for the session,
 and persists none. A passive webhook needs no grant. The Intake Service is
 never the verifier: it submits the body, headers and candidate source binding
 to the Project Service for verification. It hands every delivery at least once
-to the delivery admission operation of the Scheduler Service and performs no
-business effect.
+to the delivery admission operation of the Mission Service. It also performs
+every outbound operation and check on a platform for the service that owns its
+effect, and it decides no business meaning.
 
 **Proposed:** every command below, every command spelling, operation identifier,
 route, field name, response projection, HTTP status and numeric value in this
@@ -150,7 +151,7 @@ nor a ULID establishes causal order.
 
 The closed desired state set is `enabled`, `disabled`. The closed observed
 state set is `inactive`, `registering`, `active`, `failed`, `retiring`. Delivery
-status is separate from disposition. The Scheduler disposition values are
+status is separate from disposition. The Mission disposition values are
 exactly `accepted as an observation`, `accepted as a human act`, `refused`,
 `duplicate`; no fifth value follows from this proposal.
 
@@ -172,7 +173,7 @@ The file accepts no credential, acquisition grant, verification secret,
 verification result, observed state, checkpoint, resume position, platform
 registration identity, or arbitrary consumer operation. The Project Service
 owns custody and grant issuance. Every delivery goes to the delivery admission
-of the Scheduler Service; a subscription names no consumer. Adding a consumer
+of the Mission Service; a subscription names no consumer. Adding a consumer
 needs a design revision of `intake-service.md`.
 
 ## Subscription commands
@@ -321,7 +322,7 @@ The [service identity ruling](https://github.com/kanthorlabs/kanthord/blob/main/
 ## Delivery commands
 
 These **Proposed** reads inspect Intake-owned handoff progress. They create no
-Scheduler obligation and perform no business effect. The delivery projection
+Mission effect and perform no business effect. The delivery projection
 contains `deliveryId`, `subscriptionId`, `platformDeliveryId`, `receivedAt`,
 `verificationResult`, `status`, `disposition`, and `handoffAttemptCount`.
 Delivery schemas and payload inclusion remain **[blocked][intake-contract]**.
@@ -359,11 +360,13 @@ The record of a resolved delivery stays; the read does not promise indefinite re
 ### Handoff and disposition
 
 The Intake Service deduplicates by subscription and platform delivery identity.
-It hands every delivery at least once to Scheduler delivery admission, a unary
+It hands every delivery at least once to Mission delivery admission, a unary
 operation that records its decision durably before answering. A repeat carries
 the same delivery identity and content; admission returns its recorded
 disposition. Different content under the same identity receives a refusal.
-Scheduler owns effect deduplication across subscription kinds and redeliveries.
+Mission owns effect deduplication across subscription kinds and redeliveries.
+Admission calls the check of the Intake Service before it answers; a failed
+check answers a retryable failure, and the delivery stays for another handoff.
 
 Acceptance as an observation or as a human act, and duplication, end the
 handoff. A refusal also ends it and remains visible to a human. The Intake
@@ -373,8 +376,8 @@ a bounded count of failed attempts, it parks the delivery. A parked delivery
 never expires.
 A human action on a parked delivery remains **[blocked][intake-contract]**; handoff bounds remain **[blocked][intake-bounds]**. After acceptance, the Intake Service asks nothing further about the delivery.
 
-Acceptance transfers every effect obligation to Scheduler; it promises no
-execution and needs no live worker. Scheduler invokes payload decoding of the
+Acceptance transfers every effect to Mission; it promises no
+execution and needs no live worker. Mission invokes payload decoding of the
 [Repository component](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/repository.md#platform-connector-and-platform-implementations)
 and resolves effects; the Intake Service interprets no payload for business meaning.
 Acceptance as a human act uses the linked human identity through Mission.
@@ -413,7 +416,7 @@ The [Gateway delivery ruling](https://github.com/kanthorlabs/kanthord/blob/main/
 Receipt implementation remains **blocked** under the [HANDOFF Intake Service item](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#intake-service).
 
 The receipt operation and verification failure contract remain **[blocked][intake-contract]**.
-Scheduler delivery admission is a separate service operation, not this
+Mission delivery admission is a separate service operation, not this
 platform-facing route or a CLI submit command.
 
 ## Output and failure conventions
@@ -471,7 +474,7 @@ origin and are not required local files in a standalone engine checkout:
 
 - [Intake design](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/intake-service.md)
 - [Intake vocabulary](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/intake-service.vocabulary.md)
-- [Scheduler delivery admission and observation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#delivery-admission-and-observation)
+- [Mission delivery admission and check](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.md#delivery-admission-and-check)
 - [Project authorization and credential custody](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.md#authorization-and-credential-custody)
 - [Acquisition grant](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.vocabulary.md#acquisition-grant)
   and [source binding](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.vocabulary.md#source-binding)

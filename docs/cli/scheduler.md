@@ -21,15 +21,14 @@ The ownership and admission requirements stated here come from the service
 design. Open recovery decisions remain open, even where a candidate command
 shape is otherwise complete.
 
-The Scheduler owns jobs, claims, execution records, fixed deadlines,
-live-execution accounting, delivery admission and observation
-obligations and their leases. Mission owns nodes, attempts, pinned revisions,
-evidence, assessments, outcomes, external objects and accepted observation records.
+The Scheduler owns jobs, claims, execution records, fixed deadlines and
+live-execution accounting. Mission owns nodes, attempts, pinned revisions,
+evidence, assessments, outcomes, request evidence and delivery admission.
 Worker owns registrations, runtime identities, healthchecks, compatibility
 declarations and execution hosting. Project owns bindings, configured counts,
 resource authorization and delivery verification.
 
-The proposed public surface has **9 remote commands**: seven read operations
+The proposed public surface has **7 remote commands**: five read operations
 and two mutations. Group/resource help is local and calls no operation.
 
 ## Shared input, output and access rules
@@ -68,9 +67,8 @@ The [Scheduler operation contracts](https://github.com/kanthorlabs/kanthord/blob
   `client_identity_<ulid>` convention.
   The ULID suffix is canonical uppercase and 26 characters long. Use the
   [shared identity scalar](../../src/kernel/identity.ts), not a bare ULID.
-- `<execution-id>` uses `execution_<ulid>` and `<obligation-id>` uses
-  `observation_obligation_<ulid>` under the [Scheduler identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-identities-of-the-scheduler-service).
-  Node IDs, external object IDs and binding IDs use the prefixes of their owners;
+- `<execution-id>` uses `execution_<ulid>` under the [Scheduler identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-identities-of-the-scheduler-service).
+  Node IDs, evidence IDs and binding IDs use the prefixes of their owners;
   copy them from the owner's response.
   Binding IDs use `binding_<ulid>` under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
 - `runtimeIdentity` is the opaque string returned by Worker registration.
@@ -154,7 +152,7 @@ the wait for a response; it undoes no committed claim or release.
 A cancelled waiting pull leaves no uncommitted reservation.
 If acquisition committed before disconnection, the next pull of the same
 runtime identity returns the live execution. Shutdown stops new claims,
-cancels waiting pulls, and preserves accepted obligations.
+cancels waiting pulls, and preserves accepted execution obligations.
 
 [scheduler-contract]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery
 
@@ -165,17 +163,15 @@ path parameters with the scalar rules above; query fields are only those
 listed by a command. Read requests have no body. Every route in this table is
 **proposed, pending the owning operation declaration and generated OpenAPI**.
 
-| Command suffix / synopsis                                                              | Operation identifier                                                      | HTTP route                                                                   | Access / effect                                                                                                                                        |
-| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `queue list <project-id> [--limit <count>] [--cursor <opaque>]`                        | `scheduler.queue.list` **[blocked][scheduler-contract]**                  | `GET /api/scheduler/project/:projectId/queue`                                | `human`; read                                                                                                                                          |
-| `queue peek <project-id>`                                                              | `scheduler.queue.peek` **[blocked][scheduler-contract]**                  | `GET /api/scheduler/project/:projectId/queue/peek`                           | `human`; read                                                                                                                                          |
-| `work pull --file <path> [--idempotency-key <key>]`                                    | `scheduler.work.pull` **[blocked][scheduler-contract]**                   | `POST /api/scheduler/work/pull`                                              | `client`; mutation, bounded wait                                                                                                                       |
-| `claim get <execution-id>`                                                             | `scheduler.claim.get`                                                     | `GET /api/scheduler/claim/:executionId`                                      | `client`; owned claim read; **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)** |
-| `execution list <project-id> [--node <node-id>] [--limit <count>] [--cursor <opaque>]` | `scheduler.execution.list` **[blocked][scheduler-contract]**              | `GET /api/scheduler/project/:projectId/execution`                            | `human`; read                                                                                                                                          |
-| `execution get <execution-id>`                                                         | `scheduler.execution.get`                                                 | `GET /api/scheduler/execution/:executionId`                                  | `human`; read; **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)**              |
-| `execution release <execution-id> --file <path> [--idempotency-key <key>]`             | `scheduler.execution.release`                                             | `POST /api/scheduler/execution/:executionId/release`                         | `client`; owned live execution mutation                                                                                                                |
-| `observation-obligation list <project-id> [--limit <count>] [--cursor <opaque>]`       | `scheduler.observation-obligation.list` **[blocked][scheduler-contract]** | `GET /api/scheduler/project/:projectId/observation-obligation`               | `human`; read                                                                                                                                          |
-| `observation-obligation get <project-id> <obligation-id>`                              | `scheduler.observation-obligation.get` **[blocked][scheduler-contract]**  | `GET /api/scheduler/project/:projectId/observation-obligation/:obligationId` | `human`; read                                                                                                                                          |
+| Command suffix / synopsis                                                              | Operation identifier                                         | HTTP route                                           | Access / effect                                                                                                                                        |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `queue list <project-id> [--limit <count>] [--cursor <opaque>]`                        | `scheduler.queue.list` **[blocked][scheduler-contract]**     | `GET /api/scheduler/project/:projectId/queue`        | `human`; read                                                                                                                                          |
+| `queue peek <project-id>`                                                              | `scheduler.queue.peek` **[blocked][scheduler-contract]**     | `GET /api/scheduler/project/:projectId/queue/peek`   | `human`; read                                                                                                                                          |
+| `work pull --file <path> [--idempotency-key <key>]`                                    | `scheduler.work.pull` **[blocked][scheduler-contract]**      | `POST /api/scheduler/work/pull`                      | `client`; mutation, bounded wait                                                                                                                       |
+| `claim get <execution-id>`                                                             | `scheduler.claim.get`                                        | `GET /api/scheduler/claim/:executionId`              | `client`; owned claim read; **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)** |
+| `execution list <project-id> [--node <node-id>] [--limit <count>] [--cursor <opaque>]` | `scheduler.execution.list` **[blocked][scheduler-contract]** | `GET /api/scheduler/project/:projectId/execution`    | `human`; read                                                                                                                                          |
+| `execution get <execution-id>`                                                         | `scheduler.execution.get`                                    | `GET /api/scheduler/execution/:executionId`          | `human`; read; **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)**              |
+| `execution release <execution-id> --file <path> [--idempotency-key <key>]`             | `scheduler.execution.release`                                | `POST /api/scheduler/execution/:executionId/release` | `client`; owned live execution mutation                                                                                                                |
 
 These read operations are proposed operational visibility, not an existing
 authorization to inspect service tables directly. `claim get` provides a
@@ -387,7 +383,7 @@ No query fields are accepted. The required file supplies the following fields.
   release body contains no evidence, assessment, outcome or shell command.
 - A reviewer release is supported only after the current passing assessment
   and the action-performer path allow it: returned items consist solely of
-  submitted external objects and actions awaiting prerequisites.
+  submitted request evidence and actions awaiting prerequisites.
   When all requests are submitted, Mission routes the release to
   `External.Requested` and inserts no job. The transaction that makes the
   continuation condition hold inserts the evaluation job. A passing assessment
@@ -442,86 +438,18 @@ Inspection and cancellation make no stronger guarantee. There is no generic
 Scheduler cancellation command: a transport cancel is not a release, and a
 human pauses/discards through Mission.
 
-## Observation-obligation inspection
-
-### `observation-obligation list`
-
-```text
-kanthord scheduler observation-obligation list <project-id> [--limit <count>] [--cursor <opaque>]
-```
-
-Required `<project-id>` maps to path `projectId`, with no default. Only the
-shared pagination query is accepted; no body. Returns a page of
-`ObservationObligation` records in descending `obligationId` order under the
-shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
-This makes outstanding durable work visible
-without starting, retrying, completing or taking an observer lease.
-
-### `observation-obligation get`
-
-```text
-kanthord scheduler observation-obligation get <project-id> <obligation-id>
-```
-
-Both positional IDs are required, with no default, and map to `projectId` and
-`obligationId`. No query or body. Returns one `ObservationObligation` in that
-project, or a not-found failure. This is a Scheduler obligation; Mission's
-accepted observation record remains a different resource.
-
-### Proposed `ObservationObligation` result
-
-All fields are required; nullable fields remain present with `null`.
-
-| Field                                           | Type and meaning                                                                                                                                                                                                                                                                                        |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `obligationId`, `projectId`, `externalObjectId` | Opaque references; the external object determines correlation and service-identity resolution.                                                                                                                                                                                                          |
-| `acceptedAt`                                    | Durable obligation acceptance timestamp.                                                                                                                                                                                                                                                                |
-| `lease`                                         | Object with `expiresAt`, nullable `renewedAt` and nullable `lossDeclaredAt`, or `null` before an observer holds it; the lease start remains **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)**. This lease is not a node claim. |
-| `completedAt`                                   | Timestamp or `null` while durable completion has not been established.                                                                                                                                                                                                                                  |
-| `observationId`                                 | Opaque Mission observation reference or `null` while no accepted observation is associated. Its prefix remains Mission-owned.                                                                                                                                                                           |
-
-The observer has no claimant and no execution ID. It reads through the
-[platform connector of the Repository component](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/repository.md#platform-connector-and-platform-implementations)
-under the narrowly authorized service identity resolved from the external
-object, folds platform state and submits the observation
-to Mission. It never decides the node's outcome. This proposal offers no
-manual `observe`, `complete`, `retry` or lease-stealing command: observer recovery remains **blocked** under [HANDOFF C1](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service).
-The [service identity ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-operation-and-its-two-entry-adapters) governs observer identity.
-
 ## Delivery admission
 
 The Intake Service receives every platform delivery and owns the delivery
 record. Its inspection commands live in [Intake](./intake.md#delivery-commands).
-The Scheduler owns the delivery admission operation that the Intake Service
-calls. Admission records its decision durably before answering and returns one
-of four dispositions: `accepted as an observation`, `accepted as a human act`,
-`refused`, or `duplicate`. A repeat with the same delivery identity and content
-returns the recorded disposition; different content under that identity
-receives a refusal.
-
-Acceptance transfers every effect obligation to the Scheduler. Acceptance as
-an observation creates an observation obligation; acceptance as a human act
-invokes Mission under the linked human identity. Refusal admits no effect,
-and a duplicate creates no second effect. The Scheduler preserves every
-obligation whose effect lacks durable acceptance and deduplicates effects per
-project and per external object across subscription kinds and redeliveries.
-Admission needs no live worker and promises no execution. The
-[Repository component](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/repository.md#platform-connector-and-platform-implementations)
-decodes the platform payload; Scheduler core consumes that decoded delivery
-rather than interpreting platform JSON.
-
-The observer resolves the repository binding, object address, node and attempt;
-correlation needs no surviving originating runtime. An ambiguous or out-of-order
-delivery reconciles against the node's external objects, not automatically its
-newest attempt. An observation needs the authorized observer path, not a node
-claim. A platform signature grants no authority to edit WHAT, unblock, override
-or execute. New WHAT creates no node and is not a scheduling request; its
-inbound request contract remains **blocked** under [HANDOFF Scheduler Service and delivery](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery).
-A read of admission dispositions remains **blocked** under that same item; this page proposes no command.
+The Mission Service owns the delivery admission operation that the Intake
+Service calls, under [delivery admission and check](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.md#delivery-admission-and-check).
+The Scheduler holds no admission record, no observation obligation and no
+observer. It serves a node after the Mission Service routes it.
 
 ### Delivery is an ingress operation, not a generic CLI mutation
 
-No CLI `delivery submit` or `observation submit` exists. A JSON file is not a
+No CLI `delivery submit` or end-state submit exists. A JSON file is not a
 signed delivery, and a human or machine token is not delivery verification.
 [Intake documents the receipt route](./intake.md#routes-without-a-command).
 
@@ -545,8 +473,8 @@ signed delivery, and a human or machine token is not delivery verification.
   There is no public `tick`, `drain`, `force-release`, `declare-loss`,
   `reset-epoch` or `reset-budget`.
 - **External action performance:** Worker derives action operands from the
-  attempt and evidence, and Mission owns resulting records. It is not
-  Scheduler delivery admission or a queue write.
+  attempt and evidence, the Intake Service performs the action, and Mission
+  owns the resulting records. It is not delivery admission or a queue write.
 - **Human recovery and outcomes:** unblock, pause, resume, discard, priority
   and override belong to Mission's human authority path. Scheduler inspection
   and machine claim operations cannot take their place.
