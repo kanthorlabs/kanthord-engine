@@ -43,15 +43,16 @@ The first version supports a native agent at the `worker` placement, and no prox
 
 The order is 01 Mission attempts and human controls, 02 Worker registration, 03 Scheduler execution, 04 Mission execution operations, 05 Custody handover, 06 Worker action performer, 07 native agent runtime, 08 native methods, 09 `worker` application, 10 Gateway composition, CLI and E2E. A plan constructs its seams in `src/apps/server/index.ts` in the ERD 1 construction order scheduler, custody, worker, mission, project, gateway. For a peer seam that a later plan provides, the earlier plan passes `unwired("<seam>")` in production and a `standIns` fake in `gatewayFixture` that answers the true state of the absent peer (ERD 1 D14).
 
-| Seam                                                            | Placed by | Replaced by |
-| --------------------------------------------------------------- | --------- | ----------- |
-| Mission `SchedulerClaims.revoke`, `settle`, `liveExecutionOf`   | 01        | 03          |
-| Mission `SchedulerWakeup.wake` (production: a no-op, see below) | 01        | 03          |
-| Mission `ExecutionAttribution.of`                               | 01        | 03          |
-| Worker `SchedulerClaims.runningExecutionOfRuntime`              | 02        | 03          |
-| Mission `IntakeStorage`, `IntakeCheck`                          | 04        | ERD 3       |
-| Worker `IntakeActions`                                          | 06        | ERD 3       |
-| Scheduler `TraceIdentity`                                       | 03        | ERD 4       |
+| Seam                                                                              | Placed by | Replaced by |
+| --------------------------------------------------------------------------------- | --------- | ----------- |
+| Mission `SchedulerClaims.revoke`, `settle`, `liveExecutionOf`                     | 01        | 03          |
+| Mission `SchedulerWakeup.wake` (production: a no-op, see below)                   | 01        | 03          |
+| Mission `ExecutionAttribution.of`                                                 | 01        | 03          |
+| Worker `SchedulerClaims.runningExecutionOfRuntime`                                | 02        | 03          |
+| Worker `SchedulerClaims.activityOf` (a pure read: `idle`, `pulling`, `executing`) | 02        | 03          |
+| Mission `IntakeStorage`, `IntakeCheck`                                            | 04        | ERD 3       |
+| Worker `IntakeActions`                                                            | 06        | ERD 3       |
+| Scheduler `TraceIdentity`                                                         | 03        | ERD 4       |
 
 One exception: the production stand-in of `SchedulerWakeup.wake` is a no-op until plan 03, because no work pull exists before plan 03 and a wakeup has no receiver. An ERD 1 graph write answers as before. Every other production stand-in is `unwired`.
 
@@ -65,7 +66,7 @@ Plan 02 replaces `InMemoryRegistrations` (`src/worker/registrations.ts`) with an
 
 ## D12 — Heartbeat clock
 
-The time of the last heartbeat is a monotonic value in memory (`docs/reference/erd/02-execution.md:28`), a `Map<runtimeIdentity, number>` from `performance.now()`. The server start sets every live row to the start reading. A sweep every 30 s ends every registration whose reading is older than `worker.heartbeatWindow` seconds (`worker-service.impl.md:171`). Every authenticated request of a registered client identity renews the reading in the invocation chain after authentication, so plan 02 adds that renewal to `createInvocation` through a `lookups.worker.heartbeat(runtimeIdentity)` closure.
+The time of the last heartbeat is a monotonic value in memory (`docs/reference/erd/02-execution.md:28`), a `Map<runtimeIdentity, number>` from `performance.now()`. The server start sets every live row to the start reading. A sweep every 30 s ends every registration whose reading is older than `worker.heartbeatWindow` seconds (`worker-service.impl.md:171`). Every authenticated request of a registered client identity renews the reading in the invocation chain after authentication, so plan 02 adds that renewal to `resolveMachine` of `src/gateway/authentication.ts` through an `AuthenticationLookups.worker.heartbeat(runtimeIdentity)` closure, after the registration checks pass.
 
 ## D13 — Handover codec
 
@@ -109,7 +110,7 @@ A task is one commit of fewer than about 400 changed lines. A plan holds at most
 
 ## D23 — Standing precedents
 
-Two ERD 1 precedents need no debate (`.dev/erd-02/README.md`): an OpenAPI fragment over the line bound takes a named, shape-checked exception in `src/apps/server/openapi-integration.test.ts`, listed in the decision log; a colocated service test that needs a minted identity takes the per-file eslint exception of `eslint.config.js`, once per service. Plan 03 takes the exception for `src/scheduler/service.test.ts`, and plan 02 for `src/worker/service.test.ts` where the ERD 1 exception does not cover it.
+Two ERD 1 precedents need no debate (`.dev/erd-02/README.md`): an OpenAPI fragment over the line bound takes a named, shape-checked exception in `src/apps/server/openapi-integration.test.ts`, listed in the decision log; a colocated service test that needs a minted identity takes the per-file eslint exception of `eslint.config.js`, once per service. Plan 02 adds `testMachineIdentity` to `src/kernel/test-identity.ts`, so a service test mints a machine identity without an eslint exception. Plan 03 takes the exception for `src/scheduler/service.test.ts` only where that helper does not cover the need.
 
 ## D24 — Database conventions
 
