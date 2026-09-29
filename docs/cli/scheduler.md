@@ -163,15 +163,15 @@ path parameters with the scalar rules above; query fields are only those
 listed by a command. Read requests have no body. Every route in this table is
 **proposed, pending the owning operation declaration and generated OpenAPI**.
 
-| Command suffix / synopsis                                                              | Operation identifier                                         | HTTP route                                           | Access / effect                                                                                                                                        |
-| -------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `queue list <project-id> [--limit <count>] [--cursor <opaque>]`                        | `scheduler.queue.list` **[blocked][scheduler-contract]**     | `GET /api/scheduler/project/:projectId/queue`        | `human`; read                                                                                                                                          |
-| `queue peek <project-id>`                                                              | `scheduler.queue.peek` **[blocked][scheduler-contract]**     | `GET /api/scheduler/project/:projectId/queue/peek`   | `human`; read                                                                                                                                          |
-| `work pull --file <path> [--idempotency-key <key>]`                                    | `scheduler.work.pull` **[blocked][scheduler-contract]**      | `POST /api/scheduler/work/pull`                      | `client`; mutation, bounded wait                                                                                                                       |
-| `claim get <execution-id>`                                                             | `scheduler.claim.get`                                        | `GET /api/scheduler/claim/:executionId`              | `client`; owned claim read; **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)** |
-| `execution list <project-id> [--node <node-id>] [--limit <count>] [--cursor <opaque>]` | `scheduler.execution.list` **[blocked][scheduler-contract]** | `GET /api/scheduler/project/:projectId/execution`    | `human`; read                                                                                                                                          |
-| `execution get <execution-id>`                                                         | `scheduler.execution.get`                                    | `GET /api/scheduler/execution/:executionId`          | `human`; read; **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)**              |
-| `execution release <execution-id> --file <path> [--idempotency-key <key>]`             | `scheduler.execution.release`                                | `POST /api/scheduler/execution/:executionId/release` | `client`; owned live execution mutation                                                                                                                |
+| Command suffix / synopsis                                                                              | Operation identifier                                         | HTTP route                                           | Access / effect                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `queue list <project-id> [--limit <count>] [--cursor <opaque>]`                                        | `scheduler.queue.list` **[blocked][scheduler-contract]**     | `GET /api/scheduler/project/:projectId/queue`        | `human`; read                                                                                                                                          |
+| `queue peek <project-id>`                                                                              | `scheduler.queue.peek` **[blocked][scheduler-contract]**     | `GET /api/scheduler/project/:projectId/queue/peek`   | `human`; read                                                                                                                                          |
+| `work pull --file <path> [--idempotency-key <key>]`                                                    | `scheduler.work.pull` **[blocked][scheduler-contract]**      | `POST /api/scheduler/work/pull`                      | `client`; mutation, bounded wait                                                                                                                       |
+| `claim get <execution-id>`                                                                             | `scheduler.claim.get`                                        | `GET /api/scheduler/claim/:executionId`              | `client`; owned claim read; **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)** |
+| `execution list <project-id> [--node <node-id> [--attempt <n>]] [--limit <count>] [--cursor <opaque>]` | `scheduler.execution.list` **[blocked][scheduler-contract]** | `GET /api/scheduler/project/:projectId/execution`    | `human`; read                                                                                                                                          |
+| `execution get <execution-id>`                                                                         | `scheduler.execution.get`                                    | `GET /api/scheduler/execution/:executionId`          | `human`; read; **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)**              |
+| `execution release <execution-id> --file <path> [--idempotency-key <key>]`                             | `scheduler.execution.release`                                | `POST /api/scheduler/execution/:executionId/release` | `client`; owned live execution mutation                                                                                                                |
 
 These read operations are proposed operational visibility, not an existing
 authorization to inspect service tables directly. `claim get` provides a
@@ -304,17 +304,20 @@ This read is a snapshot; every later execution operation rechecks liveness.
 ### `execution list`
 
 ```text
-kanthord scheduler execution list <project-id> [--node <node-id>] [--limit <count>] [--cursor <opaque>]
+kanthord scheduler execution list <project-id> [--node <node-id> [--attempt <n>]] [--limit <count>] [--cursor <opaque>]
 ```
 
 Required `<project-id>` maps to path `projectId`, with no default. Optional
-`--node <node-id>` maps to query `nodeId`, with no default. The shared
-pagination query is also accepted; no body. Returns a page of `ExecutionRecord`
-values, including live and ended executions. Without `nodeId`, the list orders
-by `executionId` descending under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
-With `nodeId`, the list holds the executions of that node only, ordered by
-`attempt` ascending, then `createdAt` ascending. A `nodeId` that the project
-does not hold answers an empty page.
+`--node <node-id>` maps to query `nodeId`, with no default. Optional
+`--attempt <n>` maps to query `attempt`, a positive integer, with no default.
+The shared pagination query is also accepted; no body. Returns a page of
+`ExecutionRecord` values, including live and ended executions. Every mode
+orders by `executionId` descending under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
+With `nodeId`, the list holds the executions of that node only. A `nodeId` that
+the project does not hold answers an empty page. With `nodeId` and `attempt`,
+the list holds the executions of that attempt only. An attempt that the node
+does not hold answers an empty page. `attempt` without `nodeId` answers 400
+`gateway.request.validation_failed`.
 This inspection order establishes no causal order. It changes no claim or count.
 The list holds every execution of the project for the life of the project,
 under the [Scheduler retention](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#retention).

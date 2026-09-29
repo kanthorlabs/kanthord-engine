@@ -420,6 +420,15 @@ objective. A task record or a task attempt is not manufactured for convenience.
 - Attempt list/get return `Page<Attempt>` / `Attempt`, including pinned revision,
   derived required external actions, closure and outcome
   references. They never open, close or retry an attempt.
+- The inspection of attempt n of a node reads `node get` for the current node
+  state and `attempt get` for the attempt. It reads
+  `kanthord scheduler execution list <project-id> --node <node-id> --attempt <n>`
+  for the executions, and each record list with `--attempt <n>` for the records.
+  An evidence names its execution in `provenance`, and an assessment in `actor`,
+  only when the actor kind is `execution`. An outcome names its execution
+  through `assessmentId`, and an external action through `requestEvidenceId`.
+  The reads take no shared snapshot. A closure between two reads can end an
+  execution that an earlier read shows as `running`.
 - Evidence list/get return `Page<Evidence>` / `Evidence`. Submit accepts
   `EvidenceSubmit` and returns `Evidence`. The live execution may submit for its
   own node. A reviewer may submit an evidence with a
