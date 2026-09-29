@@ -133,10 +133,10 @@ configuration.
   are invalid entity IDs.
 - `ProjectID` uses the declared `project_` prefix. `ExecutionID` uses
   `execution_<ulid>` under the [Scheduler identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-identities-of-the-scheduler-service).
-  `TraceID`, `SpanID`, `TextID`, and producer-minted `RecordID` are symbolic types
-  here, not new prefix declarations. Their identity contracts remain **[blocked][tracking-contract]**.
-- OpenTelemetry reuse does not by itself declare W3C hexadecimal trace/span
-  IDs as the entity IDs accepted here. Protocol mapping remains **[blocked][tracking-contract]**.
+  `TraceID` is 32 and `SpanID` is 16 lower-case hexadecimal characters, never all
+  zero, under the [trace model](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/tracking-service.impl.md#trace-model).
+  `TextID` and producer-minted `RecordID` are symbolic types here, not new prefix
+  declarations. Their identity contracts remain **[blocked][tracking-contract]**.
 - `Timestamp` composes the
   [shared timestamp scalar](../../src/kernel/json.ts): a JSON integer of Unix
   milliseconds in UTC, in `0..Number.MAX_SAFE_INTEGER`. Neither a timestamp nor
