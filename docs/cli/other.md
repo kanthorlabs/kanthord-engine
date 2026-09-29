@@ -508,8 +508,7 @@ requires no terminal. Startup resolves the client configuration, checks
 version, registers the instance, and then
 logs one record `Worker application ready` with `runtimeIdentity`,
 `resourceIdentity` and `workerName`. A version mismatch refuses startup with both
-versions in the diagnostic. Until registration is implemented, the record
-`Worker application started` is a startup notice, not readiness. A startup
+versions in the diagnostic. A startup
 failure prints its diagnostic, releases what it acquired and exits `1`.
 
 `SIGINT` and `SIGTERM` stop further startup and further work pulls. The
@@ -832,8 +831,8 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | 400             | `system.pagination.cursor_invalid`               | The `--cursor` value is malformed or belongs to another listing.                                                        | paginated list commands                                   |
 | local           | `cli.<group>.<command>.token_required`           | No nonblank JWT is available for the command.                                                                           | remote commands                                           |
 | local           | `cli.<group>.<command>.indeterminate`            | The client cannot determine whether the request completed.                                                              | remote commands                                           |
-| local           | `repository.connector.tool_missing`              | Bash, git or ssh cannot run, exits with an error or has unrecognized version output.                                    | serve server                                              |
-| local           | `repository.connector.tool_version`              | Git is older than 2.40 or OpenSSH is older than 9.0.                                                                    | serve server                                              |
+| local           | `repository.connector.tool_missing`              | Bash, git or ssh cannot run, exits with an error or has unrecognized version output.                                    | serve server, serve worker                                |
+| local           | `repository.connector.tool_version`              | Git is older than 2.40 or OpenSSH is older than 9.0.                                                                    | serve server, serve worker                                |
 | local           | `repository.connector.git_failed`                | A git operation of the repository connector fails, is aborted or reaches its deadline; the message names the operation. | serve worker, binding apply                               |
 
 ## Sources
