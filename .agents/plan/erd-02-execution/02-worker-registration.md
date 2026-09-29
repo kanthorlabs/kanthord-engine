@@ -1,0 +1,492 @@
+# Plan 02: Worker Service — registration
+
+## Scope
+
+This plan delivers:
+
+- Migration 2 of `src/worker/migrations.ts` with the `worker_instance` table and its partial unique index on `client_id`.
+- The configuration fragment `worker.heartbeatWindow` and `worker.globalPrompt`.
+- The Project collaboration `workerBindingOf` and the resource identity in the answer of `resolveWorkerBinding`, so that the machine identity names its binding group.
+- The registration store over `worker_instance`, which replaces `InMemoryRegistrations` (decision D11), and `worker.register` with the instance-count admission.
+- The heartbeat clock in memory, its renewal in the invocation chain, its reset at the server start and its sweep every 30 s (decision D12).
+- `worker.heartbeat`, the first operation that answers 204, with the no-content answer of the Gateway writer, the HTTP adapter and the OpenAPI emitter.
+- `worker.instance.deregister`, `worker.instance.resume`, `worker.instance.list` and `worker.instance.get`.
+- The resource budget of every worker in the catalog, `worker.catalog.list` and `worker.catalog.get`, and the catalog lookup `declarationOf`.
+- The end of every live registration of a worker binding that the binding-set write removes or makes unavailable.
+- The collaborations that plan 03 and plan 10 consume: `liveRegistrationOf`, `clientAttributionOf`, `instanceHealthcheck`, `declarationOf` and `registrationChecks`.
+- The CLI leaves `worker heartbeat`, `worker list`, `worker get`, `worker instance list`, `get`, `deregister` and `resume`.
+
+Out of scope:
+
+- `worker.agent.get`. Its answer holds `basePrompt`, `agentPrompt` and `tools` (`worker-service.impl.md:186`). Plan 07 owns the prompt assets (decision D14) and the tool table (`00-index.md` "Shared files", row `src/worker/catalog.ts`), so plan 07 takes the operation. The report of this plan names the index change.
+- The work pull, the claim and every read of `scheduler_execution` (plan 03). This plan consumes them through the Scheduler seam of task 02.9.
+- The health report entries of a registration (plan 10). This plan provides the checks.
+- The handover and the credential report (plan 05). The `worker` application (plan 09). The MCP server (decision D5).
+- The machine JWT claims `project_id` and `resource_identity` of `gateway-service.impl.md:113–114`. The code issues and verifies the claim `binding` with a binding row identity (`src/gateway/authentication.ts:131–144`, `engine/docs/cli/other.md:606–621`). This plan keeps that claim and takes the group from the resolver. The deviation predates ERD 2 (decision D26).
+- The `server` placement pool (decision D8). Every B9 item and every open HANDOFF item (decision D1).
+
+## Sources
+
+- `docs/reference/erd/02-execution.md:25–28` — the pool and the instance record are runtime-only; the last heartbeat is a monotonic value in memory.
+- `docs/reference/erd/02-execution.md:49–57` — the columns of `worker_instance`.
+- `docs/reference/erd/02-execution.md:170` — `worker.register` commits the registration and the instance-count collaboration in one transaction.
+- `docs/reference/erd/02-execution.md:189–202` — the Worker Service constraints: the partial unique index, the live rows, the admission, the lowered count, the group from the JWT, no pin, the four ends, the idempotent registration, the resume and the kept ended row.
+- `docs/brainstorm/worker-service.md:21–47` — the declaration of a worker, its host, its method, its declared states and its resource budget.
+- `docs/brainstorm/worker-service.md:166–215` — instances and hosting: the runtime identity, one live registration per client identity, the ends of a registration, the instance healthcheck of each placement.
+- `docs/brainstorm/worker-service.vocabulary.md:11–42`, `:241–296`, `:332–337` — worker, host, placement, runtime identity, heartbeat, pool, compatibility declarations, required node format, instance healthcheck, resource budget.
+- `docs/brainstorm/worker-service.impl.md:151–158` — the identities of the Worker Service and the client attribution.
+- `docs/brainstorm/worker-service.impl.md:160–176` — the registration heartbeat.
+- `docs/brainstorm/worker-service.impl.md:178–192` — the inspection operations and the instance record.
+- `docs/brainstorm/worker-service.impl.md:194–205` — the deregistration.
+- `docs/brainstorm/worker-service.impl.md:207–223` — the resume of a registration.
+- `docs/brainstorm/worker-service.impl.md:247–254` — the configuration fields.
+- `docs/brainstorm/worker-service.impl.md:443–453` — the resource budget of every worker.
+- `docs/brainstorm/gateway-service.impl.md:65–79` — the worker-instance registration and its replay.
+- `docs/brainstorm/gateway-service.impl.md:221` — the machine identity names the runtime identity of a live registration.
+- `docs/brainstorm/gateway-service.impl.md:366` — the project-scoped resource name `<worker binding name>/<runtime identity>`.
+- `docs/brainstorm/gateway-service.impl.md:392–399`, `:420–421` — the idempotency of a mutation and the replay of the registration route.
+- `docs/brainstorm/gateway-service.impl.md:464–468` — the registration tests.
+- `docs/brainstorm/scheduler-service.md:217–245` — liveness: the claim state and the settlement before a registration resume.
+- `docs/brainstorm/scheduler-service.impl.md:35`, `:45`, `:127` — the claimant attribution, the resource identity of a work pull and the settlement at a resume.
+- `docs/brainstorm/project-service.md:63–91` — the instance count and the registered instances of a worker binding.
+- `docs/brainstorm/project-service.impl.md:57`, `:130–131` — a disablement and the range of `instanceCount`.
+- `docs/brainstorm/architecture.impl.md:179–189` — pagination.
+- `docs/brainstorm/architecture.impl.md:341–349` — the error code form and the CLI code form.
+- `docs/brainstorm/architecture.impl.md:457–473` — the stop phases; phase 1 stops every timer.
+- `docs/brainstorm/architecture.impl.md:587–604`, `:705` — Kind 2 collaborations and the registration collaboration.
+- `engine/docs/cli/worker.md:86–100` — the names and identities of the Worker CLI.
+- `engine/docs/cli/worker.md:102–148` — the command inventory, the routes and the access.
+- `engine/docs/cli/worker.md:150–217` — `register`.
+- `engine/docs/cli/worker.md:219–230` — `heartbeat`.
+- `engine/docs/cli/worker.md:244–302` — `list` and `get`.
+- `engine/docs/cli/worker.md:496–611` — the instance commands and the instance record.
+- `engine/docs/cli/worker.md:711–748` — the error codes of the Worker CLI.
+- `engine/docs/cli/other.md:799–805`, `:834–835` — the registration codes and the generic CLI codes.
+- `engine/.agents/plan/erd-02-execution/00-index.md`, `decisions.md` — the boundary, the seams and decisions D1 to D26.
+- `engine/.agents/plan/erd-02-execution/01-mission-attempts-controls.md` "Provides" and task 01.4 — `unwired.ts` and the `standIns` option.
+- `.dev/erd-02/decisions-log.md` entry of 2026-09-30 for plan 02 — the end of the registrations at a binding removal or unavailability.
+- Root `AGENTS.md` "Database design", "Contracts" and "Rejected proposals".
+
+## Depends on
+
+- ERD 1, merged. The Worker Service of `src/worker/`: `Dependencies` (`src/worker/service.ts:158–166`), the `register` handler (`:681–739`), the catalog (`src/worker/catalog.ts:26–97`), `WorkerRegistrations` (`src/worker/contract.ts:144–148`) and `workerAgentView` (`src/worker/service.ts:560–605`).
+- ERD 1, merged. The Project Service: `resolveWorkerBinding` (`src/project/service.ts:565–584`), the binding-set write (`:360–390`), `readBindingRevision` and `readLatestBinding` (`src/project/store.ts:562–592`), `workerConfigSchema` (`src/project/contract.ts:111–130`).
+- ERD 1, merged. The Gateway machine authentication (`src/gateway/authentication.ts:27–94`) and the registration check of the chain (`src/gateway/invocation.ts:265–275`).
+- Plan 01. `unwired(seam)` of `src/apps/server/unwired.ts`, the `standIns` option of `composeServices` and of `gatewayFixture`, and the seam-set assertion of `src/apps/server/unwired-import.test.ts` (plan 01 task 01.4).
+- Plan 03. `SchedulerClaims.runningExecutionOfRuntime` and `SchedulerClaims.activityOf`. This plan declares both inline in `src/worker/contract.ts`. Production passes `unwired("<seam>")`, and `gatewayFixture` passes a stand-in that answers the true state of the absent Scheduler: no execution and no work pull (decisions D6, D9).
+
+## Provides
+
+| Seam                                              | TypeScript signature                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Owner file                                          | Consumer plans                |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------- |
+| `WorkerRegistrations`                             | `findByClient(clientId: string): Registration \| undefined`; `register(tx: Transaction, client: VerifiedClient, now: number): Registration`; `deregister(tx: Transaction, runtimeIdentity: string, now: number): void`; `liveRegistrationOf(tx: Transaction, runtimeIdentity: string): Registration \| null`; `clientAttributionOf(tx: Transaction, runtimeIdentity: string): { clientId: string; name: string } \| null`; `heartbeat(runtimeIdentity: string): void`, with `Registration = { runtimeIdentity; clientId; name; projectId; resourceIdentity; registeredAt }` | `src/worker/contract.ts`                            | 03, 05                        |
+| `WorkerService.instanceHealthcheck`               | `(tx: Transaction, runtimeIdentity: string): boolean`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `src/worker/service.ts`                             | 03                            |
+| `WorkerService.declarationOf`                     | `(workerName: string): WorkerDeclaration \| null`, with `WorkerDeclaration = { name; host; method?; agentName?; harness?; resourceBudget: { turns?: number; wallTimeMs: number }; declaredNodeStates; requiredNodeFormat }`                                                                                                                                                                                                                                                                                                                                                 | `src/worker/catalog.ts`, `service.ts`               | 03, 07, 09                    |
+| `WorkerService.registrationChecks`                | `(tx: Transaction): Array<{ projectId: string; resourceIdentity: string; runtimeIdentity: string; capability: typeof REGISTRATION_CAPABILITY; check: ResourceCheck }>`                                                                                                                                                                                                                                                                                                                                                                                                      | `src/worker/service.ts`                             | 10                            |
+| `WorkerService.endRegistrations`                  | `(tx: Transaction, projectId: string, resourceIdentity: string, now: number): void`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `src/worker/service.ts`                             | 02 (Project)                  |
+| `ProjectBindings.workerBindingOf`                 | `(tx: Transaction, projectId: string, resourceIdentity: string): { bindingId: string; revision: number; workerName: string; instanceCount: number; resourceBudget: { turns: number; wallTimeMs: number } \| null; entries: WorkerBindingEntry[]; tombstone: boolean } \| null` — the latest row of the group                                                                                                                                                                                                                                                                | `src/project/contract.ts`, `service.ts`             | 02, 03                        |
+| `ProjectBindings.resolveWorkerBinding` (extended) | `(bindingId: string, context: Context): Promise<{ workerBindingId: string; projectId: string; resourceIdentity: string } \| null>`                                                                                                                                                                                                                                                                                                                                                                                                                                          | `src/project/contract.ts`                           | Gateway                       |
+| `MachineIdentity.resourceIdentity`                | `readonly resourceIdentity: string` — the group key `worker:kanthord:<binding name>` that the resolver answers                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `src/kernel/caller.ts`                              | 03, 05, 06                    |
+| No-content answer                                 | An operation with `status: HttpStatus.NoContent` and `output: z.null()` answers 204 with no body on both adapters and in OpenAPI                                                                                                                                                                                                                                                                                                                                                                                                                                            | `src/gateway/service.ts`, `client.ts`, `openapi.ts` | 02; every later 204 operation |
+| `REGISTRATION_CAPABILITY`                         | `"liveness of a registration"`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `src/worker/contract.ts`                            | 10                            |
+
+Three differences from `00-index.md` "Seams":
+
+- `register` and `deregister` take the transaction reading `now`, under the convention "The clock of a transaction".
+- `WorkerRegistrations.instanceHealthcheck` of the index is a method of `WorkerService`, because it reads `workerAgentView` and `workerBindingOf` beside the registration row.
+- `REGISTRATION_CAPABILITY` sits in `src/worker/contract.ts` beside `AGENT_PROVIDER_CAPABILITY` (`src/worker/contract.ts:77`), not in `src/kernel/health.ts`, because every capability constant of the code lives in its owner contract.
+
+## Tasks
+
+### 02.1 Create the `worker_instance` migration
+
+- Files: `src/worker/migrations.ts` (edit), `src/worker/migrations.test.ts` (edit), `src/apps/server/migrations.test.ts` (edit)
+- Do:
+  1. Append the migration `createInstanceTable` to `workerMigrations` after `createAgentEnablementTable` (`src/worker/migrations.ts:3–21`). Do not change migration 1.
+  2. Create the table with these exact columns: `id TEXT NOT NULL PRIMARY KEY`, `project_id TEXT NOT NULL`, `resource_identity TEXT NOT NULL`, `client_id TEXT NOT NULL`, `client_name TEXT NOT NULL`, `registered_at INTEGER NOT NULL`, `ended_at INTEGER`.
+  3. Create the one index: `CREATE UNIQUE INDEX worker_instance_live_client ON worker_instance (client_id) WHERE ended_at IS NULL`.
+  4. In `src/worker/migrations.test.ts`, add a test with the `PRAGMA table_info` shape of the seven columns, the one created index with `unique: 1`, `WHERE` in its SQL from `sqlite_master`, and a refusal of a second live row of one `client_id` beside the acceptance of a second row whose `ended_at` is set.
+  5. In `src/apps/server/migrations.test.ts`, add `WORKER_INSTANCE_TABLE = "worker_instance"`. Add it to the Worker table list of the prefix test (`:95`) and of the single-service test (`:124–125`). Add `ERD2_WORKER_TABLES = [WORKER_INSTANCE_TABLE]` to the combined table assertion that plan 01 task 01.1 extends.
+- Rules:
+  - The columns and their nullability equal the ERD diagram. `02-execution.md:49–57`.
+  - One partial unique index on `client_id` where `ended_at` is null, and no other index. `02-execution.md:192`; root `AGENTS.md` "Database design".
+  - No `REFERENCES` clause: `project_id` names a project of another owner, and the row pins no binding row. Decision D24; `02-execution.md:197`.
+  - No SQL `CHECK`. Root `AGENTS.md` "Database design".
+  - `project_id` is the second key column of `worker_instance`. Decision D24.
+  - Never edit a published migration. `engine/AGENTS.md` "Add a migration".
+- Done when: `pnpm run verify` passes; the migration test lists the table, its columns and its one partial unique index.
+
+### 02.2 Add the Worker configuration fragment
+
+- Files: `src/worker/config.ts` (create), `src/worker/index.ts` (edit), `src/config/index.ts` (edit), `src/config/index.test.ts` (edit), `src/worker/service.ts` (edit), `src/worker/service.test.ts` (edit), `src/apps/server/index.ts` (edit)
+- Do:
+  1. In `src/worker/config.ts`, declare `WorkerConfig { heartbeatWindow: number; globalPrompt: string }` and `workerConfigSchema: Schema<WorkerConfig>` in the form of `src/mission/config.ts:11–22`. `heartbeatWindow` has the default `300` and a format that refuses a value that is not a positive safe integer, as `idempotencyTtl` (`src/gateway/config.ts:52–62`). `globalPrompt` has the default `""` and a format that refuses a value that is not a string.
+  2. Replace `export const workerConfigSchema = {}` (`src/worker/index.ts:3`) with the export of `workerConfigSchema` and `type WorkerConfig` from `./config.ts`.
+  3. Add `worker: WorkerConfig` to `ServerConfig` (`src/config/index.ts:29–32`).
+  4. Change `Dependencies.config` of the Worker Service (`src/worker/service.ts:159`) to `WorkerConfig`. Pass `options.config.worker` at `src/apps/server/index.ts:117`. Give the tests of `src/worker/service.test.ts` a named constant `WORKER_CONFIG` with both defaults.
+  5. In `src/config/index.test.ts`, assert both defaults, the refusal of `heartbeatWindow: 0`, of `heartbeatWindow: 1.5` and of an undeclared field under `worker`, and the presence of both fields in the output of `kanthord config init`.
+- Rules:
+  - `worker.heartbeatWindow` is a positive safe integer of seconds with the default 300. `worker-service.impl.md:254`.
+  - `worker.globalPrompt` is a path string with the default empty string; plan 07 reads it. `worker-service.impl.md:250–253`.
+  - Both fields stand in the field index. `architecture.impl.md:323–324`.
+  - The fragment follows the procedure of `engine/AGENTS.md` "Add a configuration field".
+- Done when: `pnpm run verify` passes; the configuration tests pass.
+
+### 02.3 Add `workerBindingOf` and the resource identity of the resolver to the Project Service
+
+- Files: `src/project/contract.ts` (edit), `src/project/service.ts` (edit), `src/project/service.test.ts` (edit), `src/apps/server/test-support.ts` (edit), `src/gateway/test-support.ts` (edit)
+- Do:
+  1. In `src/project/contract.ts`, add `resourceIdentity: string` to the answer of `ProjectBindings.resolveWorkerBinding` (`:541–546`). Declare `WorkerBindingRow` with the fields of the Provides row, where `entries` holds the parsed entries of `workerConfigSchema` (`:120–129`).
+  2. In `resolveWorkerBinding` (`src/project/service.ts:565–584`), answer `resourceIdentity: row.resourceIdentity` beside the two ERD 1 fields.
+  3. Implement `workerBindingOf(tx, projectId, resourceIdentity): WorkerBindingRow | null` beside `getBindingRevision` (`src/project/service.ts:534`). Read `readLatestBinding(tx, projectId, resourceIdentity)` (`src/project/store.ts:578`). Answer null for an absent group and for a kind other than `worker`. Parse the `config` of the latest row with `workerConfigSchema`. Answer `bindingId: row.id`, `revision: row.revision`, `workerName: config.worker`, `instanceCount: config.instanceCount`, `resourceBudget: config.resourceBudget ?? null`, `entries: config.entries ?? []` and `tombstone: row.removedAt !== null`.
+  4. Add `resourceIdentity` to the fake resolvers: `fakeMachines` (`src/apps/server/test-support.ts:72–77`) answers `worker:kanthord:<binding>`, and `fakeLookups` (`src/gateway/test-support.ts:50–55`) answers `worker:kanthord:binding`.
+  5. Add tests: `resolveWorkerBinding` answers the group of a pinned row; `workerBindingOf` answers the latest row after a revision, `tombstone: true` after a removal, `instanceCount: 0` after a disablement, null for a repository group and null for an absent group; the call opens no transaction of its own.
+- Rules:
+  - The group `(project_id, resource_identity)` names the binding, and its latest row states it. `project-service.impl.md:48`; `02-execution.md:196–197`, `:210`.
+  - A worker binding names one worker that never changes. `project-service.md:67`.
+  - A collaboration takes the caller transaction and opens none. `architecture.impl.md:593`.
+  - A consuming plan adds the Project collaboration that it needs. `00-index.md` "Shared files".
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 02.4 Carry the resource identity in the machine identity
+
+- Files: `src/kernel/caller.ts` (edit), `src/kernel/caller-mint.ts` (edit), `src/gateway/authentication.ts` (edit), `src/gateway/authentication.test.ts` (edit), `src/apps/server/gateway-registration.test.ts` (edit)
+- Do:
+  1. Add `readonly resourceIdentity: string` to `MachineIdentity` (`src/kernel/caller.ts:13–21`) after `projectId`.
+  2. In `mintMachineIdentity` (`src/kernel/caller-mint.ts:33–52`), copy `client.resourceIdentity` into the frozen value.
+  3. In `resolveMachine` (`src/gateway/authentication.ts:49–74`), pass the `resourceIdentity` of the resolver answer to `mintMachineIdentity`.
+  4. Add assertions to the authentication tests and to the machine read of `gateway-registration.test.ts` (`:38–57`, `:72–80`) that `resourceIdentity` equals the group of the fake resolver.
+- Rules:
+  - The machine identity names the client identity, its project and its resource identity. `gateway-service.impl.md:221`.
+  - The work pull compares its `resourceIdentity` with the resource identity of the machine identity. `scheduler-service.impl.md:45`.
+  - The JWT keeps its ERD 1 claim `binding`. Gap: the claims `project_id` and `resource_identity` and the tombstone rule of `gateway-service.impl.md:113–114`, `:124`, `:131` stay unimplemented; decision D26.
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 02.5 Add the registration store over `worker_instance`
+
+- Files: `src/worker/instances.ts` (create), `src/worker/instances.test.ts` (create)
+- Do:
+  1. In `src/worker/instances.ts`, declare `WORKER_INSTANCE_PREFIX = "worker_instance"` and the row mapper to `Registration` of the Provides row, with `name` from `client_name`.
+  2. Implement the store functions. Each function takes the transaction of its caller, except `readLiveByClient`:
+     - `readLiveByClient(store, clientId)`: one prepared `SELECT` on `store.database` with `client_id = ? AND ended_at IS NULL`, outside a transaction.
+     - `readLiveOfClient(tx, clientId)`: the same read on `tx.database`.
+     - `readRow(tx, runtimeIdentity)`: the row with its `ended_at`, ended rows included.
+     - `countLive(tx, projectId, resourceIdentity)`: the count of the rows of the group with `ended_at IS NULL`.
+     - `insertRegistration(tx, client, now)`: insert a row with `id = createIdentity(WORKER_INSTANCE_PREFIX)`, `registered_at = now` and `ended_at` null; answer the registration.
+     - `endRegistration(tx, runtimeIdentity, now)`: `UPDATE worker_instance SET ended_at = ? WHERE id = ? AND ended_at IS NULL`; answer the changed count.
+     - `endGroup(tx, projectId, resourceIdentity, now)`: the same update for every live row of the group; answer the ended identities.
+     - `reopenRegistration(tx, runtimeIdentity)`: `UPDATE worker_instance SET ended_at = NULL WHERE id = ? AND ended_at IS NOT NULL`.
+     - `listLive(tx, filter: { projectId?; resourceIdentity?; cursor?; limit })`: the live rows by `id` in descending order, with `id < cursor` when a cursor is present, `limit + 1` rows.
+     - `readAllLive(tx)`: every live row.
+  3. Add tests on an in-memory store with the Worker migrations: an insert answers a `worker_instance_` identity; `readLiveByClient` finds the live row and misses an ended row; `countLive` counts one group only; `endRegistration` of an ended row changes nothing; `reopenRegistration` restores the row; `listLive` pages in descending order with a cursor and both filters; a second live insert of one client identity throws the constraint error.
+- Rules:
+  - `id` is the runtime identity `worker_instance_<ulid>`. `worker-service.impl.md:153`; `02-execution.md:191`.
+  - The live registrations of a group are its rows where `ended_at` is null. `02-execution.md:193`.
+  - `findByClient` reads outside a transaction, because authentication runs before `caller.commit`. Decision D11; `src/gateway/authentication.ts:56–72`.
+  - An ended row stays. `02-execution.md:202`.
+  - No store function opens a transaction of its own. `architecture.impl.md:593`.
+  - A list orders by its primary key in descending order, and the next page reads keys below the cursor. `architecture.impl.md:181`, `:186`.
+- Done when: `pnpm run verify` passes; `node --test src/worker/instances.test.ts` passes.
+
+### 02.6 Admit `worker.register` over the table with the instance count
+
+- Files: `src/worker/contract.ts` (edit), `src/worker/service.ts` (edit), `src/worker/registrations.ts` (rewrite), `src/worker/service.test.ts` (edit), `src/kernel/test-identity.ts` (edit), `src/apps/server/index.ts` (edit), `src/apps/server/test-support.ts` (edit), `src/apps/server/gateway-registration.test.ts` (edit), `src/apps/server/cli-worker.test.ts` (edit), `src/gateway/authentication.ts` (edit), `static/openapi.yaml` and `static/openapi/worker/register.yaml` (regenerated)
+- Do:
+  1. In `src/worker/contract.ts`, replace `VerifiedClient` and `Registration` (`:13–21`) with `VerifiedClient = { clientId; name; projectId; resourceIdentity }` and the `Registration` of the Provides row. Replace `WorkerRegistrations` (`:144–148`) with `findByClient` and `register(tx, client, now)` of the Provides row; tasks 02.7, 02.10 and 02.15 add the other methods. Declare `WorkerBindingOf` inline with the `WorkerBindingRow` shape of task 02.3. Declare `WorkerErrorCode.SlotUnavailable = "worker.instance.slot_unavailable"` (code: proposed for `worker.register`).
+  2. Replace the output of `worker.register` (`:337–343`) with `z.strictObject({ runtimeIdentity: identitySchema("worker_instance") })`. Remove `MAX_RUNTIME_IDENTITY_LENGTH` (`:12`), which becomes an orphan. Replace the description with the target behavior: a registration of a client identity that holds a live registration answers that registration with any key, and a recorded replay after the end answers 409 `gateway.registration.stale`.
+  3. Rewrite `src/worker/registrations.ts` as `TableRegistrations implements WorkerRegistrations` over the functions of task 02.5. `register(tx, client, now)` answers the live row of `client.clientId` when one exists. Otherwise it reads `workerBindingOf(tx, client.projectId, client.resourceIdentity)`. It throws 409 `worker.instance.slot_unavailable` when the answer is null, a tombstone, holds `instanceCount: 0`, or when `countLive` of the group is at or above `instanceCount`. Else it inserts the row. Remove `InMemoryRegistrations`.
+  4. Add `store: Store` and `workerBindingOf: WorkerBindingOf` to `Dependencies` (`src/worker/service.ts:158–166`) as required fields. Keep `registrations?` for the fake of `fakeMachines` (decision D11). The default is `new TableRegistrations(store, workerBindingOf)`.
+  5. Rewrite the `register` handler (`src/worker/service.ts:699–737`): read `now = Date.now()` once inside `caller.commit`, call `registrations.register(tx, identity, now)` and answer `{ runtimeIdentity }`. Remove the compensation block (`:729–736`), because a failed transaction rolls back the row. Keep the `replayGuard` (`:689–697`).
+  6. In `resolveMachine` (`src/gateway/authentication.ts:61–68`), compare the `projectId` and the `resourceIdentity` of the registration with the resolver answer in place of `workerBindingId`.
+  7. In `src/apps/server/index.ts`, pass `store: options.store` and `workerBindingOf: (tx, pid, ri) => project.workerBindingOf(tx, pid, ri)` to the Worker Service (`:116–124`).
+  8. Update `fakeMachines` (`src/apps/server/test-support.ts:79–121`) to the new interface: key the capacity by `resourceIdentity`, answer the live registration of a repeated client identity, mint `worker_instance` identities, refuse with `worker.instance.slot_unavailable`, and drop its `deregister`, which no caller uses after step 5.
+  9. Add `testMachineIdentity(client, jti, runtimeIdentity?)` to `src/kernel/test-identity.ts`, which calls `mintMachineIdentity`.
+  10. Update the tests: the prefix `worker_instance_` in `gateway-registration.test.ts:154`; the code of `ErrorCode.Capacity` (`:34`) becomes `worker.instance.slot_unavailable`; delete the two tests of the compensation (`:334–374`); add colocated tests in `src/worker/service.test.ts` with `testMachineIdentity` and a real store: a registration inserts one row; a second registration of the client identity with a new key answers the same identity and no second row; a full binding answers 409 `worker.instance.slot_unavailable`; a tombstone and `instanceCount: 0` answer the same code; a failed transaction leaves no row; a lowered count of 1 keeps two live rows and refuses a third registration.
+  11. Regenerate OpenAPI with `pnpm run build && node bin/kanthord.mjs gateway openapi`.
+- Rules:
+  - A registration is admitted only while the live rows of its group are fewer than the instance count, in one transaction with the instance-count collaboration. `02-execution.md:170`, `:194`; `architecture.impl.md:705`; `gateway-service.impl.md:72`.
+  - A registration of a client identity with a live row answers that row and inserts nothing. `02-execution.md:199`; `gateway-service.impl.md:73`.
+  - A lowered count of 1 or more ends no registration and refuses a new one. `02-execution.md:195`.
+  - `project_id` and `resource_identity` come from the verified machine identity; the request nominates neither. `02-execution.md:196`; `gateway-service.impl.md:71`.
+  - The row pins no binding revision. `02-execution.md:197`.
+  - The replay holds only while the registration is live. `gateway-service.impl.md:76–79`; `engine/docs/cli/worker.md:190`.
+  - `worker.instance.slot_unavailable` extends to `worker.register` (code: proposed). The condition "refuses a further one" is `worker-service.md:182` and `02-execution.md:194`. The code stands for the resume at `worker-service.impl.md:220`, and `00-index.md` "Codes for Ulrich" proposes the extension. No shared code of `engine/docs/cli/other.md` covers a full binding outside test support (`:802`).
+  - The runtime identity output uses `identitySchema("worker_instance")`. Decision D11.
+- Done when: `pnpm run verify` passes; the tests pass; `static/openapi/worker/register.yaml` holds the `worker_instance_` pattern.
+
+### 02.7 Add the heartbeat clock, its renewal and its sweep
+
+- Files: `src/worker/heartbeat.ts` (create), `src/worker/heartbeat.test.ts` (create), `src/worker/service.ts` (edit), `src/worker/registrations.ts` (edit), `src/gateway/authentication.ts` (edit), `src/gateway/test-support.ts` (edit), `src/apps/server/index.ts` (edit), `src/apps/server/test-support.ts` (edit)
+- Do:
+  1. In `src/worker/heartbeat.ts`, declare `HEARTBEAT_SWEEP_INTERVAL_MS = 30000` and `MILLISECONDS_PER_SECOND = 1000`. Implement `HeartbeatClock` over a `Map<string, number>` with `renew(runtimeIdentity)`, `set(runtimeIdentity)`, `drop(runtimeIdentity)`, `ageMs(runtimeIdentity): number | null` and `expired(windowSeconds): string[]`. It reads a monotonic function that `Dependencies.monotonicNow?: () => number` supplies, with the default `performance.now`, as custody does with `now` (`src/custody/service.ts:81`).
+  2. `renew` changes a present reading only. `set` writes a reading for a new registration, a resume and the start reset.
+  3. Add `heartbeat(runtimeIdentity)` to `WorkerRegistrations`. `TableRegistrations` implements it as `clock.renew` of the clock that `WorkerService` owns, and `fakeMachines` implements it as a no-op. The `register` handler calls `clock.set` of the answered runtime identity after `caller.commit` returns.
+  4. In `WorkerService.start()` (`src/worker/service.ts:181–192`), read `readAllLive` in one store transaction and `set` a reading for every live row.
+  5. Implement `sweepRegistrations()`. In one store transaction, read `Date.now()` once, end every live row whose reading is older than `config.heartbeatWindow × 1000` with `endRegistration`, and drop the reading of every row that is not live at the sweep. It never drops the reading of a live row.
+  6. Start a `setInterval` of `HEARTBEAT_SWEEP_INTERVAL_MS` in `run()` after `start()` returns (`src/worker/service.ts:202–215`), with `unref()`. Clear it in `quiesce()` (`:193–195`).
+  7. Add `heartbeat` to `AuthenticationLookups.worker` (`src/gateway/authentication.ts:29`). In `resolveMachine`, call `worker.heartbeat(registration.runtimeIdentity)` after the registration checks pass. Wire it at `src/apps/server/index.ts:89–91`. Add a no-op `heartbeat` to `fakeLookups` (`src/gateway/test-support.ts:44–47`).
+  8. Add tests with a controlled monotonic function: a reading inside the window keeps the row; a reading older than the window ends the row with `ended_at` and frees the slot; a renewal moves the reading; the start reset sets every live row to the start reading; a registration that a resume reopened keeps its reading through a sweep; `quiesce()` stops the timer; an authenticated machine request calls `heartbeat` once, and a human request and a machine identity with no live registration call it never.
+- Rules:
+  - The last heartbeat is a monotonic value in memory. `02-execution.md:28`; `worker-service.impl.md:166`; decision D12.
+  - Every authenticated request of a registered client identity renews the heartbeat. `worker-service.impl.md:162–163`; `worker-service.vocabulary.md:248–262`; decision D12.
+  - The server start keeps every live row and sets its last heartbeat to the start time. `02-execution.md:198`; `worker-service.impl.md:167`.
+  - A sweep every 30 s ends every registration whose last heartbeat is older than the window, and the end frees the slot. `worker-service.impl.md:171`, `:174`.
+  - A timer starts in `run()` and stops in phase 1 of the stop. `architecture.impl.md:457`, `:464`; `00-index.md` "Shared conventions", row "Timers".
+  - The sweep keeps the reading of a resumed registration. `.dev/erd-02/decisions-log.md` 2026-09-30, plan 02.
+  - Gap: the expiry proves no stop; physical stop and capacity reuse stay B9 SC5 and W5 (`worker-service.impl.md:176`; `docs/brainstorm/HANDOFF.md:114`, `:122`).
+- Done when: `pnpm run verify` passes; `node --test src/worker/heartbeat.test.ts` passes.
+
+### 02.8 Add the no-content answer and `worker.heartbeat` with its CLI leaf
+
+- Files: `src/gateway/service.ts` (edit), `src/gateway/client.ts` (edit), `src/gateway/openapi.ts` (edit), `src/gateway/openapi.test.ts` (edit), `src/worker/contract.ts` (edit), `src/worker/service.ts` (edit), `src/worker/service.test.ts` (edit), `src/apps/cli/worker.ts` (edit), `src/apps/server/cli-worker.test.ts` (edit), `src/apps/server/openapi-integration.test.ts` (edit), `static/openapi.yaml` and `static/openapi/worker/heartbeat.yaml` (regenerated)
+- Do:
+  1. In the Gateway writer (`src/gateway/service.ts:493`), answer `new Response(null, { status })` when `result.status` equals `HttpStatus.NoContent`.
+  2. In the HTTP adapter (`src/gateway/client.ts:147–153`), take the body `null` for a status of `HttpStatus.NoContent` and read no JSON.
+  3. In the OpenAPI emitter (`src/gateway/openapi.ts:155–164`), emit the response of `HttpStatus.NoContent` with `description` alone and no `content`. Add an emitter test for it.
+  4. Declare `heartbeat` in `workerOperations`: id `worker.heartbeat`, `POST /api/worker/heartbeat`, `access: AccessPolicy.Client`, `requiresRegistration` absent (the default requires a live registration), `mutation: false`, `lifetime: Unary`, `store: Operational`, `timeoutMs: 30000`, `input: emptyInput`, `output: z.null()`, `status: HttpStatus.NoContent`.
+  5. Register the handler in `declare`: `caller.commit(() => null)`. The chain of task 02.7 renews the heartbeat before the handler.
+  6. Add the leaf `worker heartbeat [--token <jwt>]` in `src/apps/cli/worker.ts`. It requires a token with `cli.worker.heartbeat.token_required`, calls `heartbeat` and prints the answer `null` as one JSON line. An indeterminate result answers `cli.worker.heartbeat.indeterminate`.
+  7. Regenerate OpenAPI. Assert the operation id and the 204 response without content in `openapi-integration.test.ts`.
+  8. Add tests: a registered machine answers 204 with an empty body over HTTP and `null` over the direct adapter; a machine identity with no live registration answers 403 `gateway.registration.required`; a human token answers 401 `gateway.authentication.unauthorized`; the request with a body answers 400 `gateway.request.unexpected_body`; `kanthord worker heartbeat --help` exits 0.
+- Rules:
+  - The route, the access, the empty body and the 204 answer. `worker-service.impl.md:164–165`; `engine/docs/cli/worker.md:113`, `:225–226`.
+  - The operation requires a live registration. `engine/docs/cli/worker.md:113`, `:226`; `src/gateway/invocation.ts:265–275`.
+  - `mutation: false`: the synopsis carries no `--idempotency-key` (`engine/docs/cli/worker.md:222`), the key flag applies to mutations only (`engine/docs/cli/worker.md:58`), and the handler writes no row; the renewal is the effect of every authenticated request (`worker-service.impl.md:162`).
+  - The CLI codes follow the generic forms `cli.<group>.<command>.token_required` and `.indeterminate`. `engine/docs/cli/other.md:834–835`.
+  - The task that declares a route adds the CLI leaf and regenerates OpenAPI. ERD 1 decision D13; `00-index.md` "Shared files".
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 02.9 Declare the Scheduler seam of the Worker Service and its stand-ins
+
+- Files: `src/worker/contract.ts` (edit), `src/worker/service.ts` (edit), `src/worker/service.test.ts` (edit), `src/apps/server/index.ts` (edit), `src/apps/server/test-support.ts` (edit), `src/apps/server/unwired-import.test.ts` (edit)
+- Do:
+  1. Declare in `src/worker/contract.ts`, with method syntax:
+     ```ts
+     export const InstanceActivity = {
+       Idle: "idle",
+       Pulling: "pulling",
+       Executing: "executing",
+     } as const;
+     export type InstanceActivity =
+       (typeof InstanceActivity)[keyof typeof InstanceActivity];
+     export interface SchedulerClaims {
+       runningExecutionOfRuntime(
+         tx: Transaction,
+         runtimeIdentity: string,
+         now: number,
+       ): { executionId: string } | null;
+       activityOf(
+         tx: Transaction,
+         runtimeIdentity: string,
+         now: number,
+       ): { activity: InstanceActivity; executionId: string | null };
+     }
+     ```
+  2. Add `schedulerClaims: SchedulerClaims` to `Dependencies` as a required field. Give the colocated test harness the defaults of step 4.
+  3. In `composeServices`, add the key `workerSchedulerClaims?: SchedulerClaims` to the `standIns` option of plan 01. Pass `options.standIns?.workerSchedulerClaims ?? { runningExecutionOfRuntime: unwired("SchedulerClaims.runningExecutionOfRuntime"), activityOf: unwired("SchedulerClaims.activityOf") }`. Import the type as `SchedulerClaims as WorkerSchedulerClaims`, beside the Mission type of the same name.
+  4. In `gatewayFixture`, merge `standIns.workerSchedulerClaims` over the defaults: `runningExecutionOfRuntime` answers null, and `activityOf` answers `{ activity: InstanceActivity.Idle, executionId: null }`.
+  5. Add both seam names to `UNWIRED_SEAMS` of `unwired-import.test.ts`.
+- Rules:
+  - A collaboration type is declared inline in the own `contract.ts` of the service. `00-index.md` "Collaboration-type contract rule"; `src/project/service.ts:16`.
+  - Every collaboration is required. Decision D4.
+  - Production passes `unwired`, and `gatewayFixture` answers the true state of the absent Scheduler: no execution and no work pull. Decisions D6, D9.
+  - The resume reads the `running` execution of the runtime identity after the settlement. `worker-service.impl.md:211–212`; `scheduler-service.md:241–245`; `scheduler-service.impl.md:127`.
+  - A read of the instance record settles nothing and changes no scheduling state, so `activityOf` derives the claim state and writes nothing. `worker-service.impl.md:190`; `scheduler-service.md:221–226`.
+  - The Scheduler serves the waiting work pulls, so it answers `pulling`. Decision D20; `worker-service.impl.md:189`.
+- Done when: `pnpm run verify` passes; `unwired-import.test.ts` passes with the six seam names.
+
+### 02.10 Implement `worker.instance.deregister` with its CLI leaf
+
+- Files: `src/worker/contract.ts` (edit), `src/worker/service.ts` (edit), `src/worker/registrations.ts` (edit), `src/worker/service.test.ts` (edit), `src/apps/server/test-support.ts` (edit), `src/apps/cli/worker.ts` (edit), `src/apps/server/cli-worker.test.ts` (edit), `src/apps/server/openapi-integration.test.ts` (edit), `static/openapi.yaml` and `static/openapi/worker/instance.deregister.yaml` (regenerated)
+- Do:
+  1. Declare `WorkerErrorCode.InstanceNotFound = "worker.instance.not_found"` and `runtimeIdentityParams = z.strictObject({ runtimeIdentity: identitySchema("worker_instance") })`.
+  2. Declare `"instance.deregister"`: id `worker.instance.deregister`, `DELETE /api/worker/instance/:runtimeIdentity`, `access: Client`, `requiresRegistration: false`, `mutation: true`, `timeoutMs: 30000`, no `maxBodyBytes` (the default 10 MiB), `input: { params: runtimeIdentityParams, query: {}, body: null }`, `output: z.strictObject({ runtimeIdentity, registered: z.literal(false) })`, `status: 200`. Declare no `replayGuard`.
+  3. Add `liveRegistrationOf(tx, runtimeIdentity)` and `deregister(tx, runtimeIdentity, now)` to `WorkerRegistrations`. Implement them in `TableRegistrations` with `readRow` and `endRegistration`, and in `fakeMachines` over its map.
+  4. Register the handler. In one `caller.commit` with one `Date.now()` reading, read `liveRegistrationOf(tx, runtimeIdentity)`. Answer 404 `worker.instance.not_found` when it is null or when its `clientId`, `projectId` or `resourceIdentity` differs from the machine identity. Else call `deregister`. Drop the heartbeat reading after the commit. Answer `{ runtimeIdentity, registered: false }`.
+  5. Add the leaf `worker instance deregister <runtime-identity> [--idempotency-key <key>]`. It validates the argument with `identitySchema("worker_instance")` and the code `cli.worker.instance.deregister.invalid_runtime_identity` (code: proposed), requires a token with `cli.worker.instance.deregister.token_required`, resolves the key with `resolveKey` and prints the answer with its `idempotencyKey` through `handleMutationResult`.
+  6. Regenerate OpenAPI and assert the operation id.
+  7. Add tests: the end and the slot release in one transaction; a same-key replay after the end answers the recorded answer; a new key after the end answers 404; a target of another client identity, an unknown identity and an ended identity answer 404; a newer registration of the same client identity stays live after a delayed request for its ended identity; a later registration of the same client identity with a fresh key answers a new identity.
+- Rules:
+  - The route, the access, no body, the default timeout and body limit, and the answer. `worker-service.impl.md:196`, `:201`; `engine/docs/cli/worker.md:120`, `:557–569`.
+  - The operation requires no live registration; authentication still checks the credential and the binding. `worker-service.impl.md:197`.
+  - The handler ends only the live registration that the path names and that belongs to the caller, and frees the slot in the same transaction. `worker-service.impl.md:198–199`; `02-execution.md:194`.
+  - Every other target answers 404 `worker.instance.not_found`, and a newer registration stays intact. `worker-service.impl.md:200`; `engine/docs/cli/worker.md:742`.
+  - No `replayGuard`; a retry after a restart runs the handler again. `worker-service.impl.md:202–203`.
+  - The same client identity registers again with a fresh key. `worker-service.impl.md:175`.
+  - CLI code `cli.worker.instance.deregister.invalid_runtime_identity`: proposed under `architecture.impl.md:348`, as `cli.project.binding.get.invalid_binding_id` (`engine/docs/cli/project.md:604`).
+  - Gap: the deregistration proves no stop and authorizes no workspace reuse; B9 SC5 and W5 (`worker-service.impl.md:204`).
+- Done when: `pnpm run verify` passes; the tests pass; `kanthord worker instance deregister --help` exits 0.
+
+### 02.11 Implement `worker.instance.resume` with its CLI leaf
+
+- Files: `src/worker/contract.ts` (edit), `src/worker/service.ts` (edit), `src/worker/registrations.ts` (edit), `src/worker/service.test.ts` (edit), `src/apps/cli/worker.ts` (edit), `src/apps/server/cli-worker.test.ts` (edit), `src/apps/server/openapi-integration.test.ts` (edit), `static/openapi.yaml` and `static/openapi/worker/instance.resume.yaml` (regenerated)
+- Do:
+  1. Declare `WorkerErrorCode.NoLiveExecution = "worker.instance.no_live_execution"` and `WorkerErrorCode.ClientLive = "worker.instance.client_live"`.
+  2. Declare `"instance.resume"`: id `worker.instance.resume`, `POST /api/worker/instance/:runtimeIdentity/resume`, `access: Human`, `mutation: true`, `timeoutMs: 30000`, no body, `input: { params: runtimeIdentityParams, query: {}, body: null }`, `output: z.strictObject({ runtimeIdentity, registered: z.literal(true) })`, `status: 200`.
+  3. Register the handler. In one `caller.commit` with one `Date.now()` reading `now`, run these checks in order:
+     1. `readRow(tx, runtimeIdentity)` is absent: 404 `worker.instance.not_found`.
+     2. The row is live: answer `{ runtimeIdentity, registered: true }` and change nothing.
+     3. `schedulerClaims.runningExecutionOfRuntime(tx, runtimeIdentity, now)` answers null: 409 `worker.instance.no_live_execution`.
+     4. `readLiveOfClient(tx, row.clientId)` answers a row: 409 `worker.instance.client_live`.
+     5. `workerBindingOf(tx, row.projectId, row.resourceIdentity)` is null, a tombstone or holds `instanceCount: 0`, or `countLive` of the group is at or above `instanceCount`: 409 `worker.instance.slot_unavailable`.
+     6. `reopenRegistration(tx, runtimeIdentity)`.
+  4. After the commit of step 3.6, `set` the heartbeat reading of the runtime identity.
+  5. Add the leaf `worker instance resume <runtime-identity> [--idempotency-key <key>]` with `cli.worker.instance.resume.invalid_runtime_identity` (code: proposed), `cli.worker.instance.resume.token_required` and `handleMutationResult`.
+  6. Regenerate OpenAPI and assert the operation id.
+  7. Add tests with a fake `schedulerClaims`: the reopen, the heartbeat reading and the slot; the settlement call precedes the precondition check; a resume of a live registration changes nothing; each of the four refusals; the next registration of the client identity answers the resumed identity; a machine token answers 401.
+- Rules:
+  - The route, the access, no body and the answer. `worker-service.impl.md:209`, `:221`; `engine/docs/cli/worker.md:121`, `:598–611`.
+  - The resume reopens an ended registration only while it is the claimant of a `running` execution, after the settlement, in one transaction with the slot. `02-execution.md:200`; `worker-service.impl.md:210–213`; `scheduler-service.md:241–245`.
+  - A resume of a live registration answers 200 and changes nothing. `worker-service.impl.md:215`.
+  - The four refusals and their codes. `worker-service.impl.md:216–220`; `engine/docs/cli/worker.md:742–745`.
+  - A lost execution is never revived. `worker-service.impl.md:218`.
+  - CLI code `cli.worker.instance.resume.invalid_runtime_identity`: proposed under `architecture.impl.md:348`.
+  - Gap: until plan 03, production answers 500 `system.composition.unwired` at step 3.3; decision D9.
+  - Gap: two live processes of one machine JWT pass every execution proof after a resume; HANDOFF B9 Scheduler item (`docs/brainstorm/HANDOFF.md:115`).
+- Done when: `pnpm run verify` passes; the tests pass; `kanthord worker instance resume --help` exits 0.
+
+### 02.12 Implement `worker.instance.list` and `worker.instance.get` with their CLI leaves
+
+- Files: `src/worker/contract.ts` (edit), `src/worker/service.ts` (edit), `src/worker/instance-record.ts` (create), `src/worker/instance-record.test.ts` (create), `src/apps/cli/worker.ts` (edit), `src/apps/server/cli-worker.test.ts` (edit), `src/apps/server/openapi-integration.test.ts` (edit), `static/openapi.yaml` and `static/openapi/worker/instance.list.yaml`, `instance.get.yaml` (regenerated)
+- Do:
+  1. Declare `InstancePlacement = { Server: "server", Worker: "worker" }`, `workerResourceIdentitySchema` (`/^worker:kanthord:[a-z][a-z0-9-]{0,62}$/`) and `instanceRecordSchema` with `z.strictObject`: `runtimeIdentity` (`identitySchema("worker_instance")`), `projectId` (`identitySchema("project")`), `resourceIdentity`, `workerName`, `host` (`z.enum(WorkerHost)`), `placement` (`z.enum(InstancePlacement)`, optional), `clientId` (`identitySchema("client_identity")`, optional), `name` (1 to 64 characters, optional), `activity` (`z.enum(InstanceActivity)`), `draining` (boolean), `executionId` (`identitySchema("execution")`, optional) and `registered` (boolean).
+  2. Declare `WorkerErrorCode.BindingUnknown = "worker.instance.binding_unknown"` (code: proposed).
+  3. Declare `"instance.list"`: id `worker.instance.list`, `GET /api/worker/instance`, `access: Human`, `mutation: false`, `timeoutMs: 30000`, query `{ projectId?, resourceIdentity?, limit (1 to 1000, default 100), cursor? }` with a refinement that refuses `resourceIdentity` without `projectId`, output `{ items: instanceRecordSchema[], nextCursor: string | null }`.
+  4. Declare `"instance.get"`: id `worker.instance.get`, `GET /api/worker/instance/:runtimeIdentity`, `access: Human`, `mutation: false`, `timeoutMs: 30000`, output `instanceRecordSchema`.
+  5. In `instance-record.ts`, implement `instanceRecord(tx, dependencies, registration, now)`. Read `workerBindingOf` of the group for `workerName`, the catalog declaration for `host`, and `schedulerClaims.activityOf(tx, runtimeIdentity, now)`. Set `placement: "worker"` for the host `kanthord` and omit it for `external-harness`. Set `clientId` and `name` from the row, `draining: false`, `registered: true`, and `executionId` only for the activity `executing`.
+  6. Register the list handler: one `caller.commit`. When `resourceIdentity` is present, answer 400 `worker.instance.binding_unknown` if `workerBindingOf(tx, projectId, resourceIdentity)` is null or a tombstone. Decode the cursor as `src/scheduler/service.ts` does and answer 400 `system.pagination.cursor_invalid` for a malformed cursor. Page `listLive` and map each row with `instanceRecord`.
+  7. Register the get handler: one `caller.commit`; answer 404 `worker.instance.not_found` when `liveRegistrationOf` is null.
+  8. Add the leaves `worker instance list [--project <project-id>] [--binding <binding-name>] [--limit <count>] [--cursor <opaque>]` and `worker instance get <runtime-identity>`. `--binding` maps to `resourceIdentity` as `worker:kanthord:<binding-name>`. Use these codes (code: proposed): `cli.worker.instance.list.invalid_project_id`, `cli.worker.instance.list.invalid_binding_name` (with `bindingNameSchema` of `src/project/contract.ts:80–84`), `cli.worker.instance.list.binding_without_project` and `cli.worker.instance.get.invalid_runtime_identity`. Use the shared `--limit` codes and the generic token and indeterminate codes.
+  9. Regenerate OpenAPI and assert both operation ids and the `items` and `nextCursor` properties.
+  10. Add tests: the record of a native and of an external worker; `activity` and `executionId` from a fake `activityOf`; the descending order and the cursor; both filters; `resourceIdentity` without `projectId` answers 400 `gateway.request.validation_failed`; a binding that the project does not hold answers `worker.instance.binding_unknown`; an ended identity answers 404; a machine token answers 401; the reads change no row and no heartbeat reading.
+- Rules:
+  - The routes, the filters, the order and the 400 of a foreign binding. `worker-service.impl.md:187–188`; `engine/docs/cli/worker.md:118–119`, `:507–533`.
+  - The fields and their presence. `worker-service.impl.md:189`; `engine/docs/cli/worker.md:537–546`.
+  - The list is a live inventory and no history, and an ended instance answers 404. `worker-service.impl.md:187–188`; `02-execution.md:193`.
+  - A registered instance of a kanthord host holds the `worker` placement, and an external-harness instance holds none. `worker-service.vocabulary.md:32–42`; `worker-service.md:181`; decision D8.
+  - `draining` is true only for a `server` instance; ERD 2 builds no `server` pool. `engine/docs/cli/worker.md:544`; decision D8.
+  - The reads change no registration, no pool and no scheduling state, and read no table of another service. `worker-service.impl.md:180`, `:190`.
+  - `worker.instance.binding_unknown` (code: proposed, 400): `resourceIdentity` names no current worker binding of `projectId`. The condition is `worker-service.impl.md:187` and `engine/docs/cli/worker.md:522`; no shared code of `engine/docs/cli/other.md` covers a check that needs a read.
+  - The CLI codes are proposed under `architecture.impl.md:348`; `binding_without_project` follows `cli.jwt.endpoint_without_output` (`engine/docs/cli/other.md:770`).
+  - Gap: until plan 03, production answers 500 `system.composition.unwired` at `activityOf`; decision D9.
+- Done when: `pnpm run verify` passes; the tests pass; `kanthord worker instance list --help` exits 0.
+
+### 02.13 Complete the catalog budgets and add `worker.catalog.list` and `get` with their CLI leaves
+
+- Files: `src/worker/catalog.ts` (edit), `src/worker/catalog.test.ts` (edit), `src/worker/contract.ts` (edit), `src/worker/service.ts` (edit), `src/worker/service.test.ts` (edit), `src/apps/cli/worker.ts` (edit), `src/apps/server/cli-worker.test.ts` (edit), `src/apps/server/openapi-integration.test.ts` (edit), `static/openapi.yaml` and `static/openapi/worker/catalog.list.yaml`, `catalog.get.yaml` (regenerated)
+- Do:
+  1. In `WorkerDeclaration` (`src/worker/catalog.ts:26–35`), make `resourceBudget: { turns?: number; wallTimeMs: number }` required. Declare `EXTERNAL_RESOURCE_BUDGET = { wallTimeMs: 7200000 }` beside `NATIVE_RESOURCE_BUDGET` (`:37`) and set it on `claude@1` and `opencode@1` (`:69–82`).
+  2. Add `declarationOf(workerName): WorkerDeclaration | null` to `WorkerService` over `getWorkerDeclaration` (`src/worker/catalog.ts:92–97`).
+  3. Declare `WorkerErrorCode.CatalogNotFound = "worker.catalog.not_found"`, `catalogItemSchema` `{ name, host, declaredNodeStates, requiredNodeFormat }`, and `catalogEntrySchema` as a discriminated union on `host` of `{ ...item, host: "kanthord", method: z.enum(WorkerMethod), agentName, resourceBudget }` and `{ ...item, host: "external-harness", harness, resourceBudget }`, where `resourceBudget` holds a required positive safe integer `wallTimeMs` and an optional positive safe integer `turns`.
+  4. Declare `"catalog.list"`: id `worker.catalog.list`, `GET /api/worker/catalog`, `access: Human`, `mutation: false`, `timeoutMs: 30000`, query `{ limit, cursor? }`, output `{ items: catalogItemSchema[], nextCursor }`. Declare `"catalog.get"`: id `worker.catalog.get`, `GET /api/worker/catalog/:workerName`, output `catalogEntrySchema`.
+  5. Register the list handler: one `caller.commit` with no table read. Sort the worker names in ascending order. The cursor is the base64url of the last name of a page, and the next page reads the names above it. A malformed cursor answers 400 `system.pagination.cursor_invalid`. Register the get handler: 404 `worker.catalog.not_found` for an unknown name.
+  6. Add the leaves `worker list [--limit <count>] [--cursor <opaque>]` and `worker get <worker-name>` with the shared `--limit` codes and the generic token and indeterminate codes.
+  7. Regenerate OpenAPI and assert both operation ids.
+  8. Add tests: the four workers in ascending order `claude@1`, `general@1`, `opencode@1`, `reviewer@1`; a page of two and its cursor; the native entry of `general@1` with `method`, `agentName` and `{ turns: 200, wallTimeMs: 7200000 }` and no `harness`; the external entry of `claude@1` with `harness: "claude-code"` and `{ wallTimeMs: 7200000 }` and no `method`; an unknown name answers 404; a registration adds no entry; a machine token answers 401.
+- Rules:
+  - The routes, the access and the fields. `worker-service.impl.md:181–185`.
+  - A list that answers one item for each group key orders by that key in ascending alphabetical order, and the next page reads the keys above the cursor. `architecture.impl.md:182`; ERD 1 decision D10; `engine/docs/cli/worker.md:255`. `worker-service.impl.md:181` states the descending order; Aelita ruled on 2026-09-30 that the general rule of `architecture.impl.md` wins, and the review file names the page conflict for Ulrich.
+  - Every worker declares `resourceBudget.wallTimeMs`; the four defaults. `worker-service.impl.md:445–449`; `engine/docs/cli/worker.md:288–297`; `worker-service.vocabulary.md:332–337`.
+  - The declarations of the four workers. `worker-service.md:21–47`; `engine/docs/cli/worker.md:264–273`.
+  - The catalog lists the supplied workers, and a registration adds no entry. `worker-service.impl.md:181`; `worker-service.impl.md:30`.
+  - `worker.catalog.not_found` stands at `worker-service.impl.md:185` and `engine/docs/cli/worker.md:302`; the error table of `engine/docs/cli/worker.md:715–746` lacks the row, and the report names it.
+- Done when: `pnpm run verify` passes; the tests pass; `kanthord worker list --help` exits 0.
+
+### 02.14 End the registrations at a binding removal or unavailability
+
+- Files: `src/worker/service.ts` (edit), `src/worker/service.test.ts` (edit), `src/project/contract.ts` (edit), `src/project/service.ts` (edit), `src/project/service.test.ts` (edit), `src/apps/server/index.ts` (edit)
+- Do:
+  1. Implement `endRegistrations(tx, projectId, resourceIdentity, now): void` in `WorkerService` with `endGroup` of task 02.5. It opens no transaction. It leaves the heartbeat readings to the sweep of task 02.7, which drops the reading of a row that is not live at the sweep.
+  2. Declare `EndRegistrations = (tx: Transaction, projectId: string, resourceIdentity: string, now: number) => void` inline in `src/project/contract.ts`, and add `endRegistrations: EndRegistrations` to the Project `Dependencies` (`src/project/service.ts:152–164`) as a required field.
+  3. In `writeBindings` (`src/project/service.ts:360–390`), after `writeBindingSet` (`:376`) and inside the same `caller.commit`, read `Date.now()` once. For each change of kind `removed` or `revised`, read the row that `change.bindingId` names with `readBindingRevision`. Skip a row whose kind is not `worker`. Read `readLatestBinding` of its group. Call `endRegistrations(tx, projectId, row.resourceIdentity, now)` when the latest row has `removedAt` set or holds `instanceCount: 0`.
+  4. Wire `endRegistrations: (tx, pid, ri, now) => worker.endRegistrations(tx, pid, ri, now)` at `src/apps/server/index.ts:134–147`. Give the Project test harness a default that records its calls.
+  5. Add tests: a revision to `instanceCount: 0` ends every live row of the group in the transaction of the write; a removal and a removal by omission end them; a lowered count of 1 ends nothing; a revision of another field ends nothing; a failed write ends nothing; a later `worker.register` of the same client identity after a count of 0 then 1 answers a new runtime identity; a resumed registration keeps its reading through the next sweep.
+- Rules:
+  - A removal or an unavailability of a worker binding ends every live registration of the binding. `02-execution.md:195`, `:198`; `worker-service.md:187`; `gateway-service.impl.md:91`.
+  - A lowered count of 1 or more ends no registration, and live rows can exceed the lowered count. `02-execution.md:195`.
+  - A disablement of a worker binding is the revision with `instanceCount: 0`. `project-service.impl.md:57`, `:131`.
+  - The atomic invariant is "a removed or unavailable worker binding holds no live registration", so the end commits in the transaction of the binding-set write through a Kind 2 collaboration. `architecture.impl.md:594`; `.dev/erd-02/decisions-log.md` 2026-09-30, plan 02 (review:Ulrich).
+  - The binding-set write already calls the Worker collaboration `validateEntry` in the same transaction. `architecture.impl.md:598–602`; `src/project/service.ts:374–375`.
+  - A removal of an omitted binding is a `removed` change whose `bindingId` names the tombstone. `src/project/store.ts:420–425`, `:478–503`.
+  - The change of the ERD 1 operation `project.bindingSet.write` is the one exception to `00-index.md` "Shared files", row `src/project/contract.ts`; the report names the index change.
+  - Gap: a live execution of an ended registration follows the Scheduler loss rules, and physical stop and capacity reuse stay B9 SC5 and W5 (`worker-service.md:188`; `docs/brainstorm/HANDOFF.md:114`, `:122`).
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 02.15 Add the instance healthcheck, the client attribution and the registration checks
+
+- Files: `src/worker/contract.ts` (edit), `src/worker/service.ts` (edit), `src/worker/registrations.ts` (edit), `src/worker/service.test.ts` (edit), `src/apps/server/test-support.ts` (edit), `engine/AGENTS.md` (edit)
+- Do:
+  1. Add `clientAttributionOf(tx, runtimeIdentity)` to `WorkerRegistrations` and implement it in `TableRegistrations` and in `fakeMachines`. It reads the row with ended rows included and answers `{ clientId, name }`, or null for an unknown identity.
+  2. Implement `instanceHealthcheck(tx, runtimeIdentity): boolean` in `WorkerService`. Answer false when `liveRegistrationOf` is null, or when `workerBindingOf` of the group is null, a tombstone or holds `instanceCount: 0`. For the host `external-harness`, answer true. For the host `kanthord`, answer true only when `workerAgentView(tx, workerName, agent, entry).valid` holds for every agent of `agentsOfWorker(workerName)`, with the entry of that agent from `entries` of the latest row or null.
+  3. Declare `REGISTRATION_CAPABILITY = "liveness of a registration"` in `src/worker/contract.ts`. Implement `registrationChecks(tx)` over `readAllLive`. Each check answers `ResourceStatus.Healthy` when the heartbeat age of its runtime identity is inside `config.heartbeatWindow × 1000` ms, and `ResourceStatus.Unhealthy` otherwise. A check writes nothing.
+  4. Update the `src/worker/` entry of `engine/AGENTS.md` (`:61`) with the registration store, the heartbeat clock and the instance record.
+  5. Add tests: the attribution of an ended row; null for an unknown identity; the healthcheck of an external worker with a live row; the failure of a native worker with a disabled enablement and with an ended row; both sides of the heartbeat window; the checks change no row, no heartbeat reading and no instance healthcheck.
+- Rules:
+  - The Worker Service answers the client attribution of a runtime identity, ended rows included. `worker-service.impl.md:158`; `scheduler-service.impl.md:35`.
+  - The instance healthcheck of a `worker` placement passes when the effective configuration resolves and the registration is live; the external-harness check passes when the registration is live; the Worker Service computes it from the state of the server alone. `worker-service.md:209–214`; `worker-service.vocabulary.md:289–294`; `worker-service.impl.md:58`.
+  - The resource healthcheck reports `healthy` inside the window and `unhealthy` otherwise, with the capability `liveness of a registration`. `worker-service.impl.md:168–170`.
+  - The resource healthcheck changes no registration and no instance healthcheck. `worker-service.impl.md:170`.
+  - Plan 10 adds the report entries under the resource name `<worker binding name>/<runtime identity>`. `gateway-service.impl.md:366`; `00-index.md` "Plans", row 10.
+- Done when: `pnpm run verify` passes; the tests pass.
+
+### 02.E E2E proof
+
+- Files: `src/apps/server/e2e-worker-registration.test.ts` (create)
+- Do:
+  1. Build the setup of the `## E2E` section through the CLI. Start `gatewayFixture` with `repositoryConnector: { gitLsRemote: async () => {} }` and the default stand-ins.
+  2. Issue the two machine tokens with `kanthord jwt generate` through the TTY shim of `src/apps/server/e2e-worker-app.test.ts:280–310`, with an issuance configuration that holds `fixture.config.masterKey`.
+  3. Write one `test` block for each scenario E02.1 to E02.21 of the table, in table order, on the shared setup of one fixture. Run E02.22 on a second fixture.
+  4. Parse stdout as JSON for every success. Assert the exit code and the start of stderr for every refusal.
+- Rules:
+  - Setup goes through the CLI; the state check is a CLI read, never a store read. ERD 1 decision D13.
+  - Named constants for every fixed string and number in a comparison. `architecture.impl.md:15–19`.
+  - The fixture inputs are the inputs that the committed validation accepts: the model `claude-sonnet-4-5`, the effort `off`, a complete entry form and the `binding` claim of `jwt generate`. Decision D16; `.dev/erd-01/decisions-log.md` 03.5, 05.E; `src/apps/server/e2e-project-service.test.ts:40–84`.
+- Done when: `node --test --test-timeout=30000 src/apps/server/e2e-worker-registration.test.ts` passes; `pnpm run verify` passes.
+
+## E2E
+
+- Test file: `src/apps/server/e2e-worker-registration.test.ts` (runs in `pnpm run verify`).
+- Harness: `gatewayFixture` from `src/apps/server/test-support.ts` starts the real server on a loopback port with an in-memory store and the default stand-ins of task 02.9. `kanthord(args, env)` from `src/apps/server/cli-support.ts` runs the CLI as a subprocess with disposable XDG state and `KANTHORD_ENDPOINT = fixture.endpoint`. `H` names the environment with `KANTHORD_TOKEN = fixture.token`, `A` the environment with the machine token A, and `B` the environment with the machine token B.
+- Rules: setup goes through the CLI only; the state check is a CLI read, never a store read; a refusal asserts the exact exit code and the error code at the start of stderr; stdout is parsed as JSON.
+- The heartbeat expiry needs a 30 s sweep, so the colocated tests of task 02.7 prove it with a controlled clock, and the E2E proves no expiry.
+
+Setup, in order (each command exits 0):
+
+1. `H: kanthord project create --name registration` → `projectId` = `id`.
+2. `H: kanthord credential create --file anthropic.json` with `{ "name": "anthro-1", "platform": "anthropic", "metadata": null, "secret": { "key": "e2e-registration-secret" } }`.
+3. `H: kanthord worker agent enablement put swe@1 --file enablement.json` with `{ "agentProviders": [{ "name": "default", "provider": "anthropic", "credential": "anthro-1" }], "defaultConfiguration": { "agentProvider": "default", "modelIdentifier": "claude-sonnet-4-5", "reasoningEffort": "off" } }` → `revision` 1.
+4. `H: kanthord project binding apply <projectId> --file v1.json` with `{ "version": 1, "bindings": { "general": { "kind": "worker", "config": { "worker": "general@1", "instanceCount": 1, "entries": [{ "agent": "swe@1", "agentProvider": "default", "modelIdentifier": "claude-sonnet-4-5", "reasoningEffort": "off" }] } } } }` → `bindingSetVersion` 2, `bindingId` = `bindings.general.id`.
+5. `kanthord jwt generate --binding <bindingId> --name worker-a --config issuance.yaml` → `tokenA`; `kanthord jwt generate --binding <bindingId> --name worker-b --config issuance.yaml` → `tokenB`.
+
+| Id     | Commands                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Exit          | Expect                                                                                                                                                                                                                                                                                                                                     |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| E02.1  | `H: kanthord worker list`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 0             | `items[].name` `["claude@1", "general@1", "opencode@1", "reviewer@1"]`, `nextCursor` null; `items[1].host` `kanthord`, `items[1].declaredNodeStates` `["Available"]`, `items[3].declaredNodeStates` `["Waiting", "External.Requested"]`, `items[1].requiredNodeFormat` `["name", "requirement", "criterion", "verifications", "bindings"]` |
+| E02.2  | `H: kanthord worker list --limit 2`; then `H: kanthord worker list --limit 2 --cursor <nextCursor>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 0, 0          | first stdout names `["claude@1", "general@1"]`, `nextCursor` a string; second stdout names `["opencode@1", "reviewer@1"]`, `nextCursor` null                                                                                                                                                                                               |
+| E02.3  | `H: kanthord worker get general@1`; then `H: kanthord worker get claude@1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 0, 0          | first stdout `host` `kanthord`, `method` `steps`, `agentName` `swe@1`, `resourceBudget` `{ "turns": 200, "wallTimeMs": 7200000 }`, no `harness`; second stdout `host` `external-harness`, `harness` `claude-code`, `resourceBudget` `{ "wallTimeMs": 7200000 }`, no `method`                                                               |
+| E02.4  | `H: kanthord worker get tdd@1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | 1             | stderr starts with `worker.catalog.not_found:`                                                                                                                                                                                                                                                                                             |
+| E02.5  | `A: kanthord worker list`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 1             | stderr starts with `gateway.authentication.unauthorized:`                                                                                                                                                                                                                                                                                  |
+| E02.6  | `A: kanthord worker heartbeat`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | 1             | stderr starts with `gateway.registration.required:`                                                                                                                                                                                                                                                                                        |
+| E02.7  | `A: kanthord worker register`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 0             | `runtimeIdentity` matches `^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$` → `ridA`                                                                                                                                                                                                                                                         |
+| E02.8  | `A: kanthord worker register` (a new key)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 0             | `runtimeIdentity` = `ridA`                                                                                                                                                                                                                                                                                                                 |
+| E02.9  | `B: kanthord worker register`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 1             | stderr starts with `worker.instance.slot_unavailable:`                                                                                                                                                                                                                                                                                     |
+| E02.10 | `A: kanthord worker heartbeat`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | 0             | stdout `null`                                                                                                                                                                                                                                                                                                                              |
+| E02.11 | `H: kanthord worker instance list --project <projectId> --binding general`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 0             | one item: `runtimeIdentity` = `ridA`, `projectId`, `resourceIdentity` `worker:kanthord:general`, `workerName` `general@1`, `host` `kanthord`, `placement` `worker`, `clientId` a `client_identity_` identity, `name` `worker-a`, `activity` `idle`, `draining` false, `registered` true, no `executionId`; `nextCursor` null               |
+| E02.12 | `H: kanthord worker instance get <ridA>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | 0             | stdout equals the item of E02.11                                                                                                                                                                                                                                                                                                           |
+| E02.13 | `H: kanthord worker instance list --binding general`; `H: kanthord worker instance list --project <projectId> --binding absent`; `H: kanthord worker instance get invalid`                                                                                                                                                                                                                                                                                                                                                                                           | 1, 1, 1       | stderr starts with `cli.worker.instance.list.binding_without_project:`, `worker.instance.binding_unknown:`, `cli.worker.instance.get.invalid_runtime_identity:`                                                                                                                                                                            |
+| E02.14 | `H: kanthord worker instance resume <ridA>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 0             | `runtimeIdentity` = `ridA`, `registered` true, `idempotencyKey` a ULID                                                                                                                                                                                                                                                                     |
+| E02.15 | `B: kanthord worker instance deregister <ridA>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | 1             | stderr starts with `worker.instance.not_found:`                                                                                                                                                                                                                                                                                            |
+| E02.16 | `A: kanthord worker instance deregister <ridA> --idempotency-key <K>`; then `A: kanthord worker instance deregister <ridA> --idempotency-key <K>`; then `H: kanthord worker instance get <ridA>`; then `H: kanthord worker instance list --project <projectId>`                                                                                                                                                                                                                                                                                                      | 0, 0, 1, 0    | first and second stdout `runtimeIdentity` = `ridA`, `registered` false, `idempotencyKey` = `K`; third stderr starts with `worker.instance.not_found:`; fourth stdout `items` `[]`                                                                                                                                                          |
+| E02.17 | `H: kanthord worker instance resume <ridA>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 1             | stderr starts with `worker.instance.no_live_execution:`                                                                                                                                                                                                                                                                                    |
+| E02.18 | `B: kanthord worker register`; then `A: kanthord worker register`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | 0, 1          | first stdout `runtimeIdentity` → `ridB` ≠ `ridA`; second stderr starts with `worker.instance.slot_unavailable:`                                                                                                                                                                                                                            |
+| E02.19 | `H: kanthord project binding apply <projectId> --file v2.json` with the body of setup step 4, `"version": 2` and `"instanceCount": 0`; then `H: kanthord worker instance list --project <projectId>`; then `B: kanthord worker heartbeat`                                                                                                                                                                                                                                                                                                                            | 0, 0, 1       | first stdout `bindingSetVersion` 3; second stdout `items` `[]`; third stderr starts with `gateway.authentication.unauthorized:`                                                                                                                                                                                                            |
+| E02.20 | `H: kanthord project binding apply <projectId> --file v3.json` with the body of setup step 4 and `"version": 3`; then `B: kanthord worker register`                                                                                                                                                                                                                                                                                                                                                                                                                  | 0, 0          | first stdout `bindingSetVersion` 4; second stdout `runtimeIdentity` → `ridB2` ≠ `ridB`                                                                                                                                                                                                                                                     |
+| E02.21 | `H: kanthord worker instance resume <ridB>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 1             | stderr starts with `worker.instance.no_live_execution:`                                                                                                                                                                                                                                                                                    |
+| E02.22 | A second fixture with `standIns.workerSchedulerClaims` whose `runningExecutionOfRuntime` answers `{ "executionId": "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA" }` and whose `activityOf` answers `{ "activity": "executing", "executionId": "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA" }` for the runtime identities that the test records; the setup steps 1 to 5; `A: kanthord worker register` → `rid`; `A: kanthord worker instance deregister <rid>`; `H: kanthord worker instance resume <rid>`; `A: kanthord worker register`; `H: kanthord worker instance get <rid>` | 0, 0, 0, 0, 0 | third stdout `registered` true; fourth stdout `runtimeIdentity` = `rid`; fifth stdout `activity` `executing`, `executionId` `execution_01ARZ3NDEKTSV4RRFFQ69G5FAA`                                                                                                                                                                         |
+
+E02.9, E02.13 and E02.18 assert codes of the mark `code: proposed`. The test is committed after Aelita writes each accepted code on its page (ruling R3).
+
+## Blockers
+
+None open. The debate engine settled one gap:
+
+- DEBATE: the end of the live registrations at a removal or an unavailability of their worker binding - rounds:2 - verdict: the Project binding-set write calls the Worker Kind 2 collaboration `endRegistrations` in its own transaction for every removed or unavailable worker group; the invariant is "a removed or unavailable worker binding holds no live registration", a lowered count of 1 or more ends nothing, and the sweep never drops the reading of a live row. The sweep alternative misses a count of 0 followed by a count of 1, and a guard forbids an act whose consequence the pages rule.
