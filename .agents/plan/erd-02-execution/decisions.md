@@ -12,7 +12,7 @@ Every error code has at least three parts (`architecture.impl.md:341–349`, enf
 
 ## D3 — Reads use `caller.commit`
 
-ERD 1 decision D3 stands. Task 01.0 of ERD 1 fixed the read commit gate (`eba3a9d`). Every handler performs one `caller.commit` at the end on the declared store (`architecture.impl.md:698–699`).
+ERD 1 decision D3 stands. Task 01.0 of ERD 1 fixed the read commit gate (`eba3a9d`). Every handler performs one `caller.commit` at the end on the declared store (`architecture.impl.md:698–699`). The work pull of plan 03 runs rolled-back probe transactions of the full claim on the same store before its one `caller.commit` in the same synchronous tick (`.dev/erd-02/decisions-log.md` 2026-09-30 "the wait mechanism of the work pull", `review:Ulrich`).
 
 ## D4 — Collaborations are required
 
@@ -26,10 +26,10 @@ Ulrich ruled on 2026-09-29 (R1): the candidate boundary and the candidate order 
 
 An ERD 3 or ERD 4 seam is an inline dependency type in the `contract.ts` of the consuming service, required, never optional (D4). The composition root injects one of two things:
 
-- For an ERD 3 seam (`intake.storage.put`, `get`, `check`, `delete`; `intake.action.perform`, `intake.action.read`; `intake.action.check`), `src/apps/server/index.ts` passes `unwired("<seam name>")` from `src/apps/server/unwired.ts`, which plan 01 recreates under the ERD 1 D14 mechanism: the call throws `new CodedError("system.composition.unwired", "<seam name> is not wired.")`, so the production server fails closed at the call and nowhere else. `gatewayFixture` injects a fake through `standIns` for the E2E of the plan that consumes the seam. The ERD 3 plan set deletes the stand-in and the `unwired` entry of each seam.
+- For an ERD 3 seam (`intake.storage.put`, `get`, `executionGet`, `check`, `delete`; `intake.action.perform`, `intake.action.read`; `intake.action.check`), `src/apps/server/index.ts` passes `unwired("<seam name>")` from `src/apps/server/unwired.ts`, which plan 01 recreates under the ERD 1 D14 mechanism: the call throws `new CodedError("system.composition.unwired", "<seam name> is not wired.")`, so the production server fails closed at the call and nowhere else. `gatewayFixture` injects a fake through `standIns` for the E2E of the plan that consumes the seam. The ERD 3 plan set deletes the stand-in and the `unwired` entry of each seam.
 - For the ERD 4 seam `TraceIdentity`, the composition root injects the minting stand-in of D7 in production too, because a claim needs a value.
 
-Plan 01 rewrites `src/apps/server/unwired-import.test.ts` so that it asserts the exact set of `unwired` seam names of the plan set, and plan 10 asserts the final set: the seven ERD 3 seams alone.
+Plan 01 rewrites `src/apps/server/unwired-import.test.ts` so that it asserts the exact set of `unwired` seam names of the plan set, and plan 10 asserts the final set: the eight ERD 3 seams alone.
 
 ## D7 — The trace identity and the root span identity
 
@@ -86,7 +86,7 @@ The E2E of a plan with an agent runtime uses the scripted fake provider (`worker
 
 ## D17 — Object evidence in the E2E
 
-Plan 04 proves the object flow with a `standIns` fake of `IntakeStorage` in `gatewayFixture` that answers a presigned PUT and GET against an in-process HTTP sink of the test, and a `check` that reads the sink. Production passes `unwired` under D6, so `mission.evidence.submit` with an `object` asset answers `system.composition.unwired` until ERD 3.
+Plan 04 proves the object flow with a `standIns` fake of `IntakeStorage` in `gatewayFixture` that answers a presigned PUT and GET against an in-process HTTP sink of the test, and a `check` that reads the sink. Production passes `unwired` under D6, so `mission.evidence.submit` with an `object` asset answers `system.composition.unwired` until ERD 3. The object transfer and the `mission.evidence.request` step of an E2E run through `httpClient(missionOperations, …)` from the test process, because the test acts as the host component and no CLI command projects the request.
 
 ## D18 — Consecutive loss count
 
@@ -110,7 +110,7 @@ A task is one commit of fewer than about 400 changed lines. A plan holds at most
 
 ## D23 — Standing precedents
 
-Two ERD 1 precedents need no debate (`.dev/erd-02/README.md`): an OpenAPI fragment over the line bound takes a named, shape-checked exception in `src/apps/server/openapi-integration.test.ts`, listed in the decision log; a colocated service test that needs a minted identity takes the per-file eslint exception of `eslint.config.js`, once per service. Plan 02 adds `testMachineIdentity` to `src/kernel/test-identity.ts`, so a service test mints a machine identity without an eslint exception. Plan 03 takes the exception for `src/scheduler/service.test.ts` only where that helper does not cover the need.
+Two ERD 1 precedents need no debate (`.dev/erd-02/README.md`): an OpenAPI fragment over the line bound takes a named, shape-checked exception in `src/apps/server/openapi-integration.test.ts`, listed in the decision log; a colocated service test that needs a minted identity takes the per-file eslint exception of `eslint.config.js`, once per service. Commit `bf550c2` of ERD 1 replaced the per-file exceptions with the `test-identity.ts` seam, so no ERD 2 plan changes `eslint.config.js`. Plan 02 adds `testMachineIdentity` to `src/kernel/test-identity.ts`, and plan 03 adds it only when plan 02 has not.
 
 ## D24 — Database conventions
 
