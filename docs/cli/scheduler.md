@@ -392,6 +392,11 @@ No query fields are accepted. The required file supplies the following fields.
   continuation condition hold inserts the evaluation job. A passing assessment
   with no required external action already ends the claim; no fresh release
   is needed to declare completion.
+- Mission checks the release predicate in the release transaction, before the
+  terminal write, under [the release admission](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-release-admission).
+  A release that fails it answers 409 `mission.release.obligation_unmet` with
+  `details.obligation` of `evidence`, `assessment` or `request`, and it changes
+  no execution, no node state and no job.
 - Mission inserts the job of the node in the transaction that makes the node
   claimable, and that is the release itself when the node is claimable at once.
   No job exists while a node waits. The next compatible pull receives the
@@ -486,13 +491,14 @@ signed delivery, and a human or machine token is not delivery verification.
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP  | Code                                          | Condition                                                                       | Commands                                        |
-| ----- | --------------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------- |
-| local | `cli.scheduler.queue.list.invalid_project_id` | The `<project-id>` argument is not a canonical `project_<ulid>` identity.       | queue list                                      |
-| local | `cli.scheduler.queue.peek.invalid_project_id` | The `<project-id>` argument is not a canonical `project_<ulid>` identity.       | queue peek                                      |
-| 403   | `scheduler.execution.not_owner`               | The client does not own the execution.                                          | claim get                                       |
-| 409   | `scheduler.execution.not_running`             | The execution is no longer running when its write transaction checks the proof. | execution release, and every execution mutation |
-| local | `scheduler.lifecycle.stopped`                 | A stopped Scheduler Service cannot start again.                                 | serve server                                    |
+| HTTP  | Code                                          | Condition                                                                                                                                                                                                                                | Commands                                        |
+| ----- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| local | `cli.scheduler.queue.list.invalid_project_id` | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                                                | queue list                                      |
+| local | `cli.scheduler.queue.peek.invalid_project_id` | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                                                | queue peek                                      |
+| 403   | `scheduler.execution.not_owner`               | The client does not own the execution.                                                                                                                                                                                                   | claim get                                       |
+| 409   | `scheduler.execution.not_running`             | The execution is no longer running when its write transaction checks the proof.                                                                                                                                                          | execution release, and every execution mutation |
+| 409   | `mission.release.obligation_unmet`            | The release predicate fails: a steps release with no further work names no work evidence, or a reviewer release has no current passing assessment or an eligible unrequested required action. `details.obligation` names the failed one. | execution release                               |
+| local | `scheduler.lifecycle.stopped`                 | A stopped Scheduler Service cannot start again.                                                                                                                                                                                          | serve server                                    |
 
 ## Design provenance
 
