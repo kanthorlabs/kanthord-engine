@@ -243,28 +243,28 @@ not poll until completion or change the session. No mutation key is accepted.
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP  | Code                                     | Condition                                                        | Commands                                                    |
-| ----- | ---------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------- |
-| 409   | `credential.login.value_not_awaited`     | The session does not await a code.                               | login-code                                                  |
-| 409   | `credential.login.pending`               | Another login is pending for this platform and human.            | login                                                       |
-| 404   | `credential.login.not_found`             | The login session does not exist.                                | login-code, login-status                                    |
-| 400   | `credential.login.mode_unsupported`      | The platform does not support the selected login mode.           | login                                                       |
-| 404   | `credential.credential.not_found`        | The credential does not exist.                                   | get, rotate, update-metadata, revoke                        |
-| local | `cli.credential.login.invalid_mode`      | The `--mode` value is neither `browser` nor `device`.            | login                                                       |
-| local | `cli.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.        | revoke                                                      |
-| 400   | `credential.entry.unsupported`           | The platform does not support this entry method.                 | create, login                                               |
-| 400   | `credential.input.invalid`               | The input secret or metadata fails validation.                   | create, rotate, update-metadata, login, login-code          |
-| 409   | `credential.metadata.base_url_fixed`     | The edit changes `baseUrl` outside rotation.                     | update-metadata                                             |
-| 409   | `credential.metadata.model_in_use`       | A removed model has dependent defaults or entries.               | update-metadata                                             |
-| 409   | `credential.name.conflict`               | A credential already has this name; details identify the holder. | create, login                                               |
-| 400   | `credential.platform.mismatch`           | The requested platform differs from the stored platform.         | binding apply, agent enablement put (custody collaboration) |
-| 400   | `credential.platform.unsupported`        | The platform is not supported.                                   | create, login                                               |
-| 409   | `credential.revision.conflict`           | The expected revision is stale.                                  | rotate, update-metadata                                     |
-| 409   | `credential.revision.ended`              | The revision is already ended.                                   | revoke                                                      |
-| 409   | `credential.revision.newest_live`        | The revoke names the newest live revision.                       | revoke                                                      |
-| 404   | `credential.revision.not_found`          | The revision does not exist.                                     | revoke                                                      |
-| local | `custody.lifecycle.stopped`              | Custody cannot accept a login or restart after shutdown.         | login, serve server                                         |
-| 409   | `credential.revision.revoked`            | Proposed. A pinned use names a revoked revision.                 | credential use                                              |
+| HTTP  | Code                                     | Condition                                                        | Commands                                                                     |
+| ----- | ---------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| 409   | `credential.login.value_not_awaited`     | The session does not await a code.                               | login-code                                                                   |
+| 409   | `credential.login.pending`               | Another login is pending for this platform and human.            | login                                                                        |
+| 404   | `credential.login.not_found`             | The login session does not exist.                                | login-code, login-status                                                     |
+| 400   | `credential.login.mode_unsupported`      | The platform does not support the selected login mode.           | login                                                                        |
+| 404   | `credential.credential.not_found`        | The credential does not exist.                                   | get, rotate, update-metadata, revoke, worker handover                        |
+| local | `cli.credential.login.invalid_mode`      | The `--mode` value is neither `browser` nor `device`.            | login                                                                        |
+| local | `cli.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.        | revoke                                                                       |
+| 400   | `credential.entry.unsupported`           | The platform does not support this entry method.                 | create, login                                                                |
+| 400   | `credential.input.invalid`               | The input secret or metadata fails validation.                   | create, rotate, update-metadata, login, login-code                           |
+| 409   | `credential.metadata.base_url_fixed`     | The edit changes `baseUrl` outside rotation.                     | update-metadata                                                              |
+| 409   | `credential.metadata.model_in_use`       | A removed model has dependent defaults or entries.               | update-metadata                                                              |
+| 409   | `credential.name.conflict`               | A credential already has this name; details identify the holder. | create, login                                                                |
+| 400   | `credential.platform.mismatch`           | The requested platform differs from the stored platform.         | binding apply, agent enablement put (custody collaboration), worker handover |
+| 400   | `credential.platform.unsupported`        | The platform is not supported.                                   | create, login                                                                |
+| 409   | `credential.revision.conflict`           | The expected revision is stale.                                  | rotate, update-metadata                                                      |
+| 409   | `credential.revision.ended`              | The revision is already ended, by a revoke or by a drain.        | revoke                                                                       |
+| 409   | `credential.revision.newest_live`        | The revoke names the newest live revision.                       | revoke                                                                       |
+| 404   | `credential.revision.not_found`          | The revision does not exist.                                     | revoke                                                                       |
+| local | `custody.lifecycle.stopped`              | Custody cannot accept a login or restart after shutdown.         | login, serve server                                                          |
+| 409   | `credential.revision.revoked`            | A pinned use names a revoked revision.                           | worker handover, worker credential (API only)                                |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.
 
