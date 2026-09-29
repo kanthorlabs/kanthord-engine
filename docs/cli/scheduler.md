@@ -376,8 +376,8 @@ No query fields are accepted. The required file supplies the following fields.
 - A release durably ends the execution and removes its live-execution count.
   Mission routes the release using its accepted facts. A supported release
   leaves the attempt open; it never opens a replacement attempt by itself.
-- A steps release with no further work requires the evidence and task-result
-  obligations owned by Mission/Worker. A steps release with further work
+- A steps release with no further work requires the evidence obligation owned
+  by Mission/Worker. A steps release with further work
   requires the checkpoint/push obligations of
   Worker. Those records are submitted through their owning services; the
   release body contains no evidence, assessment, outcome or shell command.
