@@ -196,6 +196,7 @@ export class MissionService implements Service, MissionCollaborations {
         return caller.commit((tx) =>
           nodePage(
             tx,
+            this.dependencies.bindings,
             params.missionId,
             {
               kind: query.kind,
@@ -210,7 +211,9 @@ export class MissionService implements Service, MissionCollaborations {
       },
     );
     registry.register(missionOperations["node.get"], ({ params }, caller) =>
-      caller.commit((tx) => getNode(tx, params.nodeId)),
+      caller.commit((tx) =>
+        getNode(tx, params.nodeId, this.dependencies.bindings),
+      ),
     );
     registry.register(
       missionOperations["node.revision.list"],
@@ -284,7 +287,11 @@ export class MissionService implements Service, MissionCollaborations {
           requireNonterminal(node);
           updateNodePriority(tx, node.id, body.value);
           this.dependencies.workQueue.priorityUpdate(tx, node.id, body.value);
-          return nodeRecord(tx, { ...node, priority: body.value });
+          return nodeRecord(
+            tx,
+            { ...node, priority: body.value },
+            this.dependencies.bindings,
+          );
         }),
     );
     registry.register(

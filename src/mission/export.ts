@@ -39,7 +39,7 @@ function exportEntry(
   dependencies: Map<string, string[]>,
   bindings: MissionBindings,
 ): ExportEntry {
-  const content = nodeRecord(tx, node).content;
+  const content = nodeRecord(tx, node, bindings).content;
   const names = content.bindings.map((id) => {
     const binding = bindings.getBindingRevision(tx, id);
     if (binding === null) throw new Error(`Missing binding revision: ${id}`);

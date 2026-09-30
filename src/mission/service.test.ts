@@ -3567,7 +3567,7 @@ function importPreviewFixture(t: TestContext) {
       id: node.id,
       filename: node.filename,
       kind: node.kind,
-      ...nodeRecord(tx, node).content,
+      ...nodeRecord(tx, node, bindings).content,
       bindings: node.kind === NodeKind.Objective ? [REPOSITORY_NAME] : [],
       ...(node.parent_id === null
         ? {}
@@ -5014,7 +5014,9 @@ test("mission rebind reports only terminal and retired earlier pins and keeps sk
         .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
         .run(RETIRED_AT, nodeId);
     return {
-      node: f.store.transaction((tx) => nodeRecord(tx, readNode(tx, nodeId)!)),
+      node: f.store.transaction((tx) =>
+        nodeRecord(tx, readNode(tx, nodeId)!, bindings),
+      ),
       condition:
         state === NodeState.Available
           ? RebindSkipCondition.Retired

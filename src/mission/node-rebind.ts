@@ -191,7 +191,7 @@ export function rebindNodes(
           ? RebindSkipCondition.Terminal
           : null;
     if (condition !== null) {
-      skipped.push({ node: nodeRecord(tx, node), condition });
+      skipped.push({ node: nodeRecord(tx, node, bindings), condition });
       continue;
     }
     const revision = reboundRevision(node, previous, pins, body, actor);

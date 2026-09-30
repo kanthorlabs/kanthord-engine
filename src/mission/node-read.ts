@@ -8,10 +8,13 @@ import {
   NODE_IDENTITY_PREFIX,
   NODE_LIST_LIMIT_DEFAULT,
   NodeKind,
+  NodeState,
+  type MissionBindings,
   type Node,
   type Revision,
 } from "./contract.ts";
 import { revisionFromRow } from "./revision.ts";
+import { blockedContextOf } from "./record-read.ts";
 import {
   listNodes,
   listRevisions,
@@ -88,7 +91,11 @@ function ownerId(node: NodeRow): string {
   return node.parent_id;
 }
 
-export function nodeRecord(tx: Transaction, node: NodeRow): Node {
+export function nodeRecord(
+  tx: Transaction,
+  node: NodeRow,
+  bindings: MissionBindings,
+): Node {
   const owner = ownerId(node);
   const current = readCurrentRevision(tx, owner);
   assert.ok(current, "Content owner must have a revision.");
@@ -111,6 +118,9 @@ export function nodeRecord(tx: Transaction, node: NodeRow): Node {
       state: node.state,
       attempt: node.attempt ?? 0,
       priority: node.priority ?? 0,
+      ...(node.state === NodeState.Blocked
+        ? { blockedContext: blockedContextOf(tx, bindings, node) }
+        : {}),
     };
   }
   const snapshot = revision.tasks?.find((task) => task.id === node.id);
@@ -127,8 +137,12 @@ export function nodeRecord(tx: Transaction, node: NodeRow): Node {
   return { ...base, kind: NodeKind.Task, content: task.content };
 }
 
-export function getNode(tx: Transaction, nodeId: string): Node {
-  return nodeRecord(tx, requireNode(tx, nodeId));
+export function getNode(
+  tx: Transaction,
+  nodeId: string,
+  bindings: MissionBindings,
+): Node {
+  return nodeRecord(tx, requireNode(tx, nodeId), bindings);
 }
 
 export function getRevision(
@@ -143,13 +157,16 @@ export function getRevision(
 
 export function nodePage(
   tx: Transaction,
+  bindings: MissionBindings,
   missionId: string,
   filter: NodeListFilter,
   limit = NODE_LIST_LIMIT_DEFAULT,
 ) {
   if (!readMission(tx, missionId)) notFound(MissionErrorCode.MissionNotFound);
   const rows = listNodes(tx, missionId, filter, limit + EXTRA_ROW);
-  const items = rows.slice(FIRST_ROW, limit).map((row) => nodeRecord(tx, row));
+  const items = rows
+    .slice(FIRST_ROW, limit)
+    .map((row) => nodeRecord(tx, row, bindings));
   return {
     items,
     nextCursor: rows.length > limit ? encode(items.at(-1)!.id) : null,

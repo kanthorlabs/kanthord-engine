@@ -393,6 +393,7 @@ function entryChanged(
   tx: Transaction,
   item: ResolvedImportEntry,
   dependencies: DepEdge[],
+  bindings: MissionBindings,
 ): boolean {
   const { entry, current } = item;
   assert.ok(current, "Only an existing identity can be compared.");
@@ -411,7 +412,8 @@ function entryChanged(
   return (
     current.filename !== entry.filename ||
     current.parent_id !== item.parentId ||
-    canonicalJSON(nodeRecord(tx, current).content) !== canonicalJSON(content) ||
+    canonicalJSON(nodeRecord(tx, current, bindings).content) !==
+      canonicalJSON(content) ||
     canonicalJSON(previous) !== canonicalJSON([...item.dependsOn].sort())
   );
 }
@@ -451,7 +453,11 @@ function droppedEdges(result: ResolvedImport): Edge[] {
   return [...containment, ...dependencies];
 }
 
-function classify(tx: Transaction, result: ResolvedImport): void {
+function classify(
+  tx: Transaction,
+  result: ResolvedImport,
+  bindings: MissionBindings,
+): void {
   assert.equal(
     result.violations.length,
     ZERO,
@@ -468,7 +474,7 @@ function classify(tx: Transaction, result: ResolvedImport): void {
       "Supplied identities resolve before classification.",
     );
     kept.add(item.current.id);
-    const target = entryChanged(tx, item, result.currentDependencies)
+    const target = entryChanged(tx, item, result.currentDependencies, bindings)
       ? result.updates
       : result.noOps;
     target.push(item.current.id);
@@ -532,7 +538,7 @@ export function resolveImportSet(
     });
   }
   resolveGraph(result);
-  if (result.violations.length === ZERO) classify(tx, result);
+  if (result.violations.length === ZERO) classify(tx, result, bindings);
   return result;
 }
 
