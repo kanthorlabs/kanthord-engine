@@ -25,15 +25,16 @@ Out of scope:
 
 ## Sources
 
-- `docs/brainstorm/worker-service.impl.md:152–159` — the runtime identity and the output of `worker.register`.
-- `docs/brainstorm/worker-service.impl.md:161–178` — the registration heartbeat, the window, the idle backoff and the registration again after an expiry.
-- `docs/brainstorm/worker-service.impl.md:196–207` — the deregistration and the 404 that ends a registration.
-- `docs/brainstorm/worker-service.impl.md:227–247` — the `worker` application.
-- `docs/brainstorm/worker-service.impl.md:284–304` — the credential store of an execution and the credential handover.
-- `docs/brainstorm/worker-service.impl.md:306–325` — evidence upload.
-- `docs/brainstorm/worker-service.impl.md:327–335` — the tool table.
-- `docs/brainstorm/worker-service.impl.md:355–361` — the workspace and its sweep.
-- `docs/brainstorm/worker-service.impl.md:446–473` — stop and budget, and the trust boundary.
+- `docs/brainstorm/worker-service.impl.md:154–161` — the runtime identity and the output of `worker.register`.
+- `docs/brainstorm/worker-service.impl.md:163–181` — the registration heartbeat, the window, the idle backoff and the registration again after an expiry.
+- `docs/brainstorm/worker-service.impl.md:199–210` — the deregistration and the 404 that ends a registration.
+- `docs/brainstorm/worker-service.impl.md:230–252` — the `worker` application.
+- `docs/brainstorm/worker-service.impl.md:254–277` — the execution setup, read after the handover.
+- `docs/brainstorm/worker-service.impl.md:316–339` — the credential store of an execution and the credential handover.
+- `docs/brainstorm/worker-service.impl.md:341–364` — evidence upload.
+- `docs/brainstorm/worker-service.impl.md:366–377` — the tool table.
+- `docs/brainstorm/worker-service.impl.md:397–405` — the workspace and its sweep.
+- `docs/brainstorm/worker-service.impl.md:505–536` — stop and budget, and the trust boundary.
 - `docs/brainstorm/worker-service.md:258–290` — executions, the workspace and the host-local upload.
 - `docs/brainstorm/scheduler-service.md:115–130`, `:163–170`, `:217–247` — work pulls, the claim answer and liveness.
 - `docs/brainstorm/scheduler-service.impl.md:21–77` — the operation contracts, the idempotency of a work pull by the runtime identity and the release.
@@ -59,7 +60,7 @@ Every external key of this plan, with the line that owns it:
 
 | Key                                                                            | Where                                                   | Owner line                                                                                                        |
 | ------------------------------------------------------------------------------ | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `runtimeIdentity`, `resourceIdentity`, `workerName`                            | the answer of `worker.register`; the ready record       | `worker-service.impl.md:155`, `:191`, `:237`; `engine/docs/cli/other.md:509`; `engine/docs/cli/worker.md:174–177` |
+| `runtimeIdentity`, `resourceIdentity`, `workerName`                            | the answer of `worker.register`; the ready record       | `worker-service.impl.md:157`, `:194`, `:240`; `engine/docs/cli/other.md:509`; `engine/docs/cli/worker.md:174–177` |
 | `resourceIdentity`, `runtimeIdentity`                                          | `WorkPull`                                              | `scheduler-service.impl.md:46`                                                                                    |
 | `kind`, `execution`                                                            | the work-pull answer                                    | `scheduler-service.impl.md:47`                                                                                    |
 | `executionId`, `nodeId`, `attempt`, `pinnedRevision`, `expiredAt`, `createdAt` | `ExecutionRecord`                                       | `scheduler-service.impl.md:35`                                                                                    |
@@ -68,7 +69,7 @@ Every external key of this plan, with the line that owns it:
 | `executionId`, `attempt`, `nodeRevision`                                       | `ExecutionContext`                                      | `engine/docs/cli/mission.md` "Execution submissions"                                                              |
 | `subject`, `assets`, `kind`, `size`, `mediaType`, `sha256`                     | `EvidenceSubmit` with one `object` asset                | `engine/docs/cli/mission.md` "Execution submissions"; `mission-service.impl.md:297`                               |
 | `evidence`, `uploads`, `assetId`, `putUrl`, `headers`, `expiresAt`             | `EvidenceSubmitResult`                                  | `engine/docs/cli/mission.md` "Object evidence schemas"                                                            |
-| `assetId`, `evidenceId`, `uri`                                                 | `AssetUploadResult`; the result of `evidence-upload`    | `engine/docs/cli/mission.md` "Object evidence schemas"; `worker-service.impl.md:315`                              |
+| `assetId`, `evidenceId`, `uri`                                                 | `AssetUploadResult`; the result of `evidence-upload`    | `engine/docs/cli/mission.md` "Object evidence schemas"; `worker-service.impl.md:352`                              |
 | `path`                                                                         | the argument of `evidence-upload`                       | `engine/docs/cli/mission.md:551` ("`evidence upload <path>`")                                                     |
 | `name`, `source`, `inputSchema`                                                | a tool of `worker.agent.get`                            | `engine/docs/cli/worker.md:318`; the new value `host` under debate Q1                                             |
 
@@ -97,7 +98,7 @@ Every external key of this plan, with the line that owns it:
 
 Three differences from `00-index.md` "Seams":
 
-- The answer of `worker.register` gains two fields (debate Q2, ruled on `worker-service.impl.md:155`). Plan 02 declares one field.
+- The answer of `worker.register` gains two fields (debate Q2, ruled on `worker-service.impl.md:157`). Plan 02 declares one field.
 - The host tool source is a fourth source of the tool table (debate Q1, ruled on `worker-service.impl.md` "Tool table"). Plan 07 declares two source values.
 - `WorkerApi`, `HostTools` and the in-process worker helper are new rows.
 
@@ -114,8 +115,8 @@ Three differences from `00-index.md` "Seams":
   5. Regenerate OpenAPI with `pnpm run build && node bin/kanthord.mjs gateway openapi`. Assert the three properties of the 200 answer in `openapi-integration.test.ts`.
   6. Add tests: a registration answers the resource identity of the machine identity and the worker name of the latest row of the group; a repeated registration answers the same three values; `kanthord worker register` prints `runtimeIdentity`, `resourceIdentity`, `workerName` and `idempotencyKey`, and no token.
 - Rules:
-  - The answer holds the registration facts that the admission reads, never a later lookup. Debate Q2 (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 09", ruled on `worker-service.impl.md:155`).
-  - The ready record holds `runtimeIdentity`, `resourceIdentity` and `workerName`. `worker-service.impl.md:237`; `engine/docs/cli/other.md:508–510`.
+  - The answer holds the registration facts that the admission reads, never a later lookup. Debate Q2 (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 09", ruled on `worker-service.impl.md:157`).
+  - The ready record holds `runtimeIdentity`, `resourceIdentity` and `workerName`. `worker-service.impl.md:240`; `engine/docs/cli/other.md:508–510`.
   - The request nominates no resource identity; the server takes it from the verified JWT. `gateway-service.impl.md:71`.
   - The answer holds no token. `gateway-service.impl.md:74`; `engine/docs/cli/worker.md:174–177`.
   - Every field name is the name of the owning vocabulary. Root `AGENTS.md` "Contracts".
@@ -134,9 +135,9 @@ Three differences from `00-index.md` "Seams":
   7. Add tests: `swe@1` answers `evidence-upload` with source `host` after the seven built-in tools; `re@1` answers no host tool; the session of `re@1` holds no `evidence-upload`, although its input holds `hostTools`; a scripted tool call `evidence-upload { path: "a.txt" }` calls `hostTools.evidenceUpload` once with `a.txt` and answers the three fields; an extra argument fails the parameter schema; a rejected `evidenceUpload` answers a tool error with the message of the rejection alone.
 - Rules:
   - The tool table holds a fourth source, the host-supplied tools, and the declaration of an agent names its host tools. Debate Q1, ruled on `worker-service.impl.md` "Tool table" and `engine/docs/cli/worker.md:318`.
-  - `re@1` holds no write tool. `worker-service.impl.md:272`.
-  - The helper returns the evidence identity, the asset identity and the `s3://` URI to the agent. `worker-service.impl.md:315`.
-  - The MCP server exposes no upload write, and the MCP write set stays unchanged. `worker-service.impl.md:319`, `:325`; decision D5.
+  - `re@1` holds no write tool. `worker-service.impl.md:304`.
+  - The helper returns the evidence identity, the asset identity and the `s3://` URI to the agent. `worker-service.impl.md:352`.
+  - The MCP server exposes no upload write, and the MCP write set stays unchanged. `worker-service.impl.md:358`, `:364`; decision D5.
   - Only `src/worker/pi.ts` holds a value import of `@earendil-works/pi-coding-agent`. Plan 07 task 07.2 step 6.
 - Done when: `pnpm run verify` passes; the tests pass; every test of plan 07 passes with the new argument.
 
@@ -152,11 +153,11 @@ Three differences from `00-index.md` "Seams":
   6. Add tests: the backoff answers 1 s, 2 s, 4 s, … and never more than 30 s, and `reset()` answers 1 s again; `retryIndeterminate` sends a new key for each try, stops at the first completed or failure answer, and stops at the deadline; `sleep` ends at a cancellation.
   7. In `engine/AGENTS.md` "Project structure", add `api.ts` under `src/apps/worker/`.
 - Rules:
-  - `apps-worker` imports `src/worker/index.ts` and `src/repository`, because `kanthord serve worker` hosts the native runtime. Decision D23; `worker-service.impl.md:229`.
+  - `apps-worker` imports `src/worker/index.ts` and `src/repository`, because `kanthord serve worker` hosts the native runtime. Decision D23; `worker-service.impl.md:232`.
   - The in-process construction of the E2E imports the `Worker` of `src/apps/worker/index.ts` from the test process of `gatewayFixture`. Decision D15. The index names the in-process worker helper in `src/apps/server/test-support.ts` (`00-index.md` "Shared files"), so the test files of `apps-server` import the application entry. This is a second boundary change of decision D23 (see "Blockers").
   - The application invokes every operation through the owners' `contract.ts` imports. `architecture.impl.md:765`.
   - An instance retries with backoff, never with tight polling. `scheduler-service.md:126`.
-  - The idle backoff stays under the heartbeat window: the cap of 30 s and the wait window of 90 s stay under the default window of 300 s. `worker-service.impl.md:174`, `:256`.
+  - The idle backoff stays under the heartbeat window: the cap of 30 s and the wait window of 90 s stay under the default window of 300 s. `worker-service.impl.md:176`, `:287`.
   - A secret mutation answers 409 on a repeat of its key, so a lost answer takes a new key. `gateway-service.impl.md:429–430`; plan 05 debate Q3.
   - No production code reads an environment variable for a fake. Decision D15.
 - Done when: `pnpm run verify` passes; the tests pass.
@@ -176,14 +177,14 @@ Three differences from `00-index.md` "Seams":
   9. Rewrite the tests of `index.test.ts` that expect `Worker application started` with a fake server that answers `worker.register`. Add tests: each step runs in the order of step 1 to step 6, and a failure of a step calls no later step; an empty `PATH` fails with `worker.start.tool_missing` before any request; a registration failure 409 `worker.instance.slot_unavailable` exits 1 with that code; an indeterminate registration answers `worker.start.registration_indeterminate`; the ready record is one JSON line with the three fields and no token; a `SIGTERM` during a slow registration waits for its answer and then deregisters.
   10. In `engine/AGENTS.md` "Run the worker application", replace the ERD 1 sentences on `Worker application started` and on "hosts no instances yet" with the startup order and the ready record of this task.
 - Rules:
-  - Startup resolves the client configuration, checks `clientSecret`, checks the server package version and registers, in that order; a host without `rg` or `fd` stops the start with `worker.start.tool_missing`. `worker-service.impl.md:236`; `engine/docs/cli/worker.md:717`.
+  - Startup resolves the client configuration, checks `clientSecret`, checks the server package version and registers, in that order; a host without `rg` or `fd` stops the start with `worker.start.tool_missing`. `worker-service.impl.md:239`; `engine/docs/cli/worker.md:717`.
   - The start of the repository connector requires git 2.40, OpenSSH 9.0 and bash on the host, and refuses with `repository.connector.tool_missing` or `repository.connector.tool_version`. `repository.impl.md:42–43`. The connector runs in the process of its caller. `repository.md:66–71`.
-  - The workspace root is `workspaces/` of the state directory of the host. `worker-service.impl.md:232`, `:356`.
-  - After the registration the application logs one ready record with the three fields; it prints no token and needs no terminal. `worker-service.impl.md:237–238`.
-  - A startup failure prints its diagnostic, releases what it acquired and exits 1. `worker-service.impl.md:239`; `architecture.impl.md:440–446`.
-  - `SIGINT` and `SIGTERM` stop further startup. `worker-service.impl.md:240`.
-  - Code `worker.start.registration_indeterminate` (local, code: proposed): the condition is ruled at `worker-service.impl.md:239` and `:246`. No shared code of `engine/docs/cli/other.md` and no ERD 1 code covers it.
-  - Gap: a registration with no answer stays B9 (`worker-service.impl.md:246`); the application exits 1, and a restarted program gets its live registration back (`scheduler-service.impl.md:65`).
+  - The workspace root is `workspaces/` of the state directory of the host. `worker-service.impl.md:236`, `:399`.
+  - After the registration the application logs one ready record with the three fields; it prints no token and needs no terminal. `worker-service.impl.md:240–241`.
+  - A startup failure prints its diagnostic, releases what it acquired and exits 1. `worker-service.impl.md:242`; `architecture.impl.md:440–446`.
+  - `SIGINT` and `SIGTERM` stop further startup. `worker-service.impl.md:244`.
+  - Code `worker.start.registration_indeterminate` (local, code: proposed): the condition is ruled at `worker-service.impl.md:243` and `:251`. No shared code of `engine/docs/cli/other.md` and no ERD 1 code covers it.
+  - Gap: a registration with no answer stays B9 (`worker-service.impl.md:251`); the application exits 1, and a restarted program gets its live registration back (`scheduler-service.impl.md:65`).
 - Done when: `pnpm run verify` passes; the tests pass.
 
 ### 09.5 Add the heartbeat timer and the workspace sweep timer
@@ -194,9 +195,9 @@ Three differences from `00-index.md` "Seams":
   2. In `run()`, start the heartbeat and `workspaces.startSweeping()` after the ready record. Stop both in `quiesce()`.
   3. Add tests with fake timers: the heartbeat runs every 60 s while the application is idle and while an execution is live; a failed heartbeat logs one record and stops no timer; `quiesce()` stops both timers; the sweep runs once at the start.
 - Rules:
-  - Every authenticated request of a registered client identity renews its heartbeat, and `worker.heartbeat` is the explicit request. `worker-service.impl.md:163–166`.
-  - A sweep every 30 s ends a registration whose last heartbeat is older than the window, and a live execution of an ended registration follows the loss rules. `worker-service.impl.md:172–173`. A native execution calls the server only at its start and its end, so the timer keeps the registration of a long execution.
-  - The workspace sweep runs at the start and every hour. `worker-service.impl.md:360–361`; plan 07 task 07.13.
+  - Every authenticated request of a registered client identity renews its heartbeat, and `worker.heartbeat` is the explicit request. `worker-service.impl.md:165–168`.
+  - A sweep every 30 s ends a registration whose last heartbeat is older than the window, and a live execution of an ended registration follows the loss rules. `worker-service.impl.md:174–175`. A native execution calls the server only at its start and its end, so the timer keeps the registration of a long execution.
+  - The workspace sweep runs at the start and every hour. `worker-service.impl.md:403–404`; plan 07 task 07.13.
   - A timer starts in `run()` and stops in phase 1 of the stop. `architecture.impl.md:457–464`; `00-index.md` "Shared conventions", row "Timers".
 - Done when: `pnpm run verify` passes; the tests pass.
 
@@ -212,14 +213,14 @@ Three differences from `00-index.md` "Seams":
   6. `run()` returns the result of `stop()`, so `src/apps/cli/index.ts:121–122` exits 0 on null and 1 on a diagnostic. Keep `SIGHUP` ignored (`:151`).
   7. Add tests with a fake server: a stop while idle deregisters once and answers null; a 404 answers null; a 500 answers its code with no retry; an indeterminate answer answers `worker.stop.deregistration_indeterminate`; a stop during a waiting pull waits for its `no-work` answer, then deregisters; a stop during a waiting pull that answers `claimed` deregisters nothing and answers `worker.stop.execution_live`; the watchdog exits 1 on a stalled deregistration (fake timers, a stubbed `process.exit`); no watchdog is armed while a pull waits; `SIGHUP` changes nothing.
 - Rules:
-  - `SIGINT` and `SIGTERM` stop further startup and further work pulls. `worker-service.impl.md:240`.
-  - The application deregisters only a registration whose runtime identity it knows, and only when no execution is live. `worker-service.impl.md:241–242`.
-  - It exits 0 after a successful deregistration or after the 404 that ends its registration; any other deregistration or cleanup failure exits 1 without a retry. `worker-service.impl.md:243`; `:205`.
-  - The 10-second watchdog applies only when no execution is live and no registration or work pull waits for its answer. `worker-service.impl.md:244`.
-  - `SIGHUP` reopens nothing. `worker-service.impl.md:245`.
+  - `SIGINT` and `SIGTERM` stop further startup and further work pulls. `worker-service.impl.md:244`.
+  - The application deregisters only a registration whose runtime identity it knows, and only when no execution is live. `worker-service.impl.md:245–246`.
+  - It exits 0 after a successful deregistration or after the 404 that ends its registration; any other deregistration or cleanup failure exits 1 without a retry. `worker-service.impl.md:247`; `:208`.
+  - The 10-second watchdog applies only when no execution is live and no registration or work pull waits for its answer. `worker-service.impl.md:249`.
+  - `SIGHUP` reopens nothing. `worker-service.impl.md:250`.
   - A signal during a live execution aborts the agent, performs no release, deregisters nothing and exits 1; the deadline settles the loss. Decision D25.
-  - Codes `worker.stop.execution_live` and `worker.stop.deregistration_indeterminate` (local, code: proposed): the conditions are ruled at `worker-service.impl.md:242–243` and decision D25. No shared code of `engine/docs/cli/other.md` and no ERD 1 code covers them.
-  - Gap: shutdown during a live execution, a registration or a work pull with no answer, and a stop deadline in those cases stay B9 (`worker-service.impl.md:246`; `engine/docs/cli/other.md:523–524`).
+  - Codes `worker.stop.execution_live` and `worker.stop.deregistration_indeterminate` (local, code: proposed): the conditions are ruled at `worker-service.impl.md:248` and decision D25. No shared code of `engine/docs/cli/other.md` and no ERD 1 code covers them.
+  - Gap: shutdown during a live execution, a registration or a work pull with no answer, and a stop deadline in those cases stay B9 (`worker-service.impl.md:251`; `engine/docs/cli/other.md:523–524`).
 - Done when: `pnpm run verify` passes; the tests pass.
 
 ### 09.7 Implement the work-pull loop
@@ -237,7 +238,7 @@ Three differences from `00-index.md` "Seams":
   - A work pull is idempotent by the runtime identity: a pull of an instance with a `running` execution answers that execution, so a lost answer is recovered by the next pull. `scheduler-service.impl.md:59–64`; `scheduler-service.md:166–167`.
   - A no-work result ends the request; an instance retries with backoff. `scheduler-service.md:125–126`.
   - Server shutdown cancels the waiting pulls. `architecture.impl.md:460–461`.
-  - The same client identity registers again with a fresh key after an expiry. `worker-service.impl.md:177`.
+  - The same client identity registers again with a fresh key after an expiry. `worker-service.impl.md:180`.
   - The loop reads the resource identity from the registration answer of task 09.1, never from the token. Debate Q2.
 - Done when: `pnpm run verify` passes; the tests pass.
 
@@ -254,13 +255,13 @@ Three differences from `00-index.md` "Seams":
   7. Keep the client secret, the keys and the payload in local variables; log only `{ executionId, credentialId }` with the message `credential handover received`.
   8. Add tests with a fake server that seals with a known secret: a lost first answer is retried with a new key and the second key succeeds; the store answers the key under the adapter id; a refresh through `store.modify` calls `worker.credential` once with an envelope that the report key opens; `release()` reports once; another client secret throws `worker.handover.decryption_failed`; a 403 `gateway.invocation.execution_proof_failed` throws `HandoverRefused` with that code; no log line holds the secret.
 - Rules:
-  - The application calls `worker.handover` once after its claim and before the first inference call; the body names the execution. `worker-service.impl.md:295–296`; plan 05 debate Q1.
+  - The application calls `worker.handover` once after its claim and before the first inference call; the body names the execution. `worker-service.impl.md:327`, `:329`; plan 05 debate Q1.
   - A lost answer takes a new key, because the handover is a secret mutation. `gateway-service.impl.md:429–430`; plan 05 debate Q3.
-  - The application decrypts with the handover key of its own `clientSecret`, builds the in-memory store and holds the plaintext in memory alone. `worker-service.impl.md:297`.
-  - The application calls `worker.credential` after each refresh and once at the release. `worker-service.impl.md:298`.
-  - Every retry stays inside the deadline of the execution. `worker-service.impl.md:467`.
-  - A `clientSecret` of another machine JWT fails every decryption, and the application ends the execution as a cannot-progress condition. `worker-service.impl.md:304`; decision D25.
-  - Code `worker.handover.decryption_failed` (local, code: proposed): the condition is ruled at `worker-service.impl.md:304`. `custody.handover.report_invalid` covers the server side alone (`custody.impl.md:149`).
+  - The application decrypts with the handover key of its own `clientSecret`, builds the in-memory store and holds the plaintext in memory alone. `worker-service.impl.md:330`.
+  - The application calls `worker.credential` after each refresh and once at the release. `worker-service.impl.md:331`.
+  - Every retry stays inside the deadline of the execution. `worker-service.impl.md:531`.
+  - A `clientSecret` of another machine JWT fails every decryption, and the application ends the execution as a cannot-progress condition. `worker-service.impl.md:338`; decision D25.
+  - Code `worker.handover.decryption_failed` (local, code: proposed): the condition is ruled at `worker-service.impl.md:338–339`. `custody.handover.report_invalid` covers the server side alone (`custody.impl.md:149`).
   - Gap: a report that the application cannot deliver leaves the server with the replaced value; the retry policy stays B9 "Cannot progress" (`docs/brainstorm/HANDOFF.md` "Cannot progress"; plan 05 task 05.3).
 - Done when: `pnpm run verify` passes; the tests pass.
 
@@ -279,12 +280,12 @@ Three differences from `00-index.md` "Seams":
   9. Add tests with fake methods: the handover precedes the setup read, and both precede the method; the entry receives the host tools and `noTranscript`; `released` and `closed` answer null; a proof failure of the setup read answers null and the loop pulls again; a 400 `worker.agent.enablement.unavailable` of the handover answers its code and stops the application with exit 1 and no deregistration; `ended` with `operation_failed` and a thrown entry error do the same; `discard()` runs on every path; a `SIGTERM` during the method cancels its context, and the application answers `worker.stop.execution_live`.
 - Rules:
   - The execution takes its identity, its node, its attempt and its pinned revision from the claim answer. `worker-service.md:261`.
-  - The binding, the worker and the agent configuration come from the server. `worker-service.impl.md:232`; plan 07 debate Q1.
-  - The application discards every credential when the execution ends and writes none to a file. `worker-service.impl.md:299`.
+  - The binding, the worker and the agent configuration come from the server. `worker-service.impl.md:235`; plan 07 debate Q1.
+  - The application discards every credential when the execution ends and writes none to a file. `worker-service.impl.md:333`.
   - A revoked or lost execution stops its agent and performs no further operation under its execution identity; it learns of the end from its first refused call. `worker-service.md:265`; `scheduler-service.md:239–240`.
   - A cannot-progress condition ends the execution under decision D25: no release, no deregistration, exit 1.
   - Gap: the disposition of an execution that cannot progress stays B9 "Cannot progress" (`docs/brainstorm/HANDOFF.md`); the deadline of the execution settles the loss.
-  - Gap: the abort proves no stop of every descendant process, and the quiescence check before a workspace reuse stays B9 W5 (`worker-service.impl.md:461–462`).
+  - Gap: the abort proves no stop of every descendant process, and the quiescence check before a workspace reuse stays B9 W5 (`worker-service.impl.md:524–525`).
 - Done when: `pnpm run verify` passes; the tests pass.
 
 ### 09.10 Implement the evidence upload helper
@@ -300,13 +301,13 @@ Three differences from `00-index.md` "Seams":
   7. Answer `{ evidenceId, assetId, uri }`. A failure of a Mission call throws `new Diagnostic(error.code, error.message)`. Close the descriptor in a `finally` block.
   8. Add tests against the object sink of plan 04: the order is submit, PUT, complete, and the asset publishes only after the complete; the answer holds the three fields alone; `../x`, an absolute path, a symbolic link that leaves the workspace, a symbolic link inside the workspace, a directory and a file that a rename replaces between the open and the check each refuse with their reason; a sink that answers 500 throws `worker.evidence_upload.transfer_failed`, and neither the message nor the details hold the `putUrl`; a changed file after the hash fails the complete through the checksum check.
 - Rules:
-  - The helper opens the path safely inside the execution workspace and refuses traversal, symbolic-link escapes and path replacement races. `worker-service.impl.md:310–311`; `engine/docs/cli/mission.md:552–553`.
-  - It calls `mission.evidence.submit` with the execution context, the evidence metadata and one `object` asset with its size, media type and SHA-256; it sends the file directly to the presigned PUT; then it calls `mission.evidence.asset.complete`. `worker-service.impl.md:312–313`; `mission-service.impl.md:297–312`.
+  - The helper opens the path safely inside the execution workspace and refuses traversal, symbolic-link escapes and path replacement races. `worker-service.impl.md:345–346`; `engine/docs/cli/mission.md:552–553`.
+  - It calls `mission.evidence.submit` with the execution context, the evidence metadata and one `object` asset with its size, media type and SHA-256; it sends the file directly to the presigned PUT; then it calls `mission.evidence.asset.complete`. `worker-service.impl.md:348–349`; `mission-service.impl.md:297–312`.
   - The helper supplies the SHA-256 that it computes, and the PUT sends the headers of the answer. `mission-service.impl.md:304`; debate Q1.
   - The subject is the workspace-relative path, and the media type is `application/octet-stream`; the service stores the value and never interprets it. Debate Q1; `mission-service.impl.md:285`.
   - The file path is local input, not an evidence address. `mission-service.impl.md:295`.
-  - The presigned URL is an API answer, never a tool result or an agent-context value. `worker-service.impl.md:318`; `mission-service.impl.md:329`.
-  - Codes `worker.evidence_upload.path_refused` and `worker.evidence_upload.transfer_failed` (local, code: proposed): the conditions are ruled at `worker-service.impl.md:311` and `:313`. No shared code and no Mission code covers a local open or a direct transfer.
+  - The presigned URL is an API answer, never a tool result or an agent-context value. `worker-service.impl.md:357`; `mission-service.impl.md:329`.
+  - Codes `worker.evidence_upload.path_refused` and `worker.evidence_upload.transfer_failed` (local, code: proposed): the conditions are ruled at `worker-service.impl.md:347` and `:350`. No shared code and no Mission code covers a local open or a direct transfer.
 - Done when: `pnpm run verify` passes; the tests pass.
 
 ### 09.11 Add the in-process worker helper
@@ -364,7 +365,7 @@ Fixture S, in order (each command exits 0):
 2. `kanthord worker agent enablement put swe@1 --file enablement.json` with `{ "agentProviders": [{ "name": "default", "provider": "anthropic", "credential": "anthro-1" }], "defaultConfiguration": { "agentProvider": "default", "modelIdentifier": "claude-sonnet-4-5", "reasoningEffort": "off" } }` → `revision` 1.
 3. `kanthord project create --name worker-app` → `projectId`.
 4. `kanthord project binding apply <projectId> --file bindings.json` with `repo` `{ "kind": "repository", "config": { "available": true, "platform": "github", "address": "git@github.com:owner/repo.git", "strategy": { "baseBranch": "main" }, "credential": "github" } }` and `general` `{ "kind": "worker", "config": { "worker": "general@1", "instanceCount": 1, "entries": [{ "agent": "swe@1", "agentProvider": "default", "modelIdentifier": "claude-sonnet-4-5", "reasoningEffort": "off" }] } }`.
-5. `kanthord project binding list <projectId>` → `generalBindingId`. `kanthord jwt generate --binding <generalBindingId> --name general-a --config server.yaml` → `token`, `clientSecret`, written into `cli.yaml` with `endpoint`.
+5. `kanthord jwt generate --project <projectId> --binding general --name general-a --config server.yaml` → `token`, `clientSecret`, written into `cli.yaml` with `endpoint`.
 6. `kanthord worker agent enablement disable swe@1 --expected-revision 1`. The instance healthcheck then fails, so every work pull answers `no-work` at once and no row claims a node.
 
 | Id     | Commands                                                                                                                                                                              | Exit | Expect                                                                                                                                                                                            |

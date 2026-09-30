@@ -5,8 +5,8 @@
 This plan delivers:
 
 - The internal action performer of the Worker Service: the admission of one execution identity (a live claim, an evaluation claim and a current passing assessment), the eligibility read, the operand derivation from the records, the reuse of an earlier pull request through `intake.action.read`, the dispatch through `intake.action.perform`, the request submission through `mission.evidence.request`, and the four return classes.
-- The per-execution-identity mutex of the page and an in-memory dispatch reservation keyed by the node attempt and the requirement key, which keep the no-redispatch invariant inside one server process.
-- The operation `worker.action.request`, the transport of the evaluation method of `reviewer@1` at the `worker` placement to the internal function (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06", Q1, `review:Ulrich`).
+- The per-execution-identity mutex and the in-memory dispatch reservation of the page, keyed by the node, the attempt and the requirement key, which keep the no-redispatch invariant inside one server process.
+- The operation `worker.action.request`, the transport of the evaluation method of `reviewer@1` at the `worker` placement to the internal function (`worker-service.impl.md:410–414`; ruled 2026-09-30 on `worker-service.impl.md` "Action performer").
 - The Mission Kind 2 read collaboration `MissionActions.actionContextOf`.
 - The ERD 3 seam `IntakeActions` with its `unwired` production entries and its `gatewayFixture` fake `scriptedActions`.
 - The shared node-branch name `nodeBranchOf`, which plans 07 and 08 consume.
@@ -18,8 +18,8 @@ Out of scope:
 - The evaluation method that calls the operation (plan 08) and the `worker` application that hosts it (plan 09).
 - `intake.action.perform`, `intake.action.read` and every Intake mechanism (ERD 3). Production answers `system.composition.unwired` at the first Intake call (decision D6).
 - A durable dispatch record (B9 W2, `docs/reference/erd/02-execution.md:23`), the retrieval of a lost acknowledgement (B9 W3), and what follows a failure or an uncertainty (B9 A3, W1, W4, PR2). Each task states its gap in one line (decision D1).
-- The `awaiting-prerequisite` production path. The first version produces no such item (`worker-service.impl.md:382`); the schema holds the variant.
-- A CLI leaf. No CLI command calls the performer (`worker-service.impl.md:407`; `engine/docs/cli/mission.md:502–503`).
+- The `awaiting-prerequisite` production path. The first version produces no such item (`worker-service.impl.md:441`); the schema holds the variant.
+- A CLI leaf. No CLI command calls the performer (`worker-service.impl.md:414`, `:467`; `engine/docs/cli/mission.md:502–503`).
 
 This plan creates no table (`docs/reference/erd/02-execution.md:23`, `:30`).
 
@@ -28,28 +28,28 @@ This plan creates no table (`docs/reference/erd/02-execution.md:23`, `:30`).
 - `docs/brainstorm/worker-service.md:445–456` — every reviewer execution, the execution identity alone, the three checks, the operands from the records and the evidence snapshot, the Intake call, no workspace, the serialization and the no-redispatch invariant.
 - `docs/brainstorm/worker-service.md:458–466` — the four return classes and no release rule for a failure or an uncertainty.
 - `docs/brainstorm/worker-service.md:517–549` — the evaluation paths, the eligibility, the operand derivation, the reuse conditions, the submission through `mission.evidence.request` and the release rule of the reviewer execution.
-- `docs/brainstorm/worker-service.md:292–296` — one node branch for each objective and repository binding, named from the node identity.
-- `docs/brainstorm/worker-service.vocabulary.md:193–221` — "action performer" and "return class", with the examples `kanthord/obj-7f3a`, `main` and pull request 42.
+- `docs/brainstorm/worker-service.md:292–296` — one node branch for each objective and repository binding, named from the node identity in the form `kanthord/<node identity>`.
+- `docs/brainstorm/worker-service.vocabulary.md:193–221` — "action performer" and "return class", with the examples `kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAV`, `main` and pull request 42.
 - `docs/brainstorm/worker-service.vocabulary.md:313–318` — "node branch".
-- `docs/brainstorm/worker-service.impl.md:364–383` — one internal function, the mutex, the in-process scope, the answer `{ toolName, items }` and the item shapes.
-- `docs/brainstorm/worker-service.impl.md:299`, `:407`, `:411`, `:424–427` — the MCP path of a platform action, no REST projection of a tool, the 900 s timeout, the idempotency of the one write and the two refusal codes.
-- `docs/brainstorm/worker-service.impl.md:482` — the acceptance path includes the configured repository action.
+- `docs/brainstorm/worker-service.impl.md:407–443` — one internal function, the operation `worker.action.request` and its route, the mutex, the dispatch reservation, the in-process scope, the answer `{ toolName, items }`, the item shapes and the three refusal codes.
+- `docs/brainstorm/worker-service.impl.md:334`, `:467–468`, `:472`, `:485–488` — the action performer path of a platform action, no REST projection of a tool, the 900 s timeout of the MCP operations, the idempotency of the one write and the two refusal codes of the tool.
+- `docs/brainstorm/worker-service.impl.md:546` — the acceptance path includes the configured repository action.
 - `docs/brainstorm/intake-service.impl.md:44–49`, `:53` — the forwarded identity, `intake.action.perform`, the clone of a `merge_push` and of a pull-request reuse, `intake.action.read` and no Mission record.
 - `docs/brainstorm/repository.md:56–64`, `:73–78` — the configured-action write, its operands from the records, the ownership of eligibility, operands, serialization and idempotency, and the result classes.
 - `docs/brainstorm/repository.vocabulary.md:28–42` — the four result classes.
 - `docs/brainstorm/repository.impl.md:17–19`, `:26`, `:34` — the pull-request read, the unchanged body and the result-class code `repository.platform.github.<class>`.
 - `docs/brainstorm/mission-service.impl.md:77–93` — `FrozenAction`, `mission.evidence.request`, the reuse as a new request evidence and its refusals.
-- `docs/brainstorm/mission-service.impl.md:237–243` — `requirement_key`, `PlatformAddress` and the four resolutions.
-- `docs/brainstorm/mission-service.impl.md:253–254` — the eligibility of the reviewer release predicate and `mission.release.obligation_unmet`.
-- `docs/brainstorm/architecture.impl.md:592–611` — the three kinds, the written atomicity reason of a Kind 2 collaboration and no peer table.
-- `docs/brainstorm/architecture.impl.md:612–622`, `:646–659`, `:661–673`, `:678–699`, `:711–717`, `:733` — the two adapters, the execution proof, the one caller kind, the caller propagation, the handler that separates asynchronous work from its commit, the idempotency and the three client results.
-- `docs/brainstorm/gateway-service.impl.md:293–302` — the request context, its cancellation at a disconnect, the 900 s timeout of a call that runs a tool of the Worker Service and `hono/timeout`.
+- `docs/brainstorm/mission-service.impl.md:243–249` — `requirement_key`, `PlatformAddress` and the four resolutions.
+- `docs/brainstorm/mission-service.impl.md:259–260` — the eligibility of the reviewer release predicate and `mission.release.obligation_unmet`.
+- `docs/brainstorm/architecture.impl.md:592–612` — the three kinds, the written atomicity reason of a Kind 2 collaboration and no peer table.
+- `docs/brainstorm/architecture.impl.md:613–623`, `:647–660`, `:662–674`, `:679–703`, `:715–721`, `:737` — the two adapters, the execution proof, the one caller kind, the caller propagation, the handler that separates asynchronous work from its commit, the idempotency and the three client results.
+- `docs/brainstorm/gateway-service.impl.md:293–303` — the request context, its cancellation at a disconnect, the 900 s timeout of a call that runs a tool of the Worker Service and of `worker.action.request`, and `hono/timeout`.
 - `docs/reference/erd/02-execution.md:21`, `:23`, `:30`, `:216`, `:220`, `:287–288` — an unrequested action, no dispatch record, the in-memory mutex, the proof inside every execution mutation, the routing of a reviewer release and the request rules.
-- `engine/docs/cli/worker.md:609–650`, `:680–683` — the MCP and repository actions, the action performer results and the two refusal codes.
+- `engine/docs/cli/worker.md:613–658`, `:686–689`, `:752–754` — the MCP and repository actions, the `worker.action.request` paragraph, the action performer results, the two refusal codes of the tool and the error rows of the three refusal codes.
 - `engine/docs/cli/mission.md:493–515`, `:849` — the request evidence and `mission.evidence.request` without a CLI command.
 - `docs/brainstorm/HANDOFF.md:114–123` — B9 SC5, the two live processes of one machine JWT, A3/W1/W4/PR2, W2, W3 and W7.
 - `engine/.agents/plan/erd-02-execution/00-index.md`, `decisions.md` — the boundary, the seams and decisions D1 to D26.
-- `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06" — the transport, the Mission read, the dispatch reservation and the classification (debate, 2 rounds, `review:Ulrich`).
+- `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06" — the Mission read and the classification (debate, 2 rounds, `review:Ulrich`). The transport and the dispatch reservation are ruled 2026-09-30 on `worker-service.impl.md` "Action performer", and the branch form is ruled 2026-09-30 on `worker-service.md` "Executions".
 - Root `AGENTS.md` "Contracts", "Database design" and "Rejected proposals".
 
 ## Depends on
@@ -72,7 +72,7 @@ This plan creates no table (`docs/reference/erd/02-execution.md:23`, `:30`).
 | `nodeBranchOf`                   | `(nodeId: string): string` — `"kanthord/" + nodeId`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `src/worker/node-branch.ts`       | 07, 08         |
 | `scriptedActions`                | `(): { seam: IntakeActions; performAnswers: Answer[]; readAnswers: Answer[]; performCalls: Call[]; readCalls: Call[]; hold(): () => void }`                                                                                                                                                                                                                                                                                                                                                                                           | `src/apps/server/test-support.ts` | 08, 09, 10     |
 
-The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": each method takes `IntakeActionCall` with the execution identity, because the Intake operation runs under the forwarded execution identity and refuses another node before custody releases a secret (`intake-service.impl.md:44`, `:46`; `:79`). `perform` answers `unknown_outcome` for every failure after a write may have started, and a thrown error of either method means that the seam started no write (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06", Q4).
+The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": each method takes `IntakeActionCall` with the execution identity, because the Intake operation runs under the forwarded execution identity and refuses another node before custody releases a secret (`intake-service.impl.md:44`, `:46`; `:79`). `perform` answers `unknown_outcome` for every failure after a write may have started (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06", Q4). A thrown error of `read` starts no write. A thrown error of `perform` proves that no write started only with the code `system.composition.unwired` of the D6 stand-in. Every other thrown error of `perform` keeps the reservation as `uncertain` with `uncertainty: "effect"` (`worker-service.impl.md:422–424`).
 
 ## Tasks
 
@@ -83,15 +83,15 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
   1. Declare `ACTION_REQUEST_TOOL_NAME = "repository-action-request"` and `ACTION_REQUEST_TIMEOUT_MS = 900000`.
   2. Declare these closed sets as `as const` objects with a `z.enum` schema and a type each: `ActionResultKind` (`submitted`, `awaiting-prerequisite`, `failed-before-effect`, `uncertain`); `RefusalClass` (`confirmed_failure`, `retryable_refusal`, `final_refusal`); `ResultClass` (the three values of `RefusalClass` plus `unknown_outcome`); `Uncertainty` (`effect`, `recording`, `both`); `ActionReadMethod` (`github-pull-request-get`).
   3. Declare inline with `z.strictObject`: `platformAddressSchema` as the discriminated union of `{ kind: "pull_request", resourceIdentity, number: positive safe integer }` and `{ kind: "branch_push", resourceIdentity, branch, commit }`; `actionRefSchema` `{ key, bindingId }`; `actionResultItemSchema` as the discriminated union on `kind` of the four shapes of the Provides row, where `evidence` is `z.record(z.string(), z.unknown())` described as the Mission `Evidence` record and `address` is optional; `actionRequestResultSchema` `{ toolName: z.literal(ACTION_REQUEST_TOOL_NAME), items: z.array(actionResultItemSchema) }`.
-  4. Add to `WorkerErrorCode` (`src/worker/contract.ts:156–174`): `ClaimNotEvaluation: "worker.action_performer.claim_not_evaluation"`, `AssessmentNotCurrent: "worker.action_performer.assessment_not_current"`, `SnapshotAbsent: "worker.action_performer.snapshot_absent"` (code: proposed).
+  4. Add to `WorkerErrorCode` (`src/worker/contract.ts:156–174`): `ClaimNotEvaluation: "worker.action_performer.claim_not_evaluation"`, `AssessmentNotCurrent: "worker.action_performer.assessment_not_current"`, `SnapshotAbsent: "worker.action_performer.snapshot_absent"`.
   5. In `contract.test.ts`, assert that each item shape parses, that `refusal.class: "unknown_outcome"` fails, that an unknown `kind` fails, that `toolName` accepts only the literal, and that a `branch_push` address without `commit` fails.
 - Rules:
-  - The answer and the item shapes. `worker-service.impl.md:373–381`; `engine/docs/cli/worker.md:628–637`.
-  - The request evidence is the Mission `Evidence` record, passed unchanged. `engine/docs/cli/worker.md:636`. No service `contract.ts` imports a peer `contract.ts` (`00-index.md` "Collaboration-type contract rule"), so the field keeps the record unchanged without the Mission schema.
-  - `PlatformAddress` holds `kind` and `resourceIdentity`, a `pull_request` adds `number`, a `branch_push` adds `branch` and `commit`, and it never holds a `bindingId`. `mission-service.impl.md:238`.
-  - The result classes. `repository.vocabulary.md:28–37`; `worker-service.impl.md:378–379`.
-  - `worker.action_performer.claim_not_evaluation` and `worker.action_performer.assessment_not_current` stand on `worker-service.impl.md:426` and `engine/docs/cli/worker.md:682–683`. Status 409, as `mission.execution.claim_not_evaluation` (`00-index.md` "Codes for Ulrich"). Gap: the error table of `engine/docs/cli/worker.md:707` holds no row for either code; Aelita adds both rows before the commit of this plan.
-  - `worker.action_performer.snapshot_absent` (409, code: proposed): the current passing assessment names no repository snapshot of the binding of the action. The condition stands at `worker-service.md:452` ("obtains every operand from the records and the evidence snapshot") and `repository.md:60`. No code of `engine/docs/cli/other.md` and no ERD 1 code covers it.
+  - The answer and the item shapes. `worker-service.impl.md:432–440`; `engine/docs/cli/worker.md:632–643`.
+  - The request evidence is the Mission `Evidence` record, passed unchanged. `engine/docs/cli/worker.md:642`. No service `contract.ts` imports a peer `contract.ts` (`00-index.md` "Collaboration-type contract rule"), so the field keeps the record unchanged without the Mission schema.
+  - `PlatformAddress` holds `kind` and `resourceIdentity`, a `pull_request` adds `number`, a `branch_push` adds `branch` and `commit`, and it never holds a `bindingId`. `mission-service.impl.md:244`.
+  - The result classes. `repository.vocabulary.md:28–37`; `worker-service.impl.md:437–438`.
+  - `worker.action_performer.claim_not_evaluation` and `worker.action_performer.assessment_not_current` stand on `worker-service.impl.md:443`, `:487` and `engine/docs/cli/worker.md:688–689`. Status 409, as `mission.execution.claim_not_evaluation` (`00-index.md` "Codes for Ulrich"). The error table holds both rows at `engine/docs/cli/worker.md:752–753`.
+  - `worker.action_performer.snapshot_absent` (409): the current passing assessment names no repository snapshot of the binding of the action. `worker-service.impl.md:443`; `engine/docs/cli/worker.md:754`. The condition stands at `worker-service.md:452` ("obtains every operand from the records and the evidence snapshot") and `repository.md:60`.
   - Every closed value set is an enum in code. Root `AGENTS.md` "Database design"; `architecture.impl.md:15–19`.
 - Done when: `pnpm run verify` passes; `contract.test.ts` passes.
 
@@ -110,12 +110,12 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
   4. Add tests with `missionHarness`: an initiative answers `actions: []`; an unrequested action answers `eligible: true`; a requested action of the attempt answers `unresolved` with its evidence and `eligible: false`; a request evidence of attempt 1 appears in `reuseCandidates` of attempt 2 and never in attempt 1; two earlier attempts with one address answer one candidate of the newer attempt; a `branch_push` request is no candidate; an attempt with no assessment answers `currentAssessment: null`; the call opens no transaction of its own.
 - Rules:
   - A Kind 2 collaboration takes the caller transaction and serves an invariant that must hold atomically across the tables of two services; its interface documents it. `architecture.impl.md:592–595`. The invariant is the snapshot of the admission (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06", Q2, `review:Ulrich`).
-  - A service names no table of a peer. `architecture.impl.md:611`.
+  - A service names no table of a peer. `architecture.impl.md:612`.
   - The performer reads the required external actions of the attempt and the request evidence of the node across every attempt. `worker-service.md:521–522`.
-  - The eligibility is the rule of the reviewer release predicate, computed by the same function. `worker-service.md:523–524`; `mission-service.impl.md:253`.
+  - The eligibility is the rule of the reviewer release predicate, computed by the same function. `worker-service.md:523–524`; `mission-service.impl.md:259`.
   - A reuse candidate names the same requirement key and belongs to an earlier attempt. `worker-service.md:531–532`; `mission-service.impl.md:91`.
-  - A `merge_push` never reuses an address: its `branch_push` address names the commit of its own push, and the performer uses the address that the current push answers. `mission-service.impl.md:238`; `intake-service.impl.md:47`.
-  - The four resolutions. `mission-service.impl.md:243`.
+  - A `merge_push` never reuses an address: its `branch_push` address names the commit of its own push, and the performer uses the address that the current push answers. `mission-service.impl.md:244`; `intake-service.impl.md:47`.
+  - The four resolutions. `mission-service.impl.md:249`.
   - A consuming plan adds the collaboration that it needs to its owner. `00-index.md` "Shared files"; this plan adds one Mission row there (report).
 - Done when: `pnpm run verify` passes; the eight tests pass.
 
@@ -135,8 +135,8 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
   - A collaboration type is declared inline in the own `contract.ts` of the service, and the composition root is the only file that imports cross-service types. `00-index.md` "Collaboration-type contract rule"; `src/project/service.ts:16`.
   - Every collaboration is required. Decision D4.
   - An ERD 3 seam is `unwired` in production and a fake in `gatewayFixture`. Decisions D6, D9 (row `Worker IntakeActions | 06 | ERD 3`).
-  - Kind 3 is the default: the performer calls `mission.evidence.request` through the direct adapter with the identity of its caller. `architecture.impl.md:606–607`, `:618–619`, `:680–683`; `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 04", Q1.
-  - The client is built once and holds no fixed identity. `architecture.impl.md:618`, `:684`.
+  - Kind 3 is the default: the performer calls `mission.evidence.request` through the direct adapter with the identity of its caller. `architecture.impl.md:607–608`, `:619–620`, `:681–684`; `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 04", Q1.
+  - The client is built once and holds no fixed identity. `architecture.impl.md:619`, `:685`.
   - `intake.action.perform` and `intake.action.read` run under the forwarded execution identity. `intake-service.impl.md:44`, `:46`, `:49`.
   - A plan edits only the construction of its own service and the dependency entries that it provides or consumes. `00-index.md` "Shared files".
   - Only a test file imports `test-identity.ts`. `eslint.config.js:206–224`.
@@ -150,7 +150,7 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
   2. Implement `operandsOf(nodeId, context, entry): ActionOperands`. `nodeBranch` is `nodeBranchOf(nodeId)`. `baseBranch` is `entry.action.configuration.baseBranch`. `commit` is the `commit` of `context.currentAssessment.testedInput` when it is one repository address whose `bindingId` equals `entry.action.bindingId`. Any other tested input throws `OperationError(409, WorkerErrorCode.SnapshotAbsent, "The assessment names no repository snapshot of the action binding.", { requirementKey })`. `reusedAddress` is null.
   3. Add tests: the branch of a node identity; a malformed identity fails the assertion; each operand from a context fixture; a `produced` tested input, an array tested input and a repository address of another binding answer `worker.action_performer.snapshot_absent`.
 - Rules:
-  - The node branch takes its name from the node identity. `worker-service.md:294`; example `kanthord/obj-7f3a` at `worker-service.vocabulary.md:316`. The form `kanthord/<node identity>` extends the example into a rule (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06", `review:Ulrich`); plans 07 and 08 use this one function.
+  - The node branch takes its name from the node identity, in the form `kanthord/<node identity>`. `worker-service.md:294` declares the form (ruled 2026-09-30 on `worker-service.md` "Executions"). The example at `worker-service.vocabulary.md:316` is `kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAV`. Plans 07 and 08 use `nodeBranchOf`.
   - The performer derives node branch and base branch from the records, with no operand from a caller. `worker-service.vocabulary.md:205`; `worker-service.md:447–448`, `:527–528`.
   - `configuration` holds `baseBranch`. `mission-service.impl.md:84`.
   - The evidence snapshot is the tested input that the current passing assessment judged. `worker-service.md:452`, `:498`; `mission-service.md:519`.
@@ -168,10 +168,10 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
      - `prune(nodeId, attempt, actions)` — deletes the entry of each action of that attempt whose `resolution` is not `unrequested`.
   3. Add tests: two runs of one key never overlap; two keys overlap; a contending `acquire` answers `uncertain` `effect` and a later `settle` of the owner still acts; a `settle` with a foreign owner changes nothing; a stored `uncertain` answers the same item; `prune` deletes a same-attempt requested key and keeps the key of another attempt.
 - Rules:
-  - A per-execution-identity mutex serializes invocations inside the server, and it holds the no-redispatch invariant inside one process only. `worker-service.impl.md:368–369`; `docs/reference/erd/02-execution.md:30`.
+  - A per-execution-identity mutex serializes invocations inside the server. Inside one server process, the mutex and the reservation prevent a redispatch within one attempt. `worker-service.impl.md:415`, `:427`; `docs/reference/erd/02-execution.md:30`.
   - The performer never dispatches an action whose earlier dispatch is unresolved, across callers and invocations. `worker-service.md:456`; `worker-service.vocabulary.md:206`.
-  - The reservation is keyed by the node attempt, because a later execution of the same attempt follows a lost execution; only the owner settles; a contender answers `uncertain` `effect` and does not wait; a same-attempt request deletes an entry and an earlier-attempt request never does. `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06", Q3 (debate, 2 rounds, `review:Ulrich`).
-  - Gap: a server restart loses every entry; the durable dispatch record stays B9 W2 (`docs/brainstorm/HANDOFF.md:120`; `docs/reference/erd/02-execution.md:23`).
+  - The dispatch reservation follows the fifteen lines of `worker-service.impl.md:415–429` (ruled 2026-09-30 on `worker-service.impl.md` "Action performer"). The key holds the node, the attempt and the requirement key, because a later execution of the same attempt follows a lost execution (`:416`). Only the invocation that took the reservation settles it (`:418`). A contender of an in-flight reservation answers `uncertain` with `uncertainty: "effect"`, changes nothing and does not wait (`:419`). A contender of an uncertain reservation answers the stored item and changes nothing (`:420`). A request evidence of the same attempt deletes the entry, and a request evidence of an earlier attempt deletes none (`:426`).
+  - Gap: a server restart loses every entry; the durable dispatch record stays B9 W2 (`worker-service.impl.md:428`; `docs/brainstorm/HANDOFF.md:120`; `docs/reference/erd/02-execution.md:23`).
 - Done when: `pnpm run verify` passes; the six tests pass.
 
 ### 06.6 Add the reuse predicate
@@ -201,12 +201,12 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
   4. Implement `recordedItem(ref, address, result)`: a `Completed` result answers `{ kind: "submitted", evidence: result.data }`; a `Failure` or an `Indeterminate` result answers `{ kind: "uncertain", action: ref, uncertainty: "recording", address }`.
   5. Add tests for each branch, and assert that no branch answers `uncertainty: "both"` or an `awaiting-prerequisite` item.
 - Rules:
-  - The four classes and their fields; an `unknown_outcome` produces `effect`; the address is present when the remote returned it and the Mission submission stayed uncertain. `worker-service.impl.md:376–379`.
-  - A final refusal declines the request before any write, and `code` and `message` come from the Repository component. `worker-service.impl.md:378`; `repository.impl.md:26`.
+  - The four classes and their fields; an `unknown_outcome` produces `effect`; the address is present when the remote returned it and the Mission submission stayed uncertain. `worker-service.impl.md:435–438`.
+  - A final refusal declines the request before any write, and `code` and `message` come from the Repository component. `worker-service.impl.md:437`; `repository.impl.md:26`.
   - A client returns `Completed`, `Failure` or `Indeterminate`. `architecture.impl.md:733`.
   - The first version produces no `both` item, because the performer submits no request after an unknown effect; a refused recording and an indeterminate recording both answer `recording`; a read has no effect, so its `unknown_outcome` answers `failed-before-effect` with `confirmed_failure`. `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06", Q4 (`review:Ulrich`).
-  - The first version produces no `awaiting-prerequisite` item. `worker-service.impl.md:382`.
-  - Gap: what follows a failure or an uncertainty stays B9 A3, W1, W4 and PR2 (`docs/brainstorm/HANDOFF.md:119`); the answer holds no release instruction (`worker-service.impl.md:383`).
+  - The first version produces no `awaiting-prerequisite` item. `worker-service.impl.md:441`.
+  - Gap: what follows a failure or an uncertainty stays B9 A3, W1, W4 and PR2 (`docs/brainstorm/HANDOFF.md:119`); the answer holds no release instruction (`worker-service.impl.md:442`).
 - Done when: `pnpm run verify` passes; the tests pass.
 
 ### 06.8 Add the admission of the performer
@@ -219,11 +219,11 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
   4. Add tests with fakes and `testMachineIdentity`: an ended execution answers 409 `scheduler.execution.not_running` and reads no Mission context; an `Executing` node answers `worker.action_performer.claim_not_evaluation`; no assessment and a `criterion-not-met` current assessment answer `worker.action_performer.assessment_not_current`; the three checks run in one transaction; an initiative context answers `items: []`; the performer calls no Intake method and no Mission request on a refusal.
 - Rules:
   - The performer checks a live claim, an evaluation claim and a current passing assessment, in this order. `worker-service.md:449–451`; `repository.md:58–59`.
-  - Every execution operation repeats the full proof inside its transaction: the claimant, a null `ended_at` and a reading before `expired_at`; a failure answers 409 `scheduler.execution.not_running`. `docs/reference/erd/02-execution.md:216`; `architecture.impl.md:656–657`.
+  - Every execution operation repeats the full proof inside its transaction: the claimant, a null `ended_at` and a reading before `expired_at`; a failure answers 409 `scheduler.execution.not_running`. `docs/reference/erd/02-execution.md:216`; `architecture.impl.md:657–658`.
   - The node state `Evaluating` fixes the kind of a live claim. `docs/reference/erd/02-execution.md:212`; root `AGENTS.md` "Rejected proposals" (no stored claim kind).
-  - The two refusal codes. `worker-service.impl.md:426`; `engine/docs/cli/worker.md:682–683`.
+  - The two refusal codes. `worker-service.impl.md:443`, `:487`; `engine/docs/cli/worker.md:688–689`, `:752–753`.
   - A transaction reads the clock once at its start. `00-index.md` "Shared conventions", row "The clock of a transaction".
-  - A store transaction is synchronous and spans no `await`. `architecture.impl.md:696`.
+  - A store transaction is synchronous and spans no `await`. `architecture.impl.md:697`.
 - Done when: `pnpm run verify` passes; the tests pass.
 
 ### 06.9 Add the dispatch of an eligible action
@@ -237,11 +237,12 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
   5. Add tests: a pull-request action calls `perform` once with `{ nodeBranch: "kanthord/<node>", baseBranch: "main", commit, reusedAddress: null }` and the forwarded identity, then `request` once with the address, and answers `submitted`; a `merge_push` answers the `branch_push` address of its push; a `final_refusal` answers `failed-before-effect` and a later invocation dispatches again; a `Failure` of the request answers `uncertain` `recording` with the address; a context with no eligible action answers `items: []` and calls nothing.
 - Rules:
   - The performer requests each eligible action until no action is eligible. A request of the first version makes no predecessor reach its expected end state, so one pass over the snapshot suffices. `worker-service.md:525`; `mission-service.impl.md:83`.
-  - A request calls `intake.action.perform`, and the performer makes no clone. `worker-service.md:526`; `worker-service.impl.md:371`.
+  - A request calls `intake.action.perform`, and the performer makes no clone. `worker-service.md:526`; `worker-service.impl.md:430`.
   - The performer submits the request through `mission.evidence.request` as the request evidence of the attempt, with the address that the Intake Service answers; that submission is the accepted request. `worker-service.md:538–540`; `mission-service.impl.md:89–90`.
-  - A handler that acts for its caller passes `caller.identity`, and the direct adapter enters the chain with it. `architecture.impl.md:680–683`.
-  - A mutation carries an idempotency key on both adapters. `architecture.impl.md:711`; `src/gateway/idempotency.ts:66–71`.
-  - No `await` separates the admission snapshot from the reservations. `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06", round 2.
+  - A handler that acts for its caller passes `caller.identity`, and the direct adapter enters the chain with it. `architecture.impl.md:681–684`.
+  - A mutation carries an idempotency key on both adapters. `architecture.impl.md:715`; `src/gateway/idempotency.ts:66–71`.
+  - The action performer takes the reservation directly after the admission snapshot, with no `await` between them, and before its first Intake call for that action. `worker-service.impl.md:417`.
+  - A refusal class of `intake.action.perform` proves that no write started and removes the reservation. An uncertain result, `recording` included, stays in the reservation with its uncertainty and its known address. `worker-service.impl.md:421`, `:423`, `:437`.
   - The subject of the request evidence is the key of its `FrozenAction`; no page rules the text. `mission-service.impl.md:90`.
   - Gap: a lost answer of the Mission submission stays B9 W3 (`docs/brainstorm/HANDOFF.md:121`); a refused recording leaves the remote object with no request evidence (B9 A3, W1, W4, PR2).
 - Done when: `pnpm run verify` passes; the tests pass.
@@ -258,14 +259,15 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
   - A reuse performs, through the Intake Service, the network git write that the action requires and no platform write, and it submits the address of the reused request evidence. `worker-service.md:536`, `:539`; `intake-service.impl.md:47`.
   - A reuse is a new request evidence of a later attempt with the address of an earlier request of the same node and action. `mission-service.impl.md:91`; `engine/docs/cli/mission.md:510–512`.
   - The reuse read uses `intake.action.read` under the forwarded execution identity. `intake-service.impl.md:49`; `00-index.md` "Plans", row 06.
-  - A read has no effect, so its failure releases the reservation; every candidate of every earlier attempt counts, newest first. `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06", round 2.
+  - A failure of `intake.action.read` removes the reservation, because the read writes nothing. `worker-service.impl.md:422`.
+  - Every candidate of every earlier attempt counts, newest first. `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06", round 2.
 - Done when: `pnpm run verify` passes; the tests pass.
 
 ### 06.11 Prove the no-redispatch invariant
 
 - Files: `src/worker/action-performer.ts`, `src/worker/action-performer.test.ts` (both edit)
 - Do:
-  1. Wrap the dispatch of each owned action in `try`/`finally`. A thrown error of `perform` settles the reservation with `{ kind: "uncertain", action, uncertainty: "effect" }` and propagates; a thrown error whose code is `system.composition.unwired` settles with `null` and propagates. A thrown error of `read` settles with `null` and propagates. Every other owned action that has not dispatched settles with `null` before the error propagates.
+  1. Wrap the dispatch of each owned action in `try`/`finally`. A thrown error of `perform` whose code is `system.composition.unwired` proves that no write started: it settles with `null` and propagates. Every other thrown error of `perform` settles the reservation with `{ kind: "uncertain", action, uncertainty: "effect" }` and propagates. A thrown error of `read` settles with `null` and propagates. A thrown error of `evidenceRequests.request` stays the `recording` item of task 06.9 and never settles as `effect`. Before an error propagates, every other owned action that has not dispatched settles with `null`.
   2. Add tests:
      - Two concurrent invocations of one execution: `perform` runs once, and the second invocation answers `items: []` after the first submission.
      - An `unknown_outcome` answers `uncertain` `effect`; a second invocation of the same execution and an invocation of a later execution of the same attempt answer the same item and call `perform` no more.
@@ -274,11 +276,11 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
      - A `perform` that throws `system.composition.unwired` releases the reservation; a later invocation calls `perform` again.
      - A same-attempt request evidence in a later context prunes an `uncertain` entry.
 - Rules:
-  - The performer never dispatches an action twice, and tests assert serialized calls with no duplicate dispatch. `worker-service.impl.md:427`, `:430`; `worker-service.md:455–456`.
-  - Every failure after a write may have started keeps the protection; only a failure certified to precede any write releases it. `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06", round 2 (`review:Ulrich`).
+  - The performer never dispatches an action twice, and tests assert serialized calls with no duplicate dispatch. `worker-service.impl.md:488`, `:491`; `worker-service.md:455–456`.
+  - A failure of `intake.action.read` and a failure of `intake.action.perform` that proves that no write started remove the reservation. Every other failure of `intake.action.perform`, an unclassified exception included, keeps it as `uncertain` with `uncertainty: "effect"`. Before a failure propagates, the invocation removes its other reservations of actions that it did not dispatch. `worker-service.impl.md:422–425` (ruled 2026-09-30 on `worker-service.impl.md` "Action performer").
   - The stand-in `unwired` throws before any work. `src/apps/server/unwired.ts` (plan 01 task 01.4); decision D6.
   - Production fails closed at the Intake call. Decision D6.
-  - Gap: a server restart during a dispatch loses the reservation (B9 W2, `docs/brainstorm/HANDOFF.md:120`); an uncertain dispatch leaves the claim to its deadline, because the reviewer release refuses an eligible unrequested action (`mission-service.impl.md:253–254`; B9 A3, W1, W4, PR2).
+  - Gap: a server restart during a dispatch loses the reservation (B9 W2, `docs/brainstorm/HANDOFF.md:120`); an uncertain dispatch leaves the claim to its deadline, because the reviewer release refuses an eligible unrequested action (`mission-service.impl.md:259–260`; B9 A3, W1, W4, PR2).
 - Done when: `pnpm run verify` passes; the tests pass.
 
 ### 06.12 Declare `worker.action.request` with its handler
@@ -291,14 +293,14 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
   4. In `src/worker/service.test.ts`, assert that the handler forwards `caller.identity` and `caller.execution` and reads no input field but the path.
   5. Update the `src/worker/` and `src/mission/` entries of `engine/AGENTS.md` with the modules of this plan.
 - Rules:
-  - The evaluation method of `reviewer@1` at the `worker` placement reaches the internal function through this operation; the later MCP tool calls the same function. `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06", Q1 (debate, 2 rounds, `review:Ulrich`); `worker-service.impl.md:366–367`; decisions D5, D8.
-  - Gap: the operation and its route stand on no page. `worker-service.impl.md:299` and `:407`, `worker-service.md:543–544`, `engine/docs/cli/worker.md:609–622` and `architecture.impl.md:765` need the repair that the decision log names; the operation keeps no CLI leaf.
-  - The performer serves every reviewer execution, whichever harness hosts it, under the full execution proof and its own admission. `worker-service.md:445`; `architecture.impl.md:659`.
-  - Both callers pass the execution identity and nothing else. `worker-service.md:447–448`; `worker-service.impl.md:437`.
-  - The chain proves the execution identity and passes the claim; the handler reads none of its fields from the input. `architecture.impl.md:646–654`; decision D10.
-  - The timeout is 900 s, the value of a call that runs a tool of the Worker Service. `gateway-service.impl.md:301`; `worker-service.impl.md:411`.
-  - A mutation route is idempotent or it completes: a replay inside the TTL answers the recorded items, and after the TTL the Mission record and the reservation refuse a second dispatch. `gateway-service.impl.md:302`; `architecture.impl.md:713–717`; `worker-service.impl.md:424`.
-  - A handler runs its asynchronous work first and performs one `caller.commit` at the end. `architecture.impl.md:697–698`; decision D3; precedent `src/custody/service.ts:799–830`.
+  - The evaluation method of `reviewer@1` at the `worker` placement reaches the internal function through this operation; the later MCP tool calls the same function. `worker-service.impl.md:409–410` (ruled 2026-09-30 on `worker-service.impl.md` "Action performer"); decisions D5, D8.
+  - `worker-service.impl.md` "Action performer" declares `worker.action.request` and its route (`:410–414`). The operation has no CLI command (`:414`; `engine/docs/cli/worker.md:628`).
+  - The performer serves every reviewer execution, whichever harness hosts it, under the full execution proof and its own admission. `worker-service.md:445`; `architecture.impl.md:660`.
+  - Both callers pass the execution identity and nothing else. `worker-service.md:447–448`; `worker-service.impl.md:412`, `:498`.
+  - The chain proves the execution identity and passes the claim; the handler reads none of its fields from the input. `architecture.impl.md:647–655`; decision D10.
+  - The timeout is 900 s, because the operation runs the action performer. `gateway-service.impl.md:302`; `worker-service.impl.md:413`.
+  - A mutation route is idempotent or it completes: a replay inside the TTL answers the recorded items, and after the TTL the Mission record and the reservation refuse a second dispatch. `gateway-service.impl.md:303`; `architecture.impl.md:717–721`; `worker-service.impl.md:485`.
+  - A handler runs its asynchronous work first and performs one `caller.commit` at the end. `architecture.impl.md:698–699`; decision D3; precedent `src/custody/service.ts:799–830`.
   - Each task publishes exactly the operations that it registers. `00-index.md` "Shared files", row `openapi-integration.test.ts`.
 - Done when: `pnpm run verify` passes; the OpenAPI assertion passes.
 
@@ -313,9 +315,9 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
   5. Test: a call without `standIns.intakeActions` answers 500 `system.composition.unwired` on a second fixture.
   6. Test: the shared error envelope, the 900 s timeout and the lifetime of the route.
 - Rules:
-  - Both adapters enter one invocation chain. `architecture.impl.md:613–617`.
-  - Serialized calls with no duplicate dispatch. `worker-service.impl.md:430`.
-  - A replay holds inside one process and inside the TTL. `architecture.impl.md:715`.
+  - Both adapters enter one invocation chain. `architecture.impl.md:614–618`.
+  - Serialized calls with no duplicate dispatch. `worker-service.impl.md:491`.
+  - A replay holds inside one process and inside the TTL. `architecture.impl.md:719`.
   - Named constants for every fixed string and number in a comparison. `architecture.impl.md:15–19`.
 - Done when: `node --test --test-timeout=30000 src/apps/server/action-performer-integration.test.ts` passes; `pnpm run verify` passes.
 
@@ -329,7 +331,7 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
 - Rules:
   - The Project Service refuses `follows.type = "action_end_state"` in a binding write until a retry-safe claim-source contract exists. `mission-service.impl.md:83`; `engine/docs/cli/project.md:348`.
   - Every evaluation claim comes from `Waiting`, so a reviewer execution performs the evaluation on every claim. `worker-service.md:517`; plan 08 task 08.16.
-  - The first version produces no `awaiting-prerequisite` item. `worker-service.impl.md:382`.
+  - The first version produces no `awaiting-prerequisite` item. `worker-service.impl.md:441`.
   - Prefer to forbid a configuration change over a mechanism that handles its edge case. Root `AGENTS.md` "Work with Ulrich".
 - Done when: `pnpm run verify` passes; the tests pass.
 
@@ -342,7 +344,7 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
   3. Parse stdout as JSON for every CLI success. Assert the exit code and the start of stderr for every CLI refusal, and the status and `error.code` for every refusal of the HTTP adapter.
 - Rules:
   - Setup goes through the CLI; the state check is a CLI read, never a store read. ERD 1 decision D13.
-  - One step uses the HTTP adapter `httpClient(workerOperations, fixture.endpoint, <machine token of W>)` from the test: `worker.action.request`, because no CLI command calls the performer (`worker-service.impl.md:407`), as plan 04 drives `mission.evidence.request` (task 04.E).
+  - One step uses the HTTP adapter `httpClient(workerOperations, fixture.endpoint, <machine token of W>)` from the test: `worker.action.request`, because no CLI command calls the performer (`worker-service.impl.md:414`), as plan 04 drives `mission.evidence.request` (task 04.E).
   - The fake answers a scripted `PlatformAddress` or result class, and no plan performs a real platform call. `00-index.md` "Consumed seams"; decision D16.
   - Named constants for every fixed string and number in a comparison. `architecture.impl.md:15–19`.
   - The fixture inputs are the inputs that the committed validation accepts. `.dev/erd-01/decisions-log.md` 03.5, 05.E, 06.E; `src/project/contract.ts:89–109`; `src/worker/catalog.ts:70–71` (`claude@1`); plan 04 "E2E".
@@ -389,13 +391,13 @@ Setup, in order (each command exits 0, token H):
 | E06.16 | W: `kanthord scheduler execution release <e6> --file { "furtherWork": false }`                                                                                                                                                                                                                                                                                                                                                                                                                                           | 1                 | stderr starts with `mission.release.obligation_unmet:`                                                                                                                                                                                                                                                                                        |
 | E06.17 | H: `kanthord mission node pause <P> --file` act(Evaluating, 1); then `kanthord mission node resume <P> --file` act(Paused, 1) plus `"target": "Waiting"`; then W: `kanthord scheduler work pull --file pull.json`; then `request(e7)`; then `request(e1)`                                                                                                                                                                                                                                                                | 0, 0, 0, 200, 403 | third `execution.nodeId` = `P`, `execution.attempt` 1 → `e7`; fourth `items[0].kind` `uncertain`, `items[0].uncertainty` `effect`, `performCalls` of length 4; fifth `error.code` `gateway.invocation.execution_proof_failed`                                                                                                                 |
 
-E06.2, E06.4, E06.6, E06.7, E06.12, E06.15 and E06.17 assert the operation `worker.action.request` and the two refusal rows that wait for the page repair of `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06". The test is committed after Aelita writes each accepted code on its page (ruling R3).
+E06.2, E06.4, E06.6, E06.7, E06.12, E06.15 and E06.17 assert the operation `worker.action.request` and the refusal codes `worker.action_performer.claim_not_evaluation` and `worker.action_performer.assessment_not_current`. `worker-service.impl.md:410–414`, `:443` and `engine/docs/cli/worker.md:628`, `:752–753` declare them.
 
 ## Blockers
 
 None open. The debate engine settled the four gaps in two rounds:
 
-- DEBATE: the transport from the `worker` placement to the internal performer with the MCP server out of scope - rounds:2 - verdict: (a), one `client` operation `worker.action.request` that calls the internal function, pending the page repair by Ulrich; (b) drops required behavior of plan 08 and D5 exempts only the external-harness journey of plan 10; (c) contradicts ruling R1.
+- DEBATE: the transport from the `worker` placement to the internal performer with the MCP server out of scope - rounds:2 - verdict: (a), one `client` operation `worker.action.request` that calls the internal function, ruled 2026-09-30 on `worker-service.impl.md` "Action performer"; (b) drops required behavior of plan 08 and D5 exempts only the external-harness journey of plan 10; (c) contradicts ruling R1.
 - DEBATE: the Mission read of the performer - rounds:2 - verdict: (a), a Mission Kind 2 collaboration `actionContextOf` in one transaction with `requireRunning`; its invariant is bounded to the snapshot and guarantees no liveness through the external operation.
-- DEBATE: the no-redispatch invariant across executions of one attempt - rounds:2 - verdict: a reservation keyed by `(nodeId, attempt, requirementKey)` and taken before the first Intake call, beside the per-execution mutex; only the owner settles; a contender answers `uncertain` `effect` and does not wait.
+- DEBATE: the no-redispatch invariant across executions of one attempt - rounds:2 - verdict: a reservation keyed by `(nodeId, attempt, requirementKey)` and taken before the first Intake call, beside the per-execution mutex; only the owner settles; a contender answers `uncertain` `effect` and does not wait; ruled 2026-09-30 on `worker-service.impl.md` "Action performer".
 - DEBATE: the classification of the seam outcomes - rounds:2 - verdict: qualified yes; `uncertain` `recording` for an address with an unconfirmed or refused submission; no `both`, because no submission follows an unknown effect; every failure after a write may have started keeps the protection, and the reuse considers every earlier candidate, checks the head and base repositories, and uses one declared branch-name function.

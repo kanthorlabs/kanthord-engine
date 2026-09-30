@@ -20,7 +20,7 @@ ERD 1 decision D4 stands. Every collaboration in a `Dependencies` type is requir
 
 ## D5 — Boundary, order and the MCP server
 
-Ulrich ruled on 2026-09-29 (R1): the candidate boundary and the candidate order of `.dev/erd-02-author/session-prompt.md` stand, and the MCP server is out of scope. The operations `worker.mcp.message`, `worker.mcp.listen` and `worker.mcp.close`, the record `mcp_session_<ulid>` and the MCP tool source of the tool table belong to the phase that follows the external-harness setup. Plan 06 delivers the action performer as the internal function that the evaluation method of `reviewer@1` calls (`worker-service.impl.md:365–366`). At the `worker` placement (D8) that method runs in `kanthord serve worker`, and the pages give it no transport to the server-internal function without the MCP tool, so plan 06 declares the `client` operation `worker.action.request` as that transport (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06", Q1, `review:Ulrich`); the later MCP tool calls the same function. The external-harness E2E journey of plan 10 covers a node that requires no external action.
+Ulrich ruled on 2026-09-29 (R1): the candidate boundary and the candidate order of `.dev/erd-02-author/session-prompt.md` stand, and the MCP server is out of scope. The operations `worker.mcp.message`, `worker.mcp.listen` and `worker.mcp.close`, the record `mcp_session_<ulid>` and the MCP tool source of the tool table belong to the phase that follows the external-harness setup. Plan 06 delivers the action performer as the internal function that the evaluation method of `reviewer@1` calls (`worker-service.impl.md:409–410`). At the `worker` placement (D8) that method runs in `kanthord serve worker`, and the pages give it no transport to the server-internal function without the MCP tool, so plan 06 declares the `client` operation `worker.action.request` as that transport (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 06", Q1, `review:Ulrich`); the later MCP tool calls the same function. The external-harness E2E journey of plan 10 covers a node that requires no external action.
 
 ## D6 — Consumed seams and stand-ins
 
@@ -54,7 +54,7 @@ The order is 01 Mission attempts and human controls, 02 Worker registration, 03 
 | Worker `IntakeActions`                                                            | 06        | ERD 3       |
 | Scheduler `TraceIdentity`                                                         | 03        | ERD 4       |
 
-One exception: the production stand-in of `SchedulerWakeup.wake` is a no-op until plan 03, because no work pull exists before plan 03 and a wakeup has no receiver. An ERD 1 graph write answers as before. Every other production stand-in is `unwired`.
+One exception: the production stand-in of `SchedulerWakeup.wake` is a no-op until plan 03, because no work pull exists before plan 03 and a wakeup has no receiver. An ERD 1 graph write answers as before; an `unwired` wake would throw after the commit, and the invocation chain would record a 500 for a committed write. Every production stand-in except `SchedulerWakeup.wake` and `TraceIdentity` is `unwired`; decision D6 states the `TraceIdentity` stand-in. Ulrich confirmed the exception on 2026-09-30.
 
 ## D10 — The execution proof
 
@@ -122,4 +122,4 @@ Shutdown during a live execution, a registration or a work pull with no answer, 
 
 ## D26 — Pre-existing deviations are findings, not blockers
 
-ERD 1 decision D16 stands. `static/openapi.yaml` predates ERD 1. Seven items of `.dev/erd-01/report.md` "Pending for Ulrich" stay pending, and no ERD 2 plan resolves one of them. `worker provider check` (`engine/docs/cli/worker.md` "provider check") has no ERD 1 or ERD 2 plan; Ulrich left it to the phase after the external harness (2026-09-30), and plan 10 task 10.6 exempts it by name.
+ERD 1 decision D16 stands. `static/openapi.yaml` predates ERD 1. Seven items of `.dev/erd-01/report.md` "Pending for Ulrich" stay pending, and no ERD 2 plan resolves one of them. `worker provider check` (`engine/docs/cli/worker.md` "provider check") has no ERD 1 or ERD 2 plan; Ulrich left it to the phase after the external harness (2026-09-30), and plan 10 task 10.6 exempts it by name. Plan 02 owns the complete machine-JWT claim transition (`project_id`, `resource_identity`, the tombstone rule of `gateway-service.impl.md:129–131`, the direct-adapter recheck, the CLI form `jwt generate --project <projectId> --binding <binding name>` and the affected fixtures; ruled 2026-09-30, S8), because the ERD 1 resolver let a token of a removed binding resolve again after a rebind.

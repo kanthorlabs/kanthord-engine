@@ -40,6 +40,7 @@ Out of scope:
 - `docs/brainstorm/mission-service.impl.md:74–91` — `FrozenAction` and the required external actions of an attempt.
 - `docs/brainstorm/mission-service.impl.md:158–172` — the node API admission and the retired and terminal refusals.
 - `docs/brainstorm/mission-service.impl.md:196–229`, `:231–242`, `:244–252` — the assessment, the request record and the release admission.
+- `docs/brainstorm/mission-service.impl.md:208`, `:234–239` — the currency of a human assessment and the currency evaluator.
 - `docs/brainstorm/mission-service.impl.md:355–403`, `:405–425`, `:427–440`, `:442–448` — the outcome record, node ready, node resume and node override.
 - `docs/brainstorm/mission-service.impl.md:462`, `:500–519`, `:528–534`, `:541–543` — `liveNodesPinning`, the mission version rules, the graph write answer and the operation contracts.
 - `docs/brainstorm/mission-service.impl.md:562–583`, `:664–666` — the tests of the actor, the attempt, the controls and the loss.
@@ -54,7 +55,7 @@ Out of scope:
 - `engine/docs/cli/scheduler.md:500` — `mission.release.obligation_unmet`.
 - `docs/brainstorm/architecture.impl.md:341–349` — the error code form and the CLI code form.
 - `engine/.agents/plan/erd-02-execution/00-index.md`, `decisions.md` — the boundary, the seams and decisions D1 to D26.
-- `.dev/erd-02/decisions-log.md` entries of 2026-09-29 for plan 01 — the wakeup stand-in and the currency mechanism.
+- `.dev/erd-02/decisions-log.md` entries of 2026-09-29 for plan 01 — the wakeup stand-in and the debate record of the currency mechanism.
 - Root `AGENTS.md` "Database design", "Contracts" and "Rejected proposals".
 
 ## Depends on
@@ -281,11 +282,12 @@ The `claim` signature differs from the sketch of `00-index.md` "Seams": it takes
   3. Implement `assessmentRecord(tx, dependencies, row): Assessment`. For a human assessment, answer the stored `actor`, `executionId: null`, `testedInput: null`, `currency: null` and `workerVersion: null`. For an execution assessment, derive `actor` as `{ kind: "execution", executionId, clientId, name }` and `workerVersion` as `workerName` from `executionAttribution.of`, and assert a non-null answer. Derive `childNodeIds` from the nodes of `child_outcome_ids`.
   4. Add tests: a later human revision leaves A current; a pause and a resume leave A current; a block in attempt k fails `authorityAdmits`; a human assessment of attempt k + 1 leaves A of attempt k admitted; a closure whose outcome names A leaves A current; a new outcome of a child objective fails `contextMatches` of the initiative assessment; a later execution assessment of attempt k fails `orderSelected` of A; a human assessment answers `currency: null`.
 - Rules:
-  - The mechanism of `.dev/erd-02/decisions-log.md` 2026-09-29 "the currency mechanism" (debate, 2 rounds, `review:Ulrich`).
+  - The service computes the currency of an execution assessment at each read and stores none. The three checks and `current` follow the page bullets. `mission-service.impl.md:234–239` (ruled 2026-09-30 on `mission-service.impl.md` "The assessment").
+  - The read answers `currency: null` for a human assessment. `mission-service.impl.md:208`.
   - The three checks. `mission-service.md:376–394`; `mission-service.vocabulary.md:386–404`.
   - The currency is computed at each read and the order check reads `sequence` over the execution assessments only. `02-execution.md:33`, `:270`.
-  - The current outcome of a node is its outcome with the greatest `sequence`. `02-execution.md:277`.
-  - An execution assessment stores `execution_id`, and the read derives the execution actor and `workerVersion`. `02-execution.md:263`; `mission-service.impl.md:202`, `:229`.
+  - The current outcome of a node is its outcome with the greatest `sequence`. `02-execution.md:277`; `mission-service.impl.md:236`.
+  - An execution assessment stores `execution_id`, and the read derives the execution actor and `workerVersion`. `02-execution.md:263`; `mission-service.impl.md:206`, `:233`.
   - `Currency` and `Assessment`. `engine/docs/cli/mission.md:813–814`.
   - Gap: the recovery of a stale assessment stays B9 B2 (`docs/brainstorm/HANDOFF.md:103`).
 - Done when: `pnpm run verify` passes; the eight tests pass.
@@ -575,4 +577,4 @@ E01.15, E01.16, E01.20, E01.21, E01.22 and E01.24 assert codes of the mark `code
 None open. The debate engine settled two gaps:
 
 - DEBATE: the Scheduler wakeup before plan 03 - rounds:1 - verdict: production passes `unwired("SchedulerWakeup.wake")` under D9 and `gatewayFixture` a no-op; the D9 table takes the row, and a production no-op needs an explicit D9 exception. Aelita ruled the exception in decision D9 on 2026-09-30: production passes a no-op, because no work pull exists before plan 03.
-- DEBATE: the currency mechanism and its owner - rounds:2 - verdict: plan 01 owns a read-time evaluator with an attempt-scoped authority rule (no later human assessment of the same attempt) and the order over the execution assessments of the same attempt; the release predicate also checks the eligible unrequested actions.
+- DEBATE: the currency mechanism and its owner - rounds:2 - verdict: plan 01 owns a read-time evaluator with an attempt-scoped authority rule (no later human assessment of the same attempt) and the order over the execution assessments of the same attempt; the release predicate also checks the eligible unrequested actions. Ruled 2026-09-30 on `mission-service.impl.md` "The assessment".

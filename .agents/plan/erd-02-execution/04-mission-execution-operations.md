@@ -132,7 +132,7 @@ Out of scope:
   5. In `contract.test.ts`, assert that each input refuses an unknown key and an `actor` key, that `attempt: 0` fails the context, that `force: true` without `reason` fails, that a size of 5 GiB passes and one byte more fails, that `text/plain; charset=utf-8` fails and `text/plain` passes, and that an assessment with a `method` key fails.
 - Rules:
   - Every field name equals the CLI page: `ExecutionContext`, `EvidenceSubmit`, `ContentBytes`, `Verification`, `AssessmentBody`, `AssessmentSubmit` (`engine/docs/cli/mission.md:715–723`); `EvidenceDelete`, `NodeCheck` (`:706–707`); `EvidenceSubmitResult`, `AssetUploadResult` (`:731–732`); `StoredContent`, `AssessmentResult`, `NodeCheckResult` (`:812`, `:815`, `:818`).
-  - `EvidenceRequest` holds every field of `ExecutionContext` plus `requirementKey`, `subject` and `address`. `mission-service.impl.md:89–90`; decision D10; `.dev/erd-02/decisions-log.md` 2026-09-30 Q1 (debate, 1 round, `review:Ulrich`).
+  - `EvidenceRequest` holds every field of `ExecutionContext` plus `requirementKey`, `subject` and `address`. `mission-service.impl.md:89–90` (ruled 2026-09-30); decision D10.
   - An execution submission names an attempt of 1 or more. `engine/docs/cli/mission.md:711`; `02-execution.md:244`.
   - An object is at most 5 GiB; the server checks that bound at submit. `02-execution.md:251`; `mission-service.impl.md:297`. A value outside the schema answers 400 `gateway.request.validation_failed`. `engine/docs/cli/other.md:810`.
   - `mediaType` is an RFC 6838 `type/subtype` with no parameter, in ASCII, at most 255 bytes. `mission-service.impl.md:284`.
@@ -205,7 +205,7 @@ Out of scope:
   - The Intake Service signs a presigned PUT with a lifetime of 1 hour, and the answer supplies one PUT for each object asset. `mission-service.impl.md:301`; `engine/docs/cli/mission.md:563`.
   - A row that records a remote effect follows that effect; the signature is asynchronous work before the commit. `02-execution.md:187`; `architecture.impl.md:697–699`.
   - An evidence has no natural key; a repeat creates a second row. `02-execution.md:245`; `architecture.impl.md:717`.
-  - Presigned URLs never reach agent-facing stdout, so the CLI leaf refuses an object asset and directs it to the host helper. `engine/docs/cli/mission.md:781`, `:549`; `.dev/erd-02/decisions-log.md` 2026-09-30 Q3 (debate, 1 round, `review:Ulrich`).
+  - Presigned URLs never reach agent-facing stdout, so the CLI leaf refuses an object asset and directs it to the host helper. `engine/docs/cli/mission.md:781`, `:549`, `:540` (ruled 2026-09-30).
   - CLI codes `cli.mission.evidence.submit.invalid_node_id` and `cli.mission.evidence.submit.object_asset`: proposed under `architecture.impl.md:348`.
   - The task that declares a route adds the CLI leaf and regenerates OpenAPI; an oversized fragment takes the named exception. ERD 1 decision D13; decision D23.
 - Done when: `pnpm run verify` passes; the tests pass; `kanthord mission evidence submit --help` exits 0.
@@ -263,9 +263,9 @@ Out of scope:
   - An execution reads no content of another node, except a current child objective of its initiative at the revision of its current outcome. `engine/docs/cli/mission.md:198–200`, `:541–542`.
   - An identity that a caller guesses conveys no authority, so an asset outside the bound answers 404. `engine/docs/cli/mission.md:145–146`.
   - A repository asset answers 409 `mission.evidence.content_repository` with `evidenceId` and the address, after the authorization and the bound checks. `mission-service.impl.md:285`; `engine/docs/cli/mission.md:812`, `:923`.
-  - A platform asset answers 409 `mission.evidence.content_platform` with `evidenceId` and the address. `.dev/erd-02/decisions-log.md` 2026-09-30 Q4 (debate, 1 round, `review:Ulrich`). Code: proposed; no code of `engine/docs/cli/other.md` and no ERD 1 code covers it.
+  - A platform asset answers 409 `mission.evidence.content_platform` with `evidenceId` and the address. `mission-service.impl.md:293`; `engine/docs/cli/mission.md:949` (ruled 2026-09-30).
   - The Intake Service signs the GET through `intake.storage.get` for a human and `intake.execution.storage.get` for an execution, at the recorded version. `mission-service.impl.md:325–326`; `intake-service.impl.md:51`.
-  - The reader's component keeps the GET URL outside the agent context, so the E leaf refuses an object answer. `engine/docs/cli/mission.md:538`, `:781`; `.dev/erd-02/decisions-log.md` 2026-09-30 Q3 (`review:Ulrich`).
+  - The reader's component keeps the GET URL outside the agent context, so the E leaf refuses an object answer. `engine/docs/cli/mission.md:540`, `:781`, `:904` (ruled 2026-09-30).
   - A read of a deleted asset answers 404 `mission.record.not_found` with no content. `mission-service.impl.md:356`; `engine/docs/cli/mission.md:821`.
 - Done when: `pnpm run verify` passes; the tests pass.
 
@@ -330,7 +330,7 @@ Out of scope:
   5. Add tests: a request writes one evidence with one `platform` asset; the external-action read answers `unresolved`; a steps claim answers `mission.execution.claim_not_evaluation`; an unknown key answers `mission.request.requirement_unknown`; a `branch_push` address for a `pull_request` action and a foreign resource identity answer `mission.request.address_mismatch`; a second request answers `mission.request.already_requested`; the unique index refuses a direct second insert.
 - Rules:
   - A `client` operation under the live evaluation claim; it checks the node, the open attempt, the required external action and its binding, and it answers `Evidence`. `mission-service.impl.md:89–90`.
-  - The route and the input with every field of `ExecutionContext`. `.dev/erd-02/decisions-log.md` 2026-09-30 Q1 (debate, 1 round, `review:Ulrich`); decision D10.
+  - The route and the input with every field of `ExecutionContext`. `mission-service.impl.md:89–90` (ruled 2026-09-30); decision D10.
   - No CLI command projects the operation. `engine/docs/cli/mission.md:502–503`, `:847`.
   - `requirement_key` equals the key of a required external action of the attempt, and the evidence holds exactly one `platform` asset. `02-execution.md:287`; `mission-service.md:256–260`. Code `mission.request.requirement_unknown` (400): proposed in `00-index.md` "Codes for Ulrich".
   - `PlatformAddress` holds the `kind` and the `resourceIdentity` of the binding and never a `bindingId`. `mission-service.impl.md:237`; `engine/docs/cli/mission.md:730`. Code `mission.request.address_mismatch` (400): proposed; the condition stands at `mission-service.impl.md:89` ("its binding"). No code of `engine/docs/cli/other.md` and no ERD 1 code covers it.
@@ -382,7 +382,7 @@ Out of scope:
   7. Add tests: a delete on a terminal chain removes the row and keeps the evidence with zero assets; a live chain answers `mission.evidence.remove_node_live`; `force` with a reason deletes on a live chain; a failed object delete keeps the row, and a repeat deletes again; the delete of the last pending asset publishes the evidence; a request asset answers `mission.evidence.request_asset_refused`; a stale version answers `mission.version.conflict`; the mission version stays unchanged; no row records the remover.
 - Rules:
   - The route, the access H, the input and the answer 204. `mission-service.impl.md:339`, `:341`; `engine/docs/cli/mission.md:406`, `:448–453`.
-  - The flag `--expected-mission-version` supplies `expectedMissionVersion`. `.dev/erd-02/decisions-log.md` 2026-09-30 Q2 (debate, 1 round, `review:Ulrich`); precedent `engine/docs/cli/worker.md:131–133`. The value is a positive safe integer. `engine/docs/cli/mission.md:124`.
+  - The flag `--expected-mission-version` supplies `expectedMissionVersion`. `engine/docs/cli/mission.md:406–407`, `:451` (ruled 2026-09-30); precedent `engine/docs/cli/worker.md:131–133`. The value is a positive safe integer. `engine/docs/cli/mission.md:124`.
   - Without force, the node and every ancestor hold a terminal state; a live chain answers 409 `mission.evidence.remove_node_live`. `mission-service.impl.md:343–344`; `engine/docs/cli/mission.md:924`.
   - The service deletes the content first and the row after it; a failed content delete keeps the row. `mission-service.impl.md:348–349`.
   - The object delete uses the storage binding revision that the asset pins and the recorded version. `mission-service.impl.md:348`.
@@ -410,7 +410,7 @@ Out of scope:
   6. Add tests: a delete removes the identity from each set and keeps the effect of the outcome; the derived closing event stays after the forced delete of a request; a request without force answers `mission.evidence.request_force_required`; a forced delete of a request of the open attempt holds the node in `Paused` and revokes a live claim; a request of a closed attempt changes no state; a read after the delete answers `mission.record.not_found`.
 - Rules:
   - The route, the access H, the input and the answer 204. `mission-service.impl.md:340–341`; `engine/docs/cli/mission.md:407`, `:448–454`.
-  - The flag `--expected-mission-version`. `.dev/erd-02/decisions-log.md` 2026-09-30 Q2 (`review:Ulrich`).
+  - The flag `--expected-mission-version`. `engine/docs/cli/mission.md:406–407`, `:451` (ruled 2026-09-30).
   - The delete removes every asset and the evidence row, and it removes the identity from every `evidenceIds` set. `02-execution.md:253`; `mission-service.impl.md:340`.
   - A request evidence is deleted only with force, in every node state. `mission-service.impl.md:352`; `engine/docs/cli/mission.md:926`.
   - A forced delete of a request of the open attempt holds the node in `Paused` in the same transaction, unless the node is already `Paused`; a request of a closed attempt or of a terminal node changes no state. `mission-service.impl.md:354`; `02-execution.md:291`; `mission-service.md:558`.
@@ -485,7 +485,7 @@ Out of scope:
 - Rules:
   - Setup goes through the CLI; the state check is a CLI read, never a store read. ERD 1 decision D13.
   - Two steps use the HTTP adapter `httpClient(missionOperations, fixture.endpoint, machineToken)` from the test: the object transfer, because the test acts as the host component (decision D17; `.dev/erd-02/decisions-log.md` 2026-09-30 Q3), and `mission.evidence.request`, because no CLI command projects it (`engine/docs/cli/mission.md:502–503`).
-  - The machine token comes from `fixture.machineToken(<harness binding id>)`, as the human token comes from `fixture.token`. `src/apps/server/test-support.ts:239–247`.
+  - The machine token comes from `fixture.machineToken(<projectId>, "harness")`, as the human token comes from `fixture.token`. `src/apps/server/test-support.ts:239–247`.
   - Named constants for every fixed string and number in a comparison. `architecture.impl.md:15–19`.
   - The fixture inputs are the inputs that the committed validation accepts. `.dev/erd-01/decisions-log.md` 03.5, 05.E, 06.E; `src/custody/platforms.ts:43–46`, `:83–87`; `src/project/contract.ts:89–134`; `src/worker/catalog.ts` `claude@1`.
 - Done when: `node --test --test-timeout=30000 src/apps/server/e2e-mission-execution-operations.test.ts` passes; `pnpm run verify` passes.
