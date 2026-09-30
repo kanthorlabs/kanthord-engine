@@ -105,8 +105,6 @@ export function composeServices(options: {
             issuedAt,
             context,
           ),
-        resolveWorkerBinding: (binding, context) =>
-          project.resolveWorkerBinding(binding, context),
       },
       worker: {
         findByClient: (client) => worker.registrations.findByClient(client),

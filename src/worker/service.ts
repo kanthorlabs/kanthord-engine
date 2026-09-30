@@ -753,8 +753,8 @@ export class WorkerService implements Service {
             assert.equal(registration.name, identity.name);
             assert.equal(registration.projectId, identity.projectId);
             assert.equal(
-              registration.workerBindingId,
-              identity.workerBindingId,
+              registration.resourceIdentity,
+              identity.resourceIdentity,
             );
             runtimeIdentity = registration.runtimeIdentity;
             assert.ok(

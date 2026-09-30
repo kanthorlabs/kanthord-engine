@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { z } from "zod";
 import type { Context } from "../kernel/context.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
@@ -82,6 +83,12 @@ export const bindingNameSchema = z
   .min(1)
   .max(PROJECT_NAME_MAX_LENGTH)
   .regex(PROJECT_NAME_PATTERN);
+export function workerResourceIdentity(bindingName: string): string {
+  assert.ok(bindingNameSchema.safeParse(bindingName).success);
+  const identity = `${BindingKind.Worker}:${WORKER_PLATFORM}:${bindingName}`;
+  assert.ok(identity.endsWith(`:${bindingName}`));
+  return identity;
+}
 export function isNonblank(s: string): boolean {
   return s.trim().length > EMPTY_LENGTH;
 }

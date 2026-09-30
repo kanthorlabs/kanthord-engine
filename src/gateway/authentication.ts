@@ -7,7 +7,6 @@ import {
   CLIENT_IDENTITY_PREFIX,
   MAX_HUMAN_USERNAME_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
-  MAX_BINDING_ID_LENGTH,
   isHumanIdentity,
   isMachineIdentity,
   type MachineIdentity,
@@ -25,7 +24,7 @@ const MILLISECONDS_PER_SECOND = 1000;
 const BEARER_PREFIX_LENGTH = 7;
 const clientIdentitySchema = identitySchema(CLIENT_IDENTITY_PREFIX);
 export interface AuthenticationLookups {
-  project: ProjectBindings;
+  project: Pick<ProjectBindings, "resolveWorkerGroup">;
   worker: Pick<WorkerRegistrations, "findByClient">;
 }
 export class Authentication {
@@ -49,25 +48,34 @@ export class Authentication {
   private async resolveMachine(
     clientId: string,
     name: string,
-    binding: string,
+    projectId: string,
+    resourceIdentity: string,
+    issuedAt: number,
     jti: string,
     context: Context,
   ): Promise<MachineIdentity> {
-    const resolved = await this.machines?.project.resolveWorkerBinding(
-      binding,
+    const resolved = await this.machines?.project.resolveWorkerGroup(
+      projectId,
+      resourceIdentity,
+      issuedAt,
       context,
     );
-    if (!resolved || resolved.workerBindingId !== binding) throw unauthorized();
+    if (
+      !resolved ||
+      resolved.projectId !== projectId ||
+      resolved.resourceIdentity !== resourceIdentity
+    )
+      throw unauthorized();
     const registration = this.machines!.worker.findByClient(clientId);
     if (
       registration &&
       (registration.clientId !== clientId ||
-        registration.workerBindingId !== resolved.workerBindingId ||
+        registration.resourceIdentity !== resolved.resourceIdentity ||
         registration.projectId !== resolved.projectId)
     )
       throw unauthorized();
     return mintMachineIdentity(
-      { clientId, name, ...resolved },
+      { clientId, name, ...resolved, issuedAt },
       jti,
       registration?.runtimeIdentity,
     );
@@ -84,7 +92,9 @@ export class Authentication {
     const current = await this.resolveMachine(
       identity.clientId,
       identity.name,
-      identity.workerBindingId,
+      identity.projectId,
+      identity.resourceIdentity,
+      identity.issuedAt,
       identity.jti,
       context,
     );
@@ -112,6 +122,7 @@ export class Authentication {
       throw unauthorized();
     }
     if (
+      "binding" in claims ||
       !isString(claims.jti) ||
       !Number.isSafeInteger(claims.iat) ||
       !Number.isSafeInteger(claims.exp) ||
@@ -122,7 +133,8 @@ export class Authentication {
     if (claims.kind === IdentityKind.Human) {
       if (
         !validText(claims.sub, MAX_HUMAN_USERNAME_LENGTH) ||
-        "binding" in claims ||
+        "project_id" in claims ||
+        "resource_identity" in claims ||
         "reg" in claims
       )
         throw unauthorized();
@@ -132,13 +144,17 @@ export class Authentication {
       claims.kind !== IdentityKind.Client ||
       !isString(claims.sub) ||
       !clientIdentitySchema.safeParse(claims.sub).success ||
-      !validText(claims.binding, MAX_BINDING_ID_LENGTH)
+      !isString(claims.project_id) ||
+      !identitySchema("project").safeParse(claims.project_id).success ||
+      !isString(claims.resource_identity)
     )
       throw unauthorized();
     return this.resolveMachine(
       claims.sub!,
       claims.name,
-      claims.binding,
+      claims.project_id,
+      claims.resource_identity,
+      claims.iat! * MILLISECONDS_PER_SECOND,
       claims.jti,
       context,
     );

@@ -15,6 +15,7 @@ import {
   fakeMachines,
   gatewayFixture,
   TEST_WORKER_BINDING,
+  TEST_PROJECT_ID,
 } from "./test-support.ts";
 
 const MAX_WIRE_NODES = 10000;
@@ -84,7 +85,10 @@ function assertEquivalent(
 
 test("every composed operation conforms across direct and HTTP adapters", async (t) => {
   const fixture = await gatewayFixture(t, { machines: fakeMachines() });
-  const machineToken = await fixture.machineToken(TEST_WORKER_BINDING);
+  const machineToken = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
   for (const { operation } of fixture.gateway.registry.all()) {
     await t.test(operation.id, async () => {
       const token =

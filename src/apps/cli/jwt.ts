@@ -14,7 +14,8 @@ import {
   KANTHORD_AUTH_USERNAME,
   parseDisplayName,
   parseHumanUsername,
-  parseWorkerBinding,
+  parseBindingName,
+  parseProjectId,
   requireTokenTerminal,
 } from "../../gateway/local.ts";
 import {
@@ -73,6 +74,7 @@ function renderClaims(token: string): string {
 interface GenerateOptions {
   name?: string;
   binding?: string;
+  project?: string;
   output?: string | boolean;
   endpoint?: string;
 }
@@ -85,6 +87,16 @@ function validateGenerateOptions(
     throw new Diagnostic(
       "cli.jwt.username_with_binding",
       "jwt: a username cannot be combined with --binding.",
+    );
+  if (options.binding !== undefined && options.project === undefined)
+    throw new Diagnostic(
+      "cli.jwt.binding_without_project",
+      "jwt generate: --binding requires --project.",
+    );
+  if (options.project !== undefined && options.binding === undefined)
+    throw new Diagnostic(
+      "cli.jwt.project_without_binding",
+      "jwt generate: --project requires --binding.",
     );
   if (options.output !== undefined && options.binding !== undefined)
     throw new Diagnostic(
@@ -124,9 +136,14 @@ export function addJWTCommand(program: Command): void {
       parseDisplayName,
     )
     .option(
-      "--binding <worker binding>",
-      "Issue a machine JWT (nonblank binding, 1–128 characters; no username)",
-      parseWorkerBinding,
+      "--binding <binding name>",
+      "Issue a machine JWT (binding name, 1–63 lower-case letters, digits or hyphens; no username)",
+      parseBindingName,
+    )
+    .option(
+      "--project <project id>",
+      "Project identity of the worker binding",
+      parseProjectId,
     )
     .option(
       "--output [path]",
@@ -154,7 +171,7 @@ export function addJWTCommand(program: Command): void {
             : await generateMachineJWT(
                 config.masterKey,
                 config.gateway.tokenLifetime,
-                options.binding,
+                { projectId: options.project!, bindingName: options.binding },
                 options.name,
               );
         if (options.output !== undefined) {

@@ -5,6 +5,7 @@ import {
   gatewayFixture,
   fakeLookups,
   TEST_WORKER_BINDING,
+  TEST_PROJECT_ID,
 } from "./test-support.ts";
 import { directClient } from "./index.ts";
 import { OperationResultType } from "../kernel/operation.ts";
@@ -103,7 +104,10 @@ test("resource healthcheck requires a human and returns four empty owners", asyn
     errorSchema.parse(await anonymous.json()).error.code,
     UNAUTHORIZED_ERROR_CODE,
   );
-  const machineToken = await fixture.machineToken(TEST_WORKER_BINDING);
+  const machineToken = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
   const machine = await fixture.request(gatewayOperations.healthcheck.path, {
     headers: { Authorization: `Bearer ${machineToken}` },
   });

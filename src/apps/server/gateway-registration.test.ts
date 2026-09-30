@@ -48,7 +48,7 @@ const machineRead = {
   input: emptyInput,
   output: z.strictObject({
     projectId: z.string(),
-    workerBindingId: z.string(),
+    resourceIdentity: z.string(),
     name: z.string(),
     runtimeIdentity: z.string(),
   }),
@@ -75,13 +75,17 @@ async function fixtureForRegistration(
     assert.ok(caller.identity.runtimeIdentity);
     return {
       projectId: caller.identity.projectId,
-      workerBindingId: caller.identity.workerBindingId,
+      resourceIdentity: caller.identity.resourceIdentity,
       name: caller.identity.name,
       runtimeIdentity: caller.identity.runtimeIdentity,
     };
   });
   const fixture = await gatewayFixture(t, { registry, machines });
-  const token = await fixture.machineToken(TEST_WORKER_BINDING, DISPLAY_NAME);
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+    DISPLAY_NAME,
+  );
   const client = httpClient(workerOperations, fixture.endpoint, token);
   assert.equal(machines.worker.registrations.size, NO_REGISTRATIONS);
   assert.equal(decode(token).payload.name, DISPLAY_NAME);
@@ -101,7 +105,7 @@ function assertFailure(
 test("absent, removed and unavailable worker bindings refuse registration before reserving a key", async (t) => {
   const fixture = await fixtureForRegistration(t);
   for (const token of [
-    await fixture.machineToken("absent"),
+    await fixture.machineToken(TEST_PROJECT_ID, "absent"),
     fixture.machineJWT,
   ]) {
     fixture.machines.project.bindings.get(TEST_WORKER_BINDING)!.available =
@@ -125,7 +129,10 @@ test("absent, removed and unavailable worker bindings refuse registration before
 
 test("concurrent machine registrations cannot oversubscribe one binding", async (t) => {
   const fixture = await fixtureForRegistration(t);
-  const otherToken = await fixture.machineToken(TEST_WORKER_BINDING);
+  const otherToken = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
   const other = httpClient(workerOperations, fixture.endpoint, otherToken);
   const results = await Promise.all([
     fixture.client.register(input),
@@ -230,7 +237,7 @@ test("work requires a live registration and machine JWTs never authorize human v
   assert.ok(response.type === OperationResultType.Completed);
   assert.deepEqual(response.data, {
     projectId: TEST_PROJECT_ID,
-    workerBindingId: TEST_WORKER_BINDING,
+    resourceIdentity: `worker:kanthord:${TEST_WORKER_BINDING}`,
     name: DISPLAY_NAME,
     runtimeIdentity: registered.data.runtimeIdentity,
   });
@@ -310,7 +317,10 @@ test("another client using the same key registers and runs its own mutation inst
   const registrationKey = ulid();
   const mutationKey = ulid();
   for (let index = 0; index < TWO_CLIENTS; index++) {
-    const token = await fixture.machineToken(TEST_WORKER_BINDING);
+    const token = await fixture.machineToken(
+      TEST_PROJECT_ID,
+      TEST_WORKER_BINDING,
+    );
     const worker = httpClient(workerOperations, fixture.endpoint, token);
     assert.ok(
       (await worker.register(input, { idempotencyKey: registrationKey }))

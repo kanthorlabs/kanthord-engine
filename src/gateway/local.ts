@@ -4,14 +4,17 @@ import { sign } from "hono/jwt";
 import { ulid } from "ulid";
 import { Diagnostic } from "../kernel/errors.ts";
 import { deriveKey } from "../kernel/json.ts";
-import { createIdentity } from "../kernel/identity.ts";
+import { createIdentity, identitySchema } from "../kernel/identity.ts";
+import {
+  bindingNameSchema,
+  workerResourceIdentity,
+} from "../project/contract.ts";
 import { isString } from "../kernel/values.ts";
 import {
   IdentityKind,
   CLIENT_IDENTITY_PREFIX,
   MAX_HUMAN_USERNAME_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
-  MAX_BINDING_ID_LENGTH,
 } from "../kernel/caller.ts";
 export const KANTHORD_AUTH_USERNAME = "kanthorlabs";
 const MILLISECONDS_PER_SECOND = 1000;
@@ -44,13 +47,24 @@ export function parseDisplayName(value: unknown): string {
   return value;
 }
 
-export function parseWorkerBinding(value: unknown): string {
-  if (!validText(value, MAX_BINDING_ID_LENGTH))
+export function parseBindingName(value: unknown): string {
+  const parsed = bindingNameSchema.safeParse(value);
+  if (!parsed.success)
     throw new Diagnostic(
       "gateway.authentication.invalid_binding",
-      "binding: expected a nonblank string of 1–128 characters.",
+      "binding: expected 1–63 lower-case letters, digits or hyphens, beginning with a letter.",
     );
-  return value;
+  return parsed.data;
+}
+
+export function parseProjectId(value: unknown): string {
+  const parsed = identitySchema("project").safeParse(value);
+  if (!parsed.success)
+    throw new Diagnostic(
+      "cli.jwt.invalid_project",
+      "project: expected a canonical project identity.",
+    );
+  return parsed.data;
 }
 
 export function deriveClientSecret(masterKey: string, sub: string): string {
@@ -72,7 +86,13 @@ export function signingKey(masterKey: string): Promise<CryptoKey> {
 async function generateJWT(
   masterKey: string,
   lifetime: number,
-  claims: { sub: string; name: string; kind: string; binding?: string },
+  claims: {
+    sub: string;
+    name: string;
+    kind: string;
+    project_id?: string;
+    resource_identity?: string;
+  },
 ): Promise<TokenResponse> {
   if (!Number.isSafeInteger(lifetime) || lifetime < MIN_TOKEN_LIFETIME)
     throw new Diagnostic(
@@ -109,7 +129,7 @@ export async function generateHumanJWT(
 export async function generateMachineJWT(
   masterKey: string,
   lifetime: number,
-  binding: string,
+  group: { projectId: string; bindingName: string },
   name?: string,
 ): Promise<TokenResponse> {
   const sub = createIdentity(CLIENT_IDENTITY_PREFIX);
@@ -117,7 +137,10 @@ export async function generateMachineJWT(
     sub,
     name: parseDisplayName(name ?? sub),
     kind: IdentityKind.Client,
-    binding: parseWorkerBinding(binding),
+    project_id: parseProjectId(group.projectId),
+    resource_identity: workerResourceIdentity(
+      parseBindingName(group.bindingName),
+    ),
   });
 }
 

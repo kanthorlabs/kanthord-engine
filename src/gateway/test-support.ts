@@ -29,7 +29,7 @@ import {
 
 type TestConfig = GlobalConfig & { gateway: GatewayConfig };
 export const TEST_WORKER_BINDING = "binding";
-const TEST_PROJECT_ID = "project";
+export const TEST_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
 export function configuration(value: unknown) {
   const config = convict<TestConfig>(
@@ -68,7 +68,7 @@ export function fakeLookups() {
       },
     },
     worker,
-  } satisfies AuthenticationLookups;
+  };
 }
 
 function storeAt(path = ":memory:"): Store {
@@ -82,12 +82,16 @@ async function tokens(config: TestConfig) {
     token: (
       await generateHumanJWT(config.masterKey, config.gateway.tokenLifetime)
     ).token,
-    machineToken: async (binding: string, name?: string) =>
+    machineToken: async (
+      projectId: string,
+      bindingName: string,
+      name?: string,
+    ) =>
       (
         await generateMachineJWT(
           config.masterKey,
           config.gateway.tokenLifetime,
-          binding,
+          { projectId, bindingName },
           name,
         )
       ).token,

@@ -267,7 +267,7 @@ class Run:
             "expired": self.jwt("--config", self.env["KANTHORD_CONFIG"] + ".expired"),
             "wrong-key": self.jwt("--config", self.env["KANTHORD_CONFIG"] + ".wrong-key"),
             "malformed": self.sentinel,
-            "machine": self.jwt("--binding", "e2e-worker-binding", "--name", "E2E worker"),
+            "machine": self.jwt("--project", "project_01ARZ3NDEKTSV4RRFFQ69G5FAV", "--binding", "e2e-worker-binding", "--name", "E2E worker"),
         }
         self.secrets.extend(value for value in invalid.values() if value)
         rejected = []

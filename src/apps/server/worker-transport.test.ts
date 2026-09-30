@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { request as httpRequest } from "node:http";
 import { testClient } from "hono/testing";
-import { gatewayFixture, domainHealth } from "./test-support.ts";
+import {
+  gatewayFixture,
+  domainHealth,
+  TEST_PROJECT_ID,
+  TEST_WORKER_BINDING,
+} from "./test-support.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
@@ -156,7 +161,10 @@ test("body limits cover declared sizes and streaming auth bodies; unexpected reg
 
 test("unconfigured worker bindings refuse machine authentication", async (t) => {
   const fixture = await gatewayFixture(t);
-  const token = await fixture.machineToken("binding");
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
   const result = await httpClient(
     workerOperations,
     fixture.endpoint,

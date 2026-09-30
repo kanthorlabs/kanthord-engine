@@ -11,11 +11,11 @@ import {
   authenticationFixture,
   gatewayFixture,
   TEST_WORKER_BINDING,
+  TEST_PROJECT_ID,
 } from "./test-support.ts";
 import {
   CLIENT_IDENTITY_PREFIX,
   IdentityKind,
-  MAX_BINDING_ID_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
   MAX_HUMAN_USERNAME_LENGTH,
 } from "../kernel/caller.ts";
@@ -72,9 +72,13 @@ test("issuance preserves human subjects and names, and generates fresh machine s
   const machine = await generateMachineJWT(
     fixture.config.masterKey,
     TOKEN_LIFETIME,
-    TEST_WORKER_BINDING,
+    { projectId: TEST_PROJECT_ID, bindingName: TEST_WORKER_BINDING },
   );
-  const named = await fixture.machineToken(TEST_WORKER_BINDING, MACHINE_NAME);
+  const named = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+    MACHINE_NAME,
+  );
   const claims = decode(machine.token).payload;
   const other = decode(named).payload;
   assert.ok(
@@ -82,7 +86,12 @@ test("issuance preserves human subjects and names, and generates fresh machine s
   );
   assert.equal(claims.name, claims.sub);
   assert.equal(claims.kind, IdentityKind.Client);
-  assert.equal(claims.binding, TEST_WORKER_BINDING);
+  assert.equal(claims.project_id, TEST_PROJECT_ID);
+  assert.equal(
+    claims.resource_identity,
+    `worker:kanthord:${TEST_WORKER_BINDING}`,
+  );
+  assert.ok(!("binding" in claims));
   assert.equal(claims.exp! - claims.iat!, TOKEN_LIFETIME);
   assert.equal(machine.expiresAt, claims.exp! * MILLISECONDS_PER_SECOND);
   assert.notEqual(claims.sub, other.sub);
@@ -92,6 +101,9 @@ test("issuance preserves human subjects and names, and generates fresh machine s
   );
   assert.ok(isMachineIdentity(verified));
   assert.equal(verified.name, MACHINE_NAME);
+  assert.equal(verified.projectId, TEST_PROJECT_ID);
+  assert.equal(verified.resourceIdentity, other.resource_identity);
+  assert.equal(verified.issuedAt, other.iat! * MILLISECONDS_PER_SECOND);
   assert.equal(verified.runtimeIdentity, undefined);
   assert.ok(Object.isFrozen(verified));
 });
@@ -102,7 +114,7 @@ test("both token kinds reject invalid names, timestamps, session identifiers, si
   const key = await tokenKey(fixture.config.masterKey);
   const tokens = [
     fixture.token,
-    await fixture.machineToken(TEST_WORKER_BINDING),
+    await fixture.machineToken(TEST_PROJECT_ID, TEST_WORKER_BINDING),
   ];
   const invalidClaims: Record<string, unknown>[] = [
     { name: undefined },
@@ -161,7 +173,7 @@ test("human and machine claims enforce distinct subjects and binding rules", asy
   const key = await tokenKey(fixture.config.masterKey);
   const human = decode(fixture.token).payload;
   const machine = decode(
-    await fixture.machineToken(TEST_WORKER_BINDING),
+    await fixture.machineToken(TEST_PROJECT_ID, TEST_WORKER_BINDING),
   ).payload;
   const invalidHuman: Record<string, unknown>[] = [
     { sub: undefined },
@@ -172,13 +184,19 @@ test("human and machine claims enforce distinct subjects and binding rules", asy
     { binding: TEST_WORKER_BINDING },
     { binding: null },
     { reg: "removed-claim" },
+    { project_id: TEST_PROJECT_ID },
+    { resource_identity: `worker:kanthord:${TEST_WORKER_BINDING}` },
   ];
   const invalidMachine: Record<string, unknown>[] = [
-    { binding: undefined },
+    { project_id: undefined },
+    { project_id: "project_invalid" },
+    { project_id: 123 },
+    { resource_identity: undefined },
+    { resource_identity: 123 },
+    { resource_identity: "repository:github:org/repo" },
     { binding: "" },
     { binding: " " },
     { binding: 123 },
-    { binding: "b".repeat(MAX_BINDING_ID_LENGTH + 1) },
     { sub: undefined },
     { sub: ulid() },
     { sub: `project_${ulid()}` },
@@ -221,14 +239,17 @@ test("human and machine claims enforce distinct subjects and binding rules", asy
       generateMachineJWT(
         fixture.config.masterKey,
         TOKEN_LIFETIME,
-        TEST_WORKER_BINDING,
+        { projectId: TEST_PROJECT_ID, bindingName: TEST_WORKER_BINDING },
         value,
       ),
       /name:/,
     );
   }
   await assert.rejects(
-    generateMachineJWT(fixture.config.masterKey, TOKEN_LIFETIME, " "),
+    generateMachineJWT(fixture.config.masterKey, TOKEN_LIFETIME, {
+      projectId: TEST_PROJECT_ID,
+      bindingName: " ",
+    }),
     /binding:/,
   );
 });
@@ -236,14 +257,62 @@ test("human and machine claims enforce distinct subjects and binding rules", asy
 test("binding collaborator failures propagate instead of becoming invalid credentials", async (t) => {
   const machines = fakeLookups();
   const failure = new Error("binding lookup failed");
-  t.mock.method(machines.project, "resolveWorkerBinding", async () => {
+  t.mock.method(machines.project, "resolveWorkerGroup", async () => {
     throw failure;
   });
   const fixture = await authenticationFixture(t, machines);
-  const token = await fixture.machineToken(TEST_WORKER_BINDING);
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
   await assert.rejects(
     fixture.authentication.authenticate(`Bearer ${token}`),
     (error) => error === failure,
   );
   assert.equal(machines.worker.registrations.size, NO_REGISTRATIONS);
+});
+
+test("machine resolution receives issuance milliseconds and rechecks group availability", async (t) => {
+  const machines = fakeLookups();
+  const resolve = t.mock.method(machines.project, "resolveWorkerGroup");
+  const fixture = await authenticationFixture(t, machines);
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
+  const identity = await fixture.authentication.authenticate(`Bearer ${token}`);
+  assert.deepEqual(resolve.mock.calls[0]!.arguments, [
+    TEST_PROJECT_ID,
+    `worker:kanthord:${TEST_WORKER_BINDING}`,
+    decode(token).payload.iat! * MILLISECONDS_PER_SECOND,
+    background,
+  ]);
+  resolve.mock.mockImplementation(async () => null);
+  await assert.rejects(
+    fixture.authentication.recheck(identity, background),
+    /Authentication required/,
+  );
+  await assert.rejects(
+    fixture.authentication.authenticate(`Bearer ${token}`),
+    /Authentication required/,
+  );
+});
+
+test("machine issuance validates the project identity and binding name", async (t) => {
+  const fixture = await authenticationFixture(t);
+  await assert.rejects(
+    generateMachineJWT(fixture.config.masterKey, TOKEN_LIFETIME, {
+      projectId: "invalid",
+      bindingName: TEST_WORKER_BINDING,
+    }),
+    { code: "cli.jwt.invalid_project" },
+  );
+  for (const bindingName of [" ", "B", "b".repeat(64)])
+    await assert.rejects(
+      generateMachineJWT(fixture.config.masterKey, TOKEN_LIFETIME, {
+        projectId: TEST_PROJECT_ID,
+        bindingName,
+      }),
+      { code: "gateway.authentication.invalid_binding" },
+    );
 });

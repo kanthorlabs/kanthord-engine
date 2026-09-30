@@ -14,6 +14,7 @@ import {
   fakeMachines,
   gatewayFixture,
   TEST_WORKER_BINDING,
+  TEST_PROJECT_ID,
 } from "./test-support.ts";
 
 const UNAUTHORIZED = "gateway.authentication.unauthorized";
@@ -53,7 +54,7 @@ test("all record reads enforce human access with valid parameters and return pre
     attempt: String(FIRST),
     actionKey: "repo.pull_request",
   };
-  const machine = await h.machineToken(TEST_WORKER_BINDING);
+  const machine = await h.machineToken(TEST_PROJECT_ID, TEST_WORKER_BINDING);
   const pathOf = (name: (typeof READS)[number]) =>
     missionOperations[name].path.replace(
       /:([^/]+)/g,

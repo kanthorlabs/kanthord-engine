@@ -643,10 +643,34 @@ test("jwt output validation precedes configuration loading and writes no file or
       "cli.jwt.username_with_binding",
     ],
     [
-      ["--output", "--binding", "x", "--endpoint", "ftp://x"],
+      [
+        "--project",
+        PROJECT_ID,
+        "--output",
+        "--binding",
+        "x",
+        "--endpoint",
+        "ftp://x",
+      ],
       "cli.jwt.output_with_binding",
     ],
-    [["--output", "--binding", "x"], "cli.jwt.output_with_binding"],
+    [
+      ["--project", PROJECT_ID, "--output", "--binding", "x"],
+      "cli.jwt.output_with_binding",
+    ],
+    [
+      ["--binding", "x", "--output", "--endpoint", "ftp://x"],
+      "cli.jwt.binding_without_project",
+    ],
+    [
+      ["--project", PROJECT_ID, "--output", "--endpoint", "ftp://x"],
+      "cli.jwt.project_without_binding",
+    ],
+    [["--project", "invalid"], "cli.jwt.invalid_project"],
+    ...[" ", "B", "b".repeat(64)].map((binding): [string[], string] => [
+      ["--binding", binding],
+      "gateway.authentication.invalid_binding",
+    ]),
     [["--endpoint", "http://x"], "cli.jwt.endpoint_without_output"],
     [["--endpoint", "ftp://x"], "cli.jwt.endpoint_without_output"],
     ...[
@@ -689,7 +713,10 @@ test("jwt --verbose --output prints creation then the existing claim list withou
 
 test("JWT generation requires terminal output before loading configuration in both modes", (t) => {
   const env = environment(temporary(t));
-  for (const options of [[], ["--binding", "worker-binding"]]) {
+  for (const options of [
+    [],
+    ["--project", PROJECT_ID, "--binding", "worker-binding"],
+  ]) {
     const result = invocation(["jwt", "generate", ...options], env);
     assert.equal(result.status, ExitCode.Failure);
     assert.equal(result.stdout, EMPTY_OUTPUT);
@@ -721,6 +748,8 @@ test("jwt accepts display names and issues fresh machine identities without open
       [
         "jwt",
         "generate",
+        "--project",
+        PROJECT_ID,
         "--binding",
         binding,
         ...(index ? ["--name", name] : []),
@@ -750,7 +779,9 @@ test("jwt accepts display names and issues fresh machine identities without open
     );
     secrets.add(clientSecret);
     assert.equal(claims.kind, IdentityKind.Client);
-    assert.equal(claims.binding, binding);
+    assert.equal(claims.project_id, PROJECT_ID);
+    assert.equal(claims.resource_identity, `worker:kanthord:${binding}`);
+    assert.ok(!("binding" in claims));
     assert.ok(
       identitySchema(CLIENT_IDENTITY_PREFIX).safeParse(claims.sub).success,
     );
@@ -769,7 +800,10 @@ test("jwt accepts display names and issues fresh machine identities without open
   assert.equal(conflict.status, ExitCode.Failure);
   assert.match(conflict.stderr, /^cli\.jwt\.username_with_binding:/);
   assert.equal(conflict.stdout, EMPTY_OUTPUT);
-  const redirected = invocation(["jwt", "generate", "--binding", binding], env);
+  const redirected = invocation(
+    ["jwt", "generate", "--project", PROJECT_ID, "--binding", binding],
+    env,
+  );
   assert.equal(redirected.status, ExitCode.Failure);
   assert.equal(redirected.stdout, EMPTY_OUTPUT);
   assert.match(redirected.stderr, /^cli\.output\.terminal_required:/);
@@ -829,7 +863,15 @@ test("jwt group, verbose generation, inspection and token precedence", (t) => {
   assert.equal(inspect.status, ExitCode.Success, inspect.stderr);
   assert.equal(inspect.stdout, claimList);
   const machine = invocation(
-    ["jwt", "generate", "--binding", "worker-binding", "--verbose"],
+    [
+      "jwt",
+      "generate",
+      "--project",
+      PROJECT_ID,
+      "--binding",
+      "worker-binding",
+      "--verbose",
+    ],
     env,
     true,
   );
@@ -845,6 +887,12 @@ test("jwt group, verbose generation, inspection and token precedence", (t) => {
   const machineInspect = invocation(["jwt", "inspect", machineToken], env);
   assert.equal(machineInspect.status, ExitCode.Success, machineInspect.stderr);
   assert.equal(machineClaims.join("\n"), machineInspect.stdout);
+  assert.match(machineInspect.stdout, new RegExp(`project_id: ${PROJECT_ID}`));
+  assert.match(
+    machineInspect.stdout,
+    /resource_identity: worker:kanthord:worker-binding/,
+  );
+  assert.doesNotMatch(machineInspect.stdout, /^binding:/m);
   assert.equal(machine.stderr, EMPTY_OUTPUT);
   const other = plain.stdout.trim();
   writePrivate(clientConfigPath(env), `token: ${other}\n`);

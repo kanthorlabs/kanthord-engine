@@ -48,7 +48,7 @@ const WORKER_CONFIG = { heartbeatWindow: 300, globalPrompt: "" };
 const client = {
   clientId: "client",
   name: "worker",
-  workerBindingId: "binding",
+  resourceIdentity: "worker:kanthord:binding",
   projectId: "project",
 };
 

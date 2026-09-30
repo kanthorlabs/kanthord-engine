@@ -19,7 +19,7 @@ import {
   REPOSITORY_PLATFORM,
   repositoryConfigSchema,
   STORAGE_PLATFORM,
-  WORKER_PLATFORM,
+  workerResourceIdentity,
   type BindingChange,
 } from "./contract.ts";
 
@@ -203,8 +203,7 @@ export function deriveResourceIdentity(
   bindingName: string,
   config: unknown,
 ): string {
-  if (kind === BindingKind.Worker)
-    return `${BindingKind.Worker}:${WORKER_PLATFORM}:${bindingName}`;
+  if (kind === BindingKind.Worker) return workerResourceIdentity(bindingName);
   if (kind === BindingKind.Repository) {
     const address =
       isObject(config) && "address" in config ? config.address : null;

@@ -15,7 +15,10 @@ import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
 import { workerMigrations } from "../../worker/index.ts";
 import { composeServices } from "./index.ts";
 import type { OperationRegistry } from "../../kernel/operation.ts";
-import type { ProjectBindings } from "../../project/contract.ts";
+import {
+  workerResourceIdentity,
+  type ProjectBindings,
+} from "../../project/contract.ts";
 import {
   InstanceActivity,
   type WorkerRegistrations,
@@ -45,7 +48,7 @@ export const domainHealth = {
 };
 
 export const TEST_WORKER_BINDING = "binding";
-export const TEST_PROJECT_ID = "project";
+export const TEST_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const SINGLE_INSTANCE = 1;
 const NO_INSTANCES = 0;
 
@@ -81,7 +84,7 @@ export function fakeMachines(
       throwIfCancelled(context);
       const match = [...bindings].find(
         ([name, binding]) =>
-          `worker:kanthord:${name}` === resourceIdentity &&
+          workerResourceIdentity(name) === resourceIdentity &&
           binding.projectId === projectId &&
           binding.available !== false &&
           binding.capacity > NO_INSTANCES,
@@ -100,7 +103,11 @@ export function fakeMachines(
     findByClient: (clientId: string) => registrations.get(clientId),
     register(transaction: Transaction, client: VerifiedClient): Registration {
       assert.ok(transaction.database.isTransaction);
-      const binding = bindings.get(client.workerBindingId);
+      const binding = [...bindings].find(
+        ([name, binding]) =>
+          workerResourceIdentity(name) === client.resourceIdentity &&
+          binding.projectId === client.projectId,
+      )?.[1];
       assert.ok(binding && binding.available !== false);
       assert.equal(binding.projectId, client.projectId);
       assert.ok(
@@ -114,7 +121,9 @@ export function fakeMachines(
           "Client identity already holds a live registration.",
         );
       const count = [...registrations.values()].filter(
-        (entry) => entry.workerBindingId === client.workerBindingId,
+        (entry) =>
+          entry.resourceIdentity === client.resourceIdentity &&
+          entry.projectId === client.projectId,
       ).length;
       if (count >= binding.capacity)
         throw new GatewayError(
@@ -274,12 +283,16 @@ export async function gatewayFixture(
     token: (
       await generateHumanJWT(config.masterKey, config.gateway.tokenLifetime)
     ).token,
-    machineToken: async (binding: string, name?: string) =>
+    machineToken: async (
+      projectId: string,
+      bindingName: string,
+      name?: string,
+    ) =>
       (
         await generateMachineJWT(
           config.masterKey,
           config.gateway.tokenLifetime,
-          binding,
+          { projectId, bindingName },
           name,
         )
       ).token,

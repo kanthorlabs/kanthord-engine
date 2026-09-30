@@ -95,7 +95,10 @@ test("worker catalog requires human access and preserves pagination errors", asy
   const env = {
     ...environment(temporary(t)),
     KANTHORD_ENDPOINT: fixture.endpoint,
-    KANTHORD_TOKEN: await fixture.machineToken(TEST_WORKER_BINDING),
+    KANTHORD_TOKEN: await fixture.machineToken(
+      TEST_PROJECT_ID,
+      TEST_WORKER_BINDING,
+    ),
   };
   const refused = await command(["worker", "list"], env);
   assert.equal(refused.code, ExitCode.Failure);
@@ -147,7 +150,10 @@ test("worker register requires a token and validates retry keys before any reque
 test("worker register prints only the runtime identity and key to redirected stdout and replays one registration", async (t) => {
   const machines = fakeMachines();
   const fixture = await gatewayFixture(t, { machines });
-  const token = await fixture.machineToken(TEST_WORKER_BINDING);
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
   const env: NodeJS.ProcessEnv = {
     ...environment(temporary(t)),
     KANTHORD_ENDPOINT: fixture.endpoint,
@@ -191,12 +197,21 @@ test("worker registration resolves option over environment over file without rew
   });
   const fixture = await gatewayFixture(t, { machines });
   const env = environment(temporary(t));
-  const fileToken = await fixture.machineToken(TEST_WORKER_BINDING, "file");
+  const fileToken = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+    "file",
+  );
   const environmentToken = await fixture.machineToken(
+    TEST_PROJECT_ID,
     TEST_WORKER_BINDING,
     "environment",
   );
-  const optionToken = await fixture.machineToken(TEST_WORKER_BINDING, "option");
+  const optionToken = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+    "option",
+  );
   writePrivate(
     clientConfigPath(env),
     stringify({ endpoint: fixture.endpoint, token: fileToken }),
@@ -245,7 +260,7 @@ test("worker registration resolves option over environment over file without rew
 test("worker register reports declared failures and indeterminate transport with a reusable key and no JWT", async (t) => {
   const machines = fakeMachines();
   const fixture = await gatewayFixture(t, { machines });
-  const token = await fixture.machineToken("absent");
+  const token = await fixture.machineToken(TEST_PROJECT_ID, "absent");
   const env = { ...environment(temporary(t)), KANTHORD_TOKEN: token };
   const key = ulid();
   const args = ["worker", "register", "--idempotency-key", key];

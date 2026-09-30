@@ -23,7 +23,7 @@ export const MAX_RUNTIME_IDENTITY_LENGTH = 128;
 export interface VerifiedClient {
   clientId: string;
   name: string;
-  workerBindingId: string;
+  resourceIdentity: string;
   projectId: string;
 }
 export interface Registration extends VerifiedClient {

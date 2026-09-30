@@ -3,7 +3,6 @@ export const IdentityKind = { Human: "human", Client: "client" } as const;
 export const CLIENT_IDENTITY_PREFIX = "client_identity";
 export const MAX_HUMAN_USERNAME_LENGTH = 64;
 export const MAX_DISPLAY_NAME_LENGTH = 64;
-export const MAX_BINDING_ID_LENGTH = 128;
 export interface HumanIdentity {
   readonly kind: typeof IdentityKind.Human;
   readonly accountId: string;
@@ -14,7 +13,8 @@ export interface MachineIdentity {
   readonly kind: typeof IdentityKind.Client;
   readonly clientId: string;
   readonly name: string;
-  readonly workerBindingId: string;
+  readonly resourceIdentity: string;
+  readonly issuedAt: number;
   readonly projectId: string;
   readonly runtimeIdentity?: string;
   readonly jti: string;

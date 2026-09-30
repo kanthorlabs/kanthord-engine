@@ -15,6 +15,7 @@ import {
   fakeMachines,
   gatewayFixture,
   TEST_WORKER_BINDING,
+  TEST_PROJECT_ID,
 } from "./test-support.ts";
 
 const SPAWN_LINE_TIMEOUT_MS = 15000;
@@ -262,7 +263,10 @@ async function liveEnvironment(
   t: TestContext,
 ): Promise<{ env: NodeJS.ProcessEnv; token: string }> {
   const fixture = await gatewayFixture(t, { machines: fakeMachines() });
-  const token = await fixture.machineToken(TEST_WORKER_BINDING);
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
   const env = {
     ...workerEnvironment(t),
     KANTHORD_ENDPOINT: fixture.endpoint,
@@ -290,6 +294,8 @@ test("worker starts from the machine JWT fragment pasted below endpoint without 
   const args = [
     "jwt",
     "generate",
+    "--project",
+    TEST_PROJECT_ID,
     "--binding",
     TEST_WORKER_BINDING,
     "--config",
