@@ -6,12 +6,85 @@ import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { MISSION_SERVICE_NAME, missionOperations } from "./contract.ts";
+import {
+  MISSION_SERVICE_NAME,
+  missionOperations,
+  ActorKind,
+  NodeKind,
+  NodeState,
+  RevisionWrite,
+  type HumanAct,
+} from "./contract.ts";
+import {
+  insertMission,
+  insertNode,
+  insertRevision,
+  readNode,
+  setNodeState,
+} from "./store.ts";
 import { missionMigrations } from "./migrations.ts";
 import { MissionService, type Dependencies } from "./service.ts";
 
 const CONSECUTIVE_LOSS_LIMIT = 3;
 const TEXT_MAX_BYTES = 32768;
+const FIXTURE_TIME = 100;
+const FIRST_REVISION = 1;
+
+export function controlHarness(
+  t: TestContext,
+  identity: CallerIdentity,
+  overrides: Partial<Dependencies> = {},
+) {
+  const h = missionHarness(t, identity, overrides);
+  const actor = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
+  const projectId = createIdentity("project");
+  const nodeId = createIdentity("node");
+  const missionId = h.store.transaction((tx) => {
+    const missionId = insertMission(tx, projectId, FIXTURE_TIME);
+    insertNode(tx, {
+      id: nodeId,
+      mission_id: missionId,
+      kind: NodeKind.Initiative,
+      filename: "initiative.md",
+      parent_id: null,
+      created_at: FIXTURE_TIME,
+    });
+    insertRevision(tx, {
+      nodeId,
+      revision: FIRST_REVISION,
+      filename: "initiative.md",
+      reason: "plan",
+      actor,
+      createdAt: FIXTURE_TIME,
+      content: {
+        name: "Name",
+        requirement: "Requirement",
+        criterion: "Criterion",
+        verifications: ["true"],
+        bindings: [],
+      },
+      change: {
+        write: RevisionWrite.NodeCreate,
+        previousRevision: null,
+        changedFields: [],
+      },
+      pinnedByAttempts: [],
+    });
+    setNodeState(tx, nodeId, NodeState.Available);
+    return missionId;
+  });
+  const body = (
+    state: NodeState = NodeState.Available,
+    attempt = 0,
+  ): HumanAct => ({
+    reason: "Hold",
+    expectedMissionVersion: FIRST_REVISION,
+    expectedState: state,
+    expectedAttempt: attempt,
+  });
+  const node = () => h.store.transaction((tx) => readNode(tx, nodeId)!);
+  return { ...h, actor, projectId, nodeId, missionId, body, node };
+}
 
 export function missionHarness(
   t: TestContext,
