@@ -23,6 +23,20 @@ export interface HumanActor {
 }
 
 export interface MissionBindings {
+  repositoryPolicyOf(
+    tx: Transaction,
+    bindingId: string,
+  ): {
+    bindingId: string;
+    projectId: string;
+    name: string;
+    address: string;
+    platform: string;
+    credential: string;
+    baseBranch: string;
+    action: "pull_request" | "merge_push" | null;
+    projectPrompt: string | null;
+  } | null;
   resolveBinding(
     tx: Transaction,
     projectId: string,
@@ -56,6 +70,61 @@ export interface WorkQueue {
 export interface MissionCollaborations {
   createMission(tx: Transaction, projectId: string, actor: HumanActor): void;
   liveNodesPinning(tx: Transaction, bindingId: string): string[];
+}
+
+export interface SchedulerClaims {
+  revoke(tx: Transaction, nodeId: string, now: number): string | null;
+  settle(tx: Transaction, nodeId: string, now: number): void;
+  liveExecutionOf(
+    tx: Transaction,
+    nodeId: string,
+    now: number,
+  ): { executionId: string } | null;
+}
+
+export interface SchedulerWakeup {
+  wake(projectId: string): void;
+}
+
+export interface ExecutionAttribution {
+  of(
+    tx: Transaction,
+    executionId: string,
+  ): {
+    clientId: string | null;
+    name: string | null;
+    workerName: string;
+  } | null;
+}
+
+export type ExecutionActor = Extract<Actor, { kind: "execution" }>;
+export type ClaimAdmission = {
+  kind: ClaimKind;
+  projectId: string;
+  attempt: number;
+  nodeRevision: number;
+};
+
+export interface MissionTransitions {
+  claim(
+    tx: Transaction,
+    nodeId: string,
+    declaredStates: readonly NodeState[],
+    opener: ExecutionActor,
+    now: number,
+  ): ClaimAdmission | null;
+  release(
+    tx: Transaction,
+    execution: { executionId: string; nodeId: string; attempt: number },
+    furtherWork: boolean,
+    now: number,
+  ): void;
+  loss(
+    tx: Transaction,
+    nodeId: string,
+    consecutiveLosses: number,
+    now: number,
+  ): void;
 }
 
 export const MissionErrorCode = {

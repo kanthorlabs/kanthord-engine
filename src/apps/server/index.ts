@@ -21,7 +21,13 @@ import {
   type WorkQueue,
 } from "../../scheduler/contract.ts";
 import { MissionService, missionMigrations } from "../../mission/index.ts";
-import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
+import {
+  MISSION_SERVICE_NAME,
+  type SchedulerClaims,
+  type SchedulerWakeup,
+  type ExecutionAttribution,
+} from "../../mission/contract.ts";
+import { unwired } from "./unwired.ts";
 import type {
   ProjectBindings,
   RepositoryConnector,
@@ -69,6 +75,11 @@ export function composeServices(options: {
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
   inventoryOverrides?: Partial<ResourceInventories>;
+  standIns?: {
+    schedulerClaims?: SchedulerClaims;
+    wakeup?: SchedulerWakeup;
+    executionAttribution?: ExecutionAttribution;
+  };
 }) {
   const repoConnector =
     options.repositoryConnector ??
@@ -126,9 +137,19 @@ export function composeServices(options: {
     config: options.config.mission,
     health: options.health,
     workQueue,
+    schedulerClaims: options.standIns?.schedulerClaims ?? {
+      revoke: unwired("SchedulerClaims.revoke"),
+      settle: unwired("SchedulerClaims.settle"),
+      liveExecutionOf: unwired("SchedulerClaims.liveExecutionOf"),
+    },
+    wakeup: options.standIns?.wakeup ?? { wake: () => {} },
+    executionAttribution: options.standIns?.executionAttribution ?? {
+      of: unwired("ExecutionAttribution.of"),
+    },
     bindings: {
       resolveBinding: (tx, pid, name) => project.resolveBinding(tx, pid, name),
       getBindingRevision: (tx, bid) => project.getBindingRevision(tx, bid),
+      repositoryPolicyOf: (tx, bid) => project.repositoryPolicyOf(tx, bid),
     },
   });
   const project: ProjectService = new ProjectService({

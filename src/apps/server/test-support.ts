@@ -135,6 +135,7 @@ export async function gatewayFixture(
       typeof composeServices
     >[0]["inventoryOverrides"];
     path?: string;
+    standIns?: Parameters<typeof composeServices>[0]["standIns"];
   } = {},
 ) {
   process.umask(0o077);
@@ -170,6 +171,16 @@ export async function gatewayFixture(
     bindings: options.machines?.project,
     registrations: options.machines?.worker,
     inventoryOverrides: options.inventoryOverrides,
+    standIns: {
+      schedulerClaims: {
+        revoke: () => null,
+        settle: () => {},
+        liveExecutionOf: () => null,
+      },
+      wakeup: { wake: () => {} },
+      executionAttribution: { of: () => null },
+      ...options.standIns,
+    },
     logger: pino(
       { level: "info" },
       {

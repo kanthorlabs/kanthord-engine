@@ -73,6 +73,8 @@ const content: Content = {
   bindings: [],
 };
 const bindings: MissionBindings = {
+  repositoryPolicyOf: () =>
+    assert.fail("Import does not derive repository policies."),
   resolveBinding: (_tx, projectId, name) => {
     assert.equal(projectId, PROJECT_ID);
     return name === REPOSITORY

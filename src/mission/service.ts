@@ -26,6 +26,9 @@ import {
   type MissionBindings,
   type MissionCollaborations,
   type WorkQueue,
+  type SchedulerClaims,
+  type SchedulerWakeup,
+  type ExecutionAttribution,
 } from "./contract.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
@@ -76,6 +79,9 @@ export interface Dependencies {
   health?: HealthRegistry;
   bindings: MissionBindings;
   workQueue: WorkQueue;
+  schedulerClaims: SchedulerClaims;
+  wakeup: SchedulerWakeup;
+  executionAttribution: ExecutionAttribution;
 }
 
 export class MissionService implements Service, MissionCollaborations {

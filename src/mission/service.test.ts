@@ -109,6 +109,9 @@ const HUMAN_ACTOR = {
 } as const;
 
 const bindings: MissionBindings = {
+  repositoryPolicyOf() {
+    throw new Error(UNEXPECTED_COLLABORATION);
+  },
   resolveBinding() {
     throw new Error(UNEXPECTED_COLLABORATION);
   },
@@ -128,7 +131,10 @@ const workQueue: WorkQueue = {
   },
 };
 
-type Collaborators = Pick<Dependencies, "bindings" | "workQueue">;
+type Collaborators = Pick<Dependencies, "bindings" | "workQueue"> &
+  Partial<
+    Pick<Dependencies, "schedulerClaims" | "wakeup" | "executionAttribution">
+  >;
 
 function makeService(
   health: HealthRegistry,
@@ -141,6 +147,17 @@ function makeService(
       textMaxBytes,
     },
     health,
+    schedulerClaims: {
+      revoke: () => null,
+      settle: () => {},
+      liveExecutionOf: () => null,
+    },
+    wakeup: { wake: () => {} },
+    executionAttribution: {
+      of: () => {
+        throw new Error(UNEXPECTED_COLLABORATION);
+      },
+    },
     ...collaborators,
   });
 }
