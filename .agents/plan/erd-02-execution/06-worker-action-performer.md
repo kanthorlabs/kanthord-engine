@@ -319,6 +319,20 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
   - Named constants for every fixed string and number in a comparison. `architecture.impl.md:15–19`.
 - Done when: `node --test --test-timeout=30000 src/apps/server/action-performer-integration.test.ts` passes; `pnpm run verify` passes.
 
+### 06.14 Refuse a non-null `follows` in the binding write
+
+- Files: `src/project/contract.ts`, `src/project/store.test.ts` (both edit)
+- Do:
+  1. In `refineBindingRelations` (`src/project/contract.ts:216–243`), add an issue at `followsPath(name)` with the message `Action follows must name the passing assessment until a claim-source contract exists.` for every repository binding whose `follows.type` is `FollowsType.ActionEndState`, before the target check. Keep the schema shapes, the target check and `refineFollowsCycles`, so the refusal is one issue of the existing validation and no new code.
+  2. Update the ERD 1 tests of the absent-target and cycle checks in `src/project/store.test.ts`: an `action_end_state` value answers the refusal issue first.
+  3. Add tests: a strategy with `follows: { type: "assessment_passed" }` passes; `action_end_state` with an existing target is refused with the message and the path; the refusal reaches the CLI as the ERD 1 validation failure of `project binding apply`.
+- Rules:
+  - The Project Service refuses `follows.type = "action_end_state"` in a binding write until a retry-safe claim-source contract exists. `mission-service.impl.md:83`; `engine/docs/cli/project.md:348`.
+  - Every evaluation claim comes from `Waiting`, so a reviewer execution performs the evaluation on every claim. `worker-service.md:517`; plan 08 task 08.16.
+  - The first version produces no `awaiting-prerequisite` item. `worker-service.impl.md:382`.
+  - Prefer to forbid a configuration change over a mechanism that handles its edge case. Root `AGENTS.md` "Work with Ulrich".
+- Done when: `pnpm run verify` passes; the tests pass.
+
 ### 06.E E2E proof
 
 - Files: `src/apps/server/e2e-worker-action-performer.test.ts` (create)

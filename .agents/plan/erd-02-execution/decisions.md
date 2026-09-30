@@ -122,4 +122,4 @@ Shutdown during a live execution, a registration or a work pull with no answer, 
 
 ## D26 — Pre-existing deviations are findings, not blockers
 
-ERD 1 decision D16 stands. `static/openapi.yaml` predates ERD 1. Seven items of `.dev/erd-01/report.md` "Pending for Ulrich" stay pending, and no ERD 2 plan resolves one of them.
+ERD 1 decision D16 stands. `static/openapi.yaml` predates ERD 1. Seven items of `.dev/erd-01/report.md` "Pending for Ulrich" stay pending, and no ERD 2 plan resolves one of them. `worker provider check` (`engine/docs/cli/worker.md` "provider check") has no ERD 1 or ERD 2 plan; Ulrich left it to the phase after the external harness (2026-09-30), and plan 10 task 10.6 exempts it by name.

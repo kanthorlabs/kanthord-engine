@@ -97,8 +97,8 @@ Every external key of this plan, with the line that owns it:
 
 Three differences from `00-index.md` "Seams":
 
-- The answer of `worker.register` gains two fields (debate Q2, `review:Ulrich`). Plan 02 declares one field.
-- The host tool source is a fourth source of the tool table (debate Q1, `review:Ulrich`). Plan 07 declares two source values.
+- The answer of `worker.register` gains two fields (debate Q2, ruled on `worker-service.impl.md:155`). Plan 02 declares one field.
+- The host tool source is a fourth source of the tool table (debate Q1, ruled on `worker-service.impl.md` "Tool table"). Plan 07 declares two source values.
 - `WorkerApi`, `HostTools` and the in-process worker helper are new rows.
 
 ## Tasks
@@ -114,7 +114,7 @@ Three differences from `00-index.md` "Seams":
   5. Regenerate OpenAPI with `pnpm run build && node bin/kanthord.mjs gateway openapi`. Assert the three properties of the 200 answer in `openapi-integration.test.ts`.
   6. Add tests: a registration answers the resource identity of the machine identity and the worker name of the latest row of the group; a repeated registration answers the same three values; `kanthord worker register` prints `runtimeIdentity`, `resourceIdentity`, `workerName` and `idempotencyKey`, and no token.
 - Rules:
-  - The answer holds the registration facts that the admission reads, never a later lookup. Debate Q2 (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 09", `review:Ulrich`).
+  - The answer holds the registration facts that the admission reads, never a later lookup. Debate Q2 (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 09", ruled on `worker-service.impl.md:155`).
   - The ready record holds `runtimeIdentity`, `resourceIdentity` and `workerName`. `worker-service.impl.md:237`; `engine/docs/cli/other.md:508–510`.
   - The request nominates no resource identity; the server takes it from the verified JWT. `gateway-service.impl.md:71`.
   - The answer holds no token. `gateway-service.impl.md:74`; `engine/docs/cli/worker.md:174–177`.
@@ -133,7 +133,7 @@ Three differences from `00-index.md` "Seams":
   6. Regenerate OpenAPI; the source enum of a tool of `worker.agent.get` holds `host`.
   7. Add tests: `swe@1` answers `evidence-upload` with source `host` after the seven built-in tools; `re@1` answers no host tool; the session of `re@1` holds no `evidence-upload`, although its input holds `hostTools`; a scripted tool call `evidence-upload { path: "a.txt" }` calls `hostTools.evidenceUpload` once with `a.txt` and answers the three fields; an extra argument fails the parameter schema; a rejected `evidenceUpload` answers a tool error with the message of the rejection alone.
 - Rules:
-  - The tool table holds a fourth source, the host-supplied tools, and the declaration of an agent names its host tools. Debate Q1, `review:Ulrich`; it amends `worker-service.impl.md:329–335` and `engine/docs/cli/worker.md:318`.
+  - The tool table holds a fourth source, the host-supplied tools, and the declaration of an agent names its host tools. Debate Q1, ruled on `worker-service.impl.md` "Tool table" and `engine/docs/cli/worker.md:318`.
   - `re@1` holds no write tool. `worker-service.impl.md:272`.
   - The helper returns the evidence identity, the asset identity and the `s3://` URI to the agent. `worker-service.impl.md:315`.
   - The MCP server exposes no upload write, and the MCP write set stays unchanged. `worker-service.impl.md:319`, `:325`; decision D5.
@@ -397,7 +397,7 @@ E09.13, E09.15 and E09.16 assert codes of the mark `code: proposed`. The tests a
 
 ## Blockers
 
-None open. One debate settled two gaps (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 09", `review:Ulrich`):
+None open. One debate settled two gaps (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 09", ruled 2026-09-30):
 
 - DEBATE: the agent surface of the worker-host `evidence upload <path>` at the `worker` placement - rounds:1 - verdict: CHANGE to option (a), a host tool `evidence-upload { path }` in the pi session of `swe@1`, with three repairs: the tool table declares the host-supplied tools as a fourth source and `worker.agent.get` answers the source `host`; the agent declaration names its host tools, so `re@1` holds none; a test proves that a failed upload holds no presigned URL in a tool error. SHA-256 stays optional on the page; the helper supplies the value that it computes.
 - DEBATE: the source of `workerName` and `resourceIdentity` of the record `Worker application ready` - rounds:1 - verdict: AGREE, `worker.register` answers `{ runtimeIdentity, resourceIdentity, workerName }` from the verified machine identity and the worker binding row that the registration transaction reads, never from a later lookup.

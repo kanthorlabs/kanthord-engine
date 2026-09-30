@@ -6,7 +6,7 @@ This plan closes the ERD 2 plan set. It adds no service operation, no table and 
 
 - The final `unwired` set of decision D6: the eight ERD 3 seams alone.
 - The combined assertion of the sixteen tables of ERD 1 and ERD 2, their thirteen unique indexes, the absence of `CHECK` and the owner rule of every foreign key.
-- The names of a worker binding in the answer of `ProjectBindings.workerBindingOf` (debate Q1 of this plan, `review:Ulrich`).
+- The names of a worker binding in the answer of `ProjectBindings.workerBindingOf` (debate Q1 of this plan, ruled 2026-09-30).
 - The health report entries of a registration in the inventory of the Worker Service.
 - The final OpenAPI inventory assertion: 106 operations with their access policies.
 - The CLI dispatcher completeness over every command page of `engine/docs/cli/`, with five named exemptions and two groups of later ERDs.
@@ -58,7 +58,7 @@ Out of scope:
   - Plan 06: `worker.action.request`; `scriptedActions` of `src/apps/server/test-support.ts`.
   - Plan 07: `scriptedProvider`, `scriptedModelRuntime` of `src/worker/test-support.ts`; `RepositoryTransport`; the test-file policy of `eslint.config.js` (task 07.E).
   - Plan 08: the steps method and the evaluation method behind `runNativeExecution`.
-  - Plan 09: the answer `{ runtimeIdentity, resourceIdentity, workerName }` of `worker.register` (task 09.1, `review:Ulrich`); the host tool `evidence-upload` (task 09.2, `review:Ulrich`); `inProcessWorker` and `toolStubs` (task 09.11); the test-file policy of `eslint.config.js` (task 09.3).
+  - Plan 09: the answer `{ runtimeIdentity, resourceIdentity, workerName }` of `worker.register` (task 09.1, ruled 2026-09-30); the host tool `evidence-upload` (task 09.2, ruled 2026-09-30); `inProcessWorker` and `toolStubs` (task 09.11); the test-file policy of `eslint.config.js` (task 09.3).
 - No boundary change of `eslint.config.js`. Decision D23 names the two test-file allowances that the journeys use.
 
 ## Provides
@@ -71,7 +71,7 @@ Out of scope:
 
 Two differences from `00-index.md`:
 
-- The seam row `ProjectBindings.workerBindingOf` gains two fields (debate Q1, `review:Ulrich`). The Scheduler type of plan 03 stays unchanged, because the wider answer satisfies it.
+- The seam row `ProjectBindings.workerBindingOf` gains two fields (debate Q1, ruled 2026-09-30). The Scheduler type of plan 03 stays unchanged, because the wider answer satisfies it.
 - The health report entries need no edit of `src/apps/server/index.ts`, because the Worker inventory already feeds `collectInventories` (`src/apps/server/index.ts:168–170`).
 
 ## Tasks
@@ -119,7 +119,7 @@ Two differences from `00-index.md`:
 - Rules:
   - The report keys a project-scoped entry by the project name and the resource name. `gateway-service.impl.md:357`, `:366`.
   - The Worker Service reads no table of another service, so the Project Service answers the names. `architecture.impl.md:95`.
-  - The existing seam carries the names, and no new collaboration exists. Debate Q1 (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 10", `review:Ulrich`).
+  - The existing seam carries the names, and no new collaboration exists. Debate Q1 (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 10", ruled 2026-09-30).
   - A collaboration takes the caller transaction and opens none. `architecture.impl.md:593`.
   - Every field name is the name of the owning vocabulary. Root `AGENTS.md` "Contracts".
 - Done when: `node --test --test-timeout=30000 src/project/service.test.ts src/worker/service.test.ts` passes; `pnpm run verify` passes.
@@ -309,11 +309,11 @@ Fixture I, in order (each command exits 0, token H):
 | EI10.6 | The calls of both fakes; the collected logs of both workers                                                                                                                                                                                                                                          | —          | `general` records eight calls and `review` three; each call holds the key `e2e-journey-secret`; the tool result of `evidence-upload` holds `evidenceId`, `assetId` and `uri` alone, with `uri` starting with `s3://evidence/kanthord/`; no call message holds `putUrl`, the sink endpoint or `X-Amz`; no log line holds `G`, `R`, a client secret or `e2e-journey-secret`                                                                                                                                                                                                                                                                                                                              |
 | EI10.7 | `general.worker.stop()`; `review.worker.stop()`; `kanthord worker instance list --project <projectId>`; `kanthord scheduler queue list <projectId>`                                                                                                                                                  | —, —, 0, 0 | both stops answer null; `items` `[]` twice                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
-No row asserts a code of the mark `code: proposed`. EX10.2 and EX10.11 need task 10.4; EX10.1 and EI10.1 need task 09.1 (`review:Ulrich`).
+No row asserts a code of the mark `code: proposed`. EX10.2 and EX10.11 need task 10.4; EX10.1 and EI10.1 need task 09.1 (ruled 2026-09-30).
 
 ## Blockers
 
-None open. The debate engine settled one gap (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 10", `review:Ulrich`):
+None open. The debate engine settled one gap (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 10", ruled 2026-09-30):
 
 - DEBATE: the source of the project name and the worker binding name of a registration entry of the health report - rounds:1 - verdict: CHANGE to (b), extend the answer of the existing seam `ProjectBindings.workerBindingOf` with `name` and `projectName`, and let the Worker Service build the entry in its own `resourceInventory`; a new Project read `projectNameOf` is a new collaboration against the plan-set constraint; a missing binding answer takes the owner-failure path into `missingInventories`, and tests cover the name against the identity, the encoded name, both sides of the window and the unchanged provider entries.
 

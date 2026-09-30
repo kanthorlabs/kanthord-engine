@@ -44,7 +44,7 @@ Out of scope:
 - `docs/brainstorm/HANDOFF.md:58`, `:91`, `:99`, `:103`, `:119–123` — the handoff protocol, cannot progress, the repeat bound, B2, A3/W1/W4/PR2, W2, W3, W5, W7.
 - `engine/.agents/plan/erd-02-execution/00-index.md`, `decisions.md` — the boundary, the seams and decisions D1 to D26.
 - Plans 03, 04, 05, 06 and 07 of this directory — the Provides tables and the tasks of the seams below.
-- `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 08" — the budget-end boundary and the claim source (debate, 2 rounds, `review:Ulrich`).
+- `.dev/erd-02/decisions-log.md` 2026-09-30 "plan 08" — the budget-end boundary and the claim source (debate, 2 rounds, ruled 2026-09-30).
 - Root `AGENTS.md` "Contracts", "Database design" and "Rejected proposals".
 
 ## Depends on
@@ -211,7 +211,7 @@ Three differences from `00-index.md` "Seams":
   - The execution code runs the verifications against the task commit and discards their changes; a failed verification leads the agent to revise within the budget; a revision is a new commit, verified again. `worker-service.md:303–306`; `worker-service.impl.md:350`.
   - The agent judges only after every verification passes. `worker-service.md:307–308`.
   - The execution enforces the turn budget on pi turn events and aborts the agent when either budget ends. `worker-service.impl.md:466`; plan 07 task 07.10.
-  - The boundary of debate Q1 (`review:Ulrich`): work that the budget ends before its task commit is task work in progress; a task commit whose run failed or left an item unrun, with no later task work, is a failed or unrun verification at the end of the budget. `worker-service.md:318–320`; `worker-service.vocabulary.md:326–330`.
+  - The boundary of debate Q1, ruled on `worker-service.md:318–320`: work that the budget ends before its task commit is task work in progress; a task commit whose run failed or left an item unrun, with no later task work, is a failed or unrun verification at the end of the budget. `worker-service.md:318–320`; `worker-service.vocabulary.md:326–330`.
   - The execution writes no evidence, no assessment and no outcome for a task. `worker-service.md:309`.
 - Done when: `pnpm run verify` passes; the tests pass.
 
@@ -229,7 +229,7 @@ Three differences from `00-index.md` "Seams":
 - Rules:
   - The execution uses the node-branch push before every release. `worker-service.md:298`.
   - Before every release with no further work, the execution submits the head commit of the node branch as the evidence of the objective, whatever the task results establish. `worker-service.md:316`.
-  - Every task complete releases with no further work; a failed or unrun verification at the budget end ends the task work and releases with no further work; otherwise the execution code writes the checkpoint commit, pushes and releases with further work. `worker-service.md:317–320`; `worker-service.impl.md:351`, `:468`; debate Q1 (`review:Ulrich`).
+  - Every task complete releases with no further work; a failed or unrun verification at the budget end ends the task work and releases with no further work; otherwise the execution code writes the checkpoint commit, pushes and releases with further work. `worker-service.md:317–320`; `worker-service.impl.md:361`, `:479`; debate Q1, ruled on `worker-service.md:318–320`.
   - Every cleanup command, the push included, is bounded by `expired_at`, not by the remaining budget. `worker-service.md:321`; `worker-service.impl.md:469`.
   - A checkpoint commit establishes no completion and no verification result. `worker-service.md:322`.
   - A steps release with no further work requires a published evidence of the releasing execution with one `repository` asset of the pinned repository binding; a release with further work checks no record. `mission-service.impl.md:251–252`.
@@ -364,7 +364,7 @@ Three differences from `00-index.md` "Seams":
 - Rules:
   - `general@1` holds the steps method and `reviewer@1` the evaluation method. `src/worker/catalog.ts:48–65`; `mission-service.md:340`.
   - A reviewer execution that claims from `Waiting` performs the evaluation. `worker-service.md:517`.
-  - Debate Q2 (`review:Ulrich`): no claim response and no execution-scoped read carries the claim source (`scheduler-service.md:163`, `:177`; `engine/docs/cli/mission.md:518–545`), and an evidence heuristic cannot stand for it (`mission-service.md:588`). The first version admits no claim from `External.Requested` only while every frozen action holds `follows: null` (`mission-service.impl.md:83`; `mission-service.md:486`). The dispatch of step 3 is committed only after Ulrich confirms that prohibition on the owning page. Gap: the continuation claim that performs no evaluation (`worker-service.md:518`) waits for a retry-safe claim-source contract; no action set with a non-null `follows` is admitted before it.
+  - Debate Q2, ruled on `mission-service.impl.md:83`: no claim answer and no execution-scoped read carries the claim source, and the Project Service refuses `follows.type = "action_end_state"` in a binding write (plan 06 task 06.14), so every evaluation claim comes from `Waiting` and step 3 performs the evaluation on each. Gap: the continuation claim that performs no evaluation (`worker-service.md:518`) waits for a retry-safe claim-source contract.
   - Each execution starts with a fresh agent context, and the context ends with the execution. `worker-service.md:822`.
   - The method receives its dependencies from plan 09 and reads no server configuration. `worker-service.impl.md:230–232`.
   - Each plan updates the entry of its directory in `engine/AGENTS.md`. `00-index.md` "Shared files", row `AGENTS.md`.
@@ -416,7 +416,7 @@ Setup, in order (each command exits 0, token H):
 
 ## Blockers
 
-Two gaps went through the debate engine. Both verdicts extend a page and wait for the review of Ulrich (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 08"):
+Two gaps went through the debate engine. Both verdicts extended a page, and Ulrich ruled them on 2026-09-30 (`.dev/erd-02/decisions-log.md` 2026-09-30 "plan 08"):
 
-- DEBATE: the routing of a steps execution on an objective at the end of its resource budget - rounds:1 - verdict: CHANGE to A, the task-commit boundary: work that the budget ends before its task commit takes the checkpoint commit and the release with further work; a task commit whose run failed or left an item unrun, with no later task work, takes the head-commit evidence and the release with no further work; the owning page needs the explicit ruling, and the B9 repeat bound stays open.
-- DEBATE: the claim source of an evaluation claim (`Waiting` or `External.Requested`) - rounds:2 - verdict: CHANGE to E, repaired: build the evaluation method and the performer path now; the dispatch of every evaluation claim to the evaluation lands only after Ulrich confirms on the owning page that no frozen action set with a non-null `follows` is admitted; no evidence heuristic, no stored claim kind and no `claimed_from`.
+- DEBATE: the routing of a steps execution on an objective at the end of its resource budget - rounds:1 - verdict: CHANGE to A, the task-commit boundary: work that the budget ends before its task commit takes the checkpoint commit and the release with further work; a task commit whose run failed or left an item unrun, with no later task work, takes the head-commit evidence and the release with no further work; ruled on `worker-service.md:318–320` and `worker-service.impl.md:479`; the B9 repeat bound stays open.
+- DEBATE: the claim source of an evaluation claim (`Waiting` or `External.Requested`) - rounds:2 - verdict: CHANGE to E, repaired: build the evaluation method and the performer path now, with no evidence heuristic, no stored claim kind and no `claimed_from`. Ruled 2026-09-30: the Project Service refuses a non-null `follows` (`mission-service.impl.md:83`; plan 06 task 06.14), so the dispatch of every evaluation claim to the evaluation stands.
