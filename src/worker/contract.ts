@@ -9,6 +9,16 @@ import {
 import type { Transaction } from "../kernel/store.ts";
 import type { ResourceCheck } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
+export const WorkerHost = {
+  Kanthord: "kanthord",
+  ExternalHarness: "external-harness",
+} as const;
+export type WorkerHost = (typeof WorkerHost)[keyof typeof WorkerHost];
+export const WorkerMethod = {
+  Steps: "steps",
+  Evaluation: "evaluation",
+} as const;
+export type WorkerMethod = (typeof WorkerMethod)[keyof typeof WorkerMethod];
 export const MAX_RUNTIME_IDENTITY_LENGTH = 128;
 export interface VerifiedClient {
   clientId: string;
@@ -175,6 +185,7 @@ export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 
 export const WorkerErrorCode = {
+  CatalogNotFound: "worker.catalog.not_found",
   AgentNotFound: "worker.agent.not_found",
   NotFound: "worker.agent.enablement.not_found",
   RevisionConflict: "worker.agent.enablement.revision_conflict",
@@ -202,6 +213,30 @@ export const agentEnablementSchema = z.strictObject({
   revision: z.number().int().positive(),
 });
 const agentParams = z.strictObject({ agentName: z.string().min(1) });
+export const catalogItemSchema = z.strictObject({
+  name: z.string().min(1),
+  host: z.enum(WorkerHost),
+  declaredNodeStates: z.array(z.string()),
+  requiredNodeFormat: z.array(z.string()),
+});
+const resourceBudgetSchema = z.strictObject({
+  wallTimeMs: z.number().int().positive(),
+  turns: z.number().int().positive().optional(),
+});
+export const catalogEntrySchema = z.discriminatedUnion("host", [
+  catalogItemSchema.extend({
+    host: z.literal(WorkerHost.Kanthord),
+    method: z.enum(WorkerMethod),
+    agentName: z.string().min(1),
+    resourceBudget: resourceBudgetSchema,
+  }),
+  catalogItemSchema.extend({
+    host: z.literal(WorkerHost.ExternalHarness),
+    harness: z.string().min(1),
+    resourceBudget: resourceBudgetSchema,
+  }),
+]);
+
 const emptyFields = z.strictObject({});
 const revisionBody = z.strictObject({
   expectedRevision: z.number().int().positive(),
@@ -228,6 +263,47 @@ const enablementMutation = {
 } as const;
 
 export const workerOperations = {
+  "catalog.list": {
+    ...enablementOperation,
+    id: "worker.catalog.list",
+    method: HttpMethod.Get,
+    path: "/api/worker/catalog",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: z.strictObject({
+        limit: z.coerce
+          .number()
+          .int()
+          .min(1)
+          .max(LIST_LIMIT_MAX)
+          .default(LIST_LIMIT_DEFAULT),
+        cursor: z.string().min(1).optional(),
+      }),
+      body: z.null(),
+    }),
+    output: z.strictObject({
+      items: z.array(catalogItemSchema),
+      nextCursor: z.string().nullable(),
+    }),
+    description: "List supplied workers in ascending worker-name order.",
+  },
+  "catalog.get": {
+    ...enablementOperation,
+    id: "worker.catalog.get",
+    method: HttpMethod.Get,
+    path: "/api/worker/catalog/:workerName",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: z.strictObject({ workerName: z.string().min(1) }),
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: catalogEntrySchema,
+    description: "Get a supplied worker declaration.",
+  },
   "agent.enablement.list": {
     ...enablementOperation,
     id: "worker.agent.enablement.list",

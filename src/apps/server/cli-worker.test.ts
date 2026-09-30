@@ -15,6 +15,7 @@ import {
 import { writePrivate } from "../../kernel/files.ts";
 import { directories } from "../../config/index.ts";
 import { kanthord as command, environment } from "./cli-support.ts";
+import { WorkerMethod } from "../../worker/contract.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 const clientConfigPath = (env: NodeJS.ProcessEnv) =>
@@ -25,6 +26,93 @@ const NO_REGISTRATIONS = 0;
 const SINGLE_REGISTRATION = 1;
 const REGISTRATION_ATTEMPTS = 2;
 const TOKEN_SOURCES = 3;
+const STRING_TYPE = "string";
+const NATIVE_AGENT = "swe@1";
+const EXTERNAL_HARNESS = "claude-code";
+
+test("worker catalog CLI lists ascending pages", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const env = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+    KANTHORD_TOKEN: fixture.token,
+  };
+  const help = await command(["worker", "list", "--help"], env);
+  assert.equal(help.code, ExitCode.Success);
+  assert.match(help.stdout, /--cursor/);
+  const first = await command(["worker", "list", "--limit", "2"], env);
+  assert.equal(first.code, ExitCode.Success, first.stderr);
+  const page = JSON.parse(first.stdout);
+  assert.deepEqual(
+    page.items.map((item: { name: string }) => item.name),
+    ["claude@1", "general@1"],
+  );
+  assert.equal(typeof page.nextCursor, STRING_TYPE);
+  const second = await command(
+    ["worker", "list", "--limit", "2", "--cursor", page.nextCursor],
+    env,
+  );
+  assert.equal(second.code, ExitCode.Success, second.stderr);
+  const last = JSON.parse(second.stdout);
+  assert.deepEqual(
+    last.items.map((item: { name: string }) => item.name),
+    ["opencode@1", "reviewer@1"],
+  );
+  assert.equal(last.nextCursor, null);
+});
+
+test("worker catalog CLI gets native and external budgets and reports missing workers", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const env = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+    KANTHORD_TOKEN: fixture.token,
+  };
+  const native = await command(["worker", "get", "general@1"], env);
+  assert.equal(native.code, ExitCode.Success, native.stderr);
+  const declaration = JSON.parse(native.stdout);
+  assert.deepEqual(declaration.resourceBudget, {
+    turns: 200,
+    wallTimeMs: 7200000,
+  });
+  assert.equal(declaration.method, WorkerMethod.Steps);
+  assert.equal(declaration.agentName, NATIVE_AGENT);
+  assert.ok(!("harness" in declaration));
+  const external = await command(["worker", "get", "claude@1"], env);
+  assert.equal(external.code, ExitCode.Success, external.stderr);
+  const harness = JSON.parse(external.stdout);
+  assert.deepEqual(harness.resourceBudget, { wallTimeMs: 7200000 });
+  assert.equal(harness.harness, EXTERNAL_HARNESS);
+  assert.ok(!("method" in harness));
+  const missing = await command(["worker", "get", "tdd@1"], env);
+  assert.equal(missing.code, ExitCode.Failure);
+  assert.match(missing.stderr, /^worker\.catalog\.not_found:/);
+  assert.equal(missing.stdout, EMPTY_OUTPUT);
+});
+
+test("worker catalog requires human access and preserves pagination errors", async (t) => {
+  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
+  const env = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+    KANTHORD_TOKEN: await fixture.machineToken(TEST_WORKER_BINDING),
+  };
+  const refused = await command(["worker", "list"], env);
+  assert.equal(refused.code, ExitCode.Failure);
+  assert.match(refused.stderr, /^gateway\.authentication\.unauthorized:/);
+  const missing = await command(["worker", "get", "general@1"], {
+    ...env,
+    KANTHORD_TOKEN: undefined,
+  });
+  assert.equal(missing.code, ExitCode.Failure);
+  assert.match(missing.stderr, /^cli\.worker\.get\.token_required:/);
+  const invalid = await command(["worker", "list", "--cursor", "!"], {
+    ...env,
+    KANTHORD_TOKEN: fixture.token,
+  });
+  assert.equal(invalid.code, ExitCode.Failure);
+  assert.match(invalid.stderr, /^system\.pagination\.cursor_invalid:/);
+});
 
 test("worker register requires a token and validates retry keys before any request", async (t) => {
   const env = environment(temporary(t));

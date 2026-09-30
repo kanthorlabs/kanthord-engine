@@ -1,14 +1,9 @@
-export const WorkerHost = {
-  Kanthord: "kanthord",
-  ExternalHarness: "external-harness",
-} as const;
-export type WorkerHost = (typeof WorkerHost)[keyof typeof WorkerHost];
+import assert from "node:assert/strict";
+import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 
-export const WorkerMethod = {
-  Steps: "steps",
-  Evaluation: "evaluation",
-} as const;
-export type WorkerMethod = (typeof WorkerMethod)[keyof typeof WorkerMethod];
+import { WorkerHost, WorkerMethod } from "./contract.ts";
+export { WorkerHost, WorkerMethod } from "./contract.ts";
 
 export const REQUIRED_NODE_FORMAT: readonly string[] = [
   "name",
@@ -29,12 +24,17 @@ export interface WorkerDeclaration {
   method?: WorkerMethod;
   agentName?: string;
   harness?: string;
-  resourceBudget?: { turns: number; wallTimeMs: number };
+  resourceBudget: { turns?: number; wallTimeMs: number };
   declaredNodeStates: readonly string[];
   requiredNodeFormat: readonly string[];
 }
 
 const NATIVE_RESOURCE_BUDGET = { turns: 200, wallTimeMs: 7200000 };
+const EXTERNAL_RESOURCE_BUDGET = { wallTimeMs: 7200000 };
+const CURSOR_ENCODING = "base64url";
+const TEXT_ENCODING = "utf8";
+const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/;
+const FIRST_ITEM = 0;
 
 export const AGENT_DECLARATIONS: Readonly<Record<string, AgentDeclaration>> = {
   "swe@1": {
@@ -70,6 +70,7 @@ export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
     name: "claude@1",
     host: WorkerHost.ExternalHarness,
     harness: "claude-code",
+    resourceBudget: EXTERNAL_RESOURCE_BUDGET,
     declaredNodeStates: ["Available", "Waiting", "External.Requested"],
     requiredNodeFormat: REQUIRED_NODE_FORMAT,
   },
@@ -77,6 +78,7 @@ export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
     name: "opencode@1",
     host: WorkerHost.ExternalHarness,
     harness: "opencode",
+    resourceBudget: EXTERNAL_RESOURCE_BUDGET,
     declaredNodeStates: ["Available", "Waiting", "External.Requested"],
     requiredNodeFormat: REQUIRED_NODE_FORMAT,
   },
@@ -101,4 +103,44 @@ export function agentsOfWorker(workerName: string): string[] {
   if (declaration?.host !== WorkerHost.Kanthord || !declaration.agentName)
     return [];
   return [declaration.agentName];
+}
+
+export function listWorkerDeclarations(limit: number, cursor: string | null) {
+  assert.ok(Number.isSafeInteger(limit));
+  assert.ok(limit > FIRST_ITEM);
+  const after = cursor === null ? null : decodeCatalogCursor(cursor);
+  const names = Object.keys(WORKER_CATALOG)
+    .sort()
+    .filter((name) => after === null || name > after);
+  const items = names.slice(FIRST_ITEM, limit).map((name) => {
+    const { host, declaredNodeStates, requiredNodeFormat } =
+      WORKER_CATALOG[name]!;
+    return {
+      name,
+      host,
+      declaredNodeStates: [...declaredNodeStates],
+      requiredNodeFormat: [...requiredNodeFormat],
+    };
+  });
+  const nextCursor =
+    names.length > limit
+      ? Buffer.from(items.at(-1)!.name, TEXT_ENCODING).toString(CURSOR_ENCODING)
+      : null;
+  return { items, nextCursor };
+}
+
+function decodeCatalogCursor(cursor: string): string {
+  const decoded = Buffer.from(cursor, CURSOR_ENCODING).toString(TEXT_ENCODING);
+  if (
+    !CURSOR_PATTERN.test(cursor) ||
+    Buffer.from(decoded, TEXT_ENCODING).toString(CURSOR_ENCODING) !== cursor
+  )
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      "system.pagination.cursor_invalid",
+      "Invalid cursor.",
+    );
+  assert.ok(decoded.length > FIRST_ITEM);
+  assert.equal(Buffer.from(decoded).toString(CURSOR_ENCODING), cursor);
+  return decoded;
 }

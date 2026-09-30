@@ -9,6 +9,8 @@ import {
   AGENT_PROVIDER_CAPABILITY,
   AGENT_PROVIDER_TARGET_KIND,
   InstanceActivity,
+  WorkerHost,
+  WorkerMethod,
   type AgentDependentBinding,
   type WorkerEntry,
 } from "./contract.ts";
@@ -126,6 +128,7 @@ test("Worker run joins cancellation before and after startup", async () => {
 const AGENT = "swe@1";
 const OTHER_AGENT = "re@1";
 const WORKER = "general@1";
+const EXTERNAL_HARNESS = "claude-code";
 const MODEL = "claude-sonnet-4-5";
 const MISSING_MODEL = "claude-3-5-sonnet-20241022";
 const UNKNOWN = "unknown";
@@ -212,6 +215,89 @@ function refuses(
     return true;
   });
 }
+
+test("catalog pages supplied declarations once per commit and registrations add no entry", async (t) => {
+  const f = enablementFixture(t);
+  const pageSize = 2;
+  const expectedCommits = 4;
+  const before = f.invoke("catalog.list", null, {});
+  assert.deepEqual(
+    before.items.map((item) => item.name),
+    ["claude@1", "general@1", "opencode@1", "reviewer@1"],
+  );
+  assert.equal(before.nextCursor, null);
+  const first = f.invoke("catalog.list", null, {}, { limit: pageSize });
+  assert.deepEqual(
+    first.items.map((item) => item.name),
+    ["claude@1", "general@1"],
+  );
+  assert.equal(first.nextCursor, Buffer.from(WORKER).toString("base64url"));
+  const second = f.invoke(
+    "catalog.list",
+    null,
+    {},
+    { limit: pageSize, cursor: first.nextCursor },
+  );
+  assert.deepEqual(
+    second.items.map((item) => item.name),
+    ["opencode@1", "reviewer@1"],
+  );
+  assert.equal(second.nextCursor, null);
+  await f.worker.start();
+  t.after(() => f.worker.stop());
+  f.store.transaction((tx) => f.worker.registrations.register(tx, client));
+  assert.deepEqual(f.invoke("catalog.list", null, {}), before);
+  assert.equal(f.commits(), expectedCommits);
+  assert.deepEqual(Object.keys(before.items[0]!).sort(), [
+    "declaredNodeStates",
+    "host",
+    "name",
+    "requiredNodeFormat",
+  ]);
+});
+
+test("catalog reads expose host-specific budgets and refuse unknown names and malformed cursors", (t) => {
+  const f = enablementFixture(t);
+  const native = f.invoke("catalog.get", null, { workerName: WORKER });
+  assert.equal(native.host, WorkerHost.Kanthord);
+  assert.ok("method" in native && native.method === WorkerMethod.Steps);
+  assert.ok("agentName" in native && native.agentName === AGENT);
+  assert.ok(!("harness" in native));
+  assert.deepEqual(native.resourceBudget, { turns: 200, wallTimeMs: 7200000 });
+  const external = f.invoke("catalog.get", null, { workerName: "claude@1" });
+  assert.equal(external.host, WorkerHost.ExternalHarness);
+  assert.ok("harness" in external && external.harness === EXTERNAL_HARNESS);
+  assert.ok(!("method" in external) && !("agentName" in external));
+  assert.deepEqual(external.resourceBudget, { wallTimeMs: 7200000 });
+  assert.deepEqual(f.worker.declarationOf(WORKER), native);
+  assert.equal(f.worker.declarationOf(UNKNOWN), null);
+  refuses(
+    () => f.invoke("catalog.get", null, { workerName: UNKNOWN }),
+    WorkerErrorCode.CatalogNotFound,
+    HttpStatus.NotFound,
+  );
+  for (const cursor of ["!", "Zg=", "Zh", "_w"])
+    refuses(
+      () => f.invoke("catalog.list", null, {}, { cursor }),
+      "system.pagination.cursor_invalid",
+    );
+  assert.deepEqual(
+    f.invoke(
+      "catalog.list",
+      null,
+      {},
+      { cursor: Buffer.from("zzz").toString("base64url") },
+    ),
+    { items: [], nextCursor: null },
+  );
+  assert.equal(
+    workerOperations["catalog.get"].output.safeParse({
+      ...native,
+      resourceBudget: { wallTimeMs: Number.MAX_SAFE_INTEGER + 1 },
+    }).success,
+    false,
+  );
+});
 
 test("resource inventory includes every live provider across pages without writes", async (t) => {
   const calls: Array<{

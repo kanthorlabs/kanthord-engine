@@ -151,6 +151,49 @@ async function list(command: Command): Promise<void> {
   );
 }
 
+async function catalogList(command: Command): Promise<void> {
+  assert.equal(workerOperations["catalog.list"].access, AccessPolicy.Human);
+  assert.equal(workerOperations["catalog.list"].mutation, false);
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, "cli.worker.list.token_required");
+  const limit =
+    options.limit === undefined
+      ? LIST_LIMIT_DEFAULT
+      : parsePositiveInt(options.limit, LIMIT_INVALID);
+  if (limit > LIST_LIMIT_MAX)
+    throw new Diagnostic(
+      LIMIT_OUT_OF_RANGE,
+      `limit must be at most ${LIST_LIMIT_MAX}`,
+    );
+  const result = await httpClient(workerOperations, endpoint, token)[
+    "catalog.list"
+  ]({
+    params: {},
+    query: {
+      limit,
+      ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
+    },
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, "cli.worker.list.indeterminate"))}\n`,
+  );
+}
+
+async function catalogGet(workerName: string, command: Command): Promise<void> {
+  assert.equal(workerOperations["catalog.get"].access, AccessPolicy.Human);
+  assert.equal(workerOperations["catalog.get"].mutation, false);
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, "cli.worker.get.token_required");
+  const result = await httpClient(workerOperations, endpoint, token)[
+    "catalog.get"
+  ]({ params: { workerName }, query: {}, body: null });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, "cli.worker.get.indeterminate"))}\n`,
+  );
+}
+
 async function get(agentName: string, command: Command): Promise<void> {
   const { endpoint, token } = resolveClient(command.optsWithGlobals());
   requireToken(token, GET_TOKEN_REQUIRED);
@@ -289,6 +332,23 @@ export function addWorkerCommand(program: Command): void {
       singleUse("--token"),
     );
   worker.action(() => worker.help());
+  worker
+    .command(LIST)
+    .description("List supplied workers as JSON")
+    .option("--limit <count>", "Maximum results per page", singleUse("--limit"))
+    .option(
+      "--cursor <cursor>",
+      "Continue from a cursor",
+      singleUse("--cursor"),
+    )
+    .action((_options, command: Command) => catalogList(command));
+  worker
+    .command(GET)
+    .description("Get a supplied worker declaration as JSON")
+    .argument("<worker-name>", "Exact worker name")
+    .action((workerName: string, _options, command: Command) =>
+      catalogGet(workerName, command),
+    );
   worker
     .command("register")
     .description(

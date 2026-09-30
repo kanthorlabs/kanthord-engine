@@ -1,0 +1,121 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: worker.catalog.list
+    tags:
+      - worker
+    description: List supplied workers in ascending worker-name order.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: limit
+        in: query
+        required: true
+        schema:
+          $ref: "#/components/schemas/worker.catalog.list.Input/properties/query/properti\
+            es/limit"
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/worker.catalog.list.Input/properties/query/properti\
+            es/cursor"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.catalog.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.catalog.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            limit:
+              default: 100
+              type: integer
+              minimum: 1
+              maximum: 1000
+            cursor:
+              type: string
+              minLength: 1
+          required:
+            - limit
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.catalog.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                minLength: 1
+              host:
+                type: string
+                enum:
+                  - kanthord
+                  - external-harness
+              declaredNodeStates:
+                type: array
+                items:
+                  type: string
+              requiredNodeFormat:
+                type: array
+                items:
+                  type: string
+            required:
+              - name
+              - host
+              - declaredNodeStates
+              - requiredNodeFormat
+            additionalProperties: false
+        nextCursor:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - items
+        - nextCursor
+      additionalProperties: false

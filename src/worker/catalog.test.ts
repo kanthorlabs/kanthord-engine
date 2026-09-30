@@ -49,6 +49,7 @@ test("static worker declarations", () => {
     name: "claude@1",
     host: WorkerHost.ExternalHarness,
     harness: "claude-code",
+    resourceBudget: { wallTimeMs: 7200000 },
     declaredNodeStates: ["Available", "Waiting", "External.Requested"],
     requiredNodeFormat,
   });
@@ -56,6 +57,7 @@ test("static worker declarations", () => {
     name: "opencode@1",
     host: WorkerHost.ExternalHarness,
     harness: "opencode",
+    resourceBudget: { wallTimeMs: 7200000 },
     declaredNodeStates: ["Available", "Waiting", "External.Requested"],
     requiredNodeFormat,
   });

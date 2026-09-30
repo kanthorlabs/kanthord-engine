@@ -46,6 +46,8 @@ import {
   agentsOfWorker,
   getAgentDeclaration,
   getWorkerDeclaration,
+  listWorkerDeclarations,
+  type WorkerDeclaration,
 } from "./catalog.ts";
 import {
   EnablementState,
@@ -681,7 +683,39 @@ export class WorkerService implements Service {
     );
   }
 
+  declarationOf(workerName: string): WorkerDeclaration | null {
+    const declaration = getWorkerDeclaration(workerName) ?? null;
+    assert.ok(declaration === null || declaration.name === workerName);
+    assert.ok(
+      declaration === null || declaration.resourceBudget.wallTimeMs > NONE,
+    );
+    return declaration;
+  }
+
+  private declareCatalog(registry: OperationRegistry): void {
+    assert.equal(workerOperations["catalog.list"].access, AccessPolicy.Human);
+    assert.equal(workerOperations["catalog.get"].mutation, false);
+    registry.register(workerOperations["catalog.list"], ({ query }, caller) =>
+      caller.commit(() =>
+        listWorkerDeclarations(query.limit, query.cursor ?? null),
+      ),
+    );
+    registry.register(workerOperations["catalog.get"], ({ params }, caller) =>
+      caller.commit(() => {
+        const declaration = this.declarationOf(params.workerName);
+        if (declaration === null)
+          throw new OperationError(
+            HttpStatus.NotFound,
+            WorkerErrorCode.CatalogNotFound,
+            "Worker not found.",
+          );
+        return workerOperations["catalog.get"].output.parse(declaration);
+      }),
+    );
+  }
+
   declare(registry: OperationRegistry): void {
+    this.declareCatalog(registry);
     this.declareEnablements(registry);
     const worker = this.registrations;
     assert.equal(workerOperations.register.service, WORKER_SERVICE_NAME);

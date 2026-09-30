@@ -215,6 +215,17 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   assert.deepEqual(liveness?.security, []);
   assert.equal(healthcheck?.operationId, gatewayOperations.healthcheck.id);
   assert.equal(healthcheck?.["x-access-policy"], AccessPolicy.Human);
+  for (const operation of [
+    workerOperations["catalog.list"],
+    workerOperations["catalog.get"],
+  ]) {
+    const published = resolved.paths?.[
+      operation.path.replace(":workerName", "{workerName}")
+    ]?.get as ResolvedOperation | undefined;
+    assert.equal(published?.operationId, operation.id);
+    assert.equal(published?.["x-access-policy"], AccessPolicy.Human);
+    assert.deepEqual(published?.security, BEARER_SECURITY);
+  }
   assert.equal(
     healthcheck?.["x-timeout-ms"],
     gatewayOperations.healthcheck.timeoutMs,
