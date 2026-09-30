@@ -171,10 +171,10 @@ The [registration contract](https://github.com/kanthorlabs/kanthord/blob/main/do
 | `body`                   | Absent HTTP body; internal value `null`                                   | JSON `{}` is not an empty request body and is rejected. `--file` is not accepted.                  |
 
 The operation is a mutation, declares a `10,000 ms` timeout and a `40 KiB` body
-limit, and returns HTTP `200` with `{ "runtimeIdentity": "..." }`. The body limit
+limit, and returns HTTP `200` with `{ "runtimeIdentity": "...", "resourceIdentity": "...", "workerName": "..." }`. The body limit
 does not permit a registration payload. The runtime identity is `worker_instance_<ulid>`.
 
-The CLI prints one JSON line with `runtimeIdentity` and `idempotencyKey`, saves no configuration and prints no token.
+The CLI prints one JSON line with `runtimeIdentity`, `resourceIdentity`, `workerName` and `idempotencyKey`, saves no configuration and prints no token.
 Success exits with zero; failure exits with a non-zero status. Registration creates no client identity,
 worker definition or human account. The credential comes from local `jwt generate`
 issuance described in [other commands](./other.md).
@@ -315,7 +315,7 @@ Required token: human JWT. Empty query, absent body. HTTP `200` returns
 | `enablement`          | The [agent enablement record](#agent-enablement-record--proposed), or `null` when no record exists.                                                                                                                                                                            |
 | `basePrompt`          | Optional string; the exact worker-declared shared prompt, omitted if absent.                                                                                                                                                                                                   |
 | `agentPrompt`         | Required string; exact worker-declared role prompt.                                                                                                                                                                                                                            |
-| `tools`               | Array of permitted tool declarations; each item has `name: string`, `source` (one of `builtin`, `kanthord-mcp`) and `inputSchema: object`. Project-added tools are inspected through Project configuration instead.                                                            |
+| `tools`               | Array of permitted tool declarations; each item has `name: string`, `source` (one of `builtin`, `kanthord-mcp`, `host`) and `inputSchema: object`. Project-added tools are inspected through Project configuration instead.                                                    |
 
 The [configuration schema](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#configuration-schema)
 is emitted by `z.toJSONSchema` of `zod` at 4.4.3 from the effective-configuration
@@ -458,6 +458,8 @@ must still hold at least one agent provider.
 ```text
 kanthord worker provider check --credential <credential-name> [R]
 ```
+
+No ERD 1 or ERD 2 plan builds this command. It waits for the phase after the external harness, and the dispatcher completeness check exempts it by name until then.
 
 The [provider check contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-provider-check)
 declares `worker.provider.check`, a server-wide read under `human` access, at

@@ -345,6 +345,7 @@ The action rules follow the [GitHub action catalog](https://github.com/kanthorla
 The key of the action is `<binding name>.<name>`, which the Mission Service freezes at the attempt opening.
 
 - The `action_end_state` shape identifies the configured action of another binding for the same node.
+- The binding write refuses the `action_end_state` shape until a retry-safe claim-source contract exists, under the [frozen action rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-attempt). The refusal is one issue of the validation failure of `binding apply`, at the `follows` path.
 - Absent references and invalid dependency cycles fail validation.
 - `pull_request` opens a pull request from the node branch into the base branch. It requires the platform action capability and expects the merge of that pull request.
 - `merge_push` merges the node branch into the base branch and pushes. It requires the network git write capability and expects the push to the base branch.
