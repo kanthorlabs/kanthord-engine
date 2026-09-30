@@ -52,6 +52,17 @@ engine/
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
 │   │   ├── config.ts           # Mission limits and Convict configuration schema
 │   │   ├── migrations.ts       # Mission, node, revision, and dependency tables
+│   │   ├── record-store.ts     # Attempts, evidence, assessments, and outcomes
+│   │   ├── record-read.ts      # Record projections and blocked context
+│   │   ├── record-list.ts      # Record pagination and read handlers
+│   │   ├── frozen-action.ts    # Pinned repository requirements and resolutions
+│   │   ├── currency.ts         # Read-time assessment currency and selection
+│   │   ├── conditions.ts       # Readiness, closure, and continuation conditions
+│   │   ├── control.ts          # Transactional human-control admission and closure
+│   │   ├── control-hold.ts     # Pause, ready, and resume
+│   │   ├── control-close.ts    # Block, discard, and success override
+│   │   ├── control-unblock.ts  # Atomic direction change and next attempt
+│   │   ├── transitions.ts     # Scheduler claim, release admission, and loss
 │   │   └── service.ts          # Lifecycle, health, and collaboration implementations
 │   ├── scheduler/              # Scheduler Service — job table, work queue, and queue reads
 │   │   ├── contract.ts         # WorkQueue collaboration and queue operation declarations

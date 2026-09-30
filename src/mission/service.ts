@@ -29,11 +29,13 @@ import {
   type SchedulerClaims,
   type SchedulerWakeup,
   type ExecutionAttribution,
+  type MissionTransitions,
 } from "./contract.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
 import { unblockNode } from "./control-unblock.ts";
+import { claim, release, loss } from "./transitions.ts";
 import {
   attemptPage,
   getAttempt,
@@ -97,7 +99,23 @@ export interface Dependencies {
   executionAttribution: ExecutionAttribution;
 }
 
-export class MissionService implements Service, MissionCollaborations {
+export class MissionService
+  implements Service, MissionCollaborations, MissionTransitions
+{
+  claim(...args: Parameters<MissionTransitions["claim"]>) {
+    const [tx, ...rest] = args;
+    return claim(tx, this.dependencies, ...rest);
+  }
+
+  release(...args: Parameters<MissionTransitions["release"]>) {
+    const [tx, ...rest] = args;
+    return release(tx, this.dependencies, ...rest);
+  }
+
+  loss(...args: Parameters<MissionTransitions["loss"]>) {
+    const [tx, ...rest] = args;
+    return loss(tx, this.dependencies, ...rest);
+  }
   private readonly shutdown = new CancellationContext();
   private startTask?: Promise<Error | null>;
   private stopTask?: Promise<Error | null>;
