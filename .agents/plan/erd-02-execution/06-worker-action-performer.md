@@ -16,7 +16,7 @@ Out of scope:
 
 - The MCP server, its session, its three operations and the MCP tool `repository-action-request` (decision D5). The tool later calls the same internal function.
 - The evaluation method that calls the operation (plan 08) and the `worker` application that hosts it (plan 09).
-- `intake.action.perform`, `intake.action.read` and every Intake mechanism (ERD 3). Production answers `system.composition.unwired` at the first Intake call (decision D6).
+- `intake.action.perform`, `intake.action.read` and every Intake mechanism (ERD 3). Production throws internal `system.composition.unwired` at the first Intake call; the Gateway answers HTTP 500 `gateway.invocation.unknown` (decision D6).
 - A durable dispatch record (B9 W2, `docs/reference/erd/02-execution.md:23`), the retrieval of a lost acknowledgement (B9 W3), and what follows a failure or an uncertainty (B9 A3, W1, W4, PR2). Each task states its gap in one line (decision D1).
 - The `awaiting-prerequisite` production path. The first version produces no such item (`worker-service.impl.md:441`); the schema holds the variant.
 - A CLI leaf. No CLI command calls the performer (`worker-service.impl.md:414`, `:467`; `engine/docs/cli/mission.md:502–503`).
@@ -312,7 +312,7 @@ The `IntakeActions` signature differs from the sketch of `00-index.md` "Seams": 
   2. Test: with `actions.hold()`, one call through the HTTP adapter and one through the direct adapter under the same execution, each with its own idempotency key; release the gate; exactly one `perform` call, one `submitted` item across both answers and one request evidence in `mission.evidence.list`.
   3. Test: a repeat of a completed call with the same key and payload answers the recorded items and calls `perform` no more.
   4. Test: a call with the execution identity of another registration answers 403 `gateway.invocation.execution_proof_failed` through both adapters and calls nothing.
-  5. Test: a call without `standIns.intakeActions` answers 500 `system.composition.unwired` on a second fixture.
+  5. Test: an HTTP call without `standIns.intakeActions` answers 500 `gateway.invocation.unknown` on a second fixture; the stand-in throws internal `system.composition.unwired` before work (decision D6).
   6. Test: the shared error envelope, the 900 s timeout and the lifetime of the route.
 - Rules:
   - Both adapters enter one invocation chain. `architecture.impl.md:614–618`.

@@ -18,7 +18,7 @@ composition root under decision D6:
 
 - ERD 3: `intake.storage.put`, `intake.storage.get`, `intake.storage.check`,
   `intake.storage.delete`, `intake.execution.storage.get`, `intake.action.perform`,
-  `intake.action.read`, and the Intake check of a request (`intake.action.check`). Production fails closed with `system.composition.unwired`;
+  `intake.action.read`, and the Intake check of a request (`intake.action.check`). Production throws internal `system.composition.unwired` before work; the Gateway answers HTTP 500 `gateway.invocation.unknown` under `architecture.impl.md` "Unwired collaborations";
   `gatewayFixture` injects a fake.
 - ERD 4: `TraceIdentity` (decision D7). The composition root injects the minting stand-in.
 

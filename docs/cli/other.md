@@ -838,6 +838,12 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `repository.connector.tool_version`              | Git is older than 2.40 or OpenSSH is older than 9.0.                                                                    | serve server, serve worker                                |
 | local           | `repository.connector.git_failed`                | A git operation of the repository connector fails, is aborted or reaches its deadline; the message names the operation. | serve worker, binding apply                               |
 
+The internal error `system.composition.unwired` means that the composition root's
+stand-in was called before its collaboration was implemented. It throws before
+performing work. The Gateway exposes it to a remote caller as HTTP 500
+`gateway.invocation.unknown` with message `Internal server error.` under the
+[unwired collaboration rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#unwired-collaborations).
+
 ## Sources
 
 Local implementation references:

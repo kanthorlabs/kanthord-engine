@@ -195,7 +195,7 @@ The `claim` signature differs from the sketch of `00-index.md` "Seams": it takes
   - Production passes `unwired`, and `gatewayFixture` passes a stand-in that answers the true state of the absent peer. Decisions D6, D9; ERD 1 decision D14.
   - The execution attribution follows the same rule as the three claim seams. The wakeup is the one production no-op of the plan set: no work pull exists before plan 03, so a wakeup has no receiver, and an ERD 1 graph write must not answer 500 after its commit. Decision D9 (the rows `SchedulerWakeup.wake | 01 | 03` and `ExecutionAttribution.of | 01 | 03` and the no-op exception); `.dev/erd-02/decisions-log.md` 2026-09-29 "the Scheduler wakeup before plan 03".
   - Method syntax keeps an unwired function assignable to each method, as in the ERD 1 stub of commit `c783ce3`.
-  - Gap: `system.composition.unwired` stands on no page; decision D6 names it, as in ERD 1.
+  - `architecture.impl.md` "Unwired collaborations" and `engine/docs/cli/other.md` "Error codes" declare internal `system.composition.unwired` and its HTTP 500 `gateway.invocation.unknown` mapping; decision D6 retains the internal helper assertion. Ulrich approved the declaration repair on 2026-09-30.
 - Done when: `pnpm run verify` passes; `unwired.test.ts` and `unwired-import.test.ts` pass; every ERD 1 E2E test passes unchanged.
 
 ### 01.5 Add the record store and the test harness

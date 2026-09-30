@@ -397,7 +397,7 @@ Four differences from `00-index.md` "Seams":
   - The four refusals and their codes. `worker-service.impl.md:216–220`; `engine/docs/cli/worker.md:742–745`.
   - A lost execution is never revived. `worker-service.impl.md:218`.
   - CLI code `cli.worker.instance.resume.invalid_runtime_identity`: proposed under `architecture.impl.md:348`.
-  - Gap: until plan 03, production answers 500 `system.composition.unwired` at step 3.3; decision D9.
+  - Gap: until plan 03, production throws internal `system.composition.unwired` at step 3.3 and the Gateway answers HTTP 500 `gateway.invocation.unknown`; decisions D6 and D9.
   - Gap: two live processes of one machine JWT pass every execution proof after a resume; HANDOFF B9 Scheduler item (`docs/brainstorm/HANDOFF.md:115`).
 - Done when: `pnpm run verify` passes; the tests pass; `kanthord worker instance resume --help` exits 0.
 
@@ -424,7 +424,7 @@ Four differences from `00-index.md` "Seams":
   - The reads change no registration, no pool and no scheduling state, and read no table of another service. `worker-service.impl.md:180`, `:190`.
   - `worker.instance.binding_unknown` (code: proposed, 400): `resourceIdentity` names no current worker binding of `projectId`. The condition is `worker-service.impl.md:187` and `engine/docs/cli/worker.md:522`; no shared code of `engine/docs/cli/other.md` covers a check that needs a read.
   - The CLI codes are proposed under `architecture.impl.md:348`; `binding_without_project` follows `cli.jwt.endpoint_without_output` (`engine/docs/cli/other.md:770`).
-  - Gap: until plan 03, production answers 500 `system.composition.unwired` at `activityOf`; decision D9.
+  - Gap: until plan 03, production throws internal `system.composition.unwired` at `activityOf` and the Gateway answers HTTP 500 `gateway.invocation.unknown`; decisions D6 and D9.
 - Done when: `pnpm run verify` passes; the tests pass; `kanthord worker instance list --help` exits 0.
 
 ### 02.13 Complete the catalog budgets and add `worker.catalog.list` and `get` with their CLI leaves
