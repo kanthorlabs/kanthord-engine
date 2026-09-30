@@ -34,6 +34,12 @@ import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
 import { unblockNode } from "./control-unblock.ts";
+import {
+  attemptPage,
+  getAttempt,
+  externalActionPage,
+  getExternalAction,
+} from "./record-list.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
 import { exportMission } from "./export.ts";
 import { previewImport } from "./import.ts";
@@ -103,6 +109,48 @@ export class MissionService implements Service, MissionCollaborations {
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["attempt.list"],
+      ({ params, query }, caller) =>
+        caller.commit((tx) =>
+          attemptPage(tx, this.dependencies.bindings, params.nodeId, query),
+        ),
+    );
+    registry.register(missionOperations["attempt.get"], ({ params }, caller) =>
+      caller.commit((tx) =>
+        getAttempt(
+          tx,
+          this.dependencies.bindings,
+          params.nodeId,
+          params.attempt,
+        ),
+      ),
+    );
+    registry.register(
+      missionOperations["externalAction.list"],
+      ({ params, query }, caller) =>
+        caller.commit((tx) =>
+          externalActionPage(
+            tx,
+            this.dependencies.bindings,
+            params.nodeId,
+            query,
+          ),
+        ),
+    );
+    registry.register(
+      missionOperations["externalAction.get"],
+      ({ params }, caller) =>
+        caller.commit((tx) =>
+          getExternalAction(
+            tx,
+            this.dependencies.bindings,
+            params.nodeId,
+            params.attempt,
+            params.actionKey,
+          ),
+        ),
+    );
     registry.register(
       missionOperations["node.unblock"],
       ({ params, body }, caller) =>

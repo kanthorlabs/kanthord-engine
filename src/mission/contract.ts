@@ -915,6 +915,69 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "attempt.list": {
+    ...readOperation,
+    id: "mission.attempt.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/node/:nodeId/attempt",
+    input: readInput(
+      z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject(pageQuery),
+    ),
+    output: pageOf(attemptSchema),
+    description: "List node attempts in descending attempt order.",
+  },
+  "attempt.get": {
+    ...readOperation,
+    id: "mission.attempt.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/node/:nodeId/attempt/:attempt",
+    input: readInput(
+      z.strictObject({
+        nodeId: identitySchema(NODE_IDENTITY_PREFIX),
+        attempt: z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+      }),
+      z.strictObject({}),
+    ),
+    output: attemptSchema,
+    description: "Get a node attempt.",
+  },
+  "externalAction.list": {
+    ...readOperation,
+    id: "mission.externalAction.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/node/:nodeId/external-action",
+    input: readInput(
+      z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject({
+        ...pageQuery,
+        attempt: z.coerce
+          .number()
+          .int()
+          .min(0)
+          .max(Number.MAX_SAFE_INTEGER)
+          .optional(),
+      }),
+    ),
+    output: pageOf(externalActionSchema),
+    description: "List frozen external actions across attempts.",
+  },
+  "externalAction.get": {
+    ...readOperation,
+    id: "mission.externalAction.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/node/:nodeId/attempt/:attempt/external-action/:actionKey",
+    input: readInput(
+      z.strictObject({
+        nodeId: identitySchema(NODE_IDENTITY_PREFIX),
+        attempt: z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+        actionKey: actionKeySchema,
+      }),
+      z.strictObject({}),
+    ),
+    output: externalActionSchema,
+    description: "Get a required external action of an attempt.",
+  },
   "node.unblock": {
     ...writeOperation,
     id: "mission.node.unblock",

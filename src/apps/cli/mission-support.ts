@@ -26,7 +26,10 @@ type ReadCommand = keyof typeof missionOperations;
 
 export function client(command: Command, name: ReadCommand) {
   const { endpoint, token } = resolveClient(command.optsWithGlobals());
-  requireToken(token, `cli.mission.${name}.token_required`);
+  requireToken(
+    token,
+    `cli.mission.${name.replace("externalAction", "external_action")}.token_required`,
+  );
   return httpClient(missionOperations, endpoint, token);
 }
 
@@ -34,7 +37,10 @@ export function printResult<T>(
   result: OperationResult<T>,
   name: ReadCommand,
 ): void {
-  const data = handleReadResult(result, `cli.mission.${name}.indeterminate`);
+  const data = handleReadResult(
+    result,
+    `cli.mission.${name.replace("externalAction", "external_action")}.indeterminate`,
+  );
   process.stdout.write(`${JSON.stringify(data)}\n`);
 }
 

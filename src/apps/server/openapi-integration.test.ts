@@ -386,6 +386,30 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     { id: "string", projectId: "string", version: "integer" },
   );
   const fixture = await gatewayFixture(t);
+  for (const name of [
+    "attempt.list",
+    "attempt.get",
+    "externalAction.list",
+    "externalAction.get",
+  ] as const) {
+    const operation = missionOperations[name];
+    const path = operation.path.replace(/:([^/]+)/g, "{$1}");
+    assert.equal(resolved.paths?.[path]?.get?.operationId, operation.id);
+    if (!name.endsWith(".list")) continue;
+    const response = resolved.paths?.[path]?.get?.responses[
+      HttpStatus.OK
+    ] as unknown as {
+      content: {
+        "application/json": { schema: { properties: Record<string, unknown> } };
+      };
+    };
+    assert.deepEqual(
+      Object.keys(
+        response.content["application/json"].schema.properties,
+      ).sort(),
+      ["items", "nextCursor"],
+    );
+  }
   assert.deepEqual(
     emitOpenAPI(
       fixture.gateway.registry.all().map(({ operation }) => operation),

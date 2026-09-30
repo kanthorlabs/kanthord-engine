@@ -30,6 +30,10 @@ paths:
     $ref: ./openapi/gateway/openapiFile.yaml#/pathItem
   /api/auth/verify:
     $ref: ./openapi/gateway/verify.yaml#/pathItem
+  /api/mission/node/{nodeId}/attempt/{attempt}:
+    $ref: ./openapi/mission/attempt.get.yaml#/pathItem
+  /api/mission/node/{nodeId}/attempt:
+    $ref: ./openapi/mission/attempt.list.yaml#/pathItem
   /api/mission/node/{nodeId}/criterion:
     $ref: ./openapi/mission/criterion.set.yaml#/pathItem
   /api/mission/node/{nodeId}/dependency/{dependsOnId}:
@@ -38,6 +42,10 @@ paths:
     $ref: ./openapi/mission/edge.list.yaml#/pathItem
   /api/mission/{missionId}/export:
     $ref: ./openapi/mission/export.yaml#/pathItem
+  /api/mission/node/{nodeId}/attempt/{attempt}/external-action/{actionKey}:
+    $ref: ./openapi/mission/externalAction.get.yaml#/pathItem
+  /api/mission/node/{nodeId}/external-action:
+    $ref: ./openapi/mission/externalAction.list.yaml#/pathItem
   /api/mission/project/{projectId}:
     $ref: ./openapi/mission/get.yaml#/pathItem
   /api/mission/{missionId}/import:

@@ -1,0 +1,178 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: mission.externalAction.get
+    tags:
+      - mission
+    description: Get a required external action of an attempt.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: nodeId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.externalAction.get.Input/properties/params/\
+            properties/nodeId"
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.externalAction.get.Input/properties/params/\
+            properties/attempt"
+      - name: actionKey
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.externalAction.get.Input/properties/params/\
+            properties/actionKey"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/mission.externalAction.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    mission.externalAction.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            nodeId:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+            attempt:
+              type: integer
+              minimum: 1
+              maximum: 9007199254740991
+            actionKey:
+              type: string
+              pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$
+          required:
+            - nodeId
+            - attempt
+            - actionKey
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    mission.externalAction.get.Output:
+      type: object
+      properties:
+        nodeId:
+          type: string
+          minLength: 31
+          maxLength: 31
+          pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: node_ followed by a canonical 26-character uppercase ULID.
+        attempt:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        action:
+          type: object
+          properties:
+            key:
+              type: string
+              pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$
+            bindingId:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: binding_ followed by a canonical 26-character uppercase ULID.
+            action:
+              type: string
+              enum:
+                - pull_request
+                - merge_push
+            expectedEndState:
+              type: string
+              enum:
+                - pull_request_merged
+                - base_branch_pushed
+            follows:
+              anyOf:
+                - type: string
+                  pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$
+                - type: "null"
+            configuration:
+              type: object
+              properties:
+                baseBranch:
+                  type: string
+                  minLength: 1
+              required:
+                - baseBranch
+              additionalProperties: false
+          required:
+            - key
+            - bindingId
+            - action
+            - expectedEndState
+            - follows
+            - configuration
+          additionalProperties: false
+        requested:
+          type: boolean
+        requestEvidenceId:
+          anyOf:
+            - type: string
+              minLength: 35
+              maxLength: 35
+              pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: evidence_ followed by a canonical 26-character uppercase ULID.
+            - type: "null"
+        resolution:
+          type: string
+          enum:
+            - unrequested
+            - unresolved
+            - expected-end
+            - other-end
+      required:
+        - nodeId
+        - attempt
+        - action
+        - requested
+        - requestEvidenceId
+        - resolution
+      additionalProperties: false
