@@ -30,6 +30,10 @@ paths:
     $ref: ./openapi/gateway/openapiFile.yaml#/pathItem
   /api/auth/verify:
     $ref: ./openapi/gateway/verify.yaml#/pathItem
+  /api/mission/assessment/{assessmentId}:
+    $ref: ./openapi/mission/assessment.get.yaml#/pathItem
+  /api/mission/node/{nodeId}/assessment:
+    $ref: ./openapi/mission/assessment.list.yaml#/pathItem
   /api/mission/node/{nodeId}/attempt/{attempt}:
     $ref: ./openapi/mission/attempt.get.yaml#/pathItem
   /api/mission/node/{nodeId}/attempt:
@@ -84,6 +88,10 @@ paths:
     $ref: ./openapi/mission/node.revision.list.yaml#/pathItem
   /api/mission/node/{nodeId}/unblock:
     $ref: ./openapi/mission/node.unblock.yaml#/pathItem
+  /api/mission/outcome/{outcomeId}:
+    $ref: ./openapi/mission/outcome.get.yaml#/pathItem
+  /api/mission/node/{nodeId}/outcome:
+    $ref: ./openapi/mission/outcome.list.yaml#/pathItem
   /api/project/{projectId}/binding/{bindingId}/agent/{agentName}:
     $ref: ./openapi/project/agentConfiguration.get.yaml#/pathItem
   /api/project/{projectId}/binding/{bindingId}/agent:

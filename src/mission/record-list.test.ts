@@ -3,9 +3,21 @@ import { test } from "node:test";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { NodeKind, RepositoryAction, MissionErrorCode } from "./contract.ts";
+import {
+  NodeKind,
+  RepositoryAction,
+  MissionErrorCode,
+  AssessmentResult,
+  ActorKind,
+} from "./contract.ts";
 import { ControlError } from "./control.ts";
 import { closeAttempt, openAttempt } from "./record-store.ts";
+import {
+  insertAssessment,
+  insertOutcome,
+  insertEvidence,
+} from "./record-store.ts";
+import { writeHumanRecords } from "./control.ts";
 import { controlHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
@@ -14,6 +26,117 @@ const SECOND = 2;
 const NOW = 100;
 const NOT_FOUND = "mission.record.not_found";
 const KEY = "repo.pull_request";
+const ZERO = 0;
+
+test("assessment and outcome reads filter attempt zero, evaluate currency, union evidence and paginate identities", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const node = h.node();
+  h.dependencies.executionAttribution.of = () => ({
+    clientId: createIdentity("client_identity"),
+    name: "Runtime",
+    workerName: "reviewer@1",
+  });
+  const records = h.store.transaction((tx) => {
+    const human = writeHumanRecords(
+      tx,
+      node,
+      AssessmentResult.Undetermined,
+      "Hold",
+      h.actor,
+      [],
+      NOW,
+    );
+    openAttempt(tx, h.nodeId, FIRST, h.actor, NOW);
+    const evidenceIds = [
+      createIdentity("evidence"),
+      createIdentity("evidence"),
+    ];
+    for (const id of evidenceIds)
+      insertEvidence(
+        tx,
+        {
+          id,
+          node_id: h.nodeId,
+          attempt: FIRST,
+          subject: "Work",
+          requirement_key: null,
+          end_state: null,
+          verification: null,
+          provenance: JSON.stringify(h.actor),
+          created_at: NOW,
+        },
+        [],
+      );
+    const assessment = insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.nodeId,
+      attempt: FIRST,
+      node_revision: FIRST,
+      result: AssessmentResult.Success,
+      rationale: "Passed",
+      evidence_ids: JSON.stringify([evidenceIds[ZERO]]),
+      child_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: createIdentity("execution"),
+      actor: null,
+      created_at: NOW,
+    });
+    const outcome = insertOutcome(tx, {
+      id: createIdentity("outcome"),
+      node_id: h.nodeId,
+      result: AssessmentResult.Success,
+      assessment_id: assessment.id,
+      evidence_ids: JSON.stringify(evidenceIds),
+      created_at: NOW,
+    });
+    return { human, assessment, outcome, evidenceIds };
+  });
+  const base = { params: { nodeId: h.nodeId }, query: {}, body: null };
+  const human = await h.invoke("assessment.list", {
+    ...base,
+    query: { attempt: ZERO },
+  });
+  assert.equal(human.items.length, FIRST);
+  assert.equal(human.items[ZERO]?.actor.kind, ActorKind.Human);
+  assert.equal(human.items[ZERO]?.currency, null);
+  assert.equal(human.items[ZERO]?.testedInput, null);
+  assert.equal(human.items[ZERO]?.workerVersion, null);
+  const execution = await h.invoke("assessment.get", {
+    params: { assessmentId: records.assessment.id },
+    query: {},
+    body: null,
+  });
+  assert.equal(execution.actor.kind, ActorKind.Execution);
+  assert.equal(execution.currency?.current, true);
+  const outcome = await h.invoke("outcome.get", {
+    params: { outcomeId: records.outcome.id },
+    query: {},
+    body: null,
+  });
+  assert.deepEqual(outcome.evidenceIds, records.evidenceIds.sort());
+  for (const operation of ["assessment.list", "outcome.list"] as const) {
+    const page = await h.invoke(operation, {
+      ...base,
+      query: { limit: FIRST },
+    });
+    const next = await h.invoke(operation, {
+      ...base,
+      query: { cursor: page.nextCursor! },
+    });
+    assert.ok(page.items[ZERO]!.id > next.items[ZERO]!.id);
+    assert.equal(next.nextCursor, null);
+    assert.equal(
+      (await h.invoke(operation, { ...base, query: { attempt: FIRST } })).items
+        .length,
+      FIRST,
+    );
+    assert.equal(
+      (await h.invoke(operation, { ...base, query: { attempt: ZERO } })).items
+        .length,
+      FIRST,
+    );
+  }
+});
 
 test("attempt and external-action reads page in descending order and filter attempt zero", async (t) => {
   const h = controlHarness(t, IDENTITY);

@@ -391,6 +391,10 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     "attempt.get",
     "externalAction.list",
     "externalAction.get",
+    "assessment.list",
+    "assessment.get",
+    "outcome.list",
+    "outcome.get",
   ] as const) {
     const operation = missionOperations[name];
     const path = operation.path.replace(/:([^/]+)/g, "{$1}");

@@ -915,6 +915,70 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "assessment.list": {
+    ...readOperation,
+    id: "mission.assessment.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/node/:nodeId/assessment",
+    input: readInput(
+      z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject({
+        ...pageQuery,
+        attempt: z.coerce
+          .number()
+          .int()
+          .min(0)
+          .max(Number.MAX_SAFE_INTEGER)
+          .optional(),
+      }),
+    ),
+    output: pageOf(assessmentSchema),
+    description: "List assessments with read-time currency.",
+  },
+  "assessment.get": {
+    ...readOperation,
+    id: "mission.assessment.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/assessment/:assessmentId",
+    input: readInput(
+      z.strictObject({ assessmentId: identitySchema("assessment") }),
+      z.strictObject({}),
+    ),
+    output: assessmentSchema,
+    description: "Get an assessment with read-time currency.",
+  },
+  "outcome.list": {
+    ...readOperation,
+    id: "mission.outcome.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/node/:nodeId/outcome",
+    input: readInput(
+      z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject({
+        ...pageQuery,
+        attempt: z.coerce
+          .number()
+          .int()
+          .min(0)
+          .max(Number.MAX_SAFE_INTEGER)
+          .optional(),
+      }),
+    ),
+    output: pageOf(outcomeSchema),
+    description: "List a node's outcomes.",
+  },
+  "outcome.get": {
+    ...readOperation,
+    id: "mission.outcome.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/outcome/:outcomeId",
+    input: readInput(
+      z.strictObject({ outcomeId: identitySchema("outcome") }),
+      z.strictObject({}),
+    ),
+    output: outcomeSchema,
+    description: "Get an outcome with its evidence union.",
+  },
   "attempt.list": {
     ...readOperation,
     id: "mission.attempt.list",

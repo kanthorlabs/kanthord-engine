@@ -24,6 +24,8 @@ function numberArgument(value: string, code: string, min: number): number {
 }
 
 export function addRecordCommands(mission: Command): void {
+  addAssessmentCommands(mission);
+  addOutcomeCommands(mission);
   const attempts = mission
     .command("attempt")
     .description("Mission attempt records");
@@ -64,6 +66,95 @@ export function addRecordCommands(mission: Command): void {
       },
     );
   addExternalCommands(mission);
+}
+
+function recordListQuery(command: Command, code: string) {
+  const options = command.optsWithGlobals();
+  return {
+    ...pagination(options),
+    ...(options.attempt === undefined
+      ? {}
+      : { attempt: numberArgument(options.attempt, code, ZERO) }),
+  };
+}
+
+function recordGroup(mission: Command, name: string) {
+  const group = mission.command(name).description(`Mission ${name} records`);
+  group.action(() => group.help());
+  const list = addPagination(
+    group
+      .command("list")
+      .argument("<node-id>", "Node ID")
+      .option("--attempt <attempt>", "Attempt filter", singleUse("--attempt")),
+  );
+  const get = group.command("get").argument(`<${name}-id>`, "Record ID");
+  return { list, get };
+}
+
+function addAssessmentCommands(mission: Command): void {
+  const { list, get } = recordGroup(mission, "assessment");
+  list.action(async (nodeId: string, _options, command: Command) => {
+    validateNode(nodeId, "cli.mission.assessment.list.invalid_node_id");
+    printResult(
+      await client(command, "assessment.list")["assessment.list"]({
+        params: { nodeId },
+        query: recordListQuery(
+          command,
+          "cli.mission.assessment.list.invalid_attempt",
+        ),
+        body: null,
+      }),
+      "assessment.list",
+    );
+  });
+  get.action(async (assessmentId: string, _options, command: Command) => {
+    if (!identitySchema("assessment").safeParse(assessmentId).success)
+      throw new Diagnostic(
+        "cli.mission.assessment.get.invalid_assessment_id",
+        "invalid assessment ID",
+      );
+    printResult(
+      await client(command, "assessment.get")["assessment.get"]({
+        params: { assessmentId },
+        query: {},
+        body: null,
+      }),
+      "assessment.get",
+    );
+  });
+}
+
+function addOutcomeCommands(mission: Command): void {
+  const { list, get } = recordGroup(mission, "outcome");
+  list.action(async (nodeId: string, _options, command: Command) => {
+    validateNode(nodeId, "cli.mission.outcome.list.invalid_node_id");
+    printResult(
+      await client(command, "outcome.list")["outcome.list"]({
+        params: { nodeId },
+        query: recordListQuery(
+          command,
+          "cli.mission.outcome.list.invalid_attempt",
+        ),
+        body: null,
+      }),
+      "outcome.list",
+    );
+  });
+  get.action(async (outcomeId: string, _options, command: Command) => {
+    if (!identitySchema("outcome").safeParse(outcomeId).success)
+      throw new Diagnostic(
+        "cli.mission.outcome.get.invalid_outcome_id",
+        "invalid outcome ID",
+      );
+    printResult(
+      await client(command, "outcome.get")["outcome.get"]({
+        params: { outcomeId },
+        query: {},
+        body: null,
+      }),
+      "outcome.get",
+    );
+  });
 }
 
 function addExternalCommands(mission: Command): void {

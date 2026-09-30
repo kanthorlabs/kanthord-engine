@@ -1,6 +1,8 @@
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
+import { identitySchema } from "../kernel/identity.ts";
+import type { Dependencies } from "./service.ts";
 import {
   NODE_LIST_LIMIT_DEFAULT,
   actionKeySchema,
@@ -9,8 +11,111 @@ import {
 } from "./contract.ts";
 import { requireRunnable } from "./control.ts";
 import { requireNode, decode, encode, invalidCursor } from "./node-read.ts";
-import { attemptRecord, externalActionRecords } from "./record-read.ts";
+import {
+  attemptRecord,
+  externalActionRecords,
+  assessmentRecord,
+  outcomeRecord,
+} from "./record-read.ts";
 import { listAttempts, readAttempt, type AttemptRow } from "./record-store.ts";
+import {
+  readAssessment,
+  readOutcome,
+  type AssessmentRow,
+  type OutcomeRow,
+} from "./record-store.ts";
+
+type RecordQuery = { attempt?: number; limit?: number; cursor?: string };
+
+function identityCursor(
+  cursor: string | undefined,
+  prefix: string,
+): string | null {
+  if (cursor === undefined) return null;
+  const id = decode(cursor);
+  if (!identitySchema(prefix).safeParse(id).success) invalidCursor();
+  return id;
+}
+
+export function getAssessment(
+  tx: Transaction,
+  dependencies: Dependencies,
+  id: string,
+) {
+  const row = readAssessment(tx, id);
+  if (row === null) recordNotFound();
+  return assessmentRecord(tx, dependencies, row);
+}
+
+export function getOutcome(
+  tx: Transaction,
+  dependencies: Dependencies,
+  id: string,
+) {
+  const row = readOutcome(tx, id);
+  if (row === null) recordNotFound();
+  return outcomeRecord(tx, dependencies.bindings, row);
+}
+
+export function assessmentPage(
+  tx: Transaction,
+  dependencies: Dependencies,
+  nodeId: string,
+  query: RecordQuery,
+) {
+  requireRunnable(requireNode(tx, nodeId));
+  const after = identityCursor(query.cursor, "assessment");
+  const limit = query.limit ?? NODE_LIST_LIMIT_DEFAULT;
+  const rows = tx.database
+    .prepare(
+      "SELECT * FROM mission_assessment WHERE node_id = ? AND (? IS NULL OR attempt = ?) AND (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?",
+    )
+    .all(
+      nodeId,
+      query.attempt ?? null,
+      query.attempt ?? null,
+      after,
+      after,
+      limit + ONE,
+    ) as unknown as AssessmentRow[];
+  const items = rows
+    .slice(ZERO, limit)
+    .map((row) => assessmentRecord(tx, dependencies, row));
+  return {
+    items,
+    nextCursor: rows.length > limit ? encode(items.at(-ONE)!.id) : null,
+  };
+}
+
+export function outcomePage(
+  tx: Transaction,
+  dependencies: Dependencies,
+  nodeId: string,
+  query: RecordQuery,
+) {
+  requireRunnable(requireNode(tx, nodeId));
+  const after = identityCursor(query.cursor, "outcome");
+  const limit = query.limit ?? NODE_LIST_LIMIT_DEFAULT;
+  const rows = tx.database
+    .prepare(
+      "SELECT o.* FROM mission_outcome o JOIN mission_assessment a ON a.id = o.assessment_id WHERE o.node_id = ? AND (? IS NULL OR a.attempt = ?) AND (? IS NULL OR o.id < ?) ORDER BY o.id DESC LIMIT ?",
+    )
+    .all(
+      nodeId,
+      query.attempt ?? null,
+      query.attempt ?? null,
+      after,
+      after,
+      limit + ONE,
+    ) as unknown as OutcomeRow[];
+  const items = rows
+    .slice(ZERO, limit)
+    .map((row) => outcomeRecord(tx, dependencies.bindings, row));
+  return {
+    items,
+    nextCursor: rows.length > limit ? encode(items.at(-ONE)!.id) : null,
+  };
+}
 
 const ZERO = 0;
 const ONE = 1;

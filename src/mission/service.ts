@@ -39,6 +39,10 @@ import {
   getAttempt,
   externalActionPage,
   getExternalAction,
+  assessmentPage,
+  getAssessment,
+  outcomePage,
+  getOutcome,
 } from "./record-list.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
 import { exportMission } from "./export.ts";
@@ -109,6 +113,32 @@ export class MissionService implements Service, MissionCollaborations {
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["assessment.list"],
+      ({ params, query }, caller) =>
+        caller.commit((tx) =>
+          assessmentPage(tx, this.dependencies, params.nodeId, query),
+        ),
+    );
+    registry.register(
+      missionOperations["assessment.get"],
+      ({ params }, caller) =>
+        caller.commit((tx) =>
+          getAssessment(tx, this.dependencies, params.assessmentId),
+        ),
+    );
+    registry.register(
+      missionOperations["outcome.list"],
+      ({ params, query }, caller) =>
+        caller.commit((tx) =>
+          outcomePage(tx, this.dependencies, params.nodeId, query),
+        ),
+    );
+    registry.register(missionOperations["outcome.get"], ({ params }, caller) =>
+      caller.commit((tx) =>
+        getOutcome(tx, this.dependencies, params.outcomeId),
+      ),
+    );
     registry.register(
       missionOperations["attempt.list"],
       ({ params, query }, caller) =>
