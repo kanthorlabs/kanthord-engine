@@ -20,7 +20,7 @@
     "build": "tsc -p tsconfig.build.json",
     "prepack": "pnpm run build",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --test-concurrency=4 --test-timeout=30000 'src/**/*.test.ts'",
+    "test": "node --test --test-concurrency=2 --test-timeout=30000 'src/**/*.test.ts'",
     "test:e2e:jwt": "pnpm run build && python3 scripts/e2e-jwt.py",
     "format": "prettier --write src bin eslint.config.js",
     "lint": "eslint src bin eslint.config.js",
