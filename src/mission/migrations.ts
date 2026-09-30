@@ -46,4 +46,68 @@ const createMissionTables: Migration = (database) => {
   `);
 };
 
-export const missionMigrations: readonly Migration[] = [createMissionTables];
+const createExecutionRecordTables: Migration = (database) => {
+  database.exec(`
+    CREATE TABLE mission_attempt (
+      node_id TEXT NOT NULL REFERENCES mission_node(id),
+      attempt INTEGER NOT NULL,
+      node_revision INTEGER NOT NULL,
+      opened_by TEXT NOT NULL,
+      opened_at INTEGER NOT NULL,
+      closed_at INTEGER,
+      PRIMARY KEY (node_id, attempt)
+    );
+    CREATE UNIQUE INDEX mission_attempt_open ON mission_attempt (node_id) WHERE closed_at IS NULL;
+    CREATE TABLE mission_evidence (
+      id TEXT NOT NULL PRIMARY KEY,
+      node_id TEXT NOT NULL REFERENCES mission_node(id),
+      attempt INTEGER NOT NULL,
+      subject TEXT NOT NULL,
+      requirement_key TEXT,
+      end_state TEXT,
+      verification TEXT,
+      provenance TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX mission_evidence_request ON mission_evidence (node_id, attempt, requirement_key) WHERE requirement_key IS NOT NULL;
+    CREATE TABLE mission_evidence_asset (
+      id TEXT NOT NULL PRIMARY KEY,
+      evidence_id TEXT NOT NULL REFERENCES mission_evidence(id),
+      kind TEXT NOT NULL,
+      content TEXT NOT NULL,
+      published_at INTEGER,
+      expired_at INTEGER
+    );
+    CREATE TABLE mission_assessment (
+      id TEXT NOT NULL PRIMARY KEY,
+      node_id TEXT NOT NULL REFERENCES mission_node(id),
+      sequence INTEGER NOT NULL,
+      attempt INTEGER NOT NULL,
+      result TEXT NOT NULL,
+      rationale TEXT NOT NULL,
+      evidence_ids TEXT NOT NULL,
+      child_outcome_ids TEXT NOT NULL,
+      tested_input TEXT,
+      execution_id TEXT,
+      actor TEXT,
+      node_revision INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX mission_assessment_sequence ON mission_assessment (node_id, sequence);
+    CREATE TABLE mission_outcome (
+      id TEXT NOT NULL PRIMARY KEY,
+      node_id TEXT NOT NULL REFERENCES mission_node(id),
+      sequence INTEGER NOT NULL,
+      result TEXT NOT NULL,
+      assessment_id TEXT NOT NULL REFERENCES mission_assessment(id),
+      evidence_ids TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX mission_outcome_sequence ON mission_outcome (node_id, sequence);
+  `);
+};
+
+export const missionMigrations: readonly Migration[] = [
+  createMissionTables,
+  createExecutionRecordTables,
+];

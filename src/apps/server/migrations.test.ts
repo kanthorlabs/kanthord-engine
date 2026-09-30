@@ -37,11 +37,28 @@ const MISSION_MISSION_TABLE = "mission_mission";
 const MISSION_NODE_TABLE = "mission_node";
 const MISSION_NODE_REVISION_TABLE = "mission_node_revision";
 const MISSION_DEPENDENCY_TABLE = "mission_dependency";
+const MISSION_ATTEMPT_TABLE = "mission_attempt";
+const MISSION_EVIDENCE_TABLE = "mission_evidence";
+const MISSION_EVIDENCE_ASSET_TABLE = "mission_evidence_asset";
+const MISSION_ASSESSMENT_TABLE = "mission_assessment";
+const MISSION_OUTCOME_TABLE = "mission_outcome";
+const MISSION_ATTEMPT_OPEN_INDEX = "mission_attempt_open";
+const MISSION_EVIDENCE_REQUEST_INDEX = "mission_evidence_request";
+const MISSION_ASSESSMENT_SEQUENCE_INDEX = "mission_assessment_sequence";
+const MISSION_OUTCOME_SEQUENCE_INDEX = "mission_outcome_sequence";
+const ERD2_MISSION_TABLES = [
+  MISSION_ATTEMPT_TABLE,
+  MISSION_EVIDENCE_TABLE,
+  MISSION_EVIDENCE_ASSET_TABLE,
+  MISSION_ASSESSMENT_TABLE,
+  MISSION_OUTCOME_TABLE,
+];
 const MISSION_TABLES = [
   MISSION_MISSION_TABLE,
   MISSION_NODE_TABLE,
   MISSION_NODE_REVISION_TABLE,
   MISSION_DEPENDENCY_TABLE,
+  ...ERD2_MISSION_TABLES,
 ];
 const INTEGRITY_OK = "ok";
 const NO_PREFIX_MATCHES = 0;
@@ -220,7 +237,7 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all ERD 1 migrations produce exactly the expected tables", () => {
+test("all migrations produce exactly the expected ERD 1 and Mission ERD 2 tables", () => {
   const erd1Services: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
@@ -243,7 +260,10 @@ test("all ERD 1 migrations produce exactly the expected tables", () => {
         owners.set(name, service.service);
       }
     }
-    assert.deepEqual([...tables(store)].sort(), [...ERD1_TABLES].sort());
+    assert.deepEqual(
+      [...tables(store)].sort(),
+      [...ERD1_TABLES, ...ERD2_MISSION_TABLES].sort(),
+    );
     for (const name of tables(store)) {
       const matches = erd1Services.filter(({ service }) =>
         name.startsWith(`${service}_`),
@@ -280,5 +300,52 @@ test("all ERD 1 migrations produce exactly the expected tables", () => {
     } finally {
       isolated.close();
     }
+  }
+});
+
+test("Mission execution records have exactly four unique indexes with the ruled predicates", () => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  try {
+    store.migrate([
+      { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
+    ]);
+    const indexes = store.database
+      .prepare(
+        "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL",
+      )
+      .all()
+      .filter((row) => ERD2_MISSION_TABLES.includes(String(row.tbl_name)));
+    assert.deepEqual(indexes.map((row) => row.name).sort(), [
+      MISSION_ASSESSMENT_SEQUENCE_INDEX,
+      MISSION_ATTEMPT_OPEN_INDEX,
+      MISSION_EVIDENCE_REQUEST_INDEX,
+      MISSION_OUTCOME_SEQUENCE_INDEX,
+    ]);
+    for (const row of indexes)
+      assert.match(String(row.sql), /^CREATE UNIQUE INDEX /);
+    assert.match(
+      String(
+        indexes.find((row) => row.name === MISSION_ATTEMPT_OPEN_INDEX)?.sql,
+      ),
+      /WHERE closed_at IS NULL$/,
+    );
+    assert.match(
+      String(
+        indexes.find((row) => row.name === MISSION_EVIDENCE_REQUEST_INDEX)?.sql,
+      ),
+      /WHERE requirement_key IS NOT NULL$/,
+    );
+    for (const table of ERD2_MISSION_TABLES) {
+      assert.doesNotMatch(
+        String(
+          store.database
+            .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
+            .get(table)?.sql,
+        ),
+        /\bCHECK\s*\(/i,
+      );
+    }
+  } finally {
+    store.close();
   }
 });
