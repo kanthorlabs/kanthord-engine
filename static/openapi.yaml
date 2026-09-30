@@ -54,8 +54,12 @@ paths:
     $ref: ./openapi/mission/node.pause.yaml#/pathItem
   /api/mission/node/{nodeId}/priority:
     $ref: ./openapi/mission/node.priority.set.yaml#/pathItem
+  /api/mission/node/{nodeId}/ready:
+    $ref: ./openapi/mission/node.ready.yaml#/pathItem
   /api/mission/{missionId}/rebind:
     $ref: ./openapi/mission/node.rebind.yaml#/pathItem
+  /api/mission/node/{nodeId}/resume:
+    $ref: ./openapi/mission/node.resume.yaml#/pathItem
   /api/mission/node/{nodeId}/retire:
     $ref: ./openapi/mission/node.retire.yaml#/pathItem
   /api/mission/node/{nodeId}/retire/preview:

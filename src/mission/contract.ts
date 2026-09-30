@@ -915,6 +915,32 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "node.ready": {
+    ...writeOperation,
+    id: "mission.node.ready",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:nodeId/ready",
+    input: z.strictObject({
+      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      query: z.strictObject({}),
+      body: humanActSchema,
+    }),
+    output: controlResultSchema,
+    description: "Declare an available node ready for evaluation.",
+  },
+  "node.resume": {
+    ...writeOperation,
+    id: "mission.node.resume",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:nodeId/resume",
+    input: z.strictObject({
+      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      query: z.strictObject({}),
+      body: resumeSchema,
+    }),
+    output: controlResultSchema,
+    description: "Resume a paused node with external-action precedence.",
+  },
   "node.pause": {
     ...writeOperation,
     id: "mission.node.pause",

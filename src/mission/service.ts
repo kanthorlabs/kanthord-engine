@@ -31,7 +31,7 @@ import {
   type ExecutionAttribution,
 } from "./contract.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
-import { pauseNode } from "./control-hold.ts";
+import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
 import { exportMission } from "./export.ts";
 import { previewImport } from "./import.ts";
@@ -101,6 +101,34 @@ export class MissionService implements Service, MissionCollaborations {
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["node.ready"],
+      ({ params, body }, caller) =>
+        this.commitGraph(caller, { nodeId: params.nodeId }, (tx) =>
+          readyNode(
+            tx,
+            this.dependencies,
+            params.nodeId,
+            body,
+            humanActor(caller),
+            Date.now(),
+          ),
+        ),
+    );
+    registry.register(
+      missionOperations["node.resume"],
+      ({ params, body }, caller) =>
+        this.commitGraph(caller, { nodeId: params.nodeId }, (tx) =>
+          resumeNode(
+            tx,
+            this.dependencies,
+            params.nodeId,
+            body,
+            humanActor(caller),
+            Date.now(),
+          ),
+        ),
+    );
     registry.register(
       missionOperations["node.pause"],
       ({ params, body }, caller) =>
