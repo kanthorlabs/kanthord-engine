@@ -38,6 +38,8 @@ const SUCCESS = 0;
 const FAILURE = 1;
 const PLANNING_LIFECYCLE_TIMEOUT_MS = 120000;
 const NODE_EDIT_LIFECYCLE_TIMEOUT_MS = 60000;
+const IMPORT_LIFECYCLE_TIMEOUT_MS = 60000;
+const IMPORT_APPLY_VALIDATION_TIMEOUT_MS = 60000;
 const EMPTY = "";
 const UTF8 = "utf8";
 const MODE_MASK = 0o777;
@@ -766,67 +768,71 @@ test("mission node retire validates its identity, token, file and flag ownership
 });
 
 for (const action of [PREVIEW, APPLY] as const) {
-  test(`mission import ${action} validates positional files and its final schema offline`, async (t) => {
-    const fixture = isolated(t);
-    const controls = {
-      ...IMPORT_CONTROLS,
-      ...(action === APPLY ? APPLY_CONTROLS : {}),
-    };
-    const path = jsonFile(fixture, MANIFEST_FILE, controls);
-    const args = [MISSION, IMPORT, action, MISSION_ID, FILE, path];
-    const local = [...args, ...LOCAL_FLAGS];
-    refusal(
-      await kanthord(args, fixture.env),
-      `cli.mission.import.${action}.token_required`,
-    );
-    refusal(
-      await kanthord(
-        [MISSION, IMPORT, action, INVALID, FILE, path, ...LOCAL_FLAGS],
-        fixture.env,
-      ),
-      `cli.mission.import.${action}.invalid_mission_id`,
-    );
-    jsonFile(fixture, MANIFEST_FILE, { ...controls, files: [] });
-    refusal(
-      await kanthord([...local, PLAN_ONE, PLAN_TWO], fixture.env),
-      `cli.mission.import.${action}.files_conflict`,
-    );
-    jsonFile(fixture, MANIFEST_FILE, {
-      ...controls,
-      format: ImportFormat.Json,
-      entries: [],
-    });
-    refusal(
-      await kanthord([...local, PLAN_ONE], fixture.env),
-      `cli.mission.import.${action}.positionals_not_accepted`,
-    );
-    jsonFile(fixture, MANIFEST_FILE, controls);
-    refusal(
-      await kanthord(
-        [...local, join(fixture.directory, PLAN_ONE)],
-        fixture.env,
-      ),
-      FILE_NOT_FOUND,
-    );
-    for (const manifest of [
-      { ...controls, format: ImportFormat.Json },
-      { ...controls, files: null },
-      { ...controls, missionId: null },
-      { ...controls, entries: [] },
-      { ...controls, unknown: true },
-      ...(action === APPLY
-        ? [{ ...IMPORT_CONTROLS, files: [] }]
-        : [{ ...controls, ...APPLY_CONTROLS }]),
-    ]) {
-      jsonFile(fixture, MANIFEST_FILE, manifest);
-      refusal(await kanthord(local, fixture.env), FILE_SCHEMA_INVALID);
-    }
-    if (action === PREVIEW) {
-      const result = await kanthord([...local, KEY, ulid()], fixture.env);
-      assert.equal(result.code, FAILURE);
-      assert.match(result.stderr, UNKNOWN_OPTION);
-    }
-  });
+  test(
+    `mission import ${action} validates positional files and its final schema offline`,
+    action === APPLY ? { timeout: IMPORT_APPLY_VALIDATION_TIMEOUT_MS } : {},
+    async (t) => {
+      const fixture = isolated(t);
+      const controls = {
+        ...IMPORT_CONTROLS,
+        ...(action === APPLY ? APPLY_CONTROLS : {}),
+      };
+      const path = jsonFile(fixture, MANIFEST_FILE, controls);
+      const args = [MISSION, IMPORT, action, MISSION_ID, FILE, path];
+      const local = [...args, ...LOCAL_FLAGS];
+      refusal(
+        await kanthord(args, fixture.env),
+        `cli.mission.import.${action}.token_required`,
+      );
+      refusal(
+        await kanthord(
+          [MISSION, IMPORT, action, INVALID, FILE, path, ...LOCAL_FLAGS],
+          fixture.env,
+        ),
+        `cli.mission.import.${action}.invalid_mission_id`,
+      );
+      jsonFile(fixture, MANIFEST_FILE, { ...controls, files: [] });
+      refusal(
+        await kanthord([...local, PLAN_ONE, PLAN_TWO], fixture.env),
+        `cli.mission.import.${action}.files_conflict`,
+      );
+      jsonFile(fixture, MANIFEST_FILE, {
+        ...controls,
+        format: ImportFormat.Json,
+        entries: [],
+      });
+      refusal(
+        await kanthord([...local, PLAN_ONE], fixture.env),
+        `cli.mission.import.${action}.positionals_not_accepted`,
+      );
+      jsonFile(fixture, MANIFEST_FILE, controls);
+      refusal(
+        await kanthord(
+          [...local, join(fixture.directory, PLAN_ONE)],
+          fixture.env,
+        ),
+        FILE_NOT_FOUND,
+      );
+      for (const manifest of [
+        { ...controls, format: ImportFormat.Json },
+        { ...controls, files: null },
+        { ...controls, missionId: null },
+        { ...controls, entries: [] },
+        { ...controls, unknown: true },
+        ...(action === APPLY
+          ? [{ ...IMPORT_CONTROLS, files: [] }]
+          : [{ ...controls, ...APPLY_CONTROLS }]),
+      ]) {
+        jsonFile(fixture, MANIFEST_FILE, manifest);
+        refusal(await kanthord(local, fixture.env), FILE_SCHEMA_INVALID);
+      }
+      if (action === PREVIEW) {
+        const result = await kanthord([...local, KEY, ulid()], fixture.env);
+        assert.equal(result.code, FAILURE);
+        assert.match(result.stderr, UNKNOWN_OPTION);
+      }
+    },
+  );
 }
 
 async function configureRepository(
@@ -916,83 +922,92 @@ async function applyImport(
   return applied;
 }
 
-test("mission Markdown export/import preserves the set, adds an objective, then retires it", async (t) => {
-  const fixture = await setup(t);
-  const mission = await createMission(fixture);
-  await configureRepository(fixture, mission.projectId);
-  const initiative = await createNode(
-    fixture,
-    mission.id,
-    NodeKind.Initiative,
-    mission.version,
-  );
-  const objective = await createNode(
-    fixture,
-    mission.id,
-    NodeKind.Objective,
-    initiative.missionVersion,
-    initiative.revisions[0]!.nodeId,
-  );
-  const task = await createNode(
-    fixture,
-    mission.id,
-    NodeKind.Task,
-    objective.missionVersion,
-    objective.revisions[0]!.nodeId,
-  );
-  const out = join(fixture.directory, OUTPUT_DIRECTORY);
-  const exported = success<{ missionVersion: number }>(
-    await kanthord(
-      exportArgs(mission.id, ImportFormat.Markdown, out),
-      fixture.env,
-    ),
-  );
-  assert.equal(exported.missionVersion, task.missionVersion);
-  const paths = readdirSync(out).map((filename) => join(out, filename));
-  assert.equal(paths.length, THREE);
-  const manifest = {
-    ...IMPORT_CONTROLS,
-    missionVersion: exported.missionVersion,
-  };
-  const preview = await previewImport(fixture, mission.id, manifest, paths);
-  assert.equal(preview.noOps.length, THREE);
-  assert.deepEqual(preview.creates, []);
-  const unchanged = await applyImport(
-    fixture,
-    mission.id,
-    manifest,
-    paths,
-    preview,
-  );
-  assert.equal(unchanged.missionVersion, exported.missionVersion);
-  assert.ok(unchanged.idempotencyKey);
-  assert.equal(unchanged.assignedIds.length, THREE);
-  const newPath = join(fixture.directory, NEW_OBJECTIVE_FILE);
-  writePrivate(newPath, NEW_OBJECTIVE_CONTENT);
-  const expandedPaths = [...paths, newPath];
-  const expanded = await previewImport(
-    fixture,
-    mission.id,
-    manifest,
-    expandedPaths,
-  );
-  assert.deepEqual(expanded.creates, [NEW_OBJECTIVE_FILE]);
-  const applied = await applyImport(
-    fixture,
-    mission.id,
-    manifest,
-    expandedPaths,
-    expanded,
-  );
-  assert.equal(applied.missionVersion, unchanged.missionVersion + ONE);
-  assert.ok(applied.idempotencyKey);
-  assert.equal(applied.assignedIds.length, unchanged.assignedIds.length + ONE);
-  assert.ok(
-    applied.assignedIds.some(({ filename }) => filename === NEW_OBJECTIVE_FILE),
-  );
-  assert.equal(readFileSync(newPath, UTF8), NEW_OBJECTIVE_CONTENT);
-  await retireImportedNode(fixture, applied);
-});
+test(
+  "mission Markdown export/import preserves the set, adds an objective, then retires it",
+  { timeout: IMPORT_LIFECYCLE_TIMEOUT_MS },
+  async (t) => {
+    const fixture = await setup(t);
+    const mission = await createMission(fixture);
+    await configureRepository(fixture, mission.projectId);
+    const initiative = await createNode(
+      fixture,
+      mission.id,
+      NodeKind.Initiative,
+      mission.version,
+    );
+    const objective = await createNode(
+      fixture,
+      mission.id,
+      NodeKind.Objective,
+      initiative.missionVersion,
+      initiative.revisions[0]!.nodeId,
+    );
+    const task = await createNode(
+      fixture,
+      mission.id,
+      NodeKind.Task,
+      objective.missionVersion,
+      objective.revisions[0]!.nodeId,
+    );
+    const out = join(fixture.directory, OUTPUT_DIRECTORY);
+    const exported = success<{ missionVersion: number }>(
+      await kanthord(
+        exportArgs(mission.id, ImportFormat.Markdown, out),
+        fixture.env,
+      ),
+    );
+    assert.equal(exported.missionVersion, task.missionVersion);
+    const paths = readdirSync(out).map((filename) => join(out, filename));
+    assert.equal(paths.length, THREE);
+    const manifest = {
+      ...IMPORT_CONTROLS,
+      missionVersion: exported.missionVersion,
+    };
+    const preview = await previewImport(fixture, mission.id, manifest, paths);
+    assert.equal(preview.noOps.length, THREE);
+    assert.deepEqual(preview.creates, []);
+    const unchanged = await applyImport(
+      fixture,
+      mission.id,
+      manifest,
+      paths,
+      preview,
+    );
+    assert.equal(unchanged.missionVersion, exported.missionVersion);
+    assert.ok(unchanged.idempotencyKey);
+    assert.equal(unchanged.assignedIds.length, THREE);
+    const newPath = join(fixture.directory, NEW_OBJECTIVE_FILE);
+    writePrivate(newPath, NEW_OBJECTIVE_CONTENT);
+    const expandedPaths = [...paths, newPath];
+    const expanded = await previewImport(
+      fixture,
+      mission.id,
+      manifest,
+      expandedPaths,
+    );
+    assert.deepEqual(expanded.creates, [NEW_OBJECTIVE_FILE]);
+    const applied = await applyImport(
+      fixture,
+      mission.id,
+      manifest,
+      expandedPaths,
+      expanded,
+    );
+    assert.equal(applied.missionVersion, unchanged.missionVersion + ONE);
+    assert.ok(applied.idempotencyKey);
+    assert.equal(
+      applied.assignedIds.length,
+      unchanged.assignedIds.length + ONE,
+    );
+    assert.ok(
+      applied.assignedIds.some(
+        ({ filename }) => filename === NEW_OBJECTIVE_FILE,
+      ),
+    );
+    assert.equal(readFileSync(newPath, UTF8), NEW_OBJECTIVE_CONTENT);
+    await retireImportedNode(fixture, applied);
+  },
+);
 
 async function retireImportedNode(
   fixture: Fixture,

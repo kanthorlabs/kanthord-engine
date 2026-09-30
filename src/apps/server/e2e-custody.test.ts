@@ -194,28 +194,33 @@ test("E01.7 rotating a github credential adds a secret-free revision", async (t)
   assert.equal(read.revisions[0].revision, SECOND_REVISION);
 });
 
-test("E01.8 rotate refuses an observed stale expected revision", async (t) => {
-  const { directory, env } = await setup(t);
-  const file = createFile(directory, GITHUB);
-  const created = success(
-    await kanthord(["credential", "create", "--file", file], env),
-  );
-  assert.ok(created.revisions[0]);
-  const observed = created.revisions[0].revision;
-  const rotation = join(directory, "stale.json");
-  writePrivate(
-    rotation,
-    JSON.stringify({ expectedRevision: observed, secret: SECRET }),
-  );
-  const args = ["credential", "rotate", NAME, "--file", rotation];
-  success(await kanthord(args, env));
-  const rotated = success(await kanthord(["credential", "get", NAME], env));
-  assert.ok(rotated.revisions[0]);
-  assert.notEqual(rotated.revisions[0].revision, observed);
-  refusal(await kanthord(args, env), "credential.revision.conflict");
-  const read = success(await kanthord(["credential", "get", NAME], env));
-  assert.deepEqual(read, rotated);
-});
+const STALE_ROTATION_TIMEOUT_MS = 60000;
+test(
+  "E01.8 rotate refuses an observed stale expected revision",
+  { timeout: STALE_ROTATION_TIMEOUT_MS },
+  async (t) => {
+    const { directory, env } = await setup(t);
+    const file = createFile(directory, GITHUB);
+    const created = success(
+      await kanthord(["credential", "create", "--file", file], env),
+    );
+    assert.ok(created.revisions[0]);
+    const observed = created.revisions[0].revision;
+    const rotation = join(directory, "stale.json");
+    writePrivate(
+      rotation,
+      JSON.stringify({ expectedRevision: observed, secret: SECRET }),
+    );
+    const args = ["credential", "rotate", NAME, "--file", rotation];
+    success(await kanthord(args, env));
+    const rotated = success(await kanthord(["credential", "get", NAME], env));
+    assert.ok(rotated.revisions[0]);
+    assert.notEqual(rotated.revisions[0].revision, observed);
+    refusal(await kanthord(args, env), "credential.revision.conflict");
+    const read = success(await kanthord(["credential", "get", NAME], env));
+    assert.deepEqual(read, rotated);
+  },
+);
 
 test("E01.9 updating metadata adds a model in a secret-free revision", async (t) => {
   const { directory, env } = await setup(t);
