@@ -915,6 +915,19 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "node.unblock": {
+    ...writeOperation,
+    id: "mission.node.unblock",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:nodeId/unblock",
+    input: z.strictObject({
+      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      query: z.strictObject({}),
+      body: unblockSchema,
+    }),
+    output: controlResultSchema,
+    description: "Unblock a node and pin its next attempt atomically.",
+  },
   "node.override": {
     ...writeOperation,
     id: "mission.node.override",

@@ -5,6 +5,7 @@ import {
   humanActSchema,
   resumeSchema,
   overrideSchema,
+  unblockSchema,
   AssessmentResult,
 } from "../../mission/contract.ts";
 import { singleUse } from "./shared.ts";
@@ -13,6 +14,7 @@ import { addMutationOptions, mutate } from "./mission-support.ts";
 const PAUSE_INVALID_NODE = "cli.mission.node.pause.invalid_node_id";
 
 export function addControlCommands(node: Command): void {
+  addUnblockCommand(node);
   addOverrideCommand(node);
   for (const [name, operation, code] of [
     ["block", "node.block", "cli.mission.node.block.invalid_node_id"],
@@ -80,6 +82,27 @@ export function addControlCommands(node: Command): void {
       throw new Diagnostic(PAUSE_INVALID_NODE, "invalid node ID");
     await mutate(command, "node.pause", humanActSchema, (api, body, key) =>
       api["node.pause"](
+        { params: { nodeId }, query: {}, body },
+        { idempotencyKey: key },
+      ),
+    );
+  });
+}
+
+function addUnblockCommand(node: Command): void {
+  addMutationOptions(
+    node
+      .command("unblock")
+      .description("Unblock a node")
+      .argument("<node-id>", "Node ID"),
+  ).action(async (nodeId: string, _options, command: Command) => {
+    if (!identitySchema("node").safeParse(nodeId).success)
+      throw new Diagnostic(
+        "cli.mission.node.unblock.invalid_node_id",
+        "invalid node ID",
+      );
+    await mutate(command, "node.unblock", unblockSchema, (api, body, key) =>
+      api["node.unblock"](
         { params: { nodeId }, query: {}, body },
         { idempotencyKey: key },
       ),

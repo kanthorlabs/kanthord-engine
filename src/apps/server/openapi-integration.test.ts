@@ -29,6 +29,7 @@ import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
 const MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS = [
+  ["node.unblock", "mission.node.unblock", "properties", "node"],
   ["node.override", "mission.node.override", "properties", "node"],
   ["node.block", "mission.node.block", "properties", "node"],
   ["node.discard", "mission.node.discard", "properties", "node"],

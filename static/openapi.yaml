@@ -74,6 +74,8 @@ paths:
     $ref: ./openapi/mission/node.revision.get.yaml#/pathItem
   /api/mission/node/{nodeId}/revision:
     $ref: ./openapi/mission/node.revision.list.yaml#/pathItem
+  /api/mission/node/{nodeId}/unblock:
+    $ref: ./openapi/mission/node.unblock.yaml#/pathItem
   /api/project/{projectId}/binding/{bindingId}/agent/{agentName}:
     $ref: ./openapi/project/agentConfiguration.get.yaml#/pathItem
   /api/project/{projectId}/binding/{bindingId}/agent:

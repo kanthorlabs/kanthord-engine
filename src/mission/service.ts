@@ -33,6 +33,7 @@ import {
 import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
+import { unblockNode } from "./control-unblock.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
 import { exportMission } from "./export.ts";
 import { previewImport } from "./import.ts";
@@ -102,6 +103,20 @@ export class MissionService implements Service, MissionCollaborations {
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["node.unblock"],
+      ({ params, body }, caller) =>
+        this.commitGraph(caller, { nodeId: params.nodeId }, (tx) =>
+          unblockNode(
+            tx,
+            this.dependencies,
+            params.nodeId,
+            body,
+            humanActor(caller),
+            Date.now(),
+          ),
+        ),
+    );
     registry.register(
       missionOperations["node.override"],
       ({ params, body }, caller) =>
