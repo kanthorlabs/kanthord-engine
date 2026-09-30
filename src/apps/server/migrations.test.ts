@@ -30,6 +30,8 @@ const services: Migrations = [
 const HISTORY_TABLE = "migration";
 const CREDENTIAL_TABLE = "credential";
 const WORKER_AGENT_ENABLEMENT_TABLE = "worker_agent_enablement";
+const WORKER_INSTANCE_TABLE = "worker_instance";
+const ERD2_WORKER_TABLES = [WORKER_INSTANCE_TABLE];
 const PROJECT_PROJECT_TABLE = "project_project";
 const PROJECT_BINDING_TABLE = "project_binding";
 const SCHEDULER_JOB_TABLE = "scheduler_job";
@@ -110,6 +112,7 @@ test("service migrations own distinct prefixes and create only tables in their n
     assert.deepEqual(tables(store), [
       CREDENTIAL_TABLE,
       WORKER_AGENT_ENABLEMENT_TABLE,
+      ...ERD2_WORKER_TABLES,
       PROJECT_PROJECT_TABLE,
       PROJECT_BINDING_TABLE,
       SCHEDULER_JOB_TABLE,
@@ -139,7 +142,10 @@ test("each service migration set applies alone to an empty store", () => {
       if (service.service === MISSION_SERVICE_NAME)
         assert.deepEqual(tables(store), MISSION_TABLES);
       if (service.service === WORKER_SERVICE_NAME)
-        assert.deepEqual(tables(store), [WORKER_AGENT_ENABLEMENT_TABLE]);
+        assert.deepEqual(tables(store), [
+          WORKER_AGENT_ENABLEMENT_TABLE,
+          ...ERD2_WORKER_TABLES,
+        ]);
       if (service.service === PROJECT_SERVICE_NAME) {
         assert.deepEqual(tables(store), [
           PROJECT_PROJECT_TABLE,
@@ -237,7 +243,7 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all migrations produce exactly the expected ERD 1 and Mission ERD 2 tables", () => {
+test("all migrations produce exactly the expected ERD 1 and implemented ERD 2 tables", () => {
   const erd1Services: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
@@ -262,7 +268,7 @@ test("all migrations produce exactly the expected ERD 1 and Mission ERD 2 tables
     }
     assert.deepEqual(
       [...tables(store)].sort(),
-      [...ERD1_TABLES, ...ERD2_MISSION_TABLES].sort(),
+      [...ERD1_TABLES, ...ERD2_MISSION_TABLES, ...ERD2_WORKER_TABLES].sort(),
     );
     for (const name of tables(store)) {
       const matches = erd1Services.filter(({ service }) =>
