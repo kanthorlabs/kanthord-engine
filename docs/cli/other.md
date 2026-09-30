@@ -566,7 +566,7 @@ kanthord jwt generate [username] [--name <display>] [--output [path]] [--endpoin
 
 Before configuration load or signing, check these conditions in order:
 
-1. A username with `--binding` fails with `cli.jwt.username_with_binding`.
+1. A username with `--binding` fails with `cli.jwt.username_with_binding`. `--binding` without `--project` fails with `cli.jwt.binding_without_project`, `--project` without `--binding` fails with `cli.jwt.project_without_binding`, and a `--project` value that is no canonical `project_<ulid>` identity fails with `cli.jwt.invalid_project`.
 2. `--output` with `--binding` fails with `cli.jwt.output_with_binding`.
 3. `--endpoint` without `--output` fails with `cli.jwt.endpoint_without_output`.
 4. An invalid `--endpoint` fails with `cli.config.invalid_endpoint`.
@@ -770,6 +770,9 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `cli.jwt.inspect.malformed_token`                | The token is not three base64url segments with a JSON object header and a JSON object payload.                          | jwt inspect                                               |
 | local           | `cli.jwt.inspect.token_required`                 | No argument, KANTHORD_TOKEN or cli.yaml token supplies a token.                                                         | jwt inspect                                               |
 | local           | `cli.jwt.output_with_binding`                    | `--output` is combined with `--binding`.                                                                                | jwt generate                                              |
+| local           | `cli.jwt.binding_without_project`                | `--binding` is given without `--project`.                                                                               | jwt generate                                              |
+| local           | `cli.jwt.project_without_binding`                | `--project` is given without `--binding`.                                                                               | jwt generate                                              |
+| local           | `cli.jwt.invalid_project`                        | The `--project` value is not a canonical `project_<ulid>` identity.                                                     | jwt generate                                              |
 | local           | `cli.jwt.username_with_binding`                  | A JWT request names a worker binding and a human username together.                                                     | jwt generate                                              |
 | local           | `cli.option.duplicate`                           | A single-use option appears more than once.                                                                             | commands with single-use flags                            |
 | local           | `cli.output.terminal_required`                   | JWT output would go to a non-terminal standard output.                                                                  | jwt generate                                              |
