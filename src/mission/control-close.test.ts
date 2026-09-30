@@ -10,7 +10,12 @@ import {
   NodeState,
 } from "./contract.ts";
 import { ControlError } from "./control.ts";
-import { openAttempt, insertEvidence } from "./record-store.ts";
+import {
+  openAttempt,
+  insertEvidence,
+  readEvidence,
+  readAssets,
+} from "./record-store.ts";
 import {
   insertNode,
   insertDependency,
@@ -24,6 +29,129 @@ const NOW = 100;
 const ZERO = 0;
 const FIRST = 1;
 const REVOKE = "schedulerClaims.revoke";
+const BINDING_MISMATCH = "mission.evidence.binding_mismatch";
+const COMMIT = "a".repeat(40);
+
+test("attempt-zero success override publishes a human repository evidence and satisfies dependents", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const bindingId = createIdentity("binding");
+  const dependent = createIdentity("node");
+  h.dependencies.bindings.getBindingRevision = () => ({
+    bindingId,
+    projectId: h.projectId,
+    name: "repo",
+    resourceIdentity: "repository:github:owner/repo",
+    revision: FIRST,
+    disabled: false,
+    tombstone: false,
+  });
+  h.store.transaction((tx) => {
+    tx.database
+      .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
+      .run(NodeKind.Objective, h.nodeId);
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
+      )
+      .run(JSON.stringify([bindingId]), h.nodeId);
+    insertNode(tx, {
+      id: dependent,
+      mission_id: h.missionId,
+      kind: NodeKind.Initiative,
+      filename: "dependent.md",
+      parent_id: null,
+      created_at: NOW,
+    });
+    insertDependency(tx, h.missionId, dependent, h.nodeId);
+  });
+  const result = await h.invoke("node.override", {
+    params: { nodeId: h.nodeId },
+    query: {},
+    body: {
+      ...h.body(),
+      result: AssessmentResult.Success,
+      landedCommit: { kind: "repository", bindingId, commit: COMMIT },
+    },
+  });
+  assert.equal(result.attempt, null);
+  assert.equal(result.outcome?.closingEvent, ClosingEvent.SuccessOverride);
+  assert.equal(result.outcome?.evidenceIds.length, FIRST);
+  const id = result.outcome!.evidenceIds[ZERO]!;
+  h.store.transaction((tx) => {
+    assert.equal(readNode(tx, dependent)?.state, NodeState.Available);
+    const evidence = readEvidence(tx, id)!;
+    assert.equal(evidence.attempt, ZERO);
+    assert.deepEqual(JSON.parse(evidence.provenance), h.actor);
+    const assets = readAssets(tx, id);
+    assert.deepEqual(JSON.parse(assets[ZERO]!.content), {
+      bindingId,
+      commit: COMMIT,
+    });
+    assert.ok(assets[ZERO]!.published_at);
+  });
+});
+
+test("override rejects another binding and Evaluating before any evidence write", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const bindingId = createIdentity("binding");
+  await assert.rejects(
+    h.invoke("node.override", {
+      params: { nodeId: h.nodeId },
+      query: {},
+      body: {
+        ...h.body(),
+        result: AssessmentResult.Success,
+        landedCommit: { kind: "repository", bindingId, commit: COMMIT },
+      },
+    }),
+    (error) =>
+      error instanceof OperationError && error.code === BINDING_MISMATCH,
+  );
+  assert.equal(h.node().state, NodeState.Available);
+  h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Evaluating));
+  await assert.rejects(
+    h.invoke("node.override", {
+      params: { nodeId: h.nodeId },
+      query: {},
+      body: {
+        ...h.body(NodeState.Evaluating),
+        result: AssessmentResult.Success,
+      },
+    }),
+    (error) =>
+      error instanceof OperationError && error.code === ControlError.Refused,
+  );
+  assert.equal(
+    h.store.database
+      .prepare("SELECT count(*) AS count FROM mission_evidence")
+      .get()!.count,
+    ZERO,
+  );
+});
+
+for (const state of [NodeState.ExternalFailed, NodeState.Blocked]) {
+  test(`success override from ${state} writes a new success outcome`, async (t) => {
+    const h = controlHarness(t, IDENTITY);
+    h.store.transaction((tx) => openAttempt(tx, h.nodeId, FIRST, h.actor, NOW));
+    if (state === NodeState.Blocked) {
+      h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Paused));
+      await h.invoke("node.block", {
+        params: { nodeId: h.nodeId },
+        query: {},
+        body: h.body(NodeState.Paused, FIRST),
+      });
+    } else h.store.transaction((tx) => setNodeState(tx, h.nodeId, state));
+    const result = await h.invoke("node.override", {
+      params: { nodeId: h.nodeId },
+      query: {},
+      body: { ...h.body(state, FIRST), result: AssessmentResult.Success },
+    });
+    assert.ok(result.node.kind !== NodeKind.Task);
+    assert.equal(result.node.state, NodeState.Completed);
+    assert.equal(result.outcome?.closingEvent, ClosingEvent.SuccessOverride);
+    assert.ok(result.attempt?.closedAt);
+  });
+}
 
 for (const attempt of [ZERO, FIRST]) {
   test(`block at attempt ${attempt} writes a human outcome; discard from Blocked closes nothing again`, async (t) => {

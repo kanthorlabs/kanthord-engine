@@ -915,6 +915,19 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "node.override": {
+    ...writeOperation,
+    id: "mission.node.override",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:nodeId/override",
+    input: z.strictObject({
+      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      query: z.strictObject({}),
+      body: overrideSchema,
+    }),
+    output: controlResultSchema,
+    description: "Override a nonterminal node with human-assessed success.",
+  },
   "node.block": {
     ...writeOperation,
     id: "mission.node.block",

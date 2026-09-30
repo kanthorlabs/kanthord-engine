@@ -32,7 +32,7 @@ import {
 } from "./contract.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
-import { blockNode, discardNode } from "./control-close.ts";
+import { blockNode, discardNode, overrideNode } from "./control-close.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
 import { exportMission } from "./export.ts";
 import { previewImport } from "./import.ts";
@@ -102,6 +102,20 @@ export class MissionService implements Service, MissionCollaborations {
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["node.override"],
+      ({ params, body }, caller) =>
+        this.commitGraph(caller, { nodeId: params.nodeId }, (tx) =>
+          overrideNode(
+            tx,
+            this.dependencies,
+            params.nodeId,
+            body,
+            humanActor(caller),
+            Date.now(),
+          ),
+        ),
+    );
     registry.register(
       missionOperations["node.block"],
       ({ params, body }, caller) =>
