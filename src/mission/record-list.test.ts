@@ -19,6 +19,9 @@ import {
 } from "./record-store.ts";
 import { writeHumanRecords } from "./control.ts";
 import { controlHarness } from "./test-support.ts";
+import { encode } from "./node-read.ts";
+import { readCurrentRevision, insertRevision } from "./store.ts";
+import { revisionFromRow } from "./revision.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST = 1;
@@ -27,6 +30,82 @@ const NOW = 100;
 const NOT_FOUND = "mission.record.not_found";
 const KEY = "repo.pull_request";
 const ZERO = 0;
+const MANY_ATTEMPTS = 70;
+
+test("action pages cross actionless batches and never derive attempts newer than the cursor", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const bindingId = createIdentity("binding");
+  const inactiveId = createIdentity("binding");
+  let derivations = ZERO;
+  h.dependencies.bindings.getBindingRevision = (_tx, id) => ({
+    bindingId: id,
+    projectId: h.projectId,
+    name: "repo",
+    resourceIdentity: "repository:github:owner/repo",
+    revision: FIRST,
+    disabled: false,
+    tombstone: false,
+  });
+  h.dependencies.bindings.repositoryPolicyOf = (_tx, id) => {
+    derivations++;
+    return {
+      bindingId: id,
+      projectId: h.projectId,
+      name: "repo",
+      address: "git@github.com:owner/repo.git",
+      platform: "github",
+      credential: "github",
+      baseBranch: "main",
+      action: id === bindingId ? RepositoryAction.PullRequest : null,
+      projectPrompt: null,
+    };
+  };
+  h.store.transaction((tx) => {
+    tx.database
+      .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
+      .run(NodeKind.Objective, h.nodeId);
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
+      )
+      .run(JSON.stringify([bindingId]), h.nodeId);
+    const prior = revisionFromRow(tx, readCurrentRevision(tx, h.nodeId)!);
+    insertRevision(tx, {
+      ...prior,
+      revision: SECOND,
+      content: { ...prior.content, bindings: [inactiveId] },
+    });
+    for (let number = FIRST; number <= MANY_ATTEMPTS; number++) {
+      openAttempt(
+        tx,
+        h.nodeId,
+        number === FIRST ? FIRST : SECOND,
+        h.actor,
+        NOW,
+      );
+      closeAttempt(tx, h.nodeId, number, NOW);
+    }
+  });
+  const input = {
+    params: { nodeId: h.nodeId },
+    query: { limit: FIRST },
+    body: null,
+  };
+  const page = await h.invoke("externalAction.list", input);
+  assert.deepEqual(
+    page.items.map((item) => item.attempt),
+    [FIRST],
+  );
+  assert.equal(page.nextCursor, null);
+  assert.equal(derivations, MANY_ATTEMPTS);
+  derivations = ZERO;
+  const older = await h.invoke("externalAction.list", {
+    ...input,
+    query: { limit: FIRST, cursor: encode(`${SECOND}|${KEY}`) },
+  });
+  assert.deepEqual(older.items, page.items);
+  assert.equal(derivations, SECOND);
+});
 
 test("assessment and outcome reads filter attempt zero, evaluate currency, union evidence and paginate identities", async (t) => {
   const h = controlHarness(t, IDENTITY);
@@ -48,6 +127,7 @@ test("assessment and outcome reads filter attempt zero, evaluate currency, union
     );
     openAttempt(tx, h.nodeId, FIRST, h.actor, NOW);
     const evidenceIds = [
+      createIdentity("evidence"),
       createIdentity("evidence"),
       createIdentity("evidence"),
     ];
@@ -74,7 +154,7 @@ test("assessment and outcome reads filter attempt zero, evaluate currency, union
       node_revision: FIRST,
       result: AssessmentResult.Success,
       rationale: "Passed",
-      evidence_ids: JSON.stringify([evidenceIds[ZERO]]),
+      evidence_ids: JSON.stringify(evidenceIds.slice(ZERO, SECOND)),
       child_outcome_ids: "[]",
       tested_input: null,
       execution_id: createIdentity("execution"),
@@ -86,7 +166,7 @@ test("assessment and outcome reads filter attempt zero, evaluate currency, union
       node_id: h.nodeId,
       result: AssessmentResult.Success,
       assessment_id: assessment.id,
-      evidence_ids: JSON.stringify(evidenceIds),
+      evidence_ids: JSON.stringify(evidenceIds.slice(FIRST)),
       created_at: NOW,
     });
     return { human, assessment, outcome, evidenceIds };
@@ -114,6 +194,14 @@ test("assessment and outcome reads filter attempt zero, evaluate currency, union
     body: null,
   });
   assert.deepEqual(outcome.evidenceIds, records.evidenceIds.sort());
+  const outcomePage = await h.invoke("outcome.list", {
+    ...base,
+    query: { attempt: FIRST },
+  });
+  assert.deepEqual(
+    outcomePage.items[ZERO]!.evidenceIds,
+    records.evidenceIds.sort(),
+  );
   for (const operation of ["assessment.list", "outcome.list"] as const) {
     const page = await h.invoke(operation, {
       ...base,
@@ -211,6 +299,21 @@ test("attempt and external-action reads page in descending order and filter atte
     query: { attempt: 0 },
   });
   assert.deepEqual(empty, { items: [], nextCursor: null });
+  const filtered = await h.invoke("externalAction.list", {
+    ...input,
+    query: { attempt: FIRST },
+  });
+  assert.deepEqual(
+    filtered.items.map((item) => item.attempt),
+    [FIRST],
+  );
+  assert.deepEqual(
+    await h.invoke("externalAction.list", {
+      ...input,
+      query: { attempt: SECOND + FIRST },
+    }),
+    { items: [], nextCursor: null },
+  );
   const get = await h.invoke("externalAction.get", {
     params: { nodeId: h.nodeId, attempt: SECOND, actionKey: KEY },
     query: {},

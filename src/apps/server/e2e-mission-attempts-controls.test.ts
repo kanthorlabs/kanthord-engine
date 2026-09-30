@@ -261,6 +261,8 @@ test(
           act(NodeState.Available, ZERO),
         );
         state(answer, NodeState.Waiting);
+        assert.ok(answer.node.kind !== NodeKind.Task);
+        assert.equal(answer.node.attempt, ONE);
         assert.equal(answer.attempt?.attempt, ONE);
         assert.equal(answer.attempt?.nodeRevision, h.revision);
         assert.equal(answer.attempt?.openedBy.kind, ActorKind.Human);

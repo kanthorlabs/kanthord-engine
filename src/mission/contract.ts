@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
 import { timestamp } from "../kernel/json.ts";
+import { isString } from "../kernel/values.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,
@@ -904,6 +905,14 @@ const pageQuery = {
     .optional(),
   cursor: z.string().optional(),
 };
+const attemptSelector = (minimum: number) =>
+  z.preprocess(
+    (value) =>
+      isString(value) && /^(0|[1-9][0-9]*)$/.test(value)
+        ? Number(value)
+        : value,
+    z.number().int().min(minimum).max(Number.MAX_SAFE_INTEGER),
+  );
 
 const dependencyInput = z.strictObject({
   params: z.strictObject({
@@ -924,12 +933,7 @@ export const missionOperations = {
       z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
       z.strictObject({
         ...pageQuery,
-        attempt: z.coerce
-          .number()
-          .int()
-          .min(0)
-          .max(Number.MAX_SAFE_INTEGER)
-          .optional(),
+        attempt: attemptSelector(0).optional(),
       }),
     ),
     output: pageOf(assessmentSchema),
@@ -956,12 +960,7 @@ export const missionOperations = {
       z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
       z.strictObject({
         ...pageQuery,
-        attempt: z.coerce
-          .number()
-          .int()
-          .min(0)
-          .max(Number.MAX_SAFE_INTEGER)
-          .optional(),
+        attempt: attemptSelector(0).optional(),
       }),
     ),
     output: pageOf(outcomeSchema),
@@ -999,7 +998,7 @@ export const missionOperations = {
     input: readInput(
       z.strictObject({
         nodeId: identitySchema(NODE_IDENTITY_PREFIX),
-        attempt: z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+        attempt: attemptSelector(1),
       }),
       z.strictObject({}),
     ),
@@ -1015,12 +1014,7 @@ export const missionOperations = {
       z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
       z.strictObject({
         ...pageQuery,
-        attempt: z.coerce
-          .number()
-          .int()
-          .min(0)
-          .max(Number.MAX_SAFE_INTEGER)
-          .optional(),
+        attempt: attemptSelector(0).optional(),
       }),
     ),
     output: pageOf(externalActionSchema),
@@ -1034,7 +1028,7 @@ export const missionOperations = {
     input: readInput(
       z.strictObject({
         nodeId: identitySchema(NODE_IDENTITY_PREFIX),
-        attempt: z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+        attempt: attemptSelector(1),
         actionKey: actionKeySchema,
       }),
       z.strictObject({}),

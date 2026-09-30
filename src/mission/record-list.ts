@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
@@ -121,6 +122,37 @@ const ZERO = 0;
 const ONE = 1;
 const CURSOR_PARTS = 2;
 const RECORD_NOT_FOUND = "mission.record.not_found";
+const ATTEMPT_BATCH_SIZE = 64;
+
+function* actionCandidates(
+  tx: Transaction,
+  nodeId: string,
+  bound: number,
+  filter: number | undefined,
+): Generator<AttemptRow> {
+  assert.ok(Number.isSafeInteger(bound) && bound >= ZERO);
+  assert.ok(tx.database.isTransaction);
+  let upper = bound;
+  for (let pass = ZERO; pass < bound; pass++) {
+    const rows = tx.database
+      .prepare(
+        "SELECT * FROM mission_attempt WHERE node_id = ? AND (? IS NULL OR attempt = ?) AND attempt <= ? ORDER BY attempt DESC LIMIT ?",
+      )
+      .all(
+        nodeId,
+        filter ?? null,
+        filter ?? null,
+        upper,
+        ATTEMPT_BATCH_SIZE,
+      ) as unknown as AttemptRow[];
+    if (rows.length === ZERO) return;
+    yield* rows;
+    const next = rows.at(-ONE)!.attempt - ONE;
+    assert.ok(next < upper);
+    upper = next;
+    if (rows.length < ATTEMPT_BATCH_SIZE || upper === ZERO) return;
+  }
+}
 export function recordNotFound(): never {
   throw new OperationError(
     HttpStatus.NotFound,
@@ -204,18 +236,16 @@ export function externalActionPage(
   nodeId: string,
   query: { attempt?: number; limit?: number; cursor?: string },
 ) {
-  requireRunnable(requireNode(tx, nodeId));
+  const node = requireNode(tx, nodeId);
+  requireRunnable(node);
   const after = query.cursor === undefined ? null : actionCursor(query.cursor);
   const limit = query.limit ?? NODE_LIST_LIMIT_DEFAULT;
-  const attempts = tx.database
-    .prepare(
-      "SELECT * FROM mission_attempt WHERE node_id = ? AND (? IS NULL OR attempt = ?) ORDER BY attempt DESC",
-    )
-    .all(
-      nodeId,
-      query.attempt ?? null,
-      query.attempt ?? null,
-    ) as unknown as AttemptRow[];
+  const attempts = actionCandidates(
+    tx,
+    nodeId,
+    Math.min(node.attempt!, after?.attempt ?? node.attempt!),
+    query.attempt,
+  );
   const records: ExternalAction[] = [];
   for (const attempt of attempts) {
     const actions = externalActionRecords(
