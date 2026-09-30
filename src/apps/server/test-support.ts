@@ -91,12 +91,6 @@ export function fakeMachines(
       );
       return match ? { projectId, resourceIdentity } : null;
     },
-    async resolveWorkerBinding(bindingId: string, context: Context) {
-      throwIfCancelled(context);
-      const binding = bindings.get(bindingId);
-      if (!binding || binding.available === false) return null;
-      return { workerBindingId: bindingId, projectId: binding.projectId };
-    },
   };
   const worker = {
     registrations,

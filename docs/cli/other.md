@@ -37,7 +37,7 @@ Help is a parser facility, not a fourth global command.
    application startup; the runtime calls public API operations afterward.
 6. `kanthord jwt generate [username] [--name <display>] [--config <path>]` — implemented
    human issuance; local, no route.
-7. `kanthord jwt generate --binding <binding> [--name <display>] [--config <path>]` —
+7. `kanthord jwt generate --project <project id> --binding <binding name> [--name <display>] [--config <path>]` —
    implemented machine issuance; local, no route.
 8. `kanthord jwt inspect [token]` — implemented local decoding; no route.
 
@@ -548,8 +548,8 @@ kanthord jwt generate [username] [--name <display>] [--output [path]] [--endpoin
   the identity and grants no authority.
 - [`--config`](./common-flags.md#--config): the selected server configuration
   must exist.
-- `--binding <binding>`: absent in human mode. Supplying it selects machine
-  mode; combining it with a username is an error, not two issuance requests.
+- `--project <project id>` and `--binding <binding name>`: absent in human mode.
+  Supplying both selects machine mode; combining them with a username is an error.
 - [`--help`](./common-flags.md#--help): displays the default username and
   resolved configuration path.
 - `--output [path]`: write a new private client configuration file instead of
@@ -593,20 +593,19 @@ kanthord jwt generate ulrich --output ./ulrich.cli.yaml --endpoint https://tunne
 ```
 
 Generate claims `kind: "human"`, `sub: <username>`, and `name: <display>`, with
-no `binding`. Reissuing for the same username preserves that subject but
+no `project_id` or `resource_identity`. Reissuing for the same username preserves that subject but
 generates a fresh `jti`. It creates no account or password record.
 
 ### Machine token
 
 ```text
-kanthord jwt generate --binding <binding> [--name <display>] [--config <path>]
+kanthord jwt generate --project <project id> --binding <binding name> [--name <display>] [--config <path>]
 ```
 
-- `--binding <binding>`: required to select machine mode; string, no default;
-  currently nonblank and 1–128 characters with the exact value preserved.
-  Current local validation does not enforce a binding entity prefix.
-  The target requires `--project <project id>` with `--binding <binding name>`, and the token holds
-  `project_id` and `resource_identity` (`worker:kanthord:<binding name>`) under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
+- `--binding <binding name>`: required in machine mode; 1 to 63 characters,
+  a lower-case letter first, then lower-case letters, digits and hyphens.
+- `--project <project id>`: required in machine mode; a canonical `project_<ulid>`
+  identity under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
 - `username`: forbidden with `--binding`. Even a valid human username produces
   `cli.jwt.username_with_binding` and no token.
 - `--name <display>`: optional nonblank string of 1–64 characters; default the
@@ -615,7 +614,7 @@ kanthord jwt generate --binding <binding> [--name <display>] [--config <path>]
 - [`--help`](./common-flags.md#--help): no issuance or runtime startup.
 
 Generate claims `kind: "client"`, `sub: "client_identity_<ulid>"`,
-`binding: <binding>`, and `name: <display>`. Every successful invocation uses a
+`project_id: <project id>`, `resource_identity: worker:kanthord:<binding name>`, and `name: <display>`. Every successful invocation uses a
 fresh canonical client-identity ULID and `jti`. It creates no client identity
 row and no worker-instance registration. Local issuance cannot check whether
 the named binding exists or is available; Gateway checks it on later use, and
@@ -780,7 +779,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `cli.pagination.limit_out_of_range`              | The `--limit` value exceeds 1000.                                                                                       | list commands with `--limit`                              |
 | local           | `cli.serve.unsupported_application`              | The named `serve` application is neither `worker` nor the default server.                                               | serve                                                     |
 | local           | `cli.serve.worker_config`                        | `serve worker` was given the unsupported `--config` option.                                                             | serve worker                                              |
-| local           | `gateway.authentication.invalid_binding`         | The worker binding is blank or longer than 128 characters.                                                              | jwt generate                                              |
+| local           | `gateway.authentication.invalid_binding`         | The binding name is not 1 to 63 characters of a lower-case letter, then lower-case letters, digits and hyphens.         | jwt generate                                              |
 | local           | `gateway.authentication.invalid_lifetime`        | The JWT lifetime is not a nonnegative safe integer.                                                                     | jwt generate                                              |
 | local           | `gateway.authentication.invalid_name`            | The display name is blank or longer than 64 characters.                                                                 | jwt generate                                              |
 | local           | `gateway.authentication.invalid_username`        | The username is blank or longer than 64 characters.                                                                     | jwt generate                                              |

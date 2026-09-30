@@ -60,15 +60,9 @@ export function fakeLookups() {
           ? { projectId, resourceIdentity }
           : null;
       },
-      async resolveWorkerBinding(binding: string, context: Context) {
-        throwIfCancelled(context);
-        return binding === TEST_WORKER_BINDING
-          ? { workerBindingId: binding, projectId: "project" }
-          : null;
-      },
     },
     worker,
-  };
+  } satisfies AuthenticationLookups;
 }
 
 function storeAt(path = ":memory:"): Store {

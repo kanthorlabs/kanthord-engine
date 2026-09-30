@@ -588,26 +588,6 @@ export class ProjectService implements Service, ProjectBindings {
       projectPrompt: config.projectPrompt ?? null,
     };
   }
-  async resolveWorkerBinding(bindingId: string, context: Context) {
-    throwIfCancelled(context);
-    if (this.bindings)
-      return this.bindings.resolveWorkerBinding(bindingId, context);
-    return this.operationalStore.transaction((tx) => {
-      const row = readBindingRevision(tx, bindingId);
-      if (!row || row.removedAt !== null) return null;
-      if (kindOf(row.resourceIdentity) !== BindingKind.Worker) return null;
-      const latest = readLatestBinding(tx, row.projectId, row.resourceIdentity);
-      assert.ok(latest, "A retained binding must have a latest revision.");
-      assert.ok(
-        latest.revision >= row.revision,
-        "Latest revision cannot precede the pinned revision.",
-      );
-      if (latest.removedAt !== null) return null;
-      const config = workerConfigSchema.parse(latest.config);
-      if (config.instanceCount === INSTANCE_COUNT_MIN) return null;
-      return { workerBindingId: row.id, projectId: row.projectId };
-    });
-  }
   workerBindingOf(
     tx: Transaction,
     projectId: string,

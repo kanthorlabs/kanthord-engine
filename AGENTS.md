@@ -194,7 +194,7 @@ The worker resolves its endpoint and token from options, then
 `KANTHORD_ENDPOINT` / `KANTHORD_TOKEN`, then `cli.yaml` in the configuration
 directory. The default endpoint is `http://127.0.0.1:31415`.
 The worker requires `clientSecret` in `cli.yaml` as canonical 32-byte base64.
-It has no option or environment variable. `jwt generate --binding <binding>`
+It has no option or environment variable. `jwt generate --project <project id> --binding <binding name>`
 prints the `token` and `clientSecret` fragment for this file. A `masterKey`
 field fails with `cli.config.invalid`.
 It reads the server's package version through the OpenAPI index and refuses

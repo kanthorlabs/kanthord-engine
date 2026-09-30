@@ -563,10 +563,6 @@ export interface ProjectBindings {
     issuedAt: number,
     context: Context,
   ): Promise<{ projectId: string; resourceIdentity: string } | null>;
-  resolveWorkerBinding(
-    bindingId: string,
-    context: Context,
-  ): Promise<{ workerBindingId: string; projectId: string } | null>;
 }
 
 export interface WorkerBindingRow {

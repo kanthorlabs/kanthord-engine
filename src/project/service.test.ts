@@ -179,7 +179,15 @@ test("Project declares every operation and owns its lifecycle probe", async (t) 
       .sort(),
     [...CORE_OPERATIONS].sort(),
   );
-  assert.equal(await project.resolveWorkerBinding("absent", background), null);
+  assert.equal(
+    await project.resolveWorkerGroup(
+      "absent",
+      "worker:kanthord:absent",
+      0,
+      background,
+    ),
+    null,
+  );
   assert.deepEqual(await project.healthcheck(), {
     bindings: HealthStatus.Unavailable,
   });
@@ -213,7 +221,12 @@ test("Project propagates cancellation to binding resolution and joins run", asyn
     if (!before) context.cancel();
     assert.equal(await running, context.err());
     await assert.rejects(
-      project.resolveWorkerBinding("absent", context),
+      project.resolveWorkerGroup(
+        "absent",
+        "worker:kanthord:absent",
+        0,
+        context,
+      ),
       (error) => error === context.err(),
     );
     assert.equal(await project.stop(), null);
@@ -612,7 +625,6 @@ test("worker group override receives the exact group, issuance and context witho
   let calls = NO_CALLS;
   const f = fixture(t, {
     bindings: {
-      resolveWorkerBinding: async () => null,
       async resolveWorkerGroup(projectId, resourceIdentity, issuedAt, context) {
         calls++;
         assert.deepEqual({ projectId, resourceIdentity }, group);
@@ -641,118 +653,6 @@ test("worker group override receives the exact group, issuance and context witho
       GROUP_ISSUED_AT,
       context,
     ),
-    (error) => error === context.err(),
-  );
-  assert.equal(calls, ONE_CALL);
-});
-
-test("resolveWorkerBinding returns current and pinned worker identities using the latest configuration", async (t) => {
-  const f = bindingFixture(t);
-  const pinned = f.write(SINGLE_INSTANCE);
-  const identity = { workerBindingId: pinned, projectId: f.projectId };
-  assert.deepEqual(
-    await f.project.resolveWorkerBinding(pinned, background),
-    identity,
-  );
-  const latest = f.write(TWO_INSTANCES);
-  assert.deepEqual(
-    await f.project.resolveWorkerBinding(pinned, background),
-    identity,
-  );
-  assert.deepEqual(await f.project.resolveWorkerBinding(latest, background), {
-    workerBindingId: latest,
-    projectId: f.projectId,
-  });
-  f.write(INSTANCE_COUNT_MIN);
-  assert.equal(await f.project.resolveWorkerBinding(pinned, background), null);
-});
-
-test("resolveWorkerBinding rejects absent and disabled bindings", async (t) => {
-  const f = bindingFixture(t);
-  assert.equal(
-    await f.project.resolveWorkerBinding(
-      createIdentity(BINDING_ID_PREFIX),
-      background,
-    ),
-    null,
-  );
-  const disabled = f.write(INSTANCE_COUNT_MIN);
-  assert.equal(
-    await f.project.resolveWorkerBinding(disabled, background),
-    null,
-  );
-});
-
-test("resolveWorkerBinding rejects a removed row and a pin followed by a tombstone", async (t) => {
-  const f = bindingFixture(t);
-  const pinned = f.write(SINGLE_INSTANCE);
-  const tombstone = f.write(null);
-  assert.equal(
-    await f.project.resolveWorkerBinding(tombstone, background),
-    null,
-  );
-  assert.equal(await f.project.resolveWorkerBinding(pinned, background), null);
-});
-
-test("resolveWorkerBinding rejects non-worker bindings", async (t) => {
-  const f = bindingFixture(t);
-  const result = f.store.transaction((tx) =>
-    writeBindingSet(
-      tx,
-      f.projectId,
-      BINDING_SET_INITIAL_VERSION,
-      new Map([
-        [
-          "repository",
-          {
-            kind: BindingKind.Repository,
-            config: { address: "git@github.com:owner/repo.git" },
-          },
-        ],
-        [
-          "storage",
-          {
-            kind: BindingKind.Storage,
-            config: { endpoint: "https://s3.example.com", bucket: "bucket" },
-          },
-        ],
-      ]),
-    ),
-  );
-  for (const { bindingId } of result.changes)
-    assert.equal(
-      await f.project.resolveWorkerBinding(bindingId, background),
-      null,
-    );
-});
-
-test("the optional binding override retains its identity and context and never bypasses cancellation", async (t) => {
-  const identity = {
-    workerBindingId: "fake-binding",
-    projectId: "fake-project",
-  };
-  let calls = NO_CALLS;
-  const f = fixture(t, {
-    bindings: {
-      async resolveWorkerGroup() {
-        return null;
-      },
-      async resolveWorkerBinding(id, context) {
-        calls++;
-        assert.equal(id, identity.workerBindingId);
-        assert.equal(context, background);
-        return identity;
-      },
-    },
-  });
-  assert.equal(
-    await f.project.resolveWorkerBinding(identity.workerBindingId, background),
-    identity,
-  );
-  const context = new CancellationContext();
-  context.cancel();
-  await assert.rejects(
-    f.project.resolveWorkerBinding(identity.workerBindingId, context),
     (error) => error === context.err(),
   );
   assert.equal(calls, ONE_CALL);
