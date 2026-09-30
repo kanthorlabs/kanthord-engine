@@ -32,7 +32,10 @@ import type {
   ProjectBindings,
   RepositoryConnector,
 } from "../../project/contract.ts";
-import type { WorkerRegistrations } from "../../worker/contract.ts";
+import type {
+  WorkerRegistrations,
+  SchedulerClaims as WorkerSchedulerClaims,
+} from "../../worker/contract.ts";
 import { audit, ensureDirectory } from "../../kernel/files.ts";
 import { Diagnostic, diagnostic, asError } from "../../kernel/errors.ts";
 import {
@@ -77,6 +80,7 @@ export function composeServices(options: {
   inventoryOverrides?: Partial<ResourceInventories>;
   standIns?: {
     schedulerClaims?: SchedulerClaims;
+    workerSchedulerClaims?: WorkerSchedulerClaims;
     wakeup?: SchedulerWakeup;
     executionAttribution?: ExecutionAttribution;
   };
@@ -133,6 +137,12 @@ export function composeServices(options: {
   });
   const worker: WorkerService = new WorkerService({
     config: options.config.worker,
+    schedulerClaims: options.standIns?.workerSchedulerClaims ?? {
+      runningExecutionOfRuntime: unwired(
+        "SchedulerClaims.runningExecutionOfRuntime",
+      ),
+      activityOf: unwired("SchedulerClaims.activityOf"),
+    },
     health: options.health,
     registrations: options.registrations,
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),

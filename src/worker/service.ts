@@ -26,6 +26,7 @@ import {
   AGENT_PROVIDER_CAPABILITY,
   AGENT_PROVIDER_TARGET_KIND,
   type WorkerRegistrations,
+  type SchedulerClaims,
   type AgentEnablement,
   type AgentProviderItem,
   type AgentDependentBinding,
@@ -158,6 +159,7 @@ function saveRevision(tx: Transaction, current: EnablementRow) {
 }
 export interface Dependencies {
   config: WorkerConfig;
+  schedulerClaims: SchedulerClaims;
   custodySuitability: CustodySuitability;
   credentialMetadata: CredentialMetadataFn;
   entriesOfAgent: EntriesOfAgent;

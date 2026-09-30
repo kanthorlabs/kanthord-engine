@@ -20,6 +20,27 @@ export interface Registration extends VerifiedClient {
   runtimeIdentity: string;
 }
 
+export const InstanceActivity = {
+  Idle: "idle",
+  Pulling: "pulling",
+  Executing: "executing",
+} as const;
+export type InstanceActivity =
+  (typeof InstanceActivity)[keyof typeof InstanceActivity];
+
+export interface SchedulerClaims {
+  runningExecutionOfRuntime(
+    tx: Transaction,
+    runtimeIdentity: string,
+    now: number,
+  ): { executionId: string } | null;
+  activityOf(
+    tx: Transaction,
+    runtimeIdentity: string,
+    now: number,
+  ): { activity: InstanceActivity; executionId: string | null };
+}
+
 export type AgentProviderItem = {
   name: string;
   provider: string;

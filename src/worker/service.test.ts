@@ -8,6 +8,7 @@ import {
   LIST_LIMIT_DEFAULT,
   AGENT_PROVIDER_CAPABILITY,
   AGENT_PROVIDER_TARGET_KIND,
+  InstanceActivity,
   type AgentDependentBinding,
   type WorkerEntry,
 } from "./contract.ts";
@@ -31,6 +32,10 @@ import { HttpStatus } from "../kernel/http.ts";
 import { CodedError, OperationError } from "../kernel/errors.ts";
 
 const fakeCollaborations = {
+  schedulerClaims: {
+    runningExecutionOfRuntime: () => null,
+    activityOf: () => ({ activity: InstanceActivity.Idle, executionId: null }),
+  },
   custodySuitability: () => {},
   credentialMetadata: () => null,
   entriesOfAgent: () => [],

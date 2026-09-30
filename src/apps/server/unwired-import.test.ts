@@ -13,6 +13,8 @@ const UNWIRED_SEAMS = [
   "SchedulerClaims.settle",
   "SchedulerClaims.liveExecutionOf",
   "ExecutionAttribution.of",
+  "SchedulerClaims.runningExecutionOfRuntime",
+  "SchedulerClaims.activityOf",
 ];
 const TYPESCRIPT_EXTENSION = ".ts";
 const IMPORT_SPECIFIER = new RegExp(
@@ -39,7 +41,7 @@ test("only the composition root and helper test import the exact unwired seams",
       .sort(),
   );
   const source = readFileSync(join(SERVER_ROOT, COMPOSITION_MODULE), "utf8");
-  const seams = [...source.matchAll(/unwired\("([^"]+)"\)/g)].map(
+  const seams = [...source.matchAll(/unwired\(\s*"([^"]+)"\s*,?\s*\)/g)].map(
     (match) => match[1],
   );
   assert.deepEqual(seams.sort(), [...UNWIRED_SEAMS].sort());

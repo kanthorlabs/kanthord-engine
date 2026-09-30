@@ -16,7 +16,10 @@ import { workerMigrations } from "../../worker/index.ts";
 import { composeServices } from "./index.ts";
 import type { OperationRegistry } from "../../kernel/operation.ts";
 import type { ProjectBindings } from "../../project/contract.ts";
-import type { WorkerRegistrations } from "../../worker/contract.ts";
+import {
+  InstanceActivity,
+  type WorkerRegistrations,
+} from "../../worker/contract.ts";
 export interface MachineDependencies {
   project: ProjectBindings;
   worker: WorkerRegistrations;
@@ -196,6 +199,14 @@ export async function gatewayFixture(
       wakeup: { wake: () => {} },
       executionAttribution: { of: () => null },
       ...options.standIns,
+      workerSchedulerClaims: {
+        runningExecutionOfRuntime: () => null,
+        activityOf: () => ({
+          activity: InstanceActivity.Idle,
+          executionId: null,
+        }),
+        ...options.standIns?.workerSchedulerClaims,
+      },
     },
     logger: pino(
       { level: "info" },
