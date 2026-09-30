@@ -44,8 +44,12 @@ paths:
     $ref: ./openapi/mission/import.apply.yaml#/pathItem
   /api/mission/{missionId}/import/preview:
     $ref: ./openapi/mission/import.preview.yaml#/pathItem
+  /api/mission/node/{nodeId}/block:
+    $ref: ./openapi/mission/node.block.yaml#/pathItem
   /api/mission/{missionId}/node:
     $ref: ./openapi/mission/node.create.yaml#/pathItem
+  /api/mission/node/{nodeId}/discard:
+    $ref: ./openapi/mission/node.discard.yaml#/pathItem
   /api/mission/node/{nodeId}:
     $ref: ./openapi/mission/node.get.yaml#/pathItem
   /api/mission/node/{nodeId}/move:

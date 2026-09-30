@@ -915,6 +915,32 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "node.block": {
+    ...writeOperation,
+    id: "mission.node.block",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:nodeId/block",
+    input: z.strictObject({
+      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      query: z.strictObject({}),
+      body: humanActSchema,
+    }),
+    output: controlResultSchema,
+    description: "Block a paused node and close its attempt.",
+  },
+  "node.discard": {
+    ...writeOperation,
+    id: "mission.node.discard",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:nodeId/discard",
+    input: z.strictObject({
+      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      query: z.strictObject({}),
+      body: humanActSchema,
+    }),
+    output: controlResultSchema,
+    description: "Discard a node and close its attempt.",
+  },
   "node.ready": {
     ...writeOperation,
     id: "mission.node.ready",
