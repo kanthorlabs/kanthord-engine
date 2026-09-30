@@ -224,7 +224,7 @@ async function stopWorker(proc: WorkerProcess): Promise<void> {
 }
 
 async function failure(proc: WorkerProcess, code: string): Promise<void> {
-  const result = await within(proc.exited, CLEANUP_WAIT_MS);
+  const result = await within(proc.exited, SPAWN_LINE_TIMEOUT_MS);
   assert.equal(result.code, EXIT_FAILURE);
   assert.ok(
     result.stderr.join(NEWLINE).startsWith(`${code}:`),
@@ -364,7 +364,7 @@ test("E09.4 version mismatch reports both versions", async (t) => {
   clientFile(env, randomBytes(KEY_BYTES).toString("base64"));
   const proc = spawnWorker(WORKER_ARGS, env);
   try {
-    const result = await within(proc.exited, CLEANUP_WAIT_MS);
+    const result = await within(proc.exited, SPAWN_LINE_TIMEOUT_MS);
     assert.equal(result.code, EXIT_FAILURE);
     const stderr = result.stderr.join(NEWLINE);
     assert.ok(stderr.startsWith("worker.version.mismatch:"), stderr);
