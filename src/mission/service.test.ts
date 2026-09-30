@@ -4041,8 +4041,9 @@ function importApplyFixture(
   t: TestContext,
   bindingRevision?: MissionBindings["getBindingRevision"],
   textMaxBytes?: number,
+  collaborators: Partial<Collaborators> = {},
 ) {
-  const f = dependencyFixture(t, bindingRevision, textMaxBytes);
+  const f = dependencyFixture(t, bindingRevision, textMaxBytes, collaborators);
   function entry(
     filename: string,
     kind: NodeKind,
@@ -4145,6 +4146,65 @@ function importApplyFixture(
     state,
   };
 }
+
+test("import dependency additions settle live descendants and dependency-only edits bypass the content import condition", (t) => {
+  const claimed = new Set<string>();
+  const settled = new Set<string>();
+  const executionId = createIdentity("execution");
+  const f = importApplyFixture(t, undefined, undefined, {
+    schedulerClaims: {
+      revoke: () => assert.fail(),
+      settle: (_tx, id) => {
+        settled.add(id);
+      },
+      liveExecutionOf: (_tx, id) => {
+        assert.ok(settled.has(id));
+        return claimed.has(id) ? { executionId } : null;
+      },
+    },
+  });
+  const entries = [
+    ...f.initial,
+    f.entry(IMPORT_NEW_PARENT, NodeKind.Initiative),
+  ];
+  const ids = f.identified(
+    f.apply(f.request(f.importSnapshot(entries))),
+    entries,
+  );
+  const parentId = ids.find(
+    (item) => item.filename === INITIATIVE_FILENAME,
+  )!.id!;
+  const childId = ids.find((item) => item.filename === OBJECTIVE_FILENAME)!.id!;
+  f.store.transaction((tx) =>
+    openAttempt(tx, parentId, FIRST_REVISION, HUMAN_ACTOR, CREATED_AT),
+  );
+  const modified = ids.map((item) =>
+    item.id === parentId ? { ...item, dependsOn: [IMPORT_NEW_PARENT] } : item,
+  );
+  const body = f.request(f.importSnapshot(modified));
+  claimed.add(childId);
+  const before = f.state();
+  assert.throws(
+    () => f.apply(body),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, MissionErrorCode.ClaimLive);
+      assert.equal(error.status, HttpStatus.Conflict);
+      assert.deepEqual(error.details, { nodeId: childId, executionId });
+      return true;
+    },
+  );
+  assert.deepEqual(f.state(), before);
+  claimed.clear();
+  const applied = f.apply(body);
+  assert.deepEqual(applied.changes.revisions, []);
+  assert.equal(
+    f.store.transaction((tx) => readOpenAttempt(tx, parentId))?.attempt,
+    FIRST_REVISION,
+  );
+  const removed = f.apply(f.request(f.importSnapshot(ids)));
+  assert.equal(removed.changes.removedEdges.length, ONE);
+});
 
 test("import.apply is a human mutation and imports a full graph in one commit and version increment", (t) => {
   const f = importApplyFixture(t);

@@ -1038,9 +1038,10 @@ const CONDITION_CASES: Array<{
     checked: ["a.md", "b.md", "o.md"],
   },
   {
-    label: "dependency changes check the dependent only",
+    label:
+      "dependency-only changes use live-claim admission instead of the import condition",
     transform: (entries) => change(entries, "b.md", { dependsOn: ["a.md"] }),
-    checked: ["b.md"],
+    checked: [],
   },
   {
     label: "created objective checks its current initiative",

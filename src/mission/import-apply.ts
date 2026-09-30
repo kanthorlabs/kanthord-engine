@@ -17,6 +17,7 @@ import {
   type Mission,
   type MissionBindings,
   type WorkQueue,
+  type SchedulerClaims,
 } from "./contract.ts";
 import {
   prepareImport,
@@ -33,6 +34,7 @@ import {
   insertRevision,
 } from "./store.ts";
 import { requireMission } from "./write.ts";
+import { requireNoLiveSubtree } from "./dependency.ts";
 
 const ZERO = 0;
 const ONE = 1;
@@ -271,6 +273,7 @@ export function applyImport(
   bindings: MissionBindings,
   workQueue: WorkQueue,
   textMaxBytes: number,
+  schedulerClaims: SchedulerClaims,
 ): ImportResult {
   const mission = requireMission(tx, missionId, body.missionVersion);
   const { preview, resolved } = prepareImport(
@@ -285,6 +288,16 @@ export function applyImport(
   assert.ok(resolved, "A valid import has a resolved graph.");
   const entries = assignIdentities(resolved);
   const acceptedAt = Date.now();
+  for (const item of entries) {
+    if (item.current === null) continue;
+    const previous = new Set(
+      resolved.currentDependencies
+        .filter((edge) => edge.dependent === item.key)
+        .map((edge) => edge.dependsOn),
+    );
+    if ([...item.dependsOn].some((target) => !previous.has(target)))
+      requireNoLiveSubtree(tx, item.current, schedulerClaims, acceptedAt);
+  }
   const result = initialResult(mission, entries, actor, acceptedAt);
   if (
     resolved.creates.length +

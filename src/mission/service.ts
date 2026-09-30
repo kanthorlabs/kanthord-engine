@@ -319,6 +319,7 @@ export class MissionService
             this.dependencies.bindings,
             this.dependencies.workQueue,
             this.dependencies.config.textMaxBytes,
+            this.dependencies.schedulerClaims,
           ),
         ),
     );

@@ -163,7 +163,7 @@ export function addDependency(
   return applyDependency(tx, mission, edge, workQueue, true, bindings);
 }
 
-function requireNoLiveSubtree(
+export function requireNoLiveSubtree(
   tx: Transaction,
   node: NodeRow,
   claims: SchedulerClaims,

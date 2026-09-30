@@ -71,6 +71,7 @@ export interface ResolvedImport {
   violations: Violation[];
   creates: string[];
   updates: string[];
+  contentUpdates: string[];
   noOps: string[];
   retirements: string[];
   removedEdges: Edge[];
@@ -392,7 +393,6 @@ function resolveGraph(result: ResolvedImport): void {
 function entryChanged(
   tx: Transaction,
   item: ResolvedImportEntry,
-  dependencies: DepEdge[],
   bindings: MissionBindings,
 ): boolean {
   const { entry, current } = item;
@@ -405,16 +405,11 @@ function entryChanged(
     verifications: entry.verifications,
     bindings: item.bindingIds,
   };
-  const previous = dependencies
-    .filter((edge) => edge.dependent === current.id)
-    .map((edge) => edge.dependsOn)
-    .sort();
   return (
     current.filename !== entry.filename ||
     current.parent_id !== item.parentId ||
     canonicalJSON(nodeRecord(tx, current, bindings).content) !==
-      canonicalJSON(content) ||
-    canonicalJSON(previous) !== canonicalJSON([...item.dependsOn].sort())
+      canonicalJSON(content)
   );
 }
 
@@ -474,9 +469,17 @@ function classify(
       "Supplied identities resolve before classification.",
     );
     kept.add(item.current.id);
-    const target = entryChanged(tx, item, result.currentDependencies, bindings)
-      ? result.updates
-      : result.noOps;
+    const contentChanged = entryChanged(tx, item, bindings);
+    if (contentChanged) result.contentUpdates.push(item.current.id);
+    const previous = result.currentDependencies
+      .filter((edge) => edge.dependent === item.key)
+      .map((edge) => edge.dependsOn)
+      .sort();
+    const target =
+      contentChanged ||
+      canonicalJSON(previous) !== canonicalJSON([...item.dependsOn].sort())
+        ? result.updates
+        : result.noOps;
     target.push(item.current.id);
   }
   result.retirements = [...result.currentNodes.keys()]
@@ -508,6 +511,7 @@ export function resolveImportSet(
     violations: [],
     creates: [],
     updates: [],
+    contentUpdates: [],
     noOps: [],
     retirements: [],
     removedEdges: [],
@@ -545,7 +549,7 @@ export function resolveImportSet(
 function modifiedNodes(resolved: ResolvedImport): Set<string> {
   assert.equal(resolved.violations.length, ZERO);
   const modified = new Set<string>();
-  const updates = new Set(resolved.updates);
+  const updates = new Set(resolved.contentUpdates);
   const retiring = new Set(resolved.retirements);
   const add = (id: string | null): void => {
     if (id !== null && resolved.currentNodes.has(id)) modified.add(id);
@@ -579,7 +583,11 @@ export function checkImportCondition(
 ): Violation[] {
   assert.equal(resolved.violations.length, ZERO);
   const violations: Violation[] = [];
-  for (const id of [...modifiedNodes(resolved)].sort()) {
+  const modified = modifiedNodes(resolved);
+  const dependents = resolved.updates.filter(
+    (id) => resolved.currentNodes.get(id)?.kind !== NodeKind.Task,
+  );
+  for (const id of [...new Set([...modified, ...dependents])].sort()) {
     const node = readNode(tx, id);
     assert.ok(node, "Modified nodes exist in the transaction.");
     const locator = { id, filename: node.filename };
@@ -594,7 +602,7 @@ export function checkImportCondition(
       );
       continue;
     }
-    if (!importAdmissible(node.state, node.attempt))
+    if (modified.has(id) && !importAdmissible(node.state, node.attempt))
       violations.push(
         violation(
           MissionErrorCode.ConditionFailed,
