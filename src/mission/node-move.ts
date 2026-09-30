@@ -14,6 +14,7 @@ import {
   type NodeChange,
   type Revision,
   type WorkQueue,
+  type MissionBindings,
 } from "./contract.ts";
 import { hasDependencyCycle } from "./graph.ts";
 import { requireNode } from "./node-read.ts";
@@ -169,6 +170,7 @@ export function moveNode(
   actor: HumanActor,
   workQueue: WorkQueue,
   textMaxBytes: number,
+  bindings: MissionBindings,
 ): NodeChange {
   const node = requireNode(tx, nodeId);
   requireActive(node);
@@ -210,7 +212,9 @@ export function moveNode(
   assert.ok(oldParentId, "A moved node must have an old parent.");
   assert.ok(oldRevision, "Old parent must have a revision.");
   const before =
-    node.kind === NodeKind.Objective ? claimableMap(tx, mission.id) : null;
+    node.kind === NodeKind.Objective
+      ? claimableMap(tx, mission.id, bindings)
+      : null;
   const result = tx.database
     .prepare("UPDATE mission_node SET parent_id = ? WHERE id = ?")
     .run(newParent.id, node.id);
@@ -233,7 +237,14 @@ export function moveNode(
   if (before !== null) {
     checkCycle(tx, mission.id);
     routeMission(tx, mission.id);
-    reconcileMission(tx, workQueue, mission.id, mission.projectId, before);
+    reconcileMission(
+      tx,
+      workQueue,
+      mission.id,
+      mission.projectId,
+      before,
+      bindings,
+    );
   }
   const missionVersion = incrementMissionVersion(tx, mission.id);
   assert.equal(

@@ -18,6 +18,7 @@ import {
   type RetirePreview,
   type Revision,
   type WorkQueue,
+  type MissionBindings,
 } from "./contract.ts";
 import { requireNode } from "./node-read.ts";
 import { revisionFromRow } from "./revision.ts";
@@ -238,6 +239,7 @@ export function retireNode(
   actor: HumanActor,
   workQueue: WorkQueue,
   textMaxBytes: number,
+  bindings: MissionBindings,
 ): NodeChange {
   const node = requireNode(tx, nodeId);
   requireActive(node);
@@ -254,7 +256,7 @@ export function retireNode(
       MissionErrorCode.RetireMismatch,
       "Retirement preview changed.",
     );
-  const before = claimableMap(tx, mission.id);
+  const before = claimableMap(tx, mission.id, bindings);
   for (const edge of plan.removedEdges) {
     assert.equal(
       edge.kind,
@@ -271,7 +273,14 @@ export function retireNode(
     actor,
   );
   routeMission(tx, mission.id);
-  reconcileMission(tx, workQueue, mission.id, mission.projectId, before);
+  reconcileMission(
+    tx,
+    workQueue,
+    mission.id,
+    mission.projectId,
+    before,
+    bindings,
+  );
   const missionVersion = incrementMissionVersion(tx, mission.id);
   assert.equal(
     missionVersion,

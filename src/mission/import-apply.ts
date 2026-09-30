@@ -292,7 +292,7 @@ export function applyImport(
     ZERO
   )
     return result;
-  const before = claimableMap(tx, missionId);
+  const before = claimableMap(tx, missionId, bindings);
   const revisions = importRevisions(
     tx,
     resolved,
@@ -304,7 +304,14 @@ export function applyImport(
   writeNodes(tx, missionId, resolved, entries, acceptedAt);
   for (const revision of revisions) insertRevision(tx, revision);
   routeMission(tx, missionId);
-  reconcileMission(tx, workQueue, missionId, mission.projectId, before);
+  reconcileMission(
+    tx,
+    workQueue,
+    missionId,
+    mission.projectId,
+    before,
+    bindings,
+  );
   const missionVersion = incrementMissionVersion(tx, missionId);
   assert.equal(missionVersion, mission.version + ONE);
   return {

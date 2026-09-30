@@ -1064,9 +1064,9 @@ test("shared routing requires Completed dependencies, preserves held states, and
     .run(PRIORITY, objective);
   function route() {
     f.store.transaction((tx) => {
-      const before = claimableMap(tx, f.missionId);
+      const before = claimableMap(tx, f.missionId, bindings);
       routeMission(tx, f.missionId);
-      reconcileMission(tx, f.queue, f.missionId, PROJECT_ID, before);
+      reconcileMission(tx, f.queue, f.missionId, PROJECT_ID, before, bindings);
     });
   }
   f.setState(dependency, NodeState.Discarded);
@@ -1105,7 +1105,9 @@ test("shared claimability ignores retired children, requires every current objec
     filename: OTHER_FILENAME,
   }).revisions[ZERO]!.nodeId;
   f.setState(objective, NodeState.Completed);
-  const before = f.store.transaction((tx) => claimableMap(tx, f.missionId));
+  const before = f.store.transaction((tx) =>
+    claimableMap(tx, f.missionId, bindings),
+  );
   assert.equal(before.get(parentId), false);
   assert.equal(before.get(task), false);
   assert.equal(before.get(objective), false);
@@ -1116,8 +1118,8 @@ test("shared claimability ignores retired children, requires every current objec
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
       .run(RETIRED_AT, other);
     routeMission(tx, f.missionId);
-    reconcileMission(tx, f.queue, f.missionId, PROJECT_ID, before);
-    const after = claimableMap(tx, f.missionId);
+    reconcileMission(tx, f.queue, f.missionId, PROJECT_ID, before, bindings);
+    const after = claimableMap(tx, f.missionId, bindings);
     assert.equal(after.get(parentId), true);
     assert.equal(after.get(other), false);
   });
@@ -1134,7 +1136,9 @@ test("shared claimability ignores retired children, requires every current objec
   );
   f.setState(objective, NodeState.Discarded);
   assert.equal(
-    f.store.transaction((tx) => claimableMap(tx, f.missionId)).get(parentId),
+    f.store
+      .transaction((tx) => claimableMap(tx, f.missionId, bindings))
+      .get(parentId),
     true,
   );
 });
@@ -1155,12 +1159,12 @@ test("shared routing ignores dependency edges with a retired endpoint", (t) => {
   assert.equal(f.node(objective)?.state, NodeState.Pending);
   f.calls.length = ZERO;
   f.store.transaction((tx) => {
-    const before = claimableMap(tx, f.missionId);
+    const before = claimableMap(tx, f.missionId, bindings);
     tx.database
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
       .run(RETIRED_AT, dependency);
     routeMission(tx, f.missionId);
-    reconcileMission(tx, f.queue, f.missionId, PROJECT_ID, before);
+    reconcileMission(tx, f.queue, f.missionId, PROJECT_ID, before, bindings);
   });
   assert.equal(f.node(objective)?.state, NodeState.Available);
   assert.equal(f.calls.length, TWO);

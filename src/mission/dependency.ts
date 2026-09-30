@@ -12,6 +12,7 @@ import {
   type Mission,
   type NodeChange,
   type WorkQueue,
+  type MissionBindings,
 } from "./contract.ts";
 import { hasDependencyCycle } from "./graph.ts";
 import { requireNode } from "./node-read.ts";
@@ -98,13 +99,21 @@ function applyDependency(
   edge: DependencyEdge,
   workQueue: WorkQueue,
   adding: boolean,
+  bindings: MissionBindings,
 ): NodeChange {
-  const before = claimableMap(tx, mission.id);
+  const before = claimableMap(tx, mission.id, bindings);
   if (adding)
     insertDependency(tx, mission.id, edge.dependentId, edge.dependsOnId);
   else deleteDependency(tx, edge.dependentId, edge.dependsOnId);
   routeMission(tx, mission.id);
-  reconcileMission(tx, workQueue, mission.id, mission.projectId, before);
+  reconcileMission(
+    tx,
+    workQueue,
+    mission.id,
+    mission.projectId,
+    before,
+    bindings,
+  );
   const missionVersion = incrementMissionVersion(tx, mission.id);
   assert.equal(
     missionVersion,
@@ -130,6 +139,7 @@ export function addDependency(
   body: GraphEdit,
   workQueue: WorkQueue,
   textMaxBytes: number,
+  bindings: MissionBindings,
 ): NodeChange {
   const node = requireNode(tx, nodeId);
   const target = requireNode(tx, dependsOnId);
@@ -147,7 +157,7 @@ export function addDependency(
     return emptyChange(mission.version);
   const edge = { kind: EdgeKind.Dependency, dependentId: nodeId, dependsOnId };
   validateCycle(tx, mission.id, edge);
-  return applyDependency(tx, mission, edge, workQueue, true);
+  return applyDependency(tx, mission, edge, workQueue, true, bindings);
 }
 
 export function removeDependency(
@@ -157,6 +167,7 @@ export function removeDependency(
   body: GraphEdit,
   workQueue: WorkQueue,
   textMaxBytes: number,
+  bindings: MissionBindings,
 ): NodeChange {
   const node = requireNode(tx, nodeId);
   requireActive(node);
@@ -170,5 +181,5 @@ export function removeDependency(
   if (!hasDependency(tx, nodeId, dependsOnId))
     return emptyChange(mission.version);
   const edge = { kind: EdgeKind.Dependency, dependentId: nodeId, dependsOnId };
-  return applyDependency(tx, mission, edge, workQueue, false);
+  return applyDependency(tx, mission, edge, workQueue, false, bindings);
 }

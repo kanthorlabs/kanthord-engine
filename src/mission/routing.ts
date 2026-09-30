@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
 import { isTerminal, reconcileJob } from "./admission.ts";
-import { NodeKind, NodeState, type WorkQueue } from "./contract.ts";
+import {
+  NodeKind,
+  NodeState,
+  type WorkQueue,
+  type MissionBindings,
+} from "./contract.ts";
+import { readinessOf, continuationHolds } from "./conditions.ts";
 import { buildDependencyClosureOf } from "./graph.ts";
 import { readDependencies, readMissionNodes, setNodeState } from "./store.ts";
 
 export function claimableMap(
   tx: Transaction,
   missionId: string,
+  bindings: MissionBindings,
 ): Map<string, boolean> {
   const nodes = readMissionNodes(tx, missionId);
   const nonterminalParents = new Set(
@@ -21,14 +28,20 @@ export function claimableMap(
       .map((node) => node.parent_id),
   );
   return new Map(
-    nodes.map((node) => [
-      node.id,
-      node.retired_at === null &&
-        node.state === NodeState.Available &&
-        (node.kind === NodeKind.Objective ||
-          (node.kind === NodeKind.Initiative &&
-            !nonterminalParents.has(node.id))),
-    ]),
+    nodes.map((node) => {
+      if (node.retired_at !== null || node.kind === NodeKind.Task)
+        return [node.id, false];
+      if (node.state === NodeState.Available)
+        return [
+          node.id,
+          node.kind === NodeKind.Objective || !nonterminalParents.has(node.id),
+        ];
+      if (node.state === NodeState.Waiting)
+        return [node.id, readinessOf(tx, node).holds];
+      if (node.state === NodeState.ExternalRequested)
+        return [node.id, continuationHolds(tx, bindings, node)];
+      return [node.id, false];
+    }),
   );
 }
 
@@ -66,8 +79,9 @@ export function reconcileMission(
   missionId: string,
   projectId: string,
   before: Map<string, boolean>,
+  bindings: MissionBindings,
 ): void {
-  const after = claimableMap(tx, missionId);
+  const after = claimableMap(tx, missionId, bindings);
   const nodes = new Map(
     readMissionNodes(tx, missionId).map((node) => [node.id, node]),
   );

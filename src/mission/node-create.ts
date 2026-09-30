@@ -227,7 +227,7 @@ export function createNode(
   );
   if (filenameTaken(tx, missionId, body.filename))
     throw filenameConflict(body.filename);
-  const before = claimableMap(tx, missionId);
+  const before = claimableMap(tx, missionId, bindings);
   const nodeId = createIdentity(NODE_IDENTITY_PREFIX);
   const createdAt = Date.now();
   insertNode(tx, {
@@ -248,7 +248,14 @@ export function createNode(
   );
   insertRevision(tx, revision);
   routeMission(tx, missionId);
-  reconcileMission(tx, workQueue, missionId, mission.projectId, before);
+  reconcileMission(
+    tx,
+    workQueue,
+    missionId,
+    mission.projectId,
+    before,
+    bindings,
+  );
   const missionVersion = incrementMissionVersion(tx, missionId);
   const stored = readRevision(tx, revision.nodeId, revision.revision);
   assert.ok(

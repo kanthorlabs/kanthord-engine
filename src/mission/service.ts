@@ -169,6 +169,7 @@ export class MissionService implements Service, MissionCollaborations {
             body,
             this.dependencies.workQueue,
             this.dependencies.config.textMaxBytes,
+            this.dependencies.bindings,
           ),
         ),
     );
@@ -183,6 +184,7 @@ export class MissionService implements Service, MissionCollaborations {
             body,
             this.dependencies.workQueue,
             this.dependencies.config.textMaxBytes,
+            this.dependencies.bindings,
           ),
         ),
     );
@@ -261,6 +263,7 @@ export class MissionService implements Service, MissionCollaborations {
             humanActor(caller),
             this.dependencies.workQueue,
             this.dependencies.config.textMaxBytes,
+            this.dependencies.bindings,
           ),
         ),
     );
@@ -295,6 +298,7 @@ export class MissionService implements Service, MissionCollaborations {
             humanActor(caller),
             this.dependencies.workQueue,
             this.dependencies.config.textMaxBytes,
+            this.dependencies.bindings,
           ),
         ),
     );
