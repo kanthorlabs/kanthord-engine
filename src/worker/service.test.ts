@@ -36,6 +36,7 @@ const fakeCollaborations = {
   entriesOfAgent: () => [],
   modelListCheck: () => async () => ResourceStatus.Unknown,
 };
+const WORKER_CONFIG = { heartbeatWindow: 300, globalPrompt: "" };
 
 const client = {
   clientId: "client",
@@ -47,7 +48,7 @@ const client = {
 test("Worker owns registrations, declares its handler, and joins lifecycle calls", async () => {
   const health = new HealthRegistry();
   const worker = new WorkerService({
-    config: {},
+    config: WORKER_CONFIG,
     health,
     ...fakeCollaborations,
   });
@@ -104,7 +105,10 @@ test("Worker owns registrations, declares its handler, and joins lifecycle calls
 
 test("Worker run joins cancellation before and after startup", async () => {
   for (const before of [true, false]) {
-    const worker = new WorkerService({ config: {}, ...fakeCollaborations });
+    const worker = new WorkerService({
+      config: WORKER_CONFIG,
+      ...fakeCollaborations,
+    });
     const context = new CancellationContext();
     if (before) context.cancel();
     const running = worker.run(context);
@@ -158,7 +162,7 @@ function enablementFixture(
     { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
   ]);
   const worker = new WorkerService({
-    config: {},
+    config: WORKER_CONFIG,
     ...fakeCollaborations,
     ...collaborations,
   });

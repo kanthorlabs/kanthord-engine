@@ -24,11 +24,12 @@ import {
 import { gatewayConfigSchema, type GatewayConfig } from "../gateway/index.ts";
 import { missionConfigSchema, type MissionConfig } from "../mission/index.ts";
 import { projectConfigSchema } from "../project/index.ts";
-import { workerConfigSchema } from "../worker/index.ts";
+import { workerConfigSchema, type WorkerConfig } from "../worker/index.ts";
 const EMPTY_SCHEMA_FIELD_COUNT = 0;
 export interface ServerConfig extends GlobalConfig {
   gateway: GatewayConfig;
   mission: MissionConfig;
+  worker: WorkerConfig;
 }
 
 export function configPath(

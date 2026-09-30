@@ -64,6 +64,7 @@ import {
   validateProvider,
 } from "./configuration.ts";
 import { InMemoryRegistrations } from "./registrations.ts";
+import type { WorkerConfig } from "./config.ts";
 
 const NONE = 0;
 const LAST_PROVIDER = 1;
@@ -156,7 +157,7 @@ function saveRevision(tx: Transaction, current: EnablementRow) {
   );
 }
 export interface Dependencies {
-  config: Record<string, never>;
+  config: WorkerConfig;
   custodySuitability: CustodySuitability;
   credentialMetadata: CredentialMetadataFn;
   entriesOfAgent: EntriesOfAgent;

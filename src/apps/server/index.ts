@@ -125,7 +125,7 @@ export function composeServices(options: {
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
   });
   const worker: WorkerService = new WorkerService({
-    config: {},
+    config: options.config.worker,
     health: options.health,
     registrations: options.registrations,
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),

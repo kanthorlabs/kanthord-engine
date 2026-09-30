@@ -32,6 +32,8 @@ const DEFAULT_PORT = 31415;
 const DEFAULT_IDEMPOTENCY_TTL = 86400;
 const DEFAULT_CONSECUTIVE_LOSS_LIMIT = 3;
 const DEFAULT_TEXT_MAX_BYTES = 32768;
+const DEFAULT_HEARTBEAT_WINDOW = 300;
+const DEFAULT_GLOBAL_PROMPT = "";
 const INVALID_FIELD_CODE = "system.config.invalid_field";
 const ORIGINAL_CONTENT = "original";
 const REPLACEMENT_CONTENT = "replacement";
@@ -45,7 +47,16 @@ test("service fragments preserve the existing YAML field set", () => {
     "log",
     "masterKey",
     "mission",
+    "worker",
   ]);
+  assert.deepEqual(Object.keys(config.worker).sort(), [
+    "globalPrompt",
+    "heartbeatWindow",
+  ]);
+  assert.deepEqual(initial.worker, {
+    heartbeatWindow: DEFAULT_HEARTBEAT_WINDOW,
+    globalPrompt: DEFAULT_GLOBAL_PROMPT,
+  });
   assert.deepEqual(Object.keys(config.mission).sort(), [
     "consecutiveLossLimit",
     "textMaxBytes",
@@ -58,6 +69,59 @@ test("service fragments preserve the existing YAML field set", () => {
     "port",
     "tokenLifetime",
   ]);
+});
+
+test("worker configuration defaults, path strings and strict validation", () => {
+  const masterKey = randomBytes(32).toString("base64");
+  assert.deepEqual(configuration({ masterKey }).getProperties().worker, {
+    heartbeatWindow: DEFAULT_HEARTBEAT_WINDOW,
+    globalPrompt: DEFAULT_GLOBAL_PROMPT,
+  });
+  for (const globalPrompt of ["prompts/global.md", "-", "./-"])
+    assert.equal(
+      configuration({ masterKey, worker: { globalPrompt } }).getProperties()
+        .worker.globalPrompt,
+      globalPrompt,
+    );
+  for (const worker of [
+    { heartbeatWindow: 0 },
+    { heartbeatWindow: -1 },
+    { heartbeatWindow: 1.5 },
+    { heartbeatWindow: Number.MAX_SAFE_INTEGER + 1 },
+    { globalPrompt: null },
+    { globalPrompt: 1 },
+    { unknown: true },
+  ]) {
+    assert.throws(
+      () => configuration({ masterKey, worker }),
+      (error: Error & { code?: string }) => {
+        assert.equal(error.code, INVALID_FIELD_CODE);
+        assert.match(error.message, /worker/);
+        return true;
+      },
+    );
+  }
+});
+
+test("config init emits both Worker fields", (t) => {
+  const path = join(temporary(t), "kanthord.yaml");
+  const result = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL("../main.ts", import.meta.url)),
+      "config",
+      "init",
+      "--config",
+      path,
+    ],
+    { encoding: "utf8", timeout: INVALID_YAML_COMMAND_TIMEOUT_MS },
+  );
+  assert.ifError(result.error);
+  assert.equal(result.status, ExitCode.Success);
+  assert.deepEqual(parseMapping(readFileSync(path, "utf8")).worker, {
+    heartbeatWindow: DEFAULT_HEARTBEAT_WINDOW,
+    globalPrompt: DEFAULT_GLOBAL_PROMPT,
+  });
 });
 
 test("mission configuration defaults and strict validation", () => {
