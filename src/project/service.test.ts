@@ -63,6 +63,11 @@ const TWO_INSTANCES = 2;
 const NO_CALLS = 0;
 const ONE_CALL = 1;
 const NO_ITEMS = 0;
+const WORKER_GROUP = "worker:kanthord:worker";
+const MISSING_GROUP = "worker:kanthord:absent";
+const GROUP_ISSUED_AT = 1000;
+const TOMBSTONE_AT = 2000;
+const GROUP_WORKER_NAME = "developer";
 const EMPTY_QUERY = {};
 const CORE_OPERATIONS = [
   "project.create",
@@ -449,6 +454,197 @@ function bindingFixture(t: TestContext) {
   return { ...f, projectId: project.id, write };
 }
 
+test("worker group resolution rejects absence, disablement and removal", async (t) => {
+  const f = bindingFixture(t);
+  const resolve = (resourceIdentity = WORKER_GROUP) =>
+    f.project.resolveWorkerGroup(
+      f.projectId,
+      resourceIdentity,
+      GROUP_ISSUED_AT,
+      background,
+    );
+  assert.equal(await resolve(), null);
+  f.write(SINGLE_INSTANCE);
+  assert.deepEqual(await resolve(), {
+    projectId: f.projectId,
+    resourceIdentity: WORKER_GROUP,
+  });
+  assert.equal(await resolve(MISSING_GROUP), null);
+  f.write(INSTANCE_COUNT_MIN);
+  assert.equal(await resolve(), null);
+  f.write(SINGLE_INSTANCE);
+  assert.notEqual(await resolve(), null);
+  f.write(null);
+  assert.equal(await resolve(), null);
+});
+
+test("worker group resolution uses the latest tombstone and accepts equality at its creation", async (t) => {
+  const f = bindingFixture(t);
+  t.mock.method(Date, "now", () => GROUP_ISSUED_AT);
+  f.write(SINGLE_INSTANCE);
+  t.mock.method(Date, "now", () => TOMBSTONE_AT);
+  f.write(null);
+  f.write(SINGLE_INSTANCE);
+  assert.equal(
+    await f.project.resolveWorkerGroup(
+      f.projectId,
+      WORKER_GROUP,
+      GROUP_ISSUED_AT,
+      background,
+    ),
+    null,
+  );
+  assert.deepEqual(
+    await f.project.resolveWorkerGroup(
+      f.projectId,
+      WORKER_GROUP,
+      TOMBSTONE_AT,
+      background,
+    ),
+    { projectId: f.projectId, resourceIdentity: WORKER_GROUP },
+  );
+  const secondTombstoneAt = TOMBSTONE_AT + GROUP_ISSUED_AT;
+  t.mock.method(Date, "now", () => secondTombstoneAt);
+  f.write(null);
+  f.write(SINGLE_INSTANCE);
+  assert.equal(
+    await f.project.resolveWorkerGroup(
+      f.projectId,
+      WORKER_GROUP,
+      TOMBSTONE_AT,
+      background,
+    ),
+    null,
+  );
+  assert.deepEqual(
+    await f.project.resolveWorkerGroup(
+      f.projectId,
+      WORKER_GROUP,
+      secondTombstoneAt,
+      background,
+    ),
+    { projectId: f.projectId, resourceIdentity: WORKER_GROUP },
+  );
+});
+
+test("workerBindingOf reads current configuration, disablement and tombstone in the caller transaction", (t) => {
+  const f = bindingFixture(t);
+  const read = () =>
+    f.store.transaction((tx) =>
+      f.project.workerBindingOf(tx, f.projectId, WORKER_GROUP),
+    );
+  assert.equal(read(), null);
+  const first = f.write(SINGLE_INSTANCE);
+  assert.deepEqual(read(), {
+    bindingId: first,
+    revision: REVISION_ONE,
+    workerName: GROUP_WORKER_NAME,
+    instanceCount: SINGLE_INSTANCE,
+    resourceBudget: null,
+    entries: [],
+    tombstone: false,
+  });
+  const next = f.write(TWO_INSTANCES);
+  const txResult = f.store.transaction((tx) => {
+    t.mock.method(f.store, "transaction", unexpected);
+    return f.project.workerBindingOf(tx, f.projectId, WORKER_GROUP);
+  });
+  t.mock.restoreAll();
+  assert.equal(txResult?.bindingId, next);
+  assert.equal(txResult?.revision, REVISION_TWO);
+  assert.equal(txResult?.instanceCount, TWO_INSTANCES);
+  f.write(INSTANCE_COUNT_MIN);
+  assert.equal(read()?.instanceCount, INSTANCE_COUNT_MIN);
+  f.write(null);
+  assert.equal(read()?.tombstone, true);
+});
+
+test("worker group reads reject a repository group and preserve cancellation", async (t) => {
+  const f = bindingFixture(t);
+  const repositoryGroup = "repository:github:owner/repo";
+  f.store.transaction((tx) =>
+    writeBindingSet(
+      tx,
+      f.projectId,
+      BINDING_SET_INITIAL_VERSION,
+      new Map([
+        [
+          "repository",
+          {
+            kind: BindingKind.Repository,
+            config: { address: "git@github.com:owner/repo.git" },
+          },
+        ],
+      ]),
+    ),
+  );
+  assert.equal(
+    await f.project.resolveWorkerGroup(
+      f.projectId,
+      repositoryGroup,
+      GROUP_ISSUED_AT,
+      background,
+    ),
+    null,
+  );
+  assert.equal(
+    f.store.transaction((tx) =>
+      f.project.workerBindingOf(tx, f.projectId, repositoryGroup),
+    ),
+    null,
+  );
+  const context = new CancellationContext();
+  context.cancel();
+  await assert.rejects(
+    f.project.resolveWorkerGroup(
+      f.projectId,
+      WORKER_GROUP,
+      GROUP_ISSUED_AT,
+      context,
+    ),
+    (error) => error === context.err(),
+  );
+});
+
+test("worker group override receives the exact group, issuance and context without bypassing cancellation", async (t) => {
+  const group = { projectId: "fake-project", resourceIdentity: WORKER_GROUP };
+  let calls = NO_CALLS;
+  const f = fixture(t, {
+    bindings: {
+      resolveWorkerBinding: async () => null,
+      async resolveWorkerGroup(projectId, resourceIdentity, issuedAt, context) {
+        calls++;
+        assert.deepEqual({ projectId, resourceIdentity }, group);
+        assert.equal(issuedAt, GROUP_ISSUED_AT);
+        assert.equal(context, background);
+        return group;
+      },
+    },
+  });
+  t.mock.method(f.store, "transaction", unexpected);
+  assert.equal(
+    await f.project.resolveWorkerGroup(
+      group.projectId,
+      group.resourceIdentity,
+      GROUP_ISSUED_AT,
+      background,
+    ),
+    group,
+  );
+  const context = new CancellationContext();
+  context.cancel();
+  await assert.rejects(
+    f.project.resolveWorkerGroup(
+      group.projectId,
+      group.resourceIdentity,
+      GROUP_ISSUED_AT,
+      context,
+    ),
+    (error) => error === context.err(),
+  );
+  assert.equal(calls, ONE_CALL);
+});
+
 test("resolveWorkerBinding returns current and pinned worker identities using the latest configuration", async (t) => {
   const f = bindingFixture(t);
   const pinned = f.write(SINGLE_INSTANCE);
@@ -537,6 +733,9 @@ test("the optional binding override retains its identity and context and never b
   let calls = NO_CALLS;
   const f = fixture(t, {
     bindings: {
+      async resolveWorkerGroup() {
+        return null;
+      },
       async resolveWorkerBinding(id, context) {
         calls++;
         assert.equal(id, identity.workerBindingId);

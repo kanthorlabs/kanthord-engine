@@ -591,6 +591,22 @@ export function readLatestBinding(
   return toBinding(row);
 }
 
+export function readLatestTombstone(
+  tx: Transaction,
+  projectId: string,
+  resourceIdentity: string,
+): StoredBinding | null {
+  const row = tx.database
+    .prepare(
+      "SELECT * FROM project_binding WHERE project_id = ? AND resource_identity = ? AND removed_at IS NOT NULL ORDER BY revision DESC LIMIT 1",
+    )
+    .get(projectId, resourceIdentity) as BindingRow | undefined;
+  if (!row) return null;
+  assert.equal(row.project_id, projectId);
+  assert.equal(row.resource_identity, resourceIdentity);
+  return toBinding(row);
+}
+
 function decodeCursor(
   cursor: string,
   valid: (value: string) => boolean,

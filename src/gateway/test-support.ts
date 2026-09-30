@@ -29,6 +29,7 @@ import {
 
 type TestConfig = GlobalConfig & { gateway: GatewayConfig };
 export const TEST_WORKER_BINDING = "binding";
+const TEST_PROJECT_ID = "project";
 
 export function configuration(value: unknown) {
   const config = convict<TestConfig>(
@@ -47,6 +48,18 @@ export function fakeLookups() {
   };
   return {
     project: {
+      async resolveWorkerGroup(
+        projectId: string,
+        resourceIdentity: string,
+        _issuedAt: number,
+        context: Context,
+      ) {
+        throwIfCancelled(context);
+        return projectId === TEST_PROJECT_ID &&
+          resourceIdentity === `worker:kanthord:${TEST_WORKER_BINDING}`
+          ? { projectId, resourceIdentity }
+          : null;
+      },
       async resolveWorkerBinding(binding: string, context: Context) {
         throwIfCancelled(context);
         return binding === TEST_WORKER_BINDING

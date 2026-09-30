@@ -550,8 +550,24 @@ export const projectOperations = {
 } as const satisfies Record<string, Operation>;
 
 export interface ProjectBindings {
+  resolveWorkerGroup(
+    projectId: string,
+    resourceIdentity: string,
+    issuedAt: number,
+    context: Context,
+  ): Promise<{ projectId: string; resourceIdentity: string } | null>;
   resolveWorkerBinding(
     bindingId: string,
     context: Context,
   ): Promise<{ workerBindingId: string; projectId: string } | null>;
+}
+
+export interface WorkerBindingRow {
+  bindingId: string;
+  revision: number;
+  workerName: string;
+  instanceCount: number;
+  resourceBudget: { turns: number; wallTimeMs: number } | null;
+  entries: NonNullable<z.infer<typeof workerConfigSchema>["entries"]>;
+  tombstone: boolean;
 }

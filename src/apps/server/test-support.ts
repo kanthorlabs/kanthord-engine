@@ -69,6 +69,22 @@ export function fakeMachines(
   const registrations = new Map<string, Registration>();
   const project = {
     bindings,
+    async resolveWorkerGroup(
+      projectId: string,
+      resourceIdentity: string,
+      _issuedAt: number,
+      context: Context,
+    ) {
+      throwIfCancelled(context);
+      const match = [...bindings].find(
+        ([name, binding]) =>
+          `worker:kanthord:${name}` === resourceIdentity &&
+          binding.projectId === projectId &&
+          binding.available !== false &&
+          binding.capacity > NO_INSTANCES,
+      );
+      return match ? { projectId, resourceIdentity } : null;
+    },
     async resolveWorkerBinding(bindingId: string, context: Context) {
       throwIfCancelled(context);
       const binding = bindings.get(bindingId);

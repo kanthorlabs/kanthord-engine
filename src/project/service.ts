@@ -56,6 +56,7 @@ import {
   type WorkerAgentsOfFn,
   type WorkerAgentViewFn,
   type WorkerEntry,
+  type WorkerBindingRow,
 } from "./contract.ts";
 import {
   insertProject,
@@ -64,6 +65,7 @@ import {
   renameProject,
   readBindingRevision,
   readLatestBinding,
+  readLatestTombstone,
   kindOf,
   deriveResourceIdentity,
   listBindings,
@@ -604,6 +606,61 @@ export class ProjectService implements Service, ProjectBindings {
       const config = workerConfigSchema.parse(latest.config);
       if (config.instanceCount === INSTANCE_COUNT_MIN) return null;
       return { workerBindingId: row.id, projectId: row.projectId };
+    });
+  }
+  workerBindingOf(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentity: string,
+  ): WorkerBindingRow | null {
+    assert.ok(tx.database.isTransaction);
+    const row = readLatestBinding(tx, projectId, resourceIdentity);
+    if (!row || kindOf(row.resourceIdentity) !== BindingKind.Worker)
+      return null;
+    assert.equal(row.projectId, projectId);
+    const config = workerConfigSchema.parse(row.config);
+    return {
+      bindingId: row.id,
+      revision: row.revision,
+      workerName: config.worker,
+      instanceCount: config.instanceCount,
+      resourceBudget: config.resourceBudget ?? null,
+      entries: config.entries ?? [],
+      tombstone: row.removedAt !== null,
+    };
+  }
+  async resolveWorkerGroup(
+    projectId: string,
+    resourceIdentity: string,
+    issuedAt: number,
+    context: Context,
+  ) {
+    throwIfCancelled(context);
+    if (this.bindings)
+      return this.bindings.resolveWorkerGroup(
+        projectId,
+        resourceIdentity,
+        issuedAt,
+        context,
+      );
+    return this.operationalStore.transaction((tx) => {
+      const row = readLatestBinding(tx, projectId, resourceIdentity);
+      if (
+        !row ||
+        kindOf(row.resourceIdentity) !== BindingKind.Worker ||
+        row.removedAt !== null
+      )
+        return null;
+      assert.equal(row.projectId, projectId);
+      assert.equal(row.resourceIdentity, resourceIdentity);
+      if (
+        workerConfigSchema.parse(row.config).instanceCount ===
+        INSTANCE_COUNT_MIN
+      )
+        return null;
+      const tombstone = readLatestTombstone(tx, projectId, resourceIdentity);
+      if (tombstone && tombstone.createdAt > issuedAt) return null;
+      return { projectId, resourceIdentity };
     });
   }
   private readonly shutdown = new CancellationContext();

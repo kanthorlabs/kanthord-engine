@@ -94,6 +94,13 @@ export function composeServices(options: {
     tokenLifetime: options.config.gateway.tokenLifetime,
     lookups: {
       project: {
+        resolveWorkerGroup: (projectId, resourceIdentity, issuedAt, context) =>
+          project.resolveWorkerGroup(
+            projectId,
+            resourceIdentity,
+            issuedAt,
+            context,
+          ),
         resolveWorkerBinding: (binding, context) =>
           project.resolveWorkerBinding(binding, context),
       },
