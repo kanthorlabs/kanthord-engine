@@ -254,7 +254,7 @@ Three differences from `00-index.md` "Seams":
   - The steps method on an initiative reads the current objectives; every objective terminal lets the agent write a report on the outcome of each objective, the execution submits it as produced evidence and releases with no further work; a graph change that adds a nonterminal objective releases with further work. `worker-service.md:378–381`.
   - The agent reads the outcome and the evidence set of each objective. `worker-service.md:395`; `engine/docs/cli/mission.md:543–545`.
   - A steps release with no further work on an initiative requires one `produced` asset of the releasing execution. `mission-service.impl.md:251`.
-  - The workspace of an initiative holds no checkout and is removed at the release. `worker-service.md:283`; plan 07 debate Q5.
+  - The workspace of the steps method on an initiative holds no checkout and is removed at the release. `worker-service.md:283`; plan 07 debate Q5.
   - A resource limit reaches the Mission Service as a release, and after the agent stops at the budget end the execution releases with further work. `worker-service.md:408`; `worker-service.impl.md:468`.
   - Inline content holds at most 5 MiB decoded. `mission-service.impl.md:260`.
   - Gap: an absent report is an invalid handoff (`docs/brainstorm/HANDOFF.md:58`); the execution performs no release (decision D25).
