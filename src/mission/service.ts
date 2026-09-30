@@ -113,7 +113,7 @@ export class MissionService implements Service, MissionCollaborations {
     registry.register(
       missionOperations["import.apply"],
       ({ params, body }, caller) =>
-        caller.commit((tx) =>
+        this.commitGraph(caller, { missionId: params.missionId }, (tx) =>
           applyImport(
             tx,
             params.missionId,
@@ -161,7 +161,7 @@ export class MissionService implements Service, MissionCollaborations {
     registry.register(
       missionOperations["dependency.add"],
       ({ params, body }, caller) =>
-        caller.commit((tx) =>
+        this.commitGraph(caller, { nodeId: params.nodeId }, (tx) =>
           addDependency(
             tx,
             params.nodeId,
@@ -170,13 +170,14 @@ export class MissionService implements Service, MissionCollaborations {
             this.dependencies.workQueue,
             this.dependencies.config.textMaxBytes,
             this.dependencies.bindings,
+            this.dependencies.schedulerClaims,
           ),
         ),
     );
     registry.register(
       missionOperations["dependency.remove"],
       ({ params, body }, caller) =>
-        caller.commit((tx) =>
+        this.commitGraph(caller, { nodeId: params.nodeId }, (tx) =>
           removeDependency(
             tx,
             params.nodeId,
@@ -258,7 +259,7 @@ export class MissionService implements Service, MissionCollaborations {
     registry.register(
       missionOperations["node.retire"],
       ({ params, body }, caller) =>
-        caller.commit((tx) =>
+        this.commitGraph(caller, { nodeId: params.nodeId }, (tx) =>
           retireNode(
             tx,
             params.nodeId,
@@ -273,7 +274,7 @@ export class MissionService implements Service, MissionCollaborations {
     registry.register(
       missionOperations["node.priority.set"],
       ({ params, body }, caller) =>
-        caller.commit((tx) => {
+        this.commitGraph(caller, { nodeId: params.nodeId }, (tx) => {
           const node = requireNode(tx, params.nodeId);
           requireActive(node);
           requireMission(tx, node.mission_id, body.expectedMissionVersion);
@@ -285,6 +286,19 @@ export class MissionService implements Service, MissionCollaborations {
               { nodeId: node.id },
             );
           requireNonterminal(node);
+          const now = Date.now();
+          const live = this.dependencies.schedulerClaims.liveExecutionOf(
+            tx,
+            node.id,
+            now,
+          );
+          if (live !== null)
+            throw new OperationError(
+              HttpStatus.Conflict,
+              MissionErrorCode.ClaimLive,
+              "Node has a live claim.",
+              { nodeId: node.id, executionId: live.executionId },
+            );
           updateNodePriority(tx, node.id, body.value);
           this.dependencies.workQueue.priorityUpdate(tx, node.id, body.value);
           return nodeRecord(
@@ -297,7 +311,7 @@ export class MissionService implements Service, MissionCollaborations {
     registry.register(
       missionOperations["node.move"],
       ({ params, body }, caller) =>
-        caller.commit((tx) =>
+        this.commitGraph(caller, { nodeId: params.nodeId }, (tx) =>
           moveNode(
             tx,
             params.nodeId,
@@ -339,7 +353,7 @@ export class MissionService implements Service, MissionCollaborations {
     registry.register(
       missionOperations["node.create"],
       ({ params, body }, caller) =>
-        caller.commit((tx) =>
+        this.commitGraph(caller, { missionId: params.missionId }, (tx) =>
           createNode(
             tx,
             params.missionId,
@@ -363,6 +377,26 @@ export class MissionService implements Service, MissionCollaborations {
         return mission;
       }),
     );
+  }
+
+  private commitGraph<T>(
+    caller: CallerContext,
+    scope: { missionId: string } | { nodeId: string },
+    write: (tx: Transaction) => T,
+  ): T {
+    let projectId: string | null = null;
+    const result = caller.commit((tx) => {
+      const result = write(tx);
+      const missionId =
+        "missionId" in scope
+          ? scope.missionId
+          : requireNode(tx, scope.nodeId).mission_id;
+      projectId = requireMission(tx, missionId).projectId;
+      return result;
+    });
+    assert.ok(projectId);
+    this.dependencies.wakeup.wake(projectId);
+    return result;
   }
 
   createMission(tx: Transaction, projectId: string, actor: HumanActor): void {

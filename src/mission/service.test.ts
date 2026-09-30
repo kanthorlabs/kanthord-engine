@@ -60,6 +60,8 @@ import {
 } from "./contract.ts";
 import { missionMigrations } from "./migrations.ts";
 import { nodeRecord } from "./node-read.ts";
+import { getRevision } from "./node-read.ts";
+import { openAttempt, closeAttempt, readOpenAttempt } from "./record-store.ts";
 import { importDigest, normalizeImportSnapshot } from "./import.ts";
 import { serializePlanFile } from "./export.ts";
 import { parsePlanFile } from "./parser.ts";
@@ -75,6 +77,137 @@ import {
 } from "./store.ts";
 
 const UNEXPECTED_COLLABORATION = "unexpected collaboration call";
+test("attempt pins survive edits and a rebind keeps the open revision's binding live", (t) => {
+  const f = rebindFixture(t);
+  const nodeId = f.objective();
+  f.store.transaction((tx) =>
+    openAttempt(tx, nodeId, FIRST_REVISION, HUMAN_ACTOR, CREATED_AT),
+  );
+  const result = f.rebind({ nodeId });
+  assert.deepEqual(result.nodeChange.openAttemptsUnchanged, [
+    { nodeId, attempt: FIRST_REVISION },
+  ]);
+  assert.deepEqual(
+    f.store.transaction((tx) => getRevision(tx, nodeId, FIRST_REVISION))
+      .pinnedByAttempts,
+    [FIRST_REVISION],
+  );
+  assert.deepEqual(
+    f.store.transaction((tx) => getRevision(tx, nodeId, NEXT_REVISION))
+      .pinnedByAttempts,
+    [],
+  );
+  assert.deepEqual(
+    f.store.transaction((tx) => f.mission.liveNodesPinning(tx, BINDING_ID)),
+    [nodeId],
+  );
+  assert.deepEqual(
+    f.store.transaction((tx) =>
+      f.mission.liveNodesPinning(tx, NEXT_BINDING_ID),
+    ),
+    [nodeId],
+  );
+  f.store.transaction((tx) =>
+    closeAttempt(tx, nodeId, FIRST_REVISION, RETIRED_AT),
+  );
+  assert.deepEqual(
+    f.store.transaction((tx) => f.mission.liveNodesPinning(tx, BINDING_ID)),
+    [],
+  );
+});
+
+test("task creation and content edits report the unchanged open content-owner attempt", (t) => {
+  const f = nodeFixture(t);
+  const nodeId = f.objective();
+  f.store.transaction((tx) =>
+    openAttempt(tx, nodeId, FIRST_REVISION, HUMAN_ACTOR, CREATED_AT),
+  );
+  const created = f.create(f.body(NodeKind.Task, nodeId));
+  assert.deepEqual(created.openAttemptsUnchanged, [
+    { nodeId, attempt: FIRST_REVISION },
+  ]);
+  const taskId = created.addedEdges.find(
+    (edge) => edge.kind === EdgeKind.Containment,
+  )!.childId;
+  const body = updateBody(f, taskId);
+  body.content.name = REASON;
+  assert.deepEqual(f.update(taskId, body).openAttemptsUnchanged, [
+    { nodeId, attempt: FIRST_REVISION },
+  ]);
+  assert.equal(
+    f.store.transaction((tx) => readOpenAttempt(tx, nodeId))?.node_revision,
+    FIRST_REVISION,
+  );
+});
+
+test("priority refuses a live claim before changing its node or job", (t) => {
+  const executionId = createIdentity("execution");
+  const f = priorityFixture(t, {
+    schedulerClaims: {
+      settle: () => assert.fail(),
+      revoke: () => assert.fail(),
+      liveExecutionOf: () => ({ executionId }),
+    },
+  });
+  const nodeId = f.objective();
+  f.refuses(nodeId, ONE, MissionErrorCode.ClaimLive, { nodeId, executionId });
+});
+
+test("dependency admission settles each descendant before testing its live claim", (t) => {
+  const executionId = createIdentity("execution");
+  let claimed = "";
+  const settled = new Set<string>();
+  const f = dependencyFixture(t, undefined, undefined, {
+    schedulerClaims: {
+      revoke: () => assert.fail(),
+      settle: (tx, id) => {
+        assert.ok(tx.database.isTransaction);
+        settled.add(id);
+      },
+      liveExecutionOf: (_tx, id) => {
+        assert.ok(settled.has(id));
+        return id === claimed ? { executionId } : null;
+      },
+    },
+  });
+  const parent = f.initiative();
+  claimed = f.create(f.body(NodeKind.Objective, parent)).revisions[ZERO]!
+    .nodeId;
+  const target = f.create({ ...f.body(), filename: OTHER_FILENAME }).revisions[
+    ZERO
+  ]!.nodeId;
+  f.refuses("dependency.add", parent, target, MissionErrorCode.ClaimLive, {
+    nodeId: claimed,
+    executionId,
+  });
+  assert.ok(settled.has(parent));
+  assert.ok(settled.has(claimed));
+});
+
+test("queue writes wake after commit and refused graph writes never wake", (t) => {
+  const wakes: string[] = [];
+  const f = nodeFixture(t, undefined, undefined, {
+    wakeup: {
+      wake: (projectId) => {
+        assert.equal(f.store.database.isTransaction, false);
+        wakes.push(projectId);
+      },
+    },
+  });
+  const body = f.body();
+  const commit = f.caller.commit;
+  f.caller.commit = (write) =>
+    commit((tx) => {
+      const result = write(tx);
+      nodeChangeSchema.parse(result);
+      return result;
+    });
+  f.create(body);
+  assert.deepEqual(wakes, [PROJECT_ID]);
+  const before = [...wakes];
+  assert.throws(() => f.create(body));
+  assert.deepEqual(wakes, before);
+});
 const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
 const CONSECUTIVE_LOSS_LIMIT = 3;
 const TEXT_MAX_BYTES = 32768;
@@ -475,6 +608,7 @@ function nodeFixture(
         };
   },
   textMaxBytes?: number,
+  collaborators: Partial<Collaborators> = {},
 ) {
   const calls: QueueCall[] = [];
   const queue: WorkQueue = {
@@ -500,6 +634,7 @@ function nodeFixture(
         },
         getBindingRevision: bindingRevision,
       },
+      ...collaborators,
     },
     textMaxBytes,
   );
@@ -1428,8 +1563,9 @@ function dependencyFixture(
   t: TestContext,
   bindingRevision?: MissionBindings["getBindingRevision"],
   textMaxBytes?: number,
+  collaborators: Partial<Collaborators> = {},
 ) {
-  const f = nodeFixture(t, bindingRevision, textMaxBytes);
+  const f = nodeFixture(t, bindingRevision, textMaxBytes, collaborators);
   f.store.database.exec(
     "CREATE TABLE test_mission_job (node_id TEXT PRIMARY KEY)",
   );
@@ -2006,8 +2142,11 @@ function updateBody(f: ReturnType<typeof nodeFixture>, id: string): NodeUpdate {
   };
 }
 
-function priorityFixture(t: TestContext) {
-  const f = nodeFixture(t);
+function priorityFixture(
+  t: TestContext,
+  collaborators: Partial<Collaborators> = {},
+) {
+  const f = nodeFixture(t, undefined, undefined, collaborators);
   const jobs = new Map<string, { id: string; priority: number }>();
   const updates: Array<{ nodeId: string; priority: number }> = [];
   f.queue.insert = (_tx, nodeId, _projectId, priority) => {

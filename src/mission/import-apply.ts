@@ -25,6 +25,7 @@ import {
 } from "./import.ts";
 import { importRevisions } from "./import-revisions.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
+import { openAttemptsOf } from "./store.ts";
 import {
   incrementMissionVersion,
   insertDependency,
@@ -321,6 +322,10 @@ export function applyImport(
       ...result.changes,
       missionVersion,
       revisions,
+      openAttemptsUnchanged: openAttemptsOf(
+        tx,
+        revisions.map((revision) => revision.nodeId),
+      ),
       retiredNodeIds: resolved.retirements,
       addedEdges: addedEdges(resolved, entries),
       removedEdges: resolved.removedEdges,

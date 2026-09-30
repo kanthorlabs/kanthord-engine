@@ -18,6 +18,7 @@ import {
 } from "./contract.ts";
 import { nodeRecord, requireNode } from "./node-read.ts";
 import { revisionFromRow } from "./revision.ts";
+import { openAttemptsOf } from "./store.ts";
 import {
   incrementMissionVersion,
   insertRevision,
@@ -114,7 +115,7 @@ function replacement(
   const row = readCurrentRevision(tx, node.id);
   assert.ok(row, "Rebind candidate must have a revision.");
   assert.equal(row.node_id, node.id, "Revision must belong to candidate.");
-  const previous = revisionFromRow(row);
+  const previous = revisionFromRow(tx, row);
   let matched = false;
   let changed = false;
   const pins = previous.content.bindings.map((id) => {
@@ -219,7 +220,10 @@ export function rebindNodes(
       retiredNodeIds: [],
       addedEdges: [],
       removedEdges: [],
-      openAttemptsUnchanged: [],
+      openAttemptsUnchanged: openAttemptsOf(
+        tx,
+        revisions.map((revision) => revision.nodeId),
+      ),
     },
     skipped,
   };

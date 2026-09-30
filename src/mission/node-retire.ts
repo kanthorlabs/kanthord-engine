@@ -22,6 +22,7 @@ import {
 } from "./contract.ts";
 import { requireNode } from "./node-read.ts";
 import { revisionFromRow } from "./revision.ts";
+import { openAttemptsOf } from "./store.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   deleteDependency,
@@ -177,7 +178,7 @@ function retireTasks(
 ): Revision {
   const row = readCurrentRevision(tx, objectiveId);
   assert.ok(row, "Surviving objective has a current revision.");
-  const previous = revisionFromRow(row);
+  const previous = revisionFromRow(tx, row);
   assert.ok(previous.tasks, "Objective revision contains tasks.");
   const retired = previous.tasks.filter((task) => retiredIds.has(task.id));
   assert.ok(retired.length, "Affected objective loses at least one task.");
@@ -294,6 +295,9 @@ export function retireNode(
     retiredNodeIds: plan.retiredNodeIds,
     addedEdges: [],
     removedEdges: plan.removedEdges,
-    openAttemptsUnchanged: [],
+    openAttemptsUnchanged: openAttemptsOf(
+      tx,
+      revisions.map((revision) => revision.nodeId),
+    ),
   };
 }

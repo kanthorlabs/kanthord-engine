@@ -169,7 +169,7 @@ export function importRevisions(
   for (const [id, kind] of owners) {
     const row = readCurrentRevision(tx, id);
     assert.equal(row === null, !resolved.currentNodes.has(id));
-    const previous = row === null ? undefined : revisionFromRow(row);
+    const previous = row === null ? undefined : revisionFromRow(tx, row);
     if (previous !== undefined && kind === NodeKind.Objective)
       assert.ok(previous.tasks, "Stored objectives contain a task list.");
     const revision = ownerRevision(

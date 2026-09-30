@@ -99,7 +99,7 @@ export function nodeRecord(
   const owner = ownerId(node);
   const current = readCurrentRevision(tx, owner);
   assert.ok(current, "Content owner must have a revision.");
-  const revision = revisionFromRow(current);
+  const revision = revisionFromRow(tx, current);
   const base = {
     id: node.id,
     filename: node.filename,
@@ -107,7 +107,7 @@ export function nodeRecord(
     parentId: node.parent_id,
     visibleRevision: revision.revision,
     retiredAt: node.retired_at,
-    pinnedByAttempts: [],
+    pinnedByAttempts: revision.pinnedByAttempts,
   };
   if (node.kind !== NodeKind.Task) {
     assert.ok(node.state, "Runnable node must have a state.");
@@ -132,7 +132,9 @@ export function nodeRecord(
     snapshot ??
     (historical === null
       ? undefined
-      : revisionFromRow(historical).tasks?.find((item) => item.id === node.id));
+      : revisionFromRow(tx, historical).tasks?.find(
+          (item) => item.id === node.id,
+        ));
   assert.ok(task, "Task content must exist in current or retired snapshot.");
   return { ...base, kind: NodeKind.Task, content: task.content };
 }
@@ -152,7 +154,7 @@ export function getRevision(
 ): Revision {
   const row = readRevision(tx, ownerId(requireNode(tx, nodeId)), revision);
   if (!row) notFound(MissionErrorCode.NodeNotFound);
-  return revisionFromRow(row);
+  return revisionFromRow(tx, row);
 }
 
 export function nodePage(
@@ -185,7 +187,9 @@ export function revisionPage(
     after,
     limit + EXTRA_ROW,
   );
-  const items = rows.slice(FIRST_ROW, limit).map(revisionFromRow);
+  const items = rows
+    .slice(FIRST_ROW, limit)
+    .map((row) => revisionFromRow(tx, row));
   return {
     items,
     nextCursor:

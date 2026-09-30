@@ -13,6 +13,7 @@ import {
   type NodeChange,
   type WorkQueue,
   type MissionBindings,
+  type SchedulerClaims,
 } from "./contract.ts";
 import { hasDependencyCycle } from "./graph.ts";
 import { requireNode } from "./node-read.ts";
@@ -140,6 +141,7 @@ export function addDependency(
   workQueue: WorkQueue,
   textMaxBytes: number,
   bindings: MissionBindings,
+  schedulerClaims: SchedulerClaims,
 ): NodeChange {
   const node = requireNode(tx, nodeId);
   const target = requireNode(tx, dependsOnId);
@@ -152,12 +154,43 @@ export function addDependency(
   );
   validateEndpoints(node, target);
   requireNonterminal(node);
+  requireNoLiveSubtree(tx, node, schedulerClaims, Date.now());
   validateText(REASON_FIELD, body.reason, textMaxBytes);
   if (hasDependency(tx, nodeId, dependsOnId))
     return emptyChange(mission.version);
   const edge = { kind: EdgeKind.Dependency, dependentId: nodeId, dependsOnId };
   validateCycle(tx, mission.id, edge);
   return applyDependency(tx, mission, edge, workQueue, true, bindings);
+}
+
+function requireNoLiveSubtree(
+  tx: Transaction,
+  node: NodeRow,
+  claims: SchedulerClaims,
+  now: number,
+): void {
+  const current = readMissionNodes(tx, node.mission_id).filter(
+    (row) => row.retired_at === null,
+  );
+  const descendants = new Set([node.id]);
+  for (let pass = 0; pass < current.length; pass++) {
+    const before = descendants.size;
+    for (const row of current)
+      if (row.parent_id !== null && descendants.has(row.parent_id))
+        descendants.add(row.id);
+    if (before === descendants.size) break;
+  }
+  for (const id of descendants) {
+    claims.settle(tx, id, now);
+    const live = claims.liveExecutionOf(tx, id, now);
+    if (live !== null)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        MissionErrorCode.ClaimLive,
+        "A node in the dependency subtree has a live claim.",
+        { nodeId: id, executionId: live.executionId },
+      );
+  }
 }
 
 export function removeDependency(

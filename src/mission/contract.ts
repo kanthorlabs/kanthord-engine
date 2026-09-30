@@ -128,6 +128,7 @@ export interface MissionTransitions {
 }
 
 export const MissionErrorCode = {
+  ClaimLive: "mission.node.claim_live",
   MissionNotFound: "mission.mission.not_found",
   NodeNotFound: "mission.node.not_found",
   VersionConflict: "mission.version.conflict",

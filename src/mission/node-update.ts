@@ -26,6 +26,7 @@ import {
 import { resolveContent } from "./node-create.ts";
 import { requireNode } from "./node-read.ts";
 import { revisionFromRow } from "./revision.ts";
+import { openAttemptsOf } from "./store.ts";
 import {
   filenameConflict,
   filenameTaken,
@@ -98,7 +99,7 @@ function editContext(
       "Node revision changed.",
       { current: current.revision },
     );
-  return { node, owner, mission, previous: revisionFromRow(current) };
+  return { node, owner, mission, previous: revisionFromRow(tx, current) };
 }
 
 function currentContent(context: EditContext): {
@@ -229,7 +230,12 @@ function finishEdit(
     mission.version + REVISION_INCREMENT,
     "Update increments mission once.",
   );
-  return { ...empty, missionVersion, revisions: [revisionFromRow(stored)] };
+  return {
+    ...empty,
+    missionVersion,
+    revisions: [revisionFromRow(tx, stored)],
+    openAttemptsUnchanged: openAttemptsOf(tx, [owner.id]),
+  };
 }
 
 export function updateNode(

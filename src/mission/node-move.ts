@@ -19,6 +19,7 @@ import {
 import { hasDependencyCycle } from "./graph.ts";
 import { requireNode } from "./node-read.ts";
 import { revisionFromRow } from "./revision.ts";
+import { openAttemptsOf } from "./store.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   incrementMissionVersion,
@@ -50,7 +51,7 @@ function currentRevision(
       "Node revision changed.",
       { current: row.revision },
     );
-  return revisionFromRow(row);
+  return revisionFromRow(tx, row);
 }
 
 function checkParent(node: NodeRow, parent: NodeRow): void {
@@ -159,7 +160,7 @@ function moveTaskRevisions(
       revision.nodeId,
       "Stored revision belongs to its owner.",
     );
-    return revisionFromRow(row);
+    return revisionFromRow(tx, row);
   });
 }
 
@@ -259,6 +260,10 @@ export function moveNode(
   );
   return {
     ...empty,
+    openAttemptsUnchanged: openAttemptsOf(
+      tx,
+      revisions.map((revision) => revision.nodeId),
+    ),
     missionVersion,
     revisions,
     addedEdges: [

@@ -497,14 +497,38 @@ export function readLiveNodesPinning(
            WHERE latest.node_id = n.id
          )
        WHERE n.retired_at IS NULL AND n.state NOT IN (?, ?)
-         AND EXISTS (
-           SELECT 1 FROM json_each(r.bindings) binding
-           WHERE binding.value = ?
-         )
+          AND (EXISTS (
+            SELECT 1 FROM json_each(r.bindings) binding
+            WHERE binding.value = ?
+          ) OR EXISTS (
+            SELECT 1 FROM mission_attempt a
+            JOIN mission_node_revision pin ON pin.node_id = a.node_id AND pin.revision = a.node_revision
+            JOIN json_each(pin.bindings) binding
+            WHERE a.node_id = n.id AND a.closed_at IS NULL AND binding.value = ?
+          ))
        ORDER BY n.id ASC`,
     )
-    .all(NodeState.Completed, NodeState.Discarded, bindingId) as Array<{
+    .all(
+      NodeState.Completed,
+      NodeState.Discarded,
+      bindingId,
+      bindingId,
+    ) as Array<{
     id: string;
   }>;
   return rows.map((row) => row.id);
+}
+
+export function openAttemptsOf(
+  tx: Transaction,
+  ownerIds: readonly string[],
+): { nodeId: string; attempt: number }[] {
+  return tx.database
+    .prepare(
+      "SELECT node_id AS nodeId, attempt FROM mission_attempt WHERE closed_at IS NULL AND node_id IN (SELECT value FROM json_each(?)) ORDER BY node_id",
+    )
+    .all(JSON.stringify(ownerIds)) as unknown as {
+    nodeId: string;
+    attempt: number;
+  }[];
 }

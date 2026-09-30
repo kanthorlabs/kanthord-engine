@@ -28,6 +28,7 @@ import {
   type WorkQueue,
 } from "./contract.ts";
 import { revisionFromRow } from "./revision.ts";
+import { openAttemptsOf } from "./store.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   filenameConflict,
@@ -118,7 +119,7 @@ function requireParent(
       "Parent revision changed.",
       { current: current.revision },
     );
-  return revisionFromRow(current);
+  return revisionFromRow(tx, current);
 }
 
 export function resolveContent(
@@ -269,7 +270,7 @@ export function createNode(
   );
   return {
     missionVersion,
-    revisions: [revisionFromRow(stored)],
+    revisions: [revisionFromRow(tx, stored)],
     retiredNodeIds: [],
     addedEdges:
       body.parentId === undefined
@@ -282,6 +283,6 @@ export function createNode(
             },
           ],
     removedEdges: [],
-    openAttemptsUnchanged: [],
+    openAttemptsUnchanged: openAttemptsOf(tx, [stored.node_id]),
   };
 }
