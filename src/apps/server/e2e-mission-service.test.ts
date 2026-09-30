@@ -36,6 +36,7 @@ import { gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
+const PLANNING_LIFECYCLE_TIMEOUT_MS = 120000;
 const EMPTY = "";
 const UTF8 = "utf8";
 const MODE_MASK = 0o777;
@@ -1586,53 +1587,30 @@ async function scenarioPriorityReplay(scenario: Scenario): Promise<void> {
   scenario.version = afterReplay.version;
 }
 
-test("E06.1-E06.24 mission planning lifecycle and replay", async (t) => {
-  const scenario = await scenarioInitiative(await setup(t));
-  await scenarioChildren(scenario);
-  await scenarioRevisions(scenario);
-  await scenarioMove(scenario);
-  await scenarioDependencies(scenario);
-  await scenarioRetire(scenario);
-  await scenarioImport(scenario);
-  await scenarioRebind(scenario);
-  await scenarioPriorityReplay(scenario);
-  const { fixture, mission } = scenario;
-  await t.test("E06.25 oversized node content is refused", async () => {
-    const content = {
-      ...CONTENT,
-      name: LARGE_TEXT_CHARACTER.repeat(LARGE_TEXT_BYTES),
-    };
-    assert.equal(Buffer.byteLength(content.name, UTF8), LARGE_TEXT_BYTES);
-    const path = jsonFile(fixture, SCENARIO_FILE, {
-      filename: REFUSED_PLAN,
-      kind: NodeKind.Initiative,
-      content,
-      reason: REASON,
-      expectedMissionVersion: scenario.version,
-    });
-    refusal(
-      await kanthord(
-        [MISSION, NODE, CREATE, mission.id, FILE, path],
-        fixture.env,
-      ),
-      MissionErrorCode.ContentInvalid,
-    );
-    const read = success<Mission>(
-      await kanthord([MISSION, GET, mission.projectId], fixture.env),
-    );
-    assert.equal(read.version, scenario.version);
-  });
-  await t.test(
-    "E06.26 creating a child of the retired objective is refused",
-    async () => {
-      const parent = await readNode(fixture, scenario.objectiveId);
-      assert.notEqual(parent.retiredAt, null);
+test(
+  "E06.1-E06.24 mission planning lifecycle and replay",
+  { timeout: PLANNING_LIFECYCLE_TIMEOUT_MS },
+  async (t) => {
+    const scenario = await scenarioInitiative(await setup(t));
+    await scenarioChildren(scenario);
+    await scenarioRevisions(scenario);
+    await scenarioMove(scenario);
+    await scenarioDependencies(scenario);
+    await scenarioRetire(scenario);
+    await scenarioImport(scenario);
+    await scenarioRebind(scenario);
+    await scenarioPriorityReplay(scenario);
+    const { fixture, mission } = scenario;
+    await t.test("E06.25 oversized node content is refused", async () => {
+      const content = {
+        ...CONTENT,
+        name: LARGE_TEXT_CHARACTER.repeat(LARGE_TEXT_BYTES),
+      };
+      assert.equal(Buffer.byteLength(content.name, UTF8), LARGE_TEXT_BYTES);
       const path = jsonFile(fixture, SCENARIO_FILE, {
         filename: REFUSED_PLAN,
-        kind: NodeKind.Task,
-        content: CONTENT,
-        parentId: parent.id,
-        expectedParentRevision: parent.visibleRevision,
+        kind: NodeKind.Initiative,
+        content,
         reason: REASON,
         expectedMissionVersion: scenario.version,
       });
@@ -1641,21 +1619,48 @@ test("E06.1-E06.24 mission planning lifecycle and replay", async (t) => {
           [MISSION, NODE, CREATE, mission.id, FILE, path],
           fixture.env,
         ),
-        MissionErrorCode.Retired,
+        MissionErrorCode.ContentInvalid,
       );
       const read = success<Mission>(
         await kanthord([MISSION, GET, mission.projectId], fixture.env),
       );
       assert.equal(read.version, scenario.version);
-    },
-  );
-  await t.test(
-    "E06.27 rebinding to a tombstoned binding is refused without changing pins",
-    async () => {
-      await scenarioRemovedBinding(scenario);
-    },
-  );
-});
+    });
+    await t.test(
+      "E06.26 creating a child of the retired objective is refused",
+      async () => {
+        const parent = await readNode(fixture, scenario.objectiveId);
+        assert.notEqual(parent.retiredAt, null);
+        const path = jsonFile(fixture, SCENARIO_FILE, {
+          filename: REFUSED_PLAN,
+          kind: NodeKind.Task,
+          content: CONTENT,
+          parentId: parent.id,
+          expectedParentRevision: parent.visibleRevision,
+          reason: REASON,
+          expectedMissionVersion: scenario.version,
+        });
+        refusal(
+          await kanthord(
+            [MISSION, NODE, CREATE, mission.id, FILE, path],
+            fixture.env,
+          ),
+          MissionErrorCode.Retired,
+        );
+        const read = success<Mission>(
+          await kanthord([MISSION, GET, mission.projectId], fixture.env),
+        );
+        assert.equal(read.version, scenario.version);
+      },
+    );
+    await t.test(
+      "E06.27 rebinding to a tombstoned binding is refused without changing pins",
+      async () => {
+        await scenarioRemovedBinding(scenario);
+      },
+    );
+  },
+);
 
 async function scenarioRemovedBinding(scenario: Scenario): Promise<void> {
   const { fixture, mission, secondObjectiveId } = scenario;

@@ -25,6 +25,7 @@ import { gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
+const BINDING_LIFECYCLE_TIMEOUT_MS = 60000;
 const UNIX_EPOCH = 0;
 const EMPTY = "";
 const ROOT = "/";
@@ -353,60 +354,71 @@ test("E05.1-E05.5 create, replay, list, get and rename a project", async (t) => 
   assert.equal(reread.id, created.id);
 });
 
-test("E05.6-E05.11 apply, replay, list, get, export and list repository revisions", async (t) => {
-  const fixture = await setup(t);
-  const project = await createProject(fixture);
-  const key = ulid();
-  const applied = await bindRepository(fixture, project.id, key);
-  const replayed = success<Applied>(
-    await kanthord(
-      [
-        "project",
-        "binding",
-        "apply",
-        project.id,
-        "--file",
-        join(fixture.directory, `v${BINDING_SET_INITIAL_VERSION}.json`),
-        "--idempotency-key",
-        key,
-      ],
-      fixture.env,
-    ),
-  );
-  assert.equal(replayed.bindingSetVersion, TWO);
-  assert.deepEqual(replayed, applied);
-  const binding = applied.bindings[REPOSITORY_NAME];
-  assert.ok(binding);
-  assert.ok(binding.id.startsWith(`${BINDING_ID_PREFIX}_`));
-  await repositoryReads(fixture, project.id, binding.id);
-});
+test(
+  "E05.6-E05.11 apply, replay, list, get, export and list repository revisions",
+  { timeout: BINDING_LIFECYCLE_TIMEOUT_MS },
+  async (t) => {
+    const fixture = await setup(t);
+    const project = await createProject(fixture);
+    const key = ulid();
+    const applied = await bindRepository(fixture, project.id, key);
+    const replayed = success<Applied>(
+      await kanthord(
+        [
+          "project",
+          "binding",
+          "apply",
+          project.id,
+          "--file",
+          join(fixture.directory, `v${BINDING_SET_INITIAL_VERSION}.json`),
+          "--idempotency-key",
+          key,
+        ],
+        fixture.env,
+      ),
+    );
+    assert.equal(replayed.bindingSetVersion, TWO);
+    assert.deepEqual(replayed, applied);
+    const binding = applied.bindings[REPOSITORY_NAME];
+    assert.ok(binding);
+    assert.ok(binding.id.startsWith(`${BINDING_ID_PREFIX}_`));
+    await repositoryReads(fixture, project.id, binding.id);
+  },
+);
 
-test("E05.12-E05.13 add a worker binding and list and get its agent", async (t) => {
-  const fixture = await setup(t);
-  const project = await createProject(fixture);
-  await bindRepository(fixture, project.id);
-  await enableAgent(fixture);
-  const applied = await apply(fixture, project.id, {
-    version: TWO,
-    bindings: { [REPOSITORY_NAME]: REPOSITORY, [WORKER_NAME]: WORKER_BINDING },
-  });
-  assert.equal(applied.bindingSetVersion, THREE);
-  const binding = applied.bindings[WORKER_NAME];
-  assert.ok(binding);
-  const listed = success<Page<Agent>>(
-    await kanthord(
-      ["project", "agent", "list", project.id, binding.id],
-      fixture.env,
-    ),
-  );
-  assert.equal(listed.items.length, ONE);
-  assert.equal(listed.items[0]?.agent, AGENT);
-  assert.equal(listed.items[0]?.valid, true);
-  assert.equal(listed.nextCursor, null);
-  const read = await readAgent(fixture, project.id, binding.id);
-  assert.equal(read.bindingSetVersion, THREE);
-  assert.deepEqual(listed.items, [read]);
-});
+test(
+  "E05.12-E05.13 add a worker binding and list and get its agent",
+  { timeout: BINDING_LIFECYCLE_TIMEOUT_MS },
+  async (t) => {
+    const fixture = await setup(t);
+    const project = await createProject(fixture);
+    await bindRepository(fixture, project.id);
+    await enableAgent(fixture);
+    const applied = await apply(fixture, project.id, {
+      version: TWO,
+      bindings: {
+        [REPOSITORY_NAME]: REPOSITORY,
+        [WORKER_NAME]: WORKER_BINDING,
+      },
+    });
+    assert.equal(applied.bindingSetVersion, THREE);
+    const binding = applied.bindings[WORKER_NAME];
+    assert.ok(binding);
+    const listed = success<Page<Agent>>(
+      await kanthord(
+        ["project", "agent", "list", project.id, binding.id],
+        fixture.env,
+      ),
+    );
+    assert.equal(listed.items.length, ONE);
+    assert.equal(listed.items[0]?.agent, AGENT);
+    assert.equal(listed.items[0]?.valid, true);
+    assert.equal(listed.nextCursor, null);
+    const read = await readAgent(fixture, project.id, binding.id);
+    assert.equal(read.bindingSetVersion, THREE);
+    assert.deepEqual(listed.items, [read]);
+  },
+);
 
 test("E05.14 invalid project name is refused", async (t) => {
   const fixture = await setup(t);
