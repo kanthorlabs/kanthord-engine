@@ -323,7 +323,7 @@ Common to every `config`:
 - Unsupported addresses and contradictory platform/address combinations fail.
 - `strategy`: **required**, `RepositoryStrategy` object below. It has no inferred base branch, action or trigger.
 - `credential`: **required**, one `CredentialName` of platform `github`; no default. It serves every platform action of the Intake Service and the check of a request evidence. Git uses the SSH configuration of the host.
-- `projectPrompt`: **optional**, string, absent by default. Absence contributes no binding-provided prompt to Worker prompt composition.
+- `projectPrompt`: **optional**, string, absent by default. Absence or an empty string contributes no binding-provided prompt to Worker prompt composition. The exact value `-` disables the project prompt layer, and the composer reads no agent file of the workspace.
 - The project prompt holds at most 32768 UTF-8 bytes. A larger value refuses the write with `project.bindings.repository.project_prompt_too_large`.
 - The JSON file holds the prompt text, not a client-side path.
 

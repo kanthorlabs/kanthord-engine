@@ -166,7 +166,7 @@ An OAuth secret is `{ refresh, access, expires }`, the pi-ai credential shape;
 initial OAuth material enters only through a login session. The file has no
 name, platform or identity override.
 
-Rotation adds the next revision under the same name and keeps the older revisions live.
+Rotation adds the next revision under the same name and, in the same transaction, drains every older live revision that no live execution pins.
 An absent `metadata` copies the metadata of the newest live revision. A supplied `metadata`
 matches the platform schema, can set a new `openai-compatible.baseUrl`, and keeps every model
 that a default or an entry names. Rotation makes no remote call and commits in one transaction.
@@ -180,7 +180,7 @@ This command does not rotate `masterKey`.
 The required `CredentialName` maps to `params.credentialName`; query is empty.
 The required file supplies exactly `{ expectedRevision, metadata }`, with the newest live revision that the human read and a complete replacement that
 matches the platform schema. It accepts no secret or platform change.
-The edit inserts the next revision with the secret of the newest live revision, and the older revisions stay live. Proposed HTTP `200` returns
+The edit inserts the next revision with the secret of the newest live revision, and the older revisions stay live until custody drains them or a human revokes them. Proposed HTTP `200` returns
 the credential answer. An `openai-compatible.baseUrl` change fails; a rotation sets a new one.
 Removal of a model used by a default or entry fails and lists its dependents;
 the check and update are atomic. No remote probe supplies approval.
