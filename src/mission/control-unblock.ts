@@ -36,7 +36,6 @@ import {
   insertRevision,
   incrementMissionVersion,
   updateNodeFilename,
-  filenameTaken,
   filenameConflict,
   type NodeRow,
 } from "./store.ts";
@@ -44,6 +43,32 @@ import {
 const ZERO = 0;
 const ONE = 1;
 const REASON = "reason";
+const TEMPORARY_FILENAME_PREFIX = "unblock:";
+
+function renameTasks(
+  tx: Transaction,
+  node: NodeRow,
+  tasks: TaskContent[],
+): void {
+  assert.equal(new Set(tasks.map((task) => task.id)).size, tasks.length);
+  assert.ok(tx.database.isTransaction);
+  const replacing = new Set(tasks.map((task) => task.id));
+  const names = new Set(
+    readMissionNodes(tx, node.mission_id)
+      .filter((item) => item.retired_at === null && !replacing.has(item.id))
+      .map((item) => item.filename),
+  );
+  for (const task of tasks) {
+    if (names.has(task.filename)) throw filenameConflict(task.filename);
+    names.add(task.filename);
+  }
+  const changed = tasks.filter(
+    (task) => requireNode(tx, task.id).filename !== task.filename,
+  );
+  for (const task of changed)
+    updateNodeFilename(tx, task.id, `${TEMPORARY_FILENAME_PREFIX}${task.id}`);
+  for (const task of changed) updateNodeFilename(tx, task.id, task.filename);
+}
 const CONTENT_KEYS = [
   ContentField.Name,
   ContentField.Requirement,
@@ -146,13 +171,7 @@ function changeRevision(
   });
   if (taskChanges.length > ZERO) changedFields.push(TASKS_FIELD);
   if (changedFields.length === ZERO) return previous.revision;
-  for (const task of tasks ?? []) {
-    const old = requireNode(tx, task.id);
-    if (old.filename === task.filename) continue;
-    if (filenameTaken(tx, node.mission_id, task.filename))
-      throw filenameConflict(task.filename);
-    updateNodeFilename(tx, task.id, task.filename);
-  }
+  renameTasks(tx, node, tasks ?? []);
   const revision = previous.revision + ONE;
   assert.ok(Number.isSafeInteger(revision));
   insertRevision(tx, {

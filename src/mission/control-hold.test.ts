@@ -23,6 +23,40 @@ const REVOKE = "schedulerClaims.revoke";
 const WAKE = "wakeup.wake";
 const INSERT = "workQueue.insert";
 const NOT_READY = "mission.node.not_ready";
+const REASON_LIMIT = 12;
+const CONTENT_INVALID = "mission.node.content_invalid";
+test("controls reject blank and oversized UTF-8 reasons without writes, preserving exact-limit text", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.dependencies.config.textMaxBytes = REASON_LIMIT;
+  const before = h.node();
+  for (const reason of [
+    "   ",
+    "x".repeat(REASON_LIMIT + FIRST),
+    "界".repeat(REASON_LIMIT),
+  ]) {
+    await assert.rejects(
+      h.invoke("node.pause", {
+        params: { nodeId: h.nodeId },
+        query: {},
+        body: { ...h.body(), reason },
+      }),
+      (error) =>
+        error instanceof OperationError && error.code === CONTENT_INVALID,
+    );
+    assert.deepEqual(h.node(), before);
+    assert.equal(
+      h.calls.some((call) => call.method === WAKE || call.method === INSERT),
+      false,
+    );
+  }
+  const result = await h.invoke("node.pause", {
+    params: { nodeId: h.nodeId },
+    query: {},
+    body: { ...h.body(), reason: "界界界界" },
+  });
+  assert.ok(result.node.kind !== NodeKind.Task);
+  assert.equal(result.node.state, NodeState.Paused);
+});
 
 for (const kind of [NodeKind.Initiative, NodeKind.Objective]) {
   test(`ready opens an attempt and enqueues ${kind} atomically; resume preserves its pin`, async (t) => {

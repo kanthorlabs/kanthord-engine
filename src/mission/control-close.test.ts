@@ -23,6 +23,8 @@ import {
   readNode,
 } from "./store.ts";
 import { controlHarness } from "./test-support.ts";
+import { readCurrentRevision, insertRevision } from "./store.ts";
+import { revisionFromRow } from "./revision.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const NOW = 100;
@@ -31,6 +33,72 @@ const FIRST = 1;
 const REVOKE = "schedulerClaims.revoke";
 const BINDING_MISMATCH = "mission.evidence.binding_mismatch";
 const COMMIT = "a".repeat(40);
+const SECOND = 2;
+test("objective override validates its attempt repository pin after the current revision changes", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const original = createIdentity("binding");
+  const newer = createIdentity("binding");
+  h.dependencies.bindings.getBindingRevision = (_tx, bindingId) => ({
+    bindingId,
+    projectId: h.projectId,
+    name: "repo",
+    resourceIdentity: "repository:github:owner/repo",
+    revision: FIRST,
+    disabled: false,
+    tombstone: false,
+  });
+  h.dependencies.bindings.repositoryPolicyOf = (_tx, bindingId) => ({
+    bindingId,
+    projectId: h.projectId,
+    name: "repo",
+    address: "git@github.com:owner/repo.git",
+    platform: "github",
+    credential: "github",
+    baseBranch: "main",
+    action: null,
+    projectPrompt: null,
+  });
+  h.store.transaction((tx) => {
+    tx.database
+      .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
+      .run(NodeKind.Objective, h.nodeId);
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
+      )
+      .run(JSON.stringify([original]), h.nodeId);
+    openAttempt(tx, h.nodeId, FIRST, h.actor, NOW);
+    const prior = revisionFromRow(tx, readCurrentRevision(tx, h.nodeId)!);
+    insertRevision(tx, {
+      ...prior,
+      revision: SECOND,
+      content: { ...prior.content, bindings: [newer] },
+    });
+  });
+  const input = {
+    params: { nodeId: h.nodeId },
+    query: {},
+    body: {
+      ...h.body(NodeState.Available, FIRST),
+      result: AssessmentResult.Success,
+      landedCommit: { kind: "repository", bindingId: newer, commit: COMMIT },
+    },
+  };
+  await assert.rejects(
+    h.invoke("node.override", input),
+    (error) =>
+      error instanceof OperationError && error.code === BINDING_MISMATCH,
+  );
+  const answer = await h.invoke("node.override", {
+    ...input,
+    body: {
+      ...input.body,
+      landedCommit: { ...input.body.landedCommit, bindingId: original },
+    },
+  });
+  assert.equal(answer.outcome?.nodeRevision, FIRST);
+  assert.equal(answer.node.visibleRevision, SECOND);
+});
 
 test("attempt-zero success override publishes a human repository evidence and satisfies dependents", async (t) => {
   const h = controlHarness(t, IDENTITY);
@@ -177,6 +245,12 @@ for (const attempt of [ZERO, FIRST]) {
       body: h.body(NodeState.Blocked, attempt),
     });
     assert.equal(discarded.outcome?.closingEvent, ClosingEvent.HumanDiscard);
+    const historical = await h.invoke("outcome.get", {
+      params: { outcomeId: blocked.outcome!.id },
+      query: {},
+      body: null,
+    });
+    assert.equal(historical.closingEvent, ClosingEvent.HumanBlock);
     assert.deepEqual(discarded.attempt?.closedAt, blocked.attempt?.closedAt);
   });
 }

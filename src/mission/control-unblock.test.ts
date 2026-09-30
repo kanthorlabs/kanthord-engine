@@ -19,6 +19,143 @@ const FIRST = 1;
 const SECOND = 2;
 const ZERO = 0;
 const NOW = 100;
+for (const filenames of [
+  ["b.md", "a.md"],
+  ["b.md", "c.md"],
+]) {
+  test(`unblock validates final task names and atomically renames ${filenames.join(",")}`, async (t) => {
+    const h = controlHarness(t, IDENTITY);
+    const bindingId = createIdentity("binding");
+    h.dependencies.bindings.getBindingRevision = () => ({
+      bindingId,
+      projectId: h.projectId,
+      name: "repo",
+      resourceIdentity: "repository:github:owner/repo",
+      revision: FIRST,
+      disabled: false,
+      tombstone: false,
+    });
+    h.dependencies.bindings.repositoryPolicyOf = () => ({
+      bindingId,
+      projectId: h.projectId,
+      name: "repo",
+      address: "git@github.com:owner/repo.git",
+      platform: "github",
+      credential: "github",
+      baseBranch: "main",
+      action: null,
+      projectPrompt: null,
+    });
+    const taskIds = [createIdentity("node"), createIdentity("node")];
+    const content = {
+      name: "Task",
+      requirement: "Requirement",
+      criterion: "Criterion",
+      verifications: ["true"],
+      bindings: [],
+    };
+    const tasks = taskIds.map((id, index) => ({
+      id,
+      filename: ["a.md", "b.md"][index]!,
+      content,
+    }));
+    h.dependencies.bindings.resolveBinding = () => ({
+      bindingId,
+      resourceIdentity: "repository:github:owner/repo",
+    });
+    h.store.transaction((tx) => {
+      tx.database
+        .prepare("UPDATE mission_node SET kind = ?, state = ? WHERE id = ?")
+        .run(NodeKind.Objective, NodeState.Paused, h.nodeId);
+      for (const task of tasks)
+        insertNode(tx, {
+          id: task.id,
+          mission_id: h.missionId,
+          kind: NodeKind.Task,
+          filename: task.filename,
+          parent_id: h.nodeId,
+          created_at: NOW,
+        });
+      tx.database
+        .prepare(
+          "UPDATE mission_node_revision SET bindings = ?, tasks = ? WHERE node_id = ?",
+        )
+        .run(JSON.stringify([bindingId]), JSON.stringify(tasks), h.nodeId);
+      openAttempt(tx, h.nodeId, FIRST, h.actor, NOW);
+    });
+    await h.invoke("node.block", {
+      params: { nodeId: h.nodeId },
+      query: {},
+      body: h.body(NodeState.Paused, FIRST),
+    });
+    const change = {
+      content: { ...content, bindings: ["repo"] },
+      reason: "Rename",
+      tasks: tasks.map((task, index) => ({
+        ...task,
+        filename: filenames[index]!,
+      })),
+    };
+    const input = {
+      params: { nodeId: h.nodeId },
+      query: {},
+      body: {
+        blockedAttempt: FIRST,
+        expectedRevision: FIRST,
+        expectedMissionVersion: FIRST,
+        change,
+      },
+    };
+    const snapshot = () =>
+      h.store.database.prepare("SELECT * FROM mission_node ORDER BY id").all();
+    const before = snapshot();
+    await assert.rejects(
+      h.invoke("node.unblock", {
+        ...input,
+        body: {
+          ...input.body,
+          change: {
+            ...change,
+            tasks: change.tasks.map((task) => ({
+              ...task,
+              filename: "same.md",
+            })),
+          },
+        },
+      }),
+      (error) =>
+        error instanceof OperationError &&
+        error.code === MissionErrorCode.FilenameConflict,
+    );
+    assert.deepEqual(snapshot(), before);
+    assert.equal(
+      h.store.transaction((tx) => readCurrentRevision(tx, h.nodeId))?.revision,
+      FIRST,
+    );
+    const callCount = h.calls.length;
+    const insert = h.dependencies.workQueue.insert;
+    h.dependencies.workQueue.insert = () => {
+      throw new Error("queue write failed");
+    };
+    await assert.rejects(h.invoke("node.unblock", input), /queue write failed/);
+    assert.deepEqual(snapshot(), before);
+    assert.equal(
+      h.store.transaction((tx) => readCurrentRevision(tx, h.nodeId))?.revision,
+      FIRST,
+    );
+    assert.equal(h.calls.length, callCount + FIRST);
+    h.dependencies.workQueue.insert = insert;
+    const result = await h.invoke("node.unblock", input);
+    assert.equal(result.attempt?.attempt, SECOND);
+    const row = h.store.transaction((tx) => readCurrentRevision(tx, h.nodeId))!;
+    assert.deepEqual(
+      JSON.parse(row.tasks!)
+        .map((task: { filename: string }) => task.filename)
+        .sort(),
+      [...filenames].sort(),
+    );
+  });
+}
 test("objective unblock validates the exact task set and writes the changed task snapshot", async (t) => {
   const h = controlHarness(t, IDENTITY);
   const bindingId = createIdentity("binding");

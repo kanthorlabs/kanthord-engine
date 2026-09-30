@@ -31,6 +31,7 @@ import {
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import { readCurrentRevision, setNodeState, type NodeRow } from "./store.ts";
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
+import { validateText } from "./content.ts";
 
 const ZERO = 0;
 export const ControlError = {
@@ -101,6 +102,7 @@ export function admitControl(
   )
     stateConflict(node);
   requireControlState(node, admitted);
+  validateText("reason", body.reason, dependencies.config.textMaxBytes);
   return { node, mission };
 }
 

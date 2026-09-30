@@ -68,6 +68,7 @@ export function validateText(
   value: string,
   textMaxBytes: number,
 ): void {
+  nonblankText(field, value);
   if (Buffer.byteLength(value, UTF8) > textMaxBytes) invalidContent(field);
 }
 

@@ -20,6 +20,8 @@ import {
   readOpenAttempt,
 } from "./record-store.ts";
 import { setNodeState, insertNode } from "./store.ts";
+import { readCurrentRevision, insertRevision } from "./store.ts";
+import { revisionFromRow } from "./revision.ts";
 import { controlHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
@@ -164,6 +166,14 @@ test("claim rechecks stale jobs, opens once, and preserves the open attempt pin"
     h.opener,
   );
   h.release(true);
+  h.store.transaction((tx) => {
+    const prior = revisionFromRow(tx, readCurrentRevision(tx, h.nodeId)!);
+    insertRevision(tx, {
+      ...prior,
+      revision: FIRST + FIRST,
+      content: { ...prior.content, name: "Later direction" },
+    });
+  });
   assert.deepEqual(h.claim(), claim);
   h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Blocked));
   assert.equal(h.claim([NodeState.Blocked]), null);
@@ -228,6 +238,60 @@ test("initiative steps release admits produced evidence", (t) => {
   h.release();
   assert.equal(h.node().state, NodeState.Waiting);
   assert.equal(h.claim([NodeState.Waiting])?.kind, ClaimKind.Evaluation);
+});
+
+test("steps release excludes foreign execution and attempt evidence and requires every asset published", (t) => {
+  const h = fixture(t);
+  h.claim();
+  const add = (executionId: string, attempt: number, pending: boolean) =>
+    h.store.transaction((tx) => {
+      const id = createIdentity("evidence");
+      insertEvidence(
+        tx,
+        {
+          id,
+          node_id: h.nodeId,
+          attempt,
+          subject: "Work",
+          requirement_key: null,
+          end_state: null,
+          verification: null,
+          provenance: JSON.stringify({ ...h.opener, executionId }),
+          created_at: NOW,
+        },
+        [
+          {
+            id: createIdentity("evidence_asset"),
+            evidence_id: id,
+            kind: AssetKind.Repository,
+            content: JSON.stringify({
+              bindingId: h.bindingId,
+              commit: "a".repeat(40),
+            }),
+            published_at: NOW,
+            expired_at: null,
+          },
+          ...(pending
+            ? [
+                {
+                  id: createIdentity("evidence_asset"),
+                  evidence_id: id,
+                  kind: AssetKind.Object,
+                  content: "{}",
+                  published_at: null,
+                  expired_at: NOW + FIRST,
+                },
+              ]
+            : []),
+        ],
+      );
+    });
+  add(createIdentity("execution"), FIRST, false);
+  h.refuses(ReleaseObligation.Evidence);
+  add(h.executionId, ZERO, false);
+  h.refuses(ReleaseObligation.Evidence);
+  add(h.executionId, FIRST, true);
+  h.refuses(ReleaseObligation.Evidence);
 });
 
 test("reviewer release requires a current success and every eligible request", (t) => {
