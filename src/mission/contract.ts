@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
+import { timestamp } from "../kernel/json.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,
@@ -14,7 +15,6 @@ export const MISSION_IDENTITY_PREFIX = "mission";
 export const NODE_IDENTITY_PREFIX = "node";
 export const MISSION_INITIAL_VERSION = 1;
 export const MISSION_OPERATION_TIMEOUT_MS = 30000;
-export const SCHEDULER_ACTOR_SERVICE = "scheduler";
 
 export interface HumanActor {
   kind: "human";
@@ -159,6 +159,91 @@ export const ActorKind = {
   Service: "service",
 } as const;
 
+export const ClaimKind = { Steps: "steps", Evaluation: "evaluation" } as const;
+export const claimKindSchema = z.enum(ClaimKind);
+export type ClaimKind = z.infer<typeof claimKindSchema>;
+export const AssessmentResult = {
+  Success: "success",
+  CriterionNotMet: "criterion-not-met",
+  Undetermined: "undetermined",
+} as const;
+export const assessmentResultSchema = z.enum(AssessmentResult);
+export type AssessmentResult = z.infer<typeof assessmentResultSchema>;
+export const AssetKind = {
+  Repository: "repository",
+  Produced: "produced",
+  Object: "object",
+  Platform: "platform",
+} as const;
+export const assetKindSchema = z.enum(AssetKind);
+export type AssetKind = z.infer<typeof assetKindSchema>;
+export const EndState = { Expected: "expected", Other: "other" } as const;
+export const endStateSchema = z.enum(EndState);
+export type EndState = z.infer<typeof endStateSchema>;
+export const Resolution = {
+  Unrequested: "unrequested",
+  Unresolved: "unresolved",
+  ExpectedEnd: "expected-end",
+  OtherEnd: "other-end",
+} as const;
+export const resolutionSchema = z.enum(Resolution);
+export type Resolution = z.infer<typeof resolutionSchema>;
+export const ClosingEvent = {
+  SuccessOverride: "success-override",
+  HumanDiscard: "human-discard",
+  HumanBlock: "human-block",
+  AssessmentNotPassed: "assessment-not-passed",
+  ExternalFailed: "external-failed",
+  AssessmentPassed: "assessment-passed",
+  ExternalSuccess: "external-success",
+} as const;
+export const closingEventSchema = z.enum(ClosingEvent);
+export type ClosingEvent = z.infer<typeof closingEventSchema>;
+export const RepositoryAction = {
+  PullRequest: "pull_request",
+  MergePush: "merge_push",
+} as const;
+export const repositoryActionSchema = z.enum(RepositoryAction);
+export type RepositoryAction = z.infer<typeof repositoryActionSchema>;
+export const ExpectedEndState = {
+  PullRequestMerged: "pull_request_merged",
+  BaseBranchPushed: "base_branch_pushed",
+} as const;
+export const expectedEndStateSchema = z.enum(ExpectedEndState);
+export type ExpectedEndState = z.infer<typeof expectedEndStateSchema>;
+export const PlatformAddressKind = {
+  PullRequest: "pull_request",
+  BranchPush: "branch_push",
+} as const;
+export const platformAddressKindSchema = z.enum(PlatformAddressKind);
+export type PlatformAddressKind = z.infer<typeof platformAddressKindSchema>;
+export const ResumeTarget = {
+  Available: NodeState.Available,
+  Waiting: NodeState.Waiting,
+} as const;
+export const resumeTargetSchema = z.enum(ResumeTarget);
+export type ResumeTarget = z.infer<typeof resumeTargetSchema>;
+export const ReleaseObligation = {
+  Evidence: "evidence",
+  Assessment: "assessment",
+  Request: "request",
+} as const;
+export const releaseObligationSchema = z.enum(ReleaseObligation);
+export type ReleaseObligation = z.infer<typeof releaseObligationSchema>;
+export const ActorService = {
+  Scheduler: "scheduler",
+  Mission: "mission",
+} as const;
+export const actorServiceSchema = z.enum(ActorService);
+export type ActorService = z.infer<typeof actorServiceSchema>;
+
+export const commitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
+export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
+export const actionKeySchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$/);
+export const textSchema = z.string().min(1);
+
 export const nodeKindSchema = z.enum(NodeKind);
 export type NodeKind = z.infer<typeof nodeKindSchema>;
 export const nodeStateSchema = z.enum(NodeState);
@@ -283,7 +368,7 @@ export const actorSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     kind: z.literal(ActorKind.Service),
-    service: z.literal(SCHEDULER_ACTOR_SERVICE),
+    service: actorServiceSchema,
   }),
 ]);
 export type Actor = z.infer<typeof actorSchema>;
@@ -293,7 +378,7 @@ export const revisionSchema = z.strictObject({
   revision: z.number().int().positive(),
   reason: z.string(),
   actor: actorSchema,
-  createdAt: z.number().int(),
+  createdAt: timestamp,
   content: contentSchema,
   tasks: z.array(taskContentSchema).optional(),
   change: revisionChangeSchema,
@@ -449,9 +534,208 @@ export const importResultSchema = z.strictObject({
   ),
   changes: nodeChangeSchema,
   actor: actorSchema,
-  acceptedAt: z.number().int(),
+  acceptedAt: timestamp,
 });
 export type ImportResult = z.infer<typeof importResultSchema>;
+
+export const repositoryAddressSchema = z.strictObject({
+  kind: z.literal(AssetKind.Repository),
+  bindingId: identitySchema("binding"),
+  commit: commitSchema,
+});
+export type RepositoryAddress = z.infer<typeof repositoryAddressSchema>;
+export const producedAddressSchema = z.strictObject({
+  kind: z.literal(AssetKind.Produced),
+  sha256: sha256Schema,
+});
+export const objectAddressSchema = z.strictObject({
+  kind: z.literal(AssetKind.Object),
+  location: z.string().startsWith("s3://"),
+  version: textSchema.optional(),
+  sha256: sha256Schema.optional(),
+});
+export const platformAddressSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal(PlatformAddressKind.PullRequest),
+    resourceIdentity: textSchema,
+    number: z.number().int().positive(),
+  }),
+  z.strictObject({
+    kind: z.literal(PlatformAddressKind.BranchPush),
+    resourceIdentity: textSchema,
+    branch: textSchema,
+    commit: commitSchema,
+  }),
+]);
+export type PlatformAddress = z.infer<typeof platformAddressSchema>;
+export const addressSchema = z.discriminatedUnion("kind", [
+  repositoryAddressSchema,
+  producedAddressSchema,
+  objectAddressSchema,
+]);
+export type Address = z.infer<typeof addressSchema>;
+export const testedInputSchema = z.union([
+  addressSchema,
+  z.array(repositoryAddressSchema).min(1),
+]);
+export type TestedInput = z.infer<typeof testedInputSchema>;
+export const verificationSchema = z.strictObject({
+  testedInput: testedInputSchema,
+  results: z.array(
+    z.strictObject({
+      command: textSchema,
+      exitCode: z.number().int().nullable(),
+      signal: textSchema.nullable(),
+      timedOut: z.boolean(),
+    }),
+  ),
+});
+export type Verification = z.infer<typeof verificationSchema>;
+export const frozenActionSchema = z.strictObject({
+  key: actionKeySchema,
+  bindingId: identitySchema("binding"),
+  action: repositoryActionSchema,
+  expectedEndState: expectedEndStateSchema,
+  follows: actionKeySchema.nullable(),
+  configuration: z.strictObject({ baseBranch: textSchema }),
+});
+export type FrozenAction = z.infer<typeof frozenActionSchema>;
+export const attemptSchema = z.strictObject({
+  nodeId: identitySchema("node"),
+  attempt: z.number().int().positive(),
+  nodeRevision: z.number().int().positive(),
+  requiredExternalActions: z.array(frozenActionSchema),
+  openedAt: timestamp,
+  closedAt: timestamp.nullable(),
+  outcomeIds: z.array(identitySchema("outcome")),
+  openedBy: actorSchema,
+});
+export type Attempt = z.infer<typeof attemptSchema>;
+const assetBase = {
+  id: identitySchema("evidence_asset"),
+  publishedAt: timestamp.nullable(),
+  expiredAt: timestamp.nullable(),
+};
+export const evidenceAssetSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    ...assetBase,
+    kind: z.literal(AssetKind.Repository),
+    address: repositoryAddressSchema,
+  }),
+  z.strictObject({
+    ...assetBase,
+    kind: z.literal(AssetKind.Produced),
+    address: producedAddressSchema,
+  }),
+  z.strictObject({
+    ...assetBase,
+    kind: z.literal(AssetKind.Object),
+    address: objectAddressSchema,
+    storageBindingId: identitySchema("binding"),
+    size: z.number().int().nonnegative(),
+    mediaType: textSchema,
+  }),
+  z.strictObject({
+    ...assetBase,
+    kind: z.literal(AssetKind.Platform),
+    address: platformAddressSchema,
+  }),
+]);
+export type EvidenceAsset = z.infer<typeof evidenceAssetSchema>;
+export const evidenceSchema = z.strictObject({
+  id: identitySchema("evidence"),
+  nodeId: identitySchema("node"),
+  attempt: z.number().int().nonnegative(),
+  subject: textSchema,
+  assets: z.array(evidenceAssetSchema),
+  provenance: actorSchema,
+  createdAt: timestamp,
+  requirementKey: actionKeySchema.optional(),
+  endState: endStateSchema.optional(),
+  verification: verificationSchema.optional(),
+});
+export type Evidence = z.infer<typeof evidenceSchema>;
+export const currencySchema = z.strictObject({
+  current: z.boolean(),
+  contextMatches: z.boolean(),
+  authorityAdmits: z.boolean(),
+  orderSelected: z.boolean(),
+  reasons: z.array(textSchema),
+});
+export type Currency = z.infer<typeof currencySchema>;
+export const assessmentSchema = z.strictObject({
+  id: identitySchema("assessment"),
+  nodeId: identitySchema("node"),
+  executionId: identitySchema("execution").nullable(),
+  attempt: z.number().int().nonnegative(),
+  nodeRevision: z.number().int().positive(),
+  evidenceIds: z.array(identitySchema("evidence")),
+  childOutcomeIds: z.array(identitySchema("outcome")),
+  result: assessmentResultSchema,
+  rationale: textSchema,
+  testedInput: testedInputSchema.nullable(),
+  actor: actorSchema,
+  createdAt: timestamp,
+  currency: currencySchema.nullable(),
+  childNodeIds: z.array(identitySchema("node")),
+  workerVersion: textSchema.nullable(),
+});
+export type Assessment = z.infer<typeof assessmentSchema>;
+export const outcomeSchema = z.strictObject({
+  id: identitySchema("outcome"),
+  nodeId: identitySchema("node"),
+  attempt: z.number().int().nonnegative(),
+  nodeRevision: z.number().int().positive(),
+  closingEvent: closingEventSchema,
+  result: assessmentResultSchema,
+  assessmentId: identitySchema("assessment"),
+  evidenceIds: z.array(identitySchema("evidence")),
+  createdAt: timestamp,
+});
+export type Outcome = z.infer<typeof outcomeSchema>;
+export const externalActionSchema = z.strictObject({
+  nodeId: identitySchema("node"),
+  attempt: z.number().int().nonnegative(),
+  action: frozenActionSchema,
+  requested: z.boolean(),
+  requestEvidenceId: identitySchema("evidence").nullable(),
+  resolution: resolutionSchema,
+});
+export type ExternalAction = z.infer<typeof externalActionSchema>;
+export const blockedContextSchema = z.strictObject({
+  outcome: outcomeSchema,
+  requests: z.array(evidenceSchema),
+});
+export type BlockedContext = z.infer<typeof blockedContextSchema>;
+export const humanActSchema = z.strictObject({
+  reason: textSchema,
+  expectedMissionVersion: z.number().int().positive(),
+  expectedState: nodeStateSchema,
+  expectedAttempt: z.number().int().nonnegative(),
+});
+export type HumanAct = z.infer<typeof humanActSchema>;
+export const resumeSchema = humanActSchema.extend({
+  target: resumeTargetSchema,
+});
+export type Resume = z.infer<typeof resumeSchema>;
+export const overrideSchema = humanActSchema.extend({
+  result: z.enum([AssessmentResult.Success]),
+  landedCommit: repositoryAddressSchema.optional(),
+});
+export type Override = z.infer<typeof overrideSchema>;
+export const unblockChangeSchema = z.strictObject({
+  content: contentSchema,
+  tasks: z.array(taskContentSchema).optional(),
+  reason: textSchema,
+});
+export type UnblockChange = z.infer<typeof unblockChangeSchema>;
+export const unblockSchema = z.strictObject({
+  blockedAttempt: z.number().int().nonnegative(),
+  expectedRevision: z.number().int().positive(),
+  expectedMissionVersion: z.number().int().positive(),
+  change: unblockChangeSchema.optional(),
+});
+export type Unblock = z.infer<typeof unblockSchema>;
 
 const nodeBase = {
   id: identitySchema("node"),
@@ -460,10 +744,11 @@ const nodeBase = {
   parentId: identitySchema("node").nullable(),
   visibleRevision: z.number().int().positive(),
   content: contentSchema,
-  retiredAt: z.number().int().nullable(),
+  retiredAt: timestamp.nullable(),
   pinnedByAttempts: z.array(z.number().int().positive()),
 };
 const runnableNodeFields = {
+  blockedContext: blockedContextSchema.optional(),
   state: nodeStateSchema,
   attempt: z.number().int().nonnegative(),
   priority: z
@@ -489,6 +774,14 @@ export const nodeSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type Node = z.infer<typeof nodeSchema>;
+export const controlResultSchema = z.strictObject({
+  node: nodeSchema,
+  attempt: attemptSchema.nullable(),
+  outcome: outcomeSchema.nullable(),
+  actor: actorSchema,
+  acceptedAt: timestamp,
+});
+export type ControlResult = z.infer<typeof controlResultSchema>;
 export const rebindResultSchema = z.strictObject({
   nodeChange: nodeChangeSchema,
   skipped: z.array(

@@ -12,6 +12,7 @@ import { schedulerOperations } from "../../scheduler/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
   MISSION_INITIAL_VERSION,
+  NodeKind,
   missionOperations,
   missionSchema,
 } from "../../mission/contract.ts";
@@ -27,6 +28,20 @@ import { ResourceStatus } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
+const MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS = [
+  ["node.create", "mission.node.list", "properties", "items", "items"],
+  ["node.get", "mission.node.get"],
+  ["node.priority.set", "mission.node.priority.set"],
+  [
+    "node.rebind",
+    "mission.node.rebind",
+    "properties",
+    "skipped",
+    "items",
+    "properties",
+    "node",
+  ],
+] as const;
 const ARRAY_SCHEMA_TYPE = "array";
 const NULL_SCHEMA_TYPE = "null";
 const STRING_SCHEMA_TYPE = "string";
@@ -73,6 +88,63 @@ const apiOperations = [
   ...Object.values(projectOperations),
   ...Object.values(missionOperations),
 ];
+function assertBlockedNode(schema: unknown): void {
+  assert.ok(
+    isObject(schema) && "oneOf" in schema && Array.isArray(schema.oneOf),
+  );
+  const variants = schema.oneOf as ResolvedSchema[];
+  assert.deepEqual(
+    variants.map((variant) => variant.properties.kind?.const),
+    [NodeKind.Initiative, NodeKind.Objective, NodeKind.Task],
+  );
+  for (const variant of variants) {
+    const context = variant.properties.blockedContext;
+    if (variant.properties.kind?.const === NodeKind.Task) {
+      assert.equal(context, undefined);
+      continue;
+    }
+    assert.ok(context);
+    assert.deepEqual(context.required, ["outcome", "requests"]);
+    assert.equal(context.properties.requests?.type, ARRAY_SCHEMA_TYPE);
+    assert.deepEqual(
+      Object.keys(context.properties.outcome!.properties).sort(),
+      [
+        "assessmentId",
+        "attempt",
+        "closingEvent",
+        "createdAt",
+        "evidenceIds",
+        "id",
+        "nodeId",
+        "nodeRevision",
+        "result",
+      ],
+    );
+  }
+}
+
+test("named Mission fragment size exceptions retain the complete blocked context", () => {
+  const files = emitOpenAPIFiles(apiOperations);
+  for (const [
+    fragment,
+    operationId,
+    ...path
+  ] of MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS) {
+    const file = files[`openapi/mission/${fragment}.yaml`];
+    assert.ok(file);
+    let schema: unknown = file;
+    for (const key of [
+      "components",
+      "schemas",
+      `${operationId}.Output`,
+      ...path,
+    ]) {
+      assert.ok(isObject(schema));
+      schema = (schema as Record<string, unknown>)[key];
+    }
+    assertBlockedNode(schema);
+  }
+});
 test("published OpenAPI validates, matches the registry exactly, and describes real responses", async (t) => {
   const files = emitOpenAPIFiles(apiOperations);
   const emitted = files["openapi.yaml"];
