@@ -915,6 +915,19 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "node.pause": {
+    ...writeOperation,
+    id: "mission.node.pause",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:nodeId/pause",
+    input: z.strictObject({
+      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      query: z.strictObject({}),
+      body: humanActSchema,
+    }),
+    output: controlResultSchema,
+    description: "Pause a node and revoke its live claim.",
+  },
   export: {
     ...readOperation,
     id: "mission.export",

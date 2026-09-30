@@ -50,6 +50,8 @@ paths:
     $ref: ./openapi/mission/node.get.yaml#/pathItem
   /api/mission/node/{nodeId}/move:
     $ref: ./openapi/mission/node.move.yaml#/pathItem
+  /api/mission/node/{nodeId}/pause:
+    $ref: ./openapi/mission/node.pause.yaml#/pathItem
   /api/mission/node/{nodeId}/priority:
     $ref: ./openapi/mission/node.priority.set.yaml#/pathItem
   /api/mission/{missionId}/rebind:

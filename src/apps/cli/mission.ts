@@ -3,11 +3,18 @@ import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Command } from "commander";
 import { z } from "zod";
-import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { ensureDirectory, writePrivate } from "../../kernel/files.ts";
 import { identitySchema } from "../../kernel/identity.ts";
-import type { OperationResult } from "../../kernel/operation.ts";
+import {
+  client,
+  printResult,
+  pagination,
+  mutate,
+  addPagination,
+  addMutationOptions,
+} from "./mission-support.ts";
+import { addControlCommands } from "./mission-control.ts";
 import {
   criterionSetSchema,
   edgeKindSchema,
@@ -18,15 +25,12 @@ import {
   importApplySchema,
   retireSchema,
   MISSION_IDENTITY_PREFIX,
-  missionOperations,
   moveSchema,
   NODE_IDENTITY_PREFIX,
   nodeCreateSchema,
   nodeUpdateSchema,
   prioritySetSchema,
   rebindSchema,
-  NODE_LIST_LIMIT_DEFAULT,
-  NODE_LIST_LIMIT_MAX,
   NodeKind,
   nodeKindSchema,
   nodeStateSchema,
@@ -34,12 +38,9 @@ import {
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
 import { validateProjectId } from "./project.ts";
 import {
-  handleMutationResult,
   handleReadResult,
   parsePositiveInt,
   readJsonFileAs,
-  requireToken,
-  resolveKey,
   singleUse,
 } from "./shared.ts";
 
@@ -86,8 +87,6 @@ const RETIRE_PREVIEW = "node.retire.preview";
 const TRUE = "true";
 const FALSE = "false";
 const EMPTY = 0;
-const LIMIT_INVALID = "cli.pagination.limit_invalid";
-const LIMIT_OUT_OF_RANGE = "cli.pagination.limit_out_of_range";
 const GET_INVALID_PROJECT_ID = "cli.mission.get.invalid_project_id";
 const NODE_LIST_INVALID_MISSION_ID = "cli.mission.node.list.invalid_mission_id";
 const NODE_LIST_INVALID_NODE_ID = "cli.mission.node.list.invalid_node_id";
@@ -129,17 +128,6 @@ const REBIND_INVALID_NODE_ID = "cli.mission.node.rebind.invalid_node_id";
 const PRIORITY_SET_INVALID_NODE_ID =
   "cli.mission.node.priority.set.invalid_node_id";
 
-type ReadCommand =
-  | typeof GET
-  | typeof NODE_LIST
-  | typeof NODE_GET
-  | typeof REVISION_LIST
-  | typeof REVISION_GET
-  | typeof EDGE_LIST
-  | typeof RETIRE_PREVIEW
-  | typeof IMPORT_PREVIEW
-  | typeof EXPORT;
-
 export function validateMissionId(id: string, code: string): void {
   if (!identitySchema(MISSION_IDENTITY_PREFIX).safeParse(id).success)
     throw new Diagnostic(code, "invalid mission ID");
@@ -148,33 +136,6 @@ export function validateMissionId(id: string, code: string): void {
 export function validateNodeId(id: string, code: string): void {
   if (!identitySchema(NODE_IDENTITY_PREFIX).safeParse(id).success)
     throw new Diagnostic(code, "invalid node ID");
-}
-
-function client(command: Command, name: ReadCommand) {
-  const { endpoint, token } = resolveClient(command.optsWithGlobals());
-  requireToken(token, `cli.mission.${name}.token_required`);
-  return httpClient(missionOperations, endpoint, token);
-}
-
-function printResult<T>(result: OperationResult<T>, name: ReadCommand): void {
-  const data = handleReadResult(result, `cli.mission.${name}.indeterminate`);
-  process.stdout.write(`${JSON.stringify(data)}\n`);
-}
-
-function pagination(options: { limit?: string; cursor?: string }) {
-  const limit =
-    options.limit === undefined
-      ? NODE_LIST_LIMIT_DEFAULT
-      : parsePositiveInt(options.limit, LIMIT_INVALID);
-  if (limit > NODE_LIST_LIMIT_MAX)
-    throw new Diagnostic(
-      LIMIT_OUT_OF_RANGE,
-      `limit must be at most ${NODE_LIST_LIMIT_MAX}`,
-    );
-  return {
-    limit,
-    ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
-  };
 }
 
 async function get(projectId: string, command: Command): Promise<void> {
@@ -226,34 +187,6 @@ async function nodeGet(nodeId: string, command: Command): Promise<void> {
     body: null,
   });
   printResult(result, NODE_GET);
-}
-
-async function mutate<S extends z.ZodTypeAny, T extends object>(
-  command: Command,
-  name: string,
-  schema: S,
-  invoke: (
-    api: ReturnType<typeof httpClient<typeof missionOperations>>,
-    body: z.infer<S>,
-    key: string,
-  ) => Promise<OperationResult<T>>,
-): Promise<void> {
-  const options = command.optsWithGlobals();
-  const { endpoint, token } = resolveClient(options);
-  requireToken(token, `cli.mission.${name}.token_required`);
-  const key = resolveKey(options);
-  const body = readJsonFileAs(options.file, schema);
-  const result = await invoke(
-    httpClient(missionOperations, endpoint, token),
-    body,
-    key,
-  );
-  const data = handleMutationResult(
-    result,
-    `cli.mission.${name}.indeterminate`,
-    key,
-  );
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
 }
 
 async function nodeCreate(missionId: string, command: Command): Promise<void> {
@@ -582,20 +515,6 @@ async function exportMission(
   );
 }
 
-function addPagination(command: Command): Command {
-  return command
-    .option(
-      "--limit <count>",
-      "Maximum results per page (default: 100, range: 1..1000)",
-      singleUse("--limit"),
-    )
-    .option(
-      "--cursor <cursor>",
-      "Continue from a cursor",
-      singleUse("--cursor"),
-    );
-}
-
 export function addMissionCommand(program: Command): void {
   assert.equal(program.name(), PROGRAM_NAME);
   assert.ok(
@@ -673,19 +592,10 @@ function addImportCommands(mission: Command): void {
   }
 }
 
-function addMutationOptions(command: Command): Command {
-  return command
-    .requiredOption(
-      FILE_OPTION + " <path>",
-      "Node JSON file",
-      singleUse(FILE_OPTION),
-    )
-    .option(KEY_OPTION + " <key>", "Mutation key", singleUse(KEY_OPTION));
-}
-
 function addNodeCommands(mission: Command): void {
   const node = mission.command(NODE).description("Mission node commands");
   node.action(() => node.help());
+  addControlCommands(node);
   addPagination(
     node
       .command(LIST)
