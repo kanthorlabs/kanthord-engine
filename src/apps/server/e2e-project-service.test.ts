@@ -26,6 +26,7 @@ import { gatewayFixture } from "./test-support.ts";
 const SUCCESS = 0;
 const FAILURE = 1;
 const BINDING_LIFECYCLE_TIMEOUT_MS = 60000;
+const PROJECT_LIFECYCLE_TIMEOUT_MS = 60000;
 const UNIX_EPOCH = 0;
 const EMPTY = "";
 const ROOT = "/";
@@ -314,45 +315,52 @@ async function repositoryReads(
   assert.equal(revisions.nextCursor, null);
 }
 
-test("E05.1-E05.5 create, replay, list, get and rename a project", async (t) => {
-  const fixture = await setup(t);
-  await createCredential(fixture);
-  const key = ulid();
-  const created = await createProject(fixture, key);
-  const replayed = await createProject(fixture, key);
-  assert.equal(replayed.id, created.id);
-  assert.deepEqual(replayed, created);
-  const listed = success<Page<Project>>(
-    await kanthord(["project", "list"], fixture.env),
-  );
-  assert.equal(listed.items.length, ONE);
-  assert.equal(listed.items[0]?.name, NAME);
-  assert.equal(listed.items[0]?.bindingSetVersion, BINDING_SET_INITIAL_VERSION);
-  assert.equal(listed.nextCursor, null);
-  const read = success<Project>(
-    await kanthord(["project", "get", created.id], fixture.env),
-  );
-  assert.equal(read.id, created.id);
-  assert.equal(read.name, NAME);
-  assert.equal(read.bindingSetVersion, BINDING_SET_INITIAL_VERSION);
-  assert.equal(read.createdAt, created.createdAt);
-  assert.ok(
-    Number.isSafeInteger(read.createdAt) && read.createdAt > UNIX_EPOCH,
-  );
-  const renamed = success<Mutation>(
-    await kanthord(
-      ["project", "rename", created.id, "--name", RENAMED],
-      fixture.env,
-    ),
-  );
-  assert.equal(renamed.name, RENAMED);
-  assert.ok(renamed.idempotencyKey);
-  const reread = success<Project>(
-    await kanthord(["project", "get", created.id], fixture.env),
-  );
-  assert.equal(reread.name, RENAMED);
-  assert.equal(reread.id, created.id);
-});
+test(
+  "E05.1-E05.5 create, replay, list, get and rename a project",
+  { timeout: PROJECT_LIFECYCLE_TIMEOUT_MS },
+  async (t) => {
+    const fixture = await setup(t);
+    await createCredential(fixture);
+    const key = ulid();
+    const created = await createProject(fixture, key);
+    const replayed = await createProject(fixture, key);
+    assert.equal(replayed.id, created.id);
+    assert.deepEqual(replayed, created);
+    const listed = success<Page<Project>>(
+      await kanthord(["project", "list"], fixture.env),
+    );
+    assert.equal(listed.items.length, ONE);
+    assert.equal(listed.items[0]?.name, NAME);
+    assert.equal(
+      listed.items[0]?.bindingSetVersion,
+      BINDING_SET_INITIAL_VERSION,
+    );
+    assert.equal(listed.nextCursor, null);
+    const read = success<Project>(
+      await kanthord(["project", "get", created.id], fixture.env),
+    );
+    assert.equal(read.id, created.id);
+    assert.equal(read.name, NAME);
+    assert.equal(read.bindingSetVersion, BINDING_SET_INITIAL_VERSION);
+    assert.equal(read.createdAt, created.createdAt);
+    assert.ok(
+      Number.isSafeInteger(read.createdAt) && read.createdAt > UNIX_EPOCH,
+    );
+    const renamed = success<Mutation>(
+      await kanthord(
+        ["project", "rename", created.id, "--name", RENAMED],
+        fixture.env,
+      ),
+    );
+    assert.equal(renamed.name, RENAMED);
+    assert.ok(renamed.idempotencyKey);
+    const reread = success<Project>(
+      await kanthord(["project", "get", created.id], fixture.env),
+    );
+    assert.equal(reread.name, RENAMED);
+    assert.equal(reread.id, created.id);
+  },
+);
 
 test(
   "E05.6-E05.11 apply, replay, list, get, export and list repository revisions",

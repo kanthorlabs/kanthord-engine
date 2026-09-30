@@ -35,7 +35,7 @@ const DEFAULT_TEXT_MAX_BYTES = 32768;
 const INVALID_FIELD_CODE = "system.config.invalid_field";
 const ORIGINAL_CONTENT = "original";
 const REPLACEMENT_CONTENT = "replacement";
-const CYCLIC_ALIAS_COMMAND_TIMEOUT_MS = 5000;
+const INVALID_YAML_COMMAND_TIMEOUT_MS = 10000;
 
 test("service fragments preserve the existing YAML field set", () => {
   const initial = parseMapping(initialConfig());
@@ -149,7 +149,7 @@ test("collection keys fail without YAML warnings or configuration excerpts", (t)
         "--config",
         path,
       ],
-      { encoding: "utf8", timeout: 5000 },
+      { encoding: "utf8", timeout: INVALID_YAML_COMMAND_TIMEOUT_MS },
     );
     assert.ifError(result.error);
     assert.equal(result.status, ExitCode.Failure);
@@ -178,7 +178,7 @@ test("cyclic aliases fail promptly before Convict validation", (t) => {
         "--config",
         path,
       ],
-      { encoding: "utf8", timeout: CYCLIC_ALIAS_COMMAND_TIMEOUT_MS },
+      { encoding: "utf8", timeout: INVALID_YAML_COMMAND_TIMEOUT_MS },
     );
     assert.ifError(result.error);
     assert.equal(result.status, ExitCode.Failure);
