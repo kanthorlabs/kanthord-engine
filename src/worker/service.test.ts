@@ -32,8 +32,20 @@ import { HealthStatus } from "../kernel/service.ts";
 import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { CodedError, OperationError } from "../kernel/errors.ts";
+import { createIdentity } from "../kernel/identity.ts";
+import { testMachineIdentity } from "../kernel/test-identity.ts";
+import { endRegistration, readAllLive } from "./instances.ts";
 
 const fakeCollaborations = {
+  workerBindingOf: () => ({
+    bindingId: "binding",
+    revision: 1,
+    workerName: "claude@1",
+    instanceCount: 1,
+    resourceBudget: null,
+    entries: [],
+    tombstone: false,
+  }),
   schedulerClaims: {
     runningExecutionOfRuntime: () => null,
     activityOf: () => ({ activity: InstanceActivity.Idle, executionId: null }),
@@ -52,10 +64,16 @@ const client = {
   projectId: "project",
 };
 
-test("Worker owns registrations, declares its handler, and joins lifecycle calls", async () => {
+test("Worker owns registrations, declares its handler, and joins lifecycle calls", async (t) => {
   const health = new HealthRegistry();
+  const store = new Store(IN_MEMORY_DATABASE);
+  t.after(() => store.close());
+  store.migrate([
+    { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
+  ]);
   const worker = new WorkerService({
     config: WORKER_CONFIG,
+    store,
     health,
     ...fakeCollaborations,
   });
@@ -75,31 +93,29 @@ test("Worker owns registrations, declares its handler, and joins lifecycle calls
   assert.deepEqual(await health.check(), {
     worker: { registrations: HealthStatus.Healthy },
   });
-  const store = new Store(IN_MEMORY_DATABASE);
   try {
     const registration = store.transaction((transaction) =>
-      worker.registrations.register(transaction, client),
+      worker.registrations.register(transaction, client, Date.now()),
     );
-    assert.equal(
+    assert.deepEqual(
       worker.registrations.findByClient(client.clientId),
       registration,
     );
-    assert.throws(
-      () =>
-        store.transaction((transaction) =>
-          worker.registrations.register(transaction, client),
-        ),
-      (error) =>
-        error instanceof OperationError && error.status === HttpStatus.Conflict,
+    assert.deepEqual(
+      store.transaction((transaction) =>
+        worker.registrations.register(transaction, client, Date.now()),
+      ),
+      registration,
     );
-    worker.registrations.deregister(registration.runtimeIdentity);
+    store.transaction((tx) =>
+      endRegistration(tx, registration.runtimeIdentity, Date.now()),
+    );
     assert.equal(worker.registrations.findByClient(client.clientId), undefined);
     const next = store.transaction((transaction) =>
-      worker.registrations.register(transaction, client),
+      worker.registrations.register(transaction, client, Date.now()),
     );
     assert.notEqual(next.runtimeIdentity, registration.runtimeIdentity);
   } finally {
-    store.close();
     assert.equal(await worker.stop(), null);
   }
   assert.equal(worker.stop(), worker.stop());
@@ -110,12 +126,9 @@ test("Worker owns registrations, declares its handler, and joins lifecycle calls
   assert.ok((await worker.start()) instanceof Error);
 });
 
-test("Worker run joins cancellation before and after startup", async () => {
+test("Worker run joins cancellation before and after startup", async (t) => {
   for (const before of [true, false]) {
-    const worker = new WorkerService({
-      config: WORKER_CONFIG,
-      ...fakeCollaborations,
-    });
+    const { worker } = enablementFixture(t);
     const context = new CancellationContext();
     if (before) context.cancel();
     const running = worker.run(context);
@@ -150,19 +163,91 @@ const defaults = {
 };
 const putBody = { agentProviders: [provider], defaultConfiguration: defaults };
 const binding = { bindingId: "binding", workerName: WORKER, entry: null };
+
+test("registration admission is idempotent, bounded by the latest slot count and rolled back with its transaction", (t) => {
+  let instanceCount = 2;
+  let tombstone = false;
+  const f = enablementFixture(t, {
+    workerBindingOf: (tx) => {
+      assert.ok(tx.database.isTransaction);
+      return {
+        ...fakeCollaborations.workerBindingOf(),
+        instanceCount,
+        tombstone,
+      };
+    },
+  });
+  const one = 1;
+  const two = 2;
+  const none = 0;
+  const identity = testMachineIdentity(
+    {
+      ...client,
+      clientId: createIdentity("client_identity"),
+      issuedAt: Date.now(),
+    },
+    "session",
+  );
+  const handler = f.registry.get(workerOperations.register.id).handler;
+  f.caller.identity = identity;
+  const input = { params: {}, query: {}, body: null };
+  const first = handler(input, f.caller);
+  assert.deepEqual(handler(input, f.caller), first);
+  assert.equal(f.store.transaction(readAllLive).length, one);
+  f.caller.identity = testMachineIdentity(
+    { ...identity, clientId: createIdentity("client_identity") },
+    "second",
+  );
+  handler(input, f.caller);
+  instanceCount = one;
+  f.caller.identity = testMachineIdentity(
+    { ...identity, clientId: createIdentity("client_identity") },
+    "third",
+  );
+  refuses(
+    () => handler(input, f.caller),
+    WorkerErrorCode.SlotUnavailable,
+    HttpStatus.Conflict,
+  );
+  assert.equal(f.store.transaction(readAllLive).length, two);
+  instanceCount = none;
+  refuses(
+    () => handler(input, f.caller),
+    WorkerErrorCode.SlotUnavailable,
+    HttpStatus.Conflict,
+  );
+  instanceCount = two + one;
+  tombstone = true;
+  refuses(
+    () => handler(input, f.caller),
+    WorkerErrorCode.SlotUnavailable,
+    HttpStatus.Conflict,
+  );
+  tombstone = false;
+  const commit = f.caller.commit;
+  const failure = new Error("commit rolls back");
+  f.caller.commit = (write) =>
+    f.store.transaction((tx) => {
+      write(tx);
+      throw failure;
+    });
+  assert.throws(
+    () => handler(input, f.caller),
+    (error) => error === failure,
+  );
+  f.caller.commit = commit;
+  assert.equal(f.store.transaction(readAllLive).length, two);
+  assert.equal(
+    f.worker.registrations.findByClient(f.caller.identity.clientId),
+    undefined,
+  );
+});
+
 type OperationKey = Exclude<keyof typeof workerOperations, "register">;
 
 function enablementFixture(
   t: TestContext,
-  collaborations: Partial<
-    Pick<
-      Dependencies,
-      | "custodySuitability"
-      | "credentialMetadata"
-      | "entriesOfAgent"
-      | "modelListCheck"
-    >
-  > = {},
+  collaborations: Partial<Dependencies> = {},
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
@@ -171,6 +256,7 @@ function enablementFixture(
   ]);
   const worker = new WorkerService({
     config: WORKER_CONFIG,
+    store,
     ...fakeCollaborations,
     ...collaborations,
   });
@@ -245,7 +331,9 @@ test("catalog pages supplied declarations once per commit and registrations add 
   assert.equal(second.nextCursor, null);
   await f.worker.start();
   t.after(() => f.worker.stop());
-  f.store.transaction((tx) => f.worker.registrations.register(tx, client));
+  f.store.transaction((tx) =>
+    f.worker.registrations.register(tx, client, Date.now()),
+  );
   assert.deepEqual(f.invoke("catalog.list", null, {}), before);
   assert.equal(f.commits(), expectedCommits);
   assert.deepEqual(Object.keys(before.items[0]!).sort(), [

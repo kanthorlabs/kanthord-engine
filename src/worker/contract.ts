@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { identitySchema } from "../kernel/identity.ts";
 import {
   AccessPolicy,
   StoreName,
@@ -19,7 +20,6 @@ export const WorkerMethod = {
   Evaluation: "evaluation",
 } as const;
 export type WorkerMethod = (typeof WorkerMethod)[keyof typeof WorkerMethod];
-export const MAX_RUNTIME_IDENTITY_LENGTH = 128;
 export interface VerifiedClient {
   clientId: string;
   name: string;
@@ -28,7 +28,21 @@ export interface VerifiedClient {
 }
 export interface Registration extends VerifiedClient {
   runtimeIdentity: string;
+  registeredAt: number;
 }
+export type WorkerBindingOf = (
+  tx: Transaction,
+  projectId: string,
+  resourceIdentity: string,
+) => {
+  bindingId: string;
+  revision: number;
+  workerName: string;
+  instanceCount: number;
+  resourceBudget: { turns: number; wallTimeMs: number } | null;
+  entries: WorkerEntry[];
+  tombstone: boolean;
+} | null;
 
 export const InstanceActivity = {
   Idle: "idle",
@@ -173,9 +187,12 @@ export type WorkerAgentViewFn = (
 ) => WorkerAgentView | null;
 
 export interface WorkerRegistrations {
-  register(transaction: Transaction, client: VerifiedClient): Registration;
+  register(
+    transaction: Transaction,
+    client: VerifiedClient,
+    now: number,
+  ): Registration;
   findByClient(clientId: string): Registration | undefined;
-  deregister(runtimeIdentity: string): void;
 }
 
 export const WORKER_SERVICE_NAME = "worker";
@@ -185,6 +202,7 @@ export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 
 export const WorkerErrorCode = {
+  SlotUnavailable: "worker.instance.slot_unavailable",
   CatalogNotFound: "worker.catalog.not_found",
   AgentNotFound: "worker.agent.not_found",
   NotFound: "worker.agent.enablement.not_found",
@@ -432,13 +450,9 @@ export const workerOperations = {
     status: HttpStatus.OK,
     input: emptyInput,
     output: z.strictObject({
-      runtimeIdentity: z
-        .string()
-        .min(1)
-        .max(MAX_RUNTIME_IDENTITY_LENGTH)
-        .refine((value) => !!value.trim()),
+      runtimeIdentity: identitySchema("worker_instance"),
     }),
     description:
-      "Register a worker instance with a bearer machine JWT and an empty body. Returns its runtime identity, not a token. A client identity holds at most one live registration. Repeating the key replays that identity while live; a replay after the registration ends answers 409. Cancellation does not deregister an accepted registration.",
+      "Register a worker instance with a bearer machine JWT and an empty body. A client identity with a live registration receives that runtime identity with any key. A recorded replay after the registration ends answers 409 gateway.registration.stale. Admission and the binding instance count share one transaction.",
   },
 } as const satisfies Record<string, Operation>;

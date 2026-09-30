@@ -135,6 +135,9 @@ export function composeServices(options: {
   });
   const worker: WorkerService = new WorkerService({
     config: options.config.worker,
+    store: options.store,
+    workerBindingOf: (tx, projectId, resourceIdentity) =>
+      project.workerBindingOf(tx, projectId, resourceIdentity),
     schedulerClaims: options.standIns?.workerSchedulerClaims ?? {
       runningExecutionOfRuntime: unwired(
         "SchedulerClaims.runningExecutionOfRuntime",

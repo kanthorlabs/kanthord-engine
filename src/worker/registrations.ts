@@ -1,37 +1,56 @@
 import assert from "node:assert/strict";
-import type { Transaction } from "../kernel/store.ts";
-import { createIdentity } from "../kernel/identity.ts";
+import type { Store, Transaction } from "../kernel/store.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import type {
-  Registration,
-  VerifiedClient,
-  WorkerRegistrations,
+import {
+  WorkerErrorCode,
+  type Registration,
+  type VerifiedClient,
+  type WorkerBindingOf,
+  type WorkerRegistrations,
 } from "./contract.ts";
-export class InMemoryRegistrations implements WorkerRegistrations {
-  readonly registrations = new Map<string, Registration>();
-  findByClient(clientId: string): Registration | undefined {
-    return this.registrations.get(clientId);
+import {
+  countLive,
+  insertRegistration,
+  readLiveByClient,
+  readLiveOfClient,
+} from "./instances.ts";
+
+export class TableRegistrations implements WorkerRegistrations {
+  private readonly store: Store;
+  private readonly workerBindingOf: WorkerBindingOf;
+  constructor(store: Store, workerBindingOf: WorkerBindingOf) {
+    assert.ok(store.database.isOpen);
+    assert.ok(workerBindingOf);
+    this.store = store;
+    this.workerBindingOf = workerBindingOf;
   }
-  register(transaction: Transaction, client: VerifiedClient): Registration {
-    assert.ok(transaction.database.isTransaction);
-    assert.ok(client.clientId);
-    if (this.registrations.has(client.clientId))
+  findByClient(clientId: string): Registration | undefined {
+    assert.ok(clientId);
+    assert.ok(this.store.database.isOpen);
+    return readLiveByClient(this.store, clientId);
+  }
+  register(tx: Transaction, client: VerifiedClient, now: number): Registration {
+    assert.ok(tx.database.isTransaction);
+    assert.equal(tx.database, this.store.database);
+    const previous = readLiveOfClient(tx, client.clientId);
+    if (previous) return previous;
+    const binding = this.workerBindingOf(
+      tx,
+      client.projectId,
+      client.resourceIdentity,
+    );
+    if (
+      !binding ||
+      binding.tombstone ||
+      countLive(tx, client.projectId, client.resourceIdentity) >=
+        binding.instanceCount
+    )
       throw new OperationError(
         HttpStatus.Conflict,
-        "gateway.registration.conflict",
-        "Client identity already holds a live registration.",
+        WorkerErrorCode.SlotUnavailable,
+        "Worker binding has no available registration slot.",
       );
-    const registration = {
-      ...client,
-      runtimeIdentity: createIdentity("runtime_identity"),
-    };
-    this.registrations.set(client.clientId, registration);
-    return registration;
-  }
-  deregister(runtimeIdentity: string): void {
-    for (const [clientId, registration] of this.registrations)
-      if (registration.runtimeIdentity === runtimeIdentity)
-        this.registrations.delete(clientId);
+    return insertRegistration(tx, client, now);
   }
 }

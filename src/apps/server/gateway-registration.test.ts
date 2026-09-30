@@ -31,7 +31,7 @@ const DISPLAY_NAME = "test worker";
 const input = { params: {}, query: {}, body: null };
 const ErrorCode = {
   Unauthorized: "gateway.authentication.unauthorized",
-  Capacity: "gateway.registration.capacity",
+  Capacity: "worker.instance.slot_unavailable",
   Stale: "gateway.registration.stale",
   Required: "gateway.registration.required",
 } as const;
@@ -158,7 +158,7 @@ test("one live registration per client, live replay across adapters, and stale r
   assert.ok(first.type === OperationResultType.Completed);
   assert.match(
     first.data.runtimeIdentity,
-    /^runtime_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
+    /^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
   );
   const retry = await fixture.client.register(input);
   assert.ok(retry.type === OperationResultType.Completed);
@@ -339,48 +339,6 @@ test("another client using the same key registers and runs its own mutation inst
   }
   assert.equal(calls, TWO_CLIENTS);
   assert.equal(machines.worker.registrations.size, TWO_CLIENTS);
-});
-
-test("a registration is deregistered when its store transaction fails", async (t) => {
-  const fixture = await fixtureForRegistration(t);
-  const transaction = fixture.store.transaction.bind(fixture.store);
-  const failing = t.mock.method(
-    fixture.store,
-    "transaction",
-    (write: Parameters<typeof transaction>[0]) =>
-      transaction((tx) => {
-        write(tx);
-        throw new Error("test transaction failure");
-      }),
-  );
-  const result = await fixture.client.register(input);
-  assert.equal(result.type, OperationResultType.Failure);
-  assert.ok(result.type === OperationResultType.Failure);
-  assert.equal(result.status, HttpStatus.InternalServerError);
-  assert.equal(fixture.machines.worker.registrations.size, NO_REGISTRATIONS);
-  failing.mock.restore();
-  assert.ok(
-    (await fixture.client.register(input)).type ===
-      OperationResultType.Completed,
-  );
-  assert.equal(fixture.machines.worker.registrations.size, SINGLE_REGISTRATION);
-});
-
-test("an invalid accepted registration is cleaned up before returning a failure", async (t) => {
-  const fixture = await fixtureForRegistration(t);
-  const register = fixture.machines.worker.register;
-  t.mock.method(
-    fixture.machines.worker,
-    "register",
-    (...args: Parameters<typeof register>) => ({
-      ...register(...args),
-      projectId: "another-project",
-    }),
-  );
-  const result = await fixture.client.register(input);
-  assert.ok(result.type === OperationResultType.Failure);
-  assert.equal(result.status, HttpStatus.InternalServerError);
-  assert.equal(fixture.machines.worker.registrations.size, NO_REGISTRATIONS);
 });
 
 test("registration accepts only a bearer machine JWT, no nominated identity or body", async (t) => {

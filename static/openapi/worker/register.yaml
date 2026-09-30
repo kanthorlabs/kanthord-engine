@@ -5,10 +5,10 @@ pathItem:
     tags:
       - worker
     description: Register a worker instance with a bearer machine JWT and an empty
-      body. Returns its runtime identity, not a token. A client identity holds
-      at most one live registration. Repeating the key replays that identity
-      while live; a replay after the registration ends answers 409. Cancellation
-      does not deregister an accepted registration.
+      body. A client identity with a live registration receives that runtime
+      identity with any key. A recorded replay after the registration ends
+      answers 409 gateway.registration.stale. Admission and the binding instance
+      count share one transaction.
     x-access-policy: client
     x-timeout-ms: 10000
     x-mutation: true
@@ -69,8 +69,10 @@ components:
       properties:
         runtimeIdentity:
           type: string
-          minLength: 1
-          maxLength: 128
+          minLength: 42
+          maxLength: 42
+          pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: worker_instance_ followed by a canonical 26-character uppercase ULID.
       required:
         - runtimeIdentity
       additionalProperties: false

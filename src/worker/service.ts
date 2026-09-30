@@ -26,6 +26,7 @@ import {
   AGENT_PROVIDER_CAPABILITY,
   AGENT_PROVIDER_TARGET_KIND,
   type WorkerRegistrations,
+  type WorkerBindingOf,
   type SchedulerClaims,
   type AgentEnablement,
   type AgentProviderItem,
@@ -41,7 +42,7 @@ import {
   LIST_LIMIT_DEFAULT,
   agentEnablementSchema,
 } from "./contract.ts";
-import type { Transaction } from "../kernel/store.ts";
+import type { Store, Transaction } from "../kernel/store.ts";
 import {
   agentsOfWorker,
   getAgentDeclaration,
@@ -66,7 +67,7 @@ import {
   validateEffectiveConfig,
   validateProvider,
 } from "./configuration.ts";
-import { InMemoryRegistrations } from "./registrations.ts";
+import { TableRegistrations } from "./registrations.ts";
 import type { WorkerConfig } from "./config.ts";
 
 const NONE = 0;
@@ -161,6 +162,8 @@ function saveRevision(tx: Transaction, current: EnablementRow) {
 }
 export interface Dependencies {
   config: WorkerConfig;
+  store: Store;
+  workerBindingOf: WorkerBindingOf;
   schedulerClaims: SchedulerClaims;
   custodySuitability: CustodySuitability;
   credentialMetadata: CredentialMetadataFn;
@@ -175,7 +178,8 @@ export class WorkerService implements Service {
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
     this.registrations =
-      dependencies.registrations ?? new InMemoryRegistrations();
+      dependencies.registrations ??
+      new TableRegistrations(dependencies.store, dependencies.workerBindingOf);
     dependencies.health?.register("worker", () => this.healthcheck());
   }
   private readonly shutdown = new CancellationContext();
@@ -741,36 +745,26 @@ export class WorkerService implements Service {
             "gateway.authentication.unauthorized",
             "Authentication required.",
           );
-        const previous = worker.findByClient(
-          identity.clientId,
-        )?.runtimeIdentity;
-        let runtimeIdentity: string | undefined;
-        try {
-          return caller.commit((transaction) => {
-            if (previous) return { runtimeIdentity: previous };
-            const registration = worker.register(transaction, identity);
-            assert.equal(registration.clientId, identity.clientId);
-            assert.equal(registration.name, identity.name);
-            assert.equal(registration.projectId, identity.projectId);
-            assert.equal(
-              registration.resourceIdentity,
-              identity.resourceIdentity,
-            );
-            runtimeIdentity = registration.runtimeIdentity;
-            assert.ok(
-              runtimeIdentity,
-              "Registration must return a runtime identity.",
-            );
-            return { runtimeIdentity };
-          });
-        } catch (error) {
-          const accepted =
-            runtimeIdentity ??
-            worker.findByClient(identity.clientId)?.runtimeIdentity;
-          if (accepted !== undefined && accepted !== previous)
-            worker.deregister(accepted);
-          throw error;
-        }
+        return caller.commit((transaction) => {
+          const registration = worker.register(
+            transaction,
+            identity,
+            Date.now(),
+          );
+          assert.equal(registration.clientId, identity.clientId);
+          assert.equal(registration.name, identity.name);
+          assert.equal(registration.projectId, identity.projectId);
+          assert.equal(
+            registration.resourceIdentity,
+            identity.resourceIdentity,
+          );
+          const runtimeIdentity = registration.runtimeIdentity;
+          assert.ok(
+            runtimeIdentity,
+            "Registration must return a runtime identity.",
+          );
+          return { runtimeIdentity };
+        });
       },
     );
   }

@@ -95,7 +95,11 @@ export function fakeMachines(
   const worker = {
     registrations,
     findByClient: (clientId: string) => registrations.get(clientId),
-    register(transaction: Transaction, client: VerifiedClient): Registration {
+    register(
+      transaction: Transaction,
+      client: VerifiedClient,
+      now: number,
+    ): Registration {
       assert.ok(transaction.database.isTransaction);
       const binding = [...bindings].find(
         ([name, binding]) =>
@@ -108,12 +112,8 @@ export function fakeMachines(
         Number.isSafeInteger(binding.capacity) &&
           binding.capacity >= NO_INSTANCES,
       );
-      if (registrations.has(client.clientId))
-        throw new GatewayError(
-          HttpStatus.Conflict,
-          "gateway.registration.conflict",
-          "Client identity already holds a live registration.",
-        );
+      const previous = registrations.get(client.clientId);
+      if (previous) return previous;
       const count = [...registrations.values()].filter(
         (entry) =>
           entry.resourceIdentity === client.resourceIdentity &&
@@ -122,12 +122,13 @@ export function fakeMachines(
       if (count >= binding.capacity)
         throw new GatewayError(
           HttpStatus.Conflict,
-          "gateway.registration.capacity",
+          "worker.instance.slot_unavailable",
           "Worker binding is at capacity.",
         );
       const registration = {
         ...client,
-        runtimeIdentity: createIdentity("runtime_identity"),
+        runtimeIdentity: createIdentity("worker_instance"),
+        registeredAt: now,
       };
       registrations.set(client.clientId, registration);
       return registration;
