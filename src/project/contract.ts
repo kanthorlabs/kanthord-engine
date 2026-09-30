@@ -320,6 +320,17 @@ export type BindingRevisionResult = {
   tombstone: boolean;
   disabled: boolean;
 };
+export type RepositoryPolicy = {
+  bindingId: string;
+  projectId: string;
+  name: string;
+  address: string;
+  platform: string;
+  credential: string;
+  baseBranch: string;
+  action: (typeof GitHubAction)[keyof typeof GitHubAction] | null;
+  projectPrompt: string | null;
+};
 
 const emptyFields = z.strictObject({});
 const projectParams = z.strictObject({ projectId: z.string().min(1) });

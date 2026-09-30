@@ -41,6 +41,7 @@ import {
   bindingEditSchema,
   bindingSetWriteInputSchema,
   projectOperations,
+  repositoryConfigSchema,
   workerConfigSchema,
   type ProjectBindings,
   type AgentDependentBinding,
@@ -51,6 +52,7 @@ import {
   type ValidateEntry,
   type CustodySuitability,
   type RepositoryConnector,
+  type RepositoryPolicy,
   type WorkerAgentsOfFn,
   type WorkerAgentViewFn,
   type WorkerEntry,
@@ -560,6 +562,28 @@ export class ProjectService implements Service, ProjectBindings {
       revision: binding.revision,
       tombstone: hasBindingTombstone(tx, binding),
       disabled,
+    };
+  }
+  repositoryPolicyOf(
+    tx: Transaction,
+    bindingId: string,
+  ): RepositoryPolicy | null {
+    assert.ok(tx.database.isTransaction);
+    const binding = readBindingRevision(tx, bindingId);
+    if (!binding || kindOf(binding.resourceIdentity) !== BindingKind.Repository)
+      return null;
+    assert.equal(binding.id, bindingId);
+    const config = repositoryConfigSchema.parse(binding.config);
+    return {
+      bindingId: binding.id,
+      projectId: binding.projectId,
+      name: binding.name,
+      address: config.address,
+      platform: config.platform,
+      credential: config.credential,
+      baseBranch: config.strategy.baseBranch,
+      action: config.strategy.action?.name ?? null,
+      projectPrompt: config.projectPrompt ?? null,
     };
   }
   async resolveWorkerBinding(bindingId: string, context: Context) {

@@ -2020,6 +2020,101 @@ test("resolveBinding selects the latest named group in its project after revisio
   });
 });
 
+test("repositoryPolicyOf preserves the named revision after a strategy change", (t) => {
+  const f = fixture(t);
+  const baseBranch = "develop";
+  const projectPrompt = "Follow the repository conventions.";
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const original = repositoryBinding();
+    original.config.strategy.action = {
+      name: GitHubAction.PullRequest,
+      follows: { type: FollowsType.AssessmentPassed },
+    };
+    original.config.projectPrompt = projectPrompt;
+    const pinned = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: original,
+    }).bindings[REPOSITORY_NAME]!;
+    const later = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: {
+        ...original,
+        config: {
+          ...original.config,
+          strategy: {
+            baseBranch,
+            action: {
+              name: GitHubAction.MergePush,
+              follows: { type: FollowsType.AssessmentPassed },
+            },
+          },
+        },
+      },
+    }).bindings[REPOSITORY_NAME]!;
+    assert.notEqual(pinned.id, later.id);
+    assert.deepEqual(f.project.repositoryPolicyOf(tx, pinned.id), {
+      bindingId: pinned.id,
+      projectId: project.id,
+      name: REPOSITORY_NAME,
+      address: original.config.address,
+      platform: original.config.platform,
+      credential: original.config.credential,
+      baseBranch: original.config.strategy.baseBranch,
+      action: GitHubAction.PullRequest,
+      projectPrompt,
+    });
+    const latest = f.project.repositoryPolicyOf(tx, later.id);
+    assert.equal(latest?.action, GitHubAction.MergePush);
+    assert.equal(latest?.baseBranch, baseBranch);
+  });
+});
+
+test("repositoryPolicyOf answers null for an absent or nonrepository binding", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const rows = persistBindings(tx, project.id, {
+      [WORKER_NAME]: workerBinding(),
+      [STORAGE_NAME]: storageBinding(),
+    }).bindings;
+    assert.equal(f.project.repositoryPolicyOf(tx, MISSING_NAME), null);
+    assert.equal(f.project.repositoryPolicyOf(tx, rows[WORKER_NAME]!.id), null);
+    assert.equal(
+      f.project.repositoryPolicyOf(tx, rows[STORAGE_NAME]!.id),
+      null,
+    );
+  });
+});
+
+test("repositoryPolicyOf shares the caller transaction and does not retain rolled-back rows", (t) => {
+  const f = fixture(t);
+  const failure = new Error("Caller rollback");
+  let bindingId = MISSING_NAME;
+  assert.throws(
+    () =>
+      f.store.transaction((tx) => {
+        const project = insertProject(tx, PROJECT_NAME);
+        bindingId = persistBindings(tx, project.id, {
+          [REPOSITORY_NAME]: repositoryBinding(),
+        }).bindings[REPOSITORY_NAME]!.id;
+        const nested = t.mock.method(f.store, "transaction", unexpected);
+        const policy = f.project.repositoryPolicyOf(tx, bindingId);
+        assert.ok(policy);
+        assert.equal(policy.bindingId, bindingId);
+        assert.equal(policy.action, null);
+        assert.equal(policy.projectPrompt, null);
+        assert.equal(nested.mock.callCount(), NO_CALLS);
+        nested.mock.restore();
+        assert.ok(tx.database.isTransaction);
+        throw failure;
+      }),
+    (error) => error === failure,
+  );
+  f.store.transaction((tx) => {
+    assert.equal(f.project.repositoryPolicyOf(tx, bindingId), null);
+    assert.equal(f.store.database.isTransaction, true);
+  });
+});
+
 test("getBindingRevision keeps pinned fields and derives disablement from the latest row for every kind", (t) => {
   const f = fixture(t);
   f.store.transaction((tx) => {
