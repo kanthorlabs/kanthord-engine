@@ -13,6 +13,10 @@ import {
   evidenceSchema,
   outcomeSchema,
   verificationSchema,
+  assessmentSchema,
+  testedInputSchema,
+  type Assessment,
+  type ExecutionAttribution,
   type Attempt,
   type Evidence,
   type EvidenceAsset,
@@ -29,6 +33,7 @@ import {
   readCurrentOutcome,
   readOutcomesOfAttempt,
   readRequests,
+  readOutcome,
   type AssetRow,
   type AttemptRow,
   type EvidenceRow,
@@ -36,6 +41,7 @@ import {
   type AssessmentRow,
 } from "./record-store.ts";
 import { readNode, type NodeRow } from "./store.ts";
+import { currencyOf } from "./currency.ts";
 
 const ZERO = 0;
 const stringSet = z.array(z.string());
@@ -224,4 +230,67 @@ export function blockedContextOf(
             evidenceRecord(tx, row),
           ),
   };
+}
+
+export function assessmentRecord(
+  tx: Transaction,
+  dependencies: { executionAttribution: ExecutionAttribution },
+  row: AssessmentRow,
+): Assessment {
+  const childOutcomeIds = stringSet.parse(JSON.parse(row.child_outcome_ids));
+  const childNodeIds = [
+    ...new Set(
+      childOutcomeIds.map((id) => {
+        const child = readOutcome(tx, id);
+        assert.ok(child);
+        return child.node_id;
+      }),
+    ),
+  ].sort();
+  const base = {
+    id: row.id,
+    nodeId: row.node_id,
+    executionId: row.execution_id,
+    attempt: row.attempt,
+    nodeRevision: row.node_revision,
+    evidenceIds: stringSet.parse(JSON.parse(row.evidence_ids)),
+    childOutcomeIds,
+    childNodeIds,
+    result: row.result,
+    rationale: row.rationale,
+    createdAt: row.created_at,
+  };
+  if (row.execution_id === null) {
+    assert.ok(row.actor !== null);
+    const actor = actorSchema.parse(JSON.parse(row.actor));
+    assert.equal(actor.kind, ActorKind.Human);
+    return assessmentSchema.parse({
+      ...base,
+      actor,
+      testedInput: null,
+      currency: null,
+      workerVersion: null,
+    });
+  }
+  const attribution = dependencies.executionAttribution.of(
+    tx,
+    row.execution_id,
+  );
+  assert.ok(attribution);
+  assert.equal(row.actor, null);
+  return assessmentSchema.parse({
+    ...base,
+    actor: {
+      kind: ActorKind.Execution,
+      executionId: row.execution_id,
+      clientId: attribution.clientId,
+      name: attribution.name,
+    },
+    testedInput:
+      row.tested_input === null
+        ? null
+        : testedInputSchema.parse(JSON.parse(row.tested_input)),
+    currency: currencyOf(tx, row),
+    workerVersion: attribution.workerName,
+  });
 }
