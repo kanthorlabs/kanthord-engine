@@ -1161,6 +1161,19 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "node.check": {
+    ...writeOperation,
+    id: "mission.node.check",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:nodeId/check",
+    input: z.strictObject({
+      params: z.strictObject({ nodeId: identitySchema("node") }),
+      query: z.strictObject({}),
+      body: nodeCheckSchema,
+    }),
+    output: nodeCheckResultSchema,
+    description: "Check unresolved external requests on demand.",
+  },
   "assessment.submit": {
     ...writeOperation,
     access: AccessPolicy.Client,

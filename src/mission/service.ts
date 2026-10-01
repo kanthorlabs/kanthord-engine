@@ -43,6 +43,7 @@ import { submitEvidence } from "./evidence-submit.ts";
 import { evidencePage, getEvidence } from "./evidence-read.ts";
 import { executionContentBound, readContent } from "./evidence-content-read.ts";
 import { submitAssessment } from "./assessment-submit.ts";
+import { checkNode } from "./node-check.ts";
 import { claim, release, loss } from "./transitions.ts";
 import {
   attemptPage,
@@ -142,6 +143,16 @@ export class MissionService
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["node.check"],
+      ({ params, body }, caller) =>
+        checkNode(
+          this.dependencies,
+          caller,
+          params.nodeId,
+          body.expectedMissionVersion,
+        ),
+    );
     registry.register(
       missionOperations["assessment.submit"],
       ({ params, body }, caller) => {

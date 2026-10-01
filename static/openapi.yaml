@@ -70,6 +70,8 @@ paths:
     $ref: ./openapi/mission/import.preview.yaml#/pathItem
   /api/mission/node/{nodeId}/block:
     $ref: ./openapi/mission/node.block.yaml#/pathItem
+  /api/mission/node/{nodeId}/check:
+    $ref: ./openapi/mission/node.check.yaml#/pathItem
   /api/mission/{missionId}/node:
     $ref: ./openapi/mission/node.create.yaml#/pathItem
   /api/mission/node/{nodeId}/discard:

@@ -30,6 +30,20 @@ import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
 
+test("published node check names its operation", () => {
+  const fragment = parse(
+    readFileSync(
+      join(dirname(openapiPath()), "openapi/mission/node.check.yaml"),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    fragment.pathItem.post.operationId,
+    missionOperations["node.check"].id,
+  );
+  assert.equal(missionOperations["node.check"].access, AccessPolicy.Human);
+});
+
 test("published content reads name their bounded operations", () => {
   for (const name of [
     "evidence.asset.content.get",

@@ -7,6 +7,7 @@ import {
   overrideSchema,
   unblockSchema,
   AssessmentResult,
+  nodeCheckSchema,
 } from "../../mission/contract.ts";
 import { singleUse } from "./shared.ts";
 import { addMutationOptions, mutate } from "./mission-support.ts";
@@ -14,6 +15,21 @@ import { addMutationOptions, mutate } from "./mission-support.ts";
 const PAUSE_INVALID_NODE = "cli.mission.node.pause.invalid_node_id";
 
 export function addControlCommands(node: Command): void {
+  addMutationOptions(
+    node.command("check").argument("<node-id>", "Node ID"),
+  ).action(async (nodeId: string, _options, command: Command) => {
+    if (!identitySchema("node").safeParse(nodeId).success)
+      throw new Diagnostic(
+        "cli.mission.node.check.invalid_node_id",
+        "invalid node ID",
+      );
+    await mutate(command, "node.check", nodeCheckSchema, (api, body, key) =>
+      api["node.check"](
+        { params: { nodeId }, query: {}, body },
+        { idempotencyKey: key },
+      ),
+    );
+  });
   addUnblockCommand(node);
   addOverrideCommand(node);
   for (const [name, operation, code] of [
