@@ -9,7 +9,7 @@ This plan delivers:
 - The human evidence reads `mission.evidence.list`, `mission.evidence.get` and `mission.evidence.asset.content.get`.
 - The human deletes `mission.evidence.asset.delete` and `mission.evidence.delete`.
 - The human check `mission.node.check` with the end state of a request, the landed-commit evidence, the fold into `External.Success` or `External.Failed` and the closure of plan 01.
-- The nine execution-scoped reads of `engine/docs/cli/mission.md:523–531`.
+- The nine execution-scoped reads of `engine/docs/cli/mission.md:544–552` ("Execution-scoped reads — 9 commands").
 - The Project collaboration `storageBindingOf`, the ERD 3 seams `IntakeStorage` and `IntakeCheck` with their `unwired` production entries and their `gatewayFixture` fakes, and the in-process object sink of the tests (decisions D6, D17).
 - The CLI leaves of every operation above that has a CLI row, except row 35 `evidence upload` (see "Out of scope").
 
@@ -43,15 +43,15 @@ Out of scope:
 - `docs/brainstorm/worker-service.md:494`, `:517–519` — the reviewer reads the evidence set of the attempt, and a passing assessment ends the claim.
 - `docs/brainstorm/scheduler-service.md:204–212`, `:224–237` — the revocation, the claim states and the proof inside the transaction.
 - `docs/brainstorm/architecture.impl.md:117–119`, `:663–676`, `:694–699` — the synchronous transaction, the read of a worker keyed by the execution identity, and the handler that separates asynchronous work from its commit.
-- `engine/docs/cli/mission.md:145–153` — the access legend H and E.
-- `engine/docs/cli/mission.md:198–200` — the one cross-node read of an execution.
-- `engine/docs/cli/mission.md:396–407`, `:409–474` — the evidence and assessment commands, routes, access and effects.
-- `engine/docs/cli/mission.md:482`, `:493–515` — `node check` and the request evidence.
-- `engine/docs/cli/mission.md:517–543` — the nine execution-scoped reads.
-- `engine/docs/cli/mission.md:545–582` — the object flow.
-- `engine/docs/cli/mission.md:699–775` — `EvidenceDelete`, `NodeCheck`, the execution submissions, the object schemas, `TestedInput` and the result order.
-- `engine/docs/cli/mission.md:777–822` — the result schemas.
-- `engine/docs/cli/mission.md:857–968` — the error codes of the Mission CLI.
+- `engine/docs/cli/mission.md` "Access legend" — the access legend H and E.
+- `engine/docs/cli/mission.md` "Execution-scoped reads — 9 commands" — the initiative's current-child objective reads.
+- `engine/docs/cli/mission.md` "Attempts, evidence and outcomes — 14 commands" — the evidence and assessment commands, routes, access and effects.
+- `engine/docs/cli/mission.md` "External-action records — 3 commands" — `node check` and the request evidence.
+- `engine/docs/cli/mission.md` "Execution-scoped reads — 9 commands" — the nine execution-scoped reads.
+- `engine/docs/cli/mission.md` "Host-local evidence upload" — the object flow.
+- `engine/docs/cli/mission.md` "Evidence deletes and node check", "Execution submissions" and "Object evidence schemas" — the delete/check inputs, submissions, object schemas, `TestedInput` and the result order.
+- `engine/docs/cli/mission.md` "Proposed result schemas" — the result schemas.
+- `engine/docs/cli/mission.md` "Error codes" — the error codes of the Mission CLI.
 - `engine/docs/cli/scheduler.md:499` — `scheduler.execution.not_running`.
 - `engine/docs/cli/other.md:810` — `gateway.request.validation_failed`.
 - `docs/brainstorm/architecture.impl.md:341–349` — the error code form and the CLI code form.
@@ -82,10 +82,10 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
 | `IntakeStorage` (declared)         | `put(call, binding, key, size, sha256): Promise<{ putUrl; headers; expiresAt }>`; `check(call, binding, key, size, sha256): Promise<{ location; version }>`; `get(call, binding, key, version): Promise<{ getUrl; expiresAt }>`; `executionGet(call, binding, key, version)`: the same answer; `delete(call, binding, key, version): Promise<void>` — `call` is `{ context: Context; identity: CallerIdentity }`, `sha256` and `version` are `string \| null` | `src/mission/contract.ts`         | ERD 3          |
 | `IntakeCheck` (declared)           | `check(context: Context, request: { frozenAction: FrozenAction; address: PlatformAddress }): Promise<{ endState: "expected" \| "other" \| "none"; landedCommits: string[] }>`                                                                                                                                                                                                                                                                                 | `src/mission/contract.ts`         | ERD 3          |
 | Execution submissions              | `mission.evidence.submit`, `mission.evidence.asset.complete`, `mission.assessment.submit`, `mission.evidence.request`                                                                                                                                                                                                                                                                                                                                         | `src/mission/contract.ts`         | 06, 08, 09, 10 |
-| Execution-scoped reads             | the nine operations of `engine/docs/cli/mission.md:523–531`                                                                                                                                                                                                                                                                                                                                                                                                   | `src/mission/contract.ts`         | 07, 08, 09     |
+| Execution-scoped reads             | the nine operations of `engine/docs/cli/mission.md` "Execution-scoped reads — 9 commands"                                                                                                                                                                                                                                                                                                                                                                     | `src/mission/contract.ts`         | 07, 08, 09     |
 | Object sink of the tests           | `objectSink(t): Promise<{ endpoint: string; objects: Map<string, Uint8Array> }>`; `sinkStorage(sink): IntakeStorage`; `scriptedCheck(answer): IntakeCheck`                                                                                                                                                                                                                                                                                                    | `src/apps/server/test-support.ts` | 09, 10         |
 
-`IntakeStorage` differs from the sketch of `00-index.md` "Seams": it adds `executionGet`, because the pages name two operations that sign a GET, `intake.storage.get` under `human` access and `intake.execution.storage.get` under `client` access (`intake-service.impl.md:51`), and no handler shapes its result by the kind of the caller (`architecture.impl.md:670`).
+This plan and `00-index.md` "Seams" both declare separate `get` and `executionGet` signing seams: the pages name `intake.storage.get` under `human` access and `intake.execution.storage.get` under `client` access (`intake-service.impl.md:51`), and no handler shapes its result by the kind of the caller (`architecture.impl.md:670`).
 
 ## Tasks
 
@@ -113,7 +113,7 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
   4. Add `store: Store`, `intakeStorage: IntakeStorage` and `intakeCheck: IntakeCheck` to `Dependencies` (`src/mission/service.ts:74–79`) as required fields.
   5. In `composeServices` (`src/apps/server/index.ts:62–72`, `:123–131`), pass `store: options.store`, add `storageBindingOf: (tx, bid) => project.storageBindingOf(tx, bid)` to the Mission `bindings`, and extend `standIns` with `intakeStorage?` and `intakeCheck?`. Without a stand-in, pass an object whose every method is `unwired("<Interface>.<method>")`.
   6. In `gatewayFixture` (`src/apps/server/test-support.ts:125–138`), extend `standIns` with the same two fields. The default of each is the same unwired object, the true state of the absent ERD 3 peer.
-  7. In `src/apps/server/test-support.ts`, export `objectSink(t)`: a `node:http` server on `127.0.0.1` port 0 that stores the body of each `PUT` by path, answers `GET` with the stored bytes or 404, and closes in `t.after`. Export `sinkStorage(sink)`: `put` answers `{ putUrl: endpoint + "/" + key, headers, expiresAt: now + 3600000 }` with the header `x-amz-checksum-sha256` only for a non-null `sha256`; `check` answers `{ location: "s3://" + bucket + "/" + key, version: null }` when the stored length equals `size`, and throws an `Error` with the message `object size mismatch` otherwise; `get` and `executionGet` answer the `GET` URL; `delete` removes the entry. Export `scriptedCheck(answer)`, which answers the given value to each call and records the calls.
+  7. In `src/apps/server/test-support.ts`, export `objectSink(t)`: a `node:http` server on `127.0.0.1` port 0 that decodes the path once at the sink boundary, stores the body of each `PUT` by its exact decoded key, answers `GET` with the stored bytes or 404, and closes in `t.after`. Export `sinkStorage(sink)`: `put` answers `{ putUrl: endpoint + "/" + encodeURIComponent(key), headers, expiresAt: now + 3600000 }` with the header `x-amz-checksum-sha256` only for a non-null `sha256`; `check` answers `{ location: "s3://" + bucket + "/" + key, version: null }` when the stored length equals `size`, and throws an `Error` with the message `object size mismatch` otherwise; `get` and `executionGet` answer `endpoint + "/" + encodeURIComponent(key)` as the `GET` URL; `delete` removes the exact-key entry. Export `scriptedCheck(answer)`, which answers the given value to each call and records the calls.
   8. In `unwired-import.test.ts`, add `IntakeStorage.put`, `IntakeStorage.check`, `IntakeStorage.get`, `IntakeStorage.executionGet`, `IntakeStorage.delete` and `IntakeCheck.check` to `UNWIRED_SEAMS`.
   9. In `missionHarness` and in `makeService` of `src/mission/service.test.ts`, pass the store of the harness, and fakes of both seams that throw `UNEXPECTED_COLLABORATION` by default. Give the `bindings` default a `storageBindingOf` that throws the same error.
 - Rules:
@@ -122,7 +122,7 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
   - An ERD 3 seam is `unwired` in production and a fake in `gatewayFixture`. Decisions D6, D17.
   - A handler runs asynchronous work first and performs one `caller.commit` at the end; the store handle serves the reads before that asynchronous work. `architecture.impl.md:694–699`. Precedent: `src/custody/service.ts:799`; `src/project/service.ts:569`.
   - A store transaction is synchronous and never nests. `architecture.impl.md:117`; `src/kernel/store.ts:66–67`.
-  - The checksum header exists only when the submission supplies a SHA-256. `mission-service.impl.md:302`; `engine/docs/cli/mission.md:564`.
+  - The checksum header exists only when the submission supplies a SHA-256. `mission-service.impl.md:302`; `engine/docs/cli/mission.md` "Host-local evidence upload", step 1.
   - Only a test file imports `test-identity.ts`. `eslint.config.js:206–224`.
   - Gap: the service identity of the Mission Service for the Intake check stays with the composition of ERD 3 (`intake-service.impl.md:48`); no service identity exists in ERD 2 code (`src/kernel/caller.ts:2`).
 - Done when: `pnpm run verify` passes; `unwired-import.test.ts` asserts the new set; every earlier E2E test passes unchanged.
@@ -137,13 +137,13 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
   4. Add to `MissionErrorCode` (`src/mission/contract.ts:61–98`) the written codes `EvidenceBindingMismatch`, `EvidenceTooLarge`, `EvidenceUploadExpired`, `EvidenceContentRepository`, `EvidenceRemoveNodeLive`, `EvidenceRequestForceRequired`, `EvidenceRequestAssetRefused`, `AssessmentEvidenceUnpublished`, `AssessmentVerificationFailed`, `NoUnresolvedRequest`, `RecordNotFound`, and the proposed codes of this plan: `mission.execution.context_mismatch`, `mission.evidence.storage_binding_absent`, `mission.evidence.content_platform`, `mission.execution.claim_not_evaluation`, `mission.request.requirement_unknown`, `mission.request.already_requested`, `mission.request.address_mismatch`, `mission.execution.revision_above_pin` (code: proposed, each).
   5. In `contract.test.ts`, assert that each input refuses an unknown key and an `actor` key, that `attempt: 0` fails the context, that `force: true` without `reason` fails, that a size of 5 GiB passes and one byte more fails, that `text/plain; charset=utf-8` fails and `text/plain` passes, and that an assessment with a `method` key fails.
 - Rules:
-  - Every field name equals the CLI page: `ExecutionContext`, `EvidenceSubmit`, `ContentBytes`, `Verification`, `AssessmentBody`, `AssessmentSubmit` (`engine/docs/cli/mission.md:715–723`); `EvidenceDelete`, `NodeCheck` (`:706–707`); `EvidenceSubmitResult`, `AssetUploadResult` (`:731–732`); `StoredContent`, `AssessmentResult`, `NodeCheckResult` (`:812`, `:815`, `:818`).
+  - Every field name equals the CLI page `engine/docs/cli/mission.md`: `ExecutionContext`, `EvidenceSubmit`, `ContentBytes`, `Verification`, `AssessmentBody`, `AssessmentSubmit` ("Execution submissions"); `EvidenceDelete`, `NodeCheck` ("Evidence deletes and node check"); `EvidenceSubmitResult`, `AssetUploadResult` ("Object evidence schemas"); `StoredContent`, `AssessmentResult`, `NodeCheckResult` ("Proposed result schemas").
   - `EvidenceRequest` holds every field of `ExecutionContext` plus `requirementKey`, `subject` and `address`. `mission-service.impl.md:89–90` (ruled 2026-09-30); decision D10.
-  - An execution submission names an attempt of 1 or more. `engine/docs/cli/mission.md:711`; `02-execution.md:244`.
+  - An execution submission names an attempt of 1 or more. `engine/docs/cli/mission.md` "Execution submissions", opening attempt rule; `02-execution.md:244`.
   - An object is at most 5 GiB; the server checks that bound at submit. `02-execution.md:251`; `mission-service.impl.md:297`. A value outside the schema answers 400 `gateway.request.validation_failed`. `engine/docs/cli/other.md:810`.
   - `mediaType` is an RFC 6838 `type/subtype` with no parameter, in ASCII, at most 255 bytes. `mission-service.impl.md:284`.
   - Force without a reason answers HTTP 400 with a validation issue list. `mission-service.impl.md:346`.
-  - An objective read without an outcome carries its identity and its state only. `engine/docs/cli/mission.md:543`.
+  - An objective read without an outcome carries its identity and its state only. `engine/docs/cli/mission.md` "Execution-scoped reads — 9 commands", objective answer description.
   - No input carries an actor, and no assessment holds a `method` field. `mission-service.impl.md:33`, `:203`, `:224`.
   - The `ProducedAddress` of an inline asset derives from its content; `ContentBytes` carries no digest, so the server computes the SHA-256. `mission-service.impl.md:261–262`, `:269`; `02-execution.md:247`.
   - Every proposed code follows `<namespace>.<component>…<error>`. `architecture.impl.md:343–347`. Aelita writes each accepted code before the plan commits. Ruling R3.
@@ -164,10 +164,10 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
 - Rules:
   - Every execution mutation repeats the full proof in its write transaction: the claimant, a null `ended_at` and a reading before `expired_at`. A failed check answers 409 `scheduler.execution.not_running`. `02-execution.md:216`; `scheduler-service.md:231–237`; `engine/docs/cli/scheduler.md:499`.
   - The chain passes the node, the attempt and the pinned revision, and the handler reads none of them from the input. `architecture.impl.md:654`; decision D10.
-  - `ExecutionContext` must match the authenticated live claim. `engine/docs/cli/mission.md:715`. Code `mission.execution.context_mismatch` (409): proposed in `00-index.md` "Codes for Ulrich". No code of `engine/docs/cli/other.md` and no ERD 1 code covers it.
+  - `ExecutionContext` must match the authenticated live claim. `engine/docs/cli/mission.md` "Execution submissions", `ExecutionContext` row. Code `mission.execution.context_mismatch` (409): published in `00-index.md` "Codes for Ulrich". No code of `engine/docs/cli/other.md` and no ERD 1 code covers it.
   - An execution submission names the claimed node and the open attempt of the claim. `02-execution.md:244`.
   - The provenance of an execution submission is that execution, in the execution actor form. `02-execution.md:245`; `mission-service.impl.md:31`.
-  - An assessment and a request need an evaluation claim; the node state `Evaluating` fixes the kind of a live claim. `engine/docs/cli/mission.md:458`; `mission-service.impl.md:89`; `02-execution.md:212`. Code `mission.execution.claim_not_evaluation` (409): proposed in `00-index.md`.
+  - An assessment and a request need an evaluation claim; the node state `Evaluating` fixes the kind of a live claim. `engine/docs/cli/mission.md` "Attempts, evidence and outcomes — 14 commands", "External-action records — 3 commands" and "Error codes"; `mission-service.impl.md:89`; `02-execution.md:212`. Code `mission.execution.claim_not_evaluation` (409): published in `00-index.md`.
   - A `Text` value above `mission.textMaxBytes` answers HTTP 400 with an issue list. `mission-service.impl.md:546`; `engine/docs/cli/other.md:810`.
 - Done when: `pnpm run verify` passes; the tests pass.
 
@@ -185,12 +185,12 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
 - Rules:
   - The asset shapes: `bindingId` and `commit`; `mediaType`, `sha256` and canonical base64 `data` of at most 5 MiB decoded; `location`, `size`, `mediaType`, `storageBindingId`, `objectVersion` when returned and an optional `sha256`. `02-execution.md:247`; `mission-service.impl.md:268–269`.
   - `bindingId` names a repository binding row of the project in every context, and for an objective it equals the repository binding of the pinned revision. `02-execution.md:248`; `mission-service.impl.md:279–283`.
-  - The tested input of an initiative holds one commit per distinct binding of its current objectives, discarded objectives included; with no repository it is a produced or an object address. `engine/docs/cli/mission.md:736–741`; `mission-service.vocabulary.md:313–343`.
+  - The tested input of an initiative holds one commit per distinct binding of its current objectives, discarded objectives included; with no repository it is a produced or an object address. `engine/docs/cli/mission.md` "Object evidence schemas", `TestedInput` description; `mission-service.vocabulary.md:313–343`.
   - The service checks the commit form alone and never the repository. `mission-service.impl.md:278`.
-  - Larger inline content answers 413 `mission.evidence.too_large`; the service never truncates. `mission-service.impl.md:259–264`; `engine/docs/cli/mission.md:927`.
-  - The object key is `<prefix>/<project>/<mission>/<node>/<attempt>/<evidence asset id>`. `mission-service.impl.md:299`; `engine/docs/cli/mission.md:561`.
+  - Larger inline content answers 413 `mission.evidence.too_large`; the service never truncates. `mission-service.impl.md:259–264`; `engine/docs/cli/mission.md` "Error codes", `mission.evidence.too_large` row.
+  - The object key is `<prefix>/<project>/<mission>/<node>/<attempt>/<evidence asset id>`. `mission-service.impl.md:299`; `engine/docs/cli/mission.md` "Host-local evidence upload", step 1.
   - A run passes when `results` hold one entry per verification and every entry has `exitCode` 0; for an objective, the verifications of each current task of the pinned revision count. `mission-service.impl.md:189`, `:196`; `02-execution.md:268`.
-  - The CLI page fixes no order across the objective and its tasks, so the check compares a multiset. `engine/docs/cli/mission.md:721`, `:751`.
+  - The CLI page fixes no order across the objective and its tasks, so the check compares a multiset. `engine/docs/cli/mission.md` "Execution submissions", `Verification` row, and "Object evidence schemas", verification description.
 - Done when: `pnpm run verify` passes; the tests pass.
 
 ### 04.6 Implement `mission.evidence.submit` with its CLI leaf
@@ -204,14 +204,14 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
   5. Regenerate OpenAPI with `pnpm run build && node bin/kanthord.mjs gateway openapi`, and assert the operation id in `openapi-integration.test.ts`.
   6. Add tests: a repository evidence of an objective is published at once; a produced evidence stores the SHA-256; an object evidence answers one upload with a 1 hour `expiresAt` and a pending asset; a node without a storage binding answers `mission.evidence.storage_binding_absent`; a repeat creates a second evidence; a failed `put` writes no row; a submission under an evaluation claim passes; a claim that ends between the pre-read and the commit answers `scheduler.execution.not_running`; a human caller answers 401 at the chain.
 - Rules:
-  - The route, the input, the answer and the access E. `engine/docs/cli/mission.md:398`, `:556`, `:719`, `:731`.
+  - The route, the input, the answer and the access E. `engine/docs/cli/mission.md` "Attempts, evidence and outcomes — 14 commands", submit row; "Execution submissions" and "Object evidence schemas", submission input and answer.
   - The submission writes the evidence row and every asset row in one transaction; no asset joins it later. `02-execution.md:246`; `mission-service.impl.md:270`.
   - A `repository`, `produced` or `platform` asset sets `published_at` at the insert; an `object` asset sets `expired_at` 1 hour after the submission. `02-execution.md:249`; `mission-service.impl.md:271`.
   - A node without a storage binding accepts no object asset. `02-execution.md:251`; `mission-service.impl.md:265`, `:298`. Code `mission.evidence.storage_binding_absent` (409): proposed in `00-index.md` "Codes for Ulrich".
-  - The Intake Service signs a presigned PUT with a lifetime of 1 hour, and the answer supplies one PUT for each object asset. `mission-service.impl.md:301`; `engine/docs/cli/mission.md:563`.
+  - The Intake Service signs a presigned PUT with a lifetime of 1 hour, and the answer supplies one PUT for each object asset. `mission-service.impl.md:301`; `engine/docs/cli/mission.md` "Host-local evidence upload", step 1.
   - A row that records a remote effect follows that effect; the signature is asynchronous work before the commit. `02-execution.md:187`; `architecture.impl.md:697–699`.
   - An evidence has no natural key; a repeat creates a second row. `02-execution.md:245`; `architecture.impl.md:717`.
-  - Presigned URLs never reach agent-facing stdout, so the CLI leaf refuses an object asset and directs it to the host helper. `engine/docs/cli/mission.md:781`, `:549`, `:540` (ruled 2026-09-30).
+  - Presigned URLs never reach agent-facing stdout, so the CLI leaf refuses an object asset and directs it to the host helper. `engine/docs/cli/mission.md` "Host-local evidence upload", "Proposed result schemas" and "Execution-scoped reads — 9 commands", URL boundaries (ruled 2026-09-30).
   - CLI codes `cli.mission.evidence.submit.invalid_node_id` and `cli.mission.evidence.submit.object_asset`: proposed under `architecture.impl.md:348`.
   - The task that declares a route adds the CLI leaf and regenerates OpenAPI; an oversized fragment takes the named exception. ERD 1 decision D13; decision D23.
 - Done when: `pnpm run verify` passes; the tests pass; `kanthord mission evidence submit --help` exits 0.
@@ -226,12 +226,12 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
   4. Regenerate OpenAPI and assert the operation id.
   5. Add tests: a complete publishes the asset and its evidence; a repeat after the publication answers the same result and calls no `check`; a thrown `check` keeps the asset pending and propagates; an expired asset answers `mission.evidence.upload_expired`; an asset of another node answers `mission.execution.context_mismatch`; a returned version reads back as `address.version`.
 - Rules:
-  - The route, the input and the answer. `engine/docs/cli/mission.md:557`, `:732`, `:734`.
-  - The server checks the live claim, and the Intake Service checks the size and the optional checksum; a mismatch prevents publication. `mission-service.impl.md:305–308`; `engine/docs/cli/mission.md:566–568`.
+  - The route, the input and the answer. `engine/docs/cli/mission.md` "Host-local evidence upload", complete row, and "Object evidence schemas", `AssetUploadResult`.
+  - The server checks the live claim, and the Intake Service checks the size and the optional checksum; a mismatch prevents publication. `mission-service.impl.md:305–308`; `engine/docs/cli/mission.md` "Host-local evidence upload", step 3.
   - The asset holds the location, the version when the store returns one, the size, the media type and the optional SHA-256; the answer holds the identity and the `s3://` URI. `mission-service.impl.md:309–310`; `02-execution.md:247`.
-  - An asset whose `expired_at` passed never completes, and a complete of it answers 409 `mission.evidence.upload_expired`. `02-execution.md:249`; `mission-service.impl.md:313`; `engine/docs/cli/mission.md:928`.
+  - An asset whose `expired_at` passed never completes, and a complete of it answers 409 `mission.evidence.upload_expired`. `02-execution.md:249`; `mission-service.impl.md:313`; `engine/docs/cli/mission.md` "Error codes", `mission.evidence.upload_expired` row.
   - A mutation is idempotent by its own natural key, the asset identity. `engine/AGENTS.md` "Add an operation".
-  - An absent record answers 404 `mission.record.not_found`; only an `object` asset holds a pending upload. `mission-service.impl.md:548`; `engine/docs/cli/mission.md:966`; `mission-service.vocabulary.md:91–94`.
+  - An absent record answers 404 `mission.record.not_found`; only an `object` asset holds a pending upload. `mission-service.impl.md:548`; `engine/docs/cli/mission.md` "Error codes", `mission.record.not_found` row; `mission-service.vocabulary.md:91–94`.
   - An evidence is published when every asset of it holds `published_at`. `02-execution.md:250`.
 - Done when: `pnpm run verify` passes; the tests pass.
 
@@ -246,9 +246,9 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
   5. Regenerate OpenAPI and assert both operation ids.
   6. Add tests: the order, the cursor, `--attempt 0` with the landed commit of an override, a pending asset with `publishedAt: null`, a request evidence with `requirementKey` and no `endState`, a task refusal and an absent evidence.
 - Rules:
-  - The routes, the access H, the filter and the answers. `engine/docs/cli/mission.md:396–397`, `:409–418`, `:432`.
-  - A record list requires an initiative or an objective. `engine/docs/cli/mission.md:417–418`; `mission-service.impl.md:174`.
-  - A list orders by its primary key in descending order. `engine/docs/cli/mission.md:788`; ERD 1 decision D10.
+  - The routes, the access H, the filter and the answers. `engine/docs/cli/mission.md` "Attempts, evidence and outcomes — 14 commands", evidence list/get rows and semantic rules.
+  - A record list requires an initiative or an objective. `engine/docs/cli/mission.md` "Attempts, evidence and outcomes — 14 commands", list rule; `mission-service.impl.md:174`.
+  - A list orders by its primary key in descending order. `engine/docs/cli/mission.md` "Proposed result schemas", pagination description; ERD 1 decision D10.
   - CLI codes: proposed under `architecture.impl.md:348`, within the family row `cli.mission.<command>.invalid_<argument>` of `00-index.md`.
   - Gap: the record commands keep their HANDOFF mark (`docs/brainstorm/HANDOFF.md:27`); the reads implement the CLI page as written.
 - Done when: `pnpm run verify` passes; the tests pass.
@@ -264,15 +264,15 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
   5. Regenerate OpenAPI and assert both operation ids.
   6. Add tests: an inline answer holds the bytes and the derived address; an object answer holds the GET of the recorded version; an object without a version signs the key alone; a repository asset answers `mission.evidence.content_repository` with the address; a platform asset answers `mission.evidence.content_platform`; an asset of another node answers 404 under the execution bound; a deleted asset answers 404 with no bytes and no URL.
 - Rules:
-  - The routes and the access. `engine/docs/cli/mission.md:399`, `:527`.
-  - Both reads call one domain query with a required bound that the server derives from the caller, and return one record schema. `engine/docs/cli/mission.md:153`; `architecture.impl.md:671–674`.
-  - An execution reads no content of another node, except a current child objective of its initiative at the revision of its current outcome. `engine/docs/cli/mission.md:198–200`, `:541–542`.
-  - An identity that a caller guesses conveys no authority, so an asset outside the bound answers 404. `engine/docs/cli/mission.md:145–146`.
-  - A repository asset answers 409 `mission.evidence.content_repository` with `evidenceId` and the address, after the authorization and the bound checks. `mission-service.impl.md:285`; `engine/docs/cli/mission.md:812`, `:923`.
-  - A platform asset answers 409 `mission.evidence.content_platform` with `evidenceId` and the address. `mission-service.impl.md:293`; `engine/docs/cli/mission.md:949` (ruled 2026-09-30).
+  - The routes and the access. `engine/docs/cli/mission.md` "Attempts, evidence and outcomes — 14 commands" and "Execution-scoped reads — 9 commands", asset content rows.
+  - Both reads call one domain query with a required bound that the server derives from the caller, and return one record schema. `engine/docs/cli/mission.md` "Access legend"; `architecture.impl.md:671–674`.
+  - An execution reads no content of another node, except a current child objective of its initiative at the revision of its current outcome. `engine/docs/cli/mission.md` "Mission, graph, nodes and criterion — 17 commands", execution boundary description, and "Execution-scoped reads — 9 commands", objective answer description.
+  - An identity that a caller guesses conveys no authority, so an asset outside the bound answers 404. `engine/docs/cli/mission.md` "Access legend".
+  - A repository asset answers 409 `mission.evidence.content_repository` with `evidenceId` and the address, after the authorization and the bound checks. `mission-service.impl.md:285`; `engine/docs/cli/mission.md` "Proposed result schemas", `StoredContent`, and "Error codes", `mission.evidence.content_repository` row.
+  - A platform asset answers 409 `mission.evidence.content_platform` with `evidenceId` and the address. `mission-service.impl.md:293`; `engine/docs/cli/mission.md` "Error codes", `mission.evidence.content_platform` row (ruled 2026-09-30).
   - The Intake Service signs the GET through `intake.storage.get` for a human and `intake.execution.storage.get` for an execution, at the recorded version. `mission-service.impl.md:325–326`; `intake-service.impl.md:51`.
-  - The reader's component keeps the GET URL outside the agent context, so the E leaf refuses an object answer. `engine/docs/cli/mission.md:540`, `:781`, `:904` (ruled 2026-09-30).
-  - A read of a deleted asset answers 404 `mission.record.not_found` with no content. `mission-service.impl.md:356`; `engine/docs/cli/mission.md:821`.
+  - The reader's component keeps the GET URL outside the agent context, so the E leaf refuses an object answer. `engine/docs/cli/mission.md` "Execution-scoped reads — 9 commands", content answer; "Proposed result schemas", URL boundary; "Error codes", `cli.mission.execution.evidence.asset.content.get.object_content` row (ruled 2026-09-30).
+  - A read of a deleted asset answers 404 `mission.record.not_found` with no content. `mission-service.impl.md:356`; `engine/docs/cli/mission.md` "Proposed result schemas", deleted-record rule.
 - Done when: `pnpm run verify` passes; the tests pass.
 
 ### 04.10 Add the assessment admission checks
@@ -286,15 +286,16 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
      - `childOutcomeIds` is empty for an objective. For an initiative it equals the set of the current outcomes of its current objectives that hold an outcome. Else 400 `gateway.request.validation_failed` with the path `childOutcomeIds`.
      - `testedInput` passes `requireTestedInput`.
      - For `success`: exactly one named evidence holds a `verification`, that run passes `verificationPasses` against `requiredVerifications`, and its `testedInput` equals the body `testedInput` in canonical JSON. A failed run, no verification or a second verification answers 409 `mission.assessment.verification_failed`. A different tested input answers 400 `gateway.request.validation_failed` with the path `testedInput`.
-     - For `undetermined`: a named verification that does not pass answers 400 `gateway.request.validation_failed` with the path `result`.
+     - For `undetermined`: no named verification, or a named verification that does not pass, answers 400 `gateway.request.validation_failed` with the path `result`.
+     - For each non-success result, every named verification's `testedInput` must equal the assessment's `testedInput` in canonical JSON; a mismatch answers 400 `gateway.request.validation_failed` with the path `testedInput`. The exactly-one-verification rule remains success-only.
   2. Add tests: each refusal and its order; `criterion-not-met` with a failed verification passes; a success whose `results` miss a task verification answers `mission.assessment.verification_failed`; an evidence of another attempt answers 400; an initiative child set with an extra outcome answers 400; a pending asset and an expired asset answer `mission.assessment.evidence_unpublished`.
 - Rules:
-  - The evidence, the tested input and the child outcomes of an assessment belong to the node and to the context of its attempt. `02-execution.md:265`; `engine/docs/cli/mission.md:722`.
+  - The evidence, the tested input and the child outcomes of an assessment belong to the node and to the context of its attempt. `02-execution.md:265`; `engine/docs/cli/mission.md` "Execution submissions", `AssessmentBody` row.
   - `childOutcomeIds` of an initiative names the current outcome of each current objective and no other; for an objective it is empty; the service refuses every other set with HTTP 400 and an issue list. `mission-service.impl.md:227`; `02-execution.md:266`.
-  - An assessment that names an evidence with a pending or expired asset answers 409 `mission.assessment.evidence_unpublished`. `mission-service.impl.md:230`; `engine/docs/cli/mission.md:916`.
-  - A success names exactly one evidence with a passing `verification` that covers the objective and each current task of the pinned revision; otherwise 409 `mission.assessment.verification_failed`. `mission-service.impl.md:194–196`; `02-execution.md:267–268`; `engine/docs/cli/mission.md:917`.
+  - An assessment that names an evidence with a pending or expired asset answers 409 `mission.assessment.evidence_unpublished`. `mission-service.impl.md:230`; `engine/docs/cli/mission.md` "Error codes", `mission.assessment.evidence_unpublished` row.
+  - A success names exactly one evidence with a passing `verification` that covers the objective and each current task of the pinned revision; otherwise 409 `mission.assessment.verification_failed`. `mission-service.impl.md:194–196`; `02-execution.md:267–268`; `engine/docs/cli/mission.md` "Error codes", `mission.assessment.verification_failed` row.
   - The assessment names the tested input of the verification that it names. `mission-service.md:519`.
-  - A result that violates the result order answers HTTP 400 with an issue list. `mission-service.impl.md:212–224`; `engine/docs/cli/mission.md:757–766`.
+  - A result that violates the result order answers HTTP 400 with an issue list. `mission-service.impl.md:212–224`; `engine/docs/cli/mission.md` "Object evidence schemas", result-order description.
   - The server checks no default-standard violation; the worker applies that rule. `02-execution.md:269`; `mission-service.impl.md:217`.
 - Done when: `pnpm run verify` passes; the tests pass.
 
@@ -310,10 +311,10 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
   6. Regenerate OpenAPI and assert the operation id.
   7. Add tests: a current pass on an objective with no required action completes the node, closes the attempt, writes the outcome `assessment-passed` and revokes the claim; a `criterion-not-met` and an `undetermined` block the node with the outcome `assessment-not-passed`; a pass on a node with a required action keeps `Evaluating` and answers `outcome: null`; an initiative pass inserts no job of a dependent before its terminal state; a dependent of a completed node moves to `Available` with a job; a pass whose child set is not current writes no outcome; a later submission under the same claim fails the proof after a closure.
 - Rules:
-  - The route, the input, the answer and the evaluation claim. `engine/docs/cli/mission.md:403`, `:456–462`, `:723`, `:815`.
+  - The route, the input, the answer and the evaluation claim. `engine/docs/cli/mission.md` "Attempts, evidence and outcomes — 14 commands", assessment submit row and semantic rules; "Execution submissions", `AssessmentSubmit`; "Proposed result schemas", `AssessmentResult`.
   - Exactly one of `execution_id` and `actor` is set; an execution assessment stores the execution. `02-execution.md:263`; `mission-service.impl.md:205`.
   - `sequence` takes the next value inside the inserting transaction. `02-execution.md:270`; decision D21.
-  - A current passing assessment on a node that requires no external action closes the attempt with `Completed` and ends the claim; a current assessment that does not pass closes the attempt with `Blocked` and ends the claim. `02-execution.md:221`; `mission-service.md:583`, `:585`; `engine/docs/cli/mission.md:463–465`.
+  - A current passing assessment on a node that requires no external action closes the attempt with `Completed` and ends the claim; a current assessment that does not pass closes the attempt with `Blocked` and ends the claim. `02-execution.md:221`; `mission-service.md:583`, `:585`; `engine/docs/cli/mission.md` "Attempts, evidence and outcomes — 14 commands", assessment submit semantic rules.
   - A passing assessment with no required external action ends the claim, and no release follows. `worker-service.md:519`; `engine/docs/cli/scheduler.md` "execution release", effect 3.
   - The revocation sets `ended_at` in the Mission transaction and counts as no loss. `02-execution.md:224`; `scheduler-service.md:208–209`, `:226`.
   - The outcome asserts the result of its execution assessment; only an execution assessment supports `criterion-not-met`. `02-execution.md:280`; `mission-service.md:533`.
@@ -337,10 +338,10 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
 - Rules:
   - A `client` operation under the live evaluation claim; it checks the node, the open attempt, the required external action and its binding, and it answers `Evidence`. `mission-service.impl.md:89–90`.
   - The route and the input with every field of `ExecutionContext`. `mission-service.impl.md:89–90` (ruled 2026-09-30); decision D10.
-  - No CLI command projects the operation. `engine/docs/cli/mission.md:502–503`, `:847`.
+  - No CLI command projects the operation. `engine/docs/cli/mission.md` "External-action records — 3 commands" and "Operations deliberately outside this CLI inventory", `mission.evidence.request`.
   - `requirement_key` equals the key of a required external action of the attempt, and the evidence holds exactly one `platform` asset. `02-execution.md:287`; `mission-service.md:256–260`. Code `mission.request.requirement_unknown` (400): proposed in `00-index.md` "Codes for Ulrich".
-  - `PlatformAddress` holds the `kind` and the `resourceIdentity` of the binding and never a `bindingId`. `mission-service.impl.md:237`; `engine/docs/cli/mission.md:730`. Code `mission.request.address_mismatch` (400): proposed; the condition stands at `mission-service.impl.md:89` ("its binding"). No code of `engine/docs/cli/other.md` and no ERD 1 code covers it.
-  - One attempt holds at most one request for each required external action. `02-execution.md:288`; `engine/docs/cli/mission.md:508–509`. Code `mission.request.already_requested` (409): proposed in `00-index.md`.
+  - `PlatformAddress` holds the `kind` and the `resourceIdentity` of the binding and never a `bindingId`. `mission-service.impl.md:237`; `engine/docs/cli/mission.md` "Object evidence schemas", `PlatformAddress`. Code `mission.request.address_mismatch` (400): published; the condition stands at `mission-service.impl.md:89` ("its binding"). No code of `engine/docs/cli/other.md` and no ERD 1 code covers it.
+  - One attempt holds at most one request for each required external action. `02-execution.md:288`; `engine/docs/cli/mission.md` "External-action records — 3 commands", request rule. Code `mission.request.already_requested` (409): published in `00-index.md`.
   - The request asset is a `platform` asset with `published_at` at the insert. `02-execution.md:249`.
   - Gap: the dispatch record and the recovery of a lost answer stay B9 W2 and W3 (`docs/brainstorm/HANDOFF.md:120–121`); a repeat answers `mission.request.already_requested`.
 - Done when: `pnpm run verify` passes; the tests pass.
@@ -361,14 +362,14 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
   7. Regenerate OpenAPI and assert the operation id.
   8. Add tests: `expected` with two commits writes two landed-commit evidences and reaches `Completed` with the outcome `external-success`; `other` reaches `Blocked` with the outcome `external-failed`; `none` writes nothing and answers `unresolved`; a thrown check answers `failures` and commits the other results; a request set by a concurrent write keeps its end state; a paused node keeps `Paused`; a node with no unresolved request answers `mission.node.no_unresolved_request`; the mission version stays unchanged.
 - Rules:
-  - The route, the access H, the input and the answer. `mission-service.impl.md:244`; `engine/docs/cli/mission.md:482`, `:493–497`, `:707`, `:818`.
-  - The check calls the Intake check for each unresolved request of the open attempt and commits each result in its own transaction; a node with no unresolved request refuses the check. `mission-service.md:851–855`; `engine/docs/cli/mission.md:955`.
+  - The route, the access H, the input and the answer. `mission-service.impl.md:244`; `engine/docs/cli/mission.md` "External-action records — 3 commands", node check; "Evidence deletes and node check", `NodeCheck`; "Proposed result schemas", `NodeCheckResult`.
+  - The check calls the Intake check for each unresolved request of the open attempt and commits each result in its own transaction; a node with no unresolved request refuses the check. `mission-service.md:851–855`; `engine/docs/cli/mission.md` "Error codes", `mission.node.no_unresolved_request` row.
   - `endState` is `expected`, `other` or `none`; the service sets `end_state` once and refuses a later conclusive result; `none` writes nothing. `mission-service.impl.md:239–240`; `02-execution.md:290`.
   - An `expected` result of a repository action writes each landed commit as its own evidence with the service provenance and the attempt of the request. `mission-service.impl.md:241`; `02-execution.md:256`.
   - The transitions `External.Requested -> External.Success` and `-> External.Failed`, then `External.Success -> Completed` and `External.Failed -> Blocked`. `mission-service.md:603–604`, `:607`, `:610`.
   - The transaction that makes the continuation condition hold inserts the evaluation job. `02-execution.md:220`; `mission-service.md:691`.
   - A node check leaves the mission version unchanged and names `expectedMissionVersion`. `mission-service.impl.md:517`, `:522`.
-  - A task rejects the external-action calls. `engine/docs/cli/mission.md:486`. The code `mission.node.control_task` extends its command list with `node check` (code: proposed extension).
+  - A task rejects the external-action calls. `engine/docs/cli/mission.md` "External-action records — 3 commands", task refusal. The code `mission.node.control_task` includes `node check` in its published command list.
   - A handler runs asynchronous work before its commit, and a transaction awaits nothing. `architecture.impl.md:117`, `:697`; `mission-service.impl.md:243`.
   - `LANDED_COMMIT_SUBJECT` is a named constant, because `subject` is a nonblank `Text` and no page names its value. `02-execution.md:89`; `architecture.impl.md:15–19`.
   - Gap: the deduplication of an unchanged state stays B9 C3, and a reversed platform state and an end state that never arrives stay C5 and C6 (`docs/brainstorm/HANDOFF.md:105–107`).
@@ -387,12 +388,12 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
   6. Regenerate OpenAPI and assert the operation id.
   7. Add tests: a delete on a terminal chain removes the row and keeps the evidence with zero assets; a live chain answers `mission.evidence.remove_node_live`; `force` with a reason deletes on a live chain; a failed object delete keeps the row, and a repeat deletes again; the delete of the last pending asset publishes the evidence; a request asset answers `mission.evidence.request_asset_refused`; a stale version answers `mission.version.conflict`; the mission version stays unchanged; no row records the remover.
 - Rules:
-  - The route, the access H, the input and the answer 204. `mission-service.impl.md:339`, `:341`; `engine/docs/cli/mission.md:406`, `:448–453`.
-  - The flag `--expected-mission-version` supplies `expectedMissionVersion`. `engine/docs/cli/mission.md:406–407`, `:451` (ruled 2026-09-30); precedent `engine/docs/cli/worker.md:131–133`. The value is a positive safe integer. `engine/docs/cli/mission.md:124`.
-  - Without force, the node and every ancestor hold a terminal state; a live chain answers 409 `mission.evidence.remove_node_live`. `mission-service.impl.md:343–344`; `engine/docs/cli/mission.md:924`.
+  - The route, the access H, the input and the answer 204. `mission-service.impl.md:339`, `:341`; `engine/docs/cli/mission.md` "Attempts, evidence and outcomes — 14 commands", asset delete row and semantic rules.
+  - The flag `--expected-mission-version` supplies `expectedMissionVersion`. `engine/docs/cli/mission.md` "Attempts, evidence and outcomes — 14 commands", delete rows and rules (ruled 2026-09-30); precedent `engine/docs/cli/worker.md:131–133`. The value is a positive safe integer. `engine/docs/cli/mission.md` "Scalars and schema notation".
+  - Without force, the node and every ancestor hold a terminal state; a live chain answers 409 `mission.evidence.remove_node_live`. `mission-service.impl.md:343–344`; `engine/docs/cli/mission.md` "Error codes", `mission.evidence.remove_node_live` row.
   - The service deletes the content first and the row after it; a failed content delete keeps the row. `mission-service.impl.md:348–349`.
   - The object delete uses the storage binding revision that the asset pins and the recorded version. `mission-service.impl.md:348`.
-  - The asset delete refuses the `platform` asset of a request evidence. `mission-service.impl.md:353`; `engine/docs/cli/mission.md:925`.
+  - The asset delete refuses the `platform` asset of a request evidence. `mission-service.impl.md:353`; `engine/docs/cli/mission.md` "Error codes", `mission.evidence.request_asset_refused` row.
   - A delete of an expired asset can publish its evidence. `mission-service.impl.md:355`.
   - No row records the remover, the reason or the time. `02-execution.md:253`; `mission-service.impl.md:351`.
   - CLI codes: proposed under `architecture.impl.md:348`.
@@ -415,10 +416,10 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
   5. Regenerate OpenAPI and assert the operation id.
   6. Add tests: a delete removes the identity from each set and keeps the effect of the outcome; the derived closing event stays after the forced delete of a request; a request without force answers `mission.evidence.request_force_required`; a forced delete of a request of the open attempt holds the node in `Paused` and revokes a live claim; a request of a closed attempt changes no state; a read after the delete answers `mission.record.not_found`.
 - Rules:
-  - The route, the access H, the input and the answer 204. `mission-service.impl.md:340–341`; `engine/docs/cli/mission.md:407`, `:448–454`.
-  - The flag `--expected-mission-version`. `engine/docs/cli/mission.md:406–407`, `:451` (ruled 2026-09-30).
+  - The route, the access H, the input and the answer 204. `mission-service.impl.md:340–341`; `engine/docs/cli/mission.md` "Attempts, evidence and outcomes — 14 commands", evidence delete row and semantic rules.
+  - The flag `--expected-mission-version`. `engine/docs/cli/mission.md` "Attempts, evidence and outcomes — 14 commands", delete rows and rules (ruled 2026-09-30).
   - The delete removes every asset and the evidence row, and it removes the identity from every `evidenceIds` set. `02-execution.md:253`; `mission-service.impl.md:340`.
-  - A request evidence is deleted only with force, in every node state. `mission-service.impl.md:352`; `engine/docs/cli/mission.md:926`.
+  - A request evidence is deleted only with force, in every node state. `mission-service.impl.md:352`; `engine/docs/cli/mission.md` "Error codes", `mission.evidence.request_force_required` row.
   - A forced delete of a request of the open attempt holds the node in `Paused` in the same transaction, unless the node is already `Paused`; a request of a closed attempt or of a terminal node changes no state. `mission-service.impl.md:354`; `02-execution.md:291`; `mission-service.md:558`.
   - Every Mission transition first settles each expired unsettled execution, and a hold ends a live claim. `02-execution.md:223`; `scheduler-service.md:204–208`.
   - A delete admits an outcome reference and changes no effect of that outcome. `mission-service.impl.md:357`; `mission-service.md:318–319`.
@@ -437,9 +438,9 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
   5. Regenerate OpenAPI and assert the three operation ids.
   6. Add tests: the pinned read answers the tasks and the complete content; a human revision after the claim stays outside the list; a revision above the pin answers `mission.execution.revision_above_pin`; the list pages in descending order.
 - Rules:
-  - The routes, the access E and the answers. `engine/docs/cli/mission.md:523–525`, `:533–535`.
-  - The server derives the node, the attempt and the pinned revision from the live claim, and a read under E never returns a revision newer than the pinned one. `engine/docs/cli/mission.md:151`, `:519`.
-  - Revision list and get reject a requested revision above the pinned one. `engine/docs/cli/mission.md:535`. Code `mission.execution.revision_above_pin` (404): proposed in `00-index.md` "Codes for Ulrich".
+  - The routes, the access E and the answers. `engine/docs/cli/mission.md` "Execution-scoped reads — 9 commands", pinned-revision and revision list/get rows.
+  - The server derives the node, the attempt and the pinned revision from the live claim, and a read under E never returns a revision newer than the pinned one. `engine/docs/cli/mission.md` "Access legend" and "Execution-scoped reads — 9 commands".
+  - Revision list and get reject a requested revision above the pinned one. `engine/docs/cli/mission.md:556` ("Execution-scoped reads — 9 commands"). Code `mission.execution.revision_above_pin` (404): published in `00-index.md` "Codes for Ulrich".
   - The read of a worker is a `client` operation keyed by the execution identity. `architecture.impl.md:673`.
   - CLI codes: proposed under `architecture.impl.md:348`; a hyphen of `pinned-revision` becomes an underscore.
 - Done when: `pnpm run verify` passes; the tests pass.
@@ -454,8 +455,8 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
   4. Regenerate OpenAPI and assert both operation ids.
   5. Add tests: the list holds the evidence of the claimed attempt only; an unblocked attempt answers the outcome of the blocked attempt; a block and an unblock at attempt 0 and a claim of attempt 1 answer 404.
 - Rules:
-  - The routes, the access E and the answers. `engine/docs/cli/mission.md:526`, `:531`, `:536`, `:539–540`.
-  - The reviewer reads the evidence set of the attempt. `worker-service.md:494`; `engine/docs/cli/mission.md:519`.
+  - The routes, the access E and the answers. `engine/docs/cli/mission.md` "Execution-scoped reads — 9 commands", evidence list and cleared-outcome rows and their answer descriptions.
+  - The reviewer reads the evidence set of the attempt. `worker-service.md:494`; `engine/docs/cli/mission.md` "Execution-scoped reads — 9 commands", claim-derived scope and evidence list.
   - The cleared-attempt outcome answers 404 `mission.record.not_found` when no unblock opened the claimed attempt; an attempt of 2 or more always opens by an unblock. `mission-service.impl.md:392–394`; `02-execution.md:234`.
   - The current outcome of a node in an attempt is its outcome with the greatest `sequence` among the outcomes whose assessment names that attempt. `02-execution.md:277`.
   - CLI codes: proposed under `architecture.impl.md:348`.
@@ -467,15 +468,15 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
 - Do:
   1. Declare three `client` reads with `requiresExecution: true` and `pageQuery`: `"execution.objective.list"` (`mission.execution.objective.list`, `GET /api/mission/execution/:executionId/objective`, output `pageOf(executionObjectiveSchema)`); `"execution.objective.outcome.list"` (`mission.execution.objective.outcome.list`, `GET /api/mission/execution/:executionId/objective/outcome`, output `pageOf(outcomeSchema)`); `"execution.objective.evidence.list"` (`mission.execution.objective.evidence.list`, `GET /api/mission/execution/:executionId/objective/evidence`, output `pageOf(evidenceSchema)`).
   2. Implement `currentObjectivesOf(tx, initiativeId)`: the current objectives of the claimed initiative, each with its current outcome or null. An objective claim answers an empty page.
-  3. The objective list answers, for an objective with an outcome, `nodeRecord` with `content`, `visibleRevision` and `pinnedByAttempts` of the `nodeRevision` of its outcome; and `{ id, state }` for an objective without one. The outcome list answers those current outcomes. The evidence list answers the evidence that those outcomes name through the union of `outcomeRecord`. Each list orders by identity in descending order.
+  3. The objective list answers, for an objective with an outcome, `nodeRecord` with `filename`, `content`, `visibleRevision` and `pinnedByAttempts` of the `nodeRevision` of its outcome; and `{ id, state }` for an objective without one. The outcome list answers those current outcomes. The evidence list answers the evidence that those outcomes name through the union of `outcomeRecord`. Each list orders by identity in descending order.
   4. Add the leaves `execution objective list <execution-id>`, `execution objective outcome list <execution-id>` and `execution objective evidence list <execution-id>`, each with `[--limit] [--cursor]` and the code `cli.mission.execution.objective.list.invalid_execution_id`, `cli.mission.execution.objective.outcome.list.invalid_execution_id` or `cli.mission.execution.objective.evidence.list.invalid_execution_id` (code: proposed).
   5. Regenerate OpenAPI and assert the three operation ids.
   6. Update the `src/mission/` entry of `engine/AGENTS.md` with the modules of this plan.
   7. Add tests: an objective with an outcome of attempt 0 resolves to the revision current at the act; an objective created during the claim carries its identity and its state only; a discarded objective answers its discard outcome; a retired objective leaves every list; an objective claim answers empty pages.
 - Rules:
-  - The routes, the access E and the answers. `engine/docs/cli/mission.md:528–530`, `:541–543`.
-  - Each objective resolves to the `nodeRevision` of its current outcome; an objective without an outcome carries its identity and its state only. `engine/docs/cli/mission.md:542–543`; `mission-service.impl.md:372`, `:580`.
-  - An execution reads no content of another node, except a current child objective of its initiative. `engine/docs/cli/mission.md:198–200`.
+  - The routes, the access E and the answers. `engine/docs/cli/mission.md` "Execution-scoped reads — 9 commands", objective list/outcome/evidence rows.
+  - Each objective resolves to the `nodeRevision` of its current outcome; an objective without an outcome carries its identity and its state only. `engine/docs/cli/mission.md` "Execution-scoped reads — 9 commands", objective answer descriptions; `mission-service.impl.md:372`, `:580`.
+  - An execution reads no content of another node, except a current child objective of its initiative. `engine/docs/cli/mission.md` "Mission, graph, nodes and criterion — 17 commands", execution boundary description.
   - The current outcome of a node is its outcome with the greatest `sequence`. `02-execution.md:277`.
   - A retirement removes a node from the current children. `mission-service.md:481`.
   - CLI codes: proposed under `architecture.impl.md:348`.
@@ -490,7 +491,7 @@ Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 
   3. Parse stdout as JSON for every success. Assert the exit code and the start of stderr for every refusal.
 - Rules:
   - Setup goes through the CLI; the state check is a CLI read, never a store read. ERD 1 decision D13.
-  - Two steps use the HTTP adapter `httpClient(missionOperations, fixture.endpoint, machineToken)` from the test: the object transfer, because the test acts as the host component (decision D17; `.dev/erd-02/decisions-log.md` 2026-09-30 Q3), and `mission.evidence.request`, because no CLI command projects it (`engine/docs/cli/mission.md:502–503`).
+  - Two steps use the HTTP adapter `httpClient(missionOperations, fixture.endpoint, machineToken)` from the test: the object transfer, because the test acts as the host component (decision D17; `.dev/erd-02/decisions-log.md` 2026-09-30 Q3), and `mission.evidence.request`, because no CLI command projects it (`engine/docs/cli/mission.md` "External-action records — 3 commands").
   - The machine token comes from `fixture.machineToken(<projectId>, "harness")`, as the human token comes from `fixture.token`. `src/apps/server/test-support.ts:239–247`.
   - Named constants for every fixed string and number in a comparison. `architecture.impl.md:15–19`.
   - The fixture inputs are the inputs that the committed validation accepts. `.dev/erd-01/decisions-log.md` 03.5, 05.E, 06.E; `src/custody/platforms.ts:43–46`, `:83–87`; `src/project/contract.ts:89–134`; `src/worker/catalog.ts` `claude@1`.
