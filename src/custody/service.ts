@@ -45,6 +45,13 @@ import {
   type Material,
 } from "./contract.ts";
 import { consumeGrant, mintGrant, MaterialBuffer } from "./facility.ts";
+import {
+  sealMaterial,
+  openReport,
+  applyReport,
+  REVISION_REVOKED,
+} from "./handover.ts";
+import type { HandoverEnvelope } from "../kernel/handover.ts";
 import { decrypt, encrypt } from "./envelope.ts";
 import {
   apiKeySecretSchema,
@@ -110,7 +117,7 @@ const CustodyErrorCode = {
   ModelInUse: "credential.metadata.model_in_use",
   RevisionNotFound: "credential.revision.not_found",
   RevisionEnded: "credential.revision.ended",
-  RevisionRevoked: "credential.revision.revoked",
+  RevisionRevoked: REVISION_REVOKED,
   NewestLive: "credential.revision.newest_live",
   InvalidCursor: "system.pagination.cursor_invalid",
 } as const;
@@ -412,6 +419,64 @@ export class CustodyComponent implements Service {
         encrypted.nonce,
         encrypted.ciphertext,
       ),
+    );
+  }
+
+  handover(
+    tx: Transaction,
+    identity: MachineIdentity,
+    execution: { executionId: string; runtimeIdentity: string },
+    now: number,
+  ): HandoverEnvelope {
+    const row = this.executions.requireRunning(
+      tx,
+      execution.executionId,
+      execution.runtimeIdentity,
+      now,
+    );
+    const material = this.release(tx, this.authorize(tx, identity, row), now);
+    try {
+      const envelope = sealMaterial(
+        this.clientSecret(identity.clientId),
+        row,
+        material,
+      );
+      this.logger.info(
+        {
+          executionId: row.executionId,
+          workerBindingId: row.workerBindingId,
+          credentialId: material.credentialId,
+        },
+        "credential handover",
+      );
+      return envelope;
+    } finally {
+      material.drop();
+    }
+  }
+
+  report(
+    tx: Transaction,
+    identity: MachineIdentity,
+    execution: { executionId: string; runtimeIdentity: string },
+    envelope: HandoverEnvelope,
+    now: number,
+  ): void {
+    const row = this.executions.requireRunning(
+      tx,
+      execution.executionId,
+      execution.runtimeIdentity,
+      now,
+    );
+    const report = openReport(
+      this.clientSecret(identity.clientId),
+      row,
+      envelope,
+    );
+    const written = applyReport(tx, this.envelopeKey, report);
+    this.logger.info(
+      { executionId: row.executionId, credentialId: report.credentialId },
+      written ? "credential report" : "credential report stale",
     );
   }
 
