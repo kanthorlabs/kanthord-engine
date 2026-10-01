@@ -124,8 +124,9 @@ command here accepts a caller-supplied service identity or linked-human identity
 Successful reads print one JSON value and exit zero. A successful mutation
 prints its result with an additional CLI field `idempotencyKey`, and exits
 zero. Help exits zero. Input, authentication, authorization and operation
-failures exit nonzero with a diagnostic; an indeterminate result also exits
-nonzero and prints the retry key without claiming that no effect occurred.
+failures exit nonzero with a diagnostic. An indeterminate result also exits
+nonzero. For a mutation, the diagnostic supplies the retry key without claiming
+that no effect occurred. For a read, it instructs the user to retry the command.
 Tokens and delivery verification material never appear in these outputs.
 
 Every list result is `{ "items": [...], "nextCursor": null | string }`:
