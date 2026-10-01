@@ -285,7 +285,7 @@ The `ExecutionRow` return of `liveExecutionOf` is a superset of the `{ execution
   - A release retry after the end meets the refusal of the proof, so the proof precedes the replay of the idempotency record. `scheduler-service.impl.md:68–69`, `:137`; `02-execution.md:218`.
   - The proof establishes ownership and liveness and grants no operation authority. `architecture.impl.md:659`.
   - The chain reads the row outside the handler transaction, as the registration lookup does. Decisions D10, D11.
-  - Gap: `gateway.invocation.execution_proof_failed` stands on no error table of `engine/docs/cli/`; Aelita adds the row to `engine/docs/cli/other.md` "Error codes" before the commit of this plan.
+  - Publication prerequisite resolved: `gateway.invocation.execution_proof_failed` is declared in `architecture.impl.md` "The operation and its two entry adapters" and `engine/docs/cli/other.md` "Error codes".
   - Gap: two live processes of one machine JWT pass every proof; Ulrich accepts the risk until the B9 item lands (`docs/brainstorm/HANDOFF.md:115`).
 - Done when: `pnpm run verify` passes; the new invocation and registry tests pass; every ERD 1 gateway test passes unchanged.
 
@@ -343,7 +343,7 @@ The `ExecutionRow` return of `liveExecutionOf` is a superset of the `{ execution
 - Do:
   1. Declare `workPull` in `schedulerOperations`: id `scheduler.work.pull`, `POST /api/scheduler/work/pull`, access `client`, `lifetime: OperationLifetime.Wait`, `timeoutMs: WORK_PULL_TIMEOUT_MS`, `mutation: true`, `body: true`, input `{ params: {}, query: {}, body: workPullSchema }`, output `workPullResultSchema`.
   2. Implement `workPull(input, caller)` in `work-pull.ts`:
-     1. Require a machine identity. When `body.runtimeIdentity !== identity.runtimeIdentity` or `body.resourceIdentity !== identity.resourceIdentity`, throw `OperationError(403, "scheduler.work.claimant_mismatch", …)` (code: proposed).
+     1. Require a machine identity. When `body.runtimeIdentity !== identity.runtimeIdentity` or `body.resourceIdentity !== identity.resourceIdentity`, throw `OperationError(403, "scheduler.work.claimant_mismatch", …)`.
      2. Set the deadline of the window to `performance.now() + WORK_PULL_WAIT_MS`.
      3. Probe. Set `now = Date.now()`. Run `store.transaction((tx) => { throw new Probe(claimOnce(tx, …, now)) })` and catch only `Probe`. The probe always rolls back, so it commits no row, no settlement and no Mission write.
      4. Commit when the probe answers `running`, `claimed` or `refused`, when it sets `settled`, when the window ends, or when quiescence starts. In the same synchronous tick, with no `await` after the probe, call `caller.commit((tx) => answerOf(claimOnce(tx, …, now)))` once, with the `now` of the deciding probe. `answerOf` maps `running` and `claimed` to `{ kind: "claimed", execution: executionRecord(…) }`, and `refused` and `none` to `{ kind: "no-work" }`. The commit keeps the settlement of the runtime identity. After quiescence starts, the commit answers `{ kind: "no-work" }` with the settlement alone.
@@ -369,7 +369,7 @@ The `ExecutionRow` return of `liveExecutionOf` is a superset of the `{ execution
   - Server shutdown stops new claims; the Gateway cancels waiting pulls in phase 1. `architecture.impl.md:460–461`; `scheduler-service.md:33`.
   - An empty pull opens no attempt, creates no execution and counts no live execution. `scheduler-service.md:124`.
   - A caller cannot widen its scope with another identifier. `scheduler-service.md:97`; `engine/docs/cli/scheduler.md:97–99`.
-  - Code `scheduler.work.claimant_mismatch` (403): proposed in `00-index.md` "Codes for Ulrich". The condition stands at `scheduler-service.impl.md:45` and `engine/docs/cli/scheduler.md:238–239`. No code of `engine/docs/cli/other.md` covers it: `gateway.registration.required` covers only a machine without a registration (`other.md:804`).
+  - Code `scheduler.work.claimant_mismatch` (403) is published in `scheduler-service.impl.md` "Operation contracts" and `engine/docs/cli/scheduler.md` "Error codes". It refuses a pull whose `resourceIdentity` or `runtimeIdentity` differs from the machine identity and its live registration.
   - The CLI codes `cli.scheduler.work.pull.token_required` and `cli.scheduler.work.pull.indeterminate` follow the shared forms. `engine/docs/cli/other.md:834–835`.
   - The task that declares a route adds its CLI leaf and regenerates OpenAPI. ERD 1 decision D13.
 - Done when: `pnpm run verify` passes; the tests pass; `kanthord scheduler work pull --help` exits 0.
@@ -380,7 +380,7 @@ The `ExecutionRow` return of `liveExecutionOf` is a superset of the `{ execution
 - Do:
   1. Declare `executionRelease`: id `scheduler.execution.release`, `POST /api/scheduler/execution/:executionId/release`, access `client`, `lifetime: Unary`, `timeoutMs: SCHEDULER_TIMEOUT_MS`, `mutation: true`, `body: true`, `requiresExecution: true`, params `{ executionId: identitySchema("execution") }`, body `executionReleaseSchema`, output `releaseResultSchema`.
   2. Implement the handler. Inside one `caller.commit`, read the clock once. Call `requireRunning(tx, caller.execution.executionId, caller.execution.runtimeIdentity, now)`. Call `transitions.release(tx, { executionId, nodeId, attempt }, body.furtherWork, now)`. Call `endExecution(tx, executionId, now)`. Answer `{ executionId, endedAt: now }`. After the commit, call `wake(projectId)`.
-  3. Add the leaf `execution release <execution-id> --file <path> [--idempotency-key <key>]`. It validates the identity with `cli.scheduler.execution.release.invalid_execution_id` (code: proposed), reads the file with `executionReleaseSchema`, and uses `cli.scheduler.execution.release.token_required` and `.indeterminate`.
+  3. Add the leaf `execution release <execution-id> --file <path> [--idempotency-key <key>]`. It validates the identity with `cli.scheduler.execution.release.invalid_execution_id`, reads the file with `executionReleaseSchema`, and uses `cli.scheduler.execution.release.token_required` and `.indeterminate`.
   4. Regenerate OpenAPI and assert the operation id.
   5. Add handler tests with the harness: a release ends the row with the transaction reading and routes the Mission Service once; a refusal of `release` changes no row; two releases in sequence answer one success and one 409 `scheduler.execution.not_running`; a release whose transaction starts exactly at `expired_at` answers 409 and leaves the claim state `lost`; a transaction that starts before expiry commits with `ended_at` equal to its start reading and `finished`; a release after a revocation and after a loss answers 409; the wake follows the commit.
 - Rules:
@@ -390,7 +390,7 @@ The `ExecutionRow` return of `liveExecutionOf` is a superset of the `{ execution
   - Of two terminal writes only one wins, and only the winner routes the Mission Service. `02-execution.md:216`; `scheduler-service.md:238`.
   - The Mission Service reads `furtherWork` in the transaction, and nothing stores it; no release receipt exists. `02-execution.md:218`; `scheduler-service.impl.md:49`, `:66`.
   - An ended execution of the binding rechecks a waiting pull. `scheduler-service.md:127`.
-  - CLI code `cli.scheduler.execution.release.invalid_execution_id`: proposed under `architecture.impl.md:348`; the identity rule stands at `engine/docs/cli/scheduler.md:70`, `:370`.
+  - CLI code `cli.scheduler.execution.release.invalid_execution_id` is published in `scheduler-service.impl.md` "Execution CLI validation" and `engine/docs/cli/scheduler.md` "Error codes". It refuses an `<execution-id>` that is not a canonical `execution_<ulid>` identity.
   - Gap: the disposition of an execution that cannot progress stays B9 (`docs/brainstorm/HANDOFF.md:91`); the release holds no failure field (`engine/docs/cli/scheduler.md:416–417`).
 - Done when: `pnpm run verify` passes; the tests pass.
 
@@ -399,15 +399,15 @@ The `ExecutionRow` return of `liveExecutionOf` is a superset of the `{ execution
 - Files: `src/scheduler/contract.ts`, `src/scheduler/service.ts`, `src/scheduler/execution-read.ts` (create), `src/scheduler/execution-read.test.ts` (create), `src/apps/cli/scheduler-execution.ts`, `src/apps/server/openapi-integration.test.ts` (edit); `static/openapi.yaml` and `static/openapi/scheduler/*` (regenerated)
 - Do:
   1. Declare `claimGet`: id `scheduler.claim.get`, `GET /api/scheduler/claim/:executionId`, access `client`, `lifetime: Unary`, `mutation: false`, `body: false`, params `{ executionId: identitySchema("execution") }`, output `executionRecordSchema`.
-  2. Implement the handler with one `caller.commit`. An absent row throws `OperationError(404, "scheduler.execution.not_found", …)` (code: proposed). A row whose `runtime_identity`, `project_id` or `resource_identity` differs from the runtime identity, the project and the resource identity of the machine identity throws `OperationError(403, "scheduler.execution.not_owner", …)`. Else answer `executionRecord(…)` with the clock reading of the transaction.
-  3. Add the leaf `claim get <execution-id>` with `cli.scheduler.claim.get.invalid_execution_id` (code: proposed), `cli.scheduler.claim.get.token_required` and `.indeterminate`.
+  2. Implement the handler with one `caller.commit`. An absent row throws `OperationError(404, "scheduler.execution.not_found", …)`. A row whose `runtime_identity`, `project_id` or `resource_identity` differs from the runtime identity, the project and the resource identity of the machine identity throws `OperationError(403, "scheduler.execution.not_owner", …)`. Else answer `executionRecord(…)` with the clock reading of the transaction.
+  3. Add the leaf `claim get <execution-id>` with `cli.scheduler.claim.get.invalid_execution_id`, `cli.scheduler.claim.get.token_required` and `.indeterminate`.
   4. Regenerate OpenAPI and assert the operation id.
   5. Add tests: the owner reads `running`, then `finished` after a release and `lost` after the deadline; another runtime identity and another binding answer 403; an unknown identity answers 404; the read changes no row.
 - Rules:
   - `claim get` is a `client` read with no body; it requires no live execution and checks the claimant against the machine identity and its live registration. `scheduler-service.impl.md:26`, `:74–76`; `engine/docs/cli/scheduler.md:296–302`.
   - A mismatch answers 403 `scheduler.execution.not_owner`. `engine/docs/cli/scheduler.md:498`.
-  - Code `scheduler.execution.not_found` (404): proposed in `00-index.md` "Codes for Ulrich". The not-found condition stands at `engine/docs/cli/scheduler.md:332`. No code of `engine/docs/cli/other.md` and no ERD 1 Scheduler code covers it.
-  - CLI code `cli.scheduler.claim.get.invalid_execution_id`: proposed under `architecture.impl.md:348`; the identity rule stands at `engine/docs/cli/scheduler.md:70`.
+  - Code `scheduler.execution.not_found` (404) is published in `scheduler-service.impl.md` "Operation contracts" and `engine/docs/cli/scheduler.md` "Error codes". It answers an execution identity that no row holds.
+  - CLI code `cli.scheduler.claim.get.invalid_execution_id` is published in `scheduler-service.impl.md` "Execution CLI validation" and `engine/docs/cli/scheduler.md` "Error codes". It refuses an `<execution-id>` that is not a canonical `execution_<ulid>` identity.
 - Done when: `pnpm run verify` passes; the tests pass.
 
 ### 03.12 Implement `scheduler.execution.list` and `get` with their CLI leaves
@@ -416,8 +416,8 @@ The `ExecutionRow` return of `liveExecutionOf` is a superset of the `{ execution
 - Do:
   1. Declare `executionList`: id `scheduler.execution.list`, `GET /api/scheduler/project/:projectId/execution`, access `human`, query `{ limit, cursor?, nodeId?: identitySchema("node"), attempt?: positive safe integer by coercion }` with a refinement that refuses `attempt` without `nodeId`, output `{ items: executionRecordSchema[], nextCursor }`. Declare `executionGet`: id `scheduler.execution.get`, `GET /api/scheduler/execution/:executionId`, access `human`, output `executionRecordSchema`.
   2. Generalize `decodeCursor` (`src/scheduler/service.ts:53–65`) to take the identity prefix, and use it with `execution` for the list cursor.
-  3. Implement both handlers with one `caller.commit` each and the clock read once. The list answers `listExecutions` with the next cursor of the last identity. `get` answers the record or 404 `scheduler.execution.not_found` (code: proposed).
-  4. Add the leaves `execution list <project-id> [--node <node-id> [--attempt <n>]] [--limit <count>] [--cursor <opaque>]` and `execution get <execution-id>`. Use these codes (code: proposed): `cli.scheduler.execution.list.invalid_project_id`, `cli.scheduler.execution.list.invalid_node_id`, `cli.scheduler.execution.list.invalid_attempt`, `cli.scheduler.execution.get.invalid_execution_id`; the shared `cli.pagination.*`, `token_required` and `indeterminate` codes. The CLI sends `--attempt` without `--node`, and the server answers the refusal.
+  3. Implement both handlers with one `caller.commit` each and the clock read once. The list answers `listExecutions` with the next cursor of the last identity. `get` answers the record or 404 `scheduler.execution.not_found`.
+  4. Add the leaves `execution list <project-id> [--node <node-id> [--attempt <n>]] [--limit <count>] [--cursor <opaque>]` and `execution get <execution-id>`. Use these published codes: `cli.scheduler.execution.list.invalid_project_id`, `cli.scheduler.execution.list.invalid_node_id`, `cli.scheduler.execution.list.invalid_attempt`, `cli.scheduler.execution.get.invalid_execution_id`; the shared `cli.pagination.*`, `token_required` and `indeterminate` codes. The CLI sends `--attempt` without `--node`, and the server answers the refusal.
   5. Regenerate OpenAPI and assert both operation ids and the `items` and `nextCursor` properties of the page.
   6. Add tests: the order, the cursor and the page bound; the node filter; the attempt filter; a node of another project and an absent attempt answer an empty page; `attempt` without `nodeId` answers 400 `gateway.request.validation_failed`; live and ended rows both appear; `get` of an unknown identity answers 404.
 - Rules:
@@ -425,8 +425,8 @@ The `ExecutionRow` return of `liveExecutionOf` is a superset of the `{ execution
   - `attempt` without `nodeId` answers HTTP 400 `gateway.request.validation_failed`. `scheduler-service.impl.md:53`; `engine/docs/cli/scheduler.md:319–320`.
   - The list holds every execution of the project, live and ended, for the life of the project. `scheduler-service.impl.md:104–105`; `engine/docs/cli/scheduler.md:322–323`.
   - A list answers the shared page, and a malformed cursor answers 400 `system.pagination.cursor_invalid`. `architecture.impl.md:179–189`.
-  - Code `scheduler.execution.not_found` (404): proposed in task 03.11.
-  - The CLI codes are proposed under `architecture.impl.md:348`; the argument rules stand at `engine/docs/cli/scheduler.md:65–71`, `:310–312`.
+  - Code `scheduler.execution.not_found` (404) is published in `scheduler-service.impl.md` "Operation contracts" and `engine/docs/cli/scheduler.md` "Error codes", as in task 03.11.
+  - The four CLI validation codes are published in `scheduler-service.impl.md` "Execution CLI validation" and `engine/docs/cli/scheduler.md` "Error codes". They refuse noncanonical project, node or execution identities and an attempt that is not a positive safe integer. `--attempt` without `--node` still reaches the server and answers `gateway.request.validation_failed`.
 - Done when: `pnpm run verify` passes; the tests pass.
 
 ### 03.13 Add the loss sweep and the lifecycle of the Scheduler
@@ -568,10 +568,12 @@ Setup of fixture B, in order: steps 1 to 11 of fixture A with three changes. Ste
 | E03.18 | Wait 1100 ms; then `kanthord scheduler execution get X1`; then `kanthord scheduler execution release X1 --file further.json` [general]                  | 0, 1    | `claimState` `lost`, `endedAt` null; stderr starts with `gateway.invocation.execution_proof_failed:`                                                                      |
 | E03.19 | `kanthord scheduler work pull --file pull(G)` [general]; then `kanthord scheduler execution get X1`; then `kanthord mission attempt list <objectiveId>` | 0, 0, 0 | `kind` `claimed`, `execution.executionId` ≠ X1, `execution.attempt` 1; X1 `claimState` `lost`, `endedAt` ≥ `expiredAt`; `items[].attempt` `[1]`, `items[0].closedAt` null |
 
-E03.4, E03.14 and E03.15 assert codes of the mark `code: proposed`. The test is committed after Aelita writes each accepted code on its page (ruling R3). E03.8 and E03.18 assert `gateway.invocation.execution_proof_failed`, which needs its row on `engine/docs/cli/other.md` before the commit. E03.13 depends on the instance healthcheck of plan 02: a disabled enablement fails the resolution, so the healthcheck fails (`worker-service.md:87`, `:211`).
+E03.4, E03.14 and E03.15 assert published codes. `scheduler-service.impl.md` "Operation contracts" and "Execution CLI validation", together with `engine/docs/cli/scheduler.md` "Error codes", satisfy the publication prerequisite of ruling R3. E03.8 and E03.18 assert `gateway.invocation.execution_proof_failed`, published in `architecture.impl.md` "The operation and its two entry adapters" and `engine/docs/cli/other.md` "Error codes". Publication completes neither implementation nor the E2E and completed-plan review gates. E03.13 depends on the instance healthcheck of plan 02: a disabled enablement fails the resolution, so the healthcheck fails (`worker-service.md:87`, `:211`).
 
 ## Blockers
 
-None open. The debate engine settled one question:
+No document or plan publication prerequisite remains open for tasks 03.10–03.12 and their dependent verification gates. Ulrich approved the B1 repair on 2026-10-01: the six unchanged local CLI validation codes now stand in `scheduler-service.impl.md` "Execution CLI validation" and `engine/docs/cli/scheduler.md` "Error codes". Tasks 03.16, 03.E and 03.R still require the completed operations and their actual acceptance checks. The original whole-plan review baseline remains `0104e1afd9c15bae813f8e6655204e22da9ad4b2`; the publication repair completes no implementation or acceptance gate.
+
+The debate engine settled one question:
 
 - DEBATE: the wait mechanism of the work pull under the one-commit rule - rounds:2 - verdict: round 1 refused several `caller.commit` calls with rolled-back early calls, because the rule says one `caller.commit` and not one successful commit. Round 2 preferred one `caller.commit` at the end after rolled-back probe transactions on the same store, on three repairs that the plan applies: every probe and the commit take a fresh instance healthcheck inside their own transaction; a probe has no effect outside the database, and a probe that settles a loss commits at once; the proof precedes the idempotency reservation and a test retries an ended release with the same key. Ulrich ruled the probe on 2026-09-30, and `architecture.impl.md:700–702` and `scheduler-service.impl.md:25–28` now name it, with one `now` for a probe and its commit.
