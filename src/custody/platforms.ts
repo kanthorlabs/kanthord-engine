@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { SecretShape } from "./contract.ts";
+export { SecretShape } from "./contract.ts";
 
 export const Platform = {
   GitHub: "github",
@@ -8,13 +10,6 @@ export const Platform = {
   S3: "s3",
 } as const;
 export type Platform = (typeof Platform)[keyof typeof Platform];
-
-export const SecretShape = {
-  ApiKey: "api_key",
-  OAuth: "oauth",
-  S3AccessKey: "s3_access_key",
-} as const;
-export type SecretShape = (typeof SecretShape)[keyof typeof SecretShape];
 
 export const PLATFORM_SECRET_SHAPE: Record<Platform, SecretShape> = {
   [Platform.GitHub]: SecretShape.ApiKey,

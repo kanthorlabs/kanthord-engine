@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { identitySchema } from "../kernel/identity.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,
@@ -7,6 +8,45 @@ import {
   type Operation,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
+
+export const SecretShape = {
+  ApiKey: "api_key",
+  OAuth: "oauth",
+  S3AccessKey: "s3_access_key",
+} as const;
+export type SecretShape = (typeof SecretShape)[keyof typeof SecretShape];
+export const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
+export const piCredentialSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal(SecretShape.ApiKey),
+    key: z
+      .string()
+      .min(1)
+      .refine((key) => Boolean(key.trim())),
+  }),
+  z.strictObject({
+    type: z.literal(SecretShape.OAuth),
+    refresh: z.string().min(1),
+    access: z.string().min(1),
+    expires: z.number().int(),
+  }),
+]);
+export const handoverPayloadSchema = z.strictObject({
+  items: z.array(
+    z.strictObject({
+      credentialId: identitySchema("credential"),
+      providerId: z.string().min(1),
+      credential: piCredentialSchema,
+    }),
+  ),
+});
+export const refreshReportSchema = z.strictObject({
+  credentialId: identitySchema("credential"),
+  digest: z.string().regex(SHA256_HEX_PATTERN),
+  credential: piCredentialSchema,
+});
+export type HandoverPayload = z.infer<typeof handoverPayloadSchema>;
+export type RefreshReport = z.infer<typeof refreshReportSchema>;
 
 export const CUSTODY_SERVICE_NAME = "custody";
 export const CREDENTIAL_OPERATION_SERVICE = "credential";
