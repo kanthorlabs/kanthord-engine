@@ -30,10 +30,23 @@ import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
 
+test("published evidence reads name their operations", () => {
+  for (const name of ["evidence.list", "evidence.get"] as const) {
+    const fragment = parse(
+      readFileSync(
+        join(dirname(openapiPath()), `openapi/mission/${name}.yaml`),
+        "utf8",
+      ),
+    );
+    assert.equal(fragment.pathItem.get.operationId, missionOperations[name].id);
+    assert.equal(missionOperations[name].access, AccessPolicy.Human);
+  }
+});
+
 test("published evidence submit names its execution operation", () => {
   const fragment = parse(
     readFileSync(
-      join(dirname(openapiPath()), "openapi/mission/evidence.submit.yaml"),
+      join(dirname(openapiPath()), "openapi/mission/evidence.list.yaml"),
       "utf8",
     ),
   );

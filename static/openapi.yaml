@@ -46,10 +46,12 @@ paths:
     $ref: ./openapi/mission/edge.list.yaml#/pathItem
   /api/mission/evidence/asset/{assetId}/complete:
     $ref: ./openapi/mission/evidence.asset.complete.yaml#/pathItem
+  /api/mission/evidence/{evidenceId}:
+    $ref: ./openapi/mission/evidence.get.yaml#/pathItem
+  /api/mission/node/{nodeId}/evidence:
+    $ref: ./openapi/mission/evidence.list.yaml#/pathItem
   /api/mission/node/{nodeId}/evidence/request:
     $ref: ./openapi/mission/evidence.request.yaml#/pathItem
-  /api/mission/node/{nodeId}/evidence:
-    $ref: ./openapi/mission/evidence.submit.yaml#/pathItem
   /api/mission/{missionId}/export:
     $ref: ./openapi/mission/export.yaml#/pathItem
   /api/mission/node/{nodeId}/attempt/{attempt}/external-action/{actionKey}:

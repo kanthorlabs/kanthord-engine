@@ -212,6 +212,26 @@ export function readEvidence(tx: Transaction, id: string): EvidenceRow | null {
       .get(id) as unknown as EvidenceRow | undefined) ?? null
   );
 }
+export function listEvidence(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number | null,
+  after: string | null,
+  count: number,
+): EvidenceRow[] {
+  return tx.database
+    .prepare(
+      "SELECT * FROM mission_evidence WHERE node_id = ? AND (? IS NULL OR attempt = ?) AND (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?",
+    )
+    .all(
+      nodeId,
+      attempt,
+      attempt,
+      after,
+      after,
+      count,
+    ) as unknown as EvidenceRow[];
+}
 export function readAssets(tx: Transaction, evidenceId: string): AssetRow[] {
   return tx.database
     .prepare(

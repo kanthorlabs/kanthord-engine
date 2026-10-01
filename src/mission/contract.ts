@@ -1161,6 +1161,30 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "evidence.list": {
+    ...readOperation,
+    id: "mission.evidence.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/node/:nodeId/evidence",
+    input: readInput(
+      z.strictObject({ nodeId: identitySchema("node") }),
+      z.strictObject({ ...pageQuery, attempt: attemptSelector(0).optional() }),
+    ),
+    output: pageOf(evidenceSchema),
+    description: "List evidence of a runnable node.",
+  },
+  "evidence.get": {
+    ...readOperation,
+    id: "mission.evidence.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/evidence/:evidenceId",
+    input: readInput(
+      z.strictObject({ evidenceId: identitySchema("evidence") }),
+      z.strictObject({}),
+    ),
+    output: evidenceSchema,
+    description: "Read an evidence record.",
+  },
   "evidence.submit": {
     ...writeOperation,
     access: AccessPolicy.Client,

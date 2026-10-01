@@ -40,6 +40,7 @@ import { unblockNode } from "./control-unblock.ts";
 import { completeEvidence } from "./evidence-complete.ts";
 import { requestEvidence } from "./evidence-request.ts";
 import { submitEvidence } from "./evidence-submit.ts";
+import { evidencePage, getEvidence } from "./evidence-read.ts";
 import { claim, release, loss } from "./transitions.ts";
 import {
   attemptPage,
@@ -139,6 +140,14 @@ export class MissionService
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["evidence.list"],
+      ({ params, query }, caller) =>
+        caller.commit((tx) => evidencePage(tx, params.nodeId, query)),
+    );
+    registry.register(missionOperations["evidence.get"], ({ params }, caller) =>
+      caller.commit((tx) => getEvidence(tx, params.evidenceId)),
+    );
     registry.register(
       missionOperations["evidence.submit"],
       ({ params, body }, caller) =>
