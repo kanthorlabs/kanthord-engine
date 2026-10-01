@@ -96,6 +96,11 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
   ]);
   const health = new HealthRegistry();
+  const registrationEnds: Array<{
+    projectId: string;
+    resourceIdentity: string;
+    now: number;
+  }> = [];
   const project = new ProjectService({
     config: {},
     operationalStore: store,
@@ -107,6 +112,11 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     repositoryConnector: { gitLsRemote: unexpected },
     workerAgentsOf: unexpected,
     workerAgentView: unexpected,
+    endRegistrations: (tx, projectId, resourceIdentity, now) => {
+      assert.ok(tx.database.isTransaction);
+      assert.equal(tx.database, store.database);
+      registrationEnds.push({ projectId, resourceIdentity, now });
+    },
     ...overrides,
   });
   t.after(() => project.stop());
@@ -142,6 +152,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     caller,
     invoke,
     commits: () => commits,
+    registrationEnds,
   };
 }
 
@@ -823,6 +834,53 @@ function storedBindings(f: ReturnType<typeof writeFixture>) {
     ),
   );
 }
+
+test("binding edits end registrations only for removed or zero-count worker groups in the write transaction", async (t) => {
+  const f = writeFixture(t);
+  const config = { ...workerBinding().config, instanceCount: TWO_INSTANCES };
+  let result = await f.write({
+    worker: { kind: BindingKind.Worker, config },
+    repository: repositoryBinding(),
+  });
+  result = await f.write(
+    { worker: workerBinding(), repository: repositoryBinding() },
+    result.bindingSetVersion,
+  );
+  assert.equal(f.registrationEnds.length, NO_CALLS);
+  result = await f.write(
+    {
+      worker: {
+        kind: BindingKind.Worker,
+        config: { ...config, resourceBudget: { turns: 10, wallTimeMs: 1000 } },
+      },
+    },
+    result.bindingSetVersion,
+  );
+  assert.equal(f.registrationEnds.length, NO_CALLS);
+  result = await f.write(
+    {
+      worker: {
+        kind: BindingKind.Worker,
+        config: { ...config, instanceCount: INSTANCE_COUNT_MIN },
+      },
+    },
+    result.bindingSetVersion,
+  );
+  assert.equal(f.registrationEnds.length, ONE_CALL);
+  assert.equal(f.registrationEnds[0]!.projectId, f.params.projectId);
+  assert.equal(f.registrationEnds[0]!.resourceIdentity, WORKER_GROUP);
+  assert.ok(Number.isSafeInteger(f.registrationEnds[0]!.now));
+  result = await f.write({ worker: workerBinding() }, result.bindingSetVersion);
+  await rejectsWrite(
+    f.write({}, result.bindingSetVersion - VERSION_INCREMENT),
+    HttpStatus.Conflict,
+    ProjectErrorCode.VersionConflict,
+    { bindingSetVersion: result.bindingSetVersion },
+  );
+  assert.equal(f.registrationEnds.length, ONE_CALL);
+  await f.write({}, result.bindingSetVersion);
+  assert.equal(f.registrationEnds.length, TWO_CALLS);
+});
 
 function assertCurrent(
   f: ReturnType<typeof writeFixture>,

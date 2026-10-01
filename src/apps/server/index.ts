@@ -175,6 +175,8 @@ export function composeServices(options: {
   const project: ProjectService = new ProjectService({
     config: {},
     operationalStore: options.store,
+    endRegistrations: (tx, projectId, resourceIdentity, now) =>
+      worker.endRegistrations(tx, projectId, resourceIdentity, now),
     createMission: (tx, pid, actor) => mission.createMission(tx, pid, actor),
     liveNodesPinning: (tx, bid) => mission.liveNodesPinning(tx, bid),
     validateEntry: (tx, name, entry) => worker.validateEntry(tx, name, entry),

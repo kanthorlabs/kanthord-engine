@@ -70,7 +70,12 @@ import {
 import { TableRegistrations } from "./registrations.ts";
 import type { WorkerConfig } from "./config.ts";
 import { HeartbeatClock, HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
-import { readAllLive, endRegistration, readRow } from "./instances.ts";
+import {
+  readAllLive,
+  endRegistration,
+  endGroup,
+  readRow,
+} from "./instances.ts";
 
 const NONE = 0;
 const LAST_PROVIDER = 1;
@@ -269,6 +274,17 @@ export class WorkerService implements Service {
     });
     for (let index = 0; index < ended.length; index++)
       this.heartbeatClock.drop(ended[index]!);
+  }
+
+  endRegistrations(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentity: string,
+    now: number,
+  ): void {
+    assert.ok(tx.database.isTransaction);
+    assert.equal(tx.database, this.dependencies.store.database);
+    endGroup(tx, projectId, resourceIdentity, now);
   }
 
   private validateEffectiveConfig(

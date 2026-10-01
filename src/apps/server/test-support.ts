@@ -272,6 +272,7 @@ export async function gatewayFixture(
   return {
     repoConnector,
     scheduler,
+    worker,
     custody,
     mission,
     gateway,

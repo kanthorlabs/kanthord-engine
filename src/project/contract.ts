@@ -565,6 +565,13 @@ export interface ProjectBindings {
   ): Promise<{ projectId: string; resourceIdentity: string } | null>;
 }
 
+export type EndRegistrations = (
+  tx: Transaction,
+  projectId: string,
+  resourceIdentity: string,
+  now: number,
+) => void;
+
 export interface WorkerBindingRow {
   bindingId: string;
   revision: number;

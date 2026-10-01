@@ -26,6 +26,7 @@ import {
   BINDING_SET_INITIAL_VERSION,
   BindingKind,
   BindingState,
+  ChangeKind,
   EMPTY_LENGTH,
   LIST_LIMIT_MAX,
   INSTANCE_COUNT_MIN,
@@ -57,6 +58,8 @@ import {
   type WorkerAgentViewFn,
   type WorkerEntry,
   type WorkerBindingRow,
+  type EndRegistrations,
+  type BindingChange,
 } from "./contract.ts";
 import {
   insertProject,
@@ -163,6 +166,7 @@ export interface Dependencies {
   repositoryConnector: RepositoryConnector;
   workerAgentsOf: WorkerAgentsOfFn;
   workerAgentView: WorkerAgentViewFn;
+  endRegistrations: EndRegistrations;
   health?: HealthRegistry;
   bindings?: ProjectBindings;
 }
@@ -176,6 +180,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly repositoryConnector: RepositoryConnector;
   private readonly workerAgentsOf: WorkerAgentsOfFn;
   private readonly workerAgentView: WorkerAgentViewFn;
+  private readonly endRegistrations: EndRegistrations;
   constructor(dependencies: Dependencies) {
     this.bindings = dependencies.bindings;
     this.operationalStore = dependencies.operationalStore;
@@ -186,6 +191,7 @@ export class ProjectService implements Service, ProjectBindings {
     this.repositoryConnector = dependencies.repositoryConnector;
     this.workerAgentsOf = dependencies.workerAgentsOf;
     this.workerAgentView = dependencies.workerAgentView;
+    this.endRegistrations = dependencies.endRegistrations;
     dependencies.health?.register("project", () => this.healthcheck());
   }
   declare(registry: OperationRegistry): void {
@@ -378,6 +384,7 @@ export class ProjectService implements Service, ProjectBindings {
       for (const [name, binding] of submission)
         this.validateBinding(tx, name, binding);
       const result = writeBindingSet(tx, projectId, body.version, submission);
+      this.endUnavailableRegistrations(tx, result.changes, Date.now());
       const bindings = Object.fromEntries(
         Array.from(readCurrentBindingSet(tx, projectId), ([name, binding]) => [
           name,
@@ -412,6 +419,33 @@ export class ProjectService implements Service, ProjectBindings {
       );
     }
     throwIfCancelled(context);
+  }
+  private endUnavailableRegistrations(
+    tx: Transaction,
+    changes: BindingChange[],
+    now: number,
+  ): void {
+    assert.ok(tx.database.isTransaction);
+    assert.ok(Number.isSafeInteger(now));
+    for (let index = 0; index < changes.length; index++) {
+      const change = changes[index]!;
+      if (
+        change.kind !== ChangeKind.Removed &&
+        change.kind !== ChangeKind.Revised
+      )
+        continue;
+      const row = readBindingRevision(tx, change.bindingId);
+      assert.ok(row);
+      if (kindOf(row.resourceIdentity) !== BindingKind.Worker) continue;
+      const latest = readLatestBinding(tx, row.projectId, row.resourceIdentity);
+      assert.ok(latest);
+      if (
+        latest.removedAt !== null ||
+        workerConfigSchema.parse(latest.config).instanceCount ===
+          INSTANCE_COUNT_MIN
+      )
+        this.endRegistrations(tx, row.projectId, row.resourceIdentity, now);
+    }
   }
   private validateBinding(
     tx: Transaction,

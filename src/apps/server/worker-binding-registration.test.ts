@@ -1,0 +1,90 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { decode } from "hono/jwt";
+import { gatewayFixture } from "./test-support.ts";
+import { httpClient } from "../../gateway/client.ts";
+import { projectOperations, BindingKind } from "../../project/contract.ts";
+import { workerOperations } from "../../worker/contract.ts";
+import { OperationResultType } from "../../kernel/operation.ts";
+import { HttpStatus } from "../../kernel/http.ts";
+
+const ONE = 1;
+const TWO = 2;
+const NONE = 0;
+const INPUT = { params: {}, query: {}, body: null };
+
+test("binding availability changes end real registrations atomically and count recovery admits a fresh runtime identity", async (t) => {
+  const f = await gatewayFixture(t);
+  const project = httpClient(projectOperations, f.endpoint, f.token);
+  const created = await project.create({
+    params: {},
+    query: {},
+    body: { name: "registration-end" },
+  });
+  assert.ok(created.type === OperationResultType.Completed);
+  const projectId = created.data.id;
+  let version = ONE;
+  const write = (count: number | null) =>
+    project["bindingSet.write"]({
+      params: { projectId },
+      query: {},
+      body: {
+        version,
+        bindings:
+          count === null
+            ? {}
+            : {
+                main: {
+                  kind: BindingKind.Worker,
+                  config: { worker: "claude@1", instanceCount: count },
+                },
+              },
+      },
+    });
+  const initial = await write(TWO);
+  assert.ok(initial.type === OperationResultType.Completed);
+  version = initial.data.bindingSetVersion;
+  const tokenA = await f.machineToken(projectId, "main");
+  const tokenB = await f.machineToken(projectId, "main");
+  const a = httpClient(workerOperations, f.endpoint, tokenA);
+  const b = httpClient(workerOperations, f.endpoint, tokenB);
+  const first = await a.register(INPUT);
+  assert.ok(first.type === OperationResultType.Completed);
+  assert.ok((await b.register(INPUT)).type === OperationResultType.Completed);
+  const clientA = String(decode(tokenA).payload.sub);
+  const clientB = String(decode(tokenB).payload.sub);
+  const lowered = await write(ONE);
+  assert.ok(lowered.type === OperationResultType.Completed);
+  version = lowered.data.bindingSetVersion;
+  assert.ok(f.worker.registrations.findByClient(clientA));
+  assert.ok(f.worker.registrations.findByClient(clientB));
+  const end = f.worker.endRegistrations.bind(f.worker);
+  const fail = t.mock.method(
+    f.worker,
+    "endRegistrations",
+    (...args: Parameters<typeof end>) => {
+      end(...args);
+      throw new Error("rollback after group end");
+    },
+  );
+  const failed = await write(NONE);
+  assert.ok(failed.type === OperationResultType.Failure);
+  assert.equal(failed.status, HttpStatus.InternalServerError);
+  assert.ok(f.worker.registrations.findByClient(clientA));
+  assert.ok(f.worker.registrations.findByClient(clientB));
+  fail.mock.restore();
+  const disabled = await write(NONE);
+  assert.ok(disabled.type === OperationResultType.Completed);
+  version = disabled.data.bindingSetVersion;
+  assert.equal(f.worker.registrations.findByClient(clientA), undefined);
+  assert.equal(f.worker.registrations.findByClient(clientB), undefined);
+  const enabled = await write(ONE);
+  assert.ok(enabled.type === OperationResultType.Completed);
+  version = enabled.data.bindingSetVersion;
+  const next = await a.register(INPUT);
+  assert.ok(next.type === OperationResultType.Completed);
+  assert.notEqual(next.data.runtimeIdentity, first.data.runtimeIdentity);
+  const removed = await write(null);
+  assert.ok(removed.type === OperationResultType.Completed);
+  assert.equal(f.worker.registrations.findByClient(clientA), undefined);
+});

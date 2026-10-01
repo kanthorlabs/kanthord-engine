@@ -309,6 +309,46 @@ test("run owns the heartbeat interval and quiescence stops it", async (t) => {
   await running;
 });
 
+test("ending a binding shares its caller transaction and leaves reopened heartbeat readings intact", async (t) => {
+  const f = enablementFixture(t);
+  const row = f.store.transaction((tx) =>
+    f.worker.registrations.register(tx, client, Date.now()),
+  );
+  await f.worker.start();
+  t.after(() => f.worker.stop());
+  const before = f.worker.heartbeatClock.ageMs(row.runtimeIdentity);
+  const failure = new Error("rollback binding end");
+  assert.throws(
+    () =>
+      f.store.transaction((tx) => {
+        f.worker.endRegistrations(
+          tx,
+          client.projectId,
+          client.resourceIdentity,
+          Date.now(),
+        );
+        throw failure;
+      }),
+    (error) => error === failure,
+  );
+  assert.ok(f.worker.registrations.findByClient(client.clientId));
+  f.store.transaction((tx) =>
+    f.worker.endRegistrations(
+      tx,
+      client.projectId,
+      client.resourceIdentity,
+      Date.now(),
+    ),
+  );
+  assert.equal(f.worker.registrations.findByClient(client.clientId), undefined);
+  assert.ok(f.worker.heartbeatClock.ageMs(row.runtimeIdentity)! >= before!);
+  f.store.transaction((tx) => reopenRegistration(tx, row.runtimeIdentity));
+  f.worker.heartbeatClock.set(row.runtimeIdentity);
+  f.worker.sweepRegistrations();
+  assert.notEqual(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), null);
+  assert.ok(f.worker.registrations.findByClient(client.clientId));
+});
+
 function enablementFixture(
   t: TestContext,
   collaborations: Partial<Dependencies> = {},
