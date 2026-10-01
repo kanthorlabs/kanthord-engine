@@ -111,6 +111,7 @@ export function requireTextBound(
   assert.ok(
     Number.isSafeInteger(textMaxBytes) && textMaxBytes > POSITIVE_BOUND,
   );
+  if (value.trim().length === POSITIVE_BOUND) invalidExecutionInput(field);
   if (Buffer.byteLength(value) > textMaxBytes)
     invalidExecutionInput(field, "too_big");
 }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { z } from "zod";
 import { OperationError, type ErrorBody } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -14,6 +15,8 @@ import {
   NodeState,
   Resolution,
   platformAddressSchema,
+  checkEndStateSchema,
+  commitSchema,
   type IntakeCheck,
 } from "./contract.ts";
 import { closeExternalAttempt, requireRunnable } from "./control.ts";
@@ -37,6 +40,16 @@ const ZERO = 0;
 const ONE = 1;
 export const LANDED_COMMIT_SUBJECT = "Landed commit";
 type CheckAnswer = Awaited<ReturnType<IntakeCheck["check"]>>;
+const checkAnswerSchema = z
+  .strictObject({
+    endState: checkEndStateSchema,
+    landedCommits: z.array(commitSchema),
+  })
+  .refine((answer) =>
+    answer.endState === CheckEndState.Expected
+      ? answer.landedCommits.length > ZERO
+      : answer.landedCommits.length === ZERO,
+  );
 
 function requestContext(
   tx: Transaction,
@@ -72,6 +85,7 @@ export function applyEndState(
   answer: CheckAnswer,
   now: number,
 ): void {
+  checkAnswerSchema.parse(answer);
   const { request, frozenAction } = requestContext(
     tx,
     dependencies,
@@ -196,10 +210,12 @@ export async function checkNode(
   for (const item of prepared.requests) {
     let answer: CheckAnswer;
     try {
-      answer = await dependencies.intakeCheck.check(caller.context, {
-        frozenAction: item.frozenAction,
-        address: item.address,
-      });
+      answer = checkAnswerSchema.parse(
+        await dependencies.intakeCheck.check(caller.context, {
+          frozenAction: item.frozenAction,
+          address: item.address,
+        }),
+      );
     } catch (error) {
       failures.push({
         evidenceId: item.request.id,
@@ -207,9 +223,10 @@ export async function checkNode(
       });
       continue;
     }
-    dependencies.store.transaction((tx) =>
-      applyEndState(tx, dependencies, item.request.id, answer, Date.now()),
-    );
+    dependencies.store.transaction((tx) => {
+      requireMission(tx, prepared.mission.id, expectedMissionVersion);
+      applyEndState(tx, dependencies, item.request.id, answer, Date.now());
+    });
     checked.push(item.request.id);
   }
   const result = caller.commit((tx) => ({

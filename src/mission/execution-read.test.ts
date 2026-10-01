@@ -27,6 +27,7 @@ const ONE = 1;
 const TWO = 2;
 const THREE = 3;
 const PINNED = "Pinned";
+const PINNED_FILENAME = "initiative.md";
 
 test("initiative reads use outcome revisions, include discarded children, minimize new children and exclude retired children", async (t) => {
   const h = executionHarness(t, IDENTITY);
@@ -95,9 +96,13 @@ test("initiative reads use outcome revisions, include discarded children, minimi
       ...base,
       nodeId: childId,
       revision: TWO,
+      filename: "renamed.md",
       content: { ...base.content, name: "Later" },
       tasks: [],
     });
+    tx.database
+      .prepare("UPDATE mission_node SET filename = ? WHERE id = ?")
+      .run("renamed.md", childId);
   });
   const input = {
     params: { executionId: h.claim.executionId },
@@ -109,6 +114,7 @@ test("initiative reads use outcome revisions, include discarded children, minimi
   assert.ok("content" in child);
   assert.equal(child.content.name, PINNED);
   assert.equal(child.visibleRevision, ONE);
+  assert.equal(child.filename, PINNED_FILENAME);
   assert.deepEqual(
     page.items.find((item) => item.id === freshId),
     { id: freshId, state: NodeState.Pending },

@@ -74,7 +74,7 @@ async function sinkRequest(
   response: ServerResponse,
 ) {
   assert.ok(request.url);
-  const key = request.url.slice(1);
+  const key = decodeURIComponent(request.url.slice(1));
   if (request.method === HttpMethod.Put) {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -126,7 +126,7 @@ export function sinkStorage(sink: ObjectSink): IntakeStorage {
     throwIfCancelled(call.context);
     assert.ok(key);
     return {
-      getUrl: `${sink.endpoint}/${key}`,
+      getUrl: `${sink.endpoint}/${encodeURIComponent(key)}`,
       expiresAt: Date.now() + OBJECT_GRANT_LIFETIME_MS,
     };
   };
@@ -137,7 +137,7 @@ export function sinkStorage(sink: ObjectSink): IntakeStorage {
       const headers: Record<string, string> = {};
       if (sha256 !== null) headers[CHECKSUM_HEADER] = sha256;
       return {
-        putUrl: `${sink.endpoint}/${key}`,
+        putUrl: `${sink.endpoint}/${encodeURIComponent(key)}`,
         headers,
         expiresAt: Date.now() + OBJECT_GRANT_LIFETIME_MS,
       };

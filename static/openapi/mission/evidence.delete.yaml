@@ -130,6 +130,15 @@ components:
             - expectedMissionVersion
             - force
           additionalProperties: false
+          if:
+            properties:
+              force:
+                const: true
+            required:
+              - force
+          then:
+            required:
+              - reason
       required:
         - params
         - query

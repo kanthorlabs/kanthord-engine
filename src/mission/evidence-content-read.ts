@@ -27,6 +27,7 @@ import type { Dependencies } from "./service.ts";
 
 export type ContentBound = (tx: Transaction, evidence: EvidenceRow) => boolean;
 const FUNCTION_TYPE = "function";
+const MAX_SIGNINGS = 2;
 const inlineSchema = z.object({ mediaType: z.string(), data: z.string() });
 export const objectContentSchema = z.object({
   location: z.string(),
@@ -165,18 +166,31 @@ export async function readContent(
     return caller.commit((tx) =>
       storedContentSchema.parse(contentOf(tx, assetId, bound).result),
     );
-  const { object, binding } = prepared;
+  let object = prepared.object;
+  const binding = prepared.binding;
   const method = execution ? "executionGet" : "get";
-  const signed = await dependencies.intakeStorage[method](
-    { context: caller.context, identity: caller.identity },
-    binding,
-    keyOfLocation(binding, object.location),
-    object.objectVersion ?? null,
-  );
-  return caller.commit((tx) =>
-    storedContentSchema.parse({
-      ...contentOf(tx, assetId, bound).result,
-      ...signed,
-    }),
+  for (let attempt = 0; attempt < MAX_SIGNINGS; attempt++) {
+    const signed = await dependencies.intakeStorage[method](
+      { context: caller.context, identity: caller.identity },
+      binding,
+      keyOfLocation(binding, object.location),
+      object.objectVersion ?? null,
+    );
+    const current = dependencies.store.transaction((tx) =>
+      contentOf(tx, assetId, bound),
+    );
+    assert.ok(current.object);
+    if (current.object.objectVersion !== object.objectVersion) {
+      object = current.object;
+      continue;
+    }
+    return caller.commit((tx) => {
+      const final = contentOf(tx, assetId, bound);
+      assert.equal(final.object?.objectVersion, object.objectVersion);
+      return storedContentSchema.parse({ ...final.result, ...signed });
+    });
+  }
+  assert.fail(
+    "An asset version is written once, so signing converges within two attempts.",
   );
 }

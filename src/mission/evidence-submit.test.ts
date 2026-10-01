@@ -17,6 +17,68 @@ const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const ZERO = 0;
 const ONE = 1;
 const NOT_RUNNING = "scheduler.execution.not_running";
+const VALIDATION = "gateway.request.validation_failed";
+const Field = {
+  Subject: "subject",
+  Command: "command",
+  Signal: "signal",
+} as const;
+
+test("submission rejects blank and oversized nested Text before signing or insertion", async (t) => {
+  const h = evidenceHarness(t, IDENTITY);
+  for (const field of Object.values(Field)) {
+    const subject = field === Field.Subject ? " \t " : "Valid";
+    const long = "é".repeat(h.dependencies.config.textMaxBytes);
+    const verification = {
+      testedInput: {
+        kind: AssetKind.Repository,
+        bindingId: h.repositoryId,
+        commit: "a".repeat(40),
+      },
+      results: [
+        {
+          command: field === Field.Command ? long : "true",
+          signal: field === Field.Signal ? long : null,
+          exitCode: ZERO,
+          timedOut: false,
+        },
+      ],
+    };
+    await assert.rejects(
+      h.invoke("evidence.submit", {
+        params: { nodeId: h.nodeId },
+        query: {},
+        body: {
+          ...h.context,
+          subject,
+          verification,
+          assets: [
+            { kind: AssetKind.Object, size: ONE, mediaType: "text/plain" },
+          ],
+        },
+      }),
+      (error) => error instanceof OperationError && error.code === VALIDATION,
+    );
+  }
+  h.store.transaction((tx) => {
+    assert.equal(
+      (
+        tx.database
+          .prepare("SELECT count(*) AS count FROM mission_evidence")
+          .get() as { count: number }
+      ).count,
+      ZERO,
+    );
+    assert.equal(
+      (
+        tx.database
+          .prepare("SELECT count(*) AS count FROM mission_evidence_asset")
+          .get() as { count: number }
+      ).count,
+      ZERO,
+    );
+  });
+});
 
 test("repository and produced submissions publish atomically and repeated submissions mint new evidence", async (t) => {
   const h = evidenceHarness(t, IDENTITY);

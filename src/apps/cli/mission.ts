@@ -529,7 +529,7 @@ export function addMissionCommand(program: Command): void {
     .option("--endpoint <url>", "Server endpoint", singleUse("--endpoint"))
     .option(
       "--token <token>",
-      "Human JWT (otherwise KANTHORD_TOKEN or cli.yaml)",
+      "JWT for the command's required caller kind (otherwise KANTHORD_TOKEN or cli.yaml)",
       singleUse("--token"),
     );
   mission.action(() => mission.help());

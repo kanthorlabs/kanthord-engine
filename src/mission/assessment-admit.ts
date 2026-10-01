@@ -85,11 +85,20 @@ function requireResult(
   }
   if (
     body.result === AssessmentResult.Undetermined &&
-    verifications.some(
-      (verification) => !verificationPasses(verification, expected),
-    )
+    (verifications.length === ZERO ||
+      verifications.some(
+        (verification) => !verificationPasses(verification, expected),
+      ))
   )
     invalidExecutionInput("result");
+  if (
+    verifications.some(
+      (verification) =>
+        canonicalJSON(verification.testedInput) !==
+        canonicalJSON(body.testedInput),
+    )
+  )
+    invalidExecutionInput("testedInput");
 }
 
 export function admitAssessment(

@@ -56,6 +56,19 @@ export function prepareEvidence(
     now,
   );
   requireTextBound("subject", body.subject, dependencies.config.textMaxBytes);
+  for (const result of body.verification?.results ?? []) {
+    requireTextBound(
+      "verification.results.command",
+      result.command,
+      dependencies.config.textMaxBytes,
+    );
+    if (result.signal !== null)
+      requireTextBound(
+        "verification.results.signal",
+        result.signal,
+        dependencies.config.textMaxBytes,
+      );
+  }
   assert.equal(ids.assetIds.length, body.assets.length);
   if (body.verification)
     requireTestedInput(

@@ -80,24 +80,34 @@ export function executionObjectives(
   query: { limit?: number; cursor?: string },
 ) {
   const { node } = executionRead(tx, dependencies, claim);
-  const items: ExecutionObjective[] =
+  const page = identityPage(
     node.kind === NodeKind.Objective
       ? []
-      : currentObjectivesOf(tx, node.id).map(({ node: child, outcome }) => {
-          assert.ok(child.state);
-          if (!outcome) return { id: child.id, state: child.state };
-          const record = outcomeRecord(tx, dependencies.bindings, outcome);
-          const revision = getRevision(tx, child.id, record.nodeRevision);
-          const view = nodeRecord(tx, child, dependencies.bindings);
-          assert.ok(view.kind === NodeKind.Objective);
-          return {
-            ...view,
-            content: revision.content,
-            visibleRevision: revision.revision,
-            pinnedByAttempts: revision.pinnedByAttempts,
-          };
-        });
-  return identityPage(items, "node", query);
+      : currentObjectivesOf(tx, node.id).map((item) => ({
+          ...item,
+          id: item.node.id,
+        })),
+    "node",
+    query,
+  );
+  const items: ExecutionObjective[] = page.items.map(
+    ({ node: child, outcome }) => {
+      assert.ok(child.state);
+      if (!outcome) return { id: child.id, state: child.state };
+      const record = outcomeRecord(tx, dependencies.bindings, outcome);
+      const revision = getRevision(tx, child.id, record.nodeRevision);
+      const view = nodeRecord(tx, child, dependencies.bindings);
+      assert.ok(view.kind === NodeKind.Objective);
+      return {
+        ...view,
+        filename: revision.filename,
+        content: revision.content,
+        visibleRevision: revision.revision,
+        pinnedByAttempts: revision.pinnedByAttempts,
+      };
+    },
+  );
+  return { ...page, items };
 }
 
 export function executionObjectiveOutcomes(
@@ -111,9 +121,15 @@ export function executionObjectiveOutcomes(
     node.kind === NodeKind.Objective
       ? []
       : currentObjectivesOf(tx, node.id).flatMap(({ outcome }) =>
-          outcome ? [outcomeRecord(tx, dependencies.bindings, outcome)] : [],
+          outcome ? [outcome] : [],
         );
-  return identityPage(items, "outcome", query);
+  const page = identityPage(items, "outcome", query);
+  return {
+    ...page,
+    items: page.items.map((row) =>
+      outcomeRecord(tx, dependencies.bindings, row),
+    ),
+  };
 }
 
 export function executionObjectiveEvidence(
@@ -131,12 +147,17 @@ export function executionObjectiveEvidence(
             ? outcomeRecord(tx, dependencies.bindings, outcome).evidenceIds
             : [],
         );
-  const items = [...new Set(ids)].map((id) => {
+  const page = identityPage(
+    [...new Set(ids)].map((id) => ({ id })),
+    "evidence",
+    query,
+  );
+  const items = page.items.map(({ id }) => {
     const evidence = readEvidence(tx, id);
     assert.ok(evidence);
     return evidenceRecord(tx, evidence);
   });
-  return identityPage(items, "evidence", query);
+  return { ...page, items };
 }
 
 export function executionEvidencePage(

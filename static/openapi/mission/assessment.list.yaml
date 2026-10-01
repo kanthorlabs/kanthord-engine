@@ -463,6 +463,7 @@ components:
                 maxLength: 35
                 pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                 description: evidence_ followed by a canonical 26-character uppercase ULID.
+              uniqueItems: true
             childOutcomeIds:
               type: array
               items:
@@ -471,6 +472,7 @@ components:
                 maxLength: 34
                 pattern: ^outcome_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                 description: outcome_ followed by a canonical 26-character uppercase ULID.
+              uniqueItems: true
             result:
               type: string
               enum:

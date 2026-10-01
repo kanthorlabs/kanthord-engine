@@ -11,8 +11,10 @@ import {
   PlatformAddressKind,
   RepositoryAction,
   Resolution,
+  ClosingEvent,
 } from "./contract.ts";
 import { applyEndState } from "./node-check.ts";
+import { outcomeRecord } from "./record-read.ts";
 import {
   readCurrentOutcome,
   readLandedCommitEvidence,
@@ -27,6 +29,45 @@ const ONE = 1;
 const TWO = 2;
 const COMMIT = "a".repeat(40);
 const RESOURCE = "repository:github:owner/repo";
+
+test("invalid Intake answers leave requests unresolved and stale mission versions refuse result writes", async (t) => {
+  const h = await fixture(t);
+  for (const answer of [
+    { endState: CheckEndState.Expected, landedCommits: [] },
+    { endState: CheckEndState.Expected, landedCommits: ["bad"] },
+    { endState: CheckEndState.Other, landedCommits: [COMMIT] },
+  ]) {
+    h.dependencies.intakeCheck.check = async () => answer;
+    const result = await h.check();
+    assert.equal(result.failures.length, ONE);
+    assert.equal(result.results.length, ZERO);
+    assert.equal(
+      h.store.transaction((tx) => readEvidence(tx, h.request.id)?.end_state),
+      null,
+    );
+  }
+  h.dependencies.intakeCheck.check = async () => {
+    h.store.transaction((tx) =>
+      tx.database
+        .prepare(
+          "UPDATE mission_mission SET version = version + 1 WHERE id = ?",
+        )
+        .run(h.missionId),
+    );
+    return { endState: CheckEndState.Expected, landedCommits: [COMMIT] };
+  };
+  await assert.rejects(
+    h.check(),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === MissionErrorCode.VersionConflict,
+  );
+  assert.equal(
+    h.store.transaction((tx) => readEvidence(tx, h.request.id)?.end_state),
+    null,
+  );
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+});
 
 async function fixture(t: TestContext) {
   const h = evidenceHarness(t, IDENTITY);
@@ -125,6 +166,31 @@ test("expected checks write every landed commit and close successful external at
       error instanceof OperationError &&
       error.code === MissionErrorCode.NoUnresolvedRequest,
   );
+  const before = h.store.transaction((tx) =>
+    outcomeRecord(
+      tx,
+      h.dependencies.bindings,
+      readCurrentOutcome(tx, h.nodeId)!,
+    ),
+  );
+  await h.invoke("evidence.delete", {
+    params: { evidenceId: h.request.id },
+    query: {},
+    body: {
+      expectedMissionVersion: ONE,
+      force: true,
+      reason: "Remove request",
+    },
+  });
+  const after = h.store.transaction((tx) =>
+    outcomeRecord(
+      tx,
+      h.dependencies.bindings,
+      readCurrentOutcome(tx, h.nodeId)!,
+    ),
+  );
+  assert.deepEqual(after, before);
+  assert.equal(after.closingEvent, ClosingEvent.ExternalSuccess);
 });
 
 test("other checks block while none stays unresolved and failed checks retain failure envelopes", async (t) => {

@@ -75,7 +75,8 @@ export function submitAssessment(
     current &&
     (body.result !== AssessmentResult.Success || actions.length === ZERO)
   ) {
-    requireNoUnresolvedAction(tx, node);
+    if (body.result === AssessmentResult.Success)
+      requireNoUnresolvedAction(tx, node);
     endLiveClaim(tx, dependencies, node, now);
     closeAttempt(tx, node.id, attempt.attempt, now);
     outcome = insertOutcome(tx, {

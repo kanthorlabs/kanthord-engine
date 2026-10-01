@@ -283,6 +283,8 @@ test(
       failed!: Submission,
       gatedRun!: Submission;
     let request!: Evidence;
+    let landedEvidenceId = EMPTY;
+    let gatedOutcome!: Outcome;
     const ctx = (executionId: string) => ({
       executionId,
       attempt: ONE,
@@ -736,6 +738,7 @@ test(
         ClosingEvent.ExternalSuccess,
       );
       assert.equal(outcomes.items[ZERO]!.evidenceIds.length, TWO);
+      gatedOutcome = outcomes.items[ZERO]!;
     });
     await t.test("E04.27 landed evidence and no unresolved check", async () => {
       const page = await h.read<Page<Evidence>>([
@@ -752,6 +755,11 @@ test(
           item.provenance.service === ActorService.Mission,
       );
       assert.equal(landed.length, ONE);
+      landedEvidenceId = landed[ZERO]!.id;
+      assert.deepEqual(
+        [...gatedOutcome.evidenceIds].sort(),
+        [gatedRun.evidence.id, landedEvidenceId].sort(),
+      );
       const asset = landed[ZERO]!.assets[ZERO]!;
       assert.ok(asset.kind === AssetKind.Repository);
       assert.equal(asset.address.commit, LANDED);
@@ -786,6 +794,15 @@ test(
           h.W,
         );
         assert.equal(evidence.items.length, FOUR);
+        assert.deepEqual(
+          evidence.items.map((item) => item.id).sort(),
+          [
+            run.evidence.id,
+            work.evidence.id,
+            gatedRun.evidence.id,
+            landedEvidenceId,
+          ].sort(),
+        );
         assert.ok(
           [run.evidence.id, work.evidence.id, gatedRun.evidence.id].every(
             (id) => evidence.items.some((item) => item.id === id),

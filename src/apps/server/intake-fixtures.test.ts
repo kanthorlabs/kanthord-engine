@@ -6,7 +6,7 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { CheckEndState, type StorageBinding } from "../../mission/contract.ts";
 import { objectSink, sinkStorage, scriptedCheck } from "./test-support.ts";
 
-const KEY = "prefix/project/mission/node/1/asset";
+const KEY = "prefix#tag?query%2F space/é/project/mission/node/1/asset";
 const BYTES = "hello";
 const SHA256 = "a".repeat(64);
 const LIFETIME = 3600000;
@@ -44,6 +44,7 @@ test("Intake storage fixture transfers bytes, checks length and removes objects"
   const response = await fetch(upload.putUrl, { method: "PUT", body: BYTES });
   assert.equal(response.status, HttpStatus.OK);
   await response.arrayBuffer();
+  assert.ok(sink.objects.has(KEY));
   assert.deepEqual(
     await storage.check(call, binding, KEY, BYTES.length, null),
     { location: `s3://${binding.bucket}/${KEY}`, version: null },

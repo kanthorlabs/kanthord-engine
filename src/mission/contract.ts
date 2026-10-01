@@ -1000,10 +1000,12 @@ export type EvidenceSubmit = z.infer<typeof evidenceSubmitSchema>;
 export const assessmentSubmitSchema = executionContextSchema.extend({
   evidenceIds: z
     .array(identitySchema("evidence"))
-    .refine((items) => new Set(items).size === items.length),
+    .refine((items) => new Set(items).size === items.length)
+    .meta({ uniqueItems: true }),
   childOutcomeIds: z
     .array(identitySchema("outcome"))
-    .refine((items) => new Set(items).size === items.length),
+    .refine((items) => new Set(items).size === items.length)
+    .meta({ uniqueItems: true }),
   result: assessmentResultSchema,
   rationale: textSchema,
   testedInput: testedInputSchema,
@@ -1028,6 +1030,10 @@ export const evidenceDeleteSchema = z
         path: ["reason"],
         message: "A forced delete requires a reason.",
       });
+  })
+  .meta({
+    if: { properties: { force: { const: true } }, required: ["force"] },
+    then: { required: ["reason"] },
   });
 export const nodeCheckSchema = z.strictObject({
   expectedMissionVersion: z.number().int().positive(),

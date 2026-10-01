@@ -14,6 +14,7 @@ import { projectOperations } from "../../project/contract.ts";
 import {
   MISSION_INITIAL_VERSION,
   NodeKind,
+  AssetKind,
   missionOperations,
   missionSchema,
 } from "../../mission/contract.ts";
@@ -252,6 +253,32 @@ const MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS = [
   ],
 ] as const;
 const ARRAY_SCHEMA_TYPE = "array";
+const EVIDENCE_FRAGMENT_EXCEPTIONS = [
+  ["evidence.delete", "mission.evidence.get", false],
+  ["evidence.list", "mission.evidence.list", true],
+  ["evidence.request", "mission.evidence.request", false],
+  ["execution.evidence.list", "mission.execution.evidence.list", true],
+  [
+    "execution.objective.evidence.list",
+    "mission.execution.objective.evidence.list",
+    true,
+  ],
+] as const;
+const LEGACY_FRAGMENT_EXCEPTIONS = [
+  "openapi/mission/dependency.add.yaml",
+  "openapi/mission/import.apply.yaml",
+  "openapi/project/bindingSet.get.yaml",
+];
+const NAMED_FRAGMENT_EXCEPTIONS = new Set([
+  ...MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS.map(
+    ([file]) => `openapi/mission/${file}.yaml`,
+  ),
+  ...EVIDENCE_FRAGMENT_EXCEPTIONS.map(
+    ([file]) => `openapi/mission/${file}.yaml`,
+  ),
+  "openapi/mission/execution.objective.list.yaml",
+  ...LEGACY_FRAGMENT_EXCEPTIONS,
+]);
 const NULL_SCHEMA_TYPE = "null";
 const STRING_SCHEMA_TYPE = "string";
 const NONEMPTY_STRING_MIN_LENGTH = 1;
@@ -274,6 +301,7 @@ type ResolvedSchema = {
   additionalProperties?: ResolvedSchema | boolean;
   enum?: unknown[];
   anyOf?: ResolvedSchema[];
+  oneOf?: ResolvedSchema[];
   allOf?: ResolvedSchema[];
   items?: ResolvedSchema;
   const?: unknown;
@@ -451,6 +479,151 @@ function assertBlockedNode(schema: unknown): void {
   }
 }
 
+function assertEvidenceShape(schema: ResolvedSchema): void {
+  assert.deepEqual(Object.keys(schema.properties).sort(), [
+    "assets",
+    "attempt",
+    "createdAt",
+    "endState",
+    "id",
+    "nodeId",
+    "provenance",
+    "requirementKey",
+    "subject",
+    "verification",
+  ]);
+  assert.deepEqual(schema.required, [
+    "id",
+    "nodeId",
+    "attempt",
+    "subject",
+    "assets",
+    "provenance",
+    "createdAt",
+  ]);
+  const variants = schema.properties.assets!.items!.oneOf!;
+  assert.deepEqual(
+    variants.map((item) => item.properties.kind!.const),
+    ["repository", "produced", "object", "platform"],
+  );
+  for (const asset of variants) {
+    assert.deepEqual(asset.required, [
+      "id",
+      "publishedAt",
+      "expiredAt",
+      "kind",
+      "address",
+      ...(asset.properties.kind!.const === AssetKind.Object
+        ? ["storageBindingId", "size", "mediaType"]
+        : []),
+    ]);
+    for (const field of ["publishedAt", "expiredAt"])
+      assert.ok(
+        asset.properties[field]!.anyOf!.some(
+          (item) => item.type === NULL_SCHEMA_TYPE,
+        ),
+      );
+    assert.ok(asset.properties.address);
+  }
+  assert.deepEqual(schema.properties.verification!.required, [
+    "testedInput",
+    "results",
+  ]);
+  assert.deepEqual(
+    schema.properties.provenance!.oneOf!.map(
+      (item) => item.properties.kind!.const,
+    ),
+    ["human", "execution", "service"],
+  );
+}
+
+test("named evidence exceptions retain record shapes and conditional request validation", () => {
+  for (const [file, operation, page] of EVIDENCE_FRAGMENT_EXCEPTIONS) {
+    const fragment = parse(
+      readFileSync(
+        join(dirname(openapiPath()), `openapi/mission/${file}.yaml`),
+        "utf8",
+      ),
+    );
+    const output = fragment.components.schemas[
+      `${operation}.Output`
+    ] as ResolvedSchema;
+    if (page) {
+      assert.deepEqual(output.required, ["items", "nextCursor"]);
+      assert.ok(
+        output.properties.nextCursor!.anyOf!.some(
+          (item) => item.type === NULL_SCHEMA_TYPE,
+        ),
+      );
+    }
+    assertEvidenceShape(page ? output.properties.items!.items! : output);
+  }
+  for (const name of ["evidence.delete", "evidence.asset.delete"]) {
+    const fragment = parse(
+      readFileSync(
+        join(dirname(openapiPath()), `openapi/mission/${name}.yaml`),
+        "utf8",
+      ),
+    );
+    const input =
+      fragment.components.schemas[`mission.${name}.Input`].properties.body;
+    assert.deepEqual(input.if, {
+      properties: { force: { const: true } },
+      required: ["force"],
+    });
+    assert.deepEqual(input.then, { required: ["reason"] });
+  }
+  const assessment = parse(
+    readFileSync(
+      join(dirname(openapiPath()), "openapi/mission/assessment.list.yaml"),
+      "utf8",
+    ),
+  );
+  for (const field of ["evidenceIds", "childOutcomeIds"])
+    assert.equal(
+      assessment.components.schemas["mission.assessment.submit.Input"]
+        .properties.body.properties[field].uniqueItems,
+      true,
+    );
+});
+
+test("objective list exception preserves full objective and identity-only variants", () => {
+  const fragment = parse(
+    readFileSync(
+      join(
+        dirname(openapiPath()),
+        "openapi/mission/execution.objective.list.yaml",
+      ),
+      "utf8",
+    ),
+  );
+  const output =
+    fragment.components.schemas["mission.execution.objective.list.Output"];
+  assert.deepEqual(output.required, ["items", "nextCursor"]);
+  const [full, minimal] = output.properties.items.items.anyOf;
+  assert.deepEqual(minimal.required, ["id", "state"]);
+  assert.deepEqual(Object.keys(minimal.properties).sort(), ["id", "state"]);
+  assert.equal(minimal.additionalProperties, false);
+  assert.deepEqual(full.required, [
+    "id",
+    "filename",
+    "missionId",
+    "parentId",
+    "visibleRevision",
+    "content",
+    "retiredAt",
+    "pinnedByAttempts",
+    "kind",
+    "state",
+    "attempt",
+    "priority",
+  ]);
+  assert.deepEqual(full.properties.blockedContext.required, [
+    "outcome",
+    "requests",
+  ]);
+});
+
 test("named Mission fragment size exceptions retain the complete blocked context", () => {
   const files = emitOpenAPIFiles(apiOperations);
   for (const [
@@ -496,8 +669,9 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     assert.equal(content, serializeOpenAPIFile(document), file);
     const lineCount = content.trimEnd().split("\n").length;
     if (lineCount > OPENAPI_FRAGMENT_SOFT_LIMIT_LINES)
-      t.diagnostic(
-        `${file} has ${lineCount} lines (soft limit: ${OPENAPI_FRAGMENT_SOFT_LIMIT_LINES})`,
+      assert.ok(
+        NAMED_FRAGMENT_EXCEPTIONS.has(file),
+        `${file} requires a named shape-checked exception`,
       );
   }
   const resolved = await SwaggerParser.validate(openapiPath());

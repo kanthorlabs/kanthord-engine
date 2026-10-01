@@ -199,8 +199,9 @@ Verify relative links and documented commands.
 1. Declare the operation and its input/output schemas in the owning service's
    `contract.ts`. Set `lifetime` to `OperationLifetime.Unary`, `Wait`, or
    `Stream`, and `store` to `StoreName.Operational`. Supply the store when
-   sealing the registry. A mutation must be idempotent by its own natural key;
-   invocation replay lasts only within the in-memory TTL.
+   sealing the registry. Follow the owning operation's idempotency rule;
+   evidence submissions deliberately have no natural-key deduplication.
+   Invocation replay lasts only within the in-memory TTL.
 2. Bind its handler in the service's `declare(registry)`. Add tests beside the
    implementation and adapter integration tests under `src/apps/server/`.
 3. For a peer call, pass the original caller through the direct client's

@@ -14,8 +14,13 @@ import {
 } from "./contract.ts";
 import { admitAssessment } from "./assessment-admit.ts";
 import { getRevision } from "./node-read.ts";
-import { insertEvidence, readOpenAttempt } from "./record-store.ts";
-import { readNode } from "./store.ts";
+import {
+  insertEvidence,
+  readOpenAttempt,
+  insertAssessment,
+  insertOutcome,
+} from "./record-store.ts";
+import { readNode, insertNode, insertRevision } from "./store.ts";
 import { executionHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
@@ -179,5 +184,91 @@ test("assessment admission checks rationale and evidence ownership before public
   refusal(() => h.admit(), VALIDATION, "childOutcomeIds");
   refusal(() => h.admit(h.body, true), VALIDATION, "childOutcomeIds");
   h.body.childOutcomeIds = [];
-  h.admit({ ...h.body, result: AssessmentResult.Undetermined });
+  refusal(
+    () => h.admit({ ...h.body, result: AssessmentResult.Undetermined }),
+    VALIDATION,
+    "result",
+  );
+});
+
+test("non-success assessments retain the verification's tested input", (t) => {
+  const h = fixture(t);
+  h.body.evidenceIds = [h.seed({ testedInput: INPUT, results: [RESULT] })];
+  for (const result of [
+    AssessmentResult.CriterionNotMet,
+    AssessmentResult.Undetermined,
+  ])
+    refusal(
+      () =>
+        h.admit({
+          ...h.body,
+          result,
+          testedInput: { ...INPUT, sha256: "b".repeat(64) },
+        }),
+      VALIDATION,
+      "testedInput",
+    );
+});
+
+test("initiative admission tracks replacement child outcomes and excludes retired children", (t) => {
+  const h = fixture(t);
+  h.body.evidenceIds = [h.seed({ testedInput: INPUT, results: [RESULT] })];
+  const childId = createIdentity("node");
+  h.store.transaction((tx) => {
+    const base = getRevision(tx, h.nodeId, FIRST);
+    insertNode(tx, {
+      id: childId,
+      mission_id: h.missionId,
+      kind: NodeKind.Objective,
+      parent_id: h.nodeId,
+      filename: "child.md",
+      created_at: NOW,
+    });
+    insertRevision(tx, {
+      ...base,
+      nodeId: childId,
+      filename: "child.md",
+      tasks: [],
+    });
+  });
+  const outcome = () =>
+    h.store.transaction((tx) => {
+      const id = createIdentity("assessment");
+      insertAssessment(tx, {
+        id,
+        node_id: childId,
+        attempt: ZERO,
+        result: AssessmentResult.Undetermined,
+        rationale: "Blocked",
+        evidence_ids: "[]",
+        child_outcome_ids: "[]",
+        tested_input: null,
+        actor: canonicalJSON(h.actor),
+        execution_id: null,
+        node_revision: FIRST,
+        created_at: NOW,
+      });
+      return insertOutcome(tx, {
+        id: createIdentity("outcome"),
+        node_id: childId,
+        result: AssessmentResult.Undetermined,
+        assessment_id: id,
+        evidence_ids: "[]",
+        created_at: NOW,
+      });
+    });
+  h.body.childOutcomeIds = [outcome().id];
+  h.admit();
+  const replacement = outcome();
+  refusal(() => h.admit(), VALIDATION, "childOutcomeIds");
+  h.body.childOutcomeIds = [replacement.id];
+  h.admit();
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+      .run(NOW, childId),
+  );
+  refusal(() => h.admit(), VALIDATION, "childOutcomeIds");
+  h.body.childOutcomeIds = [];
+  h.admit();
 });
