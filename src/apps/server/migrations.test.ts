@@ -35,6 +35,8 @@ const ERD2_WORKER_TABLES = [WORKER_INSTANCE_TABLE];
 const PROJECT_PROJECT_TABLE = "project_project";
 const PROJECT_BINDING_TABLE = "project_binding";
 const SCHEDULER_JOB_TABLE = "scheduler_job";
+const SCHEDULER_EXECUTION_TABLE = "scheduler_execution";
+const SCHEDULER_TABLES = [SCHEDULER_JOB_TABLE, SCHEDULER_EXECUTION_TABLE];
 const MISSION_MISSION_TABLE = "mission_mission";
 const MISSION_NODE_TABLE = "mission_node";
 const MISSION_NODE_REVISION_TABLE = "mission_node_revision";
@@ -115,7 +117,7 @@ test("service migrations own distinct prefixes and create only tables in their n
       ...ERD2_WORKER_TABLES,
       PROJECT_PROJECT_TABLE,
       PROJECT_BINDING_TABLE,
-      SCHEDULER_JOB_TABLE,
+      ...SCHEDULER_TABLES,
       ...MISSION_TABLES,
     ]);
   } finally {
@@ -138,7 +140,7 @@ test("each service migration set applies alone to an empty store", () => {
         INTEGRITY_OK,
       );
       if (service.service === SCHEDULER_SERVICE_NAME)
-        assert.deepEqual(tables(store), [SCHEDULER_JOB_TABLE]);
+        assert.deepEqual(tables(store), SCHEDULER_TABLES);
       if (service.service === MISSION_SERVICE_NAME)
         assert.deepEqual(tables(store), MISSION_TABLES);
       if (service.service === WORKER_SERVICE_NAME)
@@ -268,7 +270,12 @@ test("all migrations produce exactly the expected ERD 1 and implemented ERD 2 ta
     }
     assert.deepEqual(
       [...tables(store)].sort(),
-      [...ERD1_TABLES, ...ERD2_MISSION_TABLES, ...ERD2_WORKER_TABLES].sort(),
+      [
+        ...ERD1_TABLES,
+        ...ERD2_MISSION_TABLES,
+        ...ERD2_WORKER_TABLES,
+        SCHEDULER_EXECUTION_TABLE,
+      ].sort(),
     );
     for (const name of tables(store)) {
       const matches = erd1Services.filter(({ service }) =>
@@ -307,6 +314,63 @@ test("all migrations produce exactly the expected ERD 1 and implemented ERD 2 ta
       isolated.close();
     }
   }
+});
+
+test("Scheduler executions have exactly the ruled columns and partial unique indexes", (t) => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  t.after(() => store.close());
+  store.migrate([
+    { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
+  ]);
+  const columns = store.database
+    .prepare(`PRAGMA table_info('${SCHEDULER_EXECUTION_TABLE}')`)
+    .all();
+  assert.deepEqual(
+    columns.map((row) => [row.name, row.type, row.notnull, row.pk]),
+    [
+      ["id", "TEXT", 1, 1],
+      ["project_id", "TEXT", 1, 0],
+      ["node_id", "TEXT", 1, 0],
+      ["worker_binding_id", "TEXT", 1, 0],
+      ["resource_identity", "TEXT", 1, 0],
+      ["runtime_identity", "TEXT", 1, 0],
+      ["attempt", "INTEGER", 1, 0],
+      ["pinned_revision", "INTEGER", 1, 0],
+      ["credentials", "TEXT", 1, 0],
+      ["expired_at", "INTEGER", 1, 0],
+      ["trace_id", "TEXT", 1, 0],
+      ["root_span_id", "TEXT", 1, 0],
+      ["created_at", "INTEGER", 1, 0],
+      ["ended_at", "INTEGER", 0, 0],
+    ],
+  );
+  const indexes = store.database
+    .prepare(
+      "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL ORDER BY name",
+    )
+    .all(SCHEDULER_EXECUTION_TABLE);
+  assert.deepEqual(
+    indexes.map((row) => row.name),
+    ["scheduler_execution_node_live", "scheduler_execution_runtime_live"],
+  );
+  for (const row of indexes) {
+    assert.match(String(row.sql), /^CREATE UNIQUE INDEX /);
+    assert.match(String(row.sql), /WHERE ended_at IS NULL$/);
+  }
+  assert.deepEqual(
+    store.database
+      .prepare(`PRAGMA foreign_key_list('${SCHEDULER_EXECUTION_TABLE}')`)
+      .all(),
+    [],
+  );
+  assert.doesNotMatch(
+    String(
+      store.database
+        .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
+        .get(SCHEDULER_EXECUTION_TABLE)?.sql,
+    ),
+    /\bCHECK\s*\(/i,
+  );
 });
 
 test("Mission execution records have exactly four unique indexes with the ruled predicates", () => {
