@@ -1,0 +1,529 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+import { test, type TestContext } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import { parse, stringify } from "yaml";
+import { ulid } from "ulid";
+import { configuration } from "../../config/index.ts";
+import { writePrivate } from "../../kernel/files.ts";
+import { identitySchema, ulidSchema } from "../../kernel/identity.ts";
+import { temporary } from "../../kernel/test-support.ts";
+import {
+  InstanceActivity,
+  instanceRecordSchema,
+  workerOperations,
+} from "../../worker/contract.ts";
+import { environment, kanthord } from "./cli-support.ts";
+import { gatewayFixture } from "./test-support.ts";
+
+const SUCCESS = 0;
+const FAILURE = 1;
+const EMPTY = "";
+const ONE = 1;
+const TWO = 2;
+const THREE = 3;
+const FOUR = 4;
+const FIVE = 5;
+const SIX = 6;
+const STRING_TYPE = "string";
+const NATIVE = "general@1";
+const EXTERNAL = "claude@1";
+const AGENT = "swe@1";
+const BINDING = "general";
+const RESOURCE = "worker:kanthord:general";
+const HOST = "kanthord";
+const EXTERNAL_HOST = "external-harness";
+const METHOD = "steps";
+const HARNESS = "claude-code";
+const EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA";
+const SPAWN_TIMEOUT = 10000;
+const JOURNEY_TIMEOUT = 120000;
+const TOKEN_DELAY = 1000;
+const BUDGET = { turns: 200, wallTimeMs: 7200000 };
+const CONFIGURATION = {
+  agentProvider: "default",
+  modelIdentifier: "claude-sonnet-4-5",
+  reasoningEffort: "off",
+};
+const ErrorCode = {
+  Catalog: "worker.catalog.not_found",
+  Unauthorized: "gateway.authentication.unauthorized",
+  Required: "gateway.registration.required",
+  Slot: "worker.instance.slot_unavailable",
+  BindingProject: "cli.worker.instance.list.binding_without_project",
+  Binding: "worker.instance.binding_unknown",
+  Runtime: "cli.worker.instance.get.invalid_runtime_identity",
+  Instance: "worker.instance.not_found",
+  Execution: "worker.instance.no_live_execution",
+} as const;
+type Result = Awaited<ReturnType<typeof kanthord>>;
+type Registration = typeof workerOperations.register.output._output;
+type Instance = typeof instanceRecordSchema._output;
+type CatalogPage =
+  (typeof workerOperations)["catalog.list"]["output"]["_output"];
+type Fixture = Awaited<ReturnType<typeof setup>>;
+
+function success<T>(result: Result): T {
+  assert.equal(result.code, SUCCESS, result.stderr);
+  assert.equal(result.stderr, EMPTY);
+  return JSON.parse(result.stdout) as T;
+}
+
+function refusal(result: Result, code: string): void {
+  assert.equal(result.code, FAILURE, result.stderr);
+  assert.ok(result.stderr.startsWith(`${code}:`), result.stderr);
+  assert.equal(result.stdout, EMPTY);
+}
+
+function file(directory: string, name: string, value: unknown): string {
+  assert.ok(directory.startsWith("/"));
+  assert.ok(name.endsWith(".json"));
+  const path = join(directory, name);
+  writePrivate(path, JSON.stringify(value));
+  return path;
+}
+
+function machineToken(
+  directory: string,
+  projectId: string,
+  name: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  assert.ok(identitySchema("project").safeParse(projectId).success);
+  assert.ok(name);
+  const args = [
+    "jwt",
+    "generate",
+    "--project",
+    projectId,
+    "--binding",
+    BINDING,
+    "--name",
+    name,
+    "--config",
+    join(directory, "issuance.yaml"),
+  ];
+  const entry = new URL("../../main.ts", import.meta.url).href;
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `process.stdout.isTTY=true;process.argv=[process.execPath,'kanthord',...${JSON.stringify(args)}];await import(${JSON.stringify(entry)});`,
+    ],
+    { env, encoding: "utf8", timeout: SPAWN_TIMEOUT },
+  );
+  assert.equal(result.status, SUCCESS, result.stderr);
+  assert.equal(result.stderr, EMPTY);
+  const fragment = parse(result.stdout) as {
+    token: string;
+    clientSecret: string;
+  };
+  assert.ok(fragment.token && fragment.clientSecret);
+  return fragment.token;
+}
+
+function bindings(instanceCount: number) {
+  assert.ok(Number.isSafeInteger(instanceCount));
+  assert.ok(instanceCount >= SUCCESS);
+  return {
+    general: {
+      kind: "worker",
+      config: {
+        worker: NATIVE,
+        instanceCount,
+        entries: [{ agent: AGENT, ...CONFIGURATION }],
+      },
+    },
+  };
+}
+
+async function setup(t: TestContext, running?: Set<string>) {
+  const fixture = await gatewayFixture(t, {
+    repositoryConnector: { gitLsRemote: async () => {} },
+    ...(running
+      ? {
+          standIns: {
+            workerSchedulerClaims: {
+              runningExecutionOfRuntime: (_tx, runtimeIdentity) =>
+                running.has(runtimeIdentity)
+                  ? { executionId: EXECUTION }
+                  : null,
+              activityOf: (_tx, runtimeIdentity) =>
+                running.has(runtimeIdentity)
+                  ? {
+                      activity: InstanceActivity.Executing,
+                      executionId: EXECUTION,
+                    }
+                  : { activity: InstanceActivity.Idle, executionId: null },
+            },
+          },
+        }
+      : {}),
+  });
+  const directory = temporary(t);
+  const H = {
+    ...environment(directory),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+    KANTHORD_TOKEN: fixture.token,
+  };
+  const project = success<{ id: string }>(
+    await kanthord(["project", "create", "--name", "registration"], H),
+  );
+  const credential = file(directory, "anthropic.json", {
+    name: "anthro-1",
+    platform: "anthropic",
+    metadata: null,
+    secret: { key: "e2e-registration-secret" },
+  });
+  success(await kanthord(["credential", "create", "--file", credential], H));
+  const enablement = file(directory, "enablement.json", {
+    agentProviders: [
+      { name: "default", provider: "anthropic", credential: "anthro-1" },
+    ],
+    defaultConfiguration: CONFIGURATION,
+  });
+  const enabled = success<{ revision: number }>(
+    await kanthord(
+      ["worker", "agent", "enablement", "put", AGENT, "--file", enablement],
+      H,
+    ),
+  );
+  assert.equal(enabled.revision, ONE);
+  const initial = file(directory, "v1.json", {
+    version: ONE,
+    bindings: bindings(ONE),
+  });
+  const applied = success<{ bindingSetVersion: number }>(
+    await kanthord(
+      ["project", "binding", "apply", project.id, "--file", initial],
+      H,
+    ),
+  );
+  assert.equal(applied.bindingSetVersion, TWO);
+  writePrivate(
+    join(directory, "issuance.yaml"),
+    stringify(
+      configuration({ masterKey: fixture.config.masterKey }).getProperties(),
+    ),
+  );
+  const A = {
+    ...H,
+    KANTHORD_TOKEN: machineToken(directory, project.id, "worker-a", H),
+  };
+  const B = {
+    ...H,
+    KANTHORD_TOKEN: machineToken(directory, project.id, "worker-b", H),
+  };
+  return { directory, projectId: project.id, H, A, B };
+}
+
+async function apply(
+  f: Fixture,
+  version: number,
+  instanceCount: number | null,
+): Promise<number> {
+  assert.ok(f.projectId);
+  assert.ok(version >= ONE);
+  const path = file(f.directory, `v${version}.json`, {
+    version,
+    bindings: instanceCount === null ? {} : bindings(instanceCount),
+  });
+  return success<{ bindingSetVersion: number }>(
+    await kanthord(
+      ["project", "binding", "apply", f.projectId, "--file", path],
+      f.H,
+    ),
+  ).bindingSetVersion;
+}
+
+test(
+  "Worker registration CLI journey",
+  { timeout: JOURNEY_TIMEOUT },
+  async (t) => {
+    const f = await setup(t);
+    let ridA: string;
+    let ridB: string;
+    let ridB2: string;
+    let record: Instance;
+    const list = ["worker", "instance", "list", "--project", f.projectId];
+    await t.test("E02.1 catalog lists declarations", async () => {
+      const page = success<CatalogPage>(
+        await kanthord(["worker", "list"], f.H),
+      );
+      assert.deepEqual(
+        page.items.map((item) => item.name),
+        [EXTERNAL, NATIVE, "opencode@1", "reviewer@1"],
+      );
+      assert.equal(page.nextCursor, null);
+      assert.equal(page.items[ONE]!.host, HOST);
+      assert.deepEqual(page.items[ONE]!.declaredNodeStates, ["Available"]);
+      assert.deepEqual(page.items[THREE]!.declaredNodeStates, [
+        "Waiting",
+        "External.Requested",
+      ]);
+      assert.deepEqual(page.items[ONE]!.requiredNodeFormat, [
+        "name",
+        "requirement",
+        "criterion",
+        "verifications",
+        "bindings",
+      ]);
+    });
+    await t.test("E02.2 catalog pages", async () => {
+      const page = success<CatalogPage>(
+        await kanthord(["worker", "list", "--limit", "2"], f.H),
+      );
+      assert.deepEqual(
+        page.items.map((item) => item.name),
+        [EXTERNAL, NATIVE],
+      );
+      assert.equal(typeof page.nextCursor, STRING_TYPE);
+      const next = success<CatalogPage>(
+        await kanthord(
+          ["worker", "list", "--limit", "2", "--cursor", page.nextCursor!],
+          f.H,
+        ),
+      );
+      assert.deepEqual(
+        next.items.map((item) => item.name),
+        ["opencode@1", "reviewer@1"],
+      );
+      assert.equal(next.nextCursor, null);
+    });
+    await t.test("E02.3 host-specific catalog fields", async () => {
+      const native = success<Record<string, unknown>>(
+        await kanthord(["worker", "get", NATIVE], f.H),
+      );
+      const external = success<Record<string, unknown>>(
+        await kanthord(["worker", "get", EXTERNAL], f.H),
+      );
+      assert.equal(native.host, HOST);
+      assert.equal(native.method, METHOD);
+      assert.equal(native.agentName, AGENT);
+      assert.deepEqual(native.resourceBudget, BUDGET);
+      assert.equal("harness" in native, false);
+      assert.equal(external.host, EXTERNAL_HOST);
+      assert.equal(external.harness, HARNESS);
+      assert.deepEqual(external.resourceBudget, {
+        wallTimeMs: BUDGET.wallTimeMs,
+      });
+      assert.equal("method" in external, false);
+    });
+    await t.test("E02.4 unknown worker", async () =>
+      refusal(
+        await kanthord(["worker", "get", "tdd@1"], f.H),
+        ErrorCode.Catalog,
+      ),
+    );
+    await t.test("E02.5 machine cannot read catalog", async () =>
+      refusal(await kanthord(["worker", "list"], f.A), ErrorCode.Unauthorized),
+    );
+    await t.test("E02.6 unregistered heartbeat", async () =>
+      refusal(await kanthord(["worker", "heartbeat"], f.A), ErrorCode.Required),
+    );
+    await t.test("E02.7 register A", async () => {
+      ridA = success<Registration>(
+        await kanthord(["worker", "register"], f.A),
+      ).runtimeIdentity;
+      assert.ok(identitySchema("worker_instance").safeParse(ridA).success);
+    });
+    await t.test("E02.8 fresh registration key keeps identity", async () =>
+      assert.equal(
+        success<Registration>(await kanthord(["worker", "register"], f.A))
+          .runtimeIdentity,
+        ridA,
+      ),
+    );
+    await t.test("E02.9 full slot refuses B", async () =>
+      refusal(await kanthord(["worker", "register"], f.B), ErrorCode.Slot),
+    );
+    await t.test("E02.10 heartbeat prints null", async () =>
+      assert.equal(success(await kanthord(["worker", "heartbeat"], f.A)), null),
+    );
+    await t.test("E02.11 filtered inventory", async () => {
+      const page = success<{ items: Instance[]; nextCursor: string | null }>(
+        await kanthord([...list, "--binding", BINDING], f.H),
+      );
+      assert.equal(page.items.length, ONE);
+      assert.equal(page.nextCursor, null);
+      record = page.items[0]!;
+      assert.ok(
+        identitySchema("client_identity").safeParse(record.clientId).success,
+      );
+      assert.deepEqual(record, {
+        runtimeIdentity: ridA,
+        projectId: f.projectId,
+        resourceIdentity: RESOURCE,
+        workerName: NATIVE,
+        host: HOST,
+        placement: "worker",
+        clientId: record.clientId,
+        name: "worker-a",
+        activity: InstanceActivity.Idle,
+        draining: false,
+        registered: true,
+      });
+    });
+    await t.test("E02.12 get equals inventory", async () =>
+      assert.deepEqual(
+        success(await kanthord(["worker", "instance", "get", ridA], f.H)),
+        record,
+      ),
+    );
+    await t.test("E02.13 local and server validation", async () => {
+      refusal(
+        await kanthord(
+          ["worker", "instance", "list", "--binding", BINDING],
+          f.H,
+        ),
+        ErrorCode.BindingProject,
+      );
+      refusal(
+        await kanthord([...list, "--binding", "absent"], f.H),
+        ErrorCode.Binding,
+      );
+      refusal(
+        await kanthord(["worker", "instance", "get", "invalid"], f.H),
+        ErrorCode.Runtime,
+      );
+    });
+    await t.test("E02.14 live resume is idempotent", async () => {
+      const result = success<
+        Registration & { registered: boolean; idempotencyKey: string }
+      >(await kanthord(["worker", "instance", "resume", ridA], f.H));
+      assert.equal(result.runtimeIdentity, ridA);
+      assert.equal(result.registered, true);
+      assert.ok(ulidSchema.safeParse(result.idempotencyKey).success);
+    });
+    await t.test("E02.15 foreign client cannot deregister", async () =>
+      refusal(
+        await kanthord(["worker", "instance", "deregister", ridA], f.B),
+        ErrorCode.Instance,
+      ),
+    );
+    await t.test("E02.16 end replay and live inventory", async () => {
+      const key = ulid();
+      const args = [
+        "worker",
+        "instance",
+        "deregister",
+        ridA,
+        "--idempotency-key",
+        key,
+      ];
+      const result = success(await kanthord(args, f.A));
+      assert.deepEqual(result, {
+        runtimeIdentity: ridA,
+        registered: false,
+        idempotencyKey: key,
+      });
+      assert.deepEqual(success(await kanthord(args, f.A)), result);
+      refusal(
+        await kanthord(["worker", "instance", "get", ridA], f.H),
+        ErrorCode.Instance,
+      );
+      assert.deepEqual(success(await kanthord(list, f.H)), {
+        items: [],
+        nextCursor: null,
+      });
+    });
+    await t.test("E02.17 ended resume needs running execution", async () =>
+      refusal(
+        await kanthord(["worker", "instance", "resume", ridA], f.H),
+        ErrorCode.Execution,
+      ),
+    );
+    await t.test("E02.18 freed slot admits B and refuses A", async () => {
+      ridB = success<Registration>(
+        await kanthord(["worker", "register"], f.B),
+      ).runtimeIdentity;
+      assert.notEqual(ridB, ridA);
+      refusal(await kanthord(["worker", "register"], f.A), ErrorCode.Slot);
+    });
+    await t.test("E02.19 disabling binding ends registration", async () => {
+      assert.equal(await apply(f, TWO, SUCCESS), THREE);
+      assert.deepEqual(success(await kanthord(list, f.H)), {
+        items: [],
+        nextCursor: null,
+      });
+      refusal(
+        await kanthord(["worker", "heartbeat"], f.B),
+        ErrorCode.Unauthorized,
+      );
+    });
+    await t.test("E02.20 reenable admits a new identity", async () => {
+      assert.equal(await apply(f, THREE, ONE), FOUR);
+      ridB2 = success<Registration>(
+        await kanthord(["worker", "register"], f.B),
+      ).runtimeIdentity;
+      assert.notEqual(ridB2, ridB);
+    });
+    await t.test("E02.21 old identity has no execution", async () =>
+      refusal(
+        await kanthord(["worker", "instance", "resume", ridB], f.H),
+        ErrorCode.Execution,
+      ),
+    );
+    await t.test(
+      "E02.22 resume running execution on a second fixture",
+      async (step) => {
+        const running = new Set<string>();
+        const second = await setup(step, running);
+        const { runtimeIdentity } = success<Registration>(
+          await kanthord(["worker", "register"], second.A),
+        );
+        running.add(runtimeIdentity);
+        success(
+          await kanthord(
+            ["worker", "instance", "deregister", runtimeIdentity],
+            second.A,
+          ),
+        );
+        const resumed = success<{ registered: boolean }>(
+          await kanthord(
+            ["worker", "instance", "resume", runtimeIdentity],
+            second.H,
+          ),
+        );
+        assert.equal(resumed.registered, true);
+        assert.equal(
+          success<Registration>(
+            await kanthord(["worker", "register"], second.A),
+          ).runtimeIdentity,
+          runtimeIdentity,
+        );
+        const item = success<Instance>(
+          await kanthord(
+            ["worker", "instance", "get", runtimeIdentity],
+            second.H,
+          ),
+        );
+        assert.equal(item.activity, InstanceActivity.Executing);
+        assert.equal(item.executionId, EXECUTION);
+      },
+    );
+    await t.test("E02.23 tombstone refuses old JWT after rebind", async () => {
+      assert.equal(await apply(f, FOUR, null), FIVE);
+      assert.equal(await apply(f, FIVE, ONE), SIX);
+      refusal(
+        await kanthord(["worker", "heartbeat"], f.B),
+        ErrorCode.Unauthorized,
+      );
+      await delay(TOKEN_DELAY);
+      const C = {
+        ...f.H,
+        KANTHORD_TOKEN: machineToken(f.directory, f.projectId, "worker-c", f.H),
+      };
+      const item = success<Registration>(
+        await kanthord(["worker", "register"], C),
+      );
+      assert.ok(
+        identitySchema("worker_instance").safeParse(item.runtimeIdentity)
+          .success,
+      );
+      assert.notEqual(item.runtimeIdentity, ridB2);
+    });
+  },
+);
