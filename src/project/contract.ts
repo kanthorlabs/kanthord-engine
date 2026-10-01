@@ -57,6 +57,7 @@ export const BindingState = {
 } as const;
 
 export const ProjectErrorCode = {
+  AuthorizationRefused: "project.authorization.refused",
   CursorInvalid: "system.pagination.cursor_invalid",
   NameConflict: "project.name.conflict",
   ProjectNotFound: "project.project.not_found",
@@ -72,6 +73,15 @@ export const ProjectErrorCode = {
   WorkerInstanceCountRange: "project.bindings.worker.instance_count_range",
   WorkerResourceChanged: "project.bindings.worker.resource_changed",
 } as const;
+
+export const AuthorizationRefusal = {
+  BindingMismatch: "binding_mismatch",
+  BindingRemoved: "binding_removed",
+  BindingDisabled: "binding_disabled",
+  NoNativeAgent: "no_native_agent",
+} as const;
+export type AuthorizationRefusal =
+  (typeof AuthorizationRefusal)[keyof typeof AuthorizationRefusal];
 
 export const projectNameSchema = z
   .string()

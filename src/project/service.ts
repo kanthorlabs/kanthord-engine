@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { isHumanIdentity, IdentityKind } from "../kernel/caller.ts";
+import {
+  isHumanIdentity,
+  IdentityKind,
+  type MachineIdentity,
+} from "../kernel/caller.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
@@ -24,6 +28,7 @@ import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { throwIfCancelled } from "../kernel/context.ts";
 import {
   BINDING_SET_INITIAL_VERSION,
+  AuthorizationRefusal,
   BindingKind,
   BindingState,
   ChangeKind,
@@ -93,8 +98,18 @@ const PAGE_EXTRA = 1;
 const FIRST_INDEX = 0;
 const LAST_INDEX = 1;
 const MINIMUM_LIMIT = 1;
+const NATIVE_AGENT_COUNT = 1;
 type BindingEdit = typeof bindingEditSchema._output;
 type BindingSetWrite = typeof bindingSetWriteInputSchema._output;
+
+function authorizationRefused(reason: AuthorizationRefusal): never {
+  throw new OperationError(
+    HttpStatus.Forbidden,
+    ProjectErrorCode.AuthorizationRefused,
+    "The facility refuses the operation.",
+    { reason },
+  );
+}
 
 function bindingRecord(binding: StoredBinding) {
   return { ...binding, kind: kindOf(binding.resourceIdentity) };
@@ -640,6 +655,70 @@ export class ProjectService implements Service, ProjectBindings {
       baseBranch: config.strategy.baseBranch,
       action: config.strategy.action?.name ?? null,
       projectPrompt: config.projectPrompt ?? null,
+    };
+  }
+  authorizeModelInference(
+    tx: Transaction,
+    identity: MachineIdentity,
+    execution: {
+      executionId: string;
+      projectId: string;
+      workerBindingId: string;
+      resourceIdentity: string;
+    },
+  ) {
+    assert(tx.database.isTransaction);
+    assert.equal(tx.database, this.operationalStore.database);
+    const row = readBindingRevision(tx, execution.workerBindingId);
+    if (
+      !row ||
+      kindOf(row.resourceIdentity) !== BindingKind.Worker ||
+      row.projectId !== execution.projectId ||
+      row.projectId !== identity.projectId ||
+      row.resourceIdentity !== execution.resourceIdentity ||
+      row.resourceIdentity !== identity.resourceIdentity
+    )
+      authorizationRefused(AuthorizationRefusal.BindingMismatch);
+    const latest = readLatestBinding(tx, row.projectId, row.resourceIdentity);
+    if (!latest || latest.removedAt !== null || hasBindingTombstone(tx, row))
+      authorizationRefused(AuthorizationRefusal.BindingRemoved);
+    if (
+      workerConfigSchema.parse(latest.config).instanceCount ===
+      INSTANCE_COUNT_MIN
+    )
+      authorizationRefused(AuthorizationRefusal.BindingDisabled);
+    const config = workerConfigSchema.parse(row.config);
+    const agents = this.workerAgentsOf(config.worker);
+    if (agents.length !== NATIVE_AGENT_COUNT)
+      authorizationRefused(AuthorizationRefusal.NoNativeAgent);
+    const agent = agents[FIRST_INDEX];
+    assert(agent);
+    const selected = config.entries?.find((item) => item.agent === agent);
+    const entry = selected
+      ? {
+          agentProvider: selected.agentProvider,
+          modelIdentifier: selected.modelIdentifier,
+          reasoningEffort: selected.reasoningEffort,
+        }
+      : null;
+    const view = this.workerAgentView(tx, config.worker, agent, entry);
+    assert(view);
+    if (!view.valid) {
+      const issue = view.issues[FIRST_INDEX];
+      assert(issue);
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        issue.code,
+        "The agent configuration is not valid.",
+        { issues: view.issues },
+      );
+    }
+    assert(view.effective);
+    return {
+      credential: view.effective.credential,
+      platform: view.effective.provider,
+      providerId: view.effective.provider,
+      agentProvider: view.effective.agentProvider,
     };
   }
   workerBindingOf(

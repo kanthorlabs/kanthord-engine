@@ -15,13 +15,17 @@ import {
   type Transaction,
 } from "../kernel/store.ts";
 import { createIdentity, identitySchema } from "../kernel/identity.ts";
-import { testHumanIdentity } from "../kernel/test-identity.ts";
+import {
+  testHumanIdentity,
+  testMachineIdentity,
+} from "../kernel/test-identity.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { WorkerErrorCode } from "../worker/contract.ts";
 import {
   BINDING_ID_PREFIX,
+  AuthorizationRefusal,
   BINDING_SET_INITIAL_VERSION,
   BindingKind,
   BindingState,
@@ -462,8 +466,8 @@ test("rename preserves fields, accepts its current name, and rejects another hol
   assert.equal(f.invoke("create", { name: PROJECT_NAME }).name, PROJECT_NAME);
 });
 
-function bindingFixture(t: TestContext) {
-  const f = fixture(t, { createMission: allowMission });
+function bindingFixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
+  const f = fixture(t, { createMission: allowMission, ...overrides });
   const project = f.invoke("create", { name: PROJECT_NAME });
   let version = BINDING_SET_INITIAL_VERSION;
   function write(instanceCount: number | null) {
@@ -509,6 +513,128 @@ test("worker group resolution rejects absence, disablement and removal", async (
   assert.notEqual(await resolve(), null);
   f.write(null);
   assert.equal(await resolve(), null);
+});
+
+test("model inference authorization preserves pinned entries and checks every chain break", (t) => {
+  const nativeAgent = "swe@1";
+  const provider = "anthropic";
+  const credential = "anthro-1";
+  const selected = "override";
+  let agents = [nativeAgent];
+  let valid = true;
+  const issues = [{ path: ["agent"], code: WorkerErrorCode.Unavailable }];
+  const f = bindingFixture(t, {
+    workerAgentsOf: () => agents,
+    workerAgentView: (tx, worker, agent, entry) => {
+      assert(tx.database.isTransaction);
+      assert.equal(agent, nativeAgent);
+      assert.equal(worker, GROUP_WORKER_NAME);
+      return {
+        valid,
+        issues: valid ? [] : issues,
+        defaults: null,
+        effective: valid
+          ? {
+              agentProvider: entry?.agentProvider ?? "default",
+              provider,
+              credential,
+              modelIdentifier: "claude-sonnet-4-5",
+              reasoningEffort: "off",
+            }
+          : null,
+      };
+    },
+  });
+  const bindingId = f.write(SINGLE_INSTANCE);
+  const identity = testMachineIdentity(
+    {
+      clientId: createIdentity("client_identity"),
+      name: "test",
+      projectId: f.projectId,
+      resourceIdentity: WORKER_GROUP,
+      issuedAt: 0,
+    },
+    "jti",
+  );
+  const execution = {
+    executionId: createIdentity("execution"),
+    projectId: f.projectId,
+    workerBindingId: bindingId,
+    resourceIdentity: WORKER_GROUP,
+  };
+  const authorize = (change = {}) =>
+    f.store.transaction((tx) =>
+      f.project.authorizeModelInference(tx, identity, {
+        ...execution,
+        ...change,
+      }),
+    );
+  assert.deepEqual(authorize(), {
+    credential,
+    platform: provider,
+    providerId: provider,
+    agentProvider: "default",
+  });
+  f.store.transaction((tx) =>
+    tx.database
+      .prepare("UPDATE project_binding SET config = ? WHERE id = ?")
+      .run(
+        JSON.stringify({
+          worker: GROUP_WORKER_NAME,
+          instanceCount: SINGLE_INSTANCE,
+          entries: [{ agent: nativeAgent, agentProvider: selected }],
+        }),
+        bindingId,
+      ),
+  );
+  assert.equal(authorize().agentProvider, selected);
+  f.write(TWO_INSTANCES);
+  assert.equal(authorize().agentProvider, selected);
+  for (const change of [
+    { workerBindingId: "absent" },
+    { projectId: "other" },
+    { resourceIdentity: MISSING_GROUP },
+  ])
+    refuses(
+      () => authorize(change),
+      HttpStatus.Forbidden,
+      ProjectErrorCode.AuthorizationRefused,
+      { reason: AuthorizationRefusal.BindingMismatch },
+    );
+  agents = [];
+  refuses(
+    authorize,
+    HttpStatus.Forbidden,
+    ProjectErrorCode.AuthorizationRefused,
+    { reason: AuthorizationRefusal.NoNativeAgent },
+  );
+  agents = [nativeAgent];
+  valid = false;
+  refuses(authorize, HttpStatus.BadRequest, WorkerErrorCode.Unavailable, {
+    issues,
+  });
+  valid = true;
+  f.write(INSTANCE_COUNT_MIN);
+  refuses(
+    authorize,
+    HttpStatus.Forbidden,
+    ProjectErrorCode.AuthorizationRefused,
+    { reason: AuthorizationRefusal.BindingDisabled },
+  );
+  f.write(null);
+  refuses(
+    authorize,
+    HttpStatus.Forbidden,
+    ProjectErrorCode.AuthorizationRefused,
+    { reason: AuthorizationRefusal.BindingRemoved },
+  );
+  f.write(SINGLE_INSTANCE);
+  refuses(
+    authorize,
+    HttpStatus.Forbidden,
+    ProjectErrorCode.AuthorizationRefused,
+    { reason: AuthorizationRefusal.BindingRemoved },
+  );
 });
 
 test("worker group resolution uses the latest tombstone and accepts equality at its creation", async (t) => {
