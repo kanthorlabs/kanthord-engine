@@ -30,6 +30,23 @@ import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
 
+test("published execution revisions name each bounded operation", () => {
+  for (const name of [
+    "execution.pinnedRevision.get",
+    "execution.revision.get",
+    "execution.revision.list",
+  ] as const) {
+    const fragment = parse(
+      readFileSync(
+        join(dirname(openapiPath()), `openapi/mission/${name}.yaml`),
+        "utf8",
+      ),
+    );
+    assert.equal(fragment.pathItem.get.operationId, missionOperations[name].id);
+    assert.ok(missionOperations[name].requiresExecution);
+  }
+});
+
 test("published evidence delete preserves its bodyless 204 response", () => {
   const fragment = parse(
     readFileSync(

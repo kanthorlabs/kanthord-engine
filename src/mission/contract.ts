@@ -1161,6 +1161,51 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "execution.pinnedRevision.get": {
+    ...readOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.execution.pinnedRevision.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/execution/:executionId/pinned-revision",
+    input: readInput(
+      z.strictObject({ executionId: identitySchema("execution") }),
+      z.strictObject({}),
+    ),
+    output: revisionSchema,
+    description: "Read the execution's pinned revision.",
+  },
+  "execution.revision.list": {
+    ...readOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.execution.revision.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/execution/:executionId/revision",
+    input: readInput(
+      z.strictObject({ executionId: identitySchema("execution") }),
+      z.strictObject(pageQuery),
+    ),
+    output: pageOf(revisionSchema),
+    description: "List revisions no newer than the execution pin.",
+  },
+  "execution.revision.get": {
+    ...readOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.execution.revision.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/execution/:executionId/revision/:revision",
+    input: readInput(
+      z.strictObject({
+        executionId: identitySchema("execution"),
+        revision: z.coerce.number().int().positive(),
+      }),
+      z.strictObject({}),
+    ),
+    output: revisionSchema,
+    description: "Read a revision within the execution pin.",
+  },
   "evidence.delete": {
     ...writeOperation,
     id: "mission.evidence.delete",

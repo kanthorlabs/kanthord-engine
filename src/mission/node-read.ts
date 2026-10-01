@@ -180,12 +180,14 @@ export function revisionPage(
   nodeId: string,
   after?: number,
   limit = NODE_LIST_LIMIT_DEFAULT,
+  upperBound?: number,
 ) {
   const rows = listRevisions(
     tx,
     ownerId(requireNode(tx, nodeId)),
     after,
     limit + EXTRA_ROW,
+    upperBound,
   );
   const items = rows
     .slice(FIRST_ROW, limit)

@@ -261,16 +261,19 @@ export function listRevisions(
   nodeId: string,
   after: number | undefined,
   count: number,
+  upperBound?: number,
 ): RevisionRow[] {
   return tx.database
     .prepare(
       `SELECT * FROM mission_node_revision WHERE node_id = ?
-     AND (? IS NULL OR revision < ?) ORDER BY revision DESC LIMIT ?`,
+     AND (? IS NULL OR revision < ?) AND (? IS NULL OR revision <= ?) ORDER BY revision DESC LIMIT ?`,
     )
     .all(
       nodeId,
       after ?? null,
       after ?? null,
+      upperBound ?? null,
+      upperBound ?? null,
       count,
     ) as unknown as RevisionRow[];
 }

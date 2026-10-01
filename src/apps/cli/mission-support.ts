@@ -28,7 +28,7 @@ export function client(command: Command, name: ReadCommand) {
   const { endpoint, token } = resolveClient(command.optsWithGlobals());
   requireToken(
     token,
-    `cli.mission.${name.replace("externalAction", "external_action")}.token_required`,
+    `cli.mission.${name.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)}.token_required`,
   );
   return httpClient(missionOperations, endpoint, token);
 }
@@ -39,7 +39,7 @@ export function printResult<T>(
 ): void {
   const data = handleReadResult(
     result,
-    `cli.mission.${name.replace("externalAction", "external_action")}.indeterminate`,
+    `cli.mission.${name.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)}.indeterminate`,
   );
   process.stdout.write(`${JSON.stringify(data)}\n`);
 }
