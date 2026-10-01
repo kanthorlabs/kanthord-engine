@@ -360,6 +360,13 @@ test("resume settles before admission, preserves live readings and reopens the s
   };
   calls.length = 0;
   now += 100;
+  const checkedCommit = f.caller.commit;
+  f.caller.commit = (write) =>
+    checkedCommit((tx) => {
+      const result = write(tx);
+      workerOperations["instance.resume"].output.parse(result);
+      return result;
+    });
   const age = f.worker.heartbeatClock.ageMs(row.runtimeIdentity);
   assert.deepEqual(handler(input, f.caller), {
     runtimeIdentity: row.runtimeIdentity,

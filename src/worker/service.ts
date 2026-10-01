@@ -921,17 +921,19 @@ export class WorkerService implements Service {
       workerOperations["instance.resume"],
       ({ params }, caller) => {
         const { runtimeIdentity } = params;
-        const reopened = caller.commit((tx) =>
-          resumeRegistration(
+        let reopened = false;
+        const result = caller.commit((tx) => {
+          reopened = resumeRegistration(
             tx,
             runtimeIdentity,
             Date.now(),
             this.dependencies.schedulerClaims,
             this.dependencies.workerBindingOf,
-          ),
-        );
+          );
+          return { runtimeIdentity, registered: true as const };
+        });
         if (reopened) this.heartbeatClock.set(runtimeIdentity);
-        return { runtimeIdentity, registered: true as const };
+        return result;
       },
     );
     registry.register(workerOperations.heartbeat, (_input, caller) =>
