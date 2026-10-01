@@ -17,6 +17,7 @@ import {
 import { addControlCommands } from "./mission-control.ts";
 import { addRecordCommands } from "./mission-record.ts";
 import { addEvidenceCommands } from "./mission-evidence.ts";
+import { addExecutionCommands } from "./mission-execution.ts";
 import {
   criterionSetSchema,
   edgeKindSchema,
@@ -559,6 +560,7 @@ export function addMissionCommand(program: Command): void {
   addNodeCommands(mission);
   addRecordCommands(mission);
   addEvidenceCommands(mission);
+  addExecutionCommands(mission);
   addEdgeCommands(mission);
   addDependencyCommands(mission);
   addCriterionCommands(mission);

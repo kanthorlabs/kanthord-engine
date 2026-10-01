@@ -1161,6 +1161,35 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "evidence.asset.content.get": {
+    ...readOperation,
+    id: "mission.evidence.asset.content.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/evidence/asset/:assetId/content",
+    input: readInput(
+      z.strictObject({ assetId: identitySchema("evidence_asset") }),
+      z.strictObject({}),
+    ),
+    output: storedContentSchema,
+    description: "Read stored evidence content.",
+  },
+  "execution.evidence.asset.content.get": {
+    ...readOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.execution.evidence.asset.content.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/execution/:executionId/evidence/asset/:assetId/content",
+    input: readInput(
+      z.strictObject({
+        executionId: identitySchema("execution"),
+        assetId: identitySchema("evidence_asset"),
+      }),
+      z.strictObject({}),
+    ),
+    output: storedContentSchema,
+    description: "Read evidence content within a live execution bound.",
+  },
   "evidence.list": {
     ...readOperation,
     id: "mission.evidence.list",

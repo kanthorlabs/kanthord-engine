@@ -41,6 +41,7 @@ import { completeEvidence } from "./evidence-complete.ts";
 import { requestEvidence } from "./evidence-request.ts";
 import { submitEvidence } from "./evidence-submit.ts";
 import { evidencePage, getEvidence } from "./evidence-read.ts";
+import { executionContentBound, readContent } from "./evidence-content-read.ts";
 import { claim, release, loss } from "./transitions.ts";
 import {
   attemptPage,
@@ -140,6 +141,30 @@ export class MissionService
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["evidence.asset.content.get"],
+      ({ params }, caller) =>
+        readContent(
+          this.dependencies,
+          caller,
+          params.assetId,
+          () => true,
+          false,
+        ),
+    );
+    registry.register(
+      missionOperations["execution.evidence.asset.content.get"],
+      ({ params }, caller) => {
+        assert.ok(caller.execution);
+        return readContent(
+          this.dependencies,
+          caller,
+          params.assetId,
+          executionContentBound(this.dependencies, caller.execution),
+          true,
+        );
+      },
+    );
     registry.register(
       missionOperations["evidence.list"],
       ({ params, query }, caller) =>

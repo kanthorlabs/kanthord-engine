@@ -1,0 +1,182 @@
+import assert from "node:assert/strict";
+import { z } from "zod";
+import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
+import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
+import type { Transaction } from "../kernel/store.ts";
+import {
+  AssetKind,
+  CONTENT_ENCODING,
+  storedContentSchema,
+  MissionErrorCode,
+  NodeKind,
+  type EvidenceAsset,
+} from "./contract.ts";
+import { keyOfLocation } from "./evidence-content.ts";
+import { admitExecution } from "./execution.ts";
+import { evidenceRecord, outcomeRecord } from "./record-read.ts";
+import { recordNotFound } from "./record-list.ts";
+import {
+  readCurrentOutcome,
+  readEvidence,
+  type AssetRow,
+  type EvidenceRow,
+} from "./record-store.ts";
+import { readNode } from "./store.ts";
+import type { Dependencies } from "./service.ts";
+
+export type ContentBound = (tx: Transaction, evidence: EvidenceRow) => boolean;
+const FUNCTION_TYPE = "function";
+const inlineSchema = z.object({ mediaType: z.string(), data: z.string() });
+export const objectContentSchema = z.object({
+  location: z.string(),
+  size: z.number(),
+  mediaType: z.string(),
+  storageBindingId: z.string(),
+  objectVersion: z.string().optional(),
+  sha256: z.string().optional(),
+});
+
+export function executionContentBound(
+  dependencies: Dependencies,
+  claim: ExecutionClaim,
+): ContentBound {
+  return (tx, evidence) => {
+    const admitted = admitExecution(
+      tx,
+      dependencies,
+      claim,
+      claim.nodeId,
+      {
+        executionId: claim.executionId,
+        attempt: claim.attempt,
+        nodeRevision: claim.pinnedRevision,
+      },
+      Date.now(),
+    );
+    if (evidence.node_id === claim.nodeId && evidence.attempt === claim.attempt)
+      return true;
+    if (admitted.node.kind !== NodeKind.Initiative) return false;
+    const child = readNode(tx, evidence.node_id);
+    if (
+      !child ||
+      child.kind !== NodeKind.Objective ||
+      child.parent_id !== claim.nodeId ||
+      child.retired_at !== null
+    )
+      return false;
+    const outcome = readCurrentOutcome(tx, child.id);
+    return (
+      outcome !== null &&
+      outcomeRecord(tx, dependencies.bindings, outcome).evidenceIds.includes(
+        evidence.id,
+      )
+    );
+  };
+}
+
+function contentConflict(
+  code: string,
+  evidenceId: string,
+  asset: EvidenceAsset,
+): never {
+  throw new OperationError(
+    HttpStatus.Conflict,
+    code,
+    "Evidence content is represented by its external address.",
+    { evidenceId, address: asset.address },
+  );
+}
+
+export function contentOf(
+  tx: Transaction,
+  assetId: string,
+  bound: ContentBound,
+) {
+  assert.equal(typeof bound, FUNCTION_TYPE);
+  assert.ok(tx.database.isTransaction);
+  const row = tx.database
+    .prepare("SELECT * FROM mission_evidence_asset WHERE id = ?")
+    .get(assetId) as AssetRow | undefined;
+  if (!row) recordNotFound();
+  const evidence = readEvidence(tx, row.evidence_id);
+  assert.ok(evidence);
+  if (!bound(tx, evidence)) recordNotFound();
+  const asset = evidenceRecord(tx, evidence).assets.find(
+    (item) => item.id === assetId,
+  );
+  assert.ok(asset);
+  if (asset.kind === AssetKind.Repository)
+    contentConflict(
+      MissionErrorCode.EvidenceContentRepository,
+      evidence.id,
+      asset,
+    );
+  if (asset.kind === AssetKind.Platform)
+    contentConflict(
+      MissionErrorCode.EvidenceContentPlatform,
+      evidence.id,
+      asset,
+    );
+  if (asset.kind === AssetKind.Produced) {
+    const content = inlineSchema.parse(JSON.parse(row.content));
+    return {
+      result: {
+        assetId,
+        address: asset.address,
+        ...content,
+        encoding: CONTENT_ENCODING,
+      },
+      object: null,
+    };
+  }
+  const object = objectContentSchema.parse(JSON.parse(row.content));
+  return {
+    result: {
+      assetId,
+      address: asset.address,
+      mediaType: object.mediaType,
+      size: object.size,
+    },
+    object,
+  };
+}
+
+export async function readContent(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  assetId: string,
+  bound: ContentBound,
+  execution: boolean,
+) {
+  assert.ok(caller.identity);
+  assert.equal(typeof bound, FUNCTION_TYPE);
+  const prepared = dependencies.store.transaction((tx) => {
+    const content = contentOf(tx, assetId, bound);
+    if (!content.object) return { ...content, binding: null };
+    const binding = dependencies.bindings.storageBindingOf(
+      tx,
+      content.object.storageBindingId,
+    );
+    assert.ok(binding);
+    return { ...content, binding };
+  });
+  if (!prepared.object || !prepared.binding)
+    return caller.commit((tx) =>
+      storedContentSchema.parse(contentOf(tx, assetId, bound).result),
+    );
+  const { object, binding } = prepared;
+  const method = execution ? "executionGet" : "get";
+  const signed = await dependencies.intakeStorage[method](
+    { context: caller.context, identity: caller.identity },
+    binding,
+    keyOfLocation(binding, object.location),
+    object.objectVersion ?? null,
+  );
+  return caller.commit((tx) =>
+    storedContentSchema.parse({
+      ...contentOf(tx, assetId, bound).result,
+      ...signed,
+    }),
+  );
+}

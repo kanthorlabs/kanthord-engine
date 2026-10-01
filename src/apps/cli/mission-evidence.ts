@@ -18,6 +18,26 @@ export function addEvidenceCommands(mission: Command): void {
   const evidence = mission.command("evidence").description("Mission evidence");
   evidence.action(() => evidence.help());
   addEvidenceReads(evidence);
+  const asset = evidence.command("asset").description("Evidence assets");
+  asset.action(() => asset.help());
+  const content = asset.command("content").description("Stored asset content");
+  content.action(() => content.help());
+  content
+    .command("get")
+    .argument("<asset-id>", "Evidence asset ID")
+    .action(async (assetId: string, _options, command: Command) => {
+      if (!identitySchema("evidence_asset").safeParse(assetId).success)
+        throw new Diagnostic(
+          "cli.mission.evidence.asset.content.get.invalid_asset_id",
+          "invalid asset ID",
+        );
+      printResult(
+        await client(command, "evidence.asset.content.get")[
+          "evidence.asset.content.get"
+        ]({ params: { assetId }, query: {}, body: null }),
+        "evidence.asset.content.get",
+      );
+    });
   addMutationOptions(
     evidence.command("submit").argument("<node-id>", "Node ID"),
   ).action(async (nodeId: string, _options, command: Command) => {
