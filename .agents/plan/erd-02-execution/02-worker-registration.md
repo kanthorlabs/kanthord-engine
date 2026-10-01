@@ -194,7 +194,7 @@ Four differences from `00-index.md` "Seams":
   - The work pull compares its `resourceIdentity` with the resource identity of the machine identity. `scheduler-service.impl.md:50`.
   - The command derives the resource identity from the binding name. `--binding` without `--project` and `--project` without `--binding` are errors. Issuance opens no database. `gateway-service.impl.md:157`, `:159`.
   - A binding name holds 1 to 63 characters: a lower-case letter first, then lower-case letters, digits and hyphens. `project-service.impl.md:54`.
-  - Publication prerequisite resolved on 2026-10-01 by Ulrich's approved repair: `gateway-service.impl.md` "Local JWT issuance" and `engine/docs/cli/other.md:569,773–775` declare `cli.jwt.binding_without_project`, `cli.jwt.project_without_binding` and `cli.jwt.invalid_project` with matching conditions. Task 02.4 uses these exact codes under D2.
+  - Publication prerequisite resolved on 2026-10-01 by Ulrich's approved repair: `gateway-service.impl.md` "Local JWT issuance" and `engine/docs/cli/other.md:576–584,784–786` declare `cli.jwt.binding_without_project`, `cli.jwt.project_without_binding` and `cli.jwt.invalid_project` with matching conditions. Task 02.4 uses these exact codes under D2.
   - Plan 02 owns the complete machine-JWT claim transition: issuance, HTTP verification, the direct-adapter recheck, and the affected CLI contracts and fixtures. Ruling of Ulrich on 2026-09-30 (`.dev/erd-02-author/debate-verdicts-2026-09-30.md` S8).
   - Gap: the closed claim set and the codes `gateway.jwt.<cause>` of `gateway-service.impl.md:116–118` stay unimplemented. Every refusal answers 401 `gateway.authentication.unauthorized`, as in ERD 1. Decision D26.
 - Done when: `pnpm run verify` passes; the tests pass; `pnpm run test:e2e:jwt` passes (`engine/AGENTS.md` "Install and validate").
@@ -211,7 +211,7 @@ Four differences from `00-index.md` "Seams":
      - The human claim sentence (`:595–596`) names no `project_id` and no `resource_identity`.
      - The `--binding` bullet (`:605–609`) states the binding name form and adds a `--project` bullet with a `project_<ulid>` identity. It keeps no "current" or "target" text.
      - The machine claim sentence (`:617–618`) names `project_id: <project id>` and `resource_identity: worker:kanthord:<binding name>` in place of `binding: <binding>`.
-     - The error table (`:773–775`) retains the existing rows for `cli.jwt.binding_without_project`, `cli.jwt.project_without_binding` and `cli.jwt.invalid_project`; add no duplicate rows. The condition of `gateway.authentication.invalid_binding` becomes "The binding name is not 1 to 63 characters of a lower-case letter, then lower-case letters, digits and hyphens."
+     - The error table (`:784–786`) retains the existing rows for `cli.jwt.binding_without_project`, `cli.jwt.project_without_binding` and `cli.jwt.invalid_project`; add no duplicate rows. The condition of `gateway.authentication.invalid_binding` becomes "The binding name is not 1 to 63 characters of a lower-case letter, then lower-case letters, digits and hyphens."
   3. In `engine/AGENTS.md` (`:186`), change `jwt generate --binding <binding>` to `jwt generate --project <project id> --binding <binding name>`.
 - Rules:
   - The page holds the target form, and a submodule document never overrides a page. `gateway-service.impl.md:152–157`; root `AGENTS.md` "Where a ruling goes".
@@ -441,11 +441,11 @@ Four differences from `00-index.md` "Seams":
   8. Add tests: the four workers in ascending order `claude@1`, `general@1`, `opencode@1`, `reviewer@1`; a page of two and its cursor; the native entry of `general@1` with `method`, `agentName` and `{ turns: 200, wallTimeMs: 7200000 }` and no `harness`; the external entry of `claude@1` with `harness: "claude-code"` and `{ wallTimeMs: 7200000 }` and no `method`; an unknown name answers 404; a registration adds no entry; a machine token answers 401.
 - Rules:
   - The routes, the access and the fields. `worker-service.impl.md:181–185`.
-  - A list that answers one item for each group key orders by that key in ascending alphabetical order, and the next page reads the keys above the cursor. `architecture.impl.md:182`; ERD 1 decision D10; `engine/docs/cli/worker.md:255`. `worker-service.impl.md:181` states the descending order; Aelita ruled on 2026-09-30 that the general rule of `architecture.impl.md` wins, and the review file names the page conflict for Ulrich.
+  - A list that answers one item for each group key orders by that key in ascending alphabetical order, and the next page reads the keys above the cursor. `architecture.impl.md` "Pagination"; ERD 1 decision D10; `worker-service.impl.md:186`; `engine/docs/cli/worker.md:255`. The owning page and CLI reference both declare this order.
   - Every worker declares `resourceBudget.wallTimeMs`; the four defaults. `worker-service.impl.md:445–449`; `engine/docs/cli/worker.md:288–297`; `worker-service.vocabulary.md:332–337`.
   - The declarations of the four workers. `worker-service.md:21–47`; `engine/docs/cli/worker.md:264–273`.
   - The catalog lists the supplied workers, and a registration adds no entry. `worker-service.impl.md:181`; `worker-service.impl.md:30`.
-  - `worker.catalog.not_found` stands at `worker-service.impl.md:185` and `engine/docs/cli/worker.md:302`; the error table of `engine/docs/cli/worker.md:715–746` lacks the row, and the report names it.
+  - `worker.catalog.not_found` stands at `worker-service.impl.md:190` and in both the command description and error table at `engine/docs/cli/worker.md:301,782`.
 - Done when: `pnpm run verify` passes; the tests pass; `kanthord worker list --help` exits 0.
 
 ### 02.14 End the registrations at a binding removal or unavailability
