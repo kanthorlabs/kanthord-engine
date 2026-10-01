@@ -76,6 +76,25 @@ function addConfigCommand(program: Command): void {
   }
 }
 
+async function serveServer(
+  application: string | undefined,
+  command: Command,
+  onServer: (server: Server) => void,
+): Promise<void> {
+  assert.equal(command.name(), CommandName.Serve);
+  assert.equal(command.parent?.name(), PROGRAM_NAME);
+  if (application !== undefined && application !== SERVER_APPLICATION)
+    throw new Diagnostic(
+      "cli.serve.unsupported_application",
+      "serve: supported applications are server and worker.",
+    );
+  const { Server } = await import("../server/index.ts");
+  const server = new Server(effectivePath(command));
+  onServer(server);
+  const error = await server.run();
+  if (error) throw error;
+}
+
 function addServeCommand(
   program: Command,
   onServer: (server: Server) => void,
@@ -88,19 +107,8 @@ function addServeCommand(
     .command(`${CommandName.Serve} [application]`)
     .description("Start an application (default: server)")
     .option("--config <path>", "YAML configuration file")
-    .action(
-      async (application: string | undefined, _options, command: Command) => {
-        if (application !== undefined && application !== SERVER_APPLICATION)
-          throw new Diagnostic(
-            "cli.serve.unsupported_application",
-            "serve: supported applications are server and worker.",
-          );
-        const { Server } = await import("../server/index.ts");
-        const server = new Server(effectivePath(command));
-        onServer(server);
-        const error = await server.run();
-        if (error) throw error;
-      },
+    .action((application: string | undefined, _options, command: Command) =>
+      serveServer(application, command, onServer),
     );
   serve
     .command(CommandName.Worker)
