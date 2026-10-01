@@ -9,7 +9,7 @@ import { dirname } from "node:path";
 import { initialConfig, loadConfig, showConfig } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { Diagnostic, diagnostic } from "../../kernel/errors.ts";
-import { Server } from "../server/index.ts";
+import type { Server } from "../server/index.ts";
 import { runWorker } from "../worker/index.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import { openapiPath } from "../../gateway/local.ts";
@@ -95,6 +95,7 @@ function addServeCommand(
             "cli.serve.unsupported_application",
             "serve: supported applications are server and worker.",
           );
+        const { Server } = await import("../server/index.ts");
         const server = new Server(effectivePath(command));
         onServer(server);
         const error = await server.run();

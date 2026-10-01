@@ -61,7 +61,7 @@ export default tseslint.config(
               allow: [
                 ...allow("kernel"),
                 { to: file({ anyOf: ["config-global", "config"] }) },
-                { to: serviceEntry("index.ts") },
+                { to: serviceEntry("{index,config}.ts") },
               ],
             },
             {

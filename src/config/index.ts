@@ -21,10 +21,10 @@ import {
   MASTER_KEY_BYTES,
   type GlobalConfig,
 } from "./global.ts";
-import { gatewayConfigSchema, type GatewayConfig } from "../gateway/index.ts";
-import { missionConfigSchema, type MissionConfig } from "../mission/index.ts";
+import { gatewayConfigSchema, type GatewayConfig } from "../gateway/config.ts";
+import { missionConfigSchema, type MissionConfig } from "../mission/config.ts";
 import { projectConfigSchema } from "../project/index.ts";
-import { workerConfigSchema, type WorkerConfig } from "../worker/index.ts";
+import { workerConfigSchema, type WorkerConfig } from "../worker/config.ts";
 const EMPTY_SCHEMA_FIELD_COUNT = 0;
 export interface ServerConfig extends GlobalConfig {
   gateway: GatewayConfig;
