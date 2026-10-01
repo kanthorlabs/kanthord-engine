@@ -21,6 +21,7 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import type { SchedulerConfig } from "./config.ts";
 import * as settlement from "./settlement.ts";
 import { readExecution } from "./execution-store.ts";
+import { WaitingPulls } from "./wakeup.ts";
 import {
   JOB_IDENTITY_PREFIX,
   QUEUE_LIST_LIMIT_DEFAULT,
@@ -90,6 +91,7 @@ export class SchedulerService implements Service, WorkQueue {
   private readonly quiesceTask = Promise.resolve(null);
   private started = false;
   private readonly dependencies: Dependencies;
+  private readonly waiting = new WaitingPulls();
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
@@ -100,6 +102,12 @@ export class SchedulerService implements Service, WorkQueue {
 
   settle(tx: Transaction, nodeId: string, now: number): void {
     settlement.settleNode(tx, this.dependencies, nodeId, now);
+  }
+  wake(projectId: string): void {
+    this.waiting.wake(projectId);
+  }
+  pulling(runtimeIdentity: string): boolean {
+    return this.waiting.pulling(runtimeIdentity);
   }
   executionOf(executionId: string) {
     return this.dependencies.store.transaction(
@@ -241,6 +249,7 @@ export class SchedulerService implements Service, WorkQueue {
     return this.quiesceTask;
   }
   stop(): Promise<Error | null> {
+    this.waiting.wakeAll();
     this.shutdown.cancel();
     this.started = false;
     this.stopTask ??= Promise.resolve(null);
