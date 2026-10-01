@@ -68,6 +68,12 @@ Out of scope:
 - Plan 03, through `00-index.md` "Seams": the execution proof (`Operation.requiresExecution`, `caller.execution` with `{ executionId, projectId, nodeId, attempt, pinnedRevision, runtimeIdentity, workerBindingId }`, 403 `gateway.invocation.execution_proof_failed`); `SchedulerClaims.revoke`, `settle`, `liveExecutionOf`; `ExecutionAttribution.of`; `SchedulerWakeup.wake`; the CLI leaves `scheduler work pull`, `scheduler execution release` and `scheduler claim get`.
 - Plan 02, through `00-index.md` "Seams": `worker.register` over `worker_instance`, and the 204 answer on both adapters, which `worker.heartbeat` needs first (`engine/docs/cli/worker.md:226`).
 
+## Publication prerequisite resolved
+
+Ulrich approved the Plan04 B1 repair on 2026-10-01. `docs/brainstorm/mission-service.impl.md` "Execution CLI validation" publishes all 24 unchanged local code/condition pairs from `engine/docs/cli/mission.md` "Error codes". Tasks 04.6, 04.8, 04.9, 04.11 and 04.13–04.18 use those exact declarations; their publication prerequisite is resolved. The `code: proposed` and proposed-CLI wording below is historical and grants no naming discretion. Existing domain-code declarations remain authoritative under D2. Implementation, E2E and completed-plan review gates still apply.
+
+Resume at 04.6, preserving completed independent tasks 04.1–04.5, 04.7, 04.10 and 04.12 and the original review baseline `099e442a75bfcd1c9491bd1b15a711c269d85d5a`. Task 04.7 remains independently implementable with seeded pending assets and does not require the submit handler of 04.6. The response schema is `assessmentSubmitResultSchema`; the existing `assessmentResultSchema` is the result enum.
+
 ## Provides
 
 | Seam                               | TypeScript signature                                                                                                                                                                                                                                                                                                                                                                                                                                          | Owner file                        | Consumer plans |
