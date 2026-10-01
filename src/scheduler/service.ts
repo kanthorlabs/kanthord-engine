@@ -19,6 +19,7 @@ import {
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import type { SchedulerConfig } from "./config.ts";
+import * as settlement from "./settlement.ts";
 import {
   JOB_IDENTITY_PREFIX,
   QUEUE_LIST_LIMIT_DEFAULT,
@@ -94,6 +95,36 @@ export class SchedulerService implements Service, WorkQueue {
     dependencies.health?.register(SCHEDULER_SERVICE_NAME, () =>
       this.healthcheck(),
     );
+  }
+
+  settle(tx: Transaction, nodeId: string, now: number): void {
+    settlement.settleNode(tx, this.dependencies, nodeId, now);
+  }
+  revoke(tx: Transaction, nodeId: string, now: number): string | null {
+    return settlement.revoke(tx, nodeId, now);
+  }
+  liveExecutionOf(tx: Transaction, nodeId: string, now: number) {
+    return settlement.liveExecutionOf(tx, nodeId, now);
+  }
+  runningExecutionOfRuntime(
+    tx: Transaction,
+    runtimeIdentity: string,
+    now: number,
+  ) {
+    return settlement.runningExecutionOfRuntime(
+      tx,
+      this.dependencies,
+      runtimeIdentity,
+      now,
+    );
+  }
+  requireRunning(
+    tx: Transaction,
+    executionId: string,
+    runtimeIdentity: string,
+    now: number,
+  ) {
+    return settlement.requireRunning(tx, executionId, runtimeIdentity, now);
   }
 
   insert(
