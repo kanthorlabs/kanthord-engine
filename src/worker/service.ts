@@ -33,6 +33,7 @@ import {
   type WorkerRegistrations,
   type WorkerBindingOf,
   type SchedulerClaims,
+  type CustodyHandover,
   type AgentEnablement,
   type AgentProviderItem,
   type AgentDependentBinding,
@@ -178,6 +179,7 @@ function saveRevision(tx: Transaction, current: EnablementRow) {
   );
 }
 export interface Dependencies {
+  custodyHandover: CustodyHandover;
   config: WorkerConfig;
   store: Store;
   workerBindingOf: WorkerBindingOf;
@@ -922,7 +924,41 @@ export class WorkerService implements Service {
     );
   }
 
+  private declareHandover(registry: OperationRegistry): void {
+    registry.register(workerOperations.handover, (_input, caller) => {
+      const identity = caller.identity;
+      assert(isMachineIdentity(identity));
+      const execution = caller.execution;
+      assert(execution);
+      return caller.commit((tx) =>
+        this.dependencies.custodyHandover.handover(
+          tx,
+          identity,
+          execution,
+          Date.now(),
+        ),
+      );
+    });
+    registry.register(workerOperations.credential, ({ body }, caller) => {
+      const identity = caller.identity;
+      assert(isMachineIdentity(identity));
+      const execution = caller.execution;
+      assert(execution);
+      return caller.commit((tx) => {
+        this.dependencies.custodyHandover.report(
+          tx,
+          identity,
+          execution,
+          { nonce: body.nonce, ciphertext: body.ciphertext },
+          Date.now(),
+        );
+        return null;
+      });
+    });
+  }
+
   declare(registry: OperationRegistry): void {
+    this.declareHandover(registry);
     this.declareInstanceReads(registry);
     this.declareDeregister(registry);
     registry.register(

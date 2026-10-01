@@ -31,6 +31,30 @@ import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
 
+test("published handover operations preserve execution proof and bodyless report success", () => {
+  const reportName = "credential";
+  for (const name of ["handover", "credential"] as const) {
+    const fragment = parse(
+      readFileSync(
+        join(dirname(openapiPath()), `openapi/worker/${name}.yaml`),
+        "utf8",
+      ),
+    );
+    const operation = fragment.pathItem.post;
+    assert.equal(operation.operationId, workerOperations[name].id);
+    assert(workerOperations[name].requiresExecution);
+    assert(
+      fragment.components.schemas[`worker.${name}.Input`].properties.body
+        .properties.executionId,
+    );
+    if (name === reportName)
+      assert.equal(
+        operation.responses[HttpStatus.NoContent].content,
+        undefined,
+      );
+  }
+});
+
 test("published execution objective reads name their operations", () => {
   for (const name of [
     "execution.objective.list",

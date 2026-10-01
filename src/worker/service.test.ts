@@ -45,6 +45,14 @@ import {
 import { HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
 
 const fakeCollaborations = {
+  custodyHandover: {
+    handover: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    report: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+  },
   workerBindingOf: () => ({
     bindingId: "binding",
     revision: 1,
@@ -965,6 +973,72 @@ function refuses(
     return true;
   });
 }
+
+test("handover handlers pass the proven execution and one transactional clock reading", (t) => {
+  const execution = {
+    executionId: createIdentity("execution"),
+    projectId: createIdentity("project"),
+    nodeId: createIdentity("node"),
+    attempt: 1,
+    pinnedRevision: 1,
+    runtimeIdentity: createIdentity("worker_instance"),
+    workerBindingId: createIdentity("binding"),
+  };
+  const identity = testMachineIdentity(
+    {
+      clientId: createIdentity("client_identity"),
+      name: "machine",
+      projectId: execution.projectId,
+      resourceIdentity: "worker:kanthord:general",
+      issuedAt: 0,
+    },
+    "jti",
+    execution.runtimeIdentity,
+  );
+  const envelope = { nonce: "nonce", ciphertext: "ciphertext" };
+  const now = 1000;
+  t.mock.method(Date, "now", () => now);
+  const f = enablementFixture(t, {
+    custodyHandover: {
+      handover: (tx, actualIdentity, actualExecution, actualNow) => {
+        assert(tx.database.isTransaction);
+        assert.equal(actualIdentity, identity);
+        assert.equal(actualExecution, execution);
+        assert.equal(actualNow, now);
+        return envelope;
+      },
+      report: (
+        tx,
+        actualIdentity,
+        actualExecution,
+        actualEnvelope,
+        actualNow,
+      ) => {
+        assert(tx.database.isTransaction);
+        assert.equal(actualIdentity, identity);
+        assert.equal(actualExecution, execution);
+        assert.deepEqual(actualEnvelope, envelope);
+        assert.equal(actualNow, now);
+      },
+    },
+  });
+  const caller = { ...f.caller, identity, execution };
+  const body = { executionId: createIdentity("execution"), ...envelope };
+  assert.deepEqual(
+    f.registry
+      .get(workerOperations.handover.id)
+      .handler({ params: {}, query: {}, body }, caller),
+    envelope,
+  );
+  assert.equal(
+    f.registry
+      .get(workerOperations.credential.id)
+      .handler({ params: {}, query: {}, body }, caller),
+    null,
+  );
+  const expectedCommits = 2;
+  assert.equal(f.commits(), expectedCommits);
+});
 
 test("catalog pages supplied declarations once per commit and registrations add no entry", async (t) => {
   const f = enablementFixture(t);

@@ -28,8 +28,10 @@ collaboration and an owned client operation.
 The [server composition](../../src/apps/server/index.ts) wires the real
 [Project binding resolver](../../src/project/service.ts), including group
 tombstones and transactional registration endings when a binding becomes
-unavailable. Scheduler running-execution and activity collaborators remain
-explicitly unwired in production under D6/D9 until Plan 03; tests supply stand-ins.
+unavailable. Scheduler running-execution and activity collaborators use the
+implemented Scheduler Service. Custody handover and refresh-report operations
+are implemented and wired to Project authorization and Scheduler execution pins.
+The `handover` CLI leaf remains pending its owning validation-code publication.
 
 The [Worker configuration fragment](../../src/worker/config.ts) declares
 `heartbeatWindow` and `globalPrompt`. The catalog, report-only instance
@@ -137,9 +139,9 @@ provider check. `[R]`, `[M]` and
 The static `/api/worker/agent/enablement` path takes precedence over `/:agentName`.
 
 `credential` runs inside the `worker` application alone and is no CLI command.
-Its operation is `worker.credential` at `POST /api/worker/credential`, with `client` access and a live execution requirement. Its body holds `executionId`, `nonce` and `ciphertext`, the sealed refresh report, and it answers 204.
+Its implemented operation is `worker.credential` at `POST /api/worker/credential`, with `client` access and a live execution requirement. Its body holds `executionId`, `nonce` and `ciphertext`, the sealed refresh report, and it answers 204 with no HTTP body (`null` through the direct adapter). It is a mutation with a 30-second timeout and a 64 KiB body limit. The worker application caller is later Plan 09 work.
 
-`worker.execution.setup.get` runs inside the `worker` application alone and is no CLI command. Its route is `GET /api/worker/execution/:executionId/setup`, with `client` access and a live execution requirement. The [execution setup](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-execution-setup) rules its answer and its handover prerequisite.
+The planned `worker.execution.setup.get` runs inside the `worker` application alone and is no CLI command. Its target route is `GET /api/worker/execution/:executionId/setup`, with `client` access and a live execution requirement. The [execution setup](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-execution-setup) rules its answer and its handover prerequisite.
 
 The five human reads follow [inspection operations](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#inspection-operations).
 Each is `unary`, has `mutation: false` and a default timeout of 30 s, and reads
@@ -236,8 +238,8 @@ kanthord worker [--endpoint <url>] handover <execution-id> [--token <jwt>] [--id
 ```
 
 The proposed command calls `POST /api/worker/handover`, operation `worker.handover`, with `client` access and the body `{ executionId }`, which names the execution that the invocation chain proves. It is a secret mutation with `[M]`: a repeat of its key answers 409 without the envelope, and a lost answer takes a new key.
-The operation requires a live execution and returns an AES-256-GCM envelope.
-The command prints only `{ "received": true, "idempotencyKey": "<key>" }` and never prints the envelope.
+The operation is implemented, requires a live execution and returns the strict AES-256-GCM envelope `{ nonce, ciphertext }` as canonical base64. It has a 30-second timeout and a 1 KiB body limit. Registration and execution proof precede replay lookup; the handler repeats execution liveness in its one write transaction before authorization, pinning and encryption.
+The proposed command prints only `{ "received": true, "idempotencyKey": "<key>" }` and never prints the envelope. API delivery does not mark the CLI leaf implemented.
 The [credential handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-credential-handover) rules the application call after a claim and before inference.
 The [Custody handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-handover) rules the envelope and credential report.
 

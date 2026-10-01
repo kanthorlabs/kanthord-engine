@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
 import {
+  handoverEnvelopeSchema,
+  type HandoverEnvelope,
+} from "../kernel/handover.ts";
+import type { MachineIdentity } from "../kernel/caller.ts";
+import {
   AccessPolicy,
   StoreName,
   OperationLifetime,
@@ -25,6 +30,24 @@ export interface VerifiedClient {
   name: string;
   resourceIdentity: string;
   projectId: string;
+}
+export const HANDOVER_TIMEOUT_MS = 30000;
+export const HANDOVER_MAX_BODY_BYTES = 1024;
+export const CREDENTIAL_REPORT_MAX_BODY_BYTES = 64 * 1024;
+export interface CustodyHandover {
+  handover(
+    tx: Transaction,
+    identity: MachineIdentity,
+    execution: { executionId: string; runtimeIdentity: string },
+    now: number,
+  ): HandoverEnvelope;
+  report(
+    tx: Transaction,
+    identity: MachineIdentity,
+    execution: { executionId: string; runtimeIdentity: string },
+    envelope: HandoverEnvelope,
+    now: number,
+  ): void;
 }
 export interface Registration extends VerifiedClient {
   runtimeIdentity: string;
@@ -359,6 +382,55 @@ const enablementMutation = {
 } as const;
 
 export const workerOperations = {
+  handover: {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.handover",
+    method: HttpMethod.Post,
+    path: "/api/worker/handover",
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    timeoutMs: HANDOVER_TIMEOUT_MS,
+    mutation: true,
+    secret: true,
+    body: true,
+    maxBodyBytes: HANDOVER_MAX_BODY_BYTES,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.strictObject({ executionId: identitySchema("execution") }),
+    }),
+    output: handoverEnvelopeSchema,
+    description:
+      "Seal the live execution's pinned provider credential. A repeated idempotency key returns a redacted conflict; recovery uses a new key.",
+  },
+  credential: {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.credential",
+    method: HttpMethod.Post,
+    path: "/api/worker/credential",
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    timeoutMs: HANDOVER_TIMEOUT_MS,
+    mutation: true,
+    body: true,
+    maxBodyBytes: CREDENTIAL_REPORT_MAX_BODY_BYTES,
+    status: HttpStatus.NoContent,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: handoverEnvelopeSchema.extend({
+        executionId: identitySchema("execution"),
+      }),
+    }),
+    output: z.null(),
+    description:
+      "Apply an authenticated refresh report to the live execution's pinned revision when the replaced credential digest still matches.",
+  },
   "instance.list": {
     ...enablementOperation,
     id: "worker.instance.list",

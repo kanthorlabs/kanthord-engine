@@ -170,6 +170,10 @@ paths:
     $ref: ./openapi/worker/catalog.get.yaml#/pathItem
   /api/worker/catalog:
     $ref: ./openapi/worker/catalog.list.yaml#/pathItem
+  /api/worker/credential:
+    $ref: ./openapi/worker/credential.yaml#/pathItem
+  /api/worker/handover:
+    $ref: ./openapi/worker/handover.yaml#/pathItem
   /api/worker/heartbeat:
     $ref: ./openapi/worker/heartbeat.yaml#/pathItem
   /api/worker/instance/{runtimeIdentity}:

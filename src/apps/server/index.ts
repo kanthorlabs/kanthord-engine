@@ -170,6 +170,10 @@ export function composeServices(options: {
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
   });
   const worker: WorkerService = new WorkerService({
+    custodyHandover: {
+      handover: (...args) => custody.handover(...args),
+      report: (...args) => custody.report(...args),
+    },
     config: options.config.worker,
     store: options.store,
     workerBindingOf: (tx, projectId, resourceIdentity) =>

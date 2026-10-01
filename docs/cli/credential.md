@@ -4,8 +4,8 @@
 
 ## Scope
 
-This specification covers the proposed `kanthord credential` group, with
-**9 proposed command leaves**. None is implemented. Custody is a shared
+This specification covers the implemented `kanthord credential` group, with
+**9 implemented command leaves**. Custody is a shared
 component, not a service or a part of Project. It owns server-wide credential
 records and OAuth login sessions. A credential belongs to no project.
 
@@ -13,11 +13,10 @@ records and OAuth login sessions. A credential belongs to no project.
 and its [implementation contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md)
 own the rules. This page details their CLI surface and introduces no design rule.
 The [command surface](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-command-surface)
-declares `credential` as the shared component group. Proposed wire names, paths,
-filters, output shapes and error codes need operation contracts and OpenAPI.
+declares `credential` as the shared component group. The [operation contracts](../../src/custody/contract.ts), [CLI](../../src/apps/cli/credential.ts) and generated OpenAPI publish the wire names, paths, filters, output shapes and error codes.
 The `credential.create`, `credential.list`, `credential.get`, `credential.rotate`
 and OAuth operation IDs follow the root contract. `credential.update_metadata`
-is a proposed operation ID for a metadata edit, and `credential.revoke` for a revoke.
+is the operation ID for a metadata edit, and `credential.revoke` for a revoke.
 
 ## Common calling convention
 
@@ -35,10 +34,10 @@ The shared [`--endpoint`](./common-flags.md#--endpoint) and
 Read operations reject [`--idempotency-key`](./common-flags.md#--idempotency-key).
 Mutations use that key and print it with their result. An indeterminate mutation
 prints its key without claiming that the write failed. Replay lasts only for
-the process and configured TTL; no automatic mutation retry is proposed.
+the process and configured TTL; the CLI performs no automatic mutation retry.
 
 [`--file`](./common-flags.md#--file) is required where the inventory names it.
-For create and rotate, the proposed secret-file policy requires a regular,
+For create and rotate, the secret-file policy requires a regular,
 non-symlink file at mode `0600`, checked before reading, without permission
 repair. The contents go to custody and are never echoed. Metadata update uses
 the ordinary JSON-file rules and accepts no secret.
@@ -63,19 +62,19 @@ non-secret diagnostic. A supplied identity never proves authorization.
 
 Each synopsis follows `kanthord credential`. All nine commands have `[R]` and
 `human` access; six mutations have `[M]`, and one list has `[L]`.
-All paths below are proposed routes under the ruled `/api/credential` prefix.
+All paths below are implemented routes under the ruled `/api/credential` prefix.
 
-| #   | Synopsis after `kanthord credential`                              | Proposed HTTP route                                              | Operation ID                 | Access/status     |
-| --- | ----------------------------------------------------------------- | ---------------------------------------------------------------- | ---------------------------- | ----------------- |
-| 1   | `create --file <path> [M] [R]`                                    | `POST /api/credential`                                           | `credential.create`          | `human`; proposed |
-| 2   | `list [--platform <platform>] [L] [R]`                            | `GET /api/credential`                                            | `credential.list`            | `human`; proposed |
-| 3   | `get <credential-name> [R]`                                       | `GET /api/credential/:credentialName`                            | `credential.get`             | `human`; proposed |
-| 4   | `rotate <credential-name> --file <path> [M] [R]`                  | `POST /api/credential/:credentialName/revision`                  | `credential.rotate`          | `human`; proposed |
-| 5   | `update-metadata <credential-name> --file <path> [M] [R]`         | `PUT /api/credential/:credentialName/metadata`                   | `credential.update_metadata` | `human`; proposed |
-| 6   | `login <platform> [--mode browser\|device] --name <name> [M] [R]` | `POST /api/credential/login`                                     | `credential.login`           | `human`; proposed |
-| 7   | `login-code <session> <value> [M] [R]`                            | `POST /api/credential/login/:sessionId/code`                     | `credential.login_code`      | `human`; proposed |
-| 8   | `login-status <session> [R]`                                      | `GET /api/credential/login/:sessionId`                           | `credential.login_status`    | `human`; proposed |
-| 9   | `revoke <credential-name> <revision> [M] [R]`                     | `POST /api/credential/:credentialName/revision/:revision/revoke` | `credential.revoke`          | `human`; proposed |
+| #   | Synopsis after `kanthord credential`                              | HTTP route                                                       | Operation ID                 | Access/status        |
+| --- | ----------------------------------------------------------------- | ---------------------------------------------------------------- | ---------------------------- | -------------------- |
+| 1   | `create --file <path> [M] [R]`                                    | `POST /api/credential`                                           | `credential.create`          | `human`; implemented |
+| 2   | `list [--platform <platform>] [L] [R]`                            | `GET /api/credential`                                            | `credential.list`            | `human`; implemented |
+| 3   | `get <credential-name> [R]`                                       | `GET /api/credential/:credentialName`                            | `credential.get`             | `human`; implemented |
+| 4   | `rotate <credential-name> --file <path> [M] [R]`                  | `POST /api/credential/:credentialName/revision`                  | `credential.rotate`          | `human`; implemented |
+| 5   | `update-metadata <credential-name> --file <path> [M] [R]`         | `PUT /api/credential/:credentialName/metadata`                   | `credential.update_metadata` | `human`; implemented |
+| 6   | `login <platform> [--mode browser\|device] --name <name> [M] [R]` | `POST /api/credential/login`                                     | `credential.login`           | `human`; implemented |
+| 7   | `login-code <session> <value> [M] [R]`                            | `POST /api/credential/login/:sessionId/code`                     | `credential.login_code`      | `human`; implemented |
+| 8   | `login-status <session> [R]`                                      | `GET /api/credential/login/:sessionId`                           | `credential.login_status`    | `human`; implemented |
+| 9   | `revoke <credential-name> <revision> [M] [R]`                     | `POST /api/credential/:credentialName/revision/:revision/revoke` | `credential.revoke`          | `human`; implemented |
 
 The static `/api/credential/login` path takes precedence over `/:credentialName`, so custody refuses the name `login`.
 These routes have no project identity. The proposed provider check is in
@@ -93,16 +92,16 @@ fix the secret shape and the metadata of each platform:
 
 | Platform            | Secret shape    | Metadata                                 |
 | ------------------- | --------------- | ---------------------------------------- |
-| `github`            | `api_key`       | None; proposed wire value `null`.        |
-| `github-copilot`    | `oauth`         | None; proposed wire value `null`.        |
-| `anthropic`         | `api_key`       | None; proposed wire value `null`.        |
+| `github`            | `api_key`       | None; wire value `null`.                 |
+| `github-copilot`    | `oauth`         | None; wire value `null`.                 |
+| `anthropic`         | `api_key`       | None; wire value `null`.                 |
 | `openai-compatible` | `api_key`       | Required `{ baseUrl, models }`.          |
 | `s3`                | `s3_access_key` | Required `{ endpoint, bucket, region }`. |
 
 For `openai-compatible`:
 
 - `baseUrl` is required, uses `https` or `http`, and has no query or fragment.
-  It is fixed for the life of the record. A different endpoint needs a new record.
+  It is fixed for the life of the revision. A rotation can set a different endpoint; a metadata edit cannot.
   An official OpenAI record uses `https://api.openai.com/v1`.
 - `models` is required and starts as `[]` at creation. A human adds approved
   models through a metadata revision after `worker provider check`.
@@ -136,7 +135,7 @@ fields have no default:
   string whose exact value is preserved. For `s3_access_key`, required nonempty
   strings `{ accessKeyId, secretAccessKey }`; a session token is invalid.
 
-Custody validates the local schema and makes no remote call. Proposed HTTP
+Custody validates the local schema and makes no remote call. HTTP
 `200` returns the credential answer with revision 1. The name is the natural key of
 creation. A taken name answers `409 credential.name.conflict`, with the identity
 of its newest revision in `error.details`, including a retry after restart. The CLI prints
@@ -147,15 +146,15 @@ that identity, never the submitted secret.
 No positional arguments and no body. The optional filter maps to query `platform`.
 It is single-use with no default filter. The platform enum is defined above.
 `limit` and optional `cursor` use the shared pagination contract.
-Proposed HTTP `200` returns one credential answer for each name in `items`, in ascending name
+HTTP `200` returns one credential answer for each name in `items`, in ascending name
 order under [pagination](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
-The CLI fetches no further page implicitly.
+The CLI fetches no further page implicitly. Custody drains unpinned older live revisions of each returned name in the read transaction before projecting the page.
 
 ## `get <credential-name>`
 
 The required `CredentialName` has no default and maps to `params.credentialName`.
-Query is empty and body absent. Proposed HTTP `200` returns one credential answer;
-an unknown name answers proposed `404 credential.credential.not_found`.
+Query is empty and body absent. HTTP `200` returns one credential answer;
+an unknown name answers `404 credential.credential.not_found`. The read transaction first drains unpinned older live revisions of that name.
 
 ## `rotate <credential-name>`
 
@@ -170,7 +169,7 @@ Rotation adds the next revision under the same name and, in the same transaction
 An absent `metadata` copies the metadata of the newest live revision. A supplied `metadata`
 matches the platform schema, can set a new `openai-compatible.baseUrl`, and keeps every model
 that a default or an entry names. Rotation makes no remote call and commits in one transaction.
-It changes no binding revision. Proposed HTTP `200` returns the credential answer
+It changes no binding revision. HTTP `200` returns the credential answer
 without the secret.
 Custody logs the human identity and record identity, never material.
 This command does not rotate `masterKey`.
@@ -180,7 +179,7 @@ This command does not rotate `masterKey`.
 The required `CredentialName` maps to `params.credentialName`; query is empty.
 The required file supplies exactly `{ expectedRevision, metadata }`, with the newest live revision that the human read and a complete replacement that
 matches the platform schema. It accepts no secret or platform change.
-The edit inserts the next revision with the secret of the newest live revision, and the older revisions stay live until custody drains them or a human revokes them. Proposed HTTP `200` returns
+The edit inserts the next revision with the secret of the newest live revision, and the older revisions stay live until custody drains them or a human revokes them. HTTP `200` returns
 the credential answer. An `openai-compatible.baseUrl` change fails; a rotation sets a new one.
 Removal of a model used by a default or entry fails and lists its dependents;
 the check and update are atomic. No remote probe supplies approval.
@@ -192,7 +191,7 @@ The required `CredentialName` maps to `params.credentialName`, and the required
 The revoke ends that revision at once, and every execution that pins it is refused
 at its next use of the credential. A revoke of the newest live revision answers
 `409 credential.revision.newest_live`. A revoke of an ended revision answers
-`409 credential.revision.ended`. Proposed HTTP `200` returns the credential answer.
+`409 credential.revision.ended`. HTTP `200` returns the credential answer after draining other unpinned older live revisions in the same transaction.
 
 ## `login <platform>`
 
@@ -201,7 +200,7 @@ requires a platform that accepts `oauth`; the implemented platform set permits
 `github-copilot` only. The positional platform is required with no default.
 `--name` is required `CredentialName` with no default.
 
-The proposed body is `{ platform, mode?, name }`, with empty
+The body is `{ platform, mode?, name }`, with empty
 params and query. Optional `--mode` is `browser` or `device`, without a CLI
 default; absence leaves selection to the platform's supported flow. Custody
 maps `device` to pi-ai interaction value `device_code`. A platform with one
@@ -228,15 +227,15 @@ Both positional values are required, with no default. `session` is a
 redirect URL, not a record secret. The body is `{ value }`; query is empty.
 The unary mutation supplies the value awaited by the session. A remote browser
 can use this command when its loopback callback fails. The operation answers
-409 when no value is awaited. Proposed HTTP `200` returns `{ sessionId }`;
+409 when no value is awaited. HTTP `200` returns `{ sessionId }`;
 the CLI adds the mutation key. It reads no prompt and outputs no token.
 
 ## `login-status <session>`
 
 The required `LoginSessionId` maps to `params.sessionId`; query is empty and
-body absent. Proposed HTTP `200` prints `{ sessionId, state, lastMessage,
+body absent. HTTP `200` prints `{ sessionId, state, lastMessage,
 failureReason }` as JSON. `state` is `pending | completed | failed | expired`.
-Proposed absent message and failure reason values are `null`. This read does
+Absent message and failure reason values are `null`. This read does
 not poll until completion or change the session. No mutation key is accepted.
 
 ## Error codes
@@ -279,6 +278,8 @@ The S3 `HeadBucket` probe maps 200 to `ok`, 404 to a missing bucket and 403 to
 No command here exports or removes a credential, refreshes
 OAuth, mints a GitHub App token or rotates the master key. Custody's removal
 invariant remains in the design: dependents, including agent providers, prevent
-removal, and the dependency check and removal are atomic. This page proposes
-no removal route. Secret handover and acquisition grants remain runtime
-operations, not CLI record answers.
+removal, and the dependency check and removal are atomic. No removal route is implemented.
+Secret handover and refresh reports are implemented Worker API operations; the
+handover CLI leaf is pending. Acquisition grants remain later work. None is a
+CLI credential-record answer. Handover first pins the newest live revision,
+subsequent uses retain that pin, and a revoked pinned revision refuses use.
