@@ -27,7 +27,7 @@ export type ExecutionCredentials = {
 class ExecutionCredentialView implements ExecutionCredentials {
   #current: Credential | undefined;
   #reported: Credential | undefined;
-  #chain: Promise<unknown> = Promise.resolve();
+  #chain: Promise<void> = Promise.resolve();
   readonly #credentialId: string;
   readonly #providerId: string;
   readonly #report: (report: RefreshReport) => Promise<void>;
@@ -57,7 +57,10 @@ class ExecutionCredentialView implements ExecutionCredentials {
 
   #enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.#chain.then(operation, operation);
-    this.#chain = result;
+    this.#chain = result.then(
+      () => undefined,
+      () => undefined,
+    );
     return result;
   }
 
