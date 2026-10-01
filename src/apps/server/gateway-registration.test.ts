@@ -70,7 +70,7 @@ test("machine fake keeps attribution after a registration ends and a replacement
   store.transaction((tx) => {
     const row = worker.register(tx, client, Date.now());
     assert.deepEqual(worker.liveRegistrationOf(tx, row.runtimeIdentity), row);
-    worker.deregister(row.runtimeIdentity);
+    worker.deregister(tx, row.runtimeIdentity, Date.now());
     const next = worker.register(
       tx,
       { ...client, name: "replacement" },
@@ -126,6 +126,37 @@ async function fixtureForRegistration(
   assert.equal(decode(token).payload.name, DISPLAY_NAME);
   return { ...fixture, machines, machineJWT: token, client };
 }
+
+test("deregistration replays after ending while fresh keys refuse ended targets", async (t) => {
+  const f = await fixtureForRegistration(t);
+  const registered = await f.client.register(input);
+  assert.ok(registered.type === OperationResultType.Completed);
+  const target = { ...input, params: registered.data };
+  const key = ulid();
+  const ended = await f.client["instance.deregister"](target, {
+    idempotencyKey: key,
+  });
+  assert.ok(ended.type === OperationResultType.Completed);
+  assert.deepEqual(ended.data, { ...registered.data, registered: false });
+  assert.deepEqual(
+    await f.client["instance.deregister"](target, { idempotencyKey: key }),
+    ended,
+  );
+  assertFailure(
+    await f.client["instance.deregister"](target),
+    HttpStatus.NotFound,
+    "worker.instance.not_found",
+  );
+  const next = await f.client.register(input);
+  assert.ok(next.type === OperationResultType.Completed);
+  assert.notEqual(next.data.runtimeIdentity, registered.data.runtimeIdentity);
+  assertFailure(
+    await f.client["instance.deregister"](target),
+    HttpStatus.NotFound,
+    "worker.instance.not_found",
+  );
+  assert.equal(f.machines.worker.registrations.size, SINGLE_REGISTRATION);
+});
 
 function assertFailure(
   result: { type: string; status?: number; error?: unknown },
@@ -338,7 +369,13 @@ test("work requires a live registration and machine JWTs never authorize human v
     HttpStatus.Unauthorized,
     ErrorCode.Unauthorized,
   );
-  fixture.machines.worker.deregister(registered.data.runtimeIdentity);
+  fixture.store.transaction((tx) =>
+    fixture.machines.worker.deregister(
+      tx,
+      registered.data.runtimeIdentity,
+      Date.now(),
+    ),
+  );
   assertFailure(
     await client.read(input),
     HttpStatus.Forbidden,

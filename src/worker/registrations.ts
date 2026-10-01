@@ -11,6 +11,7 @@ import {
 } from "./contract.ts";
 import {
   countLive,
+  endRegistration,
   insertRegistration,
   readLiveByClient,
   readLiveOfClient,
@@ -37,6 +38,11 @@ export class TableRegistrations implements WorkerRegistrations {
     assert.ok(runtimeIdentity);
     assert.ok(this.store.database.isOpen);
     this.clock.renew(runtimeIdentity);
+  }
+  deregister(tx: Transaction, runtimeIdentity: string, now: number): void {
+    assert.ok(tx.database.isTransaction);
+    assert.equal(tx.database, this.store.database);
+    endRegistration(tx, runtimeIdentity, now);
   }
   findByClient(clientId: string): Registration | undefined {
     assert.ok(clientId);

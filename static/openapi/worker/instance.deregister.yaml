@@ -1,0 +1,94 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  delete:
+    operationId: worker.instance.deregister
+    tags:
+      - worker
+    description: End the caller's named live registration and free its slot
+      atomically. Same-key retries replay the recorded answer after the end.
+    x-access-policy: client
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: runtimeIdentity
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/worker.instance.deregister.Input/properties/params/\
+            properties/runtimeIdentity"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.instance.deregister.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.instance.deregister.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            runtimeIdentity:
+              type: string
+              minLength: 42
+              maxLength: 42
+              pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: worker_instance_ followed by a canonical 26-character uppercase
+                ULID.
+          required:
+            - runtimeIdentity
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.instance.deregister.Output:
+      type: object
+      properties:
+        runtimeIdentity:
+          type: string
+          minLength: 42
+          maxLength: 42
+          pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: worker_instance_ followed by a canonical 26-character uppercase ULID.
+        registered:
+          type: boolean
+          const: false
+      required:
+        - runtimeIdentity
+        - registered
+      additionalProperties: false

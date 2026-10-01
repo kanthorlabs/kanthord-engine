@@ -153,10 +153,15 @@ export function fakeMachines(
       registrationHistory.set(registration.runtimeIdentity, registration);
       return registration;
     },
-    deregister(runtimeIdentity: string): void {
-      for (const [clientId, registration] of registrations)
-        if (registration.runtimeIdentity === runtimeIdentity)
-          registrations.delete(clientId);
+    deregister(tx: Transaction, runtimeIdentity: string, now: number): void {
+      assert.ok(tx.database.isTransaction);
+      assert.ok(Number.isSafeInteger(now));
+      const row = registrationHistory.get(runtimeIdentity);
+      if (
+        row &&
+        registrations.get(row.clientId)?.runtimeIdentity === runtimeIdentity
+      )
+        registrations.delete(row.clientId);
     },
     restart(): void {
       registrations.clear();

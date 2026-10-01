@@ -251,6 +251,78 @@ test("registration admission is idempotent, bounded by the latest slot count and
   );
 });
 
+test("deregistration owns its target, rolls back atomically and preserves a newer registration", (t) => {
+  const f = enablementFixture(t);
+  const clientId = createIdentity("client_identity");
+  f.caller.identity = testMachineIdentity(
+    { ...client, clientId, issuedAt: Date.now() },
+    "owner",
+  );
+  const register = f.registry.get(workerOperations.register.id).handler;
+  const deregister = f.registry.get(
+    workerOperations["instance.deregister"].id,
+  ).handler;
+  const empty = { params: {}, query: {}, body: null };
+  const first = workerOperations.register.output.parse(
+    register(empty, f.caller),
+  );
+  const input = { ...empty, params: first };
+  const commit = f.caller.commit;
+  const failure = new Error("rollback end");
+  f.caller.commit = (write) =>
+    f.store.transaction((tx) => {
+      write(tx);
+      throw failure;
+    });
+  assert.throws(
+    () => deregister(input, f.caller),
+    (error) => error === failure,
+  );
+  assert.ok(f.worker.registrations.findByClient(clientId));
+  assert.notEqual(f.worker.heartbeatClock.ageMs(first.runtimeIdentity), null);
+  f.caller.commit = commit;
+  const owner = f.caller.identity;
+  for (const changed of [
+    { clientId: createIdentity("client_identity") },
+    { projectId: "other" },
+    { resourceIdentity: "other" },
+  ]) {
+    f.caller.identity = testMachineIdentity(
+      { ...owner, ...changed },
+      "foreign",
+    );
+    refuses(
+      () => deregister(input, f.caller),
+      WorkerErrorCode.InstanceNotFound,
+      HttpStatus.NotFound,
+    );
+  }
+  f.caller.identity = owner;
+  assert.deepEqual(deregister(input, f.caller), {
+    ...first,
+    registered: false,
+  });
+  assert.equal(f.worker.heartbeatClock.ageMs(first.runtimeIdentity), null);
+  assert.equal(f.worker.registrations.findByClient(clientId), undefined);
+  const next = workerOperations.register.output.parse(
+    register(empty, f.caller),
+  );
+  assert.notEqual(next.runtimeIdentity, first.runtimeIdentity);
+  for (const runtimeIdentity of [
+    first.runtimeIdentity,
+    createIdentity("worker_instance"),
+  ])
+    refuses(
+      () => deregister({ ...empty, params: { runtimeIdentity } }, f.caller),
+      WorkerErrorCode.InstanceNotFound,
+      HttpStatus.NotFound,
+    );
+  assert.equal(
+    f.worker.registrations.findByClient(clientId)?.runtimeIdentity,
+    next.runtimeIdentity,
+  );
+});
+
 type OperationKey = Exclude<keyof typeof workerOperations, "register">;
 
 test("start resets live heartbeats and sweep ends only expired rows while preserving reopened readings", async (t) => {

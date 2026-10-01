@@ -188,6 +188,7 @@ export type WorkerAgentViewFn = (
 ) => WorkerAgentView | null;
 
 export interface WorkerRegistrations {
+  deregister(tx: Transaction, runtimeIdentity: string, now: number): void;
   register(
     transaction: Transaction,
     client: VerifiedClient,
@@ -212,6 +213,7 @@ export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 
 export const WorkerErrorCode = {
+  InstanceNotFound: "worker.instance.not_found",
   SlotUnavailable: "worker.instance.slot_unavailable",
   CatalogNotFound: "worker.catalog.not_found",
   AgentNotFound: "worker.agent.not_found",
@@ -266,6 +268,9 @@ export const catalogEntrySchema = z.discriminatedUnion("host", [
 ]);
 
 const emptyFields = z.strictObject({});
+const runtimeIdentityParams = z.strictObject({
+  runtimeIdentity: identitySchema("worker_instance"),
+});
 const revisionBody = z.strictObject({
   expectedRevision: z.number().int().positive(),
 });
@@ -460,6 +465,27 @@ export const workerOperations = {
     output: z.null(),
     description:
       "Renew the live registration heartbeat with an authenticated empty request.",
+  },
+  "instance.deregister": {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.instance.deregister",
+    method: HttpMethod.Delete,
+    path: "/api/worker/instance/:runtimeIdentity",
+    access: AccessPolicy.Client,
+    requiresRegistration: false,
+    timeoutMs: 30000,
+    mutation: true,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: runtimeIdentityParams,
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: runtimeIdentityParams.extend({ registered: z.literal(false) }),
+    description:
+      "End the caller's named live registration and free its slot atomically. Same-key retries replay the recorded answer after the end.",
   },
   register: {
     service: WORKER_SERVICE_NAME,

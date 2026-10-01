@@ -3,7 +3,7 @@ import { Command } from "commander";
 import { ulid } from "ulid";
 import { z } from "zod";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { ulidSchema } from "../../kernel/identity.ts";
+import { identitySchema, ulidSchema } from "../../kernel/identity.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { AccessPolicy } from "../../kernel/operation.ts";
@@ -196,6 +196,38 @@ async function heartbeat(command: Command): Promise<void> {
   );
 }
 
+async function deregister(
+  runtimeIdentity: string,
+  command: Command,
+): Promise<void> {
+  assert.equal(
+    workerOperations["instance.deregister"].access,
+    AccessPolicy.Client,
+  );
+  assert.equal(workerOperations["instance.deregister"].mutation, true);
+  if (!identitySchema("worker_instance").safeParse(runtimeIdentity).success)
+    throw new Diagnostic(
+      "cli.worker.instance.deregister.invalid_runtime_identity",
+      "Expected a canonical worker_instance identity.",
+    );
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, "cli.worker.instance.deregister.token_required");
+  const key = resolveKey(options);
+  const result = await httpClient(workerOperations, endpoint, token)[
+    "instance.deregister"
+  ](
+    { params: { runtimeIdentity }, query: {}, body: null },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(
+    result,
+    "cli.worker.instance.deregister.indeterminate",
+    key,
+  );
+  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+}
+
 async function catalogGet(workerName: string, command: Command): Promise<void> {
   assert.equal(workerOperations["catalog.get"].access, AccessPolicy.Human);
   assert.equal(workerOperations["catalog.get"].mutation, false);
@@ -347,6 +379,18 @@ export function addWorkerCommand(program: Command): void {
       singleUse("--token"),
     );
   worker.action(() => worker.help());
+  const instance = worker
+    .command("instance")
+    .description("Worker instance commands");
+  instance.action(() => instance.help());
+  instance
+    .command("deregister")
+    .description("End an owned live registration")
+    .argument("<runtime-identity>", "Runtime identity")
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
+    .action((runtimeIdentity: string, _options, command: Command) =>
+      deregister(runtimeIdentity, command),
+    );
   worker
     .command("heartbeat")
     .description("Renew a registered instance heartbeat")

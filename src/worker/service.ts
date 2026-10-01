@@ -847,7 +847,49 @@ export class WorkerService implements Service {
     );
   }
 
+  private declareDeregister(registry: OperationRegistry): void {
+    assert.equal(
+      workerOperations["instance.deregister"].access,
+      AccessPolicy.Client,
+    );
+    assert.equal(
+      workerOperations["instance.deregister"].requiresRegistration,
+      false,
+    );
+    registry.register(
+      workerOperations["instance.deregister"],
+      ({ params }, caller) => {
+        const identity = caller.identity;
+        assert.ok(isMachineIdentity(identity));
+        const { runtimeIdentity } = params;
+        const result = caller.commit((tx) => {
+          const now = Date.now();
+          const row = this.registrations.liveRegistrationOf(
+            tx,
+            runtimeIdentity,
+          );
+          if (
+            !row ||
+            row.clientId !== identity.clientId ||
+            row.projectId !== identity.projectId ||
+            row.resourceIdentity !== identity.resourceIdentity
+          )
+            throw new OperationError(
+              HttpStatus.NotFound,
+              WorkerErrorCode.InstanceNotFound,
+              "Instance not found.",
+            );
+          this.registrations.deregister(tx, runtimeIdentity, now);
+          return { runtimeIdentity, registered: false as const };
+        });
+        this.heartbeatClock.drop(runtimeIdentity);
+        return result;
+      },
+    );
+  }
+
   declare(registry: OperationRegistry): void {
+    this.declareDeregister(registry);
     registry.register(workerOperations.heartbeat, (_input, caller) =>
       caller.commit(() => null),
     );

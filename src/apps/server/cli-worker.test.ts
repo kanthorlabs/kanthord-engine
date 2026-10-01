@@ -30,6 +30,50 @@ const STRING_TYPE = "string";
 const NATIVE_AGENT = "swe@1";
 const EXTERNAL_HARNESS = "claude-code";
 
+test("deregistration CLI validates identity and token and returns replayable JSON", async (t) => {
+  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
+  const env = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+  };
+  const leaf = ["worker", "instance", "deregister"];
+  assert.equal(
+    (await command([...leaf, "--help"], env)).code,
+    ExitCode.Success,
+  );
+  const invalid = await command([...leaf, "invalid"], env);
+  assert.match(
+    invalid.stderr,
+    /^cli.worker.instance.deregister.invalid_runtime_identity:/,
+  );
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
+  const registered = await command(
+    ["worker", "register", "--token", token],
+    env,
+  );
+  assert.equal(registered.code, ExitCode.Success, registered.stderr);
+  const { runtimeIdentity } = JSON.parse(registered.stdout);
+  const absent = await command([...leaf, runtimeIdentity], env);
+  assert.match(
+    absent.stderr,
+    /^cli.worker.instance.deregister.token_required:/,
+  );
+  const key = ulid();
+  const ended = await command(
+    [...leaf, runtimeIdentity, "--token", token, "--idempotency-key", key],
+    env,
+  );
+  assert.equal(ended.code, ExitCode.Success, ended.stderr);
+  assert.deepEqual(JSON.parse(ended.stdout), {
+    runtimeIdentity,
+    registered: false,
+    idempotencyKey: key,
+  });
+});
+
 test("heartbeat CLI has offline help, requires a token and prints null after registration", async (t) => {
   const fixture = await gatewayFixture(t, { machines: fakeMachines() });
   const env = {
