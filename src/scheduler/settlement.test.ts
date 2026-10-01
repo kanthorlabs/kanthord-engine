@@ -24,6 +24,90 @@ import {
 const ONE_LOSS = 1;
 const SECOND_LOSS = 2;
 
+test("credential pins append once in order, retain after end and select only unended executions", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  const other = executionFixture();
+  const first = createIdentity("credential");
+  const second = createIdentity("credential");
+  h.store.transaction((tx) => {
+    insertExecution(tx, row);
+    insertExecution(tx, other);
+    h.service.pinCredential(tx, row.executionId, first);
+    h.service.pinCredential(tx, row.executionId, second);
+    h.service.pinCredential(tx, row.executionId, first);
+    h.service.pinCredential(tx, other.executionId, first);
+    assert.deepEqual(readExecution(tx, row.executionId)?.credentials, [
+      first,
+      second,
+    ]);
+    assert.deepEqual(
+      h.service.liveExecutionsPinning(tx, first),
+      [row.executionId, other.executionId].sort(),
+    );
+    h.service.revoke(tx, row.nodeId, FIXTURE_NOW);
+    assert.throws(() => h.service.pinCredential(tx, row.executionId, second), {
+      code: EXECUTION_NOT_RUNNING,
+    });
+    assert.throws(
+      () => h.service.pinCredential(tx, createIdentity("execution"), first),
+      { code: EXECUTION_NOT_RUNNING },
+    );
+    assert.deepEqual(h.service.liveExecutionsPinning(tx, first), [
+      other.executionId,
+    ]);
+    assert.deepEqual(readExecution(tx, row.executionId)?.credentials, [
+      first,
+      second,
+    ]);
+  });
+});
+
+test("execution attribution reads retained registration and tombstoned binding and allows hosted attribution", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture({ endedAt: FIXTURE_NOW });
+  const attribution = {
+    clientId: createIdentity("client_identity"),
+    name: "retired-program",
+  };
+  const workerName = "general@1";
+  h.dependencies.registrations.clientAttributionOf = (_tx, runtimeIdentity) => {
+    assert.equal(runtimeIdentity, row.runtimeIdentity);
+    return attribution;
+  };
+  h.dependencies.bindings.workerBindingOf = (
+    _tx,
+    projectId,
+    resourceIdentity,
+  ) => {
+    assert.equal(projectId, row.projectId);
+    assert.equal(resourceIdentity, row.resourceIdentity);
+    return {
+      bindingId: row.workerBindingId,
+      workerName,
+      instanceCount: 0,
+      tombstone: true,
+    };
+  };
+  h.store.transaction((tx) => {
+    insertExecution(tx, row);
+    assert.deepEqual(h.service.executionAttribution(tx, row.executionId), {
+      ...attribution,
+      workerName,
+    });
+    assert.equal(
+      h.service.executionAttribution(tx, createIdentity("execution")),
+      null,
+    );
+    h.dependencies.registrations.clientAttributionOf = () => null;
+    assert.deepEqual(h.service.executionAttribution(tx, row.executionId), {
+      clientId: null,
+      name: null,
+      workerName,
+    });
+  });
+});
+
 test("settlement records exactly one loss at the transaction reading", (t) => {
   const h = schedulerHarness(t);
   const row = executionFixture();

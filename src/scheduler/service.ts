@@ -111,6 +111,19 @@ export class SchedulerService implements Service, WorkQueue {
   settle(tx: Transaction, nodeId: string, now: number): void {
     settlement.settleNode(tx, this.dependencies, nodeId, now);
   }
+  pinCredential(
+    tx: Transaction,
+    executionId: string,
+    credentialId: string,
+  ): void {
+    settlement.pinCredential(tx, executionId, credentialId);
+  }
+  liveExecutionsPinning(tx: Transaction, credentialId: string): string[] {
+    return settlement.liveExecutionsPinning(tx, credentialId);
+  }
+  executionAttribution(tx: Transaction, executionId: string) {
+    return settlement.executionAttribution(tx, this.dependencies, executionId);
+  }
   wake(projectId: string): void {
     this.waiting.wake(projectId);
   }
