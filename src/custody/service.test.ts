@@ -30,6 +30,7 @@ import {
   type AgentProvidersDependentOnFn,
   type BindingsNamingFn,
   type EnablementsDependentOnModelFn,
+  type CredentialAnswer,
 } from "./contract.ts";
 import { decrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
@@ -61,6 +62,18 @@ const ROTATED_BASE_URL = "https://other.example/v1";
 const key = Buffer.alloc(32, 7);
 const secretValue = "private-credential-value";
 const apiSecret = { key: secretValue };
+function unexpectedCollaboration(): never {
+  throw new Error("UNEXPECTED_COLLABORATION");
+}
+const unusedExecutionDependencies = {
+  executions: {
+    requireRunning: unexpectedCollaboration,
+    pinCredential: unexpectedCollaboration,
+    liveExecutionsPinning: () => [],
+  },
+  authorization: { authorizeModelInference: unexpectedCollaboration },
+  clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
+};
 const inputs = [
   {
     name: "github",
@@ -99,6 +112,7 @@ function fixture(
     agentProvidersDependentOn?: AgentProvidersDependentOnFn;
     bindingsNaming?: BindingsNamingFn;
     enablementsDependentOnModel?: EnablementsDependentOnModelFn;
+    pins?: Map<string, string[]>;
   } = {},
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -112,6 +126,15 @@ function fixture(
   } as unknown as Logger;
   const health = new HealthRegistry();
   const component = new CustodyComponent({
+    ...unusedExecutionDependencies,
+    executions: {
+      requireRunning: unexpectedCollaboration,
+      pinCredential: (_tx, executionId, credentialId) => {
+        collaborations.pins?.set(credentialId, [executionId]);
+      },
+      liveExecutionsPinning: (_tx, credentialId) =>
+        collaborations.pins?.get(credentialId) ?? [],
+    },
     store,
     oauthProviders: collaborations.oauthProviders,
     now: collaborations.now,
@@ -546,10 +569,79 @@ test("two metadata edits with the same expected revision reject the second", () 
   }
 });
 
-test("revoke ends only an older live revision", () => {
-  const f = fixture();
+test("rotation drains unpinned revisions while reads drain released pins", () => {
+  const pins = new Map<string, string[]>();
+  const f = fixture({ pins });
   try {
-    f.create(inputs[0]);
+    const created = f.create(inputs[0]) as CredentialAnswer;
+    const first = created.revisions[0]!.id;
+    pins.set(first, ["live-execution"]);
+    const rotated = f.rotate("github", {
+      expectedRevision: FIRST_REVISION,
+      secret: apiSecret,
+    }) as CredentialAnswer;
+    assert(rotated.revisions.every((row) => row.endedAt === null));
+    pins.clear();
+    const read = f.get("github") as CredentialAnswer;
+    assert.notEqual(read.revisions[1]!.endedAt, null);
+    assert.equal(read.revisions[0]!.endedAt, null);
+    const again = f.rotate("github", {
+      expectedRevision: NEXT_REVISION,
+      secret: apiSecret,
+    }) as CredentialAnswer;
+    assert.notEqual(again.revisions[1]!.endedAt, null);
+    assert.equal(again.revisions[0]!.endedAt, null);
+    fails(
+      () => f.revoke("github", NEXT_REVISION),
+      HttpStatus.Conflict,
+      "credential.revision.ended",
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("list drains every returned name and revoke drains other unpinned revisions", () => {
+  const pins = new Map<string, string[]>();
+  const f = fixture({ pins });
+  try {
+    for (const input of inputs.slice(0, 2)) {
+      const created = f.create(input) as CredentialAnswer;
+      pins.set(created.revisions[0]!.id, ["live-execution"]);
+      f.rotate(input.name, {
+        expectedRevision: FIRST_REVISION,
+        secret: apiSecret,
+      });
+    }
+    pins.clear();
+    const page = f.list() as { items: CredentialAnswer[] };
+    for (const item of page.items) {
+      assert.notEqual(item.revisions[1]!.endedAt, null);
+      assert.equal(item.revisions[0]!.endedAt, null);
+    }
+    const current = f.get("github") as CredentialAnswer;
+    pins.set(current.revisions[0]!.id, ["live-execution"]);
+    const third = f.rotate("github", {
+      expectedRevision: NEXT_REVISION,
+      secret: apiSecret,
+    }) as CredentialAnswer;
+    pins.set(third.revisions[0]!.id, ["live-execution"]);
+    f.rotate("github", { expectedRevision: THIRD_REVISION, secret: apiSecret });
+    pins.clear();
+    const revoked = f.revoke("github", THIRD_REVISION) as CredentialAnswer;
+    assert.equal(revoked.revisions[0]!.endedAt, null);
+    assert(revoked.revisions.slice(1).every((row) => row.endedAt !== null));
+  } finally {
+    f.store.close();
+  }
+});
+
+test("revoke ends only an older live revision", () => {
+  const pins = new Map<string, string[]>();
+  const f = fixture({ pins });
+  try {
+    const created = f.create(inputs[0]) as CredentialAnswer;
+    pins.set(created.revisions[0]!.id, ["live-execution"]);
     f.rotate("github", { expectedRevision: FIRST_REVISION, secret: apiSecret });
     fails(
       () => f.revoke("github", NEXT_REVISION),
@@ -579,10 +671,12 @@ test("revoke ends only an older live revision", () => {
 });
 
 test("custody suitability checks the newest live revision and platform", () => {
-  const f = fixture();
+  const pins = new Map<string, string[]>();
+  const f = fixture({ pins });
   try {
     const suitability: CustodySuitabilityFn = f.component.custodySuitability;
-    f.create(inputs[0]);
+    const created = f.create(inputs[0]) as CredentialAnswer;
+    pins.set(created.revisions[0]!.id, ["live-execution"]);
     f.store.transaction((tx) =>
       suitability(tx, { credential: "github", platform: Platform.GitHub }),
     );
@@ -613,10 +707,12 @@ test("custody suitability checks the newest live revision and platform", () => {
 });
 
 test("credential metadata returns only nonsecret fields from the newest live revision", () => {
-  const f = fixture();
+  const pins = new Map<string, string[]>();
+  const f = fixture({ pins });
   try {
     const metadata: CredentialMetadataFn = f.component.credentialMetadata;
-    f.create(inputs[2]);
+    const created = f.create(inputs[2]) as CredentialAnswer;
+    pins.set(created.revisions[0]!.id, ["live-execution"]);
     f.create(inputs[0]);
     const openai = f.store.transaction((tx) => metadata(tx, "openai"));
     assert.deepEqual(openai?.metadata, inputs[2]!.metadata);
@@ -1392,6 +1488,7 @@ test("lifecycle reports health and joins cancellation", async () => {
     );
     assert.ok((await f.component.start()) instanceof Error);
     const other = new CustodyComponent({
+      ...unusedExecutionDependencies,
       store: f.store,
       envelopeKey: key,
       logger: { info() {} } as unknown as Logger,

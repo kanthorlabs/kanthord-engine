@@ -37,6 +37,8 @@ import {
   type AgentProvidersDependentOnFn,
   type BindingsNamingFn,
   type EnablementsDependentOnModelFn,
+  type CustodyExecutions,
+  type CustodyAuthorization,
 } from "./contract.ts";
 import { decrypt, encrypt } from "./envelope.ts";
 import {
@@ -76,6 +78,9 @@ import {
 } from "./sessions.ts";
 
 export interface Dependencies {
+  executions: CustodyExecutions;
+  authorization: CustodyAuthorization;
+  clientSecret: (clientId: string) => string;
   store: Store;
   oauthProviders?: () => readonly Provider[];
   now?: () => number;
@@ -289,8 +294,14 @@ export class CustodyComponent implements Service {
   private readonly agentProvidersDependentOn: AgentProvidersDependentOnFn;
   private readonly bindingsNaming: BindingsNamingFn;
   private readonly enablementsDependentOnModel: EnablementsDependentOnModelFn;
+  private readonly executions: CustodyExecutions;
+  private readonly authorization: CustodyAuthorization;
+  private readonly clientSecret: (clientId: string) => string;
 
   constructor(dependencies: Dependencies) {
+    this.executions = dependencies.executions;
+    this.authorization = dependencies.authorization;
+    this.clientSecret = dependencies.clientSecret;
     this.store = dependencies.store;
     this.oauthProviders =
       dependencies.oauthProviders ?? (() => [githubCopilotProvider()]);
@@ -491,6 +502,7 @@ export class CustodyComponent implements Service {
     caller: CallerContext,
   ): CredentialAnswer {
     return caller.commit((tx) => {
+      this.drainRevisions(tx, input.params.credentialName, Date.now());
       const answer = answerForName(tx, input.params.credentialName);
       if (answer === null)
         throw new OperationError(
@@ -518,6 +530,8 @@ export class CustodyComponent implements Service {
         name: string;
       }[];
       const page = names.slice(NO_ROWS, limit);
+      const now = Date.now();
+      for (const { name } of page) this.drainRevisions(tx, name, now);
       const items = page.map(({ name }) => answerForName(tx, name)!);
       const nextCursor =
         names.length > limit
@@ -579,6 +593,7 @@ export class CustodyComponent implements Service {
     id: string,
     secret: unknown,
     metadata: Record<string, unknown> | null,
+    now: number,
   ): void {
     const { nonce, ciphertext } = encrypt(
       this.envelopeKey,
@@ -598,8 +613,19 @@ export class CustodyComponent implements Service {
         nonce,
         ciphertext,
         metadata === null ? null : canonicalJSON(metadata),
-        Date.now(),
+        now,
       );
+  }
+
+  private drainRevisions(tx: Transaction, name: string, now: number): void {
+    const rows = rowsForName(tx, name).filter((row) => row.ended_at === null);
+    for (const row of rows.slice(FIRST_REVISION)) {
+      if (this.executions.liveExecutionsPinning(tx, row.id).length !== NO_ROWS)
+        continue;
+      tx.database
+        .prepare("UPDATE credential SET ended_at = ? WHERE id = ?")
+        .run(now, row.id);
+    }
   }
 
   private rotate(
@@ -627,7 +653,9 @@ export class CustodyComponent implements Service {
       );
       this.checkModels(tx, row, metadata, true);
       const id = createIdentity(CREDENTIAL_PREFIX);
-      this.insertRevision(tx, row, id, secret.data, metadata);
+      const now = Date.now();
+      this.insertRevision(tx, row, id, secret.data, metadata, now);
+      this.drainRevisions(tx, row.name, now);
       this.logger.info(
         {
           credentialId: id,
@@ -665,7 +693,7 @@ export class CustodyComponent implements Service {
         row.nonce,
         row.ciphertext,
       );
-      this.insertRevision(tx, row, id, secret, metadata);
+      this.insertRevision(tx, row, id, secret, metadata, Date.now());
       this.logger.info(
         {
           credentialId: id,
@@ -686,6 +714,7 @@ export class CustodyComponent implements Service {
   ): CredentialAnswer {
     return caller.commit((tx) => {
       const { credentialName, revision } = input.params;
+      const now = Date.now();
       const row = tx.database
         .prepare(
           "SELECT id, ended_at FROM credential WHERE name = ? AND revision = ?",
@@ -717,7 +746,8 @@ export class CustodyComponent implements Service {
         );
       tx.database
         .prepare("UPDATE credential SET ended_at = ? WHERE id = ?")
-        .run(Date.now(), row.id);
+        .run(now, row.id);
+      this.drainRevisions(tx, credentialName, now);
       return answerForName(tx, credentialName)!;
     });
   }

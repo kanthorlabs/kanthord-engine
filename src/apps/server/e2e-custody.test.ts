@@ -252,7 +252,7 @@ test("E01.9 updating metadata adds a model in a secret-free revision", async (t)
   assert.ok(models.some((model) => model.id === MODEL_ID));
 });
 
-test("E01.10 revoking revision 1 leaves revision 2 live", async (t) => {
+test("E01.10 a rotation drains an unpinned revision 1", async (t) => {
   const { directory, env } = await setup(t);
   const file = createFile(directory, GITHUB);
   success(await kanthord(["credential", "create", "--file", file], env));
@@ -261,9 +261,6 @@ test("E01.10 revoking revision 1 leaves revision 2 live", async (t) => {
       ["credential", "rotate", NAME, "--file", rotateFile(directory)],
       env,
     ),
-  );
-  success(
-    await kanthord(["credential", "revoke", NAME, String(FIRST_REVISION)], env),
   );
   const read = success(await kanthord(["credential", "get", NAME], env));
   const first = read.revisions.find(
@@ -276,6 +273,10 @@ test("E01.10 revoking revision 1 leaves revision 2 live", async (t) => {
   assert.ok(second);
   assert.notEqual(first.endedAt, null);
   assert.equal(second.endedAt, null);
+  refusal(
+    await kanthord(["credential", "revoke", NAME, String(FIRST_REVISION)], env),
+    "credential.revision.ended",
+  );
 });
 
 test("E01.11 revoke refuses the newest live revision", async (t) => {

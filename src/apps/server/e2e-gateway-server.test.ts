@@ -470,7 +470,16 @@ test("E07.6 custody refuses removing a model used by an enablement", async (t) =
   const read = success<CredentialAnswer>(
     await kanthord(["credential", "get", COMPAT_CREDENTIAL], fixture.env),
   );
-  assert.deepEqual(read, updated);
+  assert.deepEqual(read.revisions[0], updated.revisions[0]);
+  assert.ok(read.revisions[1]);
+  assert.notEqual(read.revisions[1].endedAt, null);
+  assert.deepEqual(read, {
+    ...updated,
+    revisions: updated.revisions.map((revision, index) => ({
+      ...revision,
+      endedAt: read.revisions[index]!.endedAt,
+    })),
+  });
 });
 
 test("E07.7 real serve liveness exposes all eight maps (requires local git and ssh)", async (t) => {

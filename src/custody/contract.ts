@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
+import type { MachineIdentity } from "../kernel/caller.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,
@@ -47,6 +48,47 @@ export const refreshReportSchema = z.strictObject({
 });
 export type HandoverPayload = z.infer<typeof handoverPayloadSchema>;
 export type RefreshReport = z.infer<typeof refreshReportSchema>;
+
+export type CustodyExecution = {
+  executionId: string;
+  projectId: string;
+  workerBindingId: string;
+  resourceIdentity: string;
+  runtimeIdentity: string;
+  credentials: string[];
+};
+export interface CustodyExecutions {
+  requireRunning(
+    tx: Transaction,
+    executionId: string,
+    runtimeIdentity: string,
+    now: number,
+  ): CustodyExecution;
+  pinCredential(
+    tx: Transaction,
+    executionId: string,
+    credentialId: string,
+  ): void;
+  liveExecutionsPinning(tx: Transaction, credentialId: string): string[];
+}
+export type ModelInferenceAuthorization = {
+  credential: string;
+  platform: string;
+  providerId: string;
+  agentProvider: string;
+};
+export interface CustodyAuthorization {
+  authorizeModelInference(
+    tx: Transaction,
+    identity: MachineIdentity,
+    execution: {
+      executionId: string;
+      projectId: string;
+      workerBindingId: string;
+      resourceIdentity: string;
+    },
+  ): ModelInferenceAuthorization;
+}
 
 export const CUSTODY_SERVICE_NAME = "custody";
 export const CREDENTIAL_OPERATION_SERVICE = "credential";

@@ -317,6 +317,21 @@ function fixture(t: TestContext) {
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
   ]);
   const component = new CustodyComponent({
+    executions: {
+      requireRunning: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+      pinCredential: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+      liveExecutionsPinning: () => [],
+    },
+    authorization: {
+      authorizeModelInference: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+    },
+    clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
     store,
     envelopeKey: ENVELOPE_KEY,
     logger: pino({ enabled: false }),

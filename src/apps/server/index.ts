@@ -1,5 +1,6 @@
 import { join, dirname } from "node:path";
 import { randomBytes } from "node:crypto";
+import { deriveClientSecret } from "../../gateway/local.ts";
 import {
   directories,
   configPath,
@@ -146,6 +147,18 @@ export function composeServices(options: {
       scheduler.priorityUpdate(tx, nodeId, priority),
   };
   const custody = new CustodyComponent({
+    executions: {
+      requireRunning: (...args) => scheduler.requireRunning(...args),
+      pinCredential: (...args) => scheduler.pinCredential(...args),
+      liveExecutionsPinning: (...args) =>
+        scheduler.liveExecutionsPinning(...args),
+    },
+    authorization: {
+      authorizeModelInference: (...args) =>
+        project.authorizeModelInference(...args),
+    },
+    clientSecret: (clientId) =>
+      deriveClientSecret(options.config.masterKey, clientId),
     store: options.store,
     envelopeKey,
     logger: options.logger,
