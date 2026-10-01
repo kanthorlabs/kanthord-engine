@@ -1,6 +1,7 @@
 import {
   background,
   CancellationContext,
+  throwIfCancelled,
   type Context,
 } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
@@ -11,6 +12,8 @@ import {
 } from "../kernel/service.ts";
 import {
   HealthScope,
+  ResourceStatus,
+  type ResourceCheck,
   type HealthRegistry,
   type ResourceEntry,
 } from "../kernel/health.ts";
@@ -25,6 +28,8 @@ import {
   WORKER_SERVICE_NAME,
   AGENT_PROVIDER_CAPABILITY,
   AGENT_PROVIDER_TARGET_KIND,
+  REGISTRATION_CAPABILITY,
+  WorkerHost,
   type WorkerRegistrations,
   type WorkerBindingOf,
   type SchedulerClaims,
@@ -69,7 +74,11 @@ import {
 } from "./configuration.ts";
 import { TableRegistrations } from "./registrations.ts";
 import type { WorkerConfig } from "./config.ts";
-import { HeartbeatClock, HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
+import {
+  HeartbeatClock,
+  HEARTBEAT_SWEEP_INTERVAL_MS,
+  MILLISECONDS_PER_SECOND,
+} from "./heartbeat.ts";
 import {
   readAllLive,
   endRegistration,
@@ -285,6 +294,70 @@ export class WorkerService implements Service {
     assert.ok(tx.database.isTransaction);
     assert.equal(tx.database, this.dependencies.store.database);
     endGroup(tx, projectId, resourceIdentity, now);
+  }
+
+  instanceHealthcheck(tx: Transaction, runtimeIdentity: string): boolean {
+    assert.ok(tx.database.isTransaction);
+    assert.equal(tx.database, this.dependencies.store.database);
+    const registration = this.registrations.liveRegistrationOf(
+      tx,
+      runtimeIdentity,
+    );
+    if (!registration) return false;
+    const binding = this.dependencies.workerBindingOf(
+      tx,
+      registration.projectId,
+      registration.resourceIdentity,
+    );
+    if (!binding || binding.tombstone || binding.instanceCount === NONE)
+      return false;
+    const declaration = getWorkerDeclaration(binding.workerName);
+    assert.ok(declaration);
+    if (declaration.host === WorkerHost.ExternalHarness) return true;
+    const agents = agentsOfWorker(binding.workerName);
+    assert.ok(agents.length > NONE);
+    for (let index = 0; index < agents.length; index++) {
+      const agent = agents[index]!;
+      const entry = binding.entries.find((item) => item.agent === agent);
+      const view = this.workerAgentView(
+        tx,
+        binding.workerName,
+        agent,
+        entry ?? null,
+      );
+      assert.ok(view);
+      if (!view.valid) return false;
+    }
+    return true;
+  }
+
+  registrationChecks(tx: Transaction): Array<{
+    projectId: string;
+    resourceIdentity: string;
+    runtimeIdentity: string;
+    capability: typeof REGISTRATION_CAPABILITY;
+    check: ResourceCheck;
+  }> {
+    assert.ok(tx.database.isTransaction);
+    assert.equal(tx.database, this.dependencies.store.database);
+    return readAllLive(tx).map(
+      ({ projectId, resourceIdentity, runtimeIdentity }) => ({
+        projectId,
+        resourceIdentity,
+        runtimeIdentity,
+        capability: REGISTRATION_CAPABILITY,
+        check: async (context) => {
+          throwIfCancelled(context);
+          const window = this.dependencies.config.heartbeatWindow;
+          assert.ok(Number.isSafeInteger(window) && window > NONE);
+          assert.ok(runtimeIdentity);
+          const age = this.heartbeatClock.ageMs(runtimeIdentity);
+          return age !== null && age <= window * MILLISECONDS_PER_SECOND
+            ? ResourceStatus.Healthy
+            : ResourceStatus.Unhealthy;
+        },
+      }),
+    );
   }
 
   private validateEffectiveConfig(

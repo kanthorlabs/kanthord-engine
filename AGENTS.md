@@ -72,11 +72,14 @@ engine/
 │   ├── worker/                 # Worker registrations, agent enablement lifecycle, and configuration collaborations
 │   │   ├── contract.ts         # Worker operations, schemas, and collaboration types
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
-│   │   ├── migrations.ts       # Append-only agent enablement revision table
+│   │   ├── migrations.ts       # Agent enablement revisions and durable worker_instance rows
+│   │   ├── instances.ts        # Transaction-owned registration rows, retained attribution, and live reads
+│   │   ├── registrations.ts    # Capacity admission, live-registration lookup, and client attribution
+│   │   ├── heartbeat.ts        # Monotonic readings, renewal, and expiry selection
 │   │   ├── catalog.ts          # Static worker and agent declarations
 │   │   ├── enablements.ts      # Revision, tombstone, pagination, and dependency store reads
 │   │   ├── configuration.ts    # Shared provider, model, and reasoning-level validation
-│   │   └── service.ts          # Registration, enablement mutations, entry validation, dependency lookups, and views
+│   │   └── service.ts          # Registration lifecycle, instance healthchecks, report-only registration checks, and agent configuration
 │   ├── tracking/               # [planned] Telemetry ingestion, storage, and retention
 │   ├── gateway/                # HTTP transport, authentication, and invocation infrastructure
 │   │   ├── contract.ts         # Gateway operation declarations

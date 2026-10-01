@@ -14,6 +14,7 @@ import {
   insertRegistration,
   readLiveByClient,
   readLiveOfClient,
+  readRow,
 } from "./instances.ts";
 import type { HeartbeatClock } from "./heartbeat.ts";
 
@@ -41,6 +42,24 @@ export class TableRegistrations implements WorkerRegistrations {
     assert.ok(clientId);
     assert.ok(this.store.database.isOpen);
     return readLiveByClient(this.store, clientId);
+  }
+  liveRegistrationOf(
+    tx: Transaction,
+    runtimeIdentity: string,
+  ): Registration | null {
+    assert.ok(tx.database.isTransaction);
+    assert.equal(tx.database, this.store.database);
+    const row = readRow(tx, runtimeIdentity);
+    return row?.endedAt === null ? row : null;
+  }
+  clientAttributionOf(
+    tx: Transaction,
+    runtimeIdentity: string,
+  ): { clientId: string; name: string } | null {
+    assert.ok(tx.database.isTransaction);
+    assert.equal(tx.database, this.store.database);
+    const row = readRow(tx, runtimeIdentity);
+    return row ? { clientId: row.clientId, name: row.name } : null;
   }
   register(tx: Transaction, client: VerifiedClient, now: number): Registration {
     assert.ok(tx.database.isTransaction);

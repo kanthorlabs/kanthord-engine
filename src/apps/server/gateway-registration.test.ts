@@ -23,6 +23,7 @@ import { AccessPolicy } from "../../kernel/operation.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { workerOperations } from "../../worker/contract.ts";
+import { Store, IN_MEMORY_DATABASE } from "../../kernel/store.ts";
 
 const NO_REGISTRATIONS = 0;
 const SINGLE_REGISTRATION = 1;
@@ -55,6 +56,40 @@ const machineRead = {
   status: HttpStatus.OK,
   description: "Test the machine forwarding contract.",
 } as const;
+
+test("machine fake keeps attribution after a registration ends and a replacement registers", (t) => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  t.after(() => store.close());
+  const { worker } = fakeMachines();
+  const client = {
+    clientId: "client",
+    name: DISPLAY_NAME,
+    projectId: TEST_PROJECT_ID,
+    resourceIdentity: `worker:kanthord:${TEST_WORKER_BINDING}`,
+  };
+  store.transaction((tx) => {
+    const row = worker.register(tx, client, Date.now());
+    assert.deepEqual(worker.liveRegistrationOf(tx, row.runtimeIdentity), row);
+    worker.deregister(row.runtimeIdentity);
+    const next = worker.register(
+      tx,
+      { ...client, name: "replacement" },
+      Date.now(),
+    );
+    assert.equal(worker.liveRegistrationOf(tx, row.runtimeIdentity), null);
+    assert.deepEqual(worker.liveRegistrationOf(tx, next.runtimeIdentity), next);
+    assert.deepEqual(worker.clientAttributionOf(tx, row.runtimeIdentity), {
+      clientId: client.clientId,
+      name: DISPLAY_NAME,
+    });
+    assert.deepEqual(worker.clientAttributionOf(tx, next.runtimeIdentity), {
+      clientId: client.clientId,
+      name: "replacement",
+    });
+    assert.equal(worker.liveRegistrationOf(tx, "unknown"), null);
+    assert.equal(worker.clientAttributionOf(tx, "unknown"), null);
+  });
+});
 
 async function fixtureForRegistration(
   t: TestContext,

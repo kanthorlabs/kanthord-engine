@@ -8,11 +8,13 @@ import {
   LIST_LIMIT_DEFAULT,
   AGENT_PROVIDER_CAPABILITY,
   AGENT_PROVIDER_TARGET_KIND,
+  REGISTRATION_CAPABILITY,
   InstanceActivity,
   WorkerHost,
   WorkerMethod,
   type AgentDependentBinding,
   type WorkerEntry,
+  type WorkerBindingOf,
 } from "./contract.ts";
 import { workerMigrations } from "./migrations.ts";
 import {
@@ -37,6 +39,7 @@ import { testMachineIdentity } from "../kernel/test-identity.ts";
 import {
   endRegistration,
   readAllLive,
+  readRow,
   reopenRegistration,
 } from "./instances.ts";
 import { HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
@@ -347,6 +350,288 @@ test("ending a binding shares its caller transaction and leaves reopened heartbe
   f.worker.sweepRegistrations();
   assert.notEqual(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), null);
   assert.ok(f.worker.registrations.findByClient(client.clientId));
+});
+
+test("registration reads retain ended attribution and observe the caller transaction without writes", (t) => {
+  const f = enablementFixture(t);
+  const registrations = f.worker.registrations;
+  const row = f.store.transaction((tx) =>
+    registrations.register(tx, client, Date.now()),
+  );
+  const attribution = { clientId: client.clientId, name: client.name };
+  const failure = new Error("rollback registration end");
+  assert.throws(
+    () =>
+      f.store.transaction((tx) => {
+        assert.deepEqual(
+          registrations.liveRegistrationOf(tx, row.runtimeIdentity),
+          row,
+        );
+        assert.deepEqual(
+          registrations.clientAttributionOf(tx, row.runtimeIdentity),
+          attribution,
+        );
+        endRegistration(tx, row.runtimeIdentity, Date.now());
+        assert.equal(
+          registrations.liveRegistrationOf(tx, row.runtimeIdentity),
+          null,
+        );
+        assert.deepEqual(
+          registrations.clientAttributionOf(tx, row.runtimeIdentity),
+          attribution,
+        );
+        throw failure;
+      }),
+    (error) => error === failure,
+  );
+  f.store.transaction((tx) => {
+    assert.deepEqual(
+      registrations.liveRegistrationOf(tx, row.runtimeIdentity),
+      row,
+    );
+    endRegistration(tx, row.runtimeIdentity, Date.now());
+    const next = registrations.register(
+      tx,
+      { ...client, name: "renamed" },
+      Date.now(),
+    );
+    const before = tx.database.prepare("SELECT total_changes() AS count").get();
+    assert.equal(
+      registrations.liveRegistrationOf(tx, row.runtimeIdentity),
+      null,
+    );
+    assert.deepEqual(
+      registrations.liveRegistrationOf(tx, next.runtimeIdentity),
+      next,
+    );
+    assert.deepEqual(
+      registrations.clientAttributionOf(tx, row.runtimeIdentity),
+      attribution,
+    );
+    assert.deepEqual(
+      registrations.clientAttributionOf(tx, next.runtimeIdentity),
+      {
+        clientId: client.clientId,
+        name: "renamed",
+      },
+    );
+    assert.equal(registrations.liveRegistrationOf(tx, UNKNOWN), null);
+    assert.equal(registrations.clientAttributionOf(tx, UNKNOWN), null);
+    assert.deepEqual(
+      tx.database.prepare("SELECT total_changes() AS count").get(),
+      before,
+    );
+  });
+});
+
+test("registration collaborations require an active transaction of their owning store", (t) => {
+  const f = enablementFixture(t);
+  const foreign = enablementFixture(t);
+  const reads: Array<(tx: Parameters<WorkerBindingOf>[0]) => unknown> = [
+    (tx: Parameters<WorkerBindingOf>[0]) =>
+      f.worker.registrations.liveRegistrationOf(tx, UNKNOWN),
+    (tx: Parameters<WorkerBindingOf>[0]) =>
+      f.worker.registrations.clientAttributionOf(tx, UNKNOWN),
+    (tx: Parameters<WorkerBindingOf>[0]) =>
+      f.worker.instanceHealthcheck(tx, UNKNOWN),
+    (tx: Parameters<WorkerBindingOf>[0]) => f.worker.registrationChecks(tx),
+  ];
+  const ended = f.store.transaction((tx) => tx);
+  for (let index = 0; index < reads.length; index++) {
+    assert.throws(() => reads[index]!(ended), assert.AssertionError);
+    assert.throws(
+      () => foreign.store.transaction(reads[index]!),
+      assert.AssertionError,
+    );
+  }
+});
+
+test("external instance health reads current binding availability without configuration or provider checks", (t) => {
+  let binding: ReturnType<WorkerBindingOf> =
+    fakeCollaborations.workerBindingOf();
+  const f = enablementFixture(t, {
+    workerBindingOf: (tx, projectId, resourceIdentity) => {
+      assert.ok(tx.database.isTransaction);
+      assert.equal(projectId, client.projectId);
+      assert.equal(resourceIdentity, client.resourceIdentity);
+      return binding;
+    },
+    custodySuitability: () => assert.fail("External health resolves no agent"),
+    credentialMetadata: () =>
+      assert.fail("External health reads no credential"),
+    modelListCheck: () =>
+      assert.fail("Instance health performs no provider check"),
+  });
+  const row = f.store.transaction((tx) =>
+    f.worker.registrations.register(tx, client, Date.now()),
+  );
+  const check = () =>
+    f.store.transaction((tx) =>
+      f.worker.instanceHealthcheck(tx, row.runtimeIdentity),
+    );
+  assert.equal(check(), true);
+  binding = null;
+  assert.equal(check(), false);
+  binding = { ...fakeCollaborations.workerBindingOf(), tombstone: true };
+  assert.equal(check(), false);
+  binding = { ...fakeCollaborations.workerBindingOf(), instanceCount: 0 };
+  assert.equal(check(), false);
+  binding = fakeCollaborations.workerBindingOf();
+  assert.equal(check(), true);
+  f.store.transaction((tx) =>
+    endRegistration(tx, row.runtimeIdentity, Date.now()),
+  );
+  assert.equal(check(), false);
+  assert.equal(
+    f.store.transaction((tx) => f.worker.instanceHealthcheck(tx, UNKNOWN)),
+    false,
+  );
+});
+
+test("native instance health resolves the latest agent entry and enablement in the caller snapshot", (t) => {
+  let entries: NonNullable<ReturnType<WorkerBindingOf>>["entries"] = [];
+  let failure: Error | null = null;
+  const f = enablementFixture(t, {
+    workerBindingOf: () => ({
+      ...fakeCollaborations.workerBindingOf(),
+      workerName: WORKER,
+      entries,
+    }),
+    custodySuitability: (tx) => {
+      assert.ok(tx.database.isTransaction);
+      if (failure) throw failure;
+    },
+    modelListCheck: () =>
+      assert.fail("Instance health performs no provider check"),
+  });
+  const row = f.store.transaction((tx) =>
+    f.worker.registrations.register(tx, client, Date.now()),
+  );
+  const check = () =>
+    f.store.transaction((tx) =>
+      f.worker.instanceHealthcheck(tx, row.runtimeIdentity),
+    );
+  assert.equal(check(), false);
+  f.invoke("agent.enablement.put", putBody);
+  assert.equal(check(), true);
+  entries = [{ agent: AGENT, modelIdentifier: MISSING_MODEL }];
+  assert.equal(check(), false);
+  entries = [{ agent: AGENT, ...defaults }];
+  assert.equal(check(), true);
+  f.invoke("agent.enablement.disable", { expectedRevision: FIRST_REVISION });
+  assert.equal(check(), false);
+  f.invoke("agent.enablement.enable", { expectedRevision: SECOND_REVISION });
+  assert.equal(check(), true);
+  failure = new Error("Unexpected custody failure");
+  assert.throws(check, (error) => error === failure);
+  failure = null;
+  f.store.transaction((tx) => {
+    endRegistration(tx, row.runtimeIdentity, Date.now());
+    assert.equal(f.worker.instanceHealthcheck(tx, row.runtimeIdentity), false);
+  });
+});
+
+test("registration checks read heartbeat boundaries without renewing, ending or changing instance health", async (t) => {
+  let now = 0;
+  const windowMs = 1000;
+  const beyond = 1;
+  const f = enablementFixture(t, {
+    monotonicNow: () => now,
+    config: { ...WORKER_CONFIG, heartbeatWindow: 1 },
+  });
+  const row = f.store.transaction((tx) =>
+    f.worker.registrations.register(tx, client, Date.now()),
+  );
+  await f.worker.start();
+  t.after(() => f.worker.stop());
+  const before = f.store.transaction((tx) => ({
+    row: readRow(tx, row.runtimeIdentity),
+    changes: tx.database.prepare("SELECT total_changes() AS count").get(),
+  }));
+  const [item] = f.store.transaction((tx) => f.worker.registrationChecks(tx));
+  assert.ok(item);
+  assert.deepEqual(
+    { ...item, check: undefined },
+    {
+      projectId: client.projectId,
+      resourceIdentity: client.resourceIdentity,
+      runtimeIdentity: row.runtimeIdentity,
+      capability: REGISTRATION_CAPABILITY,
+      check: undefined,
+    },
+  );
+  for (const age of [windowMs - beyond, windowMs, windowMs + beyond]) {
+    now = age;
+    const expected =
+      age > windowMs ? ResourceStatus.Unhealthy : ResourceStatus.Healthy;
+    assert.equal(await item.check(background), expected);
+    assert.equal(
+      await f.store
+        .transaction((tx) => f.worker.registrationChecks(tx))[0]!
+        .check(background),
+      expected,
+    );
+    assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), age);
+    f.store.transaction((tx) => {
+      assert.equal(f.worker.instanceHealthcheck(tx, row.runtimeIdentity), true);
+      assert.deepEqual(readRow(tx, row.runtimeIdentity), before.row);
+      assert.deepEqual(
+        tx.database.prepare("SELECT total_changes() AS count").get(),
+        before.changes,
+      );
+    });
+  }
+  const cancelled = new CancellationContext();
+  cancelled.cancel();
+  await assert.rejects(
+    item.check(cancelled),
+    (error) => error === cancelled.err(),
+  );
+  f.worker.heartbeatClock.drop(row.runtimeIdentity);
+  assert.equal(await item.check(background), ResourceStatus.Unhealthy);
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), null);
+  f.worker.sweepRegistrations();
+  assert.ok(f.worker.registrations.findByClient(client.clientId));
+});
+
+test("registration liveness stays separate from native configuration and excludes ended rows", async (t) => {
+  const f = enablementFixture(t, {
+    monotonicNow: () => 0,
+    workerBindingOf: () => ({
+      ...fakeCollaborations.workerBindingOf(),
+      workerName: WORKER,
+    }),
+  });
+  const row = f.store.transaction((tx) =>
+    f.worker.registrations.register(tx, client, Date.now()),
+  );
+  await f.worker.start();
+  t.after(() => f.worker.stop());
+  assert.equal(
+    f.store.transaction((tx) =>
+      f.worker.instanceHealthcheck(tx, row.runtimeIdentity),
+    ),
+    false,
+  );
+  const [item] = f.store.transaction((tx) => f.worker.registrationChecks(tx));
+  assert.ok(item);
+  assert.equal(await item.check(background), ResourceStatus.Healthy);
+  assert.equal(
+    f.store.transaction((tx) =>
+      f.worker.instanceHealthcheck(tx, row.runtimeIdentity),
+    ),
+    false,
+  );
+  f.store.transaction((tx) => {
+    endRegistration(tx, row.runtimeIdentity, Date.now());
+    assert.deepEqual(f.worker.registrationChecks(tx), []);
+  });
+  const zero = 0;
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), zero);
+  assert.deepEqual(
+    f.store.transaction((tx) => f.worker.registrationChecks(tx)),
+    [],
+  );
 });
 
 function enablementFixture(

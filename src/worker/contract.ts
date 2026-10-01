@@ -40,7 +40,7 @@ export type WorkerBindingOf = (
   workerName: string;
   instanceCount: number;
   resourceBudget: { turns: number; wallTimeMs: number } | null;
-  entries: WorkerEntry[];
+  entries: Array<WorkerEntry & { agent: string }>;
   tombstone: boolean;
 } | null;
 
@@ -121,6 +121,7 @@ export type CredentialMetadataFn = (
 
 export const AGENT_PROVIDER_CAPABILITY = "model-list read";
 export const AGENT_PROVIDER_TARGET_KIND = "agent-provider";
+export const REGISTRATION_CAPABILITY = "liveness of a registration";
 
 export type ModelListCheckFn = (
   tx: Transaction,
@@ -193,6 +194,14 @@ export interface WorkerRegistrations {
     now: number,
   ): Registration;
   findByClient(clientId: string): Registration | undefined;
+  liveRegistrationOf(
+    tx: Transaction,
+    runtimeIdentity: string,
+  ): Registration | null;
+  clientAttributionOf(
+    tx: Transaction,
+    runtimeIdentity: string,
+  ): { clientId: string; name: string } | null;
   heartbeat(runtimeIdentity: string): void;
 }
 

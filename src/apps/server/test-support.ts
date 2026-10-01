@@ -73,6 +73,7 @@ export function fakeMachines(
       ],
     ]);
   const registrations = new Map<string, Registration>();
+  const registrationHistory = new Map<string, Registration>();
   const project = {
     bindings,
     async resolveWorkerGroup(
@@ -95,6 +96,21 @@ export function fakeMachines(
   const worker = {
     registrations,
     findByClient: (clientId: string) => registrations.get(clientId),
+    liveRegistrationOf(tx: Transaction, runtimeIdentity: string) {
+      assert.ok(tx.database.isTransaction);
+      assert.ok(runtimeIdentity);
+      const row = registrationHistory.get(runtimeIdentity);
+      return row &&
+        registrations.get(row.clientId)?.runtimeIdentity === runtimeIdentity
+        ? row
+        : null;
+    },
+    clientAttributionOf(tx: Transaction, runtimeIdentity: string) {
+      assert.ok(tx.database.isTransaction);
+      assert.ok(runtimeIdentity);
+      const row = registrationHistory.get(runtimeIdentity);
+      return row ? { clientId: row.clientId, name: row.name } : null;
+    },
     heartbeat: (runtimeIdentity: string) => {
       assert.ok(runtimeIdentity);
     },
@@ -134,6 +150,7 @@ export function fakeMachines(
         registeredAt: now,
       };
       registrations.set(client.clientId, registration);
+      registrationHistory.set(registration.runtimeIdentity, registration);
       return registration;
     },
     deregister(runtimeIdentity: string): void {
