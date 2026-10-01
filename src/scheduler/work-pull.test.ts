@@ -20,6 +20,7 @@ const TWO_CHECKS = 2;
 const FIRST_ATTEMPT = 1;
 const CLAIMANT_MISMATCH = "scheduler.work.claimant_mismatch";
 const CANCELLED = "gateway.invocation.cancelled";
+const THREE_COMMITS = 3;
 
 function harness(t: TestContext) {
   const h = schedulerHarness(t);
@@ -165,6 +166,30 @@ test("project wake serves parked pulls in arrival order and another project does
   context.cancel();
   await secondRejected;
   assert.equal(h.commits(), ONE_COMMIT);
+});
+
+test("concurrent empty pulls of one runtime retain one waiter and each duplicate commits once", async (t) => {
+  const h = harness(t);
+  const context = new CancellationContext();
+  const first = h.pull(context);
+  const cancelled = assert.rejects(first, { code: CANCELLED });
+  assert.equal(h.service.pulling(h.row.runtimeIdentity), true);
+  const duplicates = await Promise.all([h.pull(), h.pull(), h.pull()]);
+  assert.deepEqual(
+    duplicates,
+    Array.from({ length: THREE_COMMITS }, () => ({
+      kind: WorkPullKind.NoWork,
+    })),
+  );
+  assert.equal(h.commits(), THREE_COMMITS);
+  assert.equal(h.service.pulling(h.row.runtimeIdentity), true);
+  context.cancel();
+  await cancelled;
+  assert.equal(h.commits(), THREE_COMMITS);
+  assert.equal(h.service.pulling(h.row.runtimeIdentity), false);
+  h.enqueue();
+  const claim = await h.pull();
+  assert.equal(claim.kind, WorkPullKind.Claimed);
 });
 
 test("woken health failure and quiescence answer no-work once without claims", async (t) => {

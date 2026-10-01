@@ -123,6 +123,7 @@ export async function workPull(
       result.outcome !== ClaimOutcome.None ||
       result.settled ||
       remaining <= WINDOW_ENDED ||
+      dependencies.waiting.pulling(pull.runtimeIdentity) ||
       !dependencies.accepting()
     )
       return commit(dependencies, identity, pull, caller, now);

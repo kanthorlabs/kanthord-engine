@@ -103,11 +103,15 @@ components:
               pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: node_ followed by a canonical 26-character uppercase ULID.
             attempt:
+              description: Requires nodeId when supplied.
               type: integer
               exclusiveMinimum: 0
               maximum: 9007199254740991
           required: []
           additionalProperties: false
+          dependentRequired:
+            attempt:
+              - nodeId
         body:
           type: "null"
       required:

@@ -505,6 +505,17 @@ test("pull, registration resume and human pause settle an expired row before adm
 
 test("Scheduler routes preserve closed inputs, shared envelopes, lifetimes and body bounds", async (t) => {
   const h = await setup(t, "http");
+  const invalidFilter = await h.f.request(
+    `/api/scheduler/project/${h.projectId}/execution?attempt=1`,
+    { headers: { Authorization: `Bearer ${h.f.token}` } },
+  );
+  assert.equal(invalidFilter.status, HttpStatus.BadRequest);
+  const invalidFilterError = (await invalidFilter.json()) as {
+    error: { code: string };
+    requestId: string;
+  };
+  assert.equal(invalidFilterError.error.code, VALIDATION_FAILED);
+  assert.ok(invalidFilterError.requestId);
   for (const operation of Object.values(schedulerOperations)) {
     const isPull = operation.id === schedulerOperations.workPull.id;
     assert.equal(

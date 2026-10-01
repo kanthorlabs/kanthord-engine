@@ -282,11 +282,13 @@ export const schedulerOperations = {
             .int()
             .positive()
             .max(Number.MAX_SAFE_INTEGER)
-            .optional(),
+            .optional()
+            .describe("Requires nodeId when supplied."),
         })
         .refine(
           (query) => query.attempt === undefined || query.nodeId !== undefined,
-        ),
+        )
+        .meta({ dependentRequired: { attempt: ["nodeId"] } }),
       body: z.null(),
     }),
     output: z.strictObject({

@@ -263,13 +263,14 @@ test("execution proof precedes reservation and replay and supplies only proven c
     },
     "unregistered",
   );
+  const refusal = await invocation.invoke(operation.id, request, {
+    identity: unregistered,
+    idempotencyKey: key,
+  });
+  assert.equal(refusal.status, HttpStatus.Forbidden);
+  const registrationRequired = "gateway.registration.required";
   assert.equal(
-    (
-      await invocation.invoke(operation.id, request, {
-        identity: unregistered,
-        idempotencyKey: key,
-      })
-    ).status,
-    HttpStatus.Forbidden,
+    (refusal.body as { error: { code: string } }).error.code,
+    registrationRequired,
   );
 });

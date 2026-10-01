@@ -496,6 +496,34 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     /:([^/]+)/g,
     "{$1}",
   );
+  const executionFragment = parse(
+    readFileSync(
+      join(dirname(openapiPath()), "openapi/scheduler/execution.list.yaml"),
+      "utf8",
+    ),
+  ) as {
+    components: {
+      schemas: Record<
+        string,
+        {
+          properties: {
+            query: {
+              dependentRequired?: unknown;
+              properties: { attempt: { description?: string } };
+            };
+          };
+        }
+      >;
+    };
+  };
+  const executionQuery =
+    executionFragment.components.schemas["scheduler.execution.list.Input"]!
+      .properties.query;
+  assert.deepEqual(executionQuery.dependentRequired, { attempt: ["nodeId"] });
+  assert.match(
+    executionQuery.properties.attempt.description!,
+    /Requires nodeId/,
+  );
   const executionPage = resolved.paths?.[executionListPath]?.get?.responses[
     HttpStatus.OK
   ] as unknown as {
