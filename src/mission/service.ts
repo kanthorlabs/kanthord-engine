@@ -38,6 +38,7 @@ import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
 import { unblockNode } from "./control-unblock.ts";
 import { completeEvidence } from "./evidence-complete.ts";
+import { requestEvidence } from "./evidence-request.ts";
 import { claim, release, loss } from "./transitions.ts";
 import {
   attemptPage,
@@ -137,6 +138,23 @@ export class MissionService
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["evidence.request"],
+      ({ params, body }, caller) => {
+        const claim = caller.execution;
+        assert.ok(claim);
+        return caller.commit((tx) =>
+          requestEvidence(
+            tx,
+            this.dependencies,
+            claim,
+            params.nodeId,
+            body,
+            Date.now(),
+          ),
+        );
+      },
+    );
     registry.register(
       missionOperations["evidence.asset.complete"],
       ({ params, body }, caller) =>
