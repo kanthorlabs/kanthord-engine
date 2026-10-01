@@ -30,6 +30,26 @@ import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
 
+test("published asset delete names its operation with a bodyless 204 response", () => {
+  const fragment = parse(
+    readFileSync(
+      join(
+        dirname(openapiPath()),
+        "openapi/mission/evidence.asset.delete.yaml",
+      ),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    fragment.pathItem.delete.operationId,
+    missionOperations["evidence.asset.delete"].id,
+  );
+  assert.equal(
+    fragment.pathItem.delete.responses[HttpStatus.NoContent].content,
+    undefined,
+  );
+});
+
 test("published node check names its operation", () => {
   const fragment = parse(
     readFileSync(

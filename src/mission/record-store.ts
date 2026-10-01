@@ -239,6 +239,13 @@ export function readAssets(tx: Transaction, evidenceId: string): AssetRow[] {
     )
     .all(evidenceId) as unknown as AssetRow[];
 }
+export function deleteAsset(tx: Transaction, assetId: string): void {
+  assert.ok(tx.database.isTransaction);
+  const write = tx.database
+    .prepare("DELETE FROM mission_evidence_asset WHERE id = ?")
+    .run(assetId);
+  assert.equal(write.changes, ONE);
+}
 export function readRequests(
   tx: Transaction,
   nodeId: string,

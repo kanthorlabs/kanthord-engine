@@ -10,9 +10,44 @@ import {
   pagination,
   printResult,
 } from "./mission-support.ts";
-import { singleUse } from "./shared.ts";
+import {
+  singleUse,
+  parsePositiveInt,
+  resolveKey,
+  handleMutationResult,
+} from "./shared.ts";
 
 const ZERO = 0;
+
+function addDeleteOptions(command: Command): Command {
+  return command
+    .requiredOption(
+      "--expected-mission-version <version>",
+      "Expected mission version",
+      singleUse("--expected-mission-version"),
+    )
+    .option("--force", "Force deletion", singleUse("--force"))
+    .option("--reason <text>", "Deletion reason", singleUse("--reason"))
+    .option(
+      "--idempotency-key <key>",
+      "Mutation key",
+      singleUse("--idempotency-key"),
+    );
+}
+
+function deleteBody(
+  options: { expectedMissionVersion: string; force?: boolean; reason?: string },
+  code: string,
+) {
+  return {
+    expectedMissionVersion: parsePositiveInt(
+      options.expectedMissionVersion,
+      code,
+    ),
+    force: options.force ?? false,
+    ...(options.reason === undefined ? {} : { reason: options.reason }),
+  };
+}
 
 export function addEvidenceCommands(mission: Command): void {
   const evidence = mission.command("evidence").description("Mission evidence");
@@ -20,6 +55,35 @@ export function addEvidenceCommands(mission: Command): void {
   addEvidenceReads(evidence);
   const asset = evidence.command("asset").description("Evidence assets");
   asset.action(() => asset.help());
+  addDeleteOptions(
+    asset.command("delete").argument("<asset-id>", "Asset ID"),
+  ).action(async (assetId: string, _options, command: Command) => {
+    if (!identitySchema("evidence_asset").safeParse(assetId).success)
+      throw new Diagnostic(
+        "cli.mission.evidence.asset.delete.invalid_asset_id",
+        "invalid asset ID",
+      );
+    const options = command.optsWithGlobals<{
+      expectedMissionVersion: string;
+      force?: boolean;
+      reason?: string;
+      idempotencyKey?: string;
+    }>();
+    const body = deleteBody(
+      options,
+      "cli.mission.evidence.asset.delete.invalid_expected_mission_version",
+    );
+    const key = resolveKey(options);
+    const result = await client(command, "evidence.asset.delete")[
+      "evidence.asset.delete"
+    ]({ params: { assetId }, query: {}, body }, { idempotencyKey: key });
+    handleMutationResult(
+      result,
+      "cli.mission.evidence.asset.delete.indeterminate",
+      key,
+    );
+    process.stdout.write(`${JSON.stringify({ idempotencyKey: key })}\n`);
+  });
   const content = asset.command("content").description("Stored asset content");
   content.action(() => content.help());
   content

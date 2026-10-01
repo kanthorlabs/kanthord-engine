@@ -1,0 +1,95 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  delete:
+    operationId: mission.evidence.asset.delete
+    tags:
+      - mission
+    description: Delete an evidence asset after deleting its stored object.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.evidence.asset.delete.Input/properties/para\
+            ms/properties/assetId"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/mission.evidence.asset.delete.Input/properties/body"
+    responses:
+      "204":
+        description: Completed result
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    mission.evidence.asset.delete.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            assetId:
+              type: string
+              minLength: 41
+              maxLength: 41
+              pattern: ^evidence_asset_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: evidence_asset_ followed by a canonical 26-character uppercase
+                ULID.
+          required:
+            - assetId
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            expectedMissionVersion:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            force:
+              type: boolean
+            reason:
+              type: string
+              minLength: 1
+          required:
+            - expectedMissionVersion
+            - force
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    mission.evidence.asset.delete.Output:
+      type: "null"

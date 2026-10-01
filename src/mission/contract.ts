@@ -1161,6 +1161,20 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "evidence.asset.delete": {
+    ...writeOperation,
+    id: "mission.evidence.asset.delete",
+    method: HttpMethod.Delete,
+    status: HttpStatus.NoContent,
+    path: "/api/mission/evidence/asset/:assetId",
+    input: z.strictObject({
+      params: z.strictObject({ assetId: identitySchema("evidence_asset") }),
+      query: z.strictObject({}),
+      body: evidenceDeleteSchema,
+    }),
+    output: z.null(),
+    description: "Delete an evidence asset after deleting its stored object.",
+  },
   "node.check": {
     ...writeOperation,
     id: "mission.node.check",
