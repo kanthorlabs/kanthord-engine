@@ -1,0 +1,191 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: scheduler.claim.get
+    tags:
+      - scheduler
+    description: Read the execution of this registered claimant, including ended claims.
+    x-access-policy: client
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: executionId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/scheduler.claim.get.Input/properties/params/propert\
+            ies/executionId"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/scheduler.claim.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    scheduler.claim.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            executionId:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - executionId
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    scheduler.claim.get.Output:
+      type: object
+      properties:
+        executionId:
+          type: string
+          minLength: 36
+          maxLength: 36
+          pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: execution_ followed by a canonical 26-character uppercase ULID.
+        projectId:
+          type: string
+          minLength: 34
+          maxLength: 34
+          pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: project_ followed by a canonical 26-character uppercase ULID.
+        nodeId:
+          type: string
+          minLength: 31
+          maxLength: 31
+          pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: node_ followed by a canonical 26-character uppercase ULID.
+        claimant:
+          type: object
+          properties:
+            workerBindingId:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: binding_ followed by a canonical 26-character uppercase ULID.
+            resourceIdentity:
+              type: string
+              minLength: 1
+            runtimeIdentity:
+              type: string
+              minLength: 42
+              maxLength: 42
+              pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: worker_instance_ followed by a canonical 26-character uppercase
+                ULID.
+            clientId:
+              type: string
+              minLength: 42
+              maxLength: 42
+              pattern: ^client_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: client_identity_ followed by a canonical 26-character uppercase
+                ULID.
+            name:
+              type: string
+              minLength: 1
+              maxLength: 64
+          required:
+            - workerBindingId
+            - resourceIdentity
+            - runtimeIdentity
+          additionalProperties: false
+        attempt:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+        pinnedRevision:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+        credentials:
+          type: array
+          items:
+            type: string
+            minLength: 37
+            maxLength: 37
+            pattern: ^credential_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+            description: credential_ followed by a canonical 26-character uppercase ULID.
+        claimState:
+          type: string
+          enum:
+            - running
+            - lost
+            - finished
+        expiredAt:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+        createdAt:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+        endedAt:
+          anyOf:
+            - type: integer
+              minimum: 0
+              maximum: 9007199254740991
+              description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+            - type: "null"
+        traceId:
+          type: string
+          pattern: ^[0-9a-f]{32}$
+        rootSpanId:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+      required:
+        - executionId
+        - projectId
+        - nodeId
+        - claimant
+        - attempt
+        - pinnedRevision
+        - credentials
+        - claimState
+        - expiredAt
+        - createdAt
+        - endedAt
+        - traceId
+        - rootSpanId
+      additionalProperties: false

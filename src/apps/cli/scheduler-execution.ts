@@ -11,6 +11,7 @@ import {
 import { CommandName } from "./constants.ts";
 import {
   handleMutationResult,
+  handleReadResult,
   readJsonFileAs,
   requireToken,
   resolveKey,
@@ -23,6 +24,26 @@ const TOKEN_REQUIRED = "cli.scheduler.work.pull.token_required";
 const INDETERMINATE = "cli.scheduler.work.pull.indeterminate";
 const EXECUTION = "execution";
 const RELEASE = "release";
+const CLAIM = "claim";
+const GET = "get";
+
+async function claimGet(executionId: string, command: Command): Promise<void> {
+  if (!identitySchema(EXECUTION).safeParse(executionId).success)
+    throw new Diagnostic(
+      "cli.scheduler.claim.get.invalid_execution_id",
+      "invalid execution ID",
+    );
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, "cli.scheduler.claim.get.token_required");
+  const result = await httpClient(
+    schedulerOperations,
+    endpoint,
+    token,
+  ).claimGet({ params: { executionId }, query: {}, body: null });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, "cli.scheduler.claim.get.indeterminate"))}\n`,
+  );
+}
 
 async function release(executionId: string, command: Command): Promise<void> {
   if (!identitySchema(EXECUTION).safeParse(executionId).success)
@@ -67,6 +88,17 @@ async function pull(command: Command): Promise<void> {
 export function addExecutionCommands(scheduler: Command): void {
   assert.equal(scheduler.name(), CommandName.Scheduler);
   assert.ok(!scheduler.commands.some((command) => command.name() === WORK));
+  const claim = scheduler
+    .command(CLAIM)
+    .description("Read this instance's claims");
+  claim.action(() => claim.help());
+  claim
+    .command(GET)
+    .description("Read a claim as JSON")
+    .argument("<execution-id>", "Execution ID")
+    .action((executionId: string, _options, command: Command) =>
+      claimGet(executionId, command),
+    );
   const execution = scheduler
     .command(EXECUTION)
     .description("Inspect and release executions");

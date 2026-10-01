@@ -252,6 +252,29 @@ export const QUEUE_LIST_LIMIT_MIN = 1;
 export const QUEUE_LIST_LIMIT_MAX = 1000;
 
 export const schedulerOperations = {
+  claimGet: {
+    id: "scheduler.claim.get",
+    service: SCHEDULER_SERVICE_NAME,
+    method: HttpMethod.Get,
+    path: "/api/scheduler/claim/:executionId",
+    access: AccessPolicy.Client,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: SCHEDULER_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    description:
+      "Read the execution of this registered claimant, including ended claims.",
+    input: z.strictObject({
+      params: z.strictObject({
+        executionId: identitySchema(EXECUTION_IDENTITY_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: z.null(),
+    }),
+    output: executionRecordSchema,
+  },
   executionRelease: {
     id: "scheduler.execution.release",
     service: SCHEDULER_SERVICE_NAME,
