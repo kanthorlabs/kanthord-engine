@@ -252,6 +252,27 @@ export const QUEUE_LIST_LIMIT_MIN = 1;
 export const QUEUE_LIST_LIMIT_MAX = 1000;
 
 export const schedulerOperations = {
+  workPull: {
+    id: "scheduler.work.pull",
+    service: SCHEDULER_SERVICE_NAME,
+    method: HttpMethod.Post,
+    path: "/api/scheduler/work/pull",
+    access: AccessPolicy.Client,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Wait,
+    timeoutMs: WORK_PULL_TIMEOUT_MS,
+    mutation: true,
+    body: true,
+    status: HttpStatus.OK,
+    description:
+      "Pull compatible work, waiting up to 90 seconds when none is available.",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: workPullSchema,
+    }),
+    output: workPullResultSchema,
+  },
   queueList: {
     id: "scheduler.queue.list",
     service: SCHEDULER_SERVICE_NAME,

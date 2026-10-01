@@ -17,7 +17,10 @@ import {
 
 test("Scheduler inputs are closed and runtime identities are canonical", () => {
   const row = executionFixture();
-  for (const operation of Object.values(schedulerOperations)) {
+  for (const operation of [
+    schedulerOperations.queueList,
+    schedulerOperations.queuePeek,
+  ]) {
     const input = {
       params: { projectId: row.projectId },
       query: {},

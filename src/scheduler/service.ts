@@ -22,6 +22,7 @@ import type { SchedulerConfig } from "./config.ts";
 import * as settlement from "./settlement.ts";
 import { readExecution } from "./execution-store.ts";
 import { WaitingPulls } from "./wakeup.ts";
+import { workPull } from "./work-pull.ts";
 import {
   JOB_IDENTITY_PREFIX,
   QUEUE_LIST_LIMIT_DEFAULT,
@@ -92,6 +93,7 @@ export class SchedulerService implements Service, WorkQueue {
   private started = false;
   private readonly dependencies: Dependencies;
   private readonly waiting = new WaitingPulls();
+  private accepting = true;
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
@@ -172,16 +174,29 @@ export class SchedulerService implements Service, WorkQueue {
       schedulerOperations.queueList.service !== SCHEDULER_SERVICE_NAME ||
       schedulerOperations.queueList.access !== AccessPolicy.Human ||
       schedulerOperations.queuePeek.service !== SCHEDULER_SERVICE_NAME ||
-      schedulerOperations.queuePeek.access !== AccessPolicy.Human
+      schedulerOperations.queuePeek.access !== AccessPolicy.Human ||
+      schedulerOperations.workPull.service !== SCHEDULER_SERVICE_NAME ||
+      schedulerOperations.workPull.access !== AccessPolicy.Client
     )
       throw new Error(
-        "Scheduler operations require scheduler ownership and human access.",
+        "Scheduler operations require scheduler ownership and their declared access.",
       );
     registry.register(schedulerOperations.queueList, (input, caller) =>
       this.queueList(input, caller),
     );
     registry.register(schedulerOperations.queuePeek, (input, caller) =>
       this.queuePeek(input, caller),
+    );
+    registry.register(schedulerOperations.workPull, (input, caller) =>
+      workPull(
+        {
+          ...this.dependencies,
+          waiting: this.waiting,
+          accepting: () => this.accepting,
+        },
+        input.body,
+        caller,
+      ),
     );
   }
 
@@ -246,9 +261,12 @@ export class SchedulerService implements Service, WorkQueue {
     return this.startTask;
   }
   quiesce(): Promise<Error | null> {
+    this.accepting = false;
+    this.waiting.wakeAll();
     return this.quiesceTask;
   }
   stop(): Promise<Error | null> {
+    this.accepting = false;
     this.waiting.wakeAll();
     this.shutdown.cancel();
     this.started = false;

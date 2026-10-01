@@ -485,8 +485,19 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   }
   for (const operation of Object.values(schedulerOperations)) {
     const path = operation.path.replace(/:([^/]+)/g, "{$1}");
-    assert.equal(resolved.paths?.[path]?.get?.operationId, operation.id);
+    const method = operation.method.toLowerCase() as "get" | "post";
+    assert.equal(resolved.paths?.[path]?.[method]?.operationId, operation.id);
   }
+  const pullResponse = resolved.paths?.[schedulerOperations.workPull.path]?.post
+    ?.responses[HttpStatus.OK] as unknown as {
+    content: { "application/json": { schema: { oneOf: ResolvedSchema[] } } };
+  };
+  assert.deepEqual(
+    pullResponse.content["application/json"].schema.oneOf.map(
+      (variant) => variant.properties.kind?.const,
+    ),
+    ["claimed", "no-work"],
+  );
   const queueListPath = schedulerOperations.queueList.path.replace(
     /:([^/]+)/g,
     "{$1}",

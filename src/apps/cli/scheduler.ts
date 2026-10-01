@@ -10,6 +10,7 @@ import {
   schedulerOperations,
 } from "../../scheduler/contract.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
+import { addExecutionCommands } from "./scheduler-execution.ts";
 import {
   handleReadResult,
   parsePositiveInt,
@@ -94,10 +95,11 @@ export function addSchedulerCommand(program: Command): void {
     .option("--endpoint <url>", "Server endpoint", singleUse("--endpoint"))
     .option(
       "--token <token>",
-      "Human JWT (otherwise KANTHORD_TOKEN or cli.yaml)",
+      "JWT (otherwise KANTHORD_TOKEN or cli.yaml)",
       singleUse("--token"),
     );
   scheduler.action(() => scheduler.help());
+  addExecutionCommands(scheduler);
   const queue = scheduler.command(QUEUE).description("Inspect the work queue");
   queue.action(() => queue.help());
   queue
