@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { createIdentity } from "../kernel/identity.ts";
 import {
   ActorKind,
   ActorService,
@@ -14,6 +15,15 @@ import {
   resumeSchema,
   unblockChangeSchema,
   unblockSchema,
+  executionContextSchema,
+  evidenceSubmitSchema,
+  assessmentSubmitSchema,
+  evidenceRequestSchema,
+  evidenceDeleteSchema,
+  nodeCheckSchema,
+  assetSubmitSchema,
+  mediaTypeSchema,
+  OBJECT_SIZE_MAX,
 } from "./contract.ts";
 
 const ZERO_ATTEMPT = 0;
@@ -24,6 +34,122 @@ const INVALID_RESULT = "failure";
 const VALID_ACTION_KEY = "repo.pull_request";
 const INVALID_ACTION_KEY = "repo.push";
 const HUMAN = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
+const CONTEXT = {
+  executionId: createIdentity("execution"),
+  attempt: FIRST_REVISION,
+  nodeRevision: FIRST_REVISION,
+};
+const PRODUCED = {
+  kind: "produced",
+  content: { mediaType: "text/plain", encoding: "base64", data: "" },
+};
+const ASSESSMENT = {
+  ...CONTEXT,
+  evidenceIds: [],
+  childOutcomeIds: [],
+  result: AssessmentResult.Success,
+  rationale: REASON,
+  testedInput: { kind: "produced", sha256: "a".repeat(64) },
+};
+
+test("execution and evidence control inputs are strict and refuse forged actors", () => {
+  const inputs = [
+    { schema: executionContextSchema, input: CONTEXT },
+    {
+      schema: evidenceSubmitSchema,
+      input: { ...CONTEXT, subject: REASON, assets: [PRODUCED] },
+    },
+    { schema: assessmentSubmitSchema, input: ASSESSMENT },
+    {
+      schema: evidenceRequestSchema,
+      input: {
+        ...CONTEXT,
+        requirementKey: VALID_ACTION_KEY,
+        subject: REASON,
+        address: {
+          kind: "pull_request",
+          resourceIdentity: "repository:github:owner/repo",
+          number: 42,
+        },
+      },
+    },
+    {
+      schema: evidenceDeleteSchema,
+      input: { expectedMissionVersion: FIRST_REVISION, force: false },
+    },
+    {
+      schema: nodeCheckSchema,
+      input: { expectedMissionVersion: FIRST_REVISION },
+    },
+  ];
+  for (const { schema, input } of inputs) {
+    assert.equal(schema.safeParse(input).success, true);
+    assert.equal(
+      schema.safeParse({ ...input, unexpected: true }).success,
+      false,
+    );
+    assert.equal(schema.safeParse({ ...input, actor: HUMAN }).success, false);
+  }
+  assert.equal(
+    executionContextSchema.safeParse({ ...CONTEXT, attempt: ZERO_ATTEMPT })
+      .success,
+    false,
+  );
+  assert.equal(
+    assessmentSubmitSchema.safeParse({ ...ASSESSMENT, method: "evaluation" })
+      .success,
+    false,
+  );
+  const id = createIdentity("evidence");
+  assert.equal(
+    assessmentSubmitSchema.safeParse({ ...ASSESSMENT, evidenceIds: [id, id] })
+      .success,
+    false,
+  );
+  const outcomeId = createIdentity("outcome");
+  assert.equal(
+    assessmentSubmitSchema.safeParse({
+      ...ASSESSMENT,
+      childOutcomeIds: [outcomeId, outcomeId],
+    }).success,
+    false,
+  );
+});
+
+test("object size, media type and forced-delete reason have exact bounds", () => {
+  const object = {
+    kind: "object",
+    size: OBJECT_SIZE_MAX,
+    mediaType: "text/plain",
+  };
+  assert.equal(assetSubmitSchema.safeParse(object).success, true);
+  assert.equal(
+    assetSubmitSchema.safeParse({
+      ...object,
+      size: OBJECT_SIZE_MAX + FIRST_REVISION,
+    }).success,
+    false,
+  );
+  for (const mediaType of [
+    "text/plain; charset=utf-8",
+    "text",
+    "téxt/plain",
+    "text/plain\n",
+    `${"a".repeat(128)}/b`,
+  ])
+    assert.equal(mediaTypeSchema.safeParse(mediaType).success, false);
+  assert.equal(mediaTypeSchema.safeParse("text/plain").success, true);
+  assert.equal(
+    mediaTypeSchema.safeParse(`${"a".repeat(127)}/${"b".repeat(127)}`).success,
+    true,
+  );
+  const deletion = { expectedMissionVersion: FIRST_REVISION, force: true };
+  assert.equal(evidenceDeleteSchema.safeParse(deletion).success, false);
+  assert.equal(
+    evidenceDeleteSchema.safeParse({ ...deletion, reason: REASON }).success,
+    true,
+  );
+});
 const ACT = {
   reason: REASON,
   expectedMissionVersion: FIRST_REVISION,

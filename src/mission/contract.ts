@@ -12,6 +12,7 @@ import {
 import type { Transaction } from "../kernel/store.ts";
 import type { Context } from "../kernel/context.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
+import { errorSchema } from "../kernel/errors.ts";
 
 export const MISSION_SERVICE_NAME = "mission";
 export const MISSION_IDENTITY_PREFIX = "mission";
@@ -209,6 +210,25 @@ export interface MissionTransitions {
 }
 
 export const MissionErrorCode = {
+  EvidenceBindingMismatch: "mission.evidence.binding_mismatch",
+  EvidenceTooLarge: "mission.evidence.too_large",
+  EvidenceUploadExpired: "mission.evidence.upload_expired",
+  EvidenceContentRepository: "mission.evidence.content_repository",
+  EvidenceRemoveNodeLive: "mission.evidence.remove_node_live",
+  EvidenceRequestForceRequired: "mission.evidence.request_force_required",
+  EvidenceRequestAssetRefused: "mission.evidence.request_asset_refused",
+  AssessmentEvidenceUnpublished: "mission.assessment.evidence_unpublished",
+  AssessmentVerificationFailed: "mission.assessment.verification_failed",
+  NoUnresolvedRequest: "mission.node.no_unresolved_request",
+  RecordNotFound: "mission.record.not_found",
+  ExecutionContextMismatch: "mission.execution.context_mismatch",
+  EvidenceStorageBindingAbsent: "mission.evidence.storage_binding_absent",
+  EvidenceContentPlatform: "mission.evidence.content_platform",
+  ExecutionClaimNotEvaluation: "mission.execution.claim_not_evaluation",
+  RequestRequirementUnknown: "mission.request.requirement_unknown",
+  RequestAlreadyRequested: "mission.request.already_requested",
+  RequestAddressMismatch: "mission.request.address_mismatch",
+  ExecutionRevisionAbovePin: "mission.execution.revision_above_pin",
   ClaimLive: "mission.node.claim_live",
   MissionNotFound: "mission.mission.not_found",
   NodeNotFound: "mission.node.not_found",
@@ -933,6 +953,143 @@ export const controlResultSchema = z.strictObject({
   acceptedAt: timestamp,
 });
 export type ControlResult = z.infer<typeof controlResultSchema>;
+export const OBJECT_SIZE_MAX = 5 * 1024 ** 3;
+export const INLINE_BYTES_MAX = 5 * 1024 ** 2;
+export const UPLOAD_LIFETIME_MS = 3600000;
+export const CONTENT_ENCODING = "base64";
+const MEDIA_TYPE_MAX = 255;
+const MEDIA_TYPE_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$(?![\s\S])/;
+export const mediaTypeSchema = z
+  .string()
+  .max(MEDIA_TYPE_MAX)
+  .regex(MEDIA_TYPE_PATTERN);
+export const contentBytesSchema = z.strictObject({
+  mediaType: mediaTypeSchema,
+  encoding: z.literal(CONTENT_ENCODING),
+  data: z.string(),
+});
+export const executionContextSchema = z.strictObject({
+  executionId: identitySchema("execution"),
+  attempt: z.number().int().positive(),
+  nodeRevision: z.number().int().positive(),
+});
+export type ExecutionContext = z.infer<typeof executionContextSchema>;
+export const assetSubmitSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal(AssetKind.Repository),
+    address: repositoryAddressSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(AssetKind.Produced),
+    content: contentBytesSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(AssetKind.Object),
+    size: z.number().int().nonnegative().max(OBJECT_SIZE_MAX),
+    mediaType: mediaTypeSchema,
+    sha256: sha256Schema.optional(),
+  }),
+]);
+export const evidenceSubmitSchema = executionContextSchema.extend({
+  subject: textSchema,
+  assets: z.array(assetSubmitSchema).min(1),
+  verification: verificationSchema.optional(),
+});
+export type EvidenceSubmit = z.infer<typeof evidenceSubmitSchema>;
+export const assessmentSubmitSchema = executionContextSchema.extend({
+  evidenceIds: z
+    .array(identitySchema("evidence"))
+    .refine((items) => new Set(items).size === items.length),
+  childOutcomeIds: z
+    .array(identitySchema("outcome"))
+    .refine((items) => new Set(items).size === items.length),
+  result: assessmentResultSchema,
+  rationale: textSchema,
+  testedInput: testedInputSchema,
+});
+export type AssessmentSubmit = z.infer<typeof assessmentSubmitSchema>;
+export const evidenceRequestSchema = executionContextSchema.extend({
+  requirementKey: actionKeySchema,
+  subject: textSchema,
+  address: platformAddressSchema,
+});
+export type EvidenceRequest = z.infer<typeof evidenceRequestSchema>;
+export const evidenceDeleteSchema = z
+  .strictObject({
+    expectedMissionVersion: z.number().int().positive(),
+    force: z.boolean(),
+    reason: textSchema.optional(),
+  })
+  .superRefine((body, context) => {
+    if (body.force && body.reason === undefined)
+      context.addIssue({
+        code: "custom",
+        path: ["reason"],
+        message: "A forced delete requires a reason.",
+      });
+  });
+export const nodeCheckSchema = z.strictObject({
+  expectedMissionVersion: z.number().int().positive(),
+});
+export const evidenceSubmitResultSchema = z.strictObject({
+  evidence: evidenceSchema,
+  uploads: z.array(
+    z.strictObject({
+      assetId: identitySchema("evidence_asset"),
+      putUrl: z.string(),
+      headers: z.record(z.string(), z.string()),
+      expiresAt: timestamp,
+    }),
+  ),
+});
+export const assetUploadResultSchema = z.strictObject({
+  assetId: identitySchema("evidence_asset"),
+  evidenceId: identitySchema("evidence"),
+  uri: z.string().startsWith("s3://"),
+});
+export const assessmentSubmitResultSchema = z.strictObject({
+  assessment: assessmentSchema,
+  node: nodeSchema,
+  outcome: outcomeSchema.nullable(),
+});
+export const storedContentSchema = z.union([
+  contentBytesSchema.extend({
+    assetId: identitySchema("evidence_asset"),
+    address: producedAddressSchema,
+  }),
+  z.strictObject({
+    assetId: identitySchema("evidence_asset"),
+    address: objectAddressSchema,
+    mediaType: mediaTypeSchema,
+    size: z.number().int().nonnegative(),
+    getUrl: z.string(),
+    expiresAt: timestamp,
+  }),
+]);
+export const nodeCheckResultSchema = z.strictObject({
+  results: z.array(
+    z.strictObject({
+      evidenceId: identitySchema("evidence"),
+      requirementKey: actionKeySchema,
+      resolution: z.enum([
+        Resolution.Unresolved,
+        Resolution.ExpectedEnd,
+        Resolution.OtherEnd,
+      ]),
+    }),
+  ),
+  failures: z.array(
+    z.strictObject({
+      evidenceId: identitySchema("evidence"),
+      error: errorSchema,
+    }),
+  ),
+});
+export const executionObjectiveSchema = z.union([
+  nodeSchema.options[1],
+  z.strictObject({ id: identitySchema("node"), state: nodeStateSchema }),
+]);
 export const rebindResultSchema = z.strictObject({
   nodeChange: nodeChangeSchema,
   skipped: z.array(
