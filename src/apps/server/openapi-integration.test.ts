@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ulid } from "ulid";
+import { parse } from "yaml";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import SwaggerParser from "@apidevtools/swagger-parser";
@@ -34,12 +35,21 @@ test("published heartbeat projection names its operation and carries no 204 cont
     join(dirname(openapiPath()), "openapi/worker/heartbeat.yaml"),
     "utf8",
   );
-  assert.match(fragment, /operationId: worker\.heartbeat/);
-  assert.match(fragment, /"204":\n\s+description: Completed result/);
-  assert.doesNotMatch(
-    fragment,
-    /"204":\n\s+description: Completed result\n\s+content:/,
+  const document = parse(fragment) as {
+    pathItem: {
+      post: {
+        operationId: string;
+        responses: Record<string, { content?: unknown }>;
+      };
+    };
+  };
+  assert.equal(
+    document.pathItem.post.operationId,
+    workerOperations.heartbeat.id,
   );
+  const response = document.pathItem.post.responses[HttpStatus.NoContent];
+  assert.ok(response);
+  assert.equal("content" in response, false);
 });
 const MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS = [
   ["node.unblock", "mission.node.unblock", "properties", "node"],
@@ -85,10 +95,129 @@ type ResolvedSchema = {
   additionalProperties?: ResolvedSchema | boolean;
   enum?: unknown[];
   anyOf?: ResolvedSchema[];
+  allOf?: ResolvedSchema[];
+  items?: ResolvedSchema;
   const?: unknown;
   type?: string;
   minLength?: number;
+  not?: unknown;
 };
+
+function assertInstanceOutput(schema: ResolvedSchema): void {
+  assert.ok(schema.allOf);
+  const [base, host, registration, activity] = schema.allOf;
+  assert.equal(base?.additionalProperties, false);
+  assert.deepEqual(base?.required, [
+    "runtimeIdentity",
+    "projectId",
+    "resourceIdentity",
+    "workerName",
+    "host",
+    "activity",
+    "draining",
+    "registered",
+  ]);
+  for (const union of [host, registration, activity])
+    for (const variant of union!.anyOf!)
+      assert.notEqual(variant.additionalProperties, false);
+  assert.deepEqual(
+    host?.anyOf?.map((variant) => variant.required),
+    [["host", "placement"], ["host"]],
+  );
+  assert.deepEqual(
+    registration?.anyOf?.map((variant) => variant.required),
+    [["registered", "clientId", "name"], ["registered"]],
+  );
+  assert.deepEqual(
+    activity?.anyOf?.map((variant) => variant.required),
+    [["activity", "executionId"], ["activity"]],
+  );
+  const second = 1;
+  assert.deepEqual(host?.anyOf?.[second]?.properties.placement?.not, {});
+  assert.deepEqual(registration?.anyOf?.[second]?.properties.clientId?.not, {});
+  assert.deepEqual(registration?.anyOf?.[second]?.properties.name?.not, {});
+  assert.deepEqual(activity?.anyOf?.[second]?.properties.executionId?.not, {});
+}
+
+test("published Worker lists preserve optional limits, filter dependency and conditional records", async () => {
+  const api = await SwaggerParser.dereference(openapiPath());
+  const integer = "integer";
+  const limitName = "limit";
+  const defaultLimit = 100;
+  const minimum = 1;
+  const maximum = 1000;
+  for (const path of ["/api/worker/catalog", "/api/worker/instance"]) {
+    const operation = api.paths?.[path]?.get as unknown as {
+      parameters: {
+        name: string;
+        required: boolean;
+        schema: {
+          type: string;
+          minimum: number;
+          maximum: number;
+          default: number;
+        };
+      }[];
+      responses: Record<string, ResolvedJsonResponse>;
+      "x-access-policy": string;
+    };
+    assert.ok(operation);
+    assert.equal(operation["x-access-policy"], AccessPolicy.Human);
+    const limit = operation.parameters.find(
+      (parameter) => parameter.name === limitName,
+    );
+    assert.ok(limit);
+    assert.equal(limit.required, false);
+    assert.equal(limit.schema.type, integer);
+    assert.equal(limit.schema.default, defaultLimit);
+    assert.equal(limit.schema.minimum, minimum);
+    assert.equal(limit.schema.maximum, maximum);
+    const output =
+      operation.responses[HttpStatus.OK]!.content["application/json"].schema;
+    assert.deepEqual(output.required, ["items", "nextCursor"]);
+    assert.equal(output.properties.items?.type, ARRAY_SCHEMA_TYPE);
+  }
+  const fragment = parse(
+    readFileSync(
+      join(dirname(openapiPath()), "openapi/worker/instance.list.yaml"),
+      "utf8",
+    ),
+  ) as {
+    components: {
+      schemas: Record<
+        string,
+        {
+          properties: Record<
+            string,
+            {
+              dependentRequired?: unknown;
+              properties: Record<string, { description?: string }>;
+            }
+          >;
+        }
+      >;
+    };
+  };
+  const query =
+    fragment.components.schemas["worker.instance.list.Input"]!.properties
+      .query!;
+  assert.deepEqual(query.dependentRequired, {
+    resourceIdentity: ["projectId"],
+  });
+  assert.match(
+    query.properties.resourceIdentity!.description!,
+    /Requires projectId/,
+  );
+  const list = api.paths?.["/api/worker/instance"]?.get?.responses[
+    HttpStatus.OK
+  ] as unknown as ResolvedJsonResponse;
+  const get = api.paths?.["/api/worker/instance/{runtimeIdentity}"]?.get
+    ?.responses[HttpStatus.OK] as unknown as ResolvedJsonResponse;
+  assertInstanceOutput(
+    list.content["application/json"].schema.properties.items!.items!,
+  );
+  assertInstanceOutput(get.content["application/json"].schema);
+});
 type ResolvedJsonResponse = {
   content: { "application/json": { schema: ResolvedSchema } };
 };

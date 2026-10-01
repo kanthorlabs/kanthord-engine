@@ -558,6 +558,35 @@ test("run owns the heartbeat interval and quiescence stops it", async (t) => {
   await running;
 });
 
+test("quiescence before run resumes prevents a heartbeat producer", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const f = enablementFixture(t);
+  const sweep = t.mock.method(f.worker, "sweepRegistrations", () => {});
+  const running = f.worker.run();
+  await f.worker.quiesce();
+  t.mock.timers.tick(HEARTBEAT_SWEEP_INTERVAL_MS);
+  const none = 0;
+  assert.equal(sweep.mock.calls.length, none);
+  await f.worker.stop();
+  assert.equal(await running, null);
+});
+
+test("a failed heartbeat sweep stops its producer and reaches the run supervisor", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const f = enablementFixture(t);
+  const failure = new Error("heartbeat transaction failed");
+  const sweep = t.mock.method(f.worker, "sweepRegistrations", () => {
+    throw failure;
+  });
+  const running = f.worker.run();
+  await f.worker.start();
+  t.mock.timers.tick(HEARTBEAT_SWEEP_INTERVAL_MS);
+  assert.equal(await running, failure);
+  t.mock.timers.tick(HEARTBEAT_SWEEP_INTERVAL_MS);
+  const once = 1;
+  assert.equal(sweep.mock.calls.length, once);
+});
+
 test("ending a binding shares its caller transaction and leaves reopened heartbeat readings intact", async (t) => {
   const f = enablementFixture(t);
   const row = f.store.transaction((tx) =>

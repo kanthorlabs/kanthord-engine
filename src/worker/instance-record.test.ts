@@ -6,6 +6,8 @@ import { OperationError } from "../kernel/errors.ts";
 import { workerMigrations } from "./migrations.ts";
 import {
   InstanceActivity,
+  instanceRecordSchema,
+  WorkerHost,
   WorkerErrorCode,
   workerOperations,
   type WorkerBindingOf,
@@ -32,6 +34,53 @@ const BINDING = {
   entries: [],
   tombstone: false,
 };
+
+test("instance output enforces host, registration and activity field presence", () => {
+  const record = {
+    runtimeIdentity: createIdentity("worker_instance"),
+    projectId: PROJECT,
+    resourceIdentity: RESOURCE,
+    workerName: NATIVE,
+    host: WorkerHost.Kanthord,
+    placement: PLACEMENT,
+    registered: true,
+    clientId: createIdentity("client_identity"),
+    name: "worker-a",
+    activity: InstanceActivity.Idle,
+    draining: false,
+  };
+  assert.equal(instanceRecordSchema.safeParse(record).success, true);
+  for (const change of [
+    { placement: undefined },
+    { host: WorkerHost.ExternalHarness },
+    { clientId: undefined },
+    { name: undefined },
+    { registered: false },
+    { activity: InstanceActivity.Executing },
+    { executionId: createIdentity("execution") },
+  ])
+    assert.equal(
+      instanceRecordSchema.safeParse({ ...record, ...change }).success,
+      false,
+    );
+  const external = {
+    ...record,
+    host: WorkerHost.ExternalHarness,
+    placement: undefined,
+    activity: InstanceActivity.Executing,
+    executionId: createIdentity("execution"),
+  };
+  assert.equal(instanceRecordSchema.safeParse(external).success, true);
+  assert.equal(
+    instanceRecordSchema.safeParse({
+      ...record,
+      registered: false,
+      clientId: undefined,
+      name: undefined,
+    }).success,
+    true,
+  );
+});
 
 function fixture(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);

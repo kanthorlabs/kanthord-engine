@@ -222,7 +222,11 @@ export class Invocation {
       let identity =
         options.identity === undefined
           ? undefined
-          : await this.authentication.recheck(options.identity, context);
+          : await this.authentication.recheck(
+              options.identity,
+              context,
+              operation.requiresRegistration !== false,
+            );
       const parsed = operation.delivery
         ? { success: true as const, data: raw }
         : operation.input.safeParse(raw);

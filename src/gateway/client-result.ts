@@ -1,4 +1,8 @@
 import { ulid } from "ulid";
+import assert from "node:assert/strict";
+import { z } from "zod";
+import { resolveRequestId } from "./request-id.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { errorSchema } from "../kernel/errors.ts";
 import {
   OperationResultType,
@@ -8,6 +12,25 @@ import {
   type ServiceClient,
 } from "../kernel/operation.ts";
 import type { RecordedResponse } from "./idempotency.ts";
+export function inputValidationFailure(error: z.ZodError): RecordedResponse {
+  assert.ok(error instanceof z.ZodError);
+  const none = 0;
+  assert.ok(error.issues.length > none);
+  return {
+    status: HttpStatus.BadRequest,
+    body: {
+      error: {
+        code: "gateway.request.validation_failed",
+        message: "Request validation failed.",
+        details: error.issues.map((issue) => ({
+          path: issue.path.map(String),
+          code: issue.code,
+        })),
+      },
+      requestId: resolveRequestId(),
+    },
+  };
+}
 export function createClient<T extends Record<string, Operation>>(
   operations: T,
   call: (

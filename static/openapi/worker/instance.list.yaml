@@ -27,7 +27,7 @@ pathItem:
             ies/resourceIdentity"
       - name: limit
         in: query
-        required: true
+        required: false
         schema:
           $ref: "#/components/schemas/worker.instance.list.Input/properties/query/propert\
             ies/limit"
@@ -83,6 +83,7 @@ components:
               pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: project_ followed by a canonical 26-character uppercase ULID.
             resourceIdentity:
+              description: Requires projectId when supplied.
               type: string
               pattern: ^worker:kanthord:[a-z][a-z0-9-]{0,62}$
             limit:
@@ -93,9 +94,11 @@ components:
             cursor:
               type: string
               minLength: 1
-          required:
-            - limit
+          required: []
           additionalProperties: false
+          dependentRequired:
+            resourceIdentity:
+              - projectId
         body:
           type: "null"
       required:
@@ -109,74 +112,162 @@ components:
         items:
           type: array
           items:
-            type: object
-            properties:
-              runtimeIdentity:
-                type: string
-                minLength: 42
-                maxLength: 42
-                pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                description: worker_instance_ followed by a canonical 26-character uppercase
-                  ULID.
-              projectId:
-                type: string
-                minLength: 34
-                maxLength: 34
-                pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                description: project_ followed by a canonical 26-character uppercase ULID.
-              resourceIdentity:
-                type: string
-                pattern: ^worker:kanthord:[a-z][a-z0-9-]{0,62}$
-              workerName:
-                type: string
-                minLength: 1
-              host:
-                type: string
-                enum:
-                  - kanthord
-                  - external-harness
-              placement:
-                type: string
-                enum:
-                  - server
-                  - worker
-              clientId:
-                type: string
-                minLength: 42
-                maxLength: 42
-                pattern: ^client_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                description: client_identity_ followed by a canonical 26-character uppercase
-                  ULID.
-              name:
-                type: string
-                minLength: 1
-                maxLength: 64
-              activity:
-                type: string
-                enum:
-                  - idle
-                  - pulling
-                  - executing
-              draining:
-                type: boolean
-              executionId:
-                type: string
-                minLength: 36
-                maxLength: 36
-                pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                description: execution_ followed by a canonical 26-character uppercase ULID.
-              registered:
-                type: boolean
-            required:
-              - runtimeIdentity
-              - projectId
-              - resourceIdentity
-              - workerName
-              - host
-              - activity
-              - draining
-              - registered
-            additionalProperties: false
+            allOf:
+              - type: object
+                properties:
+                  runtimeIdentity:
+                    type: string
+                    minLength: 42
+                    maxLength: 42
+                    pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: worker_instance_ followed by a canonical 26-character uppercase
+                      ULID.
+                  projectId:
+                    type: string
+                    minLength: 34
+                    maxLength: 34
+                    pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: project_ followed by a canonical 26-character uppercase ULID.
+                  resourceIdentity:
+                    type: string
+                    pattern: ^worker:kanthord:[a-z][a-z0-9-]{0,62}$
+                  workerName:
+                    type: string
+                    minLength: 1
+                  host:
+                    type: string
+                    enum:
+                      - kanthord
+                      - external-harness
+                  placement:
+                    type: string
+                    enum:
+                      - server
+                      - worker
+                  clientId:
+                    type: string
+                    minLength: 42
+                    maxLength: 42
+                    pattern: ^client_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: client_identity_ followed by a canonical 26-character uppercase
+                      ULID.
+                  name:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+                  activity:
+                    type: string
+                    enum:
+                      - idle
+                      - pulling
+                      - executing
+                  draining:
+                    type: boolean
+                  executionId:
+                    type: string
+                    minLength: 36
+                    maxLength: 36
+                    pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: execution_ followed by a canonical 26-character uppercase ULID.
+                  registered:
+                    type: boolean
+                required:
+                  - runtimeIdentity
+                  - projectId
+                  - resourceIdentity
+                  - workerName
+                  - host
+                  - activity
+                  - draining
+                  - registered
+                additionalProperties: false
+              - anyOf:
+                  - type: object
+                    properties:
+                      host:
+                        type: string
+                        const: kanthord
+                      placement:
+                        type: string
+                        enum:
+                          - server
+                          - worker
+                    required:
+                      - host
+                      - placement
+                    additionalProperties: {}
+                  - type: object
+                    properties:
+                      host:
+                        type: string
+                        const: external-harness
+                      placement:
+                        not: {}
+                    required:
+                      - host
+                    additionalProperties: {}
+              - anyOf:
+                  - type: object
+                    properties:
+                      registered:
+                        type: boolean
+                        const: true
+                      clientId:
+                        type: string
+                        minLength: 42
+                        maxLength: 42
+                        pattern: ^client_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: client_identity_ followed by a canonical 26-character uppercase
+                          ULID.
+                      name:
+                        type: string
+                        minLength: 1
+                        maxLength: 64
+                    required:
+                      - registered
+                      - clientId
+                      - name
+                    additionalProperties: {}
+                  - type: object
+                    properties:
+                      registered:
+                        type: boolean
+                        const: false
+                      clientId:
+                        not: {}
+                      name:
+                        not: {}
+                    required:
+                      - registered
+                    additionalProperties: {}
+              - anyOf:
+                  - type: object
+                    properties:
+                      activity:
+                        type: string
+                        const: executing
+                      executionId:
+                        type: string
+                        minLength: 36
+                        maxLength: 36
+                        pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: execution_ followed by a canonical 26-character uppercase ULID.
+                    required:
+                      - activity
+                      - executionId
+                    additionalProperties: {}
+                  - type: object
+                    properties:
+                      activity:
+                        type: string
+                        enum:
+                          - idle
+                          - pulling
+                      executionId:
+                        not: {}
+                    required:
+                      - activity
+                    additionalProperties: {}
         nextCursor:
           anyOf:
             - type: string

@@ -132,6 +132,10 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
   const registered = await f.client.register(input);
   assert.ok(registered.type === OperationResultType.Completed);
   const target = { ...input, params: registered.data };
+  const identity = await f.gateway.authentication.authenticate(
+    `Bearer ${f.machineJWT}`,
+  );
+  const direct = directClient(workerOperations, f.gateway.invocation);
   const key = ulid();
   const ended = await f.client["instance.deregister"](target, {
     idempotencyKey: key,
@@ -142,6 +146,18 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
     await f.client["instance.deregister"](target, { idempotencyKey: key }),
     ended,
   );
+  assert.deepEqual(
+    await direct["instance.deregister"](target, {
+      identity,
+      idempotencyKey: key,
+    }),
+    ended,
+  );
+  assertFailure(
+    await direct["instance.deregister"](target, { identity }),
+    HttpStatus.NotFound,
+    "worker.instance.not_found",
+  );
   assertFailure(
     await f.client["instance.deregister"](target),
     HttpStatus.NotFound,
@@ -150,12 +166,44 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
   const next = await f.client.register(input);
   assert.ok(next.type === OperationResultType.Completed);
   assert.notEqual(next.data.runtimeIdentity, registered.data.runtimeIdentity);
+  assert.deepEqual(
+    await direct["instance.deregister"](target, {
+      identity,
+      idempotencyKey: key,
+    }),
+    ended,
+  );
+  assertFailure(
+    await direct["instance.deregister"](target, { identity }),
+    HttpStatus.NotFound,
+    "worker.instance.not_found",
+  );
   assertFailure(
     await f.client["instance.deregister"](target),
     HttpStatus.NotFound,
     "worker.instance.not_found",
   );
   assert.equal(f.machines.worker.registrations.size, SINGLE_REGISTRATION);
+  const replacement = { ...input, params: next.data };
+  const nextKey = ulid();
+  const directEnd = await direct["instance.deregister"](replacement, {
+    identity,
+    idempotencyKey: nextKey,
+  });
+  assert.ok(directEnd.type === OperationResultType.Completed);
+  assert.deepEqual(
+    await direct["instance.deregister"](replacement, {
+      identity,
+      idempotencyKey: nextKey,
+    }),
+    directEnd,
+  );
+  assert.deepEqual(
+    await f.client["instance.deregister"](replacement, {
+      idempotencyKey: nextKey,
+    }),
+    directEnd,
+  );
 });
 
 function assertFailure(
@@ -263,6 +311,63 @@ test("concurrent machine registrations cannot oversubscribe one binding", async 
   )!;
   assertFailure(refusal, HttpStatus.Conflict, ErrorCode.Capacity);
   assert.equal(fixture.machines.worker.registrations.size, SINGLE_REGISTRATION);
+});
+
+test("no-content HTTP results ignore serialization metadata and match direct results", async (t) => {
+  const operation = {
+    ...machineRead,
+    id: "test.noContent",
+    path: "/api/test/no-content",
+    access: AccessPolicy.Human,
+    output: z.null(),
+    status: HttpStatus.NoContent,
+    contentType: "text/plain",
+  } as const;
+  const registry = new OperationRegistry();
+  registry.register(operation, () => null);
+  const f = await gatewayFixture(t, { registry });
+  const identity = await f.gateway.authentication.authenticate(
+    `Bearer ${f.token}`,
+  );
+  const direct = await directClient(
+    { empty: operation },
+    f.gateway.invocation,
+  ).empty(input, { identity });
+  const http = await httpClient(
+    { empty: operation },
+    f.endpoint,
+    f.token,
+  ).empty(input);
+  assert.ok(direct.type === OperationResultType.Completed);
+  assert.equal(direct.data, null);
+  assert.deepEqual(http, direct);
+  const raw = await f.request(operation.path, {
+    headers: { Authorization: `Bearer ${f.token}` },
+  });
+  assert.equal(raw.status, HttpStatus.NoContent);
+  const empty = "";
+  assert.equal(await raw.text(), empty);
+});
+
+test("invalid direct input is captured before caller mutation and never invokes authentication", async (t) => {
+  const f = await gatewayFixture(t);
+  const identity = await f.gateway.authentication.authenticate(
+    `Bearer ${f.token}`,
+  );
+  const recheck = t.mock.method(f.gateway.authentication, "recheck");
+  const raw = { ...input, query: { limit: 0 } };
+  const direct = directClient(workerOperations, f.gateway.invocation)[
+    "catalog.list"
+  ](raw, { identity });
+  const http = httpClient(workerOperations, f.endpoint, f.token)[
+    "catalog.list"
+  ](raw);
+  raw.query.limit = 1;
+  const code = "gateway.request.validation_failed";
+  for (const result of await Promise.all([direct, http]))
+    assertFailure(result, HttpStatus.BadRequest, code);
+  const none = 0;
+  assert.equal(recheck.mock.calls.length, none);
 });
 
 test("one live registration per client, live replay across adapters, and stale replay without rewriting the record", async (t) => {

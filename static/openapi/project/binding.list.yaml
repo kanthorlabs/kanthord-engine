@@ -32,7 +32,7 @@ pathItem:
             ies/state"
       - name: limit
         in: query
-        required: true
+        required: false
         schema:
           $ref: "#/components/schemas/project.binding.list.Input/properties/query/propert\
             ies/limit"
@@ -108,8 +108,7 @@ components:
             cursor:
               type: string
               minLength: 1
-          required:
-            - limit
+          required: []
           additionalProperties: false
         body:
           type: "null"

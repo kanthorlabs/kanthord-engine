@@ -74,8 +74,6 @@ export class Authentication {
         registration.projectId !== resolved.projectId)
     )
       throw unauthorized();
-    if (registration)
-      this.machines!.worker.heartbeat(registration.runtimeIdentity);
     return mintMachineIdentity(
       { clientId, name, ...resolved, issuedAt },
       jti,
@@ -86,6 +84,7 @@ export class Authentication {
   async recheck(
     identity: CallerIdentity,
     context: Context,
+    requiresRegistration = true,
   ): Promise<CallerIdentity> {
     if (!isHumanIdentity(identity) && !isMachineIdentity(identity))
       throw unauthorized();
@@ -100,8 +99,13 @@ export class Authentication {
       identity.jti,
       context,
     );
-    if (current.runtimeIdentity !== identity.runtimeIdentity)
+    if (
+      requiresRegistration &&
+      current.runtimeIdentity !== identity.runtimeIdentity
+    )
       throw unauthorized();
+    if (current.runtimeIdentity)
+      this.machines!.worker.heartbeat(current.runtimeIdentity);
     return current;
   }
 
@@ -151,7 +155,7 @@ export class Authentication {
       !isString(claims.resource_identity)
     )
       throw unauthorized();
-    return this.resolveMachine(
+    const identity = await this.resolveMachine(
       claims.sub!,
       claims.name,
       claims.project_id,
@@ -160,5 +164,8 @@ export class Authentication {
       claims.jti,
       context,
     );
+    if (identity.runtimeIdentity)
+      this.machines!.worker.heartbeat(identity.runtimeIdentity);
+    return identity;
   }
 }

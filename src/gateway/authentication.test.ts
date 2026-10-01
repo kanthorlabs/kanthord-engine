@@ -339,6 +339,23 @@ test("only successful authentication of a live registration renews its heartbeat
   const once = 1;
   assert.equal(heartbeat.mock.calls.length, once);
   assert.deepEqual(heartbeat.mock.calls[0]!.arguments, [runtimeIdentity]);
+  await assert.rejects(
+    fixture.authentication.recheck(identity, background),
+    /Authentication required/,
+  );
+  assert.equal(heartbeat.mock.calls.length, once);
+  const current = await fixture.authentication.recheck(
+    identity,
+    background,
+    false,
+  );
+  assert.ok(isMachineIdentity(current));
+  assert.equal(current.runtimeIdentity, runtimeIdentity);
+  const twice = 2;
+  assert.equal(heartbeat.mock.calls.length, twice);
+  await fixture.authentication.recheck(current, background);
+  const threeTimes = 3;
+  assert.equal(heartbeat.mock.calls.length, threeTimes);
   machines.worker.registrations.set(identity.clientId, {
     ...identity,
     runtimeIdentity,
@@ -349,5 +366,5 @@ test("only successful authentication of a live registration renews its heartbeat
     fixture.authentication.authenticate(`Bearer ${token}`),
     /Authentication required/,
   );
-  assert.equal(heartbeat.mock.calls.length, once);
+  assert.equal(heartbeat.mock.calls.length, threeTimes);
 });

@@ -4,7 +4,7 @@ import {
   throwIfCancelled,
   type Context,
 } from "../kernel/context.ts";
-import { Diagnostic } from "../kernel/errors.ts";
+import { asError, Diagnostic } from "../kernel/errors.ts";
 import {
   HealthStatus,
   type Healthcheck,
@@ -194,6 +194,8 @@ export class WorkerService implements Service {
   readonly registrations: WorkerRegistrations;
   readonly heartbeatClock: HeartbeatClock;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
+  private quiesced = false;
+  private runError: Error | null = null;
   private readonly dependencies: Dependencies;
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
@@ -230,6 +232,7 @@ export class WorkerService implements Service {
     return this.startTask;
   }
   quiesce(): Promise<Error | null> {
+    this.quiesced = true;
     clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = undefined;
     return this.quiesceTask;
@@ -249,12 +252,17 @@ export class WorkerService implements Service {
       if (context.err()) return (await this.stop()) ?? context.err();
       const error = await this.start();
       if (error) return error;
-      this.heartbeatTimer ??= setInterval(
-        () => this.sweepRegistrations(),
-        HEARTBEAT_SWEEP_INTERVAL_MS,
-      ).unref();
+      if (!this.quiesced)
+        this.heartbeatTimer ??= setInterval(() => {
+          try {
+            this.sweepRegistrations();
+          } catch (failure) {
+            this.runError = asError(failure);
+            void this.stop();
+          }
+        }, HEARTBEAT_SWEEP_INTERVAL_MS).unref();
       await this.shutdown.done();
-      return (await this.stop()) ?? context.err();
+      return (await this.stop()) ?? this.runError ?? context.err();
     } finally {
       unsubscribe();
     }

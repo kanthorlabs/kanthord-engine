@@ -58,20 +58,59 @@ export const InstancePlacement = {
 export const workerResourceIdentitySchema = z
   .string()
   .regex(/^worker:kanthord:[a-z][a-z0-9-]{0,62}$/);
-export const instanceRecordSchema = z.strictObject({
-  runtimeIdentity: identitySchema("worker_instance"),
-  projectId: identitySchema("project"),
-  resourceIdentity: workerResourceIdentitySchema,
-  workerName: z.string().min(1),
-  host: z.enum(WorkerHost),
-  placement: z.enum(InstancePlacement).optional(),
-  clientId: identitySchema("client_identity").optional(),
-  name: z.string().min(1).max(64).optional(),
-  activity: z.enum(InstanceActivity),
-  draining: z.boolean(),
-  executionId: identitySchema("execution").optional(),
-  registered: z.boolean(),
-});
+export const instanceRecordSchema = z
+  .strictObject({
+    runtimeIdentity: identitySchema("worker_instance"),
+    projectId: identitySchema("project"),
+    resourceIdentity: workerResourceIdentitySchema,
+    workerName: z.string().min(1),
+    host: z.enum(WorkerHost),
+    placement: z.enum(InstancePlacement).optional(),
+    clientId: identitySchema("client_identity").optional(),
+    name: z.string().min(1).max(64).optional(),
+    activity: z.enum(InstanceActivity),
+    draining: z.boolean(),
+    executionId: identitySchema("execution").optional(),
+    registered: z.boolean(),
+  })
+  .and(
+    z.union([
+      z.looseObject({
+        host: z.literal(WorkerHost.Kanthord),
+        placement: z.enum(InstancePlacement),
+      }),
+      z.looseObject({
+        host: z.literal(WorkerHost.ExternalHarness),
+        placement: z.never().optional(),
+      }),
+    ]),
+  )
+  .and(
+    z.union([
+      z.looseObject({
+        registered: z.literal(true),
+        clientId: identitySchema("client_identity"),
+        name: z.string().min(1).max(64),
+      }),
+      z.looseObject({
+        registered: z.literal(false),
+        clientId: z.never().optional(),
+        name: z.never().optional(),
+      }),
+    ]),
+  )
+  .and(
+    z.union([
+      z.looseObject({
+        activity: z.literal(InstanceActivity.Executing),
+        executionId: identitySchema("execution"),
+      }),
+      z.looseObject({
+        activity: z.enum([InstanceActivity.Idle, InstanceActivity.Pulling]),
+        executionId: z.never().optional(),
+      }),
+    ]),
+  );
 
 export interface SchedulerClaims {
   runningExecutionOfRuntime(
@@ -331,7 +370,9 @@ export const workerOperations = {
       query: z
         .strictObject({
           projectId: identitySchema("project").optional(),
-          resourceIdentity: workerResourceIdentitySchema.optional(),
+          resourceIdentity: workerResourceIdentitySchema
+            .optional()
+            .describe("Requires projectId when supplied."),
           limit: z.coerce
             .number()
             .int()
@@ -345,7 +386,8 @@ export const workerOperations = {
             query.resourceIdentity === undefined ||
             query.projectId !== undefined,
           { message: "resourceIdentity requires projectId" },
-        ),
+        )
+        .meta({ dependentRequired: { resourceIdentity: ["projectId"] } }),
       body: z.null(),
     }),
     output: z.strictObject({

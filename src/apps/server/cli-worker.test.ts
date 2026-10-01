@@ -38,10 +38,10 @@ test("deregistration CLI validates identity and token and returns replayable JSO
     KANTHORD_ENDPOINT: fixture.endpoint,
   };
   const leaf = ["worker", "instance", "deregister"];
-  assert.equal(
-    (await command([...leaf, "--help"], env)).code,
-    ExitCode.Success,
-  );
+  const help = await command([...leaf, "--help"], env);
+  assert.equal(help.code, ExitCode.Success);
+  assert.match(help.stdout, /machine JWT/);
+  assert.doesNotMatch(help.stdout, /Human JWT/);
   const invalid = await command([...leaf, "invalid"], env);
   assert.match(
     invalid.stderr,

@@ -20,7 +20,7 @@ pathItem:
             /properties/nodeId"
       - name: force
         in: query
-        required: true
+        required: false
         schema:
           $ref: "#/components/schemas/mission.node.retire.preview.Input/properties/query/\
             properties/force"
@@ -77,8 +77,7 @@ components:
               enum:
                 - "true"
                 - "false"
-          required:
-            - force
+          required: []
           additionalProperties: false
         body:
           type: "null"

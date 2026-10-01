@@ -18,8 +18,7 @@ import {
   background,
   CancellationContext,
 } from "../kernel/context.ts";
-import { resolveRequestId } from "./request-id.ts";
-import { createClient } from "./client-result.ts";
+import { createClient, inputValidationFailure } from "./client-result.ts";
 const endpoint = z.url().refine((value) => {
   const url = URL.parse(value);
   return (
@@ -88,22 +87,7 @@ export function httpClient<T extends Record<string, Operation>>(
 ): ServiceClient<T> {
   return createClient(operations, async (operation, raw, options) => {
     const parsed = operation.input.safeParse(raw);
-    if (!parsed.success) {
-      return {
-        status: 400,
-        body: {
-          error: {
-            code: "gateway.request.validation_failed",
-            message: "Request validation failed.",
-            details: parsed.error.issues.map((issue) => ({
-              path: issue.path.map(String),
-              code: issue.code,
-            })),
-          },
-          requestId: resolveRequestId(),
-        },
-      };
-    }
+    if (!parsed.success) return inputValidationFailure(parsed.error);
     const input = parsed.data as {
       params: Record<string, unknown>;
       query: Record<string, unknown>;

@@ -488,7 +488,7 @@ export function addWorkerCommand(program: Command): void {
     .option("--endpoint <url>", "Server endpoint")
     .option(
       "--token <token>",
-      "Human JWT (otherwise KANTHORD_TOKEN or cli.yaml)",
+      "Caller JWT (otherwise KANTHORD_TOKEN or cli.yaml)",
       singleUse("--token"),
     );
   worker.action(() => worker.help());
@@ -533,7 +533,7 @@ export function addWorkerCommand(program: Command): void {
     );
   instance
     .command("deregister")
-    .description("End an owned live registration")
+    .description("End an owned live registration using a machine JWT")
     .argument("<runtime-identity>", "Runtime identity")
     .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((runtimeIdentity: string, _options, command: Command) =>

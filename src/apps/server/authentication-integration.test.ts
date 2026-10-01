@@ -115,12 +115,8 @@ test("a removed and rebound worker group refuses old tokens on HTTP and direct a
     assert.ok(result.type === OperationResultType.Failure);
     assert.equal(result.status, HttpStatus.Unauthorized);
   }
-  const clock = t.mock.method(
-    Date,
-    "now",
-    () =>
-      decode(token).payload.iat! * MILLISECONDS_PER_SECOND + AFTER_REMOVAL_MS,
-  );
+  const freshTime = Date.now() + AFTER_REMOVAL_MS;
+  const clock = t.mock.method(Date, "now", () => freshTime);
   const fresh = await fixture.machineToken(projectId, "machine");
   const freshIdentity = await fixture.gateway.authentication.authenticate(
     `Bearer ${fresh}`,

@@ -95,13 +95,21 @@ export function openAPIFileNames(operations: readonly Operation[]): string[] {
   ];
 }
 
-function jsonSchema(name: string, schema: z.ZodType): Record<string, unknown> {
+function jsonSchema(
+  name: string,
+  schema: z.ZodType,
+  request = false,
+): Record<string, unknown> {
   const { $schema: _dialect, ...result } = z.toJSONSchema(schema, {
     override: ({ zodSchema, jsonSchema }) => {
       // Any JSON value is the empty JSON Schema. Avoid recursively enumerating
       // that domain across every path's shared error response.
       if (zodSchema === errorDetailsSchema)
         for (const key of Object.keys(jsonSchema)) delete jsonSchema[key];
+      if (request && zodSchema instanceof z.ZodObject && jsonSchema.required)
+        jsonSchema.required = jsonSchema.required.filter(
+          (key) => !(zodSchema.shape[key] instanceof z.ZodDefault),
+        );
     },
   });
   void _dialect;
@@ -124,7 +132,7 @@ function jsonSchema(name: string, schema: z.ZodType): Record<string, unknown> {
 function emitOperation(operation: Operation, schemas: Record<string, unknown>) {
   const inputName = `${operation.id}.Input`;
   const outputName = `${operation.id}.Output`;
-  const input = jsonSchema(inputName, operation.input) as {
+  const input = jsonSchema(inputName, operation.input, true) as {
     properties?: Record<
       string,
       { properties?: Record<string, unknown>; required?: string[] }
