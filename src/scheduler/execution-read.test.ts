@@ -14,6 +14,9 @@ import { ClaimState } from "./contract.ts";
 
 const NOT_OWNER = "scheduler.execution.not_owner";
 const NOT_FOUND = "scheduler.execution.not_found";
+const ONE = 1;
+const TWO = 2;
+const CURSOR_INVALID = "system.pagination.cursor_invalid";
 function harness(t: TestContext) {
   const h = schedulerHarness(t);
   const row = executionFixture();
@@ -59,6 +62,64 @@ test("claim get reports running, finished and lost without modifying the row", a
   );
 });
 const ATTRIBUTION = "clientAttributionOf";
+
+test("human execution reads paginate all states and isolate project, node and attempt filters", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  const ended = executionFixture({
+    projectId: h.row.projectId,
+    nodeId: h.row.nodeId,
+    attempt: 2,
+    endedAt: FIXTURE_NOW,
+  });
+  h.store.transaction((tx) => insertExecution(tx, ended));
+  const list = (query = {}) =>
+    h.invoke(
+      "executionList",
+      { params: { projectId: h.row.projectId }, query, body: null },
+      h.caller,
+    );
+  const all = await list();
+  assert.deepEqual(
+    all.items.map((item) => item.executionId),
+    [ended.executionId, h.row.executionId].sort().reverse(),
+  );
+  assert.equal(all.items.length, TWO);
+  const first = await list({ limit: 1 });
+  assert.equal(first.items.length, ONE);
+  const second = await list({ limit: 1, cursor: first.nextCursor });
+  assert.deepEqual([...first.items, ...second.items], all.items);
+  assert.equal(second.nextCursor, null);
+  assert.deepEqual((await list({ nodeId: h.row.nodeId })).items, all.items);
+  assert.deepEqual(
+    (await list({ nodeId: h.row.nodeId, attempt: 2 })).items.map(
+      (item) => item.executionId,
+    ),
+    [ended.executionId],
+  );
+  assert.deepEqual(
+    (await list({ nodeId: h.row.nodeId, attempt: 3 })).items,
+    [],
+  );
+  assert.deepEqual((await list({ nodeId: createIdentity("node") })).items, []);
+  await assert.rejects(list({ attempt: 1 }));
+  for (const cursor of [
+    "malformed",
+    Buffer.from(createIdentity("job")).toString("base64url"),
+  ])
+    await assert.rejects(list({ cursor }), { code: CURSOR_INVALID });
+  const get = (executionId: string) =>
+    h.invoke(
+      "executionGet",
+      { params: { executionId }, query: {}, body: null },
+      h.caller,
+    );
+  assert.equal((await get(ended.executionId)).claimState, ClaimState.Finished);
+  await assert.rejects(get(createIdentity("execution")), { code: NOT_FOUND });
+  const foreign = executionFixture();
+  h.store.transaction((tx) => insertExecution(tx, foreign));
+  assert.deepEqual((await list({ nodeId: foreign.nodeId })).items, []);
+});
 
 test("claim get isolates runtime, binding and project and distinguishes absent executions", async (t) => {
   const h = harness(t);

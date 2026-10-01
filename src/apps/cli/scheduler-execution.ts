@@ -7,11 +7,15 @@ import {
   schedulerOperations,
   workPullSchema,
   executionReleaseSchema,
+  QUEUE_LIST_LIMIT_DEFAULT,
+  QUEUE_LIST_LIMIT_MIN,
+  QUEUE_LIST_LIMIT_MAX,
 } from "../../scheduler/contract.ts";
 import { CommandName } from "./constants.ts";
 import {
   handleMutationResult,
   handleReadResult,
+  parsePositiveInt,
   readJsonFileAs,
   requireToken,
   resolveKey,
@@ -26,6 +30,78 @@ const EXECUTION = "execution";
 const RELEASE = "release";
 const CLAIM = "claim";
 const GET = "get";
+const LIST = "list";
+
+async function executionGet(
+  executionId: string,
+  command: Command,
+): Promise<void> {
+  if (!identitySchema(EXECUTION).safeParse(executionId).success)
+    throw new Diagnostic(
+      "cli.scheduler.execution.get.invalid_execution_id",
+      "invalid execution ID",
+    );
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, "cli.scheduler.execution.get.token_required");
+  const result = await httpClient(
+    schedulerOperations,
+    endpoint,
+    token,
+  ).executionGet({ params: { executionId }, query: {}, body: null });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, "cli.scheduler.execution.get.indeterminate"))}\n`,
+  );
+}
+
+async function executionList(
+  projectId: string,
+  command: Command,
+): Promise<void> {
+  if (!identitySchema("project").safeParse(projectId).success)
+    throw new Diagnostic(
+      "cli.scheduler.execution.list.invalid_project_id",
+      "invalid project ID",
+    );
+  const options = command.optsWithGlobals();
+  if (
+    options.node !== undefined &&
+    !identitySchema("node").safeParse(options.node).success
+  )
+    throw new Diagnostic(
+      "cli.scheduler.execution.list.invalid_node_id",
+      "invalid node ID",
+    );
+  const attempt =
+    options.attempt === undefined
+      ? undefined
+      : parsePositiveInt(
+          options.attempt,
+          "cli.scheduler.execution.list.invalid_attempt",
+        );
+  const limit =
+    options.limit === undefined
+      ? QUEUE_LIST_LIMIT_DEFAULT
+      : parsePositiveInt(options.limit, "cli.pagination.limit_invalid");
+  if (limit < QUEUE_LIST_LIMIT_MIN || limit > QUEUE_LIST_LIMIT_MAX)
+    throw new Diagnostic(
+      "cli.pagination.limit_out_of_range",
+      `limit must be between ${QUEUE_LIST_LIMIT_MIN} and ${QUEUE_LIST_LIMIT_MAX}`,
+    );
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, "cli.scheduler.execution.list.token_required");
+  const result = await httpClient(
+    schedulerOperations,
+    endpoint,
+    token,
+  ).executionList({
+    params: { projectId },
+    query: { limit, nodeId: options.node, attempt, cursor: options.cursor },
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, "cli.scheduler.execution.list.indeterminate"))}\n`,
+  );
+}
 
 async function claimGet(executionId: string, command: Command): Promise<void> {
   if (!identitySchema(EXECUTION).safeParse(executionId).success)
@@ -103,6 +179,32 @@ export function addExecutionCommands(scheduler: Command): void {
     .command(EXECUTION)
     .description("Inspect and release executions");
   execution.action(() => execution.help());
+  execution
+    .command(GET)
+    .description("Read an execution as JSON")
+    .argument("<execution-id>", "Execution ID")
+    .action((executionId: string, _options, command: Command) =>
+      executionGet(executionId, command),
+    );
+  execution
+    .command(LIST)
+    .description("List executions as JSON")
+    .argument("<project-id>", "Project ID")
+    .option("--node <node-id>", "Filter by node", singleUse("--node"))
+    .option(
+      "--attempt <n>",
+      "Filter by attempt with --node",
+      singleUse("--attempt"),
+    )
+    .option("--limit <count>", "Maximum results per page", singleUse("--limit"))
+    .option(
+      "--cursor <opaque>",
+      "Continue from a cursor",
+      singleUse("--cursor"),
+    )
+    .action((projectId: string, _options, command: Command) =>
+      executionList(projectId, command),
+    );
   execution
     .command(RELEASE)
     .description("Release an execution as JSON")

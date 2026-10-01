@@ -252,6 +252,70 @@ export const QUEUE_LIST_LIMIT_MIN = 1;
 export const QUEUE_LIST_LIMIT_MAX = 1000;
 
 export const schedulerOperations = {
+  executionList: {
+    id: "scheduler.execution.list",
+    service: SCHEDULER_SERVICE_NAME,
+    method: HttpMethod.Get,
+    path: "/api/scheduler/project/:projectId/execution",
+    access: AccessPolicy.Human,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: SCHEDULER_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    description: "List live and ended executions, newest identity first.",
+    input: z.strictObject({
+      params: z.strictObject({ projectId: identitySchema("project") }),
+      query: z
+        .strictObject({
+          limit: z.coerce
+            .number()
+            .int()
+            .min(QUEUE_LIST_LIMIT_MIN)
+            .max(QUEUE_LIST_LIMIT_MAX)
+            .default(QUEUE_LIST_LIMIT_DEFAULT),
+          cursor: z.string().optional(),
+          nodeId: identitySchema("node").optional(),
+          attempt: z.coerce
+            .number()
+            .int()
+            .positive()
+            .max(Number.MAX_SAFE_INTEGER)
+            .optional(),
+        })
+        .refine(
+          (query) => query.attempt === undefined || query.nodeId !== undefined,
+        ),
+      body: z.null(),
+    }),
+    output: z.strictObject({
+      items: z.array(executionRecordSchema),
+      nextCursor: z.string().nullable(),
+    }),
+  },
+  executionGet: {
+    id: "scheduler.execution.get",
+    service: SCHEDULER_SERVICE_NAME,
+    method: HttpMethod.Get,
+    path: "/api/scheduler/execution/:executionId",
+    access: AccessPolicy.Human,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: SCHEDULER_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    description: "Read a live or ended execution.",
+    input: z.strictObject({
+      params: z.strictObject({
+        executionId: identitySchema(EXECUTION_IDENTITY_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: z.null(),
+    }),
+    output: executionRecordSchema,
+  },
   claimGet: {
     id: "scheduler.claim.get",
     service: SCHEDULER_SERVICE_NAME,

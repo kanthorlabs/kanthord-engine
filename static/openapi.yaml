@@ -110,6 +110,10 @@ paths:
     $ref: ./openapi/project/get.yaml#/pathItem
   /api/scheduler/claim/{executionId}:
     $ref: ./openapi/scheduler/claim.get.yaml#/pathItem
+  /api/scheduler/execution/{executionId}:
+    $ref: ./openapi/scheduler/execution.get.yaml#/pathItem
+  /api/scheduler/project/{projectId}/execution:
+    $ref: ./openapi/scheduler/execution.list.yaml#/pathItem
   /api/scheduler/execution/{executionId}/release:
     $ref: ./openapi/scheduler/execution.release.yaml#/pathItem
   /api/scheduler/project/{projectId}/queue:

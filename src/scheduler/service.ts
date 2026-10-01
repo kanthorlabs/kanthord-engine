@@ -24,9 +24,10 @@ import { readExecution } from "./execution-store.ts";
 import { WaitingPulls } from "./wakeup.ts";
 import { workPull } from "./work-pull.ts";
 import { release } from "./release.ts";
-import { claimGet } from "./execution-read.ts";
+import { claimGet, executionGet, executionList } from "./execution-read.ts";
 import {
   JOB_IDENTITY_PREFIX,
+  EXECUTION_IDENTITY_PREFIX,
   QUEUE_LIST_LIMIT_DEFAULT,
   SCHEDULER_SERVICE_NAME,
   schedulerOperations,
@@ -62,11 +63,11 @@ function toJob(row: JobRow): Job {
   };
 }
 
-function decodeCursor(cursor: string): string {
+function decodeCursor(cursor: string, prefix: string): string {
   const decoded = Buffer.from(cursor, CURSOR_ENCODING).toString(TEXT_ENCODING);
   if (
     Buffer.from(decoded, TEXT_ENCODING).toString(CURSOR_ENCODING) !== cursor ||
-    !identitySchema(JOB_IDENTITY_PREFIX).safeParse(decoded).success
+    !identitySchema(prefix).safeParse(decoded).success
   )
     throw new OperationError(
       HttpStatus.BadRequest,
@@ -182,7 +183,11 @@ export class SchedulerService implements Service, WorkQueue {
       schedulerOperations.executionRelease.service !== SCHEDULER_SERVICE_NAME ||
       schedulerOperations.executionRelease.access !== AccessPolicy.Client ||
       schedulerOperations.claimGet.service !== SCHEDULER_SERVICE_NAME ||
-      schedulerOperations.claimGet.access !== AccessPolicy.Client
+      schedulerOperations.claimGet.access !== AccessPolicy.Client ||
+      schedulerOperations.executionList.service !== SCHEDULER_SERVICE_NAME ||
+      schedulerOperations.executionList.access !== AccessPolicy.Human ||
+      schedulerOperations.executionGet.service !== SCHEDULER_SERVICE_NAME ||
+      schedulerOperations.executionGet.access !== AccessPolicy.Human
     )
       throw new Error(
         "Scheduler operations require scheduler ownership and their declared access.",
@@ -192,6 +197,19 @@ export class SchedulerService implements Service, WorkQueue {
     );
     registry.register(schedulerOperations.claimGet, (input, caller) =>
       claimGet(this.dependencies, input.params.executionId, caller),
+    );
+    registry.register(schedulerOperations.executionGet, (input, caller) =>
+      executionGet(this.dependencies, input.params.executionId, caller),
+    );
+    registry.register(schedulerOperations.executionList, (input, caller) =>
+      executionList(
+        this.dependencies,
+        input,
+        caller,
+        input.query.cursor === undefined
+          ? undefined
+          : decodeCursor(input.query.cursor, EXECUTION_IDENTITY_PREFIX),
+      ),
     );
     registry.register(schedulerOperations.executionRelease, (input, caller) =>
       release(
@@ -227,7 +245,7 @@ export class SchedulerService implements Service, WorkQueue {
     const after =
       input.query.cursor === undefined
         ? undefined
-        : decodeCursor(input.query.cursor);
+        : decodeCursor(input.query.cursor, JOB_IDENTITY_PREFIX);
     return caller.commit((tx) => {
       const rows =
         after === undefined

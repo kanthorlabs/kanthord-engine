@@ -492,6 +492,21 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     ?.responses[HttpStatus.OK] as unknown as {
     content: { "application/json": { schema: { oneOf: ResolvedSchema[] } } };
   };
+  const executionListPath = schedulerOperations.executionList.path.replace(
+    /:([^/]+)/g,
+    "{$1}",
+  );
+  const executionPage = resolved.paths?.[executionListPath]?.get?.responses[
+    HttpStatus.OK
+  ] as unknown as {
+    content: { "application/json": { schema: ResolvedSchema } };
+  };
+  assert.deepEqual(
+    Object.keys(
+      executionPage.content["application/json"].schema.properties,
+    ).sort(),
+    ["items", "nextCursor"],
+  );
   assert.deepEqual(
     pullResponse.content["application/json"].schema.oneOf.map(
       (variant) => variant.properties.kind?.const,
