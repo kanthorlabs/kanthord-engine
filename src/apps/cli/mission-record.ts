@@ -1,13 +1,18 @@
 import type { Command } from "commander";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { identitySchema } from "../../kernel/identity.ts";
-import { actionKeySchema } from "../../mission/contract.ts";
+import {
+  actionKeySchema,
+  assessmentSubmitSchema,
+} from "../../mission/contract.ts";
 import { singleUse } from "./shared.ts";
 import {
   client,
   printResult,
   pagination,
   addPagination,
+  addMutationOptions,
+  mutate,
 } from "./mission-support.ts";
 
 const ZERO = 0;
@@ -88,11 +93,26 @@ function recordGroup(mission: Command, name: string) {
       .option("--attempt <attempt>", "Attempt filter", singleUse("--attempt")),
   );
   const get = group.command("get").argument(`<${name}-id>`, "Record ID");
-  return { list, get };
+  return { group, list, get };
 }
 
 function addAssessmentCommands(mission: Command): void {
-  const { list, get } = recordGroup(mission, "assessment");
+  const { group, list, get } = recordGroup(mission, "assessment");
+  addMutationOptions(
+    group.command("submit").argument("<node-id>", "Node ID"),
+  ).action(async (nodeId: string, _options, command: Command) => {
+    validateNode(nodeId, "cli.mission.assessment.submit.invalid_node_id");
+    await mutate(
+      command,
+      "assessment.submit",
+      assessmentSubmitSchema,
+      (api, body, key) =>
+        api["assessment.submit"](
+          { params: { nodeId }, query: {}, body },
+          { idempotencyKey: key },
+        ),
+    );
+  });
   list.action(async (nodeId: string, _options, command: Command) => {
     validateNode(nodeId, "cli.mission.assessment.list.invalid_node_id");
     printResult(

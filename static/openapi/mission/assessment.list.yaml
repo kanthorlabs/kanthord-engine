@@ -63,6 +63,58 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
       "504":
         $ref: ../shared/components.yaml#/components/responses/Error
+  post:
+    operationId: mission.assessment.submit
+    tags:
+      - mission
+    description: Submit an evaluation assessment and close eligible attempts.
+    x-access-policy: client
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: nodeId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.assessment.submit.Input/properties/params/p\
+            roperties/nodeId"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/mission.assessment.submit.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/mission.assessment.submit.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
     mission.assessment.list.Input:
@@ -366,4 +418,1860 @@ components:
       required:
         - items
         - nextCursor
+      additionalProperties: false
+    mission.assessment.submit.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            nodeId:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - nodeId
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            executionId:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+            attempt:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            nodeRevision:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            evidenceIds:
+              type: array
+              items:
+                type: string
+                minLength: 35
+                maxLength: 35
+                pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: evidence_ followed by a canonical 26-character uppercase ULID.
+            childOutcomeIds:
+              type: array
+              items:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^outcome_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: outcome_ followed by a canonical 26-character uppercase ULID.
+            result:
+              type: string
+              enum:
+                - success
+                - criterion-not-met
+                - undetermined
+            rationale:
+              type: string
+              minLength: 1
+            testedInput:
+              anyOf:
+                - oneOf:
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: repository
+                        bindingId:
+                          type: string
+                          minLength: 34
+                          maxLength: 34
+                          pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                          description: binding_ followed by a canonical 26-character uppercase ULID.
+                        commit:
+                          type: string
+                          pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                      required:
+                        - kind
+                        - bindingId
+                        - commit
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: produced
+                        sha256:
+                          type: string
+                          pattern: ^[0-9a-f]{64}$
+                      required:
+                        - kind
+                        - sha256
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: object
+                        location:
+                          type: string
+                          pattern: ^s3:\/\/.*
+                        version:
+                          type: string
+                          minLength: 1
+                        sha256:
+                          type: string
+                          pattern: ^[0-9a-f]{64}$
+                      required:
+                        - kind
+                        - location
+                      additionalProperties: false
+                - minItems: 1
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      kind:
+                        type: string
+                        const: repository
+                      bindingId:
+                        type: string
+                        minLength: 34
+                        maxLength: 34
+                        pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: binding_ followed by a canonical 26-character uppercase ULID.
+                      commit:
+                        type: string
+                        pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                    required:
+                      - kind
+                      - bindingId
+                      - commit
+                    additionalProperties: false
+          required:
+            - executionId
+            - attempt
+            - nodeRevision
+            - evidenceIds
+            - childOutcomeIds
+            - result
+            - rationale
+            - testedInput
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    mission.assessment.submit.Output:
+      type: object
+      properties:
+        assessment:
+          type: object
+          properties:
+            id:
+              type: string
+              minLength: 37
+              maxLength: 37
+              pattern: ^assessment_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: assessment_ followed by a canonical 26-character uppercase ULID.
+            nodeId:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+            executionId:
+              anyOf:
+                - type: string
+                  minLength: 36
+                  maxLength: 36
+                  pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: execution_ followed by a canonical 26-character uppercase ULID.
+                - type: "null"
+            attempt:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            nodeRevision:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            evidenceIds:
+              type: array
+              items:
+                type: string
+                minLength: 35
+                maxLength: 35
+                pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: evidence_ followed by a canonical 26-character uppercase ULID.
+            childOutcomeIds:
+              type: array
+              items:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^outcome_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: outcome_ followed by a canonical 26-character uppercase ULID.
+            result:
+              type: string
+              enum:
+                - success
+                - criterion-not-met
+                - undetermined
+            rationale:
+              type: string
+              minLength: 1
+            testedInput:
+              anyOf:
+                - anyOf:
+                    - oneOf:
+                        - type: object
+                          properties:
+                            kind:
+                              type: string
+                              const: repository
+                            bindingId:
+                              type: string
+                              minLength: 34
+                              maxLength: 34
+                              pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                              description: binding_ followed by a canonical 26-character uppercase ULID.
+                            commit:
+                              type: string
+                              pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                          required:
+                            - kind
+                            - bindingId
+                            - commit
+                          additionalProperties: false
+                        - type: object
+                          properties:
+                            kind:
+                              type: string
+                              const: produced
+                            sha256:
+                              type: string
+                              pattern: ^[0-9a-f]{64}$
+                          required:
+                            - kind
+                            - sha256
+                          additionalProperties: false
+                        - type: object
+                          properties:
+                            kind:
+                              type: string
+                              const: object
+                            location:
+                              type: string
+                              pattern: ^s3:\/\/.*
+                            version:
+                              type: string
+                              minLength: 1
+                            sha256:
+                              type: string
+                              pattern: ^[0-9a-f]{64}$
+                          required:
+                            - kind
+                            - location
+                          additionalProperties: false
+                    - minItems: 1
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          kind:
+                            type: string
+                            const: repository
+                          bindingId:
+                            type: string
+                            minLength: 34
+                            maxLength: 34
+                            pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                            description: binding_ followed by a canonical 26-character uppercase ULID.
+                          commit:
+                            type: string
+                            pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                        required:
+                          - kind
+                          - bindingId
+                          - commit
+                        additionalProperties: false
+                - type: "null"
+            actor:
+              oneOf:
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      const: human
+                    account:
+                      type: string
+                    name:
+                      type: string
+                  required:
+                    - kind
+                    - account
+                    - name
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      const: execution
+                    executionId:
+                      type: string
+                      minLength: 36
+                      maxLength: 36
+                      pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: execution_ followed by a canonical 26-character uppercase ULID.
+                    clientId:
+                      anyOf:
+                        - type: string
+                          minLength: 42
+                          maxLength: 42
+                          pattern: ^client_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                          description: client_identity_ followed by a canonical 26-character uppercase
+                            ULID.
+                        - type: "null"
+                    name:
+                      anyOf:
+                        - type: string
+                        - type: "null"
+                  required:
+                    - kind
+                    - executionId
+                    - clientId
+                    - name
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      const: service
+                    service:
+                      type: string
+                      enum:
+                        - scheduler
+                        - mission
+                  required:
+                    - kind
+                    - service
+                  additionalProperties: false
+            createdAt:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+              description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+            currency:
+              anyOf:
+                - type: object
+                  properties:
+                    current:
+                      type: boolean
+                    contextMatches:
+                      type: boolean
+                    authorityAdmits:
+                      type: boolean
+                    orderSelected:
+                      type: boolean
+                    reasons:
+                      type: array
+                      items:
+                        type: string
+                        minLength: 1
+                  required:
+                    - current
+                    - contextMatches
+                    - authorityAdmits
+                    - orderSelected
+                    - reasons
+                  additionalProperties: false
+                - type: "null"
+            childNodeIds:
+              type: array
+              items:
+                type: string
+                minLength: 31
+                maxLength: 31
+                pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: node_ followed by a canonical 26-character uppercase ULID.
+            workerVersion:
+              anyOf:
+                - type: string
+                  minLength: 1
+                - type: "null"
+          required:
+            - id
+            - nodeId
+            - executionId
+            - attempt
+            - nodeRevision
+            - evidenceIds
+            - childOutcomeIds
+            - result
+            - rationale
+            - testedInput
+            - actor
+            - createdAt
+            - currency
+            - childNodeIds
+            - workerVersion
+          additionalProperties: false
+        node:
+          oneOf:
+            - type: object
+              properties:
+                id:
+                  type: string
+                  minLength: 31
+                  maxLength: 31
+                  pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: node_ followed by a canonical 26-character uppercase ULID.
+                filename:
+                  type: string
+                  pattern: ^[a-z][a-z0-9_-]*\.md$
+                missionId:
+                  type: string
+                  minLength: 34
+                  maxLength: 34
+                  pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: mission_ followed by a canonical 26-character uppercase ULID.
+                parentId:
+                  anyOf:
+                    - type: string
+                      minLength: 31
+                      maxLength: 31
+                      pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: node_ followed by a canonical 26-character uppercase ULID.
+                    - type: "null"
+                visibleRevision:
+                  type: integer
+                  exclusiveMinimum: 0
+                  maximum: 9007199254740991
+                content:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                    requirement:
+                      type: string
+                      minLength: 1
+                    criterion:
+                      type: string
+                      minLength: 1
+                    verifications:
+                      minItems: 1
+                      type: array
+                      items:
+                        type: string
+                        minLength: 1
+                    bindings:
+                      type: array
+                      items:
+                        type: string
+                  required:
+                    - name
+                    - requirement
+                    - criterion
+                    - verifications
+                    - bindings
+                  additionalProperties: false
+                retiredAt:
+                  anyOf:
+                    - type: integer
+                      minimum: 0
+                      maximum: 9007199254740991
+                      description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                    - type: "null"
+                pinnedByAttempts:
+                  type: array
+                  items:
+                    type: integer
+                    exclusiveMinimum: 0
+                    maximum: 9007199254740991
+                kind:
+                  type: string
+                  const: initiative
+                blockedContext:
+                  type: object
+                  properties:
+                    outcome:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          minLength: 34
+                          maxLength: 34
+                          pattern: ^outcome_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                          description: outcome_ followed by a canonical 26-character uppercase ULID.
+                        nodeId:
+                          type: string
+                          minLength: 31
+                          maxLength: 31
+                          pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                          description: node_ followed by a canonical 26-character uppercase ULID.
+                        attempt:
+                          type: integer
+                          minimum: 0
+                          maximum: 9007199254740991
+                        nodeRevision:
+                          type: integer
+                          exclusiveMinimum: 0
+                          maximum: 9007199254740991
+                        closingEvent:
+                          type: string
+                          enum:
+                            - success-override
+                            - human-discard
+                            - human-block
+                            - assessment-not-passed
+                            - external-failed
+                            - assessment-passed
+                            - external-success
+                        result:
+                          type: string
+                          enum:
+                            - success
+                            - criterion-not-met
+                            - undetermined
+                        assessmentId:
+                          type: string
+                          minLength: 37
+                          maxLength: 37
+                          pattern: ^assessment_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                          description: assessment_ followed by a canonical 26-character uppercase ULID.
+                        evidenceIds:
+                          type: array
+                          items:
+                            type: string
+                            minLength: 35
+                            maxLength: 35
+                            pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                            description: evidence_ followed by a canonical 26-character uppercase ULID.
+                        createdAt:
+                          type: integer
+                          minimum: 0
+                          maximum: 9007199254740991
+                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                      required:
+                        - id
+                        - nodeId
+                        - attempt
+                        - nodeRevision
+                        - closingEvent
+                        - result
+                        - assessmentId
+                        - evidenceIds
+                        - createdAt
+                      additionalProperties: false
+                    requests:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            minLength: 35
+                            maxLength: 35
+                            pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                            description: evidence_ followed by a canonical 26-character uppercase ULID.
+                          nodeId:
+                            type: string
+                            minLength: 31
+                            maxLength: 31
+                            pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                            description: node_ followed by a canonical 26-character uppercase ULID.
+                          attempt:
+                            type: integer
+                            minimum: 0
+                            maximum: 9007199254740991
+                          subject:
+                            type: string
+                            minLength: 1
+                          assets:
+                            type: array
+                            items:
+                              oneOf:
+                                - type: object
+                                  properties:
+                                    id:
+                                      type: string
+                                      minLength: 41
+                                      maxLength: 41
+                                      pattern: ^evidence_asset_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                      description: evidence_asset_ followed by a canonical 26-character uppercase
+                                        ULID.
+                                    publishedAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    expiredAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    kind:
+                                      type: string
+                                      const: repository
+                                    address:
+                                      type: object
+                                      properties:
+                                        kind:
+                                          type: string
+                                          const: repository
+                                        bindingId:
+                                          type: string
+                                          minLength: 34
+                                          maxLength: 34
+                                          pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                          description: binding_ followed by a canonical 26-character uppercase ULID.
+                                        commit:
+                                          type: string
+                                          pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                                      required:
+                                        - kind
+                                        - bindingId
+                                        - commit
+                                      additionalProperties: false
+                                  required:
+                                    - id
+                                    - publishedAt
+                                    - expiredAt
+                                    - kind
+                                    - address
+                                  additionalProperties: false
+                                - type: object
+                                  properties:
+                                    id:
+                                      type: string
+                                      minLength: 41
+                                      maxLength: 41
+                                      pattern: ^evidence_asset_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                      description: evidence_asset_ followed by a canonical 26-character uppercase
+                                        ULID.
+                                    publishedAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    expiredAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    kind:
+                                      type: string
+                                      const: produced
+                                    address:
+                                      type: object
+                                      properties:
+                                        kind:
+                                          type: string
+                                          const: produced
+                                        sha256:
+                                          type: string
+                                          pattern: ^[0-9a-f]{64}$
+                                      required:
+                                        - kind
+                                        - sha256
+                                      additionalProperties: false
+                                  required:
+                                    - id
+                                    - publishedAt
+                                    - expiredAt
+                                    - kind
+                                    - address
+                                  additionalProperties: false
+                                - type: object
+                                  properties:
+                                    id:
+                                      type: string
+                                      minLength: 41
+                                      maxLength: 41
+                                      pattern: ^evidence_asset_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                      description: evidence_asset_ followed by a canonical 26-character uppercase
+                                        ULID.
+                                    publishedAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    expiredAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    kind:
+                                      type: string
+                                      const: object
+                                    address:
+                                      type: object
+                                      properties:
+                                        kind:
+                                          type: string
+                                          const: object
+                                        location:
+                                          type: string
+                                          pattern: ^s3:\/\/.*
+                                        version:
+                                          type: string
+                                          minLength: 1
+                                        sha256:
+                                          type: string
+                                          pattern: ^[0-9a-f]{64}$
+                                      required:
+                                        - kind
+                                        - location
+                                      additionalProperties: false
+                                    storageBindingId:
+                                      type: string
+                                      minLength: 34
+                                      maxLength: 34
+                                      pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                      description: binding_ followed by a canonical 26-character uppercase ULID.
+                                    size:
+                                      type: integer
+                                      minimum: 0
+                                      maximum: 9007199254740991
+                                    mediaType:
+                                      type: string
+                                      minLength: 1
+                                  required:
+                                    - id
+                                    - publishedAt
+                                    - expiredAt
+                                    - kind
+                                    - address
+                                    - storageBindingId
+                                    - size
+                                    - mediaType
+                                  additionalProperties: false
+                                - type: object
+                                  properties:
+                                    id:
+                                      type: string
+                                      minLength: 41
+                                      maxLength: 41
+                                      pattern: ^evidence_asset_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                      description: evidence_asset_ followed by a canonical 26-character uppercase
+                                        ULID.
+                                    publishedAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    expiredAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    kind:
+                                      type: string
+                                      const: platform
+                                    address:
+                                      oneOf:
+                                        - type: object
+                                          properties:
+                                            kind:
+                                              type: string
+                                              const: pull_request
+                                            resourceIdentity:
+                                              type: string
+                                              minLength: 1
+                                            number:
+                                              type: integer
+                                              exclusiveMinimum: 0
+                                              maximum: 9007199254740991
+                                          required:
+                                            - kind
+                                            - resourceIdentity
+                                            - number
+                                          additionalProperties: false
+                                        - type: object
+                                          properties:
+                                            kind:
+                                              type: string
+                                              const: branch_push
+                                            resourceIdentity:
+                                              type: string
+                                              minLength: 1
+                                            branch:
+                                              type: string
+                                              minLength: 1
+                                            commit:
+                                              type: string
+                                              pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                                          required:
+                                            - kind
+                                            - resourceIdentity
+                                            - branch
+                                            - commit
+                                          additionalProperties: false
+                                  required:
+                                    - id
+                                    - publishedAt
+                                    - expiredAt
+                                    - kind
+                                    - address
+                                  additionalProperties: false
+                          provenance:
+                            oneOf:
+                              - type: object
+                                properties:
+                                  kind:
+                                    type: string
+                                    const: human
+                                  account:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                  - kind
+                                  - account
+                                  - name
+                                additionalProperties: false
+                              - type: object
+                                properties:
+                                  kind:
+                                    type: string
+                                    const: execution
+                                  executionId:
+                                    type: string
+                                    minLength: 36
+                                    maxLength: 36
+                                    pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                    description: execution_ followed by a canonical 26-character uppercase ULID.
+                                  clientId:
+                                    anyOf:
+                                      - type: string
+                                        minLength: 42
+                                        maxLength: 42
+                                        pattern: ^client_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                        description: client_identity_ followed by a canonical 26-character uppercase
+                                          ULID.
+                                      - type: "null"
+                                  name:
+                                    anyOf:
+                                      - type: string
+                                      - type: "null"
+                                required:
+                                  - kind
+                                  - executionId
+                                  - clientId
+                                  - name
+                                additionalProperties: false
+                              - type: object
+                                properties:
+                                  kind:
+                                    type: string
+                                    const: service
+                                  service:
+                                    type: string
+                                    enum:
+                                      - scheduler
+                                      - mission
+                                required:
+                                  - kind
+                                  - service
+                                additionalProperties: false
+                          createdAt:
+                            type: integer
+                            minimum: 0
+                            maximum: 9007199254740991
+                            description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                          requirementKey:
+                            type: string
+                            pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$
+                          endState:
+                            type: string
+                            enum:
+                              - expected
+                              - other
+                          verification:
+                            type: object
+                            properties:
+                              testedInput:
+                                anyOf:
+                                  - oneOf:
+                                      - type: object
+                                        properties:
+                                          kind:
+                                            type: string
+                                            const: repository
+                                          bindingId:
+                                            type: string
+                                            minLength: 34
+                                            maxLength: 34
+                                            pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                            description: binding_ followed by a canonical 26-character uppercase ULID.
+                                          commit:
+                                            type: string
+                                            pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                                        required:
+                                          - kind
+                                          - bindingId
+                                          - commit
+                                        additionalProperties: false
+                                      - type: object
+                                        properties:
+                                          kind:
+                                            type: string
+                                            const: produced
+                                          sha256:
+                                            type: string
+                                            pattern: ^[0-9a-f]{64}$
+                                        required:
+                                          - kind
+                                          - sha256
+                                        additionalProperties: false
+                                      - type: object
+                                        properties:
+                                          kind:
+                                            type: string
+                                            const: object
+                                          location:
+                                            type: string
+                                            pattern: ^s3:\/\/.*
+                                          version:
+                                            type: string
+                                            minLength: 1
+                                          sha256:
+                                            type: string
+                                            pattern: ^[0-9a-f]{64}$
+                                        required:
+                                          - kind
+                                          - location
+                                        additionalProperties: false
+                                  - minItems: 1
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        kind:
+                                          type: string
+                                          const: repository
+                                        bindingId:
+                                          type: string
+                                          minLength: 34
+                                          maxLength: 34
+                                          pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                          description: binding_ followed by a canonical 26-character uppercase ULID.
+                                        commit:
+                                          type: string
+                                          pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                                      required:
+                                        - kind
+                                        - bindingId
+                                        - commit
+                                      additionalProperties: false
+                              results:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    command:
+                                      type: string
+                                      minLength: 1
+                                    exitCode:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: -9007199254740991
+                                          maximum: 9007199254740991
+                                        - type: "null"
+                                    signal:
+                                      anyOf:
+                                        - type: string
+                                          minLength: 1
+                                        - type: "null"
+                                    timedOut:
+                                      type: boolean
+                                  required:
+                                    - command
+                                    - exitCode
+                                    - signal
+                                    - timedOut
+                                  additionalProperties: false
+                            required:
+                              - testedInput
+                              - results
+                            additionalProperties: false
+                        required:
+                          - id
+                          - nodeId
+                          - attempt
+                          - subject
+                          - assets
+                          - provenance
+                          - createdAt
+                        additionalProperties: false
+                  required:
+                    - outcome
+                    - requests
+                  additionalProperties: false
+                state:
+                  type: string
+                  enum:
+                    - Pending
+                    - Available
+                    - Executing
+                    - Waiting
+                    - Evaluating
+                    - Blocked
+                    - Paused
+                    - Completed
+                    - Discarded
+                    - External.Requested
+                    - External.Success
+                    - External.Failed
+                attempt:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+                priority:
+                  type: integer
+                  minimum: -9007199254740991
+                  maximum: 9007199254740991
+              required:
+                - id
+                - filename
+                - missionId
+                - parentId
+                - visibleRevision
+                - content
+                - retiredAt
+                - pinnedByAttempts
+                - kind
+                - state
+                - attempt
+                - priority
+              additionalProperties: false
+            - type: object
+              properties:
+                id:
+                  type: string
+                  minLength: 31
+                  maxLength: 31
+                  pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: node_ followed by a canonical 26-character uppercase ULID.
+                filename:
+                  type: string
+                  pattern: ^[a-z][a-z0-9_-]*\.md$
+                missionId:
+                  type: string
+                  minLength: 34
+                  maxLength: 34
+                  pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: mission_ followed by a canonical 26-character uppercase ULID.
+                parentId:
+                  anyOf:
+                    - type: string
+                      minLength: 31
+                      maxLength: 31
+                      pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: node_ followed by a canonical 26-character uppercase ULID.
+                    - type: "null"
+                visibleRevision:
+                  type: integer
+                  exclusiveMinimum: 0
+                  maximum: 9007199254740991
+                content:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                    requirement:
+                      type: string
+                      minLength: 1
+                    criterion:
+                      type: string
+                      minLength: 1
+                    verifications:
+                      minItems: 1
+                      type: array
+                      items:
+                        type: string
+                        minLength: 1
+                    bindings:
+                      type: array
+                      items:
+                        type: string
+                  required:
+                    - name
+                    - requirement
+                    - criterion
+                    - verifications
+                    - bindings
+                  additionalProperties: false
+                retiredAt:
+                  anyOf:
+                    - type: integer
+                      minimum: 0
+                      maximum: 9007199254740991
+                      description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                    - type: "null"
+                pinnedByAttempts:
+                  type: array
+                  items:
+                    type: integer
+                    exclusiveMinimum: 0
+                    maximum: 9007199254740991
+                kind:
+                  type: string
+                  const: objective
+                blockedContext:
+                  type: object
+                  properties:
+                    outcome:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          minLength: 34
+                          maxLength: 34
+                          pattern: ^outcome_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                          description: outcome_ followed by a canonical 26-character uppercase ULID.
+                        nodeId:
+                          type: string
+                          minLength: 31
+                          maxLength: 31
+                          pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                          description: node_ followed by a canonical 26-character uppercase ULID.
+                        attempt:
+                          type: integer
+                          minimum: 0
+                          maximum: 9007199254740991
+                        nodeRevision:
+                          type: integer
+                          exclusiveMinimum: 0
+                          maximum: 9007199254740991
+                        closingEvent:
+                          type: string
+                          enum:
+                            - success-override
+                            - human-discard
+                            - human-block
+                            - assessment-not-passed
+                            - external-failed
+                            - assessment-passed
+                            - external-success
+                        result:
+                          type: string
+                          enum:
+                            - success
+                            - criterion-not-met
+                            - undetermined
+                        assessmentId:
+                          type: string
+                          minLength: 37
+                          maxLength: 37
+                          pattern: ^assessment_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                          description: assessment_ followed by a canonical 26-character uppercase ULID.
+                        evidenceIds:
+                          type: array
+                          items:
+                            type: string
+                            minLength: 35
+                            maxLength: 35
+                            pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                            description: evidence_ followed by a canonical 26-character uppercase ULID.
+                        createdAt:
+                          type: integer
+                          minimum: 0
+                          maximum: 9007199254740991
+                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                      required:
+                        - id
+                        - nodeId
+                        - attempt
+                        - nodeRevision
+                        - closingEvent
+                        - result
+                        - assessmentId
+                        - evidenceIds
+                        - createdAt
+                      additionalProperties: false
+                    requests:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            minLength: 35
+                            maxLength: 35
+                            pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                            description: evidence_ followed by a canonical 26-character uppercase ULID.
+                          nodeId:
+                            type: string
+                            minLength: 31
+                            maxLength: 31
+                            pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                            description: node_ followed by a canonical 26-character uppercase ULID.
+                          attempt:
+                            type: integer
+                            minimum: 0
+                            maximum: 9007199254740991
+                          subject:
+                            type: string
+                            minLength: 1
+                          assets:
+                            type: array
+                            items:
+                              oneOf:
+                                - type: object
+                                  properties:
+                                    id:
+                                      type: string
+                                      minLength: 41
+                                      maxLength: 41
+                                      pattern: ^evidence_asset_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                      description: evidence_asset_ followed by a canonical 26-character uppercase
+                                        ULID.
+                                    publishedAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    expiredAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    kind:
+                                      type: string
+                                      const: repository
+                                    address:
+                                      type: object
+                                      properties:
+                                        kind:
+                                          type: string
+                                          const: repository
+                                        bindingId:
+                                          type: string
+                                          minLength: 34
+                                          maxLength: 34
+                                          pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                          description: binding_ followed by a canonical 26-character uppercase ULID.
+                                        commit:
+                                          type: string
+                                          pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                                      required:
+                                        - kind
+                                        - bindingId
+                                        - commit
+                                      additionalProperties: false
+                                  required:
+                                    - id
+                                    - publishedAt
+                                    - expiredAt
+                                    - kind
+                                    - address
+                                  additionalProperties: false
+                                - type: object
+                                  properties:
+                                    id:
+                                      type: string
+                                      minLength: 41
+                                      maxLength: 41
+                                      pattern: ^evidence_asset_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                      description: evidence_asset_ followed by a canonical 26-character uppercase
+                                        ULID.
+                                    publishedAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    expiredAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    kind:
+                                      type: string
+                                      const: produced
+                                    address:
+                                      type: object
+                                      properties:
+                                        kind:
+                                          type: string
+                                          const: produced
+                                        sha256:
+                                          type: string
+                                          pattern: ^[0-9a-f]{64}$
+                                      required:
+                                        - kind
+                                        - sha256
+                                      additionalProperties: false
+                                  required:
+                                    - id
+                                    - publishedAt
+                                    - expiredAt
+                                    - kind
+                                    - address
+                                  additionalProperties: false
+                                - type: object
+                                  properties:
+                                    id:
+                                      type: string
+                                      minLength: 41
+                                      maxLength: 41
+                                      pattern: ^evidence_asset_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                      description: evidence_asset_ followed by a canonical 26-character uppercase
+                                        ULID.
+                                    publishedAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    expiredAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    kind:
+                                      type: string
+                                      const: object
+                                    address:
+                                      type: object
+                                      properties:
+                                        kind:
+                                          type: string
+                                          const: object
+                                        location:
+                                          type: string
+                                          pattern: ^s3:\/\/.*
+                                        version:
+                                          type: string
+                                          minLength: 1
+                                        sha256:
+                                          type: string
+                                          pattern: ^[0-9a-f]{64}$
+                                      required:
+                                        - kind
+                                        - location
+                                      additionalProperties: false
+                                    storageBindingId:
+                                      type: string
+                                      minLength: 34
+                                      maxLength: 34
+                                      pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                      description: binding_ followed by a canonical 26-character uppercase ULID.
+                                    size:
+                                      type: integer
+                                      minimum: 0
+                                      maximum: 9007199254740991
+                                    mediaType:
+                                      type: string
+                                      minLength: 1
+                                  required:
+                                    - id
+                                    - publishedAt
+                                    - expiredAt
+                                    - kind
+                                    - address
+                                    - storageBindingId
+                                    - size
+                                    - mediaType
+                                  additionalProperties: false
+                                - type: object
+                                  properties:
+                                    id:
+                                      type: string
+                                      minLength: 41
+                                      maxLength: 41
+                                      pattern: ^evidence_asset_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                      description: evidence_asset_ followed by a canonical 26-character uppercase
+                                        ULID.
+                                    publishedAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    expiredAt:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: 0
+                                          maximum: 9007199254740991
+                                          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                                        - type: "null"
+                                    kind:
+                                      type: string
+                                      const: platform
+                                    address:
+                                      oneOf:
+                                        - type: object
+                                          properties:
+                                            kind:
+                                              type: string
+                                              const: pull_request
+                                            resourceIdentity:
+                                              type: string
+                                              minLength: 1
+                                            number:
+                                              type: integer
+                                              exclusiveMinimum: 0
+                                              maximum: 9007199254740991
+                                          required:
+                                            - kind
+                                            - resourceIdentity
+                                            - number
+                                          additionalProperties: false
+                                        - type: object
+                                          properties:
+                                            kind:
+                                              type: string
+                                              const: branch_push
+                                            resourceIdentity:
+                                              type: string
+                                              minLength: 1
+                                            branch:
+                                              type: string
+                                              minLength: 1
+                                            commit:
+                                              type: string
+                                              pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                                          required:
+                                            - kind
+                                            - resourceIdentity
+                                            - branch
+                                            - commit
+                                          additionalProperties: false
+                                  required:
+                                    - id
+                                    - publishedAt
+                                    - expiredAt
+                                    - kind
+                                    - address
+                                  additionalProperties: false
+                          provenance:
+                            oneOf:
+                              - type: object
+                                properties:
+                                  kind:
+                                    type: string
+                                    const: human
+                                  account:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                  - kind
+                                  - account
+                                  - name
+                                additionalProperties: false
+                              - type: object
+                                properties:
+                                  kind:
+                                    type: string
+                                    const: execution
+                                  executionId:
+                                    type: string
+                                    minLength: 36
+                                    maxLength: 36
+                                    pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                    description: execution_ followed by a canonical 26-character uppercase ULID.
+                                  clientId:
+                                    anyOf:
+                                      - type: string
+                                        minLength: 42
+                                        maxLength: 42
+                                        pattern: ^client_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                        description: client_identity_ followed by a canonical 26-character uppercase
+                                          ULID.
+                                      - type: "null"
+                                  name:
+                                    anyOf:
+                                      - type: string
+                                      - type: "null"
+                                required:
+                                  - kind
+                                  - executionId
+                                  - clientId
+                                  - name
+                                additionalProperties: false
+                              - type: object
+                                properties:
+                                  kind:
+                                    type: string
+                                    const: service
+                                  service:
+                                    type: string
+                                    enum:
+                                      - scheduler
+                                      - mission
+                                required:
+                                  - kind
+                                  - service
+                                additionalProperties: false
+                          createdAt:
+                            type: integer
+                            minimum: 0
+                            maximum: 9007199254740991
+                            description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                          requirementKey:
+                            type: string
+                            pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$
+                          endState:
+                            type: string
+                            enum:
+                              - expected
+                              - other
+                          verification:
+                            type: object
+                            properties:
+                              testedInput:
+                                anyOf:
+                                  - oneOf:
+                                      - type: object
+                                        properties:
+                                          kind:
+                                            type: string
+                                            const: repository
+                                          bindingId:
+                                            type: string
+                                            minLength: 34
+                                            maxLength: 34
+                                            pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                            description: binding_ followed by a canonical 26-character uppercase ULID.
+                                          commit:
+                                            type: string
+                                            pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                                        required:
+                                          - kind
+                                          - bindingId
+                                          - commit
+                                        additionalProperties: false
+                                      - type: object
+                                        properties:
+                                          kind:
+                                            type: string
+                                            const: produced
+                                          sha256:
+                                            type: string
+                                            pattern: ^[0-9a-f]{64}$
+                                        required:
+                                          - kind
+                                          - sha256
+                                        additionalProperties: false
+                                      - type: object
+                                        properties:
+                                          kind:
+                                            type: string
+                                            const: object
+                                          location:
+                                            type: string
+                                            pattern: ^s3:\/\/.*
+                                          version:
+                                            type: string
+                                            minLength: 1
+                                          sha256:
+                                            type: string
+                                            pattern: ^[0-9a-f]{64}$
+                                        required:
+                                          - kind
+                                          - location
+                                        additionalProperties: false
+                                  - minItems: 1
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        kind:
+                                          type: string
+                                          const: repository
+                                        bindingId:
+                                          type: string
+                                          minLength: 34
+                                          maxLength: 34
+                                          pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                          description: binding_ followed by a canonical 26-character uppercase ULID.
+                                        commit:
+                                          type: string
+                                          pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                                      required:
+                                        - kind
+                                        - bindingId
+                                        - commit
+                                      additionalProperties: false
+                              results:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    command:
+                                      type: string
+                                      minLength: 1
+                                    exitCode:
+                                      anyOf:
+                                        - type: integer
+                                          minimum: -9007199254740991
+                                          maximum: 9007199254740991
+                                        - type: "null"
+                                    signal:
+                                      anyOf:
+                                        - type: string
+                                          minLength: 1
+                                        - type: "null"
+                                    timedOut:
+                                      type: boolean
+                                  required:
+                                    - command
+                                    - exitCode
+                                    - signal
+                                    - timedOut
+                                  additionalProperties: false
+                            required:
+                              - testedInput
+                              - results
+                            additionalProperties: false
+                        required:
+                          - id
+                          - nodeId
+                          - attempt
+                          - subject
+                          - assets
+                          - provenance
+                          - createdAt
+                        additionalProperties: false
+                  required:
+                    - outcome
+                    - requests
+                  additionalProperties: false
+                state:
+                  type: string
+                  enum:
+                    - Pending
+                    - Available
+                    - Executing
+                    - Waiting
+                    - Evaluating
+                    - Blocked
+                    - Paused
+                    - Completed
+                    - Discarded
+                    - External.Requested
+                    - External.Success
+                    - External.Failed
+                attempt:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+                priority:
+                  type: integer
+                  minimum: -9007199254740991
+                  maximum: 9007199254740991
+              required:
+                - id
+                - filename
+                - missionId
+                - parentId
+                - visibleRevision
+                - content
+                - retiredAt
+                - pinnedByAttempts
+                - kind
+                - state
+                - attempt
+                - priority
+              additionalProperties: false
+            - type: object
+              properties:
+                id:
+                  type: string
+                  minLength: 31
+                  maxLength: 31
+                  pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: node_ followed by a canonical 26-character uppercase ULID.
+                filename:
+                  type: string
+                  pattern: ^[a-z][a-z0-9_-]*\.md$
+                missionId:
+                  type: string
+                  minLength: 34
+                  maxLength: 34
+                  pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: mission_ followed by a canonical 26-character uppercase ULID.
+                parentId:
+                  anyOf:
+                    - type: string
+                      minLength: 31
+                      maxLength: 31
+                      pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: node_ followed by a canonical 26-character uppercase ULID.
+                    - type: "null"
+                visibleRevision:
+                  type: integer
+                  exclusiveMinimum: 0
+                  maximum: 9007199254740991
+                content:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                    requirement:
+                      type: string
+                      minLength: 1
+                    criterion:
+                      type: string
+                      minLength: 1
+                    verifications:
+                      minItems: 1
+                      type: array
+                      items:
+                        type: string
+                        minLength: 1
+                    bindings:
+                      type: array
+                      items:
+                        type: string
+                  required:
+                    - name
+                    - requirement
+                    - criterion
+                    - verifications
+                    - bindings
+                  additionalProperties: false
+                retiredAt:
+                  anyOf:
+                    - type: integer
+                      minimum: 0
+                      maximum: 9007199254740991
+                      description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                    - type: "null"
+                pinnedByAttempts:
+                  type: array
+                  items:
+                    type: integer
+                    exclusiveMinimum: 0
+                    maximum: 9007199254740991
+                kind:
+                  type: string
+                  const: task
+              required:
+                - id
+                - filename
+                - missionId
+                - parentId
+                - visibleRevision
+                - content
+                - retiredAt
+                - pinnedByAttempts
+                - kind
+              additionalProperties: false
+        outcome:
+          anyOf:
+            - type: object
+              properties:
+                id:
+                  type: string
+                  minLength: 34
+                  maxLength: 34
+                  pattern: ^outcome_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: outcome_ followed by a canonical 26-character uppercase ULID.
+                nodeId:
+                  type: string
+                  minLength: 31
+                  maxLength: 31
+                  pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: node_ followed by a canonical 26-character uppercase ULID.
+                attempt:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+                nodeRevision:
+                  type: integer
+                  exclusiveMinimum: 0
+                  maximum: 9007199254740991
+                closingEvent:
+                  type: string
+                  enum:
+                    - success-override
+                    - human-discard
+                    - human-block
+                    - assessment-not-passed
+                    - external-failed
+                    - assessment-passed
+                    - external-success
+                result:
+                  type: string
+                  enum:
+                    - success
+                    - criterion-not-met
+                    - undetermined
+                assessmentId:
+                  type: string
+                  minLength: 37
+                  maxLength: 37
+                  pattern: ^assessment_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: assessment_ followed by a canonical 26-character uppercase ULID.
+                evidenceIds:
+                  type: array
+                  items:
+                    type: string
+                    minLength: 35
+                    maxLength: 35
+                    pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: evidence_ followed by a canonical 26-character uppercase ULID.
+                createdAt:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+                  description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+              required:
+                - id
+                - nodeId
+                - attempt
+                - nodeRevision
+                - closingEvent
+                - result
+                - assessmentId
+                - evidenceIds
+                - createdAt
+              additionalProperties: false
+            - type: "null"
+      required:
+        - assessment
+        - node
+        - outcome
       additionalProperties: false

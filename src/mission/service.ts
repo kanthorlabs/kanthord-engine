@@ -42,6 +42,7 @@ import { requestEvidence } from "./evidence-request.ts";
 import { submitEvidence } from "./evidence-submit.ts";
 import { evidencePage, getEvidence } from "./evidence-read.ts";
 import { executionContentBound, readContent } from "./evidence-content-read.ts";
+import { submitAssessment } from "./assessment-submit.ts";
 import { claim, release, loss } from "./transitions.ts";
 import {
   attemptPage,
@@ -141,6 +142,25 @@ export class MissionService
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["assessment.submit"],
+      ({ params, body }, caller) => {
+        const claim = caller.execution;
+        assert.ok(claim);
+        const result = caller.commit((tx) =>
+          submitAssessment(
+            tx,
+            this.dependencies,
+            claim,
+            params.nodeId,
+            body,
+            Date.now(),
+          ),
+        );
+        this.dependencies.wakeup.wake(claim.projectId);
+        return result;
+      },
+    );
     registry.register(
       missionOperations["evidence.asset.content.get"],
       ({ params }, caller) =>

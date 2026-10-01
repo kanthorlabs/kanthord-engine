@@ -126,6 +126,7 @@ test("published heartbeat projection names its operation and carries no 204 cont
   assert.equal("content" in response, false);
 });
 const MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS = [
+  ["assessment.list", "mission.assessment.submit", "properties", "node"],
   ["node.unblock", "mission.node.unblock", "properties", "node"],
   ["node.override", "mission.node.override", "properties", "node"],
   ["node.block", "mission.node.block", "properties", "node"],
