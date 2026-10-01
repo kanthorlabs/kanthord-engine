@@ -102,6 +102,44 @@ test("heartbeat CLI has offline help, requires a token and prints null after reg
   assert.equal(JSON.parse(heartbeat.stdout), null);
 });
 
+test("resume CLI validates input and token and denies machine access", async (t) => {
+  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
+  const env = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+  };
+  const leaf = ["worker", "instance", "resume"];
+  assert.equal(
+    (await command([...leaf, "--help"], env)).code,
+    ExitCode.Success,
+  );
+  const invalid = await command([...leaf, "invalid"], env);
+  assert.equal(invalid.code, ExitCode.Failure);
+  assert.match(
+    invalid.stderr,
+    /^cli.worker.instance.resume.invalid_runtime_identity:/,
+  );
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
+  const registration = await command(
+    ["worker", "register", "--token", token],
+    env,
+  );
+  assert.equal(registration.code, ExitCode.Success, registration.stderr);
+  const { runtimeIdentity } = JSON.parse(registration.stdout);
+  const absent = await command([...leaf, runtimeIdentity], env);
+  assert.equal(absent.code, ExitCode.Failure);
+  assert.match(absent.stderr, /^cli.worker.instance.resume.token_required:/);
+  const refused = await command(
+    [...leaf, runtimeIdentity, "--token", token],
+    env,
+  );
+  assert.equal(refused.code, ExitCode.Failure);
+  assert.match(refused.stderr, /^gateway.authentication.unauthorized:/);
+});
+
 test("worker catalog CLI lists ascending pages", async (t) => {
   const fixture = await gatewayFixture(t);
   const env = {

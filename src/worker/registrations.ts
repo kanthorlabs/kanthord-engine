@@ -5,6 +5,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import {
   WorkerErrorCode,
   type Registration,
+  type SchedulerClaims,
   type VerifiedClient,
   type WorkerBindingOf,
   type WorkerRegistrations,
@@ -16,8 +17,53 @@ import {
   readLiveByClient,
   readLiveOfClient,
   readRow,
+  reopenRegistration,
 } from "./instances.ts";
 import type { HeartbeatClock } from "./heartbeat.ts";
+
+export function resumeRegistration(
+  tx: Transaction,
+  runtimeIdentity: string,
+  now: number,
+  schedulerClaims: SchedulerClaims,
+  workerBindingOf: WorkerBindingOf,
+): boolean {
+  assert.ok(tx.database.isTransaction);
+  assert.ok(runtimeIdentity);
+  const row = readRow(tx, runtimeIdentity);
+  if (!row)
+    throw new OperationError(
+      HttpStatus.NotFound,
+      WorkerErrorCode.InstanceNotFound,
+      "Instance not found.",
+    );
+  if (row.endedAt === null) return false;
+  if (!schedulerClaims.runningExecutionOfRuntime(tx, runtimeIdentity, now))
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkerErrorCode.NoLiveExecution,
+      "Instance has no running execution.",
+    );
+  if (readLiveOfClient(tx, row.clientId))
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkerErrorCode.ClientLive,
+      "Client already holds a live registration.",
+    );
+  const binding = workerBindingOf(tx, row.projectId, row.resourceIdentity);
+  if (
+    !binding ||
+    binding.tombstone ||
+    countLive(tx, row.projectId, row.resourceIdentity) >= binding.instanceCount
+  )
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkerErrorCode.SlotUnavailable,
+      "Worker binding has no available registration slot.",
+    );
+  reopenRegistration(tx, runtimeIdentity);
+  return true;
+}
 
 export class TableRegistrations implements WorkerRegistrations {
   private readonly store: Store;

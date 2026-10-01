@@ -229,6 +229,11 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   assert.equal(healthcheck?.operationId, gatewayOperations.healthcheck.id);
   assert.equal(healthcheck?.["x-access-policy"], AccessPolicy.Human);
   assert.equal(
+    resolved.paths?.["/api/worker/instance/{runtimeIdentity}/resume"]?.post
+      ?.operationId,
+    workerOperations["instance.resume"].id,
+  );
+  assert.equal(
     resolved.paths?.["/api/worker/instance/{runtimeIdentity}"]?.delete
       ?.operationId,
     workerOperations["instance.deregister"].id,

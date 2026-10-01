@@ -325,6 +325,173 @@ test("deregistration owns its target, rolls back atomically and preserves a newe
 
 type OperationKey = Exclude<keyof typeof workerOperations, "register">;
 
+test("resume settles before admission, preserves live readings and reopens the same client registration", (t) => {
+  let now = 100;
+  let running = true;
+  let slot = true;
+  const calls: string[] = [];
+  const f = enablementFixture(t, {
+    monotonicNow: () => now,
+    schedulerClaims: {
+      ...fakeCollaborations.schedulerClaims,
+      runningExecutionOfRuntime: (tx, runtimeIdentity, time) => {
+        assert.ok(tx.database.isTransaction);
+        assert.ok(runtimeIdentity && Number.isSafeInteger(time));
+        calls.push("settle");
+        return running ? { executionId: "execution" } : null;
+      },
+    },
+    workerBindingOf: () => {
+      calls.push("binding");
+      return slot ? fakeCollaborations.workerBindingOf() : null;
+    },
+  });
+  const row = f.store.transaction((tx) =>
+    f.worker.registrations.register(tx, client, Date.now()),
+  );
+  f.worker.heartbeatClock.set(row.runtimeIdentity);
+  const handler = f.registry.get(
+    workerOperations["instance.resume"].id,
+  ).handler;
+  const input = {
+    params: { runtimeIdentity: row.runtimeIdentity },
+    query: {},
+    body: null,
+  };
+  calls.length = 0;
+  now += 100;
+  const age = f.worker.heartbeatClock.ageMs(row.runtimeIdentity);
+  assert.deepEqual(handler(input, f.caller), {
+    runtimeIdentity: row.runtimeIdentity,
+    registered: true,
+  });
+  assert.deepEqual(calls, []);
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), age);
+  f.store.transaction((tx) =>
+    f.worker.registrations.deregister(tx, row.runtimeIdentity, Date.now()),
+  );
+  running = false;
+  refuses(
+    () => handler(input, f.caller),
+    WorkerErrorCode.NoLiveExecution,
+    HttpStatus.Conflict,
+  );
+  assert.deepEqual(calls, ["settle"]);
+  running = true;
+  slot = false;
+  calls.length = 0;
+  refuses(
+    () => handler(input, f.caller),
+    WorkerErrorCode.SlotUnavailable,
+    HttpStatus.Conflict,
+  );
+  assert.deepEqual(calls, ["settle", "binding"]);
+  slot = true;
+  const commit = f.caller.commit;
+  const failure = new Error("rollback resume");
+  f.caller.commit = (write) =>
+    f.store.transaction((tx) => {
+      write(tx);
+      throw failure;
+    });
+  assert.throws(
+    () => handler(input, f.caller),
+    (error) => error === failure,
+  );
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), age);
+  assert.equal(f.worker.registrations.findByClient(client.clientId), undefined);
+  f.caller.commit = commit;
+  assert.deepEqual(handler(input, f.caller), {
+    runtimeIdentity: row.runtimeIdentity,
+    registered: true,
+  });
+  const renewedAge = 0;
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), renewedAge);
+  assert.equal(
+    f.store.transaction((tx) =>
+      f.worker.registrations.register(tx, client, Date.now()),
+    ).runtimeIdentity,
+    row.runtimeIdentity,
+  );
+});
+
+test("resume refuses unknown identities, occupied clients, full slots, tombstones and disabled bindings", (t) => {
+  let binding: ReturnType<WorkerBindingOf> =
+    fakeCollaborations.workerBindingOf();
+  const f = enablementFixture(t, {
+    workerBindingOf: () => binding,
+    schedulerClaims: {
+      ...fakeCollaborations.schedulerClaims,
+      runningExecutionOfRuntime: () => ({ executionId: "execution" }),
+    },
+  });
+  const handler = f.registry.get(
+    workerOperations["instance.resume"].id,
+  ).handler;
+  const row = f.store.transaction((tx) =>
+    f.worker.registrations.register(tx, client, Date.now()),
+  );
+  const input = {
+    params: { runtimeIdentity: row.runtimeIdentity },
+    query: {},
+    body: null,
+  };
+  refuses(
+    () =>
+      handler(
+        {
+          ...input,
+          params: { runtimeIdentity: createIdentity("worker_instance") },
+        },
+        f.caller,
+      ),
+    WorkerErrorCode.InstanceNotFound,
+    HttpStatus.NotFound,
+  );
+  f.store.transaction((tx) =>
+    f.worker.registrations.deregister(tx, row.runtimeIdentity, Date.now()),
+  );
+  const next = f.store.transaction((tx) =>
+    f.worker.registrations.register(tx, client, Date.now()),
+  );
+  refuses(
+    () => handler(input, f.caller),
+    WorkerErrorCode.ClientLive,
+    HttpStatus.Conflict,
+  );
+  f.store.transaction((tx) =>
+    f.worker.registrations.deregister(tx, next.runtimeIdentity, Date.now()),
+  );
+  const other = f.store.transaction((tx) =>
+    f.worker.registrations.register(
+      tx,
+      { ...client, clientId: "other" },
+      Date.now(),
+    ),
+  );
+  refuses(
+    () => handler(input, f.caller),
+    WorkerErrorCode.SlotUnavailable,
+    HttpStatus.Conflict,
+  );
+  f.store.transaction((tx) =>
+    f.worker.registrations.deregister(tx, other.runtimeIdentity, Date.now()),
+  );
+  for (const unavailable of [
+    null,
+    { ...fakeCollaborations.workerBindingOf(), tombstone: true },
+    { ...fakeCollaborations.workerBindingOf(), instanceCount: 0 },
+  ]) {
+    binding = unavailable;
+    refuses(
+      () => handler(input, f.caller),
+      WorkerErrorCode.SlotUnavailable,
+      HttpStatus.Conflict,
+    );
+  }
+  assert.equal(f.worker.registrations.findByClient(client.clientId), undefined);
+});
+
 test("start resets live heartbeats and sweep ends only expired rows while preserving reopened readings", async (t) => {
   let now = 1000;
   const window = 1;

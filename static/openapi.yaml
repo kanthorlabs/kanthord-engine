@@ -132,6 +132,8 @@ paths:
     $ref: ./openapi/worker/heartbeat.yaml#/pathItem
   /api/worker/instance/{runtimeIdentity}:
     $ref: ./openapi/worker/instance.deregister.yaml#/pathItem
+  /api/worker/instance/{runtimeIdentity}/resume:
+    $ref: ./openapi/worker/instance.resume.yaml#/pathItem
   /api/worker/register:
     $ref: ./openapi/worker/register.yaml#/pathItem
 components:

@@ -72,7 +72,7 @@ import {
   validateEffectiveConfig,
   validateProvider,
 } from "./configuration.ts";
-import { TableRegistrations } from "./registrations.ts";
+import { resumeRegistration, TableRegistrations } from "./registrations.ts";
 import type { WorkerConfig } from "./config.ts";
 import {
   HeartbeatClock,
@@ -890,6 +890,23 @@ export class WorkerService implements Service {
 
   declare(registry: OperationRegistry): void {
     this.declareDeregister(registry);
+    registry.register(
+      workerOperations["instance.resume"],
+      ({ params }, caller) => {
+        const { runtimeIdentity } = params;
+        const reopened = caller.commit((tx) =>
+          resumeRegistration(
+            tx,
+            runtimeIdentity,
+            Date.now(),
+            this.dependencies.schedulerClaims,
+            this.dependencies.workerBindingOf,
+          ),
+        );
+        if (reopened) this.heartbeatClock.set(runtimeIdentity);
+        return { runtimeIdentity, registered: true as const };
+      },
+    );
     registry.register(workerOperations.heartbeat, (_input, caller) =>
       caller.commit(() => null),
     );

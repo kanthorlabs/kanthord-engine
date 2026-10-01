@@ -214,6 +214,8 @@ export const LIST_LIMIT_MAX = 1000;
 
 export const WorkerErrorCode = {
   InstanceNotFound: "worker.instance.not_found",
+  NoLiveExecution: "worker.instance.no_live_execution",
+  ClientLive: "worker.instance.client_live",
   SlotUnavailable: "worker.instance.slot_unavailable",
   CatalogNotFound: "worker.catalog.not_found",
   AgentNotFound: "worker.agent.not_found",
@@ -486,6 +488,26 @@ export const workerOperations = {
     output: runtimeIdentityParams.extend({ registered: z.literal(false) }),
     description:
       "End the caller's named live registration and free its slot atomically. Same-key retries replay the recorded answer after the end.",
+  },
+  "instance.resume": {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.instance.resume",
+    method: HttpMethod.Post,
+    path: "/api/worker/instance/:runtimeIdentity/resume",
+    access: AccessPolicy.Human,
+    timeoutMs: 30000,
+    mutation: true,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: runtimeIdentityParams,
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: runtimeIdentityParams.extend({ registered: z.literal(true) }),
+    description:
+      "Resume an ended registration with a running execution and an available slot. A live registration is unchanged.",
   },
   register: {
     service: WORKER_SERVICE_NAME,

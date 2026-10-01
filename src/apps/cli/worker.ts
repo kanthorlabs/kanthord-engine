@@ -241,6 +241,35 @@ async function catalogGet(workerName: string, command: Command): Promise<void> {
   );
 }
 
+async function resume(
+  runtimeIdentity: string,
+  command: Command,
+): Promise<void> {
+  assert.equal(workerOperations["instance.resume"].access, AccessPolicy.Human);
+  assert.equal(workerOperations["instance.resume"].mutation, true);
+  if (!identitySchema("worker_instance").safeParse(runtimeIdentity).success)
+    throw new Diagnostic(
+      "cli.worker.instance.resume.invalid_runtime_identity",
+      "Expected a canonical worker_instance identity.",
+    );
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, "cli.worker.instance.resume.token_required");
+  const key = resolveKey(options);
+  const result = await httpClient(workerOperations, endpoint, token)[
+    "instance.resume"
+  ](
+    { params: { runtimeIdentity }, query: {}, body: null },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(
+    result,
+    "cli.worker.instance.resume.indeterminate",
+    key,
+  );
+  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+}
+
 async function get(agentName: string, command: Command): Promise<void> {
   const { endpoint, token } = resolveClient(command.optsWithGlobals());
   requireToken(token, GET_TOKEN_REQUIRED);
@@ -383,6 +412,14 @@ export function addWorkerCommand(program: Command): void {
     .command("instance")
     .description("Worker instance commands");
   instance.action(() => instance.help());
+  instance
+    .command("resume")
+    .description("Resume an ended registration with a running execution")
+    .argument("<runtime-identity>", "Runtime identity")
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
+    .action((runtimeIdentity: string, _options, command: Command) =>
+      resume(runtimeIdentity, command),
+    );
   instance
     .command("deregister")
     .description("End an owned live registration")
