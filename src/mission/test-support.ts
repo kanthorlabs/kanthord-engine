@@ -29,6 +29,11 @@ const CONSECUTIVE_LOSS_LIMIT = 3;
 const TEXT_MAX_BYTES = 32768;
 const FIXTURE_TIME = 100;
 const FIRST_REVISION = 1;
+const UNEXPECTED_COLLABORATION = "unexpected collaboration call";
+
+export function unexpectedCollaboration(): never {
+  throw new Error(UNEXPECTED_COLLABORATION);
+}
 
 export function controlHarness(
   t: TestContext,
@@ -101,11 +106,21 @@ export function missionHarness(
     calls.push({ method, arguments: args });
   };
   const dependencies: Dependencies = {
+    store,
+    intakeStorage: {
+      put: unexpectedCollaboration,
+      check: unexpectedCollaboration,
+      get: unexpectedCollaboration,
+      executionGet: unexpectedCollaboration,
+      delete: unexpectedCollaboration,
+    },
+    intakeCheck: { check: unexpectedCollaboration },
     config: {
       consecutiveLossLimit: CONSECUTIVE_LOSS_LIMIT,
       textMaxBytes: TEXT_MAX_BYTES,
     },
     bindings: {
+      storageBindingOf: unexpectedCollaboration,
       resolveBinding: (...args) => {
         record("bindings.resolveBinding", args);
         return null;

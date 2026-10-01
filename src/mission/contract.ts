@@ -10,6 +10,8 @@ import {
   type Operation,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
+import type { Context } from "../kernel/context.ts";
+import type { CallerIdentity } from "../kernel/caller.ts";
 
 export const MISSION_SERVICE_NAME = "mission";
 export const MISSION_IDENTITY_PREFIX = "mission";
@@ -24,6 +26,7 @@ export interface HumanActor {
 }
 
 export interface MissionBindings {
+  storageBindingOf(tx: Transaction, bindingId: string): StorageBinding | null;
   repositoryPolicyOf(
     tx: Transaction,
     bindingId: string,
@@ -80,7 +83,84 @@ export interface SchedulerClaims {
     tx: Transaction,
     nodeId: string,
     now: number,
-  ): { executionId: string } | null;
+  ): {
+    executionId: string;
+    runtimeIdentity: string;
+    attempt: number;
+    pinnedRevision: number;
+  } | null;
+}
+
+export interface IntakeCall {
+  context: Context;
+  identity: CallerIdentity;
+}
+
+export interface StorageBinding {
+  bindingId: string;
+  projectId: string;
+  endpoint: string;
+  bucket: string;
+  region: string;
+  prefix: string;
+  credential: string;
+  available: boolean;
+}
+
+export interface IntakeStorage {
+  put(
+    call: IntakeCall,
+    binding: StorageBinding,
+    key: string,
+    size: number,
+    sha256: string | null,
+  ): Promise<{
+    putUrl: string;
+    headers: Record<string, string>;
+    expiresAt: number;
+  }>;
+  check(
+    call: IntakeCall,
+    binding: StorageBinding,
+    key: string,
+    size: number,
+    sha256: string | null,
+  ): Promise<{ location: string; version: string | null }>;
+  get(
+    call: IntakeCall,
+    binding: StorageBinding,
+    key: string,
+    version: string | null,
+  ): Promise<{ getUrl: string; expiresAt: number }>;
+  executionGet(
+    call: IntakeCall,
+    binding: StorageBinding,
+    key: string,
+    version: string | null,
+  ): Promise<{ getUrl: string; expiresAt: number }>;
+  delete(
+    call: IntakeCall,
+    binding: StorageBinding,
+    key: string,
+    version: string | null,
+  ): Promise<void>;
+}
+
+export const CheckEndState = {
+  Expected: "expected",
+  Other: "other",
+  None: "none",
+} as const;
+export const checkEndStateSchema = z.enum(CheckEndState);
+
+export interface IntakeCheck {
+  check(
+    context: Context,
+    request: { frozenAction: FrozenAction; address: PlatformAddress },
+  ): Promise<{
+    endState: z.infer<typeof checkEndStateSchema>;
+    landedCommits: string[];
+  }>;
 }
 
 export interface SchedulerWakeup {

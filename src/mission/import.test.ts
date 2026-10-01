@@ -73,6 +73,8 @@ const content: Content = {
   bindings: [],
 };
 const bindings: MissionBindings = {
+  storageBindingOf: () =>
+    assert.fail("Import does not read storage configuration."),
   repositoryPolicyOf: () =>
     assert.fail("Import does not derive repository policies."),
   resolveBinding: (_tx, projectId, name) => {

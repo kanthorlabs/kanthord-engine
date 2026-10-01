@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
+import { once } from "node:events";
 import type { TestContext } from "node:test";
 import pino from "pino";
 import { configuration } from "../../config/index.ts";
@@ -12,7 +18,11 @@ import { Store } from "../../kernel/store.ts";
 import { gatewayMigrations } from "../../gateway/index.ts";
 import { projectMigrations } from "../../project/index.ts";
 import { missionMigrations } from "../../mission/index.ts";
-import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
+import {
+  MISSION_SERVICE_NAME,
+  type IntakeStorage,
+  type IntakeCheck,
+} from "../../mission/contract.ts";
 import { workerMigrations } from "../../worker/index.ts";
 import { composeServices } from "./index.ts";
 import type { OperationRegistry } from "../../kernel/operation.ts";
@@ -29,7 +39,8 @@ import type { Registration, VerifiedClient } from "../../worker/contract.ts";
 import type { Transaction } from "../../kernel/store.ts";
 import { throwIfCancelled, type Context } from "../../kernel/context.ts";
 import { createIdentity } from "../../kernel/identity.ts";
-import { HttpStatus } from "../../kernel/http.ts";
+import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
+import { isString } from "../../kernel/values.ts";
 import { OperationError as GatewayError } from "../../kernel/errors.ts";
 import { KANTHORD_AUTH_USERNAME } from "../../gateway/local.ts";
 import { generateHumanJWT, generateMachineJWT } from "../../gateway/local.ts";
@@ -49,6 +60,119 @@ export const TEST_WORKER_BINDING = "binding";
 export const TEST_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const SINGLE_INSTANCE = 1;
 const NO_INSTANCES = 0;
+const OBJECT_GRANT_LIFETIME_MS = 3600000;
+const SINK_BODY_MAX = 16 * 1024 ** 2;
+const CHECKSUM_HEADER = "x-amz-checksum-sha256";
+const ZERO_BYTES = 0;
+const EPHEMERAL_PORT = 0;
+
+type ObjectSink = { endpoint: string; objects: Map<string, Uint8Array> };
+
+async function sinkRequest(
+  objects: ObjectSink["objects"],
+  request: IncomingMessage,
+  response: ServerResponse,
+) {
+  assert.ok(request.url);
+  const key = request.url.slice(1);
+  if (request.method === HttpMethod.Put) {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of request) {
+      size += chunk.length;
+      assert.ok(size <= SINK_BODY_MAX);
+      chunks.push(Buffer.from(chunk));
+    }
+    objects.set(key, Buffer.concat(chunks));
+    response.writeHead(HttpStatus.OK).end();
+    return;
+  }
+  assert.equal(request.method, HttpMethod.Get);
+  const bytes = objects.get(key);
+  response.writeHead(bytes ? HttpStatus.OK : HttpStatus.NotFound).end(bytes);
+}
+
+export async function objectSink(t: TestContext): Promise<ObjectSink> {
+  const objects: ObjectSink["objects"] = new Map();
+  const failures: unknown[] = [];
+  const server = createServer((request, response) => {
+    void sinkRequest(objects, request, response).catch((error: unknown) => {
+      failures.push(error);
+      response.destroy(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    });
+  });
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    if (failures.length)
+      throw new AggregateError(failures, "Object sink failed.");
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && !isString(address));
+  assert.ok(address.port > EPHEMERAL_PORT);
+  return { endpoint: `http://127.0.0.1:${address.port}`, objects };
+}
+
+export function sinkStorage(sink: ObjectSink): IntakeStorage {
+  assert.ok(sink.endpoint.startsWith("http://127.0.0.1:"));
+  assert.ok(sink.objects instanceof Map);
+  const get: IntakeStorage["get"] = async (call, _binding, key) => {
+    throwIfCancelled(call.context);
+    assert.ok(key);
+    return {
+      getUrl: `${sink.endpoint}/${key}`,
+      expiresAt: Date.now() + OBJECT_GRANT_LIFETIME_MS,
+    };
+  };
+  return {
+    async put(call, _binding, key, size, sha256) {
+      throwIfCancelled(call.context);
+      assert.ok(size >= ZERO_BYTES);
+      const headers: Record<string, string> = {};
+      if (sha256 !== null) headers[CHECKSUM_HEADER] = sha256;
+      return {
+        putUrl: `${sink.endpoint}/${key}`,
+        headers,
+        expiresAt: Date.now() + OBJECT_GRANT_LIFETIME_MS,
+      };
+    },
+    async check(call, binding, key, size) {
+      throwIfCancelled(call.context);
+      assert.ok(size >= ZERO_BYTES);
+      if (sink.objects.get(key)?.byteLength !== size)
+        throw new Error("object size mismatch");
+      return { location: `s3://${binding.bucket}/${key}`, version: null };
+    },
+    get,
+    executionGet: get,
+    async delete(call, _binding, key) {
+      throwIfCancelled(call.context);
+      assert.ok(key);
+      sink.objects.delete(key);
+    },
+  };
+}
+
+export function scriptedCheck(
+  answer: Awaited<ReturnType<IntakeCheck["check"]>>,
+) {
+  const calls: Parameters<IntakeCheck["check"]>[] = [];
+  return {
+    calls,
+    async check(...args: Parameters<IntakeCheck["check"]>) {
+      throwIfCancelled(args[0]);
+      assert.ok(args[1].frozenAction.key);
+      calls.push(args);
+      return structuredClone(answer);
+    },
+  } satisfies IntakeCheck & { calls: typeof calls };
+}
 
 export function fakeMachines(
   options: {

@@ -14,7 +14,7 @@ import {
   type Healthcheck,
   type Service,
 } from "../kernel/service.ts";
-import type { Transaction } from "../kernel/store.ts";
+import type { Store, Transaction } from "../kernel/store.ts";
 import type { MissionConfig } from "./config.ts";
 import {
   ActorKind,
@@ -30,6 +30,8 @@ import {
   type SchedulerWakeup,
   type ExecutionAttribution,
   type MissionTransitions,
+  type IntakeStorage,
+  type IntakeCheck,
 } from "./contract.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
@@ -90,6 +92,9 @@ export function humanActor(caller: CallerContext): HumanActor {
 }
 
 export interface Dependencies {
+  store: Store;
+  intakeStorage: IntakeStorage;
+  intakeCheck: IntakeCheck;
   config: MissionConfig;
   health?: HealthRegistry;
   bindings: MissionBindings;

@@ -8,7 +8,14 @@ const SERVER_ROOT = import.meta.dirname;
 const UNWIRED_MODULE = "unwired.ts";
 const UNWIRED_TEST_MODULE = "unwired.test.ts";
 const COMPOSITION_MODULE = "index.ts";
-const UNWIRED_SEAMS: string[] = [];
+const UNWIRED_SEAMS = [
+  "IntakeStorage.put",
+  "IntakeStorage.check",
+  "IntakeStorage.get",
+  "IntakeStorage.executionGet",
+  "IntakeStorage.delete",
+  "IntakeCheck.check",
+];
 const NO_SEAMS = 0;
 const TYPESCRIPT_EXTENSION = ".ts";
 const IMPORT_SPECIFIER = new RegExp(

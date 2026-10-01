@@ -67,6 +67,7 @@ import { serializePlanFile } from "./export.ts";
 import { parsePlanFile } from "./parser.ts";
 import { MissionService, humanActor, type Dependencies } from "./service.ts";
 import { CONTENT_FIELDS, TASKS_FIELD, ContentField } from "./content.ts";
+import { unexpectedCollaboration } from "./test-support.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   insertNode as insertNodeRow,
@@ -146,7 +147,12 @@ test("priority refuses a live claim before changing its node or job", (t) => {
     schedulerClaims: {
       settle: () => assert.fail(),
       revoke: () => assert.fail(),
-      liveExecutionOf: () => ({ executionId }),
+      liveExecutionOf: () => ({
+        executionId,
+        runtimeIdentity: "runtime",
+        attempt: 1,
+        pinnedRevision: 1,
+      }),
     },
   });
   const nodeId = f.objective();
@@ -166,7 +172,14 @@ test("dependency admission settles each descendant before testing its live claim
       },
       liveExecutionOf: (_tx, id) => {
         assert.ok(settled.has(id));
-        return id === claimed ? { executionId } : null;
+        return id === claimed
+          ? {
+              executionId,
+              runtimeIdentity: "runtime",
+              attempt: 1,
+              pinnedRevision: 1,
+            }
+          : null;
       },
     },
   });
@@ -242,6 +255,7 @@ const HUMAN_ACTOR = {
 } as const;
 
 const bindings: MissionBindings = {
+  storageBindingOf: unexpectedCollaboration,
   repositoryPolicyOf() {
     throw new Error(UNEXPECTED_COLLABORATION);
   },
@@ -271,10 +285,20 @@ type Collaborators = Pick<Dependencies, "bindings" | "workQueue"> &
 
 function makeService(
   health: HealthRegistry,
+  store: Store,
   collaborators: Collaborators = { bindings, workQueue },
   textMaxBytes = TEXT_MAX_BYTES,
 ): MissionService {
   return new MissionService({
+    store,
+    intakeStorage: {
+      put: unexpectedCollaboration,
+      check: unexpectedCollaboration,
+      get: unexpectedCollaboration,
+      executionGet: unexpectedCollaboration,
+      delete: unexpectedCollaboration,
+    },
+    intakeCheck: { check: unexpectedCollaboration },
     config: {
       consecutiveLossLimit: CONSECUTIVE_LOSS_LIMIT,
       textMaxBytes,
@@ -307,7 +331,12 @@ function fixture(
   ]);
   return {
     store,
-    mission: makeService(new HealthRegistry(), collaborators, textMaxBytes),
+    mission: makeService(
+      new HealthRegistry(),
+      store,
+      collaborators,
+      textMaxBytes,
+    ),
   };
 }
 
@@ -451,9 +480,10 @@ test("humanActor requires minted human provenance and maps account and name", (t
   );
 });
 
-test("MissionService healthcheck follows lifecycle", async () => {
+test("MissionService healthcheck follows lifecycle", async (t) => {
   const health = new HealthRegistry();
-  const mission = makeService(health);
+  const { store } = fixture(t);
+  const mission = makeService(health, store);
   assert.deepEqual(await mission.healthcheck(), {
     operations: HealthStatus.Unavailable,
   });
@@ -467,9 +497,10 @@ test("MissionService healthcheck follows lifecycle", async () => {
   });
 });
 
-test("MissionService registers its operations health probe", async () => {
+test("MissionService registers its operations health probe", async (t) => {
   const registry = new HealthRegistry();
-  const mission = makeService(registry);
+  const { store } = fixture(t);
+  const mission = makeService(registry, store);
   assert.equal(await mission.start(), null);
   const results = await registry.check(background);
   assert.ok(Object.hasOwn(results, MISSION_SERVICE_NAME));
@@ -4159,7 +4190,14 @@ test("import dependency additions settle live descendants and dependency-only ed
       },
       liveExecutionOf: (_tx, id) => {
         assert.ok(settled.has(id));
-        return claimed.has(id) ? { executionId } : null;
+        return claimed.has(id)
+          ? {
+              executionId,
+              runtimeIdentity: "runtime",
+              attempt: 1,
+              pinnedRevision: 1,
+            }
+          : null;
       },
     },
   });
@@ -5411,8 +5449,8 @@ for (const condition of Object.values(UnmatchedPin)) {
   });
 }
 
-test("MissionService refuses to restart after stop", async () => {
-  const mission = makeService(new HealthRegistry());
+test("MissionService refuses to restart after stop", async (t) => {
+  const { mission } = fixture(t);
   assert.equal(await mission.start(), null);
   assert.equal(await mission.stop(), null);
   const error = await mission.start();

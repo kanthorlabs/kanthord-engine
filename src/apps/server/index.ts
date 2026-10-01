@@ -22,7 +22,12 @@ import {
   type WorkQueue,
 } from "../../scheduler/contract.ts";
 import { MissionService, missionMigrations } from "../../mission/index.ts";
-import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
+import {
+  MISSION_SERVICE_NAME,
+  type IntakeStorage,
+  type IntakeCheck,
+} from "../../mission/contract.ts";
+import { unwired } from "./unwired.ts";
 import type {
   ProjectBindings,
   RepositoryConnector,
@@ -70,7 +75,7 @@ export function composeServices(options: {
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
   inventoryOverrides?: Partial<ResourceInventories>;
-  standIns?: Record<string, never>;
+  standIns?: { intakeStorage?: IntakeStorage; intakeCheck?: IntakeCheck };
 }) {
   const repoConnector =
     options.repositoryConnector ??
@@ -169,6 +174,17 @@ export function composeServices(options: {
     entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
   });
   const mission: MissionService = new MissionService({
+    store: options.store,
+    intakeStorage: options.standIns?.intakeStorage ?? {
+      put: unwired("IntakeStorage.put"),
+      check: unwired("IntakeStorage.check"),
+      get: unwired("IntakeStorage.get"),
+      executionGet: unwired("IntakeStorage.executionGet"),
+      delete: unwired("IntakeStorage.delete"),
+    },
+    intakeCheck: options.standIns?.intakeCheck ?? {
+      check: unwired("IntakeCheck.check"),
+    },
     config: options.config.mission,
     health: options.health,
     workQueue,
@@ -185,6 +201,7 @@ export function composeServices(options: {
       resolveBinding: (tx, pid, name) => project.resolveBinding(tx, pid, name),
       getBindingRevision: (tx, bid) => project.getBindingRevision(tx, bid),
       repositoryPolicyOf: (tx, bid) => project.repositoryPolicyOf(tx, bid),
+      storageBindingOf: (tx, bid) => project.storageBindingOf(tx, bid),
     },
   });
   const project: ProjectService = new ProjectService({

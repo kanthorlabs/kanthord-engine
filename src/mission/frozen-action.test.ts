@@ -66,6 +66,8 @@ test("required actions preserve pinned policies across later revisions and omit 
     ],
   ]);
   const bindings: MissionBindings = {
+    storageBindingOf: () =>
+      assert.fail("Actions do not read storage configuration."),
     resolveBinding: () =>
       assert.fail("Pinned reads never resolve the latest name."),
     getBindingRevision: (_tx, bindingId) => ({
