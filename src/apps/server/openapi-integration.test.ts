@@ -30,6 +30,23 @@ import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
 
+test("published evidence delete preserves its bodyless 204 response", () => {
+  const fragment = parse(
+    readFileSync(
+      join(dirname(openapiPath()), "openapi/mission/evidence.delete.yaml"),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    fragment.pathItem.delete.operationId,
+    missionOperations["evidence.delete"].id,
+  );
+  assert.equal(
+    fragment.pathItem.delete.responses[HttpStatus.NoContent].content,
+    undefined,
+  );
+});
+
 test("published asset delete names its operation with a bodyless 204 response", () => {
   const fragment = parse(
     readFileSync(
@@ -81,10 +98,13 @@ test("published content reads name their bounded operations", () => {
 });
 
 test("published evidence reads name their operations", () => {
-  for (const name of ["evidence.list", "evidence.get"] as const) {
+  for (const [name, file] of [
+    ["evidence.list", "evidence.list"],
+    ["evidence.get", "evidence.delete"],
+  ] as const) {
     const fragment = parse(
       readFileSync(
-        join(dirname(openapiPath()), `openapi/mission/${name}.yaml`),
+        join(dirname(openapiPath()), `openapi/mission/${file}.yaml`),
         "utf8",
       ),
     );

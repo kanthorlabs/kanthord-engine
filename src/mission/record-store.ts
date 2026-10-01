@@ -246,6 +246,33 @@ export function deleteAsset(tx: Transaction, assetId: string): void {
     .run(assetId);
   assert.equal(write.changes, ONE);
 }
+export function deleteEvidence(tx: Transaction, evidenceId: string): void {
+  assert.ok(tx.database.isTransaction);
+  const evidence = readEvidence(tx, evidenceId);
+  assert.ok(evidence);
+  for (const table of ["mission_assessment", "mission_outcome"] as const) {
+    const rows = tx.database
+      .prepare(`SELECT id, evidence_ids FROM ${table} WHERE node_id = ?`)
+      .all(evidence.node_id) as { id: string; evidence_ids: string }[];
+    for (const row of rows) {
+      const ids = stringSetSchema.parse(JSON.parse(row.evidence_ids));
+      if (ids.includes(evidenceId))
+        tx.database
+          .prepare(`UPDATE ${table} SET evidence_ids = ? WHERE id = ?`)
+          .run(
+            canonicalJSON(ids.filter((id) => id !== evidenceId).sort()),
+            row.id,
+          );
+    }
+  }
+  tx.database
+    .prepare("DELETE FROM mission_evidence_asset WHERE evidence_id = ?")
+    .run(evidenceId);
+  const write = tx.database
+    .prepare("DELETE FROM mission_evidence WHERE id = ?")
+    .run(evidenceId);
+  assert.equal(write.changes, ONE);
+}
 export function readRequests(
   tx: Transaction,
   nodeId: string,

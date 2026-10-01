@@ -6,6 +6,7 @@ import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   AssetKind,
+  NodeState,
   MissionErrorCode,
   type evidenceDeleteSchema,
 } from "./contract.ts";
@@ -15,7 +16,15 @@ import { objectContentSchema } from "./evidence-content-read.ts";
 import { requireTextBound } from "./execution.ts";
 import { requireNode } from "./node-read.ts";
 import { recordNotFound } from "./record-list.ts";
-import { deleteAsset, readEvidence, type AssetRow } from "./record-store.ts";
+import {
+  deleteAsset,
+  deleteEvidence,
+  readAssets,
+  readEvidence,
+  readOpenAttempt,
+  type AssetRow,
+} from "./record-store.ts";
+import { endLiveClaim, transition } from "./control.ts";
 import { readMissionNodes, type NodeRow } from "./store.ts";
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
@@ -113,4 +122,63 @@ export async function deleteEvidenceAsset(
     deleteAsset(tx, assetId);
     return null;
   });
+}
+
+export function prepareEvidenceDelete(
+  tx: Transaction,
+  dependencies: Dependencies,
+  evidenceId: string,
+  body: EvidenceDelete,
+) {
+  const evidence = readEvidence(tx, evidenceId);
+  if (!evidence) recordNotFound();
+  if (evidence.requirement_key !== null && !body.force)
+    throw new OperationError(
+      HttpStatus.Conflict,
+      MissionErrorCode.EvidenceRequestForceRequired,
+      "A request evidence requires force to delete.",
+    );
+  const node = requireNode(tx, evidence.node_id);
+  const mission = admitDelete(tx, node, body);
+  if (body.reason !== undefined)
+    requireTextBound("reason", body.reason, dependencies.config.textMaxBytes);
+  return { evidence, node, mission, assets: readAssets(tx, evidenceId) };
+}
+
+export async function removeEvidence(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  evidenceId: string,
+  body: EvidenceDelete,
+) {
+  const prepared = dependencies.store.transaction((tx) =>
+    prepareEvidenceDelete(tx, dependencies, evidenceId, body),
+  );
+  for (const asset of prepared.assets)
+    await deleteObject(dependencies, caller, asset);
+  const result = caller.commit((tx) => {
+    const now = Date.now();
+    const { evidence, node, mission } = prepareEvidenceDelete(
+      tx,
+      dependencies,
+      evidenceId,
+      body,
+    );
+    const hold =
+      body.force &&
+      evidence.requirement_key !== null &&
+      readOpenAttempt(tx, node.id)?.attempt === evidence.attempt &&
+      node.state !== NodeState.Paused &&
+      !isTerminal(node.state);
+    deleteEvidence(tx, evidenceId);
+    if (hold) {
+      dependencies.schedulerClaims.settle(tx, node.id, now);
+      const settled = requireNode(tx, node.id);
+      endLiveClaim(tx, dependencies, settled, now);
+      transition(tx, dependencies, mission, settled, NodeState.Paused, now);
+    }
+    return null;
+  });
+  dependencies.wakeup.wake(prepared.mission.projectId);
+  return result;
 }

@@ -51,7 +51,7 @@ paths:
   /api/mission/evidence/asset/{assetId}:
     $ref: ./openapi/mission/evidence.asset.delete.yaml#/pathItem
   /api/mission/evidence/{evidenceId}:
-    $ref: ./openapi/mission/evidence.get.yaml#/pathItem
+    $ref: ./openapi/mission/evidence.delete.yaml#/pathItem
   /api/mission/node/{nodeId}/evidence:
     $ref: ./openapi/mission/evidence.list.yaml#/pathItem
   /api/mission/node/{nodeId}/evidence/request:

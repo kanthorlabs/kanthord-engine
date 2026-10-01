@@ -53,6 +53,36 @@ export function addEvidenceCommands(mission: Command): void {
   const evidence = mission.command("evidence").description("Mission evidence");
   evidence.action(() => evidence.help());
   addEvidenceReads(evidence);
+  addDeleteOptions(
+    evidence.command("delete").argument("<evidence-id>", "Evidence ID"),
+  ).action(async (evidenceId: string, _options, command: Command) => {
+    if (!identitySchema("evidence").safeParse(evidenceId).success)
+      throw new Diagnostic(
+        "cli.mission.evidence.delete.invalid_evidence_id",
+        "invalid evidence ID",
+      );
+    const options = command.optsWithGlobals<{
+      expectedMissionVersion: string;
+      force?: boolean;
+      reason?: string;
+      idempotencyKey?: string;
+    }>();
+    const body = deleteBody(
+      options,
+      "cli.mission.evidence.delete.invalid_expected_mission_version",
+    );
+    const key = resolveKey(options);
+    const result = await client(command, "evidence.delete")["evidence.delete"](
+      { params: { evidenceId }, query: {}, body },
+      { idempotencyKey: key },
+    );
+    handleMutationResult(
+      result,
+      "cli.mission.evidence.delete.indeterminate",
+      key,
+    );
+    process.stdout.write(`${JSON.stringify({ idempotencyKey: key })}\n`);
+  });
   const asset = evidence.command("asset").description("Evidence assets");
   asset.action(() => asset.help());
   addDeleteOptions(

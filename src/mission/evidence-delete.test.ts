@@ -9,8 +9,20 @@ import {
   MissionErrorCode,
   NodeState,
   PlatformAddressKind,
+  AssessmentResult,
+  ClosingEvent,
 } from "./contract.ts";
-import { insertEvidence, readAssets, readEvidence } from "./record-store.ts";
+import {
+  insertEvidence,
+  readAssets,
+  readEvidence,
+  closeAttempt,
+  insertAssessment,
+  insertOutcome,
+  readAssessment,
+  readOutcome,
+} from "./record-store.ts";
+import { outcomeRecord } from "./record-read.ts";
 import { readMission, setNodeState } from "./store.ts";
 import { evidenceHarness } from "./test-support.ts";
 
@@ -158,4 +170,104 @@ test("request platform assets cannot be removed separately even with force", asy
     h.store.transaction((tx) => readAssets(tx, h.evidenceId).length),
     ONE,
   );
+});
+
+test("whole evidence deletion clears assessment and outcome sets without changing outcome effects", async (t) => {
+  const h = fixture(t);
+  const assessmentId = createIdentity("assessment");
+  const outcomeId = createIdentity("outcome");
+  h.dependencies.intakeStorage.delete = async () => {};
+  h.store.transaction((tx) => {
+    insertAssessment(tx, {
+      id: assessmentId,
+      node_id: h.nodeId,
+      attempt: ONE,
+      result: AssessmentResult.Undetermined,
+      rationale: "Human block",
+      evidence_ids: canonicalJSON([h.evidenceId]),
+      child_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: null,
+      actor: canonicalJSON(h.actor),
+      node_revision: ONE,
+      created_at: ONE,
+    });
+    insertOutcome(tx, {
+      id: outcomeId,
+      node_id: h.nodeId,
+      assessment_id: assessmentId,
+      result: AssessmentResult.Undetermined,
+      evidence_ids: canonicalJSON([h.evidenceId]),
+      created_at: ONE,
+    });
+  });
+  await h.invoke("evidence.delete", {
+    params: { evidenceId: h.evidenceId },
+    query: {},
+    body: { expectedMissionVersion: ONE, force: true, reason: "Remove" },
+  });
+  h.store.transaction((tx) => {
+    assert.equal(readEvidence(tx, h.evidenceId), null);
+    assert.deepEqual(
+      JSON.parse(readAssessment(tx, assessmentId)!.evidence_ids),
+      [],
+    );
+    const outcome = readOutcome(tx, outcomeId)!;
+    assert.deepEqual(JSON.parse(outcome.evidence_ids), []);
+    assert.equal(outcome.result, AssessmentResult.Undetermined);
+    assert.equal(
+      outcomeRecord(tx, h.dependencies.bindings, outcome).closingEvent,
+      ClosingEvent.HumanBlock,
+    );
+  });
+  await assert.rejects(
+    h.invoke("evidence.get", {
+      params: { evidenceId: h.evidenceId },
+      query: {},
+      body: null,
+    }),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === MissionErrorCode.RecordNotFound,
+  );
+});
+
+test("forced request deletion pauses and revokes only the open attempt", async (t) => {
+  for (const closed of [false, true]) {
+    const h = fixture(t, true);
+    let revokes = ZERO;
+    h.dependencies.schedulerClaims.revoke = () => {
+      revokes++;
+      return h.claim.executionId;
+    };
+    if (closed)
+      h.store.transaction((tx) => {
+        closeAttempt(tx, h.nodeId, ONE, TWO);
+        setNodeState(tx, h.nodeId, NodeState.Completed);
+      });
+    await assert.rejects(
+      h.invoke("evidence.delete", {
+        params: { evidenceId: h.evidenceId },
+        query: {},
+        body: { expectedMissionVersion: ONE, force: false },
+      }),
+      (error) =>
+        error instanceof OperationError &&
+        error.code === MissionErrorCode.EvidenceRequestForceRequired,
+    );
+    await h.invoke("evidence.delete", {
+      params: { evidenceId: h.evidenceId },
+      query: {},
+      body: {
+        expectedMissionVersion: ONE,
+        force: true,
+        reason: "Remove request",
+      },
+    });
+    assert.equal(
+      h.node().state,
+      closed ? NodeState.Completed : NodeState.Paused,
+    );
+    assert.equal(revokes, closed ? ZERO : ONE);
+  }
 });

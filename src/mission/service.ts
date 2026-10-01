@@ -44,7 +44,7 @@ import { evidencePage, getEvidence } from "./evidence-read.ts";
 import { executionContentBound, readContent } from "./evidence-content-read.ts";
 import { submitAssessment } from "./assessment-submit.ts";
 import { checkNode } from "./node-check.ts";
-import { deleteEvidenceAsset } from "./evidence-delete.ts";
+import { deleteEvidenceAsset, removeEvidence } from "./evidence-delete.ts";
 import { claim, release, loss } from "./transitions.ts";
 import {
   attemptPage,
@@ -144,6 +144,11 @@ export class MissionService
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["evidence.delete"],
+      ({ params, body }, caller) =>
+        removeEvidence(this.dependencies, caller, params.evidenceId, body),
+    );
     registry.register(
       missionOperations["evidence.asset.delete"],
       ({ params, body }, caller) =>
