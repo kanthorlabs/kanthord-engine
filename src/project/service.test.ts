@@ -2200,6 +2200,77 @@ test("resolveBinding selects the latest named group in its project after revisio
   });
 });
 
+test("storageBindingOf reads the pinned configuration after a prefix revision", (t) => {
+  const f = fixture(t);
+  const prefix = "later";
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const original = storageBinding();
+    const pinned = persistBindings(tx, project.id, {
+      [STORAGE_NAME]: original,
+    }).bindings[STORAGE_NAME]!;
+    const later = persistBindings(tx, project.id, {
+      [STORAGE_NAME]: { ...original, config: { ...original.config, prefix } },
+    }).bindings[STORAGE_NAME]!;
+    assert.notEqual(pinned.id, later.id);
+    assert.deepEqual(f.project.storageBindingOf(tx, pinned.id), {
+      bindingId: pinned.id,
+      projectId: project.id,
+      ...original.config,
+    });
+    assert.equal(f.project.storageBindingOf(tx, later.id)?.prefix, prefix);
+  });
+});
+
+test("storageBindingOf refuses a repository binding", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const row = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings[REPOSITORY_NAME]!;
+    assert.equal(f.project.storageBindingOf(tx, row.id), null);
+    assert.ok(tx.database.isTransaction);
+  });
+});
+
+test("storageBindingOf answers null for an unknown identity", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    assert.equal(f.project.storageBindingOf(tx, MISSING_NAME), null);
+    assert.ok(tx.database.isTransaction);
+  });
+});
+
+test("storageBindingOf shares the caller transaction and rollback", (t) => {
+  const f = fixture(t);
+  const failure = new Error("Caller rollback");
+  let bindingId = MISSING_NAME;
+  assert.throws(
+    () =>
+      f.store.transaction((tx) => {
+        const project = insertProject(tx, PROJECT_NAME);
+        bindingId = persistBindings(tx, project.id, {
+          [STORAGE_NAME]: storageBinding(),
+        }).bindings[STORAGE_NAME]!.id;
+        const nested = t.mock.method(f.store, "transaction", unexpected);
+        assert.equal(
+          f.project.storageBindingOf(tx, bindingId)?.bindingId,
+          bindingId,
+        );
+        assert.equal(nested.mock.callCount(), NO_CALLS);
+        nested.mock.restore();
+        assert.ok(tx.database.isTransaction);
+        throw failure;
+      }),
+    (error) => error === failure,
+  );
+  f.store.transaction((tx) => {
+    assert.equal(f.project.storageBindingOf(tx, bindingId), null);
+    assert.ok(tx.database.isTransaction);
+  });
+});
+
 test("repositoryPolicyOf preserves the named revision after a strategy change", (t) => {
   const f = fixture(t);
   const baseBranch = "develop";

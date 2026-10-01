@@ -576,6 +576,17 @@ export type EndRegistrations = (
   now: number,
 ) => void;
 
+export interface StorageBinding {
+  bindingId: string;
+  projectId: string;
+  endpoint: string;
+  bucket: string;
+  region: string;
+  prefix: string;
+  credential: string;
+  available: boolean;
+}
+
 export interface WorkerBindingRow {
   bindingId: string;
   revision: number;

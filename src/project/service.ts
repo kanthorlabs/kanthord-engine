@@ -43,6 +43,7 @@ import {
   bindingSetWriteInputSchema,
   projectOperations,
   repositoryConfigSchema,
+  storageConfigSchema,
   workerConfigSchema,
   type ProjectBindings,
   type AgentDependentBinding,
@@ -54,6 +55,7 @@ import {
   type CustodySuitability,
   type RepositoryConnector,
   type RepositoryPolicy,
+  type StorageBinding,
   type WorkerAgentsOfFn,
   type WorkerAgentViewFn,
   type WorkerEntry,
@@ -604,6 +606,18 @@ export class ProjectService implements Service, ProjectBindings {
       revision: binding.revision,
       tombstone: hasBindingTombstone(tx, binding),
       disabled,
+    };
+  }
+  storageBindingOf(tx: Transaction, bindingId: string): StorageBinding | null {
+    assert.ok(tx.database.isTransaction);
+    const binding = readBindingRevision(tx, bindingId);
+    if (!binding || kindOf(binding.resourceIdentity) !== BindingKind.Storage)
+      return null;
+    assert.equal(binding.id, bindingId);
+    return {
+      bindingId: binding.id,
+      projectId: binding.projectId,
+      ...storageConfigSchema.parse(binding.config),
     };
   }
   repositoryPolicyOf(
