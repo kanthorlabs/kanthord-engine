@@ -42,6 +42,8 @@ engine/
 │   │   └── test-support.ts     # Isolated temporary filesystem fixtures
 │   ├── repository/             # Repository shared component: startup version gate and SSH reachability connector
 │   ├── custody/                # Custody component: credential envelope, platform validators, OAuth login sessions, and platform probes
+│   │   ├── payload.ts         # Normalized execution credential and stored secret conversion
+│   │   └── execution-store.ts # Isolated execution credential view and serialized refresh reports
 │   ├── project/                # Project Service: projects, binding sets, and binding collaborations
 │   │   ├── contract.ts         # Constants, closed sets, binding schemas, operations, collaboration and dependency types
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
