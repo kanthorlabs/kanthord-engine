@@ -14,6 +14,7 @@ import { errorDetailsSchema, errorSchema } from "../kernel/errors.ts";
 import type { Operation } from "../kernel/operation.ts";
 import { AccessPolicy } from "../kernel/operation.ts";
 import { packageVersion } from "../kernel/version.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { isObject, isString } from "../kernel/values.ts";
 
 export const OPENAPI_INDEX_FILE = "openapi.yaml";
@@ -155,11 +156,15 @@ function emitOperation(operation: Operation, schemas: Record<string, unknown>) {
   const responses: Record<string, unknown> = {
     [operation.status]: {
       description: "Completed result",
-      content: {
-        [operation.contentType ?? "application/json"]: {
-          schema: { $ref: `#/components/schemas/${pointer(outputName)}` },
-        },
-      },
+      ...(operation.status === HttpStatus.NoContent
+        ? {}
+        : {
+            content: {
+              [operation.contentType ?? "application/json"]: {
+                schema: { $ref: `#/components/schemas/${pointer(outputName)}` },
+              },
+            },
+          }),
     },
   };
   for (const status of new Set([

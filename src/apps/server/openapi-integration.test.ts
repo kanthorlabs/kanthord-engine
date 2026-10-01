@@ -28,6 +28,19 @@ import { ResourceStatus } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
+
+test("published heartbeat projection names its operation and carries no 204 content", () => {
+  const fragment = readFileSync(
+    join(dirname(openapiPath()), "openapi/worker/heartbeat.yaml"),
+    "utf8",
+  );
+  assert.match(fragment, /operationId: worker\.heartbeat/);
+  assert.match(fragment, /"204":\n\s+description: Completed result/);
+  assert.doesNotMatch(
+    fragment,
+    /"204":\n\s+description: Completed result\n\s+content:/,
+  );
+});
 const MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS = [
   ["node.unblock", "mission.node.unblock", "properties", "node"],
   ["node.override", "mission.node.override", "properties", "node"],

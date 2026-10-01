@@ -181,6 +181,21 @@ async function catalogList(command: Command): Promise<void> {
   );
 }
 
+async function heartbeat(command: Command): Promise<void> {
+  assert.equal(workerOperations.heartbeat.access, AccessPolicy.Client);
+  assert.equal(workerOperations.heartbeat.mutation, false);
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, "cli.worker.heartbeat.token_required");
+  const result = await httpClient(workerOperations, endpoint, token).heartbeat({
+    params: {},
+    query: {},
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, "cli.worker.heartbeat.indeterminate"))}\n`,
+  );
+}
+
 async function catalogGet(workerName: string, command: Command): Promise<void> {
   assert.equal(workerOperations["catalog.get"].access, AccessPolicy.Human);
   assert.equal(workerOperations["catalog.get"].mutation, false);
@@ -332,6 +347,11 @@ export function addWorkerCommand(program: Command): void {
       singleUse("--token"),
     );
   worker.action(() => worker.help());
+  worker
+    .command("heartbeat")
+    .description("Renew a registered instance heartbeat")
+    .option("--token <jwt>", "Machine JWT", singleUse("--token"))
+    .action((_options, command: Command) => heartbeat(command));
   worker
     .command(LIST)
     .description("List supplied workers as JSON")

@@ -30,6 +30,34 @@ const STRING_TYPE = "string";
 const NATIVE_AGENT = "swe@1";
 const EXTERNAL_HARNESS = "claude-code";
 
+test("heartbeat CLI has offline help, requires a token and prints null after registration", async (t) => {
+  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
+  const env = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+  };
+  const help = await command(["worker", "heartbeat", "--help"], env);
+  assert.equal(help.code, ExitCode.Success);
+  const absent = await command(["worker", "heartbeat"], env);
+  assert.equal(absent.code, ExitCode.Failure);
+  assert.match(absent.stderr, /^cli.worker.heartbeat.token_required:/);
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
+  const registered = await command(
+    ["worker", "register", "--token", token],
+    env,
+  );
+  assert.equal(registered.code, ExitCode.Success, registered.stderr);
+  const heartbeat = await command(
+    ["worker", "heartbeat", "--token", token],
+    env,
+  );
+  assert.equal(heartbeat.code, ExitCode.Success, heartbeat.stderr);
+  assert.equal(JSON.parse(heartbeat.stdout), null);
+});
+
 test("worker catalog CLI lists ascending pages", async (t) => {
   const fixture = await gatewayFixture(t);
   const env = {

@@ -436,6 +436,22 @@ export const workerOperations = {
     description:
       "Remove an unused named provider, retaining at least one provider.",
   },
+  heartbeat: {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.heartbeat",
+    method: HttpMethod.Post,
+    path: "/api/worker/heartbeat",
+    access: AccessPolicy.Client,
+    timeoutMs: 30000,
+    mutation: false,
+    status: HttpStatus.NoContent,
+    input: emptyInput,
+    output: z.null(),
+    description:
+      "Renew the live registration heartbeat with an authenticated empty request.",
+  },
   register: {
     service: WORKER_SERVICE_NAME,
     store: StoreName.Operational,

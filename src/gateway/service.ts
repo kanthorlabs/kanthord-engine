@@ -490,6 +490,8 @@ export class GatewayService implements Service {
                 headers: { "Content-Type": operation.contentType },
               });
             }
+            if (result.status === HttpStatus.NoContent)
+              return new Response(null, { status: result.status });
             return Response.json(result.body, { status: result.status });
           })();
           this.httpPending.add(work);

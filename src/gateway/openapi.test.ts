@@ -7,6 +7,7 @@ import { z } from "zod";
 import { temporary } from "../kernel/test-support.ts";
 import { gatewayOperations, HEALTHCHECK_OK } from "./contract.ts";
 import { HealthStatus } from "../kernel/service.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { workerOperations } from "../worker/contract.ts";
 import { emptyInput, OperationRegistry } from "../kernel/operation.ts";
 import { emitOpenAPIFiles, writeOpenAPI } from "./openapi.ts";
@@ -107,3 +108,16 @@ test("OpenAPI scopes isolate services and keep methods sharing a path in one ref
 });
 
 const apiOperations = { ...gatewayOperations, ...workerOperations };
+
+test("a no-content operation publishes no response content", () => {
+  const files = emitOpenAPIFiles([workerOperations.heartbeat]);
+  const document = files["openapi/worker/heartbeat.yaml"];
+  assert.ok(document && "pathItem" in document);
+  const path = document.pathItem as {
+    post: { operationId: string; responses: Record<string, unknown> };
+  };
+  assert.equal(path.post.operationId, workerOperations.heartbeat.id);
+  assert.deepEqual(path.post.responses[HttpStatus.NoContent], {
+    description: "Completed result",
+  });
+});

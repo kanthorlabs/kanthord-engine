@@ -759,6 +759,9 @@ export class WorkerService implements Service {
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(workerOperations.heartbeat, (_input, caller) =>
+      caller.commit(() => null),
+    );
     this.declareCatalog(registry);
     this.declareEnablements(registry);
     const worker = this.registrations;

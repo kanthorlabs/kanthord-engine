@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { HttpStatus } from "../kernel/http.ts";
 import { directories } from "../kernel/xdg.ts";
 import { parseMapping } from "../kernel/yaml.ts";
 import { audit, readPrivate } from "../kernel/files.ts";
@@ -148,9 +149,11 @@ export function httpClient<T extends Record<string, Operation>>(
       return {
         status: response.status,
         body:
-          operation.contentType && response.ok
-            ? await response.text()
-            : await response.json(),
+          response.status === HttpStatus.NoContent
+            ? null
+            : operation.contentType && response.ok
+              ? await response.text()
+              : await response.json(),
       };
     } finally {
       if (!streaming) dispose();

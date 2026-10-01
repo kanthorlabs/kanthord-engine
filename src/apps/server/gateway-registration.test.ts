@@ -127,6 +127,55 @@ test("absent, removed and unavailable worker bindings refuse registration before
   assert.equal(fixture.gateway.invocation.idempotency.healthcheck(), true);
 });
 
+test("heartbeat answers empty HTTP 204 and direct null only for registered machine identities", async (t) => {
+  const fixture = await fixtureForRegistration(t);
+  assertFailure(
+    await fixture.client.heartbeat(input),
+    HttpStatus.Forbidden,
+    ErrorCode.Required,
+  );
+  const registered = await fixture.client.register(input);
+  assert.ok(registered.type === OperationResultType.Completed);
+  const identity = await fixture.gateway.authentication.authenticate(
+    `Bearer ${fixture.machineJWT}`,
+  );
+  const direct = await directClient(
+    workerOperations,
+    fixture.gateway.invocation,
+  ).heartbeat(input, { identity });
+  assert.ok(direct.type === OperationResultType.Completed);
+  assert.equal(direct.data, null);
+  const http = await fixture.client.heartbeat(input);
+  assert.deepEqual(http, direct);
+  const raw = await fixture.request(workerOperations.heartbeat.path, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${fixture.machineJWT}` },
+  });
+  assert.equal(raw.status, HttpStatus.NoContent);
+  const empty = "";
+  assert.equal(await raw.text(), empty);
+  assertFailure(
+    await httpClient(
+      workerOperations,
+      fixture.endpoint,
+      fixture.token,
+    ).heartbeat(input),
+    HttpStatus.Unauthorized,
+    ErrorCode.Unauthorized,
+  );
+  const body = await fixture.request(workerOperations.heartbeat.path, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${fixture.machineJWT}`,
+      "Content-Type": "application/json",
+    },
+    body: "{}",
+  });
+  assert.equal(body.status, HttpStatus.BadRequest);
+  const unexpected = "gateway.request.unexpected_body";
+  assert.equal(errorSchema.parse(await body.json()).error.code, unexpected);
+});
+
 test("concurrent machine registrations cannot oversubscribe one binding", async (t) => {
   const fixture = await fixtureForRegistration(t);
   const otherToken = await fixture.machineToken(
