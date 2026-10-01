@@ -31,6 +31,7 @@ engine/
 │   │   ├── caller.ts           # Identity types, provenance, and predicates
 │   │   ├── caller-mint.ts      # Identity minting entry reserved for Gateway
 │   │   ├── json.ts             # Canonical JSON, digests, key derivation, and timestamps
+│   │   ├── handover.ts         # Handover keys, additional authenticated data and envelope codec
 │   │   ├── identity.ts         # Prefixed entity identities and ULID schemas
 │   │   ├── values.ts           # JavaScript value predicates
 │   │   ├── version.ts          # Cached package version
