@@ -3,7 +3,7 @@ import {
   CancellationContext,
   type Context,
 } from "../kernel/context.ts";
-import { Diagnostic, OperationError } from "../kernel/errors.ts";
+import { asError, Diagnostic, OperationError } from "../kernel/errors.ts";
 import type { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity, identitySchema } from "../kernel/identity.ts";
@@ -20,7 +20,7 @@ import {
 import type { Store, Transaction } from "../kernel/store.ts";
 import type { SchedulerConfig } from "./config.ts";
 import * as settlement from "./settlement.ts";
-import { readExecution } from "./execution-store.ts";
+import { readExecution, readExpiredUnsettled } from "./execution-store.ts";
 import { WaitingPulls } from "./wakeup.ts";
 import { workPull } from "./work-pull.ts";
 import { release } from "./release.ts";
@@ -28,6 +28,7 @@ import { claimGet, executionGet, executionList } from "./execution-read.ts";
 import {
   JOB_IDENTITY_PREFIX,
   EXECUTION_IDENTITY_PREFIX,
+  LOSS_SWEEP_INTERVAL_MS,
   QUEUE_LIST_LIMIT_DEFAULT,
   SCHEDULER_SERVICE_NAME,
   schedulerOperations,
@@ -97,6 +98,8 @@ export class SchedulerService implements Service, WorkQueue {
   private readonly dependencies: Dependencies;
   private readonly waiting = new WaitingPulls();
   private accepting = true;
+  private lossTimer?: NodeJS.Timeout;
+  private runError: Error | null = null;
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
@@ -297,13 +300,14 @@ export class SchedulerService implements Service, WorkQueue {
     return this.startTask;
   }
   quiesce(): Promise<Error | null> {
+    clearInterval(this.lossTimer);
+    this.lossTimer = undefined;
     this.accepting = false;
     this.waiting.wakeAll();
     return this.quiesceTask;
   }
   stop(): Promise<Error | null> {
-    this.accepting = false;
-    this.waiting.wakeAll();
+    void this.quiesce();
     this.shutdown.cancel();
     this.started = false;
     this.stopTask ??= Promise.resolve(null);
@@ -317,8 +321,17 @@ export class SchedulerService implements Service, WorkQueue {
       if (context.err()) return (await this.stop()) ?? context.err();
       const error = await this.start();
       if (error) return error;
+      if (this.accepting)
+        this.lossTimer ??= setInterval(() => {
+          try {
+            this.sweep();
+          } catch (failure) {
+            this.runError = asError(failure);
+            void this.stop();
+          }
+        }, LOSS_SWEEP_INTERVAL_MS).unref();
       await this.shutdown.done();
-      return (await this.stop()) ?? context.err();
+      return (await this.stop()) ?? this.runError ?? context.err();
     } finally {
       unsubscribe();
     }
@@ -330,5 +343,24 @@ export class SchedulerService implements Service, WorkQueue {
           ? HealthStatus.Healthy
           : HealthStatus.Unavailable,
     };
+  }
+
+  sweep(): void {
+    const identities = this.dependencies.store.transaction((tx) =>
+      readExpiredUnsettled(tx, Date.now()).map((row) => row.executionId),
+    );
+    for (let index = 0; index < identities.length; index++) {
+      const projectId = this.dependencies.store.transaction((tx) => {
+        const now = Date.now();
+        const row = readExecution(tx, identities[index]!);
+        if (!row || row.endedAt !== null || now < row.expiredAt) return null;
+        settlement.declareLoss(tx, this.dependencies, row, now);
+        return row.projectId;
+      });
+      if (projectId !== null) this.wake(projectId);
+    }
+    const projects = this.waiting.projectIds();
+    for (let index = 0; index < projects.length; index++)
+      this.wake(projects[index]!);
   }
 }

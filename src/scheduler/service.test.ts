@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { setImmediate as turn } from "node:timers/promises";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HealthRegistry } from "../kernel/health.ts";
@@ -12,9 +13,15 @@ import {
   schedulerOperations,
   SCHEDULER_SERVICE_NAME,
   QUEUE_LIST_LIMIT_DEFAULT,
+  LOSS_SWEEP_INTERVAL_MS,
 } from "./contract.ts";
 import { schedulerMigrations } from "./migrations.ts";
-import { schedulerHarness } from "./test-support.ts";
+import {
+  schedulerHarness,
+  executionFixture,
+  FIXTURE_DEADLINE,
+} from "./test-support.ts";
+import { insertExecution, readExecution } from "./execution-store.ts";
 
 const PROJECT_PREFIX = "project";
 const NODE_PREFIX = "node";
@@ -286,4 +293,108 @@ test("SchedulerService lifecycle and health registration", async (t) => {
     HealthStatus.Unavailable,
   );
   assert.ok(await scheduler.start());
+});
+
+test("run owns the 30-second loss sweep and quiescence stops it permanently", async (t) => {
+  const h = schedulerHarness(t);
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  t.mock.method(Date, "now", () => FIXTURE_DEADLINE);
+  const row = executionFixture();
+  h.store.transaction((tx) => insertExecution(tx, row));
+  t.mock.timers.tick(LOSS_SWEEP_INTERVAL_MS);
+  assert.deepEqual(h.calls, []);
+  const running = h.service.run();
+  await turn();
+  t.mock.timers.tick(LOSS_SWEEP_INTERVAL_MS - 1);
+  assert.deepEqual(h.calls, []);
+  t.mock.timers.tick(1);
+  assert.equal(h.calls.length, ONE_ROW);
+  t.mock.timers.tick(LOSS_SWEEP_INTERVAL_MS);
+  assert.equal(h.calls.length, ONE_ROW);
+  assert.equal(
+    h.store.transaction((tx) => readExecution(tx, row.executionId))?.endedAt,
+    FIXTURE_DEADLINE,
+  );
+  await h.service.quiesce();
+  const later = executionFixture();
+  h.store.transaction((tx) => insertExecution(tx, later));
+  t.mock.timers.tick(LOSS_SWEEP_INTERVAL_MS);
+  assert.equal(h.calls.length, ONE_ROW);
+  await h.service.stop();
+  assert.equal(await running, null);
+  assert.equal(
+    h.store.database
+      .prepare("SELECT count(*) AS count FROM scheduler_execution")
+      .get()!.count,
+    LIST_PAGE_LIMIT,
+  );
+});
+
+test("sweep hands consecutive loss counts to Mission once per steps and evaluation row", (t) => {
+  const h = schedulerHarness(t);
+  let now = FIXTURE_DEADLINE;
+  t.mock.method(Date, "now", () => now);
+  const rows = [executionFixture(), executionFixture()];
+  const counts: number[] = [];
+  h.dependencies.transitions.loss = (tx, nodeId, count) => {
+    assert.ok(tx.database.isTransaction);
+    assert.ok(rows.some((row) => row.nodeId === nodeId));
+    counts.push(count);
+  };
+  h.store.transaction((tx) => rows.forEach((row) => insertExecution(tx, row)));
+  h.service.sweep();
+  h.service.sweep();
+  assert.deepEqual(counts, [ONE_ROW, ONE_ROW]);
+  now++;
+  h.store.transaction((tx) =>
+    rows.forEach((row) =>
+      insertExecution(tx, {
+        ...row,
+        executionId: createIdentity("execution"),
+        endedAt: null,
+      }),
+    ),
+  );
+  h.service.sweep();
+  assert.deepEqual(counts, [
+    ONE_ROW,
+    ONE_ROW,
+    LIST_PAGE_LIMIT,
+    LIST_PAGE_LIMIT,
+  ]);
+});
+
+test("a timer sweep failure rolls back, stops the timer and returns the original error", async (t) => {
+  const h = schedulerHarness(t);
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  t.mock.method(Date, "now", () => FIXTURE_DEADLINE);
+  const row = executionFixture();
+  h.store.transaction((tx) => insertExecution(tx, row));
+  const failure = new Error("loss routing failed");
+  h.dependencies.transitions.loss = () => {
+    throw failure;
+  };
+  const running = h.service.run();
+  await turn();
+  t.mock.timers.tick(LOSS_SWEEP_INTERVAL_MS);
+  assert.equal(await running, failure);
+  assert.equal(
+    h.store.transaction((tx) => readExecution(tx, row.executionId))?.endedAt,
+    null,
+  );
+  t.mock.timers.tick(LOSS_SWEEP_INTERVAL_MS);
+  assert.equal((await h.service.healthcheck()).queue, HealthStatus.Unavailable);
+});
+
+test("quiescence before run installs no timer", async (t) => {
+  const h = schedulerHarness(t);
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const sweep = t.mock.method(h.service, "sweep");
+  await h.service.quiesce();
+  const running = h.service.run();
+  await turn();
+  t.mock.timers.tick(LOSS_SWEEP_INTERVAL_MS);
+  assert.deepEqual(sweep.mock.calls, []);
+  await h.service.stop();
+  assert.equal(await running, null);
 });
