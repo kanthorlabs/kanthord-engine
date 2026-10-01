@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
+import { timestamp } from "../kernel/json.ts";
 import {
   AccessPolicy,
   OperationLifetime,
@@ -12,6 +13,216 @@ import type { Transaction } from "../kernel/store.ts";
 export const SCHEDULER_SERVICE_NAME = "scheduler";
 export const JOB_IDENTITY_PREFIX = "job";
 export const SCHEDULER_TIMEOUT_MS = 30000;
+export const EXECUTION_IDENTITY_PREFIX = "execution";
+export const WORKER_INSTANCE_IDENTITY_PREFIX = "worker_instance";
+export const WORK_PULL_TIMEOUT_MS = 120000;
+export const WORK_PULL_WAIT_MS = 90000;
+export const LOSS_SWEEP_INTERVAL_MS = 30000;
+const EMPTY_TEXT_LENGTH = 0;
+
+export const ClaimState = {
+  Running: "running",
+  Lost: "lost",
+  Finished: "finished",
+} as const;
+export const claimStateSchema = z.enum(ClaimState);
+export type ClaimState = z.infer<typeof claimStateSchema>;
+export const WorkPullKind = { Claimed: "claimed", NoWork: "no-work" } as const;
+export const workPullKindSchema = z.enum(WorkPullKind);
+export type WorkPullKind = z.infer<typeof workPullKindSchema>;
+export const ClaimNodeState = {
+  Available: "Available",
+  Waiting: "Waiting",
+  ExternalRequested: "External.Requested",
+} as const;
+export const claimNodeStateSchema = z.enum(ClaimNodeState);
+export type ClaimNodeState = z.infer<typeof claimNodeStateSchema>;
+export const NodeFormatField = {
+  Name: "name",
+  Requirement: "requirement",
+  Criterion: "criterion",
+  Verifications: "verifications",
+  Bindings: "bindings",
+} as const;
+export const nodeFormatFieldSchema = z.enum(NodeFormatField);
+export type NodeFormatField = z.infer<typeof nodeFormatFieldSchema>;
+export const traceIdSchema = z
+  .string()
+  .regex(/^[0-9a-f]{32}$/)
+  .refine((value) => !/^0+$/.test(value));
+export const spanIdSchema = z
+  .string()
+  .regex(/^[0-9a-f]{16}$/)
+  .refine((value) => !/^0+$/.test(value));
+const positiveInteger = z
+  .number()
+  .int()
+  .positive()
+  .max(Number.MAX_SAFE_INTEGER);
+export const claimantSchema = z.strictObject({
+  workerBindingId: identitySchema("binding"),
+  resourceIdentity: z.string().min(1),
+  runtimeIdentity: identitySchema(WORKER_INSTANCE_IDENTITY_PREFIX),
+  clientId: identitySchema("client_identity").optional(),
+  name: z
+    .string()
+    .min(1)
+    .max(64)
+    .refine((value) => value.trim().length > EMPTY_TEXT_LENGTH)
+    .optional(),
+});
+export const executionRecordSchema = z.strictObject({
+  executionId: identitySchema(EXECUTION_IDENTITY_PREFIX),
+  projectId: identitySchema("project"),
+  nodeId: identitySchema("node"),
+  claimant: claimantSchema,
+  attempt: positiveInteger,
+  pinnedRevision: positiveInteger,
+  credentials: z.array(identitySchema("credential")),
+  claimState: claimStateSchema,
+  expiredAt: timestamp,
+  createdAt: timestamp,
+  endedAt: timestamp.nullable(),
+  traceId: traceIdSchema,
+  rootSpanId: spanIdSchema,
+});
+export type ExecutionRecord = z.infer<typeof executionRecordSchema>;
+export const workPullSchema = z.strictObject({
+  resourceIdentity: z.string().min(1),
+  runtimeIdentity: identitySchema(WORKER_INSTANCE_IDENTITY_PREFIX),
+});
+export type WorkPull = z.infer<typeof workPullSchema>;
+export const workPullResultSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal(WorkPullKind.Claimed),
+    execution: executionRecordSchema,
+  }),
+  z.strictObject({ kind: z.literal(WorkPullKind.NoWork) }),
+]);
+export const executionReleaseSchema = z.strictObject({
+  furtherWork: z.boolean(),
+});
+export const releaseResultSchema = z.strictObject({
+  executionId: identitySchema(EXECUTION_IDENTITY_PREFIX),
+  endedAt: timestamp,
+});
+
+export interface ExecutionRow {
+  executionId: string;
+  projectId: string;
+  nodeId: string;
+  workerBindingId: string;
+  resourceIdentity: string;
+  runtimeIdentity: string;
+  attempt: number;
+  pinnedRevision: number;
+  credentials: string[];
+  expiredAt: number;
+  traceId: string;
+  rootSpanId: string;
+  createdAt: number;
+  endedAt: number | null;
+}
+export interface SchedulerClaims {
+  revoke(tx: Transaction, nodeId: string, now: number): string | null;
+  settle(tx: Transaction, nodeId: string, now: number): void;
+  liveExecutionOf(
+    tx: Transaction,
+    nodeId: string,
+    now: number,
+  ): ExecutionRow | null;
+  runningExecutionOfRuntime(
+    tx: Transaction,
+    runtimeIdentity: string,
+    now: number,
+  ): ExecutionRow | null;
+  requireRunning(
+    tx: Transaction,
+    executionId: string,
+    runtimeIdentity: string,
+    now: number,
+  ): ExecutionRow;
+  pinCredential(
+    tx: Transaction,
+    executionId: string,
+    credentialId: string,
+  ): void;
+  liveExecutionsPinning(tx: Transaction, credentialId: string): string[];
+}
+export interface SchedulerWakeup {
+  wake(projectId: string): void;
+}
+export interface ExecutionAttribution {
+  of(
+    tx: Transaction,
+    executionId: string,
+  ): {
+    clientId: string | null;
+    name: string | null;
+    workerName: string;
+  } | null;
+}
+export interface MissionTransitions {
+  claim(
+    tx: Transaction,
+    nodeId: string,
+    declaredStates: readonly string[],
+    opener: {
+      kind: "execution";
+      executionId: string;
+      clientId: string | null;
+      name: string | null;
+    },
+    now: number,
+  ): {
+    kind: string;
+    projectId: string;
+    attempt: number;
+    nodeRevision: number;
+  } | null;
+  release(
+    tx: Transaction,
+    execution: { executionId: string; nodeId: string; attempt: number },
+    furtherWork: boolean,
+    now: number,
+  ): void;
+  loss(
+    tx: Transaction,
+    nodeId: string,
+    consecutiveLosses: number,
+    now: number,
+  ): void;
+}
+export interface InstanceRegistrations {
+  clientAttributionOf(
+    tx: Transaction,
+    runtimeIdentity: string,
+  ): { clientId: string; name: string } | null;
+  instanceHealthcheck(tx: Transaction, runtimeIdentity: string): boolean;
+}
+export interface WorkerDeclarations {
+  declarationOf(workerName: string): {
+    declaredNodeStates: readonly string[];
+    requiredNodeFormat: readonly string[];
+    resourceBudget: { wallTimeMs: number };
+  } | null;
+}
+export interface WorkerBindings {
+  workerBindingOf(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentity: string,
+  ): {
+    bindingId: string;
+    workerName: string;
+    instanceCount: number;
+    resourceBudget?: { wallTimeMs: number } | null;
+    tombstone: boolean;
+  } | null;
+}
+export interface TraceIdentity {
+  mint(): { traceId: string; rootSpanId: string };
+}
 
 export interface WorkQueue {
   insert(

@@ -1,4 +1,5 @@
 import { join, dirname } from "node:path";
+import { randomBytes } from "node:crypto";
 import {
   directories,
   configPath,
@@ -115,6 +116,32 @@ export function composeServices(options: {
   });
   const scheduler = new SchedulerService({
     config: options.config.scheduler,
+    store: options.store,
+    transitions: {
+      claim: (...args: Parameters<MissionService["claim"]>) =>
+        mission.claim(...args),
+      release: (...args) => mission.release(...args),
+      loss: (...args) => mission.loss(...args),
+    },
+    registrations: {
+      clientAttributionOf: (tx, runtimeIdentity) =>
+        worker.registrations.clientAttributionOf(tx, runtimeIdentity),
+      instanceHealthcheck: (tx, runtimeIdentity) =>
+        worker.instanceHealthcheck(tx, runtimeIdentity),
+    },
+    declarations: {
+      declarationOf: (workerName) => worker.declarationOf(workerName),
+    },
+    bindings: {
+      workerBindingOf: (tx, projectId, resourceIdentity) =>
+        project.workerBindingOf(tx, projectId, resourceIdentity),
+    },
+    traceIdentity: {
+      mint: () => ({
+        traceId: randomBytes(16).toString("hex"),
+        rootSpanId: randomBytes(8).toString("hex"),
+      }),
+    },
     health: options.health,
   });
   const workQueue: WorkQueue = {

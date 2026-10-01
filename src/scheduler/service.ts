@@ -17,7 +17,7 @@ import {
   type Healthcheck,
   type Service,
 } from "../kernel/service.ts";
-import type { Transaction } from "../kernel/store.ts";
+import type { Store, Transaction } from "../kernel/store.ts";
 import type { SchedulerConfig } from "./config.ts";
 import {
   JOB_IDENTITY_PREFIX,
@@ -26,6 +26,11 @@ import {
   schedulerOperations,
   type Job,
   type WorkQueue,
+  type MissionTransitions,
+  type InstanceRegistrations,
+  type WorkerDeclarations,
+  type WorkerBindings,
+  type TraceIdentity,
 } from "./contract.ts";
 
 const SCHEDULER_STOPPED_CODE = "scheduler.lifecycle.stopped";
@@ -67,6 +72,12 @@ function decodeCursor(cursor: string): string {
 
 export interface Dependencies {
   config: SchedulerConfig;
+  store: Store;
+  transitions: MissionTransitions;
+  registrations: InstanceRegistrations;
+  declarations: WorkerDeclarations;
+  bindings: WorkerBindings;
+  traceIdentity: TraceIdentity;
   health?: HealthRegistry;
 }
 
@@ -76,8 +87,10 @@ export class SchedulerService implements Service, WorkQueue {
   private stopTask?: Promise<Error | null>;
   private readonly quiesceTask = Promise.resolve(null);
   private started = false;
+  private readonly dependencies: Dependencies;
 
   constructor(dependencies: Dependencies) {
+    this.dependencies = dependencies;
     dependencies.health?.register(SCHEDULER_SERVICE_NAME, () =>
       this.healthcheck(),
     );
