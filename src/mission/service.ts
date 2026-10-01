@@ -45,7 +45,12 @@ import { executionContentBound, readContent } from "./evidence-content-read.ts";
 import { submitAssessment } from "./assessment-submit.ts";
 import { checkNode } from "./node-check.ts";
 import { deleteEvidenceAsset, removeEvidence } from "./evidence-delete.ts";
-import { executionRevision, executionRevisionPage } from "./execution-read.ts";
+import {
+  executionRevision,
+  executionRevisionPage,
+  executionEvidencePage,
+  clearedOutcome,
+} from "./execution-read.ts";
 import { claim, release, loss } from "./transitions.ts";
 import {
   attemptPage,
@@ -145,6 +150,26 @@ export class MissionService
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["execution.evidence.list"],
+      ({ query }, caller) => {
+        assert.ok(caller.execution);
+        const claim = caller.execution;
+        return caller.commit((tx) =>
+          executionEvidencePage(tx, this.dependencies, claim, query),
+        );
+      },
+    );
+    registry.register(
+      missionOperations["execution.clearedOutcome.get"],
+      (_input, caller) => {
+        assert.ok(caller.execution);
+        const claim = caller.execution;
+        return caller.commit((tx) =>
+          clearedOutcome(tx, this.dependencies, claim),
+        );
+      },
+    );
     registry.register(
       missionOperations["execution.pinnedRevision.get"],
       (_input, caller) => {

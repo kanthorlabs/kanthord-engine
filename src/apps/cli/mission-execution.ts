@@ -18,6 +18,43 @@ export function addExecutionCommands(mission: Command): void {
   addRevisionReads(execution);
   const evidence = execution.command("evidence").description("Bound evidence");
   evidence.action(() => evidence.help());
+  addPagination(
+    evidence.command("list").argument("<execution-id>", "Execution ID"),
+  ).action(async (executionId: string, _options, command: Command) => {
+    executionIdentity(
+      executionId,
+      "cli.mission.execution.evidence.list.invalid_execution_id",
+    );
+    printResult(
+      await client(command, "execution.evidence.list")[
+        "execution.evidence.list"
+      ]({
+        params: { executionId },
+        query: pagination(command.optsWithGlobals()),
+        body: null,
+      }),
+      "execution.evidence.list",
+    );
+  });
+  const cleared = execution
+    .command("cleared-outcome")
+    .description("Outcome cleared by an unblock");
+  cleared.action(() => cleared.help());
+  cleared
+    .command("get")
+    .argument("<execution-id>", "Execution ID")
+    .action(async (executionId: string, _options, command: Command) => {
+      executionIdentity(
+        executionId,
+        "cli.mission.execution.cleared_outcome.get.invalid_execution_id",
+      );
+      printResult(
+        await client(command, "execution.clearedOutcome.get")[
+          "execution.clearedOutcome.get"
+        ]({ params: { executionId }, query: {}, body: null }),
+        "execution.clearedOutcome.get",
+      );
+    });
   const asset = evidence.command("asset").description("Bound assets");
   asset.action(() => asset.help());
   const content = asset.command("content").description("Bound asset content");

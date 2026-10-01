@@ -1161,6 +1161,34 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "execution.evidence.list": {
+    ...readOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.execution.evidence.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/execution/:executionId/evidence",
+    input: readInput(
+      z.strictObject({ executionId: identitySchema("execution") }),
+      z.strictObject(pageQuery),
+    ),
+    output: pageOf(evidenceSchema),
+    description: "List evidence of the claimed attempt.",
+  },
+  "execution.clearedOutcome.get": {
+    ...readOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.execution.clearedOutcome.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/execution/:executionId/cleared-outcome",
+    input: readInput(
+      z.strictObject({ executionId: identitySchema("execution") }),
+      z.strictObject({}),
+    ),
+    output: outcomeSchema,
+    description: "Read the previous attempt outcome cleared by an unblock.",
+  },
   "execution.pinnedRevision.get": {
     ...readOperation,
     access: AccessPolicy.Client,
