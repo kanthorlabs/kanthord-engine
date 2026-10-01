@@ -4,7 +4,11 @@ import type { z } from "zod";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import {
+  OperationRegistry,
+  type CallerContext,
+  type ExecutionClaim,
+} from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   MISSION_SERVICE_NAME,
@@ -24,6 +28,7 @@ import {
 } from "./store.ts";
 import { missionMigrations } from "./migrations.ts";
 import { MissionService, type Dependencies } from "./service.ts";
+import { openAttempt } from "./record-store.ts";
 
 const CONSECUTIVE_LOSS_LIMIT = 3;
 const TEXT_MAX_BYTES = 32768;
@@ -33,6 +38,44 @@ const UNEXPECTED_COLLABORATION = "unexpected collaboration call";
 
 export function unexpectedCollaboration(): never {
   throw new Error(UNEXPECTED_COLLABORATION);
+}
+
+export function executionHarness(t: TestContext, identity: CallerIdentity) {
+  const h = controlHarness(t, identity);
+  const claim: ExecutionClaim = {
+    executionId: createIdentity("execution"),
+    projectId: h.projectId,
+    nodeId: h.nodeId,
+    attempt: FIRST_REVISION,
+    pinnedRevision: FIRST_REVISION,
+    runtimeIdentity: createIdentity("worker_instance"),
+    workerBindingId: createIdentity("binding"),
+  };
+  const actor = {
+    kind: ActorKind.Execution,
+    executionId: claim.executionId,
+    clientId: createIdentity("client_identity"),
+    name: "Harness",
+  } as const;
+  h.dependencies.schedulerClaims.liveExecutionOf = () => claim;
+  h.dependencies.executionAttribution.of = () => ({
+    clientId: actor.clientId,
+    name: actor.name,
+    workerName: "claude@1",
+  });
+  h.caller.execution = claim;
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.nodeId, FIRST_REVISION, actor, FIXTURE_TIME);
+    setNodeState(tx, h.nodeId, NodeState.Executing);
+  });
+  const context = {
+    executionId: claim.executionId,
+    attempt: claim.attempt,
+    nodeRevision: claim.pinnedRevision,
+  };
+  assert.equal(h.node().attempt, claim.attempt);
+  assert.equal(h.node().state, NodeState.Executing);
+  return { ...h, claim, context, executionActor: actor };
 }
 
 export function controlHarness(
