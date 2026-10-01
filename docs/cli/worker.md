@@ -1,10 +1,9 @@
 # Worker CLI specification
 
-This is the future specification for `kanthord worker`. It contains **19 command leaves: 1 implemented command and 18 proposed commands**. The proposed command
-names, routes, operation IDs, access policies, JSON fields and defaults below are
-design proposals, not published API or working CLI commands. The behavioral
-requirements identified as **target design** come from the Worker design; their
-presence here does not establish implementation.
+This specification for `kanthord worker` contains **19 command leaves: 16 implemented commands and 3 proposed commands**.
+The inventory distinguishes shipped syntax and operations from `handover`,
+`agent get` and `provider check`, which remain proposed. Requirements marked
+**target design** describe later runtime behavior and do not establish implementation.
 
 See the [CLI index](./README.md) for shared conventions and
 [other commands](./other.md) for `serve worker`, server configuration and local
@@ -18,26 +17,26 @@ Work pull, claims, execution records and release belong to
 ## Current implementation boundary
 
 The [CLI implementation](../../src/apps/cli/worker.ts) and
-[Worker operation contract](../../src/worker/contract.ts) declare only `register`.
-The [registration implementation](../../src/worker/registrations.ts) holds one
-in-memory registration per client identity and mints a runtime identity. Its
-`findByClient` and `deregister` functions are internal collaborations, not CLI
-commands or published routes.
+[Worker operation contract](../../src/worker/contract.ts) provide registration,
+heartbeat, catalog reads, registration-backed instance inspection and lifecycle,
+and eight agent-enablement commands. The
+[registration implementation](../../src/worker/registrations.ts) uses durable
+`worker_instance` rows, one live registration per client identity, and atomic
+binding instance-count admission. Deregistration is both an internal
+collaboration and an owned client operation.
 
-The normal [server composition](../../src/apps/server/index.ts) currently supplies
-no populated Project binding resolver. The default
-[Project implementation](../../src/project/service.ts) returns no binding, so
-ordinary machine authentication cannot yet resolve a configured worker binding.
-Registration integration tests inject binding and registration implementations.
-In particular, the production in-memory registration implementation checks the
-one-registration-per-client rule but does not implement the design's atomic
-binding instance-count admission. A registered command and route therefore do not
-establish the complete usable Worker lifecycle.
+The [server composition](../../src/apps/server/index.ts) wires the real
+[Project binding resolver](../../src/project/service.ts), including group
+tombstones and transactional registration endings when a binding becomes
+unavailable. Scheduler running-execution and activity collaborators remain
+explicitly unwired in production under D6/D9 until Plan 03; tests supply stand-ins.
 
-The [Worker configuration fragment](../../src/worker/index.ts) is empty. Native
-workers, their agent loops, the catalog, instance pools, instance healthchecks,
-repository actions and MCP are target work. The current Worker service probe
-reports registration-component availability; it is not an instance healthcheck.
+The [Worker configuration fragment](../../src/worker/config.ts) declares
+`heartbeatWindow` and `globalPrompt`. The catalog, report-only instance
+healthcheck collaboration and registration heartbeat lifecycle are implemented.
+Native agent loops, server-placement pools, prompt consumption, repository
+actions and MCP remain later runtime work. The service probe reports
+registration-component availability separately from instance healthchecks.
 
 ## Shared input and output contract
 
@@ -63,24 +62,24 @@ Only applicability and Worker-specific requirements are listed here.
 The [shared client-file rules](./other.md#cliyaml-and-its-effects) apply.
 Commands do not save or rewrite that file.
 
-For proposed commands, all request objects are strict: undeclared fields are
+Request objects are strict: undeclared fields are
 rejected. An omitted optional field takes only its documented default; `null`
 does not mean omission. No read accepts an idempotency key. Unless a section says
 otherwise, the command has no positional arguments or options beyond its listed
 ones and the applicable shared options; its request body is absent, represented
 as `body: null` in the service-client envelope.
 
-Proposed successful unary commands print one JSON line and exit `0`. List results
-are `{ "items": [...], "nextCursor": null | string }`. Proposed mutations also
+Successful unary commands print one JSON line and exit `0`. List results
+are `{ "items": [...], "nextCursor": null | string }`. Mutations also
 print the used `idempotencyKey`. Failures print a diagnostic and exit nonzero;
 they do not print tokens. An indeterminate mutation reports its key and does not
 assert that the operation had no effect. Repeating the same logical request uses
 the same caller, inputs and key; starting another CLI invocation without that key
-creates a new invocation. This proposal adds no automatic mutation retry.
+creates a new invocation. There is no automatic mutation retry.
 
-The target invocation design limits replay to one process and the configured
-TTL; domain handlers still need natural-key idempotency. Current registration's
-storage differs, as documented in its section. Replay is not failure recovery,
+Invocation replay is limited to one process and the configured
+TTL; domain handlers still need natural-key idempotency. Durable registration
+rows are separate from replay records. Replay is not failure recovery,
 and an idempotency key alone cannot reconcile an uncertain repository write.
 
 ### Names and identities
@@ -101,7 +100,7 @@ Worker/agent names and MCP session IDs retain their natural-key/protocol forms.
 ## Command inventory
 
 `P` means proposed; `I` means implemented syntax and operation.
-Heartbeat, handover, deregistration, the five inspection reads and provider check use their ruled routes. Other `P` paths remain proposals, not current OpenAPI declarations.
+`P` routes describe the ruled target and are not current OpenAPI declarations.
 `human` authenticates a human JWT. `client` authenticates a machine JWT.
 Live registration and execution requirements appear per operation; registration
 and deregistration require no live registration.
@@ -109,29 +108,30 @@ and deregistration require no live registration.
 | Status | Command after `kanthord worker`               | Route                                               | Operation ID                 | Access / registration                                                             |
 | ------ | --------------------------------------------- | --------------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------- |
 | I      | `register`                                    | `POST /api/worker/register`                         | `worker.register`            | `client`; no live registration required                                           |
-| P      | `heartbeat [--token <jwt>]`                   | `POST /api/worker/heartbeat`                        | `worker.heartbeat`           | `client`; live registration                                                       |
+| I      | `heartbeat [--token <jwt>]`                   | `POST /api/worker/heartbeat`                        | `worker.heartbeat`           | `client`; live registration                                                       |
 | P      | `handover <execution-id> [M] [--token <jwt>]` | `POST /api/worker/handover`                         | `worker.handover`            | `client`; live registration and live execution                                    |
-| P      | `list`                                        | `GET /api/worker/catalog`                           | `worker.catalog.list`        | `human`                                                                           |
-| P      | `get <worker-name>`                           | `GET /api/worker/catalog/:workerName`               | `worker.catalog.get`         | `human`                                                                           |
+| I      | `list`                                        | `GET /api/worker/catalog`                           | `worker.catalog.list`        | `human`                                                                           |
+| I      | `get <worker-name>`                           | `GET /api/worker/catalog/:workerName`               | `worker.catalog.get`         | `human`                                                                           |
 | P      | `agent get <agent-name>`                      | `GET /api/worker/agent/:agentName`                  | `worker.agent.get`           | `human`                                                                           |
-| P      | `instance list`                               | `GET /api/worker/instance`                          | `worker.instance.list`       | `human`                                                                           |
-| P      | `instance get <runtime-identity>`             | `GET /api/worker/instance/:runtimeIdentity`         | `worker.instance.get`        | `human`                                                                           |
-| P      | `instance deregister <runtime-identity>`      | `DELETE /api/worker/instance/:runtimeIdentity`      | `worker.instance.deregister` | `client`; no live registration required; ownership by client, binding and project |
-| P      | `instance resume <runtime-identity>`          | `POST /api/worker/instance/:runtimeIdentity/resume` | `worker.instance.resume`     | `human`; mutation                                                                 |
+| I      | `instance list`                               | `GET /api/worker/instance`                          | `worker.instance.list`       | `human`                                                                           |
+| I      | `instance get <runtime-identity>`             | `GET /api/worker/instance/:runtimeIdentity`         | `worker.instance.get`        | `human`                                                                           |
+| I      | `instance deregister <runtime-identity>`      | `DELETE /api/worker/instance/:runtimeIdentity`      | `worker.instance.deregister` | `client`; no live registration required; ownership by client, binding and project |
+| I      | `instance resume <runtime-identity>`          | `POST /api/worker/instance/:runtimeIdentity/resume` | `worker.instance.resume`     | `human`; mutation                                                                 |
 
-The inventory includes these nine **proposed** commands. `[R]`, `[M]` and
+The inventory also includes eight implemented enablement commands and the proposed
+provider check. `[R]`, `[M]` and
 `[L]` use the [common synopsis definitions](./common-flags.md#synopsis-markers).
 
 | Status | Command after `kanthord worker`                                                                        | Route                                                                   | Operation ID                              | Access / registration |
 | ------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- | ----------------------------------------- | --------------------- |
-| P      | `agent enablement list [L] [R]`                                                                        | `GET /api/worker/agent/enablement`                                      | `worker.agent.enablement.list`            | `human`; proposed     |
-| P      | `agent enablement get <agent-name> [R]`                                                                | `GET /api/worker/agent/enablement/:agentName`                           | `worker.agent.enablement.get`             | `human`; proposed     |
-| P      | `agent enablement put <agent-name> --file <path> [M] [R]`                                              | `PUT /api/worker/agent/enablement/:agentName`                           | `worker.agent.enablement.put`             | `human`; proposed     |
-| P      | `agent enablement enable <agent-name> --expected-revision <revision> [M] [R]`                          | `POST /api/worker/agent/enablement/:agentName/enable`                   | `worker.agent.enablement.enable`          | `human`; proposed     |
-| P      | `agent enablement disable <agent-name> --expected-revision <revision> [M] [R]`                         | `POST /api/worker/agent/enablement/:agentName/disable`                  | `worker.agent.enablement.disable`         | `human`; proposed     |
-| P      | `agent enablement remove <agent-name> --expected-revision <revision> [M] [R]`                          | `DELETE /api/worker/agent/enablement/:agentName`                        | `worker.agent.enablement.remove`          | `human`; proposed     |
-| P      | `agent enablement provider add <agent-name> --file <path> [M] [R]`                                     | `POST /api/worker/agent/enablement/:agentName/provider`                 | `worker.agent.enablement.provider.add`    | `human`; proposed     |
-| P      | `agent enablement provider remove <agent-name> <provider-name> --expected-revision <revision> [M] [R]` | `DELETE /api/worker/agent/enablement/:agentName/provider/:providerName` | `worker.agent.enablement.provider.remove` | `human`; proposed     |
+| I      | `agent enablement list [L] [R]`                                                                        | `GET /api/worker/agent/enablement`                                      | `worker.agent.enablement.list`            | `human`               |
+| I      | `agent enablement get <agent-name> [R]`                                                                | `GET /api/worker/agent/enablement/:agentName`                           | `worker.agent.enablement.get`             | `human`               |
+| I      | `agent enablement put <agent-name> --file <path> [M] [R]`                                              | `PUT /api/worker/agent/enablement/:agentName`                           | `worker.agent.enablement.put`             | `human`               |
+| I      | `agent enablement enable <agent-name> --expected-revision <revision> [M] [R]`                          | `POST /api/worker/agent/enablement/:agentName/enable`                   | `worker.agent.enablement.enable`          | `human`               |
+| I      | `agent enablement disable <agent-name> --expected-revision <revision> [M] [R]`                         | `POST /api/worker/agent/enablement/:agentName/disable`                  | `worker.agent.enablement.disable`         | `human`               |
+| I      | `agent enablement remove <agent-name> --expected-revision <revision> [M] [R]`                          | `DELETE /api/worker/agent/enablement/:agentName`                        | `worker.agent.enablement.remove`          | `human`               |
+| I      | `agent enablement provider add <agent-name> --file <path> [M] [R]`                                     | `POST /api/worker/agent/enablement/:agentName/provider`                 | `worker.agent.enablement.provider.add`    | `human`               |
+| I      | `agent enablement provider remove <agent-name> <provider-name> --expected-revision <revision> [M] [R]` | `DELETE /api/worker/agent/enablement/:agentName/provider/:providerName` | `worker.agent.enablement.provider.remove` | `human`               |
 | P      | `provider check --credential <credential-name> [R]`                                                    | `POST /api/worker/provider/check`                                       | `worker.provider.check`                   | `human`; proposed     |
 
 The static `/api/worker/agent/enablement` path takes precedence over `/:agentName`.
@@ -173,10 +173,12 @@ The [registration contract](https://github.com/kanthorlabs/kanthord/blob/main/do
 | `body`                   | Absent HTTP body; internal value `null`                                   | JSON `{}` is not an empty request body and is rejected. `--file` is not accepted.                  |
 
 The operation is a mutation, declares a `10,000 ms` timeout and a `40 KiB` body
-limit, and returns HTTP `200` with `{ "runtimeIdentity": "...", "resourceIdentity": "...", "workerName": "..." }`. The body limit
+limit, and currently returns HTTP `200` with `{ "runtimeIdentity": "..." }`. The body limit
 does not permit a registration payload. The runtime identity is `worker_instance_<ulid>`.
 
-The CLI prints one JSON line with `runtimeIdentity`, `resourceIdentity`, `workerName` and `idempotencyKey`, saves no configuration and prints no token.
+The CLI currently prints one JSON line with `runtimeIdentity` and `idempotencyKey`, saves no configuration and prints no token.
+**Target design (Plan 09):** the operation and CLI answer additionally hold
+`resourceIdentity` and `workerName` for worker-application startup.
 Success exits with zero; failure exits with a non-zero status. Registration creates no client identity,
 worker definition or human account. The credential comes from local `jwt generate`
 issuance described in [other commands](./other.md).
@@ -191,28 +193,28 @@ Cancellation does not deregister an accepted registration. There is no automatic
 CLI retry. Declared failures print their HTTP status and key; indeterminate
 results print the key and instruct explicit reuse of it.
 
-**Current/target distinction:** the current
-[Gateway idempotency component](../../src/gateway/idempotency.ts) stores completed
-responses in memory and sweeps them by TTL every 60 s. The target architecture
-requires process-local replay with a TTL. Do not infer the target storage or
-restart behavior from this CLI specification. Runtime registrations themselves
-are in memory; a stale stored answer grants no renewed registration.
+The [Gateway idempotency component](../../src/gateway/idempotency.ts) stores
+completed responses in process memory and sweeps them by TTL every 60 s.
+Registrations are durable `worker_instance` rows, including retained ended
+attribution. A stale stored answer grants no renewed registration.
 
-**Target design:** registration must also check the binding's instance count in
-the same transaction as acceptance. Binding removal/unavailability ends the
-registration. A server restart keeps it and sets its last heartbeat to the start
-time. These rules need production integration beyond the current default
-collaborators. The current authentication path refuses a binding that the
-Project resolver rejects; that refusal is not evidence of a completed
-registration-cleanup implementation. The [Gateway signing
+Registration checks the current binding's instance count in its acceptance
+transaction. Binding removal or a change to zero instances ends live
+registrations in the binding-write transaction. A server restart retains rows
+and resets live heartbeat readings to its start time. The Scheduler claim and
+activity collaborations remain stand-ins under D6/D9 until Plan 03; production
+calls requiring those unwired collaborators fail explicitly. The [Gateway signing
 key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
 revokes every JWT after an increment
 of `gateway.tokenVersion` and a restart.
 
 Source checks: [CLI integration tests](../../src/apps/server/cli-worker.test.ts),
 [registration integration tests](../../src/apps/server/gateway-registration.test.ts)
-and [Worker tests](../../src/worker/service.test.ts). The binding/capacity tests
-use injected collaborators and do not establish a production binding store.
+and [Worker tests](../../src/worker/service.test.ts). The
+[binding integration tests](../../src/apps/server/worker-binding-registration.test.ts)
+exercise the real Project and Worker stores, while the
+[registration CLI journey](../../src/apps/server/e2e-worker-registration.test.ts)
+uses a real loopback server with the authorized Scheduler stand-ins.
 
 ## `heartbeat`
 
@@ -220,7 +222,7 @@ use injected collaborators and do not establish a production binding store.
 kanthord worker [--endpoint <url>] heartbeat [--token <jwt>]
 ```
 
-The proposed command calls `POST /api/worker/heartbeat`, operation `worker.heartbeat`, with `client` access and an empty body.
+The command calls `POST /api/worker/heartbeat`, operation `worker.heartbeat`, with `client` access and an empty body.
 The operation requires a live registration and answers 204.
 Every authenticated request of the registered client identity renews its heartbeat.
 `worker.heartbeatWindow` defaults to 300 s; a sweep every 30 s ends expired registrations and frees their slots.
@@ -239,7 +241,7 @@ The command prints only `{ "received": true, "idempotencyKey": "<key>" }` and ne
 The [credential handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-credential-handover) rules the application call after a claim and before inference.
 The [Custody handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-handover) rules the envelope and credential report.
 
-## Catalog and agent inspection — proposed
+## Catalog and agent inspection
 
 ### `list`
 
@@ -249,13 +251,13 @@ kanthord worker list [--limit <count>] [--cursor <opaque>]
 
 No positional arguments or filters. Required token: human JWT. Request:
 `params: {}`, `query: { limit, cursor? }`, no body. `limit` and `cursor` use the
-shared types, requiredness, defaults and validation. Proposed HTTP `200` returns
+shared types, requiredness, defaults and validation. HTTP `200` returns
 one page of worker summaries in ascending alphabetical order by exact name,
 under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination). Each item contains
 `name: WorkerName`, `host: "kanthord" | "external-harness"`,
 `declaredNodeStates: string[]` and `requiredNodeFormat: string[]`.
 
-**Target design:** the catalog describes supplied static templates. It is not a
+The catalog describes supplied static templates. It is not a
 runtime plugin store, and registration does not add entries. The declared workers
 and their capabilities are:
 
@@ -266,9 +268,8 @@ and their capabilities are:
 | `claude@1`   | external harness `claude-code` | Harness-owned       | `Available`, `Waiting`, `External.Requested` |
 | `opencode@1` | external harness `opencode`    | Harness-owned       | `Available`, `Waiting`, `External.Requested` |
 
-The first native-runtime milestone supplies `general@1` and `reviewer@1`;
-external-harness integration follows. These are target declarations, not claims
-that the current engine has these templates. All four require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
+All four declarations are in the current catalog; native runtime execution and
+external-harness integration remain later work. All four require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
 is promised by this specification.
 
 ### `get <worker-name>`
@@ -279,7 +280,7 @@ kanthord worker get <worker-name>
 
 `worker-name` is required `WorkerName`, with no default, mapped to
 `params.workerName`; query is empty and body absent. Required token: human JWT.
-Proposed HTTP `200` returns the summary fields plus:
+HTTP `200` returns the summary fields plus:
 
 - `harness: string` for an external worker, naming its hosting harness.
 - `method: "steps" | "evaluation"` and `agentName: AgentName` for a native worker.
@@ -301,6 +302,8 @@ An unknown exact worker name returns `404 worker.catalog.not_found`.
 
 ### `agent get <agent-name>`
 
+This command remains proposed.
+
 ```text
 kanthord worker agent get <agent-name>
 ```
@@ -314,7 +317,7 @@ Required token: human JWT. Empty query, absent body. HTTP `200` returns
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `configurationSchema` | JSON Schema draft 2020-12 object describing the effective configuration: every allowed field, its type, requiredness and enumeration. Its `description` states the whole-configuration constraint that the Worker Service checks; JSON Schema validates no cross-field lookup. |
 | `overridableFields`   | Array of field paths allowed in a Project override; no wildcard permission to add fields. For `swe@1` and `re@1` it is `["agentProvider", "modelIdentifier", "reasoningEffort"]`.                                                                                              |
-| `enablement`          | The [agent enablement record](#agent-enablement-record--proposed), or `null` when no record exists.                                                                                                                                                                            |
+| `enablement`          | The [agent enablement record](#agent-enablement-record), or `null` when no record exists.                                                                                                                                                                                      |
 | `basePrompt`          | Optional string; the exact worker-declared shared prompt, omitted if absent.                                                                                                                                                                                                   |
 | `agentPrompt`         | Required string; exact worker-declared role prompt.                                                                                                                                                                                                                            |
 | `tools`               | Array of permitted tool declarations; each item has `name: string`, `source` (one of `builtin`, `kanthord-mcp`, `host`) and `inputSchema: object`. Project-added tools are inspected through Project configuration instead.                                                    |
@@ -352,10 +355,10 @@ This command neither composes the prompt of an execution nor
 reads a local `AGENTS.md`/`CLAUDE.md`. The [Worker configuration](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#configuration) declares `worker.globalPrompt`.
 Each global prompt source and project prompt source holds at most 32768 UTF-8 bytes under the [Worker implementation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md).
 
-## Agent enablement record — proposed
+## Agent enablement record
 
 The [agent configuration rules](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.md#agent-configuration)
-own these records. The following wire fields and command spellings are proposed.
+own these implemented records and command spellings.
 An enablement is global to the server, belongs to no project and is keyed by
 `agentName: AgentName`. It holds:
 
@@ -389,7 +392,7 @@ A tuning entry follows unchanged default fields at its next resolution.
 All commands below use `human` access. Required names have no default.
 `<agent-name>` maps to `params.agentName`; `<provider-name>` maps to
 `params.providerName`. Mutations use the shared replay key and print it.
-Proposed reads and writes are unary. Unless stated otherwise, query is empty,
+Reads and writes are unary. Unless stated otherwise, query is empty,
 body is absent and success answers HTTP `200` with the enablement record.
 
 ### `agent enablement list`
@@ -400,7 +403,7 @@ ascending alphabetical order. It lists records, not catalog agents without an en
 
 ### `agent enablement get <agent-name>`
 
-Uses `[R]`. Returns one enablement. An absent record answers the proposed
+Uses `[R]`. Returns one enablement. An absent record answers
 `404 worker.agent.enablement.not_found`; `agent get` instead returns a null
 `enablement` for a catalog agent without a record.
 
@@ -410,7 +413,7 @@ Uses `[M] [R]`. The required file supplies exactly
 `{ expectedRevision, agentProviders, defaultConfiguration }`. `agentProviders`
 and `defaultConfiguration` are required with no default. `expectedRevision` is
 the latest revision of the agent that the human read, and it is absent only when
-the agent holds no row. It creates or replaces the complete configuration. Proposed creation
+the agent holds no row. It creates or replaces the complete configuration. Creation
 sets `state: enabled`; replacement preserves the record's state. The explicit
 `enable` and `disable` commands change that state. Omitted agent providers are
 removals and must pass the dependency check. A retained name cannot change its
@@ -437,7 +440,7 @@ in flight. An agent provider has no independent disablement.
 The required `--expected-revision` names the latest revision of the agent that the human read.
 Uses `[M] [R]`. Removal fails while any worker binding of a worker that references
 this agent exists. The refusal lists those bindings. The dependency check and
-removal commit in one transaction. Proposed success is
+removal commit in one transaction. Success is
 `{ agentName, removed: true }`, not an enablement record.
 
 ### `agent enablement provider add <agent-name> --file <path>`
@@ -493,7 +496,7 @@ each result. `GET /models` proves model-list access only. This check belongs to
 neither the liveness answer nor the claim path and changes no instance healthcheck.
 No check refreshes OAuth; an expired access token reports `unknown`.
 
-## Instance inspection and lifecycle — proposed
+## Instance inspection and lifecycle
 
 **Target design:** an instance is runtime-only, hosts at most one execution and
 has at most one outstanding work pull or execution. Server-placement pools are
@@ -501,6 +504,11 @@ created from Project bindings. Configuration revisions replace no instance;
 count reductions retire idle server instances first and drain busy ones. External
 harnesses host their own instances and have no kanthord placement. Starting a
 remote application belongs to `serve worker` in [other commands](./other.md).
+
+The registration-backed list, get, deregister and resume leaves below are
+implemented. Server-placement pools remain later work. Inspection and ended
+resume use the Scheduler collaboration, supplied by the D6/D9 stand-ins in
+tests until Plan 03 wires its implementation.
 
 ### `instance list`
 
@@ -514,7 +522,7 @@ kanthord worker instance list [--project <project-id>] [--binding <binding-name>
 | `--binding <binding-name>`                                                       | Optional binding name; omitted means all worker bindings in the selected scope | `query.resourceIdentity` as `worker:kanthord:<binding-name>`; requires `--project`, and the project must hold that worker binding. |
 | [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Shared pagination flags                                                        | Shared query mapping.                                                                                                              |
 
-Required token: human JWT. Empty params, absent body. Proposed HTTP `200` returns
+Required token: human JWT. Empty params, absent body. HTTP `200` returns
 one page of the instance records defined below in descending runtime-identity
 order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
 No ULID ordering is a lifecycle chronology. This is a live inventory, not a
@@ -529,10 +537,10 @@ kanthord worker instance get <runtime-identity>
 
 Required `runtime-identity: RuntimeIdentity`, no default; maps to
 `params.runtimeIdentity`. Required token: human JWT. Empty query, absent body.
-Proposed HTTP `200` returns one instance record; unknown or ended instances return
+HTTP `200` returns one instance record; unknown or ended instances return
 `404 worker.instance.not_found` rather than a historical execution record.
 
-The proposed instance record contains:
+The instance record contains:
 
 | Field                                                            | Type and presence                                                                                                                   |
 | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |

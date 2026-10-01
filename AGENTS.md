@@ -76,6 +76,8 @@ engine/
 │   │   ├── instances.ts        # Transaction-owned registration rows, retained attribution, and live reads
 │   │   ├── registrations.ts    # Capacity admission, live-registration lookup, and client attribution
 │   │   ├── heartbeat.ts        # Monotonic readings, renewal, and expiry selection
+│   │   ├── instance-record.ts  # Live runtime projection, activity, filters, and pagination
+│   │   ├── config.ts           # Heartbeat window and global prompt configuration fragment
 │   │   ├── catalog.ts          # Static worker and agent declarations
 │   │   ├── enablements.ts      # Revision, tombstone, pagination, and dependency store reads
 │   │   ├── configuration.ts    # Shared provider, model, and reasoning-level validation

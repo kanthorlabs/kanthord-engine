@@ -97,9 +97,11 @@ requiredness, payload fields, bounds, and any explicit conversion such as
 [`--limit`](./common-flags.md#--limit) and
 [`--cursor`](./common-flags.md#--cursor) with their shared definitions.
 
-A list invocation requests one page. Every list uses keyset pagination in
-descending primary-key order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination),
-so the first page holds the newest records and a refresh shows new records.
+A list invocation requests one page. Lists use keyset pagination under the shared
+[pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
+Primary-key lists use descending order and continue below the last key, so the
+first page holds the newest records. Group-key lists, including the Worker
+catalog, use ascending order and continue above the last key.
 The base64url last-key cursor does not expire, a malformed cursor returns `400`,
 and a list takes no snapshot. Do not silently traverse all pages. Preserve the
 same list scope and filters when using a continuation. The result holds `items`
@@ -306,8 +308,9 @@ Values come from the file, then the schema defaults. There are no environment
 bindings or option overrides for server field values. `KANTHORD_ENDPOINT` does
 not change `gateway.bind` or `gateway.port`. Configuration is read at startup,
 and an edit takes effect on the next start. **Target requirement:** a relative
-path-valued field inside the configuration resolves against the data directory;
-the current schema declares no such field.
+path-valued field inside the configuration resolves against the data directory.
+`worker.globalPrompt` declares such a field; reading and resolving its file
+belongs to the later prompt-consumption implementation (Plan 07).
 
 Reads require a user-owned regular `0600` file and a user-owned `0700` containing
 directory. Exact modes are checked, including rejection of special bits and
@@ -349,7 +352,13 @@ The implemented fields are:
   `32768`. It bounds every `Text` value of a Mission write; a stored value keeps
   its length after a change of the bound.
 
-The current Project and Worker fragments are empty and add no YAML sections.
+- `worker.heartbeatWindow`: optional positive safe integer in seconds, default
+  `300`. A 30-second sweep ends expired registrations.
+- `worker.globalPrompt`: optional string, default `""`. Empty means absent;
+  `-` disables the layer. Other values name a Markdown file. This release
+  validates the field type; Plan 07 owns consuming the file.
+
+The current Project fragment is empty and adds no YAML section.
 See [Gateway](./gateway.md) for authentication context.
 
 ## Configuration commands
@@ -564,9 +573,12 @@ kanthord jwt generate [username] [--name <display>] [--output [path]] [--endpoin
   no server. It does not copy an endpoint from the environment or an existing
   client file.
 
-Before configuration load or signing, check these conditions in order:
+Before configuration load or signing, argument-value parsers run first. In
+particular, a `--project` value that is no canonical `project_<ulid>` identity
+fails with `cli.jwt.invalid_project` before combination checks. The action then
+checks these conditions in order:
 
-1. A username with `--binding` fails with `cli.jwt.username_with_binding`. `--binding` without `--project` fails with `cli.jwt.binding_without_project`, `--project` without `--binding` fails with `cli.jwt.project_without_binding`, and a `--project` value that is no canonical `project_<ulid>` identity fails with `cli.jwt.invalid_project`.
+1. A username with `--binding` fails with `cli.jwt.username_with_binding`. `--binding` without `--project` fails with `cli.jwt.binding_without_project`, and `--project` without `--binding` fails with `cli.jwt.project_without_binding`.
 2. `--output` with `--binding` fails with `cli.jwt.output_with_binding`.
 3. `--endpoint` without `--output` fails with `cli.jwt.endpoint_without_output`.
 4. An invalid `--endpoint` fails with `cli.config.invalid_endpoint`.
