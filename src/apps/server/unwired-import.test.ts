@@ -8,14 +8,8 @@ const SERVER_ROOT = import.meta.dirname;
 const UNWIRED_MODULE = "unwired.ts";
 const UNWIRED_TEST_MODULE = "unwired.test.ts";
 const COMPOSITION_MODULE = "index.ts";
-const UNWIRED_SEAMS = [
-  "SchedulerClaims.revoke",
-  "SchedulerClaims.settle",
-  "SchedulerClaims.liveExecutionOf",
-  "ExecutionAttribution.of",
-  "SchedulerClaims.runningExecutionOfRuntime",
-  "SchedulerClaims.activityOf",
-];
+const UNWIRED_SEAMS: string[] = [];
+const NO_SEAMS = 0;
 const TYPESCRIPT_EXTENSION = ".ts";
 const IMPORT_SPECIFIER = new RegExp(
   "(?:from|import\\s*\\(?)\\s*[\"'][^\"']*" + "unwired",
@@ -36,7 +30,10 @@ test("only the composition root and helper test import the exact unwired seams",
   }
   assert.deepEqual(
     imports.sort(),
-    [COMPOSITION_MODULE, UNWIRED_TEST_MODULE]
+    [
+      UNWIRED_TEST_MODULE,
+      ...(UNWIRED_SEAMS.length > NO_SEAMS ? [COMPOSITION_MODULE] : []),
+    ]
       .map((name) => join(SERVER_ROOT, name))
       .sort(),
   );

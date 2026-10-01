@@ -22,21 +22,12 @@ import {
   type WorkQueue,
 } from "../../scheduler/contract.ts";
 import { MissionService, missionMigrations } from "../../mission/index.ts";
-import {
-  MISSION_SERVICE_NAME,
-  type SchedulerClaims,
-  type SchedulerWakeup,
-  type ExecutionAttribution,
-} from "../../mission/contract.ts";
-import { unwired } from "./unwired.ts";
+import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
 import type {
   ProjectBindings,
   RepositoryConnector,
 } from "../../project/contract.ts";
-import type {
-  WorkerRegistrations,
-  SchedulerClaims as WorkerSchedulerClaims,
-} from "../../worker/contract.ts";
+import type { WorkerRegistrations } from "../../worker/contract.ts";
 import { audit, ensureDirectory } from "../../kernel/files.ts";
 import { Diagnostic, diagnostic, asError } from "../../kernel/errors.ts";
 import {
@@ -79,12 +70,7 @@ export function composeServices(options: {
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
   inventoryOverrides?: Partial<ResourceInventories>;
-  standIns?: {
-    schedulerClaims?: SchedulerClaims;
-    workerSchedulerClaims?: WorkerSchedulerClaims;
-    wakeup?: SchedulerWakeup;
-    executionAttribution?: ExecutionAttribution;
-  };
+  standIns?: Record<string, never>;
 }) {
   const repoConnector =
     options.repositoryConnector ??
@@ -117,7 +103,7 @@ export function composeServices(options: {
       },
     },
   });
-  const scheduler = new SchedulerService({
+  const scheduler: SchedulerService = new SchedulerService({
     config: options.config.scheduler,
     store: options.store,
     transitions: {
@@ -170,11 +156,10 @@ export function composeServices(options: {
     store: options.store,
     workerBindingOf: (tx, projectId, resourceIdentity) =>
       project.workerBindingOf(tx, projectId, resourceIdentity),
-    schedulerClaims: options.standIns?.workerSchedulerClaims ?? {
-      runningExecutionOfRuntime: unwired(
-        "SchedulerClaims.runningExecutionOfRuntime",
-      ),
-      activityOf: unwired("SchedulerClaims.activityOf"),
+    schedulerClaims: {
+      runningExecutionOfRuntime: (...args) =>
+        scheduler.runningExecutionOfRuntime(...args),
+      activityOf: (...args) => scheduler.activityOf(...args),
     },
     health: options.health,
     registrations: options.registrations,
@@ -183,18 +168,18 @@ export function composeServices(options: {
     modelListCheck: (tx, name) => custody.modelListCheck(tx, name),
     entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
   });
-  const mission = new MissionService({
+  const mission: MissionService = new MissionService({
     config: options.config.mission,
     health: options.health,
     workQueue,
-    schedulerClaims: options.standIns?.schedulerClaims ?? {
-      revoke: unwired("SchedulerClaims.revoke"),
-      settle: unwired("SchedulerClaims.settle"),
-      liveExecutionOf: unwired("SchedulerClaims.liveExecutionOf"),
+    schedulerClaims: {
+      revoke: (...args) => scheduler.revoke(...args),
+      settle: (...args) => scheduler.settle(...args),
+      liveExecutionOf: (...args) => scheduler.liveExecutionOf(...args),
     },
-    wakeup: options.standIns?.wakeup ?? { wake: () => {} },
-    executionAttribution: options.standIns?.executionAttribution ?? {
-      of: unwired("ExecutionAttribution.of"),
+    wakeup: { wake: (projectId) => scheduler.wake(projectId) },
+    executionAttribution: {
+      of: (...args) => scheduler.executionAttribution(...args),
     },
     bindings: {
       resolveBinding: (tx, pid, name) => project.resolveBinding(tx, pid, name),
@@ -205,6 +190,7 @@ export function composeServices(options: {
   const project: ProjectService = new ProjectService({
     config: {},
     operationalStore: options.store,
+    wakeup: { wake: (projectId) => scheduler.wake(projectId) },
     endRegistrations: (tx, projectId, resourceIdentity, now) =>
       worker.endRegistrations(tx, projectId, resourceIdentity, now),
     createMission: (tx, pid, actor) => mission.createMission(tx, pid, actor),

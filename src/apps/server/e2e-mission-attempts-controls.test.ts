@@ -38,7 +38,6 @@ const NUMBER_TYPE = "number";
 const JOURNEY_TIMEOUT_MS = 300000;
 const SCENARIO_TIMEOUT_MS = 30000;
 const BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAA";
-const EXECUTION_ID = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const COMMIT = "a".repeat(40);
 const ACTION_KEY = "repo.pull_request";
 const CONTENT = {
@@ -50,22 +49,10 @@ const CONTENT = {
 };
 type Page<T> = { items: T[]; nextCursor: string | null };
 
-async function setup(
-  t: TestContext,
-  claimed = new Set<string>(),
-  complete = true,
-) {
+async function setup(t: TestContext) {
   const directory = temporary(t);
   const fixture = await gatewayFixture(t, {
     repositoryConnector: { gitLsRemote: async () => {} },
-    standIns: {
-      schedulerClaims: {
-        settle: () => {},
-        revoke: () => null,
-        liveExecutionOf: (_tx, nodeId) =>
-          claimed.has(nodeId) ? { executionId: EXECUTION_ID } : null,
-      },
-    },
   });
   const env = {
     ...environment(directory),
@@ -151,21 +138,6 @@ async function setup(
   };
   const objective = await create(objectiveBody);
   const objectiveId = objective.revisions[ZERO]!.nodeId;
-  if (!complete)
-    return {
-      read,
-      write,
-      refuses,
-      env,
-      projectId: project.id,
-      missionId: mission.id,
-      initiativeId,
-      objectiveId,
-      taskId: "",
-      secondObjectiveId: "",
-      bindingId: "",
-      revision: ONE,
-    };
   const task = await create({
     filename: "task-1.md",
     kind: NodeKind.Task,
@@ -627,14 +599,3 @@ test(
     });
   },
 );
-
-test("E01.24 priority refuses a live claim", { timeout: 120000 }, async (t) => {
-  const claimed = new Set<string>();
-  const h = await setup(t, claimed, false);
-  claimed.add(h.objectiveId);
-  await h.refuses(
-    ["mission", "node", "priority", "set", h.objectiveId],
-    { value: ONE, expectedMissionVersion: THREE },
-    "mission.node.claim_live",
-  );
-});

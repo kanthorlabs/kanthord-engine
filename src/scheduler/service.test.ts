@@ -398,3 +398,21 @@ test("quiescence before run installs no timer", async (t) => {
   await h.service.stop();
   assert.equal(await running, null);
 });
+
+test("activity is a pure read that never settles an expired execution", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  h.store.transaction((tx) => {
+    insertExecution(tx, row);
+    assert.deepEqual(
+      h.service.activityOf(tx, row.runtimeIdentity, row.createdAt),
+      { activity: "executing", executionId: row.executionId },
+    );
+    assert.deepEqual(
+      h.service.activityOf(tx, row.runtimeIdentity, row.expiredAt),
+      { activity: "idle", executionId: null },
+    );
+    assert.equal(readExecution(tx, row.executionId)?.endedAt, null);
+  });
+  assert.deepEqual(h.calls, []);
+});

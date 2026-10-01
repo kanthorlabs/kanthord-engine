@@ -64,11 +64,19 @@ engine/
 │   │   ├── control-unblock.ts  # Atomic direction change and next attempt
 │   │   ├── transitions.ts     # Scheduler claim, release admission, and loss
 │   │   └── service.ts          # Lifecycle, health, and collaboration implementations
-│   ├── scheduler/              # Scheduler Service — job table, work queue, and queue reads
-│   │   ├── contract.ts         # WorkQueue collaboration and queue operation declarations
+│   ├── scheduler/              # Scheduler Service: work queue, execution claims, history, and loss settlement
+│   │   ├── contract.ts         # Execution schemas, operations, and collaboration contracts
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
-│   │   ├── migrations.ts       # scheduler_job table migration
-│   │   └── service.ts          # Private lifecycle, WorkQueue implementation, and queue handlers
+│   │   ├── config.ts           # Fixed execution deadline release reserve
+│   │   ├── migrations.ts       # scheduler_job and scheduler_execution tables
+│   │   ├── execution-store.ts  # Execution rows, claim-state derivation, and record projection
+│   │   ├── claim.ts            # Transactional work selection and admission
+│   │   ├── work-pull.ts        # Rolled-back probes, waiting, and one final commit
+│   │   ├── wakeup.ts           # Project-scoped waiting pulls and coalesced notifications
+│   │   ├── release.ts          # Transactional proof and Mission release routing
+│   │   ├── execution-read.ts   # Claim ownership and paginated execution history
+│   │   ├── settlement.ts       # Loss, revocation, credential pins, and retained attribution
+│   │   └── service.ts          # Lifecycle, loss sweep, queue handlers, and collaboration entrypoints
 │   ├── worker/                 # Worker registrations, agent enablement lifecycle, and configuration collaborations
 │   │   ├── contract.ts         # Worker operations, schemas, and collaboration types
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations

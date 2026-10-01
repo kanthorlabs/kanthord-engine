@@ -60,6 +60,7 @@ import {
   type WorkerBindingRow,
   type EndRegistrations,
   type BindingChange,
+  type SchedulerWakeup,
 } from "./contract.ts";
 import {
   insertProject,
@@ -167,6 +168,7 @@ export interface Dependencies {
   workerAgentsOf: WorkerAgentsOfFn;
   workerAgentView: WorkerAgentViewFn;
   endRegistrations: EndRegistrations;
+  wakeup: SchedulerWakeup;
   health?: HealthRegistry;
   bindings?: ProjectBindings;
 }
@@ -181,6 +183,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly workerAgentsOf: WorkerAgentsOfFn;
   private readonly workerAgentView: WorkerAgentViewFn;
   private readonly endRegistrations: EndRegistrations;
+  private readonly wakeup: SchedulerWakeup;
   constructor(dependencies: Dependencies) {
     this.bindings = dependencies.bindings;
     this.operationalStore = dependencies.operationalStore;
@@ -192,6 +195,7 @@ export class ProjectService implements Service, ProjectBindings {
     this.workerAgentsOf = dependencies.workerAgentsOf;
     this.workerAgentView = dependencies.workerAgentView;
     this.endRegistrations = dependencies.endRegistrations;
+    this.wakeup = dependencies.wakeup;
     dependencies.health?.register("project", () => this.healthcheck());
   }
   declare(registry: OperationRegistry): void {
@@ -378,7 +382,7 @@ export class ProjectService implements Service, ProjectBindings {
       await this.checkRepository(binding.config.address, caller.context);
     }
     throwIfCancelled(caller.context);
-    return caller.commit((tx) => {
+    const answer = caller.commit((tx) => {
       assert.ok(tx.database.isTransaction);
       assert.equal(submission.size, Object.keys(body.bindings).length);
       for (const [name, binding] of submission)
@@ -398,6 +402,8 @@ export class ProjectService implements Service, ProjectBindings {
         changes: result.changes,
       };
     });
+    this.wakeup.wake(projectId);
+    return answer;
   }
   private async checkRepository(
     address: string,

@@ -96,6 +96,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
   ]);
   const health = new HealthRegistry();
+  const wakes: string[] = [];
   const registrationEnds: Array<{
     projectId: string;
     resourceIdentity: string;
@@ -105,6 +106,12 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     config: {},
     operationalStore: store,
     health,
+    wakeup: {
+      wake: (projectId) => {
+        assert.equal(store.database.isTransaction, false);
+        wakes.push(projectId);
+      },
+    },
     createMission: unexpected,
     liveNodesPinning: unexpected,
     validateEntry: unexpected,
@@ -153,6 +160,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     invoke,
     commits: () => commits,
     registrationEnds,
+    wakes,
   };
 }
 
@@ -823,6 +831,20 @@ async function rejectsWrite(
     return true;
   });
 }
+
+test("binding writes wake Scheduler once after commit and refused writes wake nothing", async (t) => {
+  const f = writeFixture(t);
+  assert.deepEqual(f.wakes, []);
+  const result = await f.write({ general: workerBinding() });
+  assert.deepEqual(f.wakes, [f.params.projectId]);
+  assert.equal(
+    f.store.transaction((tx) => requireProject(tx, f.params.projectId))
+      .bindingSetVersion,
+    result.bindingSetVersion,
+  );
+  await assert.rejects(f.write({}));
+  assert.deepEqual(f.wakes, [f.params.projectId]);
+});
 
 function storedBindings(f: ReturnType<typeof writeFixture>) {
   return f.store.transaction((tx) =>

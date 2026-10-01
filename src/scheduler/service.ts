@@ -20,7 +20,11 @@ import {
 import type { Store, Transaction } from "../kernel/store.ts";
 import type { SchedulerConfig } from "./config.ts";
 import * as settlement from "./settlement.ts";
-import { readExecution, readExpiredUnsettled } from "./execution-store.ts";
+import {
+  readExecution,
+  readExpiredUnsettled,
+  readUnendedOfRuntime,
+} from "./execution-store.ts";
 import { WaitingPulls } from "./wakeup.ts";
 import { workPull } from "./work-pull.ts";
 import { release } from "./release.ts";
@@ -129,6 +133,17 @@ export class SchedulerService implements Service, WorkQueue {
   }
   pulling(runtimeIdentity: string): boolean {
     return this.waiting.pulling(runtimeIdentity);
+  }
+  activityOf(tx: Transaction, runtimeIdentity: string, now: number) {
+    const row = readUnendedOfRuntime(tx, runtimeIdentity);
+    if (row && now < row.expiredAt)
+      return { activity: "executing" as const, executionId: row.executionId };
+    return {
+      activity: this.pulling(runtimeIdentity)
+        ? ("pulling" as const)
+        : ("idle" as const),
+      executionId: null,
+    };
   }
   executionOf(executionId: string) {
     return this.dependencies.store.transaction(

@@ -556,6 +556,10 @@ export const projectOperations = {
   },
 } as const satisfies Record<string, Operation>;
 
+export interface SchedulerWakeup {
+  wake(projectId: string): void;
+}
+
 export interface ProjectBindings {
   resolveWorkerGroup(
     projectId: string,

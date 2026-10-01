@@ -7,6 +7,7 @@ import { custodyMigrations } from "../../custody/index.ts";
 import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
 import { schedulerMigrations } from "../../scheduler/index.ts";
 import { SCHEDULER_SERVICE_NAME } from "../../scheduler/contract.ts";
+import type { SchedulerConfig } from "../../scheduler/index.ts";
 import { Store } from "../../kernel/store.ts";
 import { gatewayMigrations } from "../../gateway/index.ts";
 import { projectMigrations } from "../../project/index.ts";
@@ -19,10 +20,7 @@ import {
   workerResourceIdentity,
   type ProjectBindings,
 } from "../../project/contract.ts";
-import {
-  InstanceActivity,
-  type WorkerRegistrations,
-} from "../../worker/contract.ts";
+import type { WorkerRegistrations } from "../../worker/contract.ts";
 export interface MachineDependencies {
   project: ProjectBindings;
   worker: WorkerRegistrations;
@@ -183,6 +181,7 @@ export async function gatewayFixture(
       typeof composeServices
     >[0]["inventoryOverrides"];
     path?: string;
+    scheduler?: Partial<SchedulerConfig>;
     standIns?: Parameters<typeof composeServices>[0]["standIns"];
   } = {},
 ) {
@@ -190,6 +189,7 @@ export async function gatewayFixture(
   const config = configuration({
     masterKey: randomBytes(32).toString("base64"),
     gateway: { port: 0, allowedHosts: ["localhost"] },
+    scheduler: options.scheduler ?? {},
   }).getProperties();
   const store = new Store(options.path ?? ":memory:");
   store.migrate([
@@ -219,24 +219,7 @@ export async function gatewayFixture(
     bindings: options.machines?.project,
     registrations: options.machines?.worker,
     inventoryOverrides: options.inventoryOverrides,
-    standIns: {
-      schedulerClaims: {
-        revoke: () => null,
-        settle: () => {},
-        liveExecutionOf: () => null,
-      },
-      wakeup: { wake: () => {} },
-      executionAttribution: { of: () => null },
-      ...options.standIns,
-      workerSchedulerClaims: {
-        runningExecutionOfRuntime: () => null,
-        activityOf: () => ({
-          activity: InstanceActivity.Idle,
-          executionId: null,
-        }),
-        ...options.standIns?.workerSchedulerClaims,
-      },
-    },
+    standIns: options.standIns,
     logger: pino(
       { level: "info" },
       {
@@ -293,6 +276,7 @@ export async function gatewayFixture(
     fetch(endpoint + path, init);
   return {
     repoConnector,
+    project,
     scheduler,
     worker,
     custody,

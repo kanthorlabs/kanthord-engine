@@ -7,7 +7,11 @@ import { parse, stringify } from "yaml";
 import { ulid } from "ulid";
 import { configuration } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
-import { identitySchema, ulidSchema } from "../../kernel/identity.ts";
+import {
+  createIdentity,
+  identitySchema,
+  ulidSchema,
+} from "../../kernel/identity.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
   InstanceActivity,
@@ -139,28 +143,9 @@ function bindings(instanceCount: number) {
   };
 }
 
-async function setup(t: TestContext, running?: Set<string>) {
+async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: { gitLsRemote: async () => {} },
-    ...(running
-      ? {
-          standIns: {
-            workerSchedulerClaims: {
-              runningExecutionOfRuntime: (_tx, runtimeIdentity) =>
-                running.has(runtimeIdentity)
-                  ? { executionId: EXECUTION }
-                  : null,
-              activityOf: (_tx, runtimeIdentity) =>
-                running.has(runtimeIdentity)
-                  ? {
-                      activity: InstanceActivity.Executing,
-                      executionId: EXECUTION,
-                    }
-                  : { activity: InstanceActivity.Idle, executionId: null },
-            },
-          },
-        }
-      : {}),
   });
   const directory = temporary(t);
   const H = {
@@ -216,7 +201,7 @@ async function setup(t: TestContext, running?: Set<string>) {
     ...H,
     KANTHORD_TOKEN: machineToken(directory, project.id, "worker-b", H),
   };
-  return { directory, projectId: project.id, H, A, B };
+  return { directory, projectId: project.id, H, A, B, fixture };
 }
 
 async function apply(
@@ -469,12 +454,38 @@ test(
     await t.test(
       "E02.22 resume running execution on a second fixture",
       async (step) => {
-        const running = new Set<string>();
-        const second = await setup(step, running);
+        const second = await setup(step);
         const { runtimeIdentity } = success<Registration>(
           await kanthord(["worker", "register"], second.A),
         );
-        running.add(runtimeIdentity);
+        second.fixture.store.transaction((tx) => {
+          const binding = second.fixture.project.workerBindingOf(
+            tx,
+            second.projectId,
+            RESOURCE,
+          );
+          assert.ok(binding);
+          const now = Date.now();
+          tx.database
+            .prepare(
+              `INSERT INTO scheduler_execution
+            (id, project_id, node_id, worker_binding_id, resource_identity, runtime_identity,
+             attempt, pinned_revision, credentials, expired_at, trace_id, root_span_id, created_at, ended_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, 1, '[]', ?, ?, ?, ?, NULL)`,
+            )
+            .run(
+              EXECUTION,
+              second.projectId,
+              createIdentity("node"),
+              binding.bindingId,
+              RESOURCE,
+              runtimeIdentity,
+              now + BUDGET.wallTimeMs,
+              "1234567890abcdef1234567890abcdef",
+              "1234567890abcdef",
+              now,
+            );
+        });
         success(
           await kanthord(
             ["worker", "instance", "deregister", runtimeIdentity],
