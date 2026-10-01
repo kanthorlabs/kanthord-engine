@@ -40,6 +40,33 @@ const operations = {
     mutation: true,
   },
 };
+test("execution proof requires client access and registration", () => {
+  const registry = new OperationRegistry();
+  for (const invalid of [
+    { ...read, requiresExecution: true },
+    {
+      ...read,
+      access: AccessPolicy.Client,
+      requiresExecution: true,
+      requiresRegistration: false,
+    },
+  ])
+    assert.throws(
+      () =>
+        registry.register(invalid, () => {
+          throw new Error("unused");
+        }),
+      /execution proof requires/,
+    );
+  assert.doesNotThrow(() =>
+    registry.register(
+      { ...read, access: AccessPolicy.Client, requiresExecution: true },
+      () => {
+        throw new Error("unused");
+      },
+    ),
+  );
+});
 test("registry rejects undeclared access policies, duplicates, versioned paths and late registration", () => {
   const registry = new OperationRegistry();
   assert.throws(

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Store } from "../kernel/store.ts";
 import { digest } from "../kernel/json.ts";
+import { isObject, isString } from "../kernel/values.ts";
 import { CancellationContext, type Context } from "../kernel/context.ts";
 import { lifecycle } from "../kernel/service.ts";
 import { Authentication } from "./authentication.ts";
@@ -14,6 +15,8 @@ import {
   AccessPolicy,
   OperationLifetime,
   type StoreName,
+  type ExecutionProofRow,
+  type ExecutionClaim,
 } from "../kernel/operation.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { resolveRequestId } from "./request-id.ts";
@@ -40,6 +43,10 @@ export interface InvocationOptions {
   request?: Request;
 }
 
+export interface ExecutionLookup {
+  executionOf(executionId: string): ExecutionProofRow | undefined;
+}
+
 export class Invocation {
   readonly pending = new Set<Promise<RecordedResponse>>();
   private readonly registry: OperationRegistry;
@@ -50,17 +57,68 @@ export class Invocation {
   private readonly streams = new Set<Promise<void>>();
   private stopTask?: Promise<Error | null>;
   private stopped = false;
+  private readonly scheduler?: ExecutionLookup;
 
   constructor(
     registry: OperationRegistry,
     authentication: Authentication,
     idempotency: Idempotency,
     stores: Record<StoreName, Store>,
+    scheduler?: ExecutionLookup,
   ) {
     this.registry = registry;
     this.authentication = authentication;
     this.idempotency = idempotency;
     this.stores = stores;
+    this.scheduler = scheduler;
+  }
+
+  private proveExecution(
+    input: { params: unknown; body: unknown },
+    identity: CallerIdentity | undefined,
+  ): ExecutionClaim {
+    const params = isObject(input.params)
+      ? (input.params as Record<string, unknown>)
+      : {};
+    const body = isObject(input.body)
+      ? (input.body as Record<string, unknown>)
+      : {};
+    const executionId = isString(params.executionId)
+      ? params.executionId
+      : body.executionId;
+    const row = isString(executionId)
+      ? this.scheduler?.executionOf(executionId)
+      : undefined;
+    if (
+      !isMachineIdentity(identity) ||
+      !identity.runtimeIdentity ||
+      !row ||
+      row.runtimeIdentity !== identity.runtimeIdentity ||
+      row.endedAt !== null ||
+      Date.now() >= row.expiredAt
+    )
+      throw new GatewayError(
+        HttpStatus.Forbidden,
+        "gateway.invocation.execution_proof_failed",
+        "The execution is not a live claim of this registration.",
+      );
+    const {
+      projectId,
+      nodeId,
+      attempt,
+      pinnedRevision,
+      runtimeIdentity,
+      workerBindingId,
+    } = row;
+    return {
+      executionId: row.executionId,
+      projectId,
+      nodeId,
+      attempt,
+      pinnedRevision,
+      runtimeIdentity,
+      workerBindingId,
+    };
   }
 
   healthcheck(): boolean {
@@ -277,6 +335,9 @@ export class Invocation {
           "gateway.registration.required",
           "A live worker registration is required.",
         );
+      const execution = operation.requiresExecution
+        ? this.proveExecution(input, identity)
+        : undefined;
       if (operation.mutation) {
         const caller = isHumanIdentity(identity)
           ? identity.accountId
@@ -317,6 +378,7 @@ export class Invocation {
       }
       const caller: CallerContext = {
         identity,
+        execution,
         context,
         requestId: options.requestId,
         idempotencyKey: options.idempotencyKey,

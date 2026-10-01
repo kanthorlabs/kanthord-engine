@@ -52,6 +52,7 @@ export interface Operation<
   body?: boolean;
   secret?: boolean;
   requiresRegistration?: boolean;
+  requiresExecution?: boolean;
   maxBodyBytes?: number;
   replayGuard?: (recorded: unknown, identity: CallerIdentity) => boolean;
   lifetime: OperationLifetime;
@@ -61,8 +62,23 @@ export interface Operation<
   description: string;
 }
 
+export interface ExecutionClaim {
+  executionId: string;
+  projectId: string;
+  nodeId: string;
+  attempt: number;
+  pinnedRevision: number;
+  runtimeIdentity: string;
+  workerBindingId: string;
+}
+export type ExecutionProofRow = ExecutionClaim & {
+  endedAt: number | null;
+  expiredAt: number;
+};
+
 export interface CallerContext {
   identity?: CallerIdentity;
+  execution?: ExecutionClaim;
   context: Context;
   requestId: string;
   traceparent?: string;
@@ -93,6 +109,14 @@ export class OperationRegistry {
     if (this.sealed) throw new Error("Route registration is closed.");
     if (!Object.values(AccessPolicy).includes(operation.access))
       throw new Error("Every route must declare an access policy.");
+    if (
+      operation.requiresExecution &&
+      (operation.access !== AccessPolicy.Client ||
+        operation.requiresRegistration === false)
+    )
+      throw new Error(
+        "An execution proof requires client access and a live registration.",
+      );
     if (!Object.values(OperationLifetime).includes(operation.lifetime))
       throw new Error("Every route must declare a valid lifetime.");
     if (

@@ -98,6 +98,9 @@ export function composeServices(options: {
     masterKey: options.config.masterKey,
     tokenLifetime: options.config.gateway.tokenLifetime,
     lookups: {
+      scheduler: {
+        executionOf: (executionId) => scheduler.executionOf(executionId),
+      },
       project: {
         resolveWorkerGroup: (projectId, resourceIdentity, issuedAt, context) =>
           project.resolveWorkerGroup(
